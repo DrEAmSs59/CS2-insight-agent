@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn>=0.32.0
+python-multipart>=0.0.12
+demoparser2>=0.41.2
+pandas>=2.0.0
+obs-websocket-py>=1.0
+litellm>=1.50.0
+openai>=1.40.0
+pydantic>=2.9.0
+aiosqlite>=0.20.0
+watchdog>=4.0.0

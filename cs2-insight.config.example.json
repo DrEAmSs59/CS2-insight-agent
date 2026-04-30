@@ -1,0 +1,16 @@
+{
+  "obs": {
+    "host": "localhost",
+    "port": 4455,
+    "password": ""
+  },
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "api_key": "",
+    "base_url": null
+  },
+  "cs2_path": "",
+  "demo_directory": "",
+  "ai_mode": false
+}

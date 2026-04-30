@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Config with secrets (JSON)
+backend/config.json
+cs2-insight.config.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+cs2-insight.db
+
+# Portable packaging cache (embeddable Python zips, get-pip.py)
+.packaging-cache/
+
+# Temp
+*.tmp
+*.log
+
+# Local demo files (do not upload)
+cs2_demo/
+cs2_demo_lib
+
+# Project doc not tracked
+开发白皮书.md
+
+# Local tooling scripts (keep local only)
+.cursor/
+/scripts/
+build_portable.bat
+package_portable.ps1
+rebuild_frontend.ps1
+
+# Per-recording user config backup (sensitive: player's CS2 cfg snapshot)
+.cs2_config_backup/
