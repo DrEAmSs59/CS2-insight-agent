@@ -12,6 +12,7 @@ env/
 # Node
 node_modules/
 frontend/dist/
+.vite/
 
 # Config with secrets (JSON)
 backend/config.json
