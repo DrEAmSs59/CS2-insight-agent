@@ -387,7 +387,7 @@ _BAREFOOT_EQUIP_MAX       = 2000     # 👢 光脚干皮鞋：本回合队伍装
 _COMEBACK_HP_MAX          = 20       # ❤️‍🩹 残血绝地反击：起始 HP 上限
 _IRONSHIRT_HITS_MIN       = 4        # 🪨 挨揍王：非道具命中次数下限
 _IRONSHIRT_DMG_MIN        = 95       # 🪨 挨揍王：累计伤害下限
-_EXTREME_DEFUSE_ZERO_SEC  = 1.0      # ⏱️ 零秒拆包 子标：拆完剩余 ≤ 此秒
+_EXTREME_DEFUSE_ZERO_SEC  = 0.2      # ⏱️ 零秒拆包 子标：拆完剩余 ≤ 此秒
 
 # 手枪梗专用集合
 PISTOL_WEAPONS = frozenset({
@@ -734,6 +734,7 @@ class DemoAnalyzer:
         target_player: str,
         match_start_tick: int,
         spatial_cache: dict[int, pd.DataFrame],
+        round_freeze_end_ticks: dict[int, int],
     ) -> list[dict]:
         """目标玩家拆包：极限拆包时间 + 忍者偷包（需 spatial_cache 含拆包 tick）。"""
         tp = str(target_player or "").strip().lower()
@@ -768,16 +769,19 @@ class DemoAnalyzer:
                 rnd = _int(row.get(trc)) + 1
             elif "round" in row.index:
                 rnd = _int(row.get("round"))
+            if rnd <= 0 and round_freeze_end_ticks:
+                for rn, ft_tick in sorted(round_freeze_end_ticks.items(), reverse=True):
+                    if ft_tick <= d_tick:
+                        rnd = rn
+                        break
             if rnd <= 0:
                 continue
 
             tags: list[str] = []
             elapsed = (d_tick - plant_tick) / float(TICK_RATE)
             if elapsed >= _DEFUSE_EXTREME_MIN_SEC:
-                tags.append("⏱️ 极限拆包")
-                # C4 标准倒计时 40s；剩余 ≤ 1s 追加"零秒拆包"子标
-                if (40.0 - elapsed) <= _EXTREME_DEFUSE_ZERO_SEC:
-                    tags.append("⏱️ 零秒拆包")
+                # C4 标准倒计时 40s；剩余 ≤ 1s 极限拆包;
+                tags.append(f"⏱️ 极限拆包 ({40.0 - elapsed:.1f}s)")
             snap = spatial_cache.get(d_tick)
             if snap is not None and self._ninja_defuse_ok(snap, defuser, target_player):
                 tags.append("🥷 忍者偷包")
@@ -1272,6 +1276,7 @@ class DemoAnalyzer:
         spatial_cache = self._parse_spatial_snapshots(spatial_ticks)
         bomb_highlights = self._analyze_bomb_defuse_highlights(
             planted_df, defused_df, target_player, match_start_tick, spatial_cache,
+            round_freeze_end_ticks,
         )
 
         # spatial_cache 构建完成后，回填几何/速度/yaw 类击杀动作子标
@@ -1820,16 +1825,27 @@ class DemoAnalyzer:
                 break  # 单杀回合只处理第一个命中的 kill
 
         rounds_with_kill_highlight = {c.round for c in highlight_clips}
+        bomb_round_defuse_ticks: dict[int, int] = {bh["round"]: bh["defuse_tick"] for bh in bomb_highlights}
         merged_highlights: list[Clip] = []
         for c in highlight_clips:
             extra_tags: list[str] = []
+            defuse_tick = bomb_round_defuse_ticks.get(c.round)
+            new_start = c.start_tick
+            new_end = c.end_tick
             for bh in bomb_highlights:
                 if bh["round"] == c.round:
                     extra_tags.extend(bh["tags"])
+                    if defuse_tick is None or bh["defuse_tick"] < defuse_tick:
+                        defuse_tick = bh["defuse_tick"]
             if extra_tags:
+                if defuse_tick is not None:
+                    new_start = min(c.start_tick, defuse_tick - BUFFER_SECONDS_BEFORE * TICK_RATE)
+                    new_end = max(c.end_tick, defuse_tick + BUFFER_SECONDS_AFTER * TICK_RATE)
                 merged_highlights.append(
                     replace(
                         c,
+                        start_tick=new_start,
+                        end_tick=new_end,
                         context_tags=_dedup_context_tags(
                             DemoAnalyzer._extend_tags_unique(c.context_tags, extra_tags),
                         ),

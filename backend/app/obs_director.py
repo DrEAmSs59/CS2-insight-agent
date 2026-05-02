@@ -438,10 +438,25 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             merged.append((s, e))
         else:
             last_s, last_e = merged[-1]
-            if s <= last_e:  
+            if s <= last_e:
                 merged[-1] = (last_s, max(last_e, e))
             else:
                 merged.append((s, e))
+
+    # 扩展最后一段以覆盖 clip end_tick（极限拆包）。
+    if merged and end_tick > 0:
+        ls, le = merged[-1]
+        if end_tick > le:
+            le_ext = min(end_tick, clip_max_tick) if clip_max_tick > 0 else end_tick
+            if le_ext > le:
+                merged[-1] = (ls, le_ext)
+    # 扩展第一段以覆盖 clip start_tick（拆包后击杀）。
+    if merged and start_tick > 0:
+        fs, fe = merged[0]
+        if start_tick < fs:
+            fs_ext = max(start_tick, clip_min_start_tick) if clip_min_start_tick > 0 else start_tick
+            if fs_ext < fs:
+                merged[0] = (fs_ext, fe)
 
     logger.info("[build_segments] final_segments clip_id=%s segments=%s", clip.get("clip_id"), merged)
     return merged
