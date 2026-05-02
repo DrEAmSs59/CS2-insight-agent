@@ -202,3 +202,9 @@ Counter-Strike 2、CS2、Counter-Strike、Steam、Valve 等名称、商标和标
 - 本工具调用 CS2 时使用 `-insecure` 参数仅用于本地 Demo 回放，不存在任何注入内存和修改游戏文件的操作，不连接、不修改、不干预任何官方游戏服务器、匹配服务或反作弊系统，也不提供任何作弊、绕过检测或破坏公平竞技的功能，**不要在已登录匹配服务器的 CS2 客户端中并行使用**，以免触发反作弊系统的不必要警示。
 - 录制期间会临时修改若干 CS2 archive cvar 与按键绑定。本项目会在启动录制时在仓库根目录的 `.cs2_config_backup`中**自动备份**玩家原始的 `config.cfg` / `video.txt` / `user_convars_*.vcfg`，录制结束后会回滚；如遇异常退出或未知错误导致的设置被覆盖，可在该目录手动取回原始文件。
 
+## 支持项目
+
+如果这个项目帮你节省了剪辑时间，欢迎请我喝一杯咖啡 ☕  
+你的支持会用于 Demo 解析、录制兼容性测试和后续功能维护。
+<img src="asset/wx.jpg" alt="赞助方式1" style="zoom:33%;" />
+<img src="asset/ali.jpg" alt="赞助方式2" style="zoom:33%;" />

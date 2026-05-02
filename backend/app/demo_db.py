@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import aiosqlite
 
@@ -62,6 +62,14 @@ class DemoDB:
                     mtime_ns   INTEGER NOT NULL,
                     size_bytes INTEGER NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_scan_blocklist (
+                    path       TEXT PRIMARY KEY NOT NULL,
+                    created_at TEXT NOT NULL
                 )
                 """
             )
@@ -288,13 +296,40 @@ class DemoDB:
                 return None
             return dict(row)
 
-    async def delete_demo(self, demo_id: int) -> bool:
+    async def is_path_scan_blocked(self, path: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM demo_scan_blocklist WHERE path = ? LIMIT 1",
+                (path,),
+            )
+            row = await cur.fetchone()
+        return row is not None
+
+    async def delete_demo(
+        self,
+        demo_id: int,
+        *,
+        rescan: Literal["reimport", "skip"] = "reimport",
+    ) -> bool:
+        """删除库内记录。``rescan=skip`` 时把磁盘路径加入阻止表，后续扫描/监听不再入库。"""
         demo = await self.get_demo_by_id(demo_id)
         if not demo:
             return False
+        disk_path = str(demo["path"])
         async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo["path"],))
+            await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
+            if rescan == "skip":
+                await conn.execute(
+                    """
+                    INSERT INTO demo_scan_blocklist(path, created_at)
+                    VALUES (?, ?)
+                    ON CONFLICT(path) DO UPDATE SET created_at = excluded.created_at
+                    """,
+                    (disk_path, utc_now_iso()),
+                )
+            else:
+                await conn.execute("DELETE FROM demo_scan_blocklist WHERE path = ?", (disk_path,))
             await conn.commit()
         return True
 

@@ -12,8 +12,10 @@ import MatchSwitcher from "./components/MatchSwitcher";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import RecordingQueueDrawer from "./components/RecordingQueueDrawer";
 import MontageWorkbenchDrawer from "./components/MontageWorkbenchDrawer";
-import { useRecordingQueue } from "./stores/recordingQueueStore";
+import CommonParamsModal from "./components/CommonParamsModal";
+import { useRecordingQueue, stripGlobalPacingMetaKeys } from "./stores/recordingQueueStore";
 import { ensureClientClipUidsOnClips, stripClientClipUid } from "./utils/clipClientUid";
+import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
 import {
   Package,
   RefreshCw,
@@ -26,6 +28,7 @@ import {
   Pencil,
   Search,
   ShieldAlert,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 
@@ -37,6 +40,16 @@ const API = axios.create({ baseURL: "/api" });
  */
 function recordingBlockedSubtitle(message) {
   const m = String(message || "");
+  if (
+    m.includes("分辨率") ||
+    m.includes("屏幕比例") ||
+    m.includes("宽高") ||
+    m.includes("启动分辨率") ||
+    m.includes("所选屏幕比例") ||
+    m.includes("填写启动分辨率")
+  ) {
+    return "录制预热选项未通过校验";
+  }
   if (m.includes("GSI") || m.includes("未就绪") || m.includes("未进入游戏")) {
     return "CS2 未在限定时间内进入游戏画面";
   }
@@ -47,6 +60,33 @@ function recordingBlockedSubtitle(message) {
     return "已有录制任务进行中";
   }
   return "录制启动条件未满足";
+}
+
+/** 提取 FastAPI / axios 报错文案（含 422 校验数组）。 */
+function formatRecordingApiError(e) {
+  const data = e?.response?.data;
+  const d = data?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    return d
+      .map((item) => {
+        if (item && typeof item === "object" && item.msg != null) return String(item.msg);
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .join(" ");
+  }
+  if (d != null && typeof d === "object") {
+    try {
+      return JSON.stringify(d);
+    } catch {
+      /* fallthrough */
+    }
+  }
+  return String(e?.message || "请求失败");
 }
 
 function RecordingBlockedDialog({ message, onClose }) {
@@ -145,9 +185,10 @@ function buildBatchGroupsFromQueue(queue, globalPacing = {}) {
       });
     }
     const clip = { ...stripClientClipUid(it.clipData) };
+    const baseGlobal = stripGlobalPacingMetaKeys(globalPacing);
     // 全局节奏作为基底，片段自身 pacing_override 覆盖同名字段（优先级更高）
     const mergedPacing = {
-      ...( Object.keys(globalPacing).length ? globalPacing : {} ),
+      ...( Object.keys(baseGlobal).length ? baseGlobal : {} ),
       ...( it.pacing_override && typeof it.pacing_override === "object" ? it.pacing_override : {} ),
     };
     if (Object.keys(mergedPacing).length) {
@@ -168,6 +209,8 @@ export default function App() {
   const obsConfigRef = useRef(obsConfig);
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
+  /** GET /api/config 已注入录制队列全局节奏后再允许自动写回，避免覆盖用户在本页会话内的修改 */
+  const pacingPersistReadyRef = useRef(false);
   const [llmConfig, setLlmConfig] = useState({
     provider: "deepseek",
     model: "deepseek-chat",
@@ -206,8 +249,11 @@ export default function App() {
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
+  /** 来自 cs2-insight.config.json，打开录制预热对话框时作为初始选项 */
+  const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
+  const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [cs2FpsMax, setCs2FpsMax] = useState(240);
@@ -224,6 +270,8 @@ export default function App() {
   const [selectedLibraryDemoIds, setSelectedLibraryDemoIds] = useState(new Set());
   const [libraryDemoIdsByIndex, setLibraryDemoIdsByIndex] = useState({});
   const [libraryRename, setLibraryRename] = useState(null);
+  /** @type {{ id: number, label: string } | null} */
+  const [libraryDeletePrompt, setLibraryDeletePrompt] = useState(null);
   const [librarySearchInput, setLibrarySearchInput] = useState("");
   const [librarySearchQ, setLibrarySearchQ] = useState("");
   const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
@@ -481,14 +529,18 @@ export default function App() {
     }
   }, [refreshDemoLibrary]);
 
-  const handleDeleteDemo = useCallback(async (id) => {
-    try {
-      await API.delete(`/demos/${id}`);
-      await refreshDemoLibrary(libraryPage);
-    } catch (e) {
-      setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
-    }
-  }, [refreshDemoLibrary]);
+  const handleDeleteDemo = useCallback(
+    async (id, rescan) => {
+      try {
+        await API.delete(`/demos/${id}`, { params: { rescan } });
+        setLibraryDeletePrompt(null);
+        await refreshDemoLibrary(libraryPage);
+      } catch (e) {
+        setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
+      }
+    },
+    [refreshDemoLibrary, libraryPage]
+  );
 
   const handleSaveLibraryRename = useCallback(async () => {
     if (!libraryRename) return;
@@ -664,8 +716,25 @@ export default function App() {
         if (Array.isArray(data.expected_parse_players)) {
           setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
         }
+        if (
+          data.default_record_warmup &&
+          typeof data.default_record_warmup === "object" &&
+          !Array.isArray(data.default_record_warmup)
+        ) {
+          setSavedRecordWarmupDefaults(data.default_record_warmup);
+        }
+        if (
+          data.recording_global_pacing &&
+          typeof data.recording_global_pacing === "object" &&
+          !Array.isArray(data.recording_global_pacing)
+        ) {
+          useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
+        }
         if (!cancelled) {
           obsConfigHydratedRef.current = true;
+          queueMicrotask(() => {
+            pacingPersistReadyRef.current = true;
+          });
         }
       } catch {
         /* ignore */
@@ -675,6 +744,14 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!pacingPersistReadyRef.current) return;
+    const t = setTimeout(() => {
+      void API.put("config", { recording_global_pacing: globalPacing }).catch(() => {});
+    }, 600);
+    return () => clearTimeout(t);
+  }, [globalPacing]);
 
   useEffect(() => {
     // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「刷新」扫描入库。
@@ -1046,6 +1123,15 @@ export default function App() {
     setProgressText(`已将 ${toAdd.length} 条高光片段加入队列（跨场次）。`);
   }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal]);
 
+  const persistWarmupDefaults = useCallback(async (obj) => {
+    setSavedRecordWarmupDefaults(obj);
+    try {
+      await API.put("config", { default_record_warmup: obj });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
     setQueueDrawerOpen(false);
@@ -1055,8 +1141,11 @@ export default function App() {
 
   const handleWarmupConfirm = useCallback(
     async (warmup) => {
+      const intent = warmupIntent;
+      await persistWarmupDefaults(warmupApiPayloadToPersisted(warmup));
+
       setRecordWarmupOpen(false);
-      if (warmupIntent === "batch") {
+      if (intent === "batch") {
         setWarmupIntent(null);
         if (!queue.length) return;
         setBatchRecording(true);
@@ -1076,12 +1165,9 @@ export default function App() {
           }
           clearQueue();
         } catch (e) {
-          const detail = e.response?.data?.detail || e.message;
-          // 后端用 HTTP 409 表达「录制前置条件未满足」：CS2 已经在跑、GSI 超时
-          // 仍卡在读条页、已有录制任务进行中等。所有 409 一律弹同款对话框，
-          // 用户能从弹窗里看到原因，不会被静默退回队列。
-          if (e.response?.status === 409) {
-            setRecordingBlockedMessage(String(detail || "录制启动失败"));
+          const detail = formatRecordingApiError(e);
+          if (e.response?.status === 409 || e.response?.status === 422) {
+            setRecordingBlockedMessage(detail || "录制启动失败");
           }
           setProgressText(`批量录制失败: ${detail}`);
         } finally {
@@ -1091,7 +1177,7 @@ export default function App() {
       }
       setWarmupIntent(null);
     },
-    [warmupIntent, queue, clearQueue, obsConfig, globalPacing]
+    [warmupIntent, queue, clearQueue, obsConfig, globalPacing, persistWarmupDefaults]
   );
 
   const handleAbortBatchRecording = useCallback(async () => {
@@ -1312,6 +1398,15 @@ export default function App() {
             <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
+                onClick={() => setCommonParamsOpen(true)}
+                disabled={batchRecording}
+                className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                常用参数管理
+              </button>
+              <button
+                type="button"
                 onClick={handleResetDemo}
                 disabled={anyDemoParsing || batchRecording}
                 className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
@@ -1481,7 +1576,13 @@ export default function App() {
                     <button
                       type="button"
                       className="rounded border border-cs2-border px-1.5 py-0.5 text-[10px] hover:border-cs2-fail"
-                      onClick={() => void handleDeleteDemo(it.id)}
+                      onClick={() =>
+                        setLibraryDeletePrompt({
+                          id: it.id,
+                          label:
+                            (it.display_name && String(it.display_name).trim()) || it.filename || `#${it.id}`,
+                        })
+                      }
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -1545,6 +1646,60 @@ export default function App() {
               </form>
             </div>
           </section>
+
+          {libraryDeletePrompt ? (
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="library-delete-title"
+              onClick={() => setLibraryDeletePrompt(null)}
+            >
+              <div
+                className="w-full max-w-md rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-zinc-300">
+                  从 Demo 库删除
+                </h4>
+                <p className="mb-3 font-mono text-[11px] text-zinc-400">{libraryDeletePrompt.label}</p>
+                <p className="mb-3 text-[10px] leading-relaxed text-cs2-text-secondary">
+                  仅移除本地库中的记录与解析缓存，不会删除磁盘上的 .dem 文件。请选择删除之后再次扫描时的行为：
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-emerald-200/95 hover:bg-emerald-500/20"
+                    onClick={() => void handleDeleteDemo(libraryDeletePrompt.id, "reimport")}
+                  >
+                    删除后再次扫描仍入库
+                    <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
+                      下次扫描会重新加入库中，入库时间为扫描时刻。
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-white/15 px-3 py-2 text-left text-[11px] leading-snug text-zinc-300 hover:bg-white/[0.06]"
+                    onClick={() => void handleDeleteDemo(libraryDeletePrompt.id, "skip")}
+                  >
+                    删除后再次扫描不再入库
+                    <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
+                      之后目录监听与手动扫描都会跳过该路径；仅改文件名或移动文件可视为新路径再入库。
+                    </span>
+                  </button>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    className="rounded border border-cs2-border px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+                    onClick={() => setLibraryDeletePrompt(null)}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {libraryRename ? (
             <div
@@ -1706,6 +1861,14 @@ export default function App() {
 
       <MontageWorkbenchDrawer open={montageDrawerOpen} onClose={() => setMontageDrawerOpen(false)} />
 
+      <CommonParamsModal
+        open={commonParamsOpen}
+        onClose={() => setCommonParamsOpen(false)}
+        batchRecording={batchRecording}
+        savedWarmupDefaults={savedRecordWarmupDefaults}
+        onPersistWarmupDefaults={persistWarmupDefaults}
+      />
+
       <RecordingQueueDrawer
         open={queueDrawerOpen}
         onClose={() => setQueueDrawerOpen(false)}
@@ -1724,6 +1887,8 @@ export default function App() {
           setWarmupIntent(null);
         }}
         onConfirm={handleWarmupConfirm}
+        onWarmupValidationError={(msg) => setRecordingBlockedMessage(msg)}
+        defaultOverrides={savedRecordWarmupDefaults ?? undefined}
       />
 
       <LibraryLoadModeModal

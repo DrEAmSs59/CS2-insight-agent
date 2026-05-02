@@ -10,6 +10,8 @@ import { create } from "zustand";
  * @property {boolean} [victim_pov]     是否追加 POV（高光→受害者、失误→击杀者）
  * @property {number} [victim_pov_pre_sec]
  * @property {number} [victim_pov_post_sec]
+ * @property {number} [killer_pov_pre_sec]
+ * @property {number} [killer_pov_post_sec]
  */
 
 /**
@@ -45,7 +47,65 @@ function newId() {
   return `q_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export const useRecordingQueue = create((set) => ({
+/** 与队列抽屉「受害者视角」资格判定一致：新入队时用于套用 default_victim_pov */
+export function clipVictimPovEnqueueEligible(clipData) {
+  if (!clipData || typeof clipData !== "object") return false;
+  const victims = Array.isArray(clipData.victims) ? clipData.victims : [];
+  const kind = clipData.compilation_kind;
+  return (
+    (clipData.category === "highlight" ||
+      (clipData.category === "compilation" && ["rival_kills", "all_kills"].includes(kind))) &&
+    victims.some((v) => String(v ?? "").trim().length > 0)
+  );
+}
+
+/** 与队列抽屉「击杀者视角」资格判定一致 */
+export function clipKillerPovEnqueueEligible(clipData) {
+  if (!clipData || typeof clipData !== "object") return false;
+  const killers = Array.isArray(clipData.killers) ? clipData.killers : [];
+  const hasKillerList = killers.some((v) => String(v ?? "").trim().length > 0);
+  const kind = clipData.compilation_kind;
+  return (
+    (clipData.category === "compilation" &&
+      ["nemesis_deaths", "all_deaths"].includes(kind) &&
+      hasKillerList) ||
+    (clipData.category === "fail" && String(clipData.killer_name ?? "").trim().length > 0)
+  );
+}
+
+/**
+ * 写入 recording_global_pacing 的「入队默认」开关不应参与片段 pacing_override 合并。
+ * @param {Record<string, unknown>} gp
+ */
+export function stripGlobalPacingMetaKeys(gp) {
+  if (!gp || typeof gp !== "object" || Array.isArray(gp)) return {};
+  const { default_victim_pov, default_killer_pov, ...rest } = gp;
+  return rest;
+}
+
+function applyEnqueuePovDefaults(item, globalPacing) {
+  const gp = globalPacing && typeof globalPacing === "object" ? globalPacing : {};
+  const dv = gp.default_victim_pov === true;
+  const dk = gp.default_killer_pov === true;
+  if (!dv && !dk) return item;
+  const prev =
+    item.pacing_override && typeof item.pacing_override === "object"
+      ? { ...item.pacing_override }
+      : {};
+  let touched = false;
+  if (dv && clipVictimPovEnqueueEligible(item.clipData)) {
+    prev.victim_pov = true;
+    touched = true;
+  }
+  if (dk && clipKillerPovEnqueueEligible(item.clipData)) {
+    prev.killer_pov = true;
+    touched = true;
+  }
+  if (!touched) return item;
+  return { ...item, pacing_override: prev };
+}
+
+export const useRecordingQueue = create((set, get) => ({
   queue: /** @type {RecordingQueueItem[]} */ ([]),
 
   /**
@@ -58,11 +118,15 @@ export const useRecordingQueue = create((set) => ({
   /** @param {RecordingQueueItem | RecordingQueueItem[]} itemOrItems */
   addToQueue(itemOrItems) {
     const arr = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
-    const normalized = arr.map((it) => ({
-      ...it,
-      id: it.id || newId(),
-      clientClipUid: it.clientClipUid || it.clipData?.client_clip_uid || "",
-    }));
+    const gp = get().globalPacing || {};
+    const normalized = arr.map((it) => {
+      const base = {
+        ...it,
+        id: it.id || newId(),
+        clientClipUid: it.clientClipUid || it.clipData?.client_clip_uid || "",
+      };
+      return applyEnqueuePovDefaults(base, gp);
+    });
     set((s) => ({ queue: [...s.queue, ...normalized] }));
   },
 
@@ -108,9 +172,37 @@ export const useRecordingQueue = create((set) => ({
     }));
   },
 
-  /** 重置全局节奏到后端默认值（清空覆写，让后端默认值生效） */
+  /**
+   * 重置「智能分段」数值（开场预留 / 结尾留白 / 防跳剪阈值），保留入队默认开关与 POV 时序默认值。
+   */
   resetGlobalPacing() {
-    set({ globalPacing: {} });
+    set((s) => {
+      const g = s.globalPacing || {};
+      const next = {};
+      const keep = new Set([
+        "default_victim_pov",
+        "default_killer_pov",
+        "victim_pov_pre_sec",
+        "victim_pov_post_sec",
+        "killer_pov_pre_sec",
+        "killer_pov_post_sec",
+      ]);
+      for (const k of Object.keys(g)) {
+        if (keep.has(k)) next[k] = g[k];
+      }
+      return { globalPacing: next };
+    });
+  },
+
+  /**
+   * 从 cs2-insight.config.json / GET /api/config 一次性替换全局节奏（非合并）。
+   * @param {Record<string, unknown>} obj
+   */
+  hydrateGlobalPacing(obj) {
+    set({
+      globalPacing:
+        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+    });
   },
 
   /**

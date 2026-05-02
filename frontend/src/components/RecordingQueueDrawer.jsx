@@ -27,12 +27,18 @@ function groupByDemo(queue) {
 }
 
 function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) {
+  const globalPacing = useRecordingQueue((s) => s.globalPacing);
+  const gp = globalPacing || {};
   const po = item.pacing_override || {};
-  const pre = po.pre_first_sec ?? DEFAULT_PACING.pre_first_sec;
-  const post = po.post_last_sec ?? DEFAULT_PACING.post_last_sec;
-  const gap = po.max_gap_sec ?? DEFAULT_PACING.max_gap_sec;
-  const postMid = po.post_mid_sec ?? DEFAULT_PACING.post_mid_sec;
-  const preCont = po.pre_cont_sec ?? DEFAULT_PACING.pre_cont_sec;
+  const gNum = (key) => {
+    const v = gp[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  };
+  const pre = po.pre_first_sec ?? gNum("pre_first_sec") ?? DEFAULT_PACING.pre_first_sec;
+  const post = po.post_last_sec ?? gNum("post_last_sec") ?? DEFAULT_PACING.post_last_sec;
+  const gap = po.max_gap_sec ?? gNum("max_gap_sec") ?? DEFAULT_PACING.max_gap_sec;
+  const postMid = po.post_mid_sec ?? gNum("post_mid_sec") ?? DEFAULT_PACING.post_mid_sec;
+  const preCont = po.pre_cont_sec ?? gNum("pre_cont_sec") ?? DEFAULT_PACING.pre_cont_sec;
 
   const commit = (partial) => {
     const next = { ...partial };
@@ -117,7 +123,7 @@ function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) 
                   <input
                     type="range"
                     min={2}
-                    max={30}
+                    max={70}
                     step={0.5}
                     value={gap}
                     onChange={(e) => commit({ max_gap_sec: parseFloat(e.target.value) })}
@@ -220,6 +226,8 @@ function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) 
  * 开关与独立时序参数均存入 item.pacing_override。
  */
 function PovSection({ item, updateItemPacing }) {
+  const globalPacing = useRecordingQueue((s) => s.globalPacing);
+  const gp = globalPacing || {};
   const po = item.pacing_override || {};
   const clipCategory = item.clipData?.category;
   const victimsList = item.clipData?.victims || [];
@@ -237,10 +245,19 @@ function PovSection({ item, updateItemPacing }) {
 
   if (!canVictimPov && !canKillerPov) return null;
 
+  const gNum = (key) => {
+    const v = gp[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  };
+
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
-  const povPre = po.victim_pov_pre_sec ?? (isFail ? 3.0 : 1.5);
-  const povPost = po.victim_pov_post_sec ?? (isFail ? 1.5 : 1.0);
+  const vicPre =
+    po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? (isFail ? 3.0 : 1.5);
+  const vicPost =
+    po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? (isFail ? 1.5 : 1.0);
+  const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
+  const killPost = po.killer_pov_post_sec ?? gNum("killer_pov_post_sec") ?? vicPost;
 
   const commit = (partial) => updateItemPacing(item.id, partial);
 
@@ -261,7 +278,7 @@ function PovSection({ item, updateItemPacing }) {
             <span>追加受害者视角</span>
             {povEnabled && (
               <span className="ml-auto font-mono text-[9px] text-cyan-400/70">
-                -{povPre.toFixed(1)}s / +{povPost.toFixed(1)}s
+                -{vicPre.toFixed(1)}s / +{vicPost.toFixed(1)}s
               </span>
             )}
           </button>
@@ -278,21 +295,26 @@ function PovSection({ item, updateItemPacing }) {
           >
             {killerPovEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
             <span>追加击杀者视角</span>
+            {killerPovEnabled && (
+              <span className="ml-auto font-mono text-[9px] text-amber-400/70">
+                -{killPre.toFixed(1)}s / +{killPost.toFixed(1)}s
+              </span>
+            )}
           </button>
         )}
       </div>
 
-      {(povEnabled || killerPovEnabled) && (
+      {povEnabled && canVictimPov && (
         <div className="mt-1.5 space-y-2 rounded border border-cyan-500/10 bg-cyan-950/10 p-2">
           <label className="block text-[10px] text-zinc-500">
-            击杀前预留 (秒)
+            击杀前预留 (秒) · 受害者视角
             <div className="mt-1 flex items-center gap-2">
               <input
                 type="range"
                 min={0.5}
                 max={5}
                 step={0.5}
-                value={povPre}
+                value={vicPre}
                 onChange={(e) => commit({ victim_pov_pre_sec: parseFloat(e.target.value) })}
                 className="min-w-0 flex-1 accent-cyan-500"
               />
@@ -300,7 +322,7 @@ function PovSection({ item, updateItemPacing }) {
                 type="number"
                 step={0.5}
                 min={0.5}
-                value={povPre}
+                value={vicPre}
                 onChange={(e) => {
                   const n = parseFloat(e.target.value);
                   if (Number.isFinite(n)) commit({ victim_pov_pre_sec: n });
@@ -310,14 +332,14 @@ function PovSection({ item, updateItemPacing }) {
             </div>
           </label>
           <label className="block text-[10px] text-zinc-500">
-            死亡后停留 (秒)
+            死亡后停留 (秒) · 受害者视角
             <div className="mt-1 flex items-center gap-2">
               <input
                 type="range"
                 min={0}
                 max={5}
                 step={0.5}
-                value={povPost}
+                value={vicPost}
                 onChange={(e) => commit({ victim_pov_post_sec: parseFloat(e.target.value) })}
                 className="min-w-0 flex-1 accent-cyan-500"
               />
@@ -325,10 +347,65 @@ function PovSection({ item, updateItemPacing }) {
                 type="number"
                 step={0.5}
                 min={0}
-                value={povPost}
+                value={vicPost}
                 onChange={(e) => {
                   const n = parseFloat(e.target.value);
                   if (Number.isFinite(n)) commit({ victim_pov_post_sec: n });
+                }}
+                className="w-16 rounded border border-white/10 bg-black/40 px-1 py-0.5 font-mono text-[10px] text-zinc-200"
+              />
+            </div>
+          </label>
+        </div>
+      )}
+
+      {killerPovEnabled && canKillerPov && (
+        <div className="mt-1.5 space-y-2 rounded border border-amber-500/15 bg-amber-950/10 p-2">
+          <label className="block text-[10px] text-zinc-500">
+            击杀前预留 (秒) · 击杀者视角
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="range"
+                min={0.5}
+                max={5}
+                step={0.5}
+                value={killPre}
+                onChange={(e) => commit({ killer_pov_pre_sec: parseFloat(e.target.value) })}
+                className="min-w-0 flex-1 accent-amber-500"
+              />
+              <input
+                type="number"
+                step={0.5}
+                min={0.5}
+                value={killPre}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n)) commit({ killer_pov_pre_sec: n });
+                }}
+                className="w-16 rounded border border-white/10 bg-black/40 px-1 py-0.5 font-mono text-[10px] text-zinc-200"
+              />
+            </div>
+          </label>
+          <label className="block text-[10px] text-zinc-500">
+            死亡后停留 (秒) · 击杀者视角
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={5}
+                step={0.5}
+                value={killPost}
+                onChange={(e) => commit({ killer_pov_post_sec: parseFloat(e.target.value) })}
+                className="min-w-0 flex-1 accent-amber-500"
+              />
+              <input
+                type="number"
+                step={0.5}
+                min={0}
+                value={killPost}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n)) commit({ killer_pov_post_sec: n });
                 }}
                 className="w-16 rounded border border-white/10 bg-black/40 px-1 py-0.5 font-mono text-[10px] text-zinc-200"
               />

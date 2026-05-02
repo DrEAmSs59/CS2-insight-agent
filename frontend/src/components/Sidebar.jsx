@@ -129,7 +129,7 @@ export default function Sidebar({
           </div>
           <div>
             <div className="text-sm font-bold tracking-wide">CS2 洞察</div>
-            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">智能体 v1.0</div>
+            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">智能体 v1.0.1</div>
           </div>
         </div>
       </div>
@@ -261,11 +261,11 @@ export default function Sidebar({
             />
             <div className="space-y-1">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                录制帧率上限 (fps_max)
+                录制帧率上限 (fps_max，0=不限制)
               </label>
               <input
                 type="number"
-                min={30}
+                min={0}
                 max={9999}
                 step={10}
                 value={cs2FpsMax}

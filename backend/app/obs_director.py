@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Literal, Optional, Tuple
 
 from obswebsocket import obsws, requests as obs_requests
 
@@ -31,6 +31,20 @@ from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_paylo
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_gsi_sink_url() -> str:
+    """URI written into ``gamestate_integration_*.cfg``; must match the backend listen port."""
+    explicit = os.environ.get("CS2_INSIGHT_GSI_URL") or os.environ.get("CS2_INSIGHT_BACKEND_GSI_URL")
+    if explicit:
+        return explicit.strip()
+    try:
+        port = int(os.environ.get("CS2_INSIGHT_PORT", "8000") or "8000")
+    except ValueError:
+        port = 8000
+    # CS2 POSTs from the same machine; mirror CS2_INSIGHT_PORT so a non-default
+    # uvicorn port still receives GSI (previously defaulted to :8000 only).
+    return f"http://127.0.0.1:{port}/api/gsi/cs2"
 
 
 class RecordingAborted(Exception):
@@ -469,8 +483,14 @@ class RecordingWarmupExtras:
     hide_demo_playback_ui: bool = True
     # 投掷物抛物线 + 画中窗预览
     hide_grenade_trajectory_pip: bool = True
+    # 与 cs2_video.txt / video.cfg 中 setting.aspectratiomode 一致：0=4:3，1=16:9，2=16:10
+    aspect_ratio: Optional[Literal["4:3", "16:9", "16:10"]] = None
     # 若前端传入非空列表，则优先使用该顺序注入（须已含各 cvar）；否则由静态方法从布尔字段拼装
     console_cmds: Optional[tuple[str, ...]] = None
+
+
+# CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
+_ASPECT_RATIO_VIDEOCFG_MODE: dict[str, int] = {"4:3": 0, "16:9": 1, "16:10": 2}
 
 
 class OBSDirector:
@@ -486,7 +506,7 @@ class OBSDirector:
     ):
         self.obs_config = obs_config
         self.cs2_path = cs2_path
-        self._cs2_fps_max: int = max(30, int(cs2_fps_max))
+        self._cs2_fps_max: int = max(0, min(int(cs2_fps_max), 9999))
         self._ws: Optional[obsws] = None
         self._cs2_process: Optional[subprocess.Popen] = None
         self._on_state_change = on_state_change
@@ -975,7 +995,7 @@ class OBSDirector:
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
         # engine_no_focus_sleep 0 关闭 Source 2 失焦节流（默认 50ms/帧 ≈ 20fps）。
-        # fps_max 由用户在页面配置（默认 240）：整场录制的帧率上限。
+        # fps_max 固定走启动项 ``+fps_max``，这里不再通过 cfg / console 重复设置。
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
             console_toggle_key = "`"
@@ -987,7 +1007,7 @@ class OBSDirector:
         cfg_lines = [
             "engine_no_focus_sleep 0",
             "cl_demo_predict 0",
-            f"fps_max {self._cs2_fps_max}",
+            "cl_spec_show_bindings 0",
             "con_enable 1",
             *console_bind_lines,
             f'playdemo "{stem}.dem"',
@@ -996,12 +1016,9 @@ class OBSDirector:
         self._copied_cfg = cfg_path
 
         reset_gsi_ready()
-        gsi_url = (
-            os.environ.get("CS2_INSIGHT_GSI_URL")
-            or os.environ.get("CS2_INSIGHT_BACKEND_GSI_URL")
-            or "http://127.0.0.1:8000/api/gsi/cs2"
-        ).strip()
+        gsi_url = _resolve_gsi_sink_url()
         gsi_path = cfg_dir / f"gamestate_integration_{stem}.cfg"
+        logger.info("GSI HTTP sink (gamestate cfg): %s -> %s", gsi_url, gsi_path)
         gsi_lines = [
             '"CS2 Insight Agent"',
             "{",
@@ -1038,6 +1055,8 @@ class OBSDirector:
             # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
             # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
             "+engine_no_focus_sleep", "0",
+            # fps_max 同样固定走启动项，避免录制期再经 cfg / console 改写。
+            "+fps_max", str(self._cs2_fps_max),
             # 关闭TrueView
             "+cl_demo_predict", "0",
         ]
@@ -1046,6 +1065,10 @@ class OBSDirector:
             w, h = warmup.resolution_width, warmup.resolution_height
             if w is not None and h is not None and int(w) > 0 and int(h) > 0:
                 argv.extend(["-w", str(int(w)), "-h", str(int(h))])
+                arm = warmup.aspect_ratio
+                mode = _ASPECT_RATIO_VIDEOCFG_MODE.get(arm) if arm else None
+                if mode is not None:
+                    argv.extend(["+setting.aspectratiomode", str(mode)])
 
         argv.extend(["+exec", stem])
         logger.info("Launch CS2 cwd=%s cmd=%s", cwd, " ".join(argv))
@@ -1716,14 +1739,6 @@ class OBSDirector:
         logger.error("等待 CS2 窗口超时，无法注入 demo_gototick")
         return False
 
-    def _fps_idle_cmd(self) -> str:
-        """CS2 启动后（注入期 + 录制期）统一使用的帧率上限，来自用户配置。"""
-        return f"fps_max {self._cs2_fps_max}"
-
-    def _fps_record_cmd(self) -> str:
-        """录制期恢复的帧率；与 idle 保持一致（无需双相切换）。"""
-        return f"fps_max {self._cs2_fps_max}"
-
     def _env_float(self, key: str, default: str) -> float:
         try:
             return float((os.environ.get(key) or default).strip())
@@ -1995,6 +2010,52 @@ class OBSDirector:
                 else:
                     logger.warning("Could not rename OBS recording %s after 5 attempts: %s", original, e)
                     return {"original_output_path": original, "rename_error": str(e)}
+
+    async def _finalize_obs_recording_rename(
+        self,
+        stop_path: Optional[Path],
+        clip: dict,
+        demo_abs: Path,
+        spectator_name: Optional[str],
+        record_started_at_wall: Optional[float],
+        pre_record_video_paths: Optional[set[str]] = None,
+    ) -> dict:
+        """StopRecord 后对 OBS 输出文件改名：无固定前置等待；最多 5 次尝试，间隔 0.5s，成功即返回。
+
+        WebSocket 已给出 ``outputPath`` 时各轮只尝试该路径（避免录制目录内误选其它成片）；
+        仅当 StopRecord 未返回路径时先按录制前目录快照匹配新文件，再按 mtime 扫描兜底。
+        """
+        interval = 0.5
+        max_attempts = 5
+        clip_ref = str(clip.get("clip_id") or "")
+        for attempt in range(1, max_attempts + 1):
+            self._check_abort()
+            path: Optional[Path]
+            if stop_path is not None:
+                try:
+                    path = stop_path.expanduser()
+                except OSError:
+                    path = None
+            else:
+                path = None
+                if pre_record_video_paths is not None:
+                    path = self._pick_new_recording_path_after_snapshot(
+                        pre_record_video_paths,
+                        record_started_at_wall,
+                    )
+                if path is None:
+                    path = self._locate_recent_recording_output(record_started_at_wall)
+            result = await self._rename_recording_output(path, clip, demo_abs, spectator_name)
+            if result.get("output_path") and not result.get("rename_error"):
+                return result
+            if attempt < max_attempts:
+                await self._sleep_abortable(interval)
+        logger.warning(
+            "OBS output rename skipped after %d attempts (clip_id=%s)",
+            max_attempts,
+            clip_ref,
+        )
+        return {}
 
     @staticmethod
     def _recording_warmup_console_lines(w: RecordingWarmupExtras) -> list[str]:
@@ -2282,16 +2343,11 @@ class OBSDirector:
                 logger.warning("Console inject failed stage 4: spec_mode + %s", spec_cmd)
             await self._sleep_abortable(spec_settle)
 
-        # 与 _launch_cs2 cfg 中的 fps_max IDLE（默认 30）配对：命令都已注入完，
-        # 进入录制前把帧率恢复到 RECORD（默认 120）。默认不再用 400 的原因：
-        # 400fps ≈ 2.5ms/帧，激烈场景渲染一帧就吃 5-15ms → 主线程 100% 忙 →
-        # 段间 jump_cut 再次 demo_pause 时 WM_CHAR 又龟速。120fps 每帧 8.3ms，
-        # 激烈场景仍能留出数 ms 处理窗口消息；OBS 成片也足够流畅。
-        ok5 = await asyncio.to_thread(_inj, [self._fps_record_cmd(), close_cmd], skip=True, close=False)
+        ok5 = await asyncio.to_thread(_inj, [close_cmd], skip=True, close=False)
         if ok5:
-            logger.info("Injected stage 5: %s + %s", self._fps_record_cmd(), close_cmd)
+            logger.info("Injected stage 5: %s", close_cmd)
         else:
-            logger.warning("Console inject failed stage 5: fps_max + %s", close_cmd)
+            logger.warning("Console inject failed stage 5: %s", close_cmd)
 
         await self._sleep_abortable(self._env_float("CS2_INSIGHT_POST_HIDE_DELAY", "0.55"))
         await self._sleep_abortable(self._env_float("CS2_INSIGHT_PRE_RECORD_DELAY", "0.35"))
@@ -2960,15 +3016,13 @@ class OBSDirector:
             except Exception as ce:
                 logger.debug("restore cursor pos: %s", ce)
             if record_started_at_wall is not None or stop_record_output_path is not None:
-                if stop_record_output_path is None:
-                    stop_record_output_path = self._pick_new_recording_path_after_snapshot(
-                        pre_record_video_paths,
-                        record_started_at_wall,
-                    )
-                if stop_record_output_path is None:
-                    stop_record_output_path = self._locate_recent_recording_output(record_started_at_wall)
-                output_result = await self._rename_recording_output(
-                    stop_record_output_path, clip, demo_abs, spectator_name
+                output_result = await self._finalize_obs_recording_rename(
+                    stop_record_output_path,
+                    clip,
+                    demo_abs,
+                    spectator_name,
+                    record_started_at_wall,
+                    pre_record_video_paths,
                 )
 
         self._set_state(DirectorState.STOPPING, clip_id)

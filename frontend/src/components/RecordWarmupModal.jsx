@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { validateWarmupResolution } from "../utils/warmupDefaults";
 
 /** 与后端 `RecordingWarmupExtras._recording_warmup_console_lines` 拼装顺序一致（无 console_cmds 覆盖时） */
 export function buildWarmupConsoleCommands(o) {
@@ -34,7 +35,7 @@ export function buildWarmupConsoleCommands(o) {
   return lines;
 }
 
-const DEFAULT_OPTIONS = {
+export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   cl_draw_only_deathnotices: true,
   hud_showtargetid_hide: true,
   tv_nochat: true,
@@ -45,11 +46,12 @@ const DEFAULT_OPTIONS = {
   snd_voipvolume_mute: true,
   hide_demo_playback_ui: true,
   hide_grenade_trajectory_pip: true,
+  aspect_ratio: "",
   resolution_width: "",
   resolution_height: "",
 };
 
-function SectionHeader({ en, zh }) {
+export function SectionHeader({ en, zh }) {
   return (
     <div className="mb-2 flex items-end gap-2 px-0.5">
       <div className="min-w-0">
@@ -61,7 +63,7 @@ function SectionHeader({ en, zh }) {
   );
 }
 
-function OptionRow({ checked, onChange, title, code }) {
+export function OptionRow({ checked, onChange, title, code }) {
   return (
     <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-black/25 px-3 py-2.5 transition-colors hover:border-cs2-orange/25">
       <input
@@ -80,38 +82,55 @@ function OptionRow({ checked, onChange, title, code }) {
 
 /**
  * 一键录制前：分组观战 / 摄像机 / 音频与启动项；提交时生成 console_cmds 供后端注入。
+ * @param {{ open: boolean, onClose: () => void, onConfirm: (w: object) => void, onWarmupValidationError?: (msg: string) => void, defaultOverrides?: object }} props
  */
-export default function RecordWarmupModal({ open, onClose, onConfirm }) {
-  const [opts, setOpts] = useState(DEFAULT_OPTIONS);
+export default function RecordWarmupModal({
+  open,
+  onClose,
+  onConfirm,
+  onWarmupValidationError,
+  defaultOverrides,
+}) {
+  const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
 
   useEffect(() => {
-    if (open) {
-      setOpts({ ...DEFAULT_OPTIONS });
+    if (!open) return;
+    const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
+    const o = defaultOverrides;
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      for (const k of Object.keys(RECORD_WARMUP_DEFAULT_OPTIONS)) {
+        if (!Object.prototype.hasOwnProperty.call(o, k) || o[k] === undefined) continue;
+        const v = o[k];
+        if (k === "resolution_width" || k === "resolution_height") {
+          base[k] = v != null && v !== "" ? String(v) : "";
+        } else {
+          base[k] = v;
+        }
+      }
     }
-  }, [open]);
+    setOpts(base);
+  }, [open, defaultOverrides]);
 
   const set = useCallback((patch) => {
     setOpts((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const handleSubmit = () => {
+    const vr = validateWarmupResolution(opts);
+    if (!vr.ok) {
+      if (onWarmupValidationError) onWarmupValidationError(vr.message);
+      return;
+    }
+
+    const arRaw = String(opts.aspect_ratio || "").trim();
+    /** @type {"" | "4:3" | "16:9" | "16:10"} */
+    const ar =
+      arRaw === "4:3" || arRaw === "16:9" || arRaw === "16:10" ? arRaw : "";
+
     const w = String(opts.resolution_width || "").trim();
     const h = String(opts.resolution_height || "").trim();
     const rw = w ? parseInt(w, 10) : null;
     const rh = h ? parseInt(h, 10) : null;
-
-    if ((rw != null && Number.isNaN(rw)) || (rh != null && Number.isNaN(rh))) {
-      window.alert("分辨率请填写有效数字，或留空以使用当前分辨率。");
-      return;
-    }
-    if ((rw != null && rw <= 0) || (rh != null && rh <= 0)) {
-      window.alert("分辨率宽高须为正整数，或两者都留空。");
-      return;
-    }
-    if ((rw != null) !== (rh != null)) {
-      window.alert("分辨率请同时填写宽度与高度，或都留空。");
-      return;
-    }
 
     const apiShape = {
       cl_draw_only_deathnotices: opts.cl_draw_only_deathnotices,
@@ -125,6 +144,7 @@ export default function RecordWarmupModal({ open, onClose, onConfirm }) {
       hide_grenade_trajectory_pip: opts.hide_grenade_trajectory_pip,
       resolution_width: rw,
       resolution_height: rh,
+      aspect_ratio: ar || null,
     };
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
@@ -265,7 +285,20 @@ export default function RecordWarmupModal({ open, onClose, onConfirm }) {
                 code="snd_voipvolume 0"
               />
               <div className="rounded-lg border border-white/[0.06] bg-black/25 px-3 py-2.5">
-                <p className="mb-2 text-sm font-medium text-zinc-200">启动分辨率（可选）</p>
+                <p className="mb-2 text-sm font-medium text-zinc-200">启动分辨率（可选，不填则为本机当前游戏设置分辨率）</p>
+                <label className="mb-2 block">
+                  <span className="mb-1 block text-[11px] text-zinc-500">屏幕比例（与分辨率联动）</span>
+                  <select
+                    value={opts.aspect_ratio}
+                    onChange={(e) => set({ aspect_ratio: e.target.value })}
+                    className="w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-white outline-none focus:border-cs2-orange/50"
+                  >
+                    <option value="">不填写启动分辨率</option>
+                    <option value="4:3">4 : 3</option>
+                    <option value="16:9">16 : 9</option>
+                    <option value="16:10">16 : 10</option>
+                  </select>
+                </label>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-xs text-zinc-500">-w</span>
                   <input
@@ -273,7 +306,6 @@ export default function RecordWarmupModal({ open, onClose, onConfirm }) {
                     inputMode="numeric"
                     value={opts.resolution_width}
                     onChange={(e) => set({ resolution_width: e.target.value })}
-                    placeholder="1920"
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-white placeholder:text-zinc-600"
                   />
                   <span className="font-mono text-xs text-zinc-500">-h</span>
@@ -282,11 +314,12 @@ export default function RecordWarmupModal({ open, onClose, onConfirm }) {
                     inputMode="numeric"
                     value={opts.resolution_height}
                     onChange={(e) => set({ resolution_height: e.target.value })}
-                    placeholder="1080"
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-white placeholder:text-zinc-600"
                   />
                 </div>
-                <p className="mt-1.5 text-[11px] text-zinc-600">留空沿用当前窗口；须宽高同时填写。</p>
+                <p className="mt-1.5 text-[11px] text-zinc-600">
+                  留空宽高则沿用当前分辨率；若填写宽高须选择比例且化简后须匹配（4:3 含游戏内同组的 5:4，如 1280×1024）。
+                </p>
               </div>
             </div>
           </section>

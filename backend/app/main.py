@@ -12,13 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
+
 import faulthandler
 
 from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from math import gcd
+from pydantic import BaseModel, Field, model_validator
 
 from .demo_parse_isolation import (
     IsolatedParseError,
@@ -80,6 +82,9 @@ async def _enqueue_demo_path(path: Path) -> None:
         if not _enqueue_striped_locks:
             _enqueue_striped_locks = [asyncio.Lock() for _ in range(_ENQUEUE_STRIPE_COUNT)]
     demo_path = str(path.resolve())
+    if await demo_db.is_path_scan_blocked(demo_path):
+        logger.debug("Skip enqueue (scan blocklist): %s", demo_path)
+        return
     stripe = (hash(demo_path) & 0x7FFFFFFF) % _ENQUEUE_STRIPE_COUNT
     async with _enqueue_striped_locks[stripe]:
         size: int | None = None
@@ -514,6 +519,8 @@ class ConfigPayload(BaseModel):
     ai_mode: Optional[bool] = None
     expected_parse_players: Optional[list[str]] = None
     cs2_fps_max: Optional[int] = None
+    recording_global_pacing: Optional[dict[str, Any]] = None
+    default_record_warmup: Optional[dict[str, Any]] = None
 
 
 @app.get("/api/config")
@@ -589,9 +596,21 @@ async def update_config(payload: ConfigPayload):
         cfg.expected_parse_players = cleaned
     if payload.cs2_fps_max is not None:
         v = int(payload.cs2_fps_max)
-        cfg.cs2_fps_max = max(30, min(v, 9999))
+        cfg.cs2_fps_max = max(0, min(v, 9999))
     if payload.ffmpeg_path is not None:
         cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
+    if payload.recording_global_pacing is not None:
+        cfg.recording_global_pacing = (
+            dict(payload.recording_global_pacing)
+            if isinstance(payload.recording_global_pacing, dict)
+            else {}
+        )
+    if payload.default_record_warmup is not None:
+        cfg.default_record_warmup = (
+            dict(payload.default_record_warmup)
+            if isinstance(payload.default_record_warmup, dict)
+            else {}
+        )
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -957,8 +976,11 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
 
 
 @app.delete("/api/demos/{demo_id}")
-async def delete_demo(demo_id: int):
-    ok = await demo_db.delete_demo(demo_id)
+async def delete_demo(
+    demo_id: int,
+    rescan: Annotated[Literal["reimport", "skip"], Query(description="reimport=再次扫描可入库; skip=扫描不再入库")] = "reimport",
+):
+    ok = await demo_db.delete_demo(demo_id, rescan=rescan)
     if not ok:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     await demo_library_hub.notify("deleted")
@@ -966,6 +988,29 @@ async def delete_demo(demo_id: int):
 
 
 # ─── Recording endpoints ──────────────────────────────────────
+
+
+def _resolution_matches_aspect(width: int, height: int, aspect_ratio: str) -> bool:
+    """判定整数宽高化简后是否与所选比例一致。
+
+    CS2 视频设置里「宽高比 4:3」下列有 **1280×1024** 等实为 **5:4** 的分辨率，
+    与游戏菜单保持一致：选 4:3 时同时接受标准 4:3 与 5:4。
+    """
+    g = gcd(int(width), int(height))
+    if g <= 0:
+        return False
+    wn, hn = int(width) // g, int(height) // g
+    if aspect_ratio == "4:3":
+        if wn * 3 == hn * 4:
+            return True
+        # 1280×1024 等：游戏内挂在 4:3 分组下，数学上为 5:4（宽:高 = 5:4）
+        return wn * 4 == hn * 5
+    if aspect_ratio == "16:9":
+        return wn * 9 == hn * 16
+    if aspect_ratio == "16:10":
+        return wn * 10 == hn * 16
+    return False
+
 
 class RecordWarmupOptions(BaseModel):
     """与 obs 首次 seek 前预热阶段注入的观战 cvar 及本次 CS2 启动分辨率一致。"""
@@ -975,6 +1020,7 @@ class RecordWarmupOptions(BaseModel):
     fov_cs_debug: Optional[float] = Field(default=None, ge=1, le=179)
     resolution_width: Optional[int] = Field(default=None, ge=1)
     resolution_height: Optional[int] = Field(default=None, ge=1)
+    aspect_ratio: Optional[Literal["4:3", "16:9", "16:10"]] = None
     hud_showtargetid_hide: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
@@ -982,6 +1028,23 @@ class RecordWarmupOptions(BaseModel):
     hide_demo_playback_ui: bool = True
     hide_grenade_trajectory_pip: bool = True
     console_cmds: Optional[list[str]] = None
+
+    @model_validator(mode="after")
+    def resolution_and_aspect_consistency(self) -> RecordWarmupOptions:
+        rw, rh = self.resolution_width, self.resolution_height
+        ar = self.aspect_ratio
+        has_both = rw is not None and rh is not None
+        has_either = rw is not None or rh is not None
+        if has_either and not has_both:
+            raise ValueError("启动分辨率须同时填写宽度与高度，或两者都留空。")
+        if ar is not None and not has_both:
+            raise ValueError("已选择屏幕比例时必须填写启动分辨率宽度与高度。")
+        if has_both and ar is None:
+            raise ValueError("填写启动分辨率时必须选择屏幕比例。")
+        if has_both and ar is not None and rw is not None and rh is not None:
+            if not _resolution_matches_aspect(rw, rh, ar):
+                raise ValueError(f"分辨率 {rw}×{rh} 与所选屏幕比例 {ar} 不符。")
+        return self
 
 
 class RecordRequest(BaseModel):
@@ -1068,6 +1131,7 @@ async def start_recording(req: RecordRequest):
             snd_voipvolume_mute=req.warmup.snd_voipvolume_mute,
             hide_demo_playback_ui=req.warmup.hide_demo_playback_ui,
             hide_grenade_trajectory_pip=req.warmup.hide_grenade_trajectory_pip,
+            aspect_ratio=req.warmup.aspect_ratio,
             console_cmds=tup,
         )
 
@@ -1186,6 +1250,7 @@ async def start_batch_recording(req: BatchRecordRequest):
             snd_voipvolume_mute=warmup_opts.snd_voipvolume_mute,
             hide_demo_playback_ui=warmup_opts.hide_demo_playback_ui,
             hide_grenade_trajectory_pip=warmup_opts.hide_grenade_trajectory_pip,
+            aspect_ratio=warmup_opts.aspect_ratio,
             console_cmds=tup,
         )
 
