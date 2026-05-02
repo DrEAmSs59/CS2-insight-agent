@@ -12,6 +12,7 @@ env/
 # Node
 node_modules/
 frontend/dist/
+.vite/
 
 # Config with secrets (JSON)
 backend/config.json
@@ -46,6 +47,7 @@ cs2_demo_lib
 build_portable.bat
 package_portable.ps1
 rebuild_frontend.ps1
+dev.sh
 
 # Per-recording user config backup (sensitive: player's CS2 cfg snapshot)
 .cs2_config_backup/
