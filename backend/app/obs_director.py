@@ -981,7 +981,7 @@ class OBSDirector:
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
         # engine_no_focus_sleep 0 关闭 Source 2 失焦节流（默认 50ms/帧 ≈ 20fps）。
-        # fps_max 由用户在页面配置（默认 240；0 在 CS2 中表示不限制）：整场录制的帧率上限。
+        # fps_max 固定走启动项 ``+fps_max``，这里不再通过 cfg / console 重复设置。
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
             console_toggle_key = "`"
@@ -993,7 +993,7 @@ class OBSDirector:
         cfg_lines = [
             "engine_no_focus_sleep 0",
             "cl_demo_predict 0",
-            f"fps_max {self._cs2_fps_max}",
+            "cl_spec_show_bindings 0",
             "con_enable 1",
             *console_bind_lines,
             f'playdemo "{stem}.dem"',
@@ -1041,6 +1041,8 @@ class OBSDirector:
             # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
             # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
             "+engine_no_focus_sleep", "0",
+            # fps_max 同样固定走启动项，避免录制期再经 cfg / console 改写。
+            "+fps_max", str(self._cs2_fps_max),
             # 关闭TrueView
             "+cl_demo_predict", "0",
         ]
@@ -1723,14 +1725,6 @@ class OBSDirector:
         logger.error("等待 CS2 窗口超时，无法注入 demo_gototick")
         return False
 
-    def _fps_idle_cmd(self) -> str:
-        """CS2 启动后（注入期 + 录制期）统一使用的帧率上限，来自用户配置。"""
-        return f"fps_max {self._cs2_fps_max}"
-
-    def _fps_record_cmd(self) -> str:
-        """录制期恢复的帧率；与 idle 保持一致（无需双相切换）。"""
-        return f"fps_max {self._cs2_fps_max}"
-
     def _env_float(self, key: str, default: str) -> float:
         try:
             return float((os.environ.get(key) or default).strip())
@@ -2269,13 +2263,11 @@ class OBSDirector:
                 logger.warning("Console inject failed stage 4: spec_mode + %s", spec_cmd)
             await self._sleep_abortable(spec_settle)
 
-        # 与 _launch_cs2 cfg 中的 fps_max 一致：前置命令注入完后再次设置 fps_max，
-        # 确保进入录制前帧率与用户配置一致（含 fps_max 0 = 不限制）。
-        ok5 = await asyncio.to_thread(_inj, [self._fps_record_cmd(), close_cmd], skip=True, close=False)
+        ok5 = await asyncio.to_thread(_inj, [close_cmd], skip=True, close=False)
         if ok5:
-            logger.info("Injected stage 5: %s + %s", self._fps_record_cmd(), close_cmd)
+            logger.info("Injected stage 5: %s", close_cmd)
         else:
-            logger.warning("Console inject failed stage 5: fps_max + %s", close_cmd)
+            logger.warning("Console inject failed stage 5: %s", close_cmd)
 
         await self._sleep_abortable(self._env_float("CS2_INSIGHT_POST_HIDE_DELAY", "0.55"))
         await self._sleep_abortable(self._env_float("CS2_INSIGHT_PRE_RECORD_DELAY", "0.35"))
