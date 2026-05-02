@@ -8,9 +8,13 @@
 import json
 import os
 import re
-import winreg
 from pathlib import Path
 from typing import Any, Optional
+
+try:
+    import winreg
+except ImportError:
+    winreg = None  # non-Windows
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +44,8 @@ CS2_RELATIVE = Path("steamapps") / "common" / "Counter-Strike Global Offensive" 
 
 
 def _steam_install_from_registry() -> Optional[Path]:
+    if winreg is None:
+        return None
     for hive, subkey in (
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
