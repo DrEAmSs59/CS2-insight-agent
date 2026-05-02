@@ -1390,6 +1390,7 @@ class MontageExportBody(BaseModel):
     intro_path: Optional[str] = None
     outro_path: Optional[str] = None
     output_path: str = Field(..., min_length=1, max_length=2048)
+    theme_id: Optional[str] = Field(default=None, max_length=64)
 
 
 @app.post("/api/montage/export")
@@ -1449,6 +1450,10 @@ async def montage_export(body: MontageExportBody):
         "outro_path": outro_s,
         "output_path": str(out),
     }
+    if body.theme_id is not None:
+        tid = str(body.theme_id).strip()
+        if tid:
+            snap["theme_id"] = tid
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
