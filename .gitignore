@@ -32,6 +32,7 @@ cs2-insight.db
 # Temp
 *.tmp
 *.log
+.empty-git-hooks/
 
 # Local demo files (do not upload)
 cs2_demo/
