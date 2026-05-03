@@ -101,6 +101,7 @@ jobs:
           echo.
           echo [注意] 此版本由 CI 自动构建，仅供测试，可能有未预期的 bug。
           echo.
+          set "PYTHONPATH=%ROOT%backend"
           "%ROOT%python\python.exe" -m app.run_server
           pause
           "@ | Set-Content -Encoding utf8 启动.bat

@@ -105,6 +105,7 @@ jobs:
           if not defined CS2_INSIGHT_PORT set "CS2_INSIGHT_PORT=8000"
           echo Backend: http://127.0.0.1:%CS2_INSIGHT_PORT%
           echo.
+          set "PYTHONPATH=%ROOT%backend"
           "%ROOT%python\python.exe" -m app.run_server
           pause
           "@ | Set-Content -Encoding utf8 启动.bat
