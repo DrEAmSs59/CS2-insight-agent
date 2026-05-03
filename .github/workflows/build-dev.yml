@@ -85,8 +85,8 @@ jobs:
           .\python\python.exe -m pip install -r backend\requirements.txt --no-warn-script-location
           .\python\python.exe -m pip cache purge
 
-      - name: Copy config example
-        run: copy cs2-insight.config.example.json cs2-insight.config.json
+      - name: Copy config example (template only, first run auto-creates real config)
+        run: echo "cs2-insight.config.example.json 作为模板参考，首次启动应用会自动生成 cs2-insight.config.json"
 
       - name: Smoke test
         run: .\python\python.exe -c "import fastapi; print('Smoke test passed')"
@@ -151,7 +151,7 @@ jobs:
           echo "pkg=$pkg" >> $env:GITHUB_OUTPUT
 
       - name: Package ZIP
-        run: 7z a "${{ steps.name.outputs.pkg }}.zip" backend python web cs2-insight.config.json 启动.bat 修复依赖.bat
+        run: 7z a "${{ steps.name.outputs.pkg }}.zip" backend python web cs2-insight.config.example.json 启动.bat 修复依赖.bat
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
