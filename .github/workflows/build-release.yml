@@ -15,7 +15,7 @@ on:
         default: ''
 
 env:
-  PYTHON_VERSION: '3.12.12'
+  PYTHON_VERSION: '3.12.10'
 
 jobs:
   build:
