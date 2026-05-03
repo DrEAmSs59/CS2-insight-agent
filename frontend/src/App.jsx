@@ -12,6 +12,7 @@ import MatchSwitcher from "./components/MatchSwitcher";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import RecordingQueueDrawer from "./components/RecordingQueueDrawer";
 import CommonParamsModal from "./components/CommonParamsModal";
+import ToastContainer from "./components/Toast";
 import { useRecordingQueue, stripGlobalPacingMetaKeys } from "./stores/recordingQueueStore";
 import { ensureClientClipUidsOnClips, stripClientClipUid } from "./utils/clipClientUid";
 import {
@@ -248,6 +249,9 @@ export default function App() {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
 
+  // 按 matchIndex → playerName 缓存选中状态，避免切换 Tab 丢失选择
+  const selectionsByMatchRef = useRef({});
+
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
   const [selectedPlayers, setSelectedPlayers] = useState({});
   /** 每场「回合合集」勾选：空 → 请求里发 null（整局合规非赛后）；非空 → 只解析所选回合 */
@@ -263,6 +267,16 @@ export default function App() {
   /** 按场次索引的后台解析（与上传时的全局 parsing 区分，便于切换场次） */
   const [parsingByIndex, setParsingByIndex] = useState({});
   const [progressText, setProgressText] = useState("");
+
+  // ── Toast 通知系统 ──
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((message, type = "info", duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type, duration }]);
+  }, []);
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
   const [batchRecording, setBatchRecording] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
@@ -412,9 +426,20 @@ export default function App() {
     });
   }, [queuedClientClipUidsForCurrentDemo]);
 
-  // 切换玩家 Tab 时清空选中状态
+  // 切换玩家 Tab 时保存/恢复选中状态
+  const prevPlayerRef = useRef(currentActivePlayer);
   useEffect(() => {
-    setSelectedClientClipUids(new Set());
+    const prev = prevPlayerRef.current;
+    if (prev && prev !== currentActivePlayer) {
+      // 保存旧玩家选择
+      const matchKey = currentMatchIndex;
+      if (!selectionsByMatchRef.current[matchKey]) selectionsByMatchRef.current[matchKey] = {};
+      selectionsByMatchRef.current[matchKey][prev] = selectedClientClipUids;
+      // 恢复新玩家选择
+      const restored = selectionsByMatchRef.current[matchKey]?.[currentActivePlayer];
+      setSelectedClientClipUids(restored ?? new Set());
+    }
+    prevPlayerRef.current = currentActivePlayer;
   }, [currentActivePlayer]);
 
   // 回合合集勾选被清空后，取消其卡片选中（避免看起来已选却不能入队）
@@ -482,8 +507,8 @@ export default function App() {
         setLibraryTotal(null);
         setLibraryHasNextPage((data.items || []).length === limit);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("刷新 Demo 库失败:", err);
     } finally {
       if (manageLoading) setLibraryLoading(false);
     }
@@ -801,8 +826,8 @@ export default function App() {
             pacingPersistReadyRef.current = true;
           });
         }
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.error("加载配置失败:", err);
       }
     })();
     return () => {
@@ -1257,8 +1282,8 @@ export default function App() {
     setSavedRecordWarmupDefaults(obj);
     try {
       await API.put("config", { default_record_warmup: obj });
-    } catch {
-      /* silent */
+    } catch (err) {
+      console.error("保存预热默认值失败:", err);
     }
   }, []);
 
@@ -1322,8 +1347,8 @@ export default function App() {
   const handleSaveConfig = useCallback(async (config) => {
     try {
       await API.put("config", config);
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("保存配置失败:", err);
     }
   }, []);
 
@@ -1397,7 +1422,6 @@ export default function App() {
   }, [obsConfig.host, obsConfig.port, persistObsConfig]);
 
   const persistLlmConfig = useCallback(async () => {
-    await Promise.resolve();
     const c = llmConfigRef.current;
     const payload = {
       provider: c.provider,
@@ -1442,6 +1466,10 @@ export default function App() {
   );
 
   const handleResetDemo = useCallback(() => {
+    if ((parsedMatches?.length > 0 || queue.length > 0) &&
+        !window.confirm("更换 Demo 将清除当前所有解析结果和选择，确认继续？")) {
+      return;
+    }
     setUploadedDemos(null);
     setParsedMatches(null);
     setLibraryDemoIdsByIndex({});
@@ -1451,7 +1479,7 @@ export default function App() {
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
-  }, []);
+  }, [parsedMatches, queue]);
 
   const handleDetectCs2 = useCallback(async () => {
     try {
@@ -1476,8 +1504,23 @@ export default function App() {
     }
   }, [uploadedDemos, currentMatchIndex]);
 
+  // 切换 match 时保存/恢复选中状态
+  const prevMatchRef = useRef(currentMatchIndex);
   useEffect(() => {
-    setSelectedClientClipUids(new Set());
+    const prev = prevMatchRef.current;
+    if (prev !== currentMatchIndex) {
+      // 保存旧 match 的当前玩家选择
+      const prevPlayer = prevPlayerRef.current;
+      if (prevPlayer) {
+        if (!selectionsByMatchRef.current[prev]) selectionsByMatchRef.current[prev] = {};
+        selectionsByMatchRef.current[prev][prevPlayer] = selectedClientClipUids;
+      }
+      // 恢复新 match 的当前玩家选择
+      const newPlayer = activePlayerTabs[currentMatchIndex] ?? parsedPlayerNames[0] ?? "";
+      const restored = selectionsByMatchRef.current[currentMatchIndex]?.[newPlayer];
+      setSelectedClientClipUids(restored ?? new Set());
+    }
+    prevMatchRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
 
   return (
@@ -1559,7 +1602,8 @@ export default function App() {
           </header>
         )}
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-3 sm:px-5 sm:pt-4">
+        <div className="flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-6 sm:pt-4">
+          <div className="mx-auto max-w-5xl space-y-5">
           <section className="rounded-lg border border-white/10 bg-cs2-bg-card p-3">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-xs font-semibold text-zinc-300">本地 Demo 库</h3>
@@ -1962,6 +2006,7 @@ export default function App() {
               )}
             />
           )}
+          </div>
         </div>
 
         {clips.length > 0 && (
@@ -2030,6 +2075,8 @@ export default function App() {
         message={recordingBlockedMessage}
         onClose={() => setRecordingBlockedMessage("")}
       />
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

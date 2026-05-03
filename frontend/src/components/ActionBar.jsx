@@ -45,7 +45,10 @@ export default function ActionBar({
             <button
               type="button"
               disabled={batchRecording}
-              onClick={onAddAllHighlightsAllMatches}
+              onClick={() => {
+                if (!window.confirm("将全部场次的高光片段加入录制队列，确认？")) return;
+                onAddAllHighlightsAllMatches();
+              }}
               className="flex items-center gap-2 rounded-lg border border-cs2-orange/35 bg-cs2-orange/10 px-4 py-2.5 text-xs font-bold text-cs2-orange transition-colors hover:border-cs2-orange/60 hover:bg-cs2-orange/15 disabled:opacity-30"
             >
               <Sparkles className="h-3.5 w-3.5" />

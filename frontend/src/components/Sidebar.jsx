@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 const PROVIDER_PRESETS = {
-  deepseek:    { label: "DeepSeek",        model: "deepseek-chat",          base_url: "https://api.deepseek.com",                  local: false },
+  deepseek:    { label: "DeepSeek",        model: "deepseek-v4-flash",      base_url: "https://api.deepseek.com",                  local: false },
   openai:      { label: "OpenAI",          model: "gpt-4o",                base_url: "https://api.openai.com",                    local: false },
   qwen:        { label: "通义千问 (Qwen)", model: "qwen-plus",             base_url: "https://dashscope.aliyuncs.com/compatible-mode", local: false },
   glm:         { label: "智谱 (GLM)",      model: "glm-4-flash",           base_url: "https://open.bigmodel.cn/api/paas",         local: false },
@@ -56,14 +56,14 @@ export default function Sidebar({
   onSaveExpectedParsePlayers,
 }) {
   const [obsOpen, setObsOpen] = useState(true);
-  const [cs2Open, setCs2Open] = useState(true);
+  const [cs2Open, setCs2Open] = useState(false);
   const [llmOpen, setLlmOpen] = useState(true);
-  const [expectedPlayersOpen, setExpectedPlayersOpen] = useState(true);
+  const [expectedPlayersOpen, setExpectedPlayersOpen] = useState(false);
   const [obsTestResult, setObsTestResult] = useState(null);
   const [obsTesting, setObsTesting] = useState(false);
   const [detectingCs2, setDetectingCs2] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [watchOpen, setWatchOpen] = useState(true);
+  const [watchOpen, setWatchOpen] = useState(false);
   const [watchPathInput, setWatchPathInput] = useState("");
 
   const handleDetectCs2 = async () => {
@@ -118,7 +118,7 @@ export default function Sidebar({
   const isLocal = currentPreset?.local ?? false;
 
   return (
-    <aside className="w-72 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
+    <aside className="w-76 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-cs2-border">
         <div className="flex items-center gap-2">

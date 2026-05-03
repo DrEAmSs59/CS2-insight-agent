@@ -240,41 +240,47 @@ export default function ClipCard({
               </div>
             )}
 
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {clip.context_tags?.map((tag, ti) => {
-                const desc = describeTag(tag);
-                return (
-                  <span
-                    key={`${ti}-${tag}`}
-                    title={desc || undefined}
-                    className={`rounded border px-2 py-0.5 text-[10px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${desc ? "cursor-help" : ""}`}
-                  >
-                    {tag}
-                  </span>
-                );
-              })}
-              {clip.weapon_used
-                ?.split(" / ")
-                .map((w) => w.trim())
-                .filter(Boolean)
-                .map((w) => (
-                  <span
-                    key={w}
-                    className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-0.5 font-mono text-[10px] text-cs2-text-secondary"
-                  >
-                    {w}
-                  </span>
-                ))}
-              {showKillerBadge && (
-                <span className="rounded border border-rose-500/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-bold tracking-wide text-rose-300/85">
-                  💀 击杀者: {clip.killer_name}
-                </span>
+            <div className="mb-2 space-y-1.5">
+              {clip.context_tags?.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {clip.context_tags.map((tag, ti) => {
+                    const desc = describeTag(tag);
+                    return (
+                      <span
+                        key={`${ti}-${tag}`}
+                        title={desc || undefined}
+                        className={`rounded border px-2 py-1 text-[11px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${desc ? "cursor-help" : ""}`}
+                      >
+                        {tag}
+                      </span>
+                    );
+                  })}
+                </div>
               )}
-              {showVictimsBadge && (
-                <span className="rounded border border-emerald-500/20 bg-emerald-950/35 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-400/90">
-                  🎯 击杀: {victimsList.join(", ")}
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {clip.weapon_used
+                  ?.split(" / ")
+                  .map((w) => w.trim())
+                  .filter(Boolean)
+                  .map((w) => (
+                    <span
+                      key={w}
+                      className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-secondary"
+                    >
+                      {w}
+                    </span>
+                  ))}
+                {showKillerBadge && (
+                  <span className="rounded border border-rose-500/25 bg-rose-950/40 px-2 py-1 text-[11px] font-bold tracking-wide text-rose-300/85">
+                    💀 击杀者: {clip.killer_name}
+                  </span>
+                )}
+                {showVictimsBadge && (
+                  <span className="rounded border border-emerald-500/20 bg-emerald-950/35 px-2 py-1 text-[11px] font-bold tracking-wide text-emerald-400/90">
+                    🎯 击杀: {victimsList.join(", ")}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="font-mono text-[10px] text-cs2-text-secondary">

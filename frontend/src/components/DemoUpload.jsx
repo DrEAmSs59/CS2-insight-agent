@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Upload, FileCode2 } from "lucide-react";
 
 function collectDemFiles(fileList) {
@@ -9,10 +9,31 @@ function collectDemFiles(fileList) {
 /** @param {{ onUpload: (files: File[]) => void }} props */
 export default function DemoUpload({ onUpload }) {
   const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleDragEnter = useCallback((e) => {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+  }, []);
 
   const handleDrop = useCallback(
     (e) => {
       e.preventDefault();
+      dragCounterRef.current = 0;
       setDragOver(false);
       const dems = collectDemFiles(e.dataTransfer.files);
       if (dems.length) onUpload(dems);
@@ -31,11 +52,9 @@ export default function DemoUpload({ onUpload }) {
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 cursor-pointer py-14 sm:py-16 ${
         dragOver
@@ -48,7 +67,7 @@ export default function DemoUpload({ onUpload }) {
         accept=".dem"
         multiple
         onChange={handleFileInput}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
       />
 
       <div

@@ -39,7 +39,7 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
           未勾选时不可加入录制队列。解析在未勾选时仍按整局合规非赛后回合生成合辑；勾选后再解析可只生成所选回合。
         </p>
       ) : null}
-      <div className="max-h-24 overflow-y-auto rounded border border-white/[0.06] bg-black/35 p-1.5">
+      <div className="max-h-32 overflow-y-auto rounded border border-white/[0.06] bg-black/35 p-1.5">
         <div className="flex flex-wrap gap-1">
           {Array.from({ length: n }, (_, i) => i + 1).map((r) => {
             const on = set.has(r);
@@ -50,7 +50,7 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
                 disabled={disabled}
                 title={`第 ${r} 回合`}
                 onClick={() => toggle(r)}
-                className={`min-w-[1.75rem] rounded border px-1 py-0.5 font-mono text-[9px] font-semibold tabular-nums transition-colors ${
+                className={`min-w-[2.25rem] rounded border px-1.5 py-1 font-mono text-[10px] font-semibold tabular-nums transition-colors ${
                   on
                     ? "border-cs2-orange/45 bg-cs2-orange/15 text-cs2-orange"
                     : "border-white/10 bg-white/[0.03] text-zinc-500 hover:border-white/18"

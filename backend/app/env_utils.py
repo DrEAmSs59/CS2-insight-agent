@@ -122,7 +122,7 @@ class OBSConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     provider: str = "deepseek"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     api_key: str = ""
     base_url: Optional[str] = None
 

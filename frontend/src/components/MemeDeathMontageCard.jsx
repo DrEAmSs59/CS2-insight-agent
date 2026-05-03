@@ -33,9 +33,9 @@ export default function MemeDeathMontageCard({
   return (
     <div
       className={[
-        "relative overflow-hidden rounded-2xl border-2 p-5 md:p-6",
-        "border-red-500/70 shadow-[0_0_24px_rgba(239,68,68,0.45),0_0_48px_rgba(190,24,93,0.2),inset_0_1px_0_rgba(255,255,255,0.06)]",
-        "bg-gradient-to-br from-rose-950/50 via-red-950/40 to-fuchsia-950/35",
+        "relative overflow-hidden rounded-xl border p-5 md:p-6",
+        "border-red-500/40 shadow-md",
+        "bg-gradient-to-br from-rose-950/25 via-red-950/20 to-fuchsia-950/15",
       ].join(" ")}
     >
       <div
@@ -54,7 +54,7 @@ export default function MemeDeathMontageCard({
               打包录制
             </span>
           </div>
-          <h3 className="text-xl font-black leading-tight tracking-tight text-white drop-shadow-[0_0_12px_rgba(0,0,0,0.5)] md:text-2xl lg:text-3xl">
+          <h3 className="text-lg font-black leading-tight tracking-tight text-white">
             👨‍🔬 节目效果专属：研发全过程{" "}
             <span className="whitespace-nowrap text-red-200">
               (本局共 {totalDeathsInMatch} 次死亡)

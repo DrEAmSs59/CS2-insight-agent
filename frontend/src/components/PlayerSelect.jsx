@@ -34,9 +34,8 @@ function normalizePlayer(p) {
 }
 
 const MEME_BADGE_CLASS =
-  "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-sm font-black tracking-tight text-white " +
-  "bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-600 " +
-  "shadow-[0_0_14px_rgba(236,72,153,0.85),0_0_28px_rgba(168,85,247,0.45)]";
+  "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-xs font-bold tracking-tight text-fuchsia-300 " +
+  "bg-fuchsia-600/20 border border-fuchsia-500/30";
 
 /** selected: string[] — 已选玩家名称数组 */
 function PlayerRow({ player, selected, onSelect }) {

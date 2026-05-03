@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Film, User } from "lucide-react";
+import { Film, Flame, Skull, User } from "lucide-react";
 import ClipCard from "./ClipCard";
 
 const NO_QUEUED = new Set();
@@ -114,24 +114,87 @@ export default function ClipList({
         </div>
       )}
 
-      {/* ── 片段卡片列表 ── */}
+      {/* ── 片段卡片列表（按类别分组） ── */}
       {regularClips.length > 0 ? (
-        <div className="grid gap-3">
-          {regularClips.map((clip) => (
-            <ClipCard
-              key={clip.client_clip_uid || clip.clip_id}
-              clip={clip}
-              targetPlayer={targetPlayer}
-              selected={Boolean(clip.client_clip_uid && selectedIds.has(clip.client_clip_uid))}
-              onToggle={onToggle}
-              aiMode={aiMode}
-              inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
-              matchTotalRounds={matchTotalRounds}
-              freezeToDeathDraft={freezeToDeathDraft}
-              onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
-              roundMontagePickerDisabled={roundMontagePickerDisabled}
-            />
-          ))}
+        <div className="space-y-5">
+          {highlights.length > 0 && (
+            <section>
+              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-cs2-highlight">
+                <Flame className="h-3.5 w-3.5" />
+                高光时刻
+                <span className="text-cs2-text-secondary">({highlights.length})</span>
+              </h3>
+              <div className="grid gap-3">
+                {highlights.map((clip) => (
+                  <ClipCard
+                    key={clip.client_clip_uid || clip.clip_id}
+                    clip={clip}
+                    targetPlayer={targetPlayer}
+                    selected={Boolean(clip.client_clip_uid && selectedIds.has(clip.client_clip_uid))}
+                    onToggle={onToggle}
+                    aiMode={aiMode}
+                    inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
+                    matchTotalRounds={matchTotalRounds}
+                    freezeToDeathDraft={freezeToDeathDraft}
+                    onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
+                    roundMontagePickerDisabled={roundMontagePickerDisabled}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+          {fails.length > 0 && (
+            <section>
+              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-cs2-fail">
+                <Skull className="h-3.5 w-3.5" />
+                下饭操作
+                <span className="text-cs2-text-secondary">({fails.length})</span>
+              </h3>
+              <div className="grid gap-3">
+                {fails.map((clip) => (
+                  <ClipCard
+                    key={clip.client_clip_uid || clip.clip_id}
+                    clip={clip}
+                    targetPlayer={targetPlayer}
+                    selected={Boolean(clip.client_clip_uid && selectedIds.has(clip.client_clip_uid))}
+                    onToggle={onToggle}
+                    aiMode={aiMode}
+                    inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
+                    matchTotalRounds={matchTotalRounds}
+                    freezeToDeathDraft={freezeToDeathDraft}
+                    onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
+                    roundMontagePickerDisabled={roundMontagePickerDisabled}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+          {compilations.length > 0 && (
+            <section>
+              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-cs2-compilation">
+                <Film className="h-3.5 w-3.5" />
+                跨回合合集
+                <span className="text-cs2-text-secondary">({compilations.length})</span>
+              </h3>
+              <div className="grid gap-3">
+                {compilations.map((clip) => (
+                  <ClipCard
+                    key={clip.client_clip_uid || clip.clip_id}
+                    clip={clip}
+                    targetPlayer={targetPlayer}
+                    selected={Boolean(clip.client_clip_uid && selectedIds.has(clip.client_clip_uid))}
+                    onToggle={onToggle}
+                    aiMode={aiMode}
+                    inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
+                    matchTotalRounds={matchTotalRounds}
+                    freezeToDeathDraft={freezeToDeathDraft}
+                    onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
+                    roundMontagePickerDisabled={roundMontagePickerDisabled}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       ) : (
         showTabs && (

@@ -145,11 +145,8 @@ function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) 
             </div>
           </div>
 
-          <details className="group rounded border border-white/[0.08] bg-black/20 [&_summary::-webkit-details-marker]:hidden">
-            <summary className="cursor-pointer list-none px-2 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:text-cs2-orange">
-              <span className="select-none">🔽 展开专业跳剪参数 (Pro)</span>
-            </summary>
-            <div className="space-y-3 border-t border-white/[0.06] px-2 pb-2 pt-2">
+          <div className="space-y-3 border-t border-white/[0.06] pt-2">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-600">专业跳剪参数</p>
               <label
                 className="block text-[10px] text-zinc-500"
                 title="触发闪切前的保留时间(适合保留切刀)"
@@ -213,8 +210,7 @@ function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) 
                 </div>
               </label>
             </div>
-          </details>
-        </div>
+          </div>
       ) : null}
     </div>
   );
@@ -812,7 +808,10 @@ export default function RecordingQueueDrawer({
           {queue.length > 0 && (
             <button
               type="button"
-              onClick={onClear}
+              onClick={() => {
+                if (!window.confirm(`确认清空全部 ${queue.length} 个录制队列项？`)) return;
+                onClear();
+              }}
               className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:text-red-300"
             >
               清空队列
