@@ -54,12 +54,25 @@ jobs:
           tar -xf python-embed.zip -C python
           del python-embed.zip
 
-      - name: Enable site-packages in embedded Python
+      - name: Configure embedded Python (site-packages + backend path)
         run: |
           cd python
           $pth = Get-ChildItem -Filter "python*._pth" | Select-Object -First 1
           if ($pth) {
-            (Get-Content $pth.Name) -replace '^\s*#import site', 'import site' | Set-Content -Encoding utf8 $pth.Name
+            $lines = Get-Content $pth.Name
+            $out = @()
+            foreach ($line in $lines) {
+              if ($line -match '^\s*#import site') {
+                $out += '..\backend'
+                $out += 'import site'
+              } elseif ($line -match '^\s*import site') {
+                $out += '..\backend'
+                $out += $line
+              } else {
+                $out += $line
+              }
+            }
+            $out | Set-Content -Encoding utf8 $pth.Name
           }
           cd ..
 
@@ -105,7 +118,6 @@ jobs:
           if not defined CS2_INSIGHT_PORT set "CS2_INSIGHT_PORT=8000"
           echo Backend: http://127.0.0.1:%CS2_INSIGHT_PORT%
           echo.
-          set "PYTHONPATH=%ROOT%backend"
           "%ROOT%python\python.exe" -m app.run_server
           pause
           "@ | Set-Content -Encoding utf8 启动.bat
