@@ -161,6 +161,185 @@ def _concat_file_line(p: Path) -> str:
     return f"file '{s}'"
 
 
+def _finalize_mp4_for_common_players(ffmpeg_bin: Path, src: Path, dst: Path) -> None:
+    """
+    concat 直拷 .ts → .mp4 在部分播放器上不可靠（moov/时间基/流封装）。
+    统一重编码为 H.264 Main + AAC-LC，并写入 faststart 便于随机访问。
+    """
+    cmd = [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "faster",
+        "-crf",
+        "20",
+        "-profile:v",
+        "main",
+        "-level",
+        "4.0",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        str(dst),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    if r.returncode != 0:
+        raise MontageComposerError(
+            f"成片封装失败（播放器兼容）: {(r.stderr or r.stdout or '').strip()[-900:]}",
+        )
+
+
+_VALID_XFADE_TYPES = frozenset({"fade", "cut", "flash", "dip_black", "zoom", "none"})
+
+
+def _xfade_transition_name(trans_type: str) -> str:
+    """映射到 ffmpeg xfade 的 transition 名称。"""
+    if trans_type == "flash":
+        return "fadewhite"
+    if trans_type == "dip_black":
+        return "fadeblack"
+    if trans_type == "zoom":
+        return "zoomin"
+    return "fade"
+
+
+def _parse_transition_for_edge(transitions: dict[str, Any], clip_row_id: int) -> tuple[str, float]:
+    raw = transitions.get(str(int(clip_row_id)))
+    if not isinstance(raw, dict):
+        return "cut", 0.25
+    t = str(raw.get("type") or "cut").strip().lower()
+    if t not in _VALID_XFADE_TYPES:
+        t = "cut"
+    try:
+        d = float(raw.get("duration", 0.25))
+    except (TypeError, ValueError):
+        d = 0.25
+    if t == "none":
+        d = 0.0
+    return t, max(0.0, d)
+
+
+def _clamp_xfade_duration(
+    trans_type: str,
+    requested: float,
+    dur_a: float,
+    dur_b: float,
+    fps: float,
+) -> float:
+    """保证 offset>0 且 duration 不超过相邻片段。"""
+    frame = max(1.0 / max(fps, 24.0), 0.02)
+    if trans_type in ("none", "cut") and requested <= 1e-6:
+        return frame
+    cap = min(float(dur_a), float(dur_b)) * 0.48 - 1e-4
+    if cap < frame:
+        return frame
+    if trans_type == "none":
+        return frame
+    base = requested if requested > 1e-6 else 0.25
+    return max(frame, min(base, cap, 2.0))
+
+
+def _montage_xfade_chain_to_ts(
+    *,
+    ffmpeg_bin: Path,
+    ffprobe: Path,
+    clip_ts_paths: list[Path],
+    clip_row_ids: list[int],
+    transitions: dict[str, Any],
+    fps: float,
+    out_ts: Path,
+) -> None:
+    """将已归一化的 .ts 片段链用 xfade + acrossfade 连成单路 mpegts（片段需同分辨率/帧率）。"""
+    n = len(clip_ts_paths)
+    if n < 2:
+        raise MontageComposerError("xfade 链至少需要 2 个片段")
+    if len(clip_row_ids) != n:
+        raise MontageComposerError("clip_row_ids 与片段数量不一致")
+
+    durs: list[float] = []
+    for p in clip_ts_paths:
+        info = probe_video_audio_summary(p, ffprobe)
+        d = info.get("duration")
+        if d is None or float(d) <= 0:
+            d = 0.1
+        durs.append(float(d))
+
+    fc: list[str] = []
+    v_in = "[0:v]"
+    a_in = "[0:a]"
+    out_len = durs[0]
+
+    for i in range(1, n):
+        tid = int(clip_row_ids[i - 1])
+        t_type, t_req = _parse_transition_for_edge(transitions, tid)
+        td = _clamp_xfade_duration(t_type, t_req, out_len, durs[i], fps)
+        if t_type in ("cut", "fade", "none"):
+            xname = "fade"
+        else:
+            xname = _xfade_transition_name(t_type)
+        off = out_len - td
+        if off < 1e-6:
+            raise MontageComposerError(
+                "转场时长相对片段过长（offset 无效），请缩短转场时长或检查素材长度。",
+            )
+        last = i == n - 1
+        v_tag = "vout" if last else f"vxf{i}"
+        a_tag = "aout" if last else f"axf{i}"
+        fc.append(f"{v_in}[{i}:v]xfade=transition={xname}:duration={td:.6f}:offset={off:.6f}[{v_tag}]")
+        fc.append(f"{a_in}[{i}:a]acrossfade=d={td:.6f}[{a_tag}]")
+        v_in = f"[{v_tag}]"
+        a_in = f"[{a_tag}]"
+        out_len = out_len + durs[i] - td
+
+    cmd: list[str] = [str(ffmpeg_bin), "-y", "-hide_banner", "-loglevel", "error"]
+    for p in clip_ts_paths:
+        cmd += ["-i", str(p)]
+    cmd += [
+        "-filter_complex",
+        ";".join(fc),
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        str(out_ts),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    if r.returncode != 0:
+        raise MontageComposerError(
+            f"片段转场拼接失败: {(r.stderr or r.stdout or '').strip()[-900:]}",
+        )
+
+
 def compose_montage(
     *,
     ffmpeg_bin: Path,
@@ -169,6 +348,8 @@ def compose_montage(
     outro_path: Optional[Path],
     bgm_path: Optional[Path],
     output_path: Path,
+    transitions: Optional[dict[str, Any]] = None,
+    clip_row_ids: Optional[list[int]] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -278,8 +459,39 @@ def compose_montage(
                 )
             normed.append(out_ts)
 
+        intro_n = 1 if intro_path is not None else 0
+        n_clips = len(clip_paths)
+        use_xfade = bool(
+            transitions is not None
+            and isinstance(transitions, dict)
+            and clip_row_ids is not None
+            and len(clip_row_ids) == n_clips
+            and n_clips >= 2
+        )
+
+        if use_xfade:
+            clip_norm = normed[intro_n : intro_n + n_clips]
+            chain_ts = Path(tmpdir) / "clips_xfade_chain.ts"
+            _montage_xfade_chain_to_ts(
+                ffmpeg_bin=ffmpeg_bin,
+                ffprobe=ffprobe,
+                clip_ts_paths=clip_norm,
+                clip_row_ids=[int(x) for x in clip_row_ids],
+                transitions=transitions,
+                fps=fps,
+                out_ts=chain_ts,
+            )
+            concat_paths: list[Path] = []
+            if intro_path is not None:
+                concat_paths.append(normed[0])
+            concat_paths.append(chain_ts)
+            if outro_path is not None:
+                concat_paths.append(normed[-1])
+        else:
+            concat_paths = normed
+
         concat_list = Path(tmpdir) / "concat.txt"
-        lines = [_concat_file_line(p) for p in normed]
+        lines = [_concat_file_line(p) for p in concat_paths]
         concat_list.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         mid_mp4 = Path(tmpdir) / "mid.mp4"
@@ -305,7 +517,10 @@ def compose_montage(
                 f"拼接失败: {(r2.stderr or r2.stdout or '').strip()[-600:]}",
             )
 
-        mid_info = ffprobe_streams(mid_mp4, ffprobe)
+        mid_playable = Path(tmpdir) / "mid_playable.mp4"
+        _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable)
+
+        mid_info = ffprobe_streams(mid_playable, ffprobe)
         try:
             vdur = float((mid_info.get("format") or {}).get("duration") or 0)
         except (TypeError, ValueError):
@@ -314,7 +529,7 @@ def compose_montage(
             vdur = 0.01
 
         if bgm_path is None:
-            shutil.move(str(mid_mp4), str(output_path))
+            shutil.move(str(mid_playable), str(output_path))
             return
 
         fc_mix = (
@@ -329,7 +544,7 @@ def compose_montage(
             "-loglevel",
             "error",
             "-i",
-            str(mid_mp4),
+            str(mid_playable),
             "-i",
             str(bgm_path),
             "-filter_complex",
@@ -340,12 +555,14 @@ def compose_montage(
             "[aout]",
             "-c:v",
             "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            str(output_path),
-        ]
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
         r3 = subprocess.run(cmd_mix, capture_output=True, text=True, timeout=3600)
         if r3.returncode != 0:
             raise MontageComposerError(

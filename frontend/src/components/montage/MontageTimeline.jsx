@@ -10,6 +10,7 @@ function typeBadgeClass(t) {
   if (t === "高光") return "bg-amber-500/20 text-amber-200 ring-amber-500/40";
   if (t === "下饭") return "bg-orange-500/20 text-orange-200 ring-orange-500/40";
   if (t === "梗死亡") return "bg-fuchsia-500/20 text-fuchsia-200 ring-fuchsia-500/40";
+  if (t === "合集") return "bg-violet-500/20 text-violet-200 ring-violet-500/45";
   if (t === "击杀") return "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40";
   return "bg-zinc-500/15 text-zinc-400 ring-white/10";
 }

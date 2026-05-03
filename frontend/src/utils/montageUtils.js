@@ -28,13 +28,17 @@ export function themeLabel(themeId) {
   return t?.name || "自定义合集";
 }
 
-/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 普通片段 */
+/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 普通片段 */
 export function normalizeClipType(clip) {
   if (!clip || typeof clip !== "object") return "普通片段";
+  const cat = String(clip.category || "").trim().toLowerCase();
+  if (cat === "highlight") return "高光";
+  if (cat === "fail") return "下饭";
+  if (cat === "meme_death") return "梗死亡";
+  if (cat === "compilation") return "合集";
   const raw = (
     clip.clip_type ||
     clip.type ||
-    clip.category ||
     clip.tag ||
     (Array.isArray(clip.tags) ? clip.tags[0] : "") ||
     ""
@@ -45,6 +49,7 @@ export function normalizeClipType(clip) {
   if (raw.includes("highlight") || raw.includes("高光")) return "高光";
   if (raw.includes("death") || raw.includes("死亡") || raw.includes("下饭") || raw.includes("funny")) return "下饭";
   if (raw.includes("meme") || raw.includes("梗")) return "梗死亡";
+  if (raw.includes("compilation") || raw.includes("合集")) return "合集";
   if (raw.includes("kill") || raw.includes("击杀")) return "击杀";
   return "普通片段";
 }
@@ -306,6 +311,7 @@ export function clipMatchesFilter(clip, filterKey, orderedIdSet) {
   if (filterKey === "高光") return t === "高光";
   if (filterKey === "下饭") return t === "下饭";
   if (filterKey === "梗死亡") return t === "梗死亡";
+  if (filterKey === "合集") return t === "合集";
   if (filterKey === "击杀") return t === "击杀";
   if (filterKey === "普通片段") return t === "普通片段";
   return true;

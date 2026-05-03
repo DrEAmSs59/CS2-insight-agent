@@ -42,6 +42,7 @@ from .obs_director import (
     CS2NotReadyError,
     OBSDirector,
     RecordingWarmupExtras,
+    _RECORDING_RESULT_CLIP_META_KEYS,
     is_cs2_running,
 )
 
@@ -302,6 +303,16 @@ def _raise_if_recording_never_started(results: list[dict]) -> None:
         raise HTTPException(500, f"录制没有开始：{first_error}")
 
 
+def _clip_meta_from_recording_result(r: dict) -> dict[str, Any]:
+    """从单次录制结果提取可 JSON 化的片段元数据，写入 recorded_clips.clip_meta。"""
+    out: dict[str, Any] = {}
+    for k in _RECORDING_RESULT_CLIP_META_KEYS:
+        if k not in r:
+            continue
+        out[k] = r[k]
+    return out
+
+
 async def _persist_recorded_clips_from_results(results: list[dict]) -> None:
     """将成功录制的片段写入 recorded_clips 表（供合辑工作台）。"""
     for r in results:
@@ -326,6 +337,7 @@ async def _persist_recorded_clips_from_results(results: list[dict]) -> None:
             except (TypeError, ValueError):
                 dur_f = None
         try:
+            meta = _clip_meta_from_recording_result(r)
             await montage_db.insert_recorded_clip(
                 clip_id=clip_id,
                 demo_path=demo_path,
@@ -334,6 +346,7 @@ async def _persist_recorded_clips_from_results(results: list[dict]) -> None:
                 output_path=op,
                 duration_sec=dur_f,
                 status="ready",
+                clip_meta=meta if meta else None,
             )
         except Exception:
             logger.exception("recorded_clips insert failed clip_id=%s path=%s", clip_id, op)
@@ -1353,6 +1366,7 @@ class MontageProjectBody(BaseModel):
     intro_path: Optional[str] = None
     outro_path: Optional[str] = None
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
+    transitions: Optional[dict[str, Any]] = None
 
 
 @app.get("/api/recorded-clips")
@@ -1364,6 +1378,17 @@ async def list_recorded_clips(
     return {"items": rows, "limit": limit, "offset": offset}
 
 
+@app.delete("/api/recorded-clips/{clip_id}")
+async def delete_recorded_clip(clip_id: int):
+    try:
+        r = await montage_db.delete_recorded_clip(clip_id)
+    except ValueError as e:
+        raise HTTPException(500, str(e)) from e
+    if r is None:
+        raise HTTPException(404, "片段不存在或已删除")
+    return r
+
+
 @app.post("/api/montage/projects")
 async def save_montage_project(body: MontageProjectBody):
     proj_body = {
@@ -1373,6 +1398,8 @@ async def save_montage_project(body: MontageProjectBody):
         "outro_path": body.outro_path,
         "output_filename": (body.output_filename or "montage_export.mp4").strip() or "montage_export.mp4",
     }
+    if body.transitions is not None:
+        proj_body["transitions"] = body.transitions
     try:
         pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
     except ValueError as e:
@@ -1386,11 +1413,13 @@ async def save_montage_project(body: MontageProjectBody):
 class MontageExportBody(BaseModel):
     project_id: Optional[int] = None
     recorded_clip_ids: Optional[list[int]] = None
+    ordered_ids: Optional[list[str]] = None
     bgm_path: Optional[str] = None
     intro_path: Optional[str] = None
     outro_path: Optional[str] = None
     output_path: str = Field(..., min_length=1, max_length=2048)
     theme_id: Optional[str] = Field(default=None, max_length=64)
+    transitions: Optional[dict[str, Any]] = None
 
 
 @app.post("/api/montage/export")
@@ -1426,6 +1455,10 @@ async def montage_export(body: MontageExportBody):
     intro_s = _coalesce(body.intro_path, "intro_path")
     outro_s = _coalesce(body.outro_path, "outro_path")
 
+    transitions_eff: Any = body.transitions
+    if transitions_eff is None and isinstance(extras, dict):
+        transitions_eff = extras.get("transitions")
+
     try:
         out = validate_output_path(body.output_path)
     except MontageComposerError as e:
@@ -1450,6 +1483,10 @@ async def montage_export(body: MontageExportBody):
         "outro_path": outro_s,
         "output_path": str(out),
     }
+    if isinstance(transitions_eff, dict):
+        snap["transitions"] = transitions_eff
+    if body.ordered_ids is not None:
+        snap["ordered_ids"] = list(body.ordered_ids)
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -1469,6 +1506,8 @@ async def montage_export(body: MontageExportBody):
             outro_path=outro_p,
             bgm_path=bgm_p,
             output_path=out,
+            transitions=transitions_eff if isinstance(transitions_eff, dict) else None,
+            clip_row_ids=[int(x) for x in clip_ids],
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)

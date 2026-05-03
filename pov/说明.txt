@@ -1,0 +1,20 @@
+文件:
+1.pov.vpk
+2.gameinfo.gi(只读-修改后)
+3.gameinfo.gi(默认)
+
+文件路径:
+Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo
+
+使用方法:
+将pov.vpk放在该路径下
+备份原本的gameinfo.gi文件，即gameinfo.gi(默认)
+添加修改后的gameinfo.gi文件，即gameinfo.gi(只读-修改后)
+启动项添加-insecure(安全)
+
+控制台命令:
+cl_draw_only_deathnotices false  (HUD精简，必须为false，否则第一人称pov也会被精简，在开启pov录制时这个指令强制false。)
+cl_trueview_show_status 0  (关闭右上角trueview显示，只有在开启pov录制时，这个指令才有效，在开启pov录制时这个指令强制执行。)
+cl_drawhud_force_radar -1  (雷达隐藏，当前pov.vpk无法做到修改雷达样式，可进行雷达隐藏，值为0时则为开启，这个控制台指令可在录制前进行选择。)
+cl_spec_show_bindings 0  (隐藏底栏的小字，已添加忽略不计。)
+cl_teamcounter_playercount_instead_of_avatars true (HUD正上方的头像显示，目前pov.vpk会显示敌方血量，可通过这个指令将头像显示改为数字显示，这个控制台指令可在录制前进行选择。false为显示十人头像，true为只显示敌我双方存活人数)

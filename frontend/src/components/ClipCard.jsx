@@ -1,7 +1,7 @@
 import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
 import { describeTag } from "../utils/tagDescriptions";
 
-const CATEGORY_CONFIG = {
+export const CLIP_CATEGORY_CONFIG = {
   highlight: {
     icon: Flame,
     color: "text-cs2-highlight",
@@ -96,7 +96,7 @@ export default function ClipCard({
   aiMode: _aiMode,
   inQueue = false,
 }) {
-  const cat = CATEGORY_CONFIG[clip.category] || CATEGORY_CONFIG.highlight;
+  const cat = CLIP_CATEGORY_CONFIG[clip.category] || CLIP_CATEGORY_CONFIG.highlight;
   const Icon = cat.icon;
 
   const showKillerBadge =

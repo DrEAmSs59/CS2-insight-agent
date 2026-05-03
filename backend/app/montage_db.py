@@ -15,6 +15,22 @@ class MontageDB:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
 
+    @staticmethod
+    def _expand_clip_meta_row(row: dict[str, Any]) -> dict[str, Any]:
+        """将 clip_meta JSON 展平到行字典，便于前端与解析片段字段对齐。"""
+        out = dict(row)
+        raw = out.pop("clip_meta", None)
+        if not raw:
+            return out
+        try:
+            meta = json.loads(str(raw))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return out
+        if isinstance(meta, dict):
+            for k, v in meta.items():
+                out[k] = v
+        return out
+
     async def init_tables(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as conn:
@@ -29,13 +45,18 @@ class MontageDB:
                     output_path    TEXT NOT NULL,
                     duration_sec   REAL,
                     status         TEXT NOT NULL DEFAULT 'ready',
-                    created_at     TEXT NOT NULL
+                    created_at     TEXT NOT NULL,
+                    clip_meta      TEXT
                 )
                 """,
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_recorded_clips_created ON recorded_clips(created_at DESC)",
             )
+            cur = await conn.execute("PRAGMA table_info(recorded_clips)")
+            cols = {str(r[1]) for r in await cur.fetchall()}
+            if "clip_meta" not in cols:
+                await conn.execute("ALTER TABLE recorded_clips ADD COLUMN clip_meta TEXT")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS montage_projects (
@@ -77,14 +98,16 @@ class MontageDB:
         output_path: str,
         duration_sec: float | None,
         status: str = "ready",
+        clip_meta: Optional[dict[str, Any]] = None,
     ) -> int:
         now = utc_now_iso()
+        meta_json = json.dumps(clip_meta, ensure_ascii=False) if clip_meta else None
         async with aiosqlite.connect(self.db_path) as conn:
             cur = await conn.execute(
                 """
                 INSERT INTO recorded_clips(
-                    clip_id, demo_path, demo_filename, player_name, output_path, duration_sec, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    clip_id, demo_path, demo_filename, player_name, output_path, duration_sec, status, created_at, clip_meta
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clip_id,
@@ -95,6 +118,7 @@ class MontageDB:
                     duration_sec,
                     status,
                     now,
+                    meta_json,
                 ),
             )
             await conn.commit()
@@ -105,7 +129,7 @@ class MontageDB:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
-                SELECT id, clip_id, demo_path, demo_filename, player_name, output_path, duration_sec, status, created_at
+                SELECT id, clip_id, demo_path, demo_filename, player_name, output_path, duration_sec, status, created_at, clip_meta
                 FROM recorded_clips
                 ORDER BY id DESC
                 LIMIT ? OFFSET ?
@@ -113,7 +137,7 @@ class MontageDB:
                 (limit, offset),
             )
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        return [self._expand_clip_meta_row(dict(r)) for r in rows]
 
     async def get_recorded_clips_by_ids(self, ids: list[int]) -> dict[int, dict[str, Any]]:
         if not ids:
@@ -126,7 +150,32 @@ class MontageDB:
                 tuple(int(x) for x in ids),
             )
             rows = await cur.fetchall()
-        return {int(r["id"]): dict(r) for r in rows}
+        return {int(r["id"]): self._expand_clip_meta_row(dict(r)) for r in rows}
+
+    async def delete_recorded_clip(self, clip_id: int) -> Optional[dict[str, Any]]:
+        """删除 recorded_clips 行；若 output_path 指向本地文件则尝试一并删除。"""
+        cid = int(clip_id)
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, output_path FROM recorded_clips WHERE id = ?",
+                (cid,),
+            )
+            row = await cur.fetchone()
+        if not row:
+            return None
+        out = Path(str(row["output_path"])).expanduser()
+        removed_file = False
+        if out.is_file():
+            try:
+                out.unlink()
+                removed_file = True
+            except OSError as e:
+                raise ValueError(f"无法删除本地文件: {e}") from e
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM recorded_clips WHERE id = ?", (cid,))
+            await conn.commit()
+        return {"id": cid, "output_path": str(out), "removed_file": removed_file}
 
     async def save_project(self, *, name: str | None, body: dict[str, Any], project_id: int | None = None) -> int:
         now = utc_now_iso()

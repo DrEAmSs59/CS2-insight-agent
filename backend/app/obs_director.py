@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Literal, Optional, Tuple
+from typing import Any, Callable, List, Literal, Optional, Tuple
 
 from obswebsocket import obsws, requests as obs_requests
 
@@ -31,6 +31,35 @@ from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_paylo
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
+
+# 写入录制结果 / recorded_clips.clip_meta，供合辑工作台展示回合、比分、标签等
+_RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
+    "category",
+    "compilation_kind",
+    "round",
+    "round_won",
+    "score_own",
+    "score_opp",
+    "context_tags",
+    "kill_count",
+    "weapon_used",
+    "killer_name",
+    "victims",
+    "killers",
+    "ai_score",
+    "ai_commentary",
+    "start_tick",
+    "end_tick",
+)
+
+
+def merge_clip_metadata_into_recording_result(out: dict[str, Any], clip: dict[str, Any]) -> dict[str, Any]:
+    """把解析阶段 clip 字典中的展示字段合并进单次录制 API 结果。"""
+    for k in _RECORDING_RESULT_CLIP_META_KEYS:
+        if k not in clip:
+            continue
+        out[k] = clip[k]
+    return out
 
 
 def _resolve_gsi_sink_url() -> str:
@@ -3222,6 +3251,7 @@ class OBSDirector:
                         )
                         one["demo_path"] = str(demo_abs)
                         one["demo_filename"] = demo_abs.name
+                        merge_clip_metadata_into_recording_result(one, clip)
                         results.append(one)
                     except RecordingAborted:
                         logger.info("Recording aborted by user at clip %s", clip_id)
@@ -3397,6 +3427,7 @@ class OBSDirector:
                         )
                         one["demo_filename"] = demo_name
                         one["demo_path"] = str(demo_abs)
+                        merge_clip_metadata_into_recording_result(one, clip)
                         all_results.append(one)
                     except RecordingAborted:
                         logger.info("Batch recording aborted by user at clip %s", clip_id)
