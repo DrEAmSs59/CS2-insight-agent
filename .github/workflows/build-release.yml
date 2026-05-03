@@ -1,0 +1,164 @@
+# Release build — tag trigger auto-publishes to GitHub Release; manual trigger
+# uploads as artifact only to avoid polluting the tag / release list.
+# 正式发布：打 V* tag → 自动构建并发布到 Release。
+# 手动触发：仅上传 artifact，不创建 Release 或标签。
+name: Build Release Package
+
+on:
+  push:
+    tags: ['V*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch / tag / commit to build'
+        required: false
+        default: ''
+
+env:
+  PYTHON_VERSION: '3.12.12'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+          if (!(Test-Path frontend\dist)) { Write-Error "前端构建产物未生成"; exit 1 }
+          if (Test-Path web) { Remove-Item web -Recurse -Force }
+          move frontend\dist web
+
+      - name: Download Python embeddable
+        run: |
+          curl -L -o python-embed.zip "https://www.python.org/ftp/python/$env:PYTHON_VERSION/python-$env:PYTHON_VERSION-embed-amd64.zip"
+          mkdir python
+          tar -xf python-embed.zip -C python
+          del python-embed.zip
+
+      - name: Enable site-packages in embedded Python
+        run: |
+          cd python
+          $pth = Get-ChildItem -Filter "python*._pth" | Select-Object -First 1
+          if ($pth) {
+            (Get-Content $pth.Name) -replace '^\s*#import site', 'import site' | Set-Content -Encoding utf8 $pth.Name
+          }
+          cd ..
+
+      - name: Install pip into embedded Python
+        # 注意：直接从 bootstrap.pypa.io 下载脚本执行，存在供应链风险。
+        # 当前项目规模下可接受，若需加固可改为校验预置哈希或改用 ensurepip。
+        run: |
+          curl -L -o get-pip.py https://bootstrap.pypa.io/get-pip.py
+          .\python\python.exe get-pip.py --no-warn-script-location
+          del get-pip.py
+
+      - name: Install backend dependencies
+        run: |
+          .\python\python.exe -m pip install -r backend\requirements.txt --no-warn-script-location
+          .\python\python.exe -m pip cache purge
+
+      - name: Copy config example
+        run: copy cs2-insight.config.example.json cs2-insight.config.json
+
+      - name: Smoke test
+        run: .\python\python.exe -c "import fastapi; print('Smoke test passed')"
+
+      - name: Create launcher scripts
+        run: |
+          @"
+          @echo off
+          chcp 65001 >nul
+          setlocal
+          set "ROOT=%~dp0"
+          if not exist "%ROOT%python\python.exe" (
+            echo [错误] 缺少 python\python.exe，请重新解压完整发行包。
+            pause
+            exit /b 1
+          )
+          cd /d "%ROOT%backend" 2>nul
+          if errorlevel 1 (
+            echo [错误] 找不到 backend 目录。
+            pause
+            exit /b 1
+          )
+          echo.
+          echo CS2 Insight Agent
+          if not defined CS2_INSIGHT_PORT set "CS2_INSIGHT_PORT=8000"
+          echo Backend: http://127.0.0.1:%CS2_INSIGHT_PORT%
+          echo.
+          "%ROOT%python\python.exe" -m app.run_server
+          pause
+          "@ | Set-Content -Encoding utf8 启动.bat
+
+          @"
+          @echo off
+          chcp 65001 >nul
+          setlocal
+          set "ROOT=%~dp0"
+          if not exist "%ROOT%python\python.exe" (
+            echo [错误] 缺少 python\python.exe
+            pause
+            exit /b 1
+          )
+          if not exist "%ROOT%backend\requirements.txt" (
+            echo [错误] 缺少 backend\requirements.txt
+            pause
+            exit /b 1
+          )
+          echo 正在安装/修复 Python 依赖...
+          "%ROOT%python\python.exe" -m pip install --no-warn-script-location -r "%ROOT%backend\requirements.txt"
+          echo.
+          echo 完成。
+          pause
+          "@ | Set-Content -Encoding utf8 修复依赖.bat
+
+      - name: Set package name
+        id: name
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.event_name }}" -eq "push") {
+            $ver = "${{ github.ref_name }}" -replace '^V', ''
+            $pkg = "CS2-Insight-Agent-V${ver}"
+          } else {
+            $ts = (Get-Date -Format "yyyyMMdd-HHmmss")
+            $sha = "${{ github.sha }}".Substring(0, 7)
+            $pkg = "CS2-Insight-Agent-dev-${ts}-${sha}"
+          }
+          echo "pkg=$pkg" >> $env:GITHUB_OUTPUT
+
+      - name: Package ZIP
+        run: 7z a "${{ steps.name.outputs.pkg }}.zip" backend python web cs2-insight.config.json 启动.bat 修复依赖.bat
+
+      - name: Upload to Release
+        if: github.ref_type == 'tag' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.name.outputs.pkg }}
+          files: "${{ steps.name.outputs.pkg }}.zip"
+          generate_release_notes: true
+
+      - name: Upload artifact (manual trigger only)
+        if: github.ref_type != 'tag' || github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.pkg }}
+          path: "${{ steps.name.outputs.pkg }}.zip"
+          retention-days: 30
