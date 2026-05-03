@@ -8,6 +8,7 @@
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,18 +19,24 @@ except ImportError:
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# 轻量 JSON 配置：默认在仓库根目录 cs2-insight.config.json（可用环境变量 CS2_INSIGHT_CONFIG 覆盖绝对路径）
+# 用户数据统一放在 data/ 目录，版本升级时只需保留该目录即可迁移。
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _BACKEND_DIR.parent
+_DATA_DIR = _REPO_ROOT / "data"
 _LEGACY_CONFIG_PATH = _BACKEND_DIR / "config.json"
 _DEFAULT_CONFIG_FILENAME = "cs2-insight.config.json"
+_EXAMPLE_CONFIG = _REPO_ROOT / "cs2-insight.config.example.json"
 
 
 def resolve_config_path() -> Path:
+    """返回用户配置文件路径（data/cs2-insight.config.json）。
+
+    可通过环境变量 ``CS2_INSIGHT_CONFIG`` 覆写为绝对路径。
+    """
     override = os.environ.get("CS2_INSIGHT_CONFIG", "").strip()
     if override:
         return Path(override).expanduser()
-    return _REPO_ROOT / _DEFAULT_CONFIG_FILENAME
+    return _DATA_DIR / _DEFAULT_CONFIG_FILENAME
 
 DEFAULT_STEAM_PATHS = [
     Path(r"C:\Program Files (x86)\Steam"),
@@ -181,14 +188,37 @@ def load_config() -> AppConfig:
     if path.is_file():
         raw = _parse_config_json_file(path)
         return AppConfig(**raw)
-    if _LEGACY_CONFIG_PATH.is_file():
-        raw = _parse_config_json_file(_LEGACY_CONFIG_PATH)
-        cfg = AppConfig(**raw)
-        save_config(cfg)
-        return cfg
+
+    # 从旧位置自动迁移
+    _migrate_old_config(path)
+
+    if path.is_file():
+        raw = _parse_config_json_file(path)
+        return AppConfig(**raw)
+
+    # 首次启动：从模板复制一份，方便用户在此基础上修改
+    if _EXAMPLE_CONFIG.is_file():
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy(str(_EXAMPLE_CONFIG), str(path))
+        raw = _parse_config_json_file(path)
+        return AppConfig(**raw)
+
     cfg = AppConfig()
     save_config(cfg)
     return cfg
+
+
+def _migrate_old_config(target: Path) -> None:
+    """将旧位置的配置文件迁移到 data/ 目录。"""
+    candidates = [
+        _REPO_ROOT / _DEFAULT_CONFIG_FILENAME,   # 旧：仓库根目录
+        _LEGACY_CONFIG_PATH,                     # 旧：backend/config.json
+    ]
+    for old in candidates:
+        if old.is_file() and old != target:
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy(str(old), str(target))
+            break
 
 
 def save_config(cfg: AppConfig) -> None:

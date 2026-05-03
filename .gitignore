@@ -14,7 +14,9 @@ node_modules/
 frontend/dist/
 .vite/
 
-# Config with secrets (JSON)
+# User data directory (config, db, logs)
+data/
+# Legacy config paths (before data/ migration)
 backend/config.json
 cs2-insight.config.json
 

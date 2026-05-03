@@ -66,6 +66,11 @@ except Exception:
     logging.getLogger(__name__).exception("Backend file logging setup failed")
 
 DB_PATH = resolve_config_path().parent / "cs2-insight.db"
+# 从仓库根目录迁移旧数据库到 data/
+_OLD_DB_PATH = DB_PATH.parent.parent / "cs2-insight.db"
+if _OLD_DB_PATH.is_file() and not DB_PATH.is_file():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(_OLD_DB_PATH), str(DB_PATH))
 demo_db = DemoDB(DB_PATH)
 montage_db = MontageDB(DB_PATH)
 demo_watcher: DemoWatcher | None = None
