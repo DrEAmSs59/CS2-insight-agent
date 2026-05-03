@@ -158,7 +158,7 @@ jobs:
           echo "pkg=$pkg" >> $env:GITHUB_OUTPUT
 
       - name: Package ZIP
-        run: 7z a "${{ steps.name.outputs.pkg }}.zip" backend python web cs2-insight.config.example.json 启动.bat 修复依赖.bat
+        run: 7z a "${{ steps.name.outputs.pkg }}.zip" backend python web pov cs2-insight.config.example.json 启动.bat 修复依赖.bat
 
       - name: Upload to Release
         if: github.ref_type == 'tag' && github.event_name == 'push'
