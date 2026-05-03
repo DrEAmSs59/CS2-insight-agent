@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { validateWarmupResolution } from "../utils/warmupDefaults";
+import ExperimentalPovSection from "./ExperimentalPovSection";
 
 /** 与后端 `RecordingWarmupExtras._recording_warmup_console_lines` 拼装顺序一致（无 console_cmds 覆盖时） */
 export function buildWarmupConsoleCommands(o) {
@@ -49,6 +50,10 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   aspect_ratio: "",
   resolution_width: "",
   resolution_height: "",
+  /** POV：cl_drawhud_force_radar，-1 隐藏，0 显示 */
+  pov_radar_mode: -1,
+  /** POV：true 正上方显示存活人数；false 显示双方十人头像 */
+  pov_teamcounter_numeric: true,
 };
 
 export function SectionHeader({ en, zh }) {
@@ -90,6 +95,8 @@ export default function RecordWarmupModal({
   onConfirm,
   onWarmupValidationError,
   defaultOverrides,
+  experimentalPovEnabled = false,
+  onExperimentalPovChange,
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
 
@@ -145,6 +152,8 @@ export default function RecordWarmupModal({
       resolution_width: rw,
       resolution_height: rh,
       aspect_ratio: ar || null,
+      pov_radar_mode: opts.pov_radar_mode === 0 ? 0 : -1,
+      pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
     };
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
@@ -166,7 +175,7 @@ export default function RecordWarmupModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-cs2-bg-card shadow-2xl">
+      <div className="relative flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-cs2-bg-card shadow-2xl">
         <button
           type="button"
           onClick={onClose}
@@ -176,7 +185,7 @@ export default function RecordWarmupModal({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="flex-1 overflow-y-auto p-6 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-6 pb-4">
         <h2 id="record-warmup-title" className="mb-1 pr-8 text-lg font-bold tracking-tight text-white">
           录制前观战选项
         </h2>
@@ -188,17 +197,20 @@ export default function RecordWarmupModal({
           附加到本次 CS2 进程。
         </p>
 
-        <div className="space-y-6">
+        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+          <div className="min-w-0 space-y-4">
           {/* —— Visuals & HUD —— */}
           <section aria-labelledby="sec-visuals">
             <SectionHeader en="Visuals & HUD" zh="视觉与 UI" />
-            <div id="sec-visuals" className="space-y-2">
-              <OptionRow
-                checked={opts.cl_draw_only_deathnotices}
-                onChange={(v) => set({ cl_draw_only_deathnotices: v })}
-                title="简化观战 HUD"
-                code="cl_draw_only_deathnotices true"
-              />
+            <div id="sec-visuals" className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+              {!experimentalPovEnabled ? (
+                <OptionRow
+                  checked={opts.cl_draw_only_deathnotices}
+                  onChange={(v) => set({ cl_draw_only_deathnotices: v })}
+                  title="简化观战 HUD"
+                  code="cl_draw_only_deathnotices true"
+                />
+              ) : null}
               <OptionRow
                 checked={opts.hud_showtargetid_hide}
                 onChange={(v) => set({ hud_showtargetid_hide: v })}
@@ -273,7 +285,9 @@ export default function RecordWarmupModal({
               />
             </div>
           </section>
+          </div>
 
+          <div className="min-w-0 space-y-4">
           {/* —— Audio & Misc —— */}
           <section aria-labelledby="sec-audio">
             <SectionHeader en="Audio & Misc" zh="音频与杂项" />
@@ -324,11 +338,23 @@ export default function RecordWarmupModal({
             </div>
           </section>
 
-          <p className="font-mono text-[10px] leading-relaxed text-zinc-600">
+          <ExperimentalPovSection
+            visible={open}
+            experimentalPovEnabled={experimentalPovEnabled}
+            onExperimentalPovChange={onExperimentalPovChange}
+            checkboxDisabled={!onExperimentalPovChange}
+            povRadarMode={opts.pov_radar_mode}
+            onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
+            povTeamcounterNumeric={opts.pov_teamcounter_numeric}
+            onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
+          />
+          </div>
+        </div>
+
+          <p className="mt-4 font-mono text-[10px] leading-relaxed text-zinc-600">
             将注入 {buildWarmupConsoleCommands({ ...opts, spec_show_xray: !!opts.spec_show_xray }).length}{" "}
             条控制台指令（首片段预热）
           </p>
-        </div>
         </div>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-white/[0.08] bg-black/35 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">

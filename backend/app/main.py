@@ -28,13 +28,15 @@ from .demo_parse_isolation import (
     get_demo_match_summary_isolated,
     get_player_list_isolated,
 )
-from .env_utils import AppConfig, OBSConfig, LLMConfig, load_config, save_config, ensure_cs2_path, detect_cs2_path, resolve_config_path
+from .env_utils import AppConfig, OBSConfig, LLMConfig, ExperimentalConfig, load_config, save_config, ensure_cs2_path, detect_cs2_path, resolve_config_path
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
 from .demo_db import DemoDB, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher
 from .gsi_ready import gsi_status, notify_gsi_payload
 from .montage_db import MontageDB
+from .pov_experimental import merge_warmup_extras_for_pov
+from .pov_hud_manager import PovHudError, PovHudManager, try_restore_stale_pov_on_startup
 from .video_composer import MontageComposerError, compose_montage, resolve_ffmpeg_binary, validate_output_path
 from .obs_director import (
     CS2_RUNNING_MESSAGE,
@@ -138,6 +140,9 @@ async def lifespan(_: FastAPI):
     await montage_db.init_tables()
     cfg = load_config()
     demo_watcher = DemoWatcher(cfg.demo_watch_paths or [], _enqueue_demo_path, demo_db)
+    for _msg in try_restore_stale_pov_on_startup(cfg):
+        if _msg:
+            logger.info("POV startup: %s", _msg)
     try:
         yield
     finally:
@@ -523,6 +528,10 @@ async def _auto_tag_library_demo_for_expected_players(demo_path: str) -> None:
 
 # ─── Config endpoints ─────────────────────────────────────────
 
+class ExperimentalPayload(BaseModel):
+    pov_enabled: Optional[bool] = None
+
+
 class ConfigPayload(BaseModel):
     obs: Optional[OBSConfig] = None
     llm: Optional[LLMConfig] = None
@@ -534,6 +543,7 @@ class ConfigPayload(BaseModel):
     cs2_fps_max: Optional[int] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
+    experimental: Optional[ExperimentalPayload] = None
 
 
 @app.get("/api/config")
@@ -624,6 +634,8 @@ async def update_config(payload: ConfigPayload):
             if isinstance(payload.default_record_warmup, dict)
             else {}
         )
+    if payload.experimental is not None and payload.experimental.pov_enabled is not None:
+        cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -631,6 +643,31 @@ async def update_config(payload: ConfigPayload):
         # 大量重型解析抢占 CS2 录制时的系统资源。
         demo_watcher._paths = list(cfg.demo_watch_paths or [])
     return {"status": "ok"}
+
+
+@app.get("/api/experimental/pov/status")
+def experimental_pov_status():
+    cfg = load_config()
+    cfg = ensure_cs2_path(cfg)
+    try:
+        mgr = PovHudManager(cfg)
+        st = mgr.status()
+    except PovHudError as e:
+        raise HTTPException(400, str(e)) from e
+    st["enabled"] = bool(cfg.experimental.pov_enabled)
+    return st
+
+
+@app.post("/api/experimental/pov/restore")
+def experimental_pov_restore():
+    cfg = load_config()
+    cfg = ensure_cs2_path(cfg)
+    try:
+        mgr = PovHudManager(cfg)
+        mgr.restore()
+    except PovHudError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "message": "POV HUD 修改已恢复"}
 
 
 def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
@@ -1041,6 +1078,8 @@ class RecordWarmupOptions(BaseModel):
     hide_demo_playback_ui: bool = True
     hide_grenade_trajectory_pip: bool = True
     console_cmds: Optional[list[str]] = None
+    pov_radar_mode: int = Field(default=-1, ge=-1, le=0)
+    pov_teamcounter_numeric: bool = True
 
     @model_validator(mode="after")
     def resolution_and_aspect_consistency(self) -> RecordWarmupOptions:
@@ -1146,31 +1185,50 @@ async def start_recording(req: RecordRequest):
             hide_grenade_trajectory_pip=req.warmup.hide_grenade_trajectory_pip,
             aspect_ratio=req.warmup.aspect_ratio,
             console_cmds=tup,
+            pov_radar_mode=int(req.warmup.pov_radar_mode),
+            pov_teamcounter_numeric=bool(req.warmup.pov_teamcounter_numeric),
         )
+
+    pov_on = bool(cfg.experimental.pov_enabled)
+    warmup_eff: Optional[RecordingWarmupExtras] = (
+        merge_warmup_extras_for_pov(warmup_extras) if pov_on else warmup_extras
+    )
 
     global _recording_abort_event
     if _recording_abort_event is not None:
         raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
     abort_ev = asyncio.Event()
     _recording_abort_event = abort_ev
+    pov_mgr: Optional[PovHudManager] = None
     try:
+        if pov_on:
+            pov_mgr = PovHudManager(cfg)
+            pov_mgr.install()
         director = OBSDirector(obs_cfg, cfg.cs2_path, abort_event=abort_ev, cs2_fps_max=cfg.cs2_fps_max)
         results = await director.execute_recording_pipeline(
             dem_path,
             req.clips,
             spectator_name=spectator_name,
             spectator_user_id=spectator_uid,
-            warmup=warmup_extras,
+            warmup=warmup_eff,
+            pov_enabled=pov_on,
         )
         _raise_if_recording_never_started(results)
         await _persist_recorded_clips_from_results(results)
         return {"status": "completed", "results": results}
+    except PovHudError as e:
+        raise HTTPException(400, str(e)) from e
     except CS2AlreadyRunningError as e:
         raise HTTPException(409, str(e)) from e
     except CS2NotReadyError as e:
         raise HTTPException(409, str(e)) from e
     finally:
         _recording_abort_event = None
+        if pov_on and pov_mgr is not None:
+            try:
+                pov_mgr.restore()
+            except Exception:
+                logger.exception("POV HUD restore failed")
 
 
 class BatchRecordGroup(BaseModel):
@@ -1265,7 +1323,12 @@ async def start_batch_recording(req: BatchRecordRequest):
             hide_grenade_trajectory_pip=warmup_opts.hide_grenade_trajectory_pip,
             aspect_ratio=warmup_opts.aspect_ratio,
             console_cmds=tup,
+            pov_radar_mode=int(warmup_opts.pov_radar_mode),
+            pov_teamcounter_numeric=bool(warmup_opts.pov_teamcounter_numeric),
         )
+
+    pov_on = bool(cfg.experimental.pov_enabled)
+    warmup_eff: Optional[RecordingWarmupExtras] = merge_warmup_extras_for_pov(wobj) if pov_on else wobj
 
     # ── 两层聚合：demo（唯一启动 CS2）→ player（切换 spec_player）→ clips ──
     # 同一个 demo 内的不同玩家合并为一个 CS2 会话，只启动/关闭游戏一次；
@@ -1319,18 +1382,29 @@ async def start_batch_recording(req: BatchRecordRequest):
         raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
     abort_ev = asyncio.Event()
     _recording_abort_event = abort_ev
+    pov_mgr: Optional[PovHudManager] = None
     try:
+        if pov_on:
+            pov_mgr = PovHudManager(cfg)
+            pov_mgr.install()
         director = OBSDirector(obs_cfg, cfg.cs2_path, abort_event=abort_ev, cs2_fps_max=cfg.cs2_fps_max)
-        results = await director.execute_batch_recording(demo_jobs, warmup=wobj)
+        results = await director.execute_batch_recording(demo_jobs, warmup=warmup_eff, pov_enabled=pov_on)
         _raise_if_recording_never_started(results)
         await _persist_recorded_clips_from_results(results)
         return {"status": "completed", "results": results}
+    except PovHudError as e:
+        raise HTTPException(400, str(e)) from e
     except CS2AlreadyRunningError as e:
         raise HTTPException(409, str(e)) from e
     except CS2NotReadyError as e:
         raise HTTPException(409, str(e)) from e
     finally:
         _recording_abort_event = None
+        if pov_on and pov_mgr is not None:
+            try:
+                pov_mgr.restore()
+            except Exception:
+                logger.exception("POV HUD restore failed")
 
 
 @app.post("/api/record/abort")

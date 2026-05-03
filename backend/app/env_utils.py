@@ -127,11 +127,18 @@ class LLMConfig(BaseModel):
     base_url: Optional[str] = None
 
 
+class ExperimentalConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    pov_enabled: bool = False
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     obs: OBSConfig = Field(default_factory=OBSConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
     cs2_path: str = ""

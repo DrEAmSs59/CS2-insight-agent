@@ -28,6 +28,7 @@ from .demo_parser import (
 )
 from .env_utils import OBSConfig
 from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_payload_after
+from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -531,6 +532,9 @@ class RecordingWarmupExtras:
     aspect_ratio: Optional[Literal["4:3", "16:9", "16:10"]] = None
     # 若前端传入非空列表，则优先使用该顺序注入（须已含各 cvar）；否则由静态方法从布尔字段拼装
     console_cmds: Optional[tuple[str, ...]] = None
+    # 实验性 POV：与 pov_tail_commands 对应（仅 pov_enabled 时注入末尾）
+    pov_radar_mode: int = -1  # cl_drawhud_force_radar：-1 隐藏，0 显示
+    pov_teamcounter_numeric: bool = True  # cl_teamcounter_playercount_instead_of_avatars
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -565,6 +569,8 @@ class OBSDirector:
         self._spec_parse_fallback_offset_by_demo: dict[str, int] = {}
         self._demo_steam_by_name_cache: dict[str, dict[str, str]] = {}
         self._abort_event = abort_event
+        # 实验性 POV：在首次片段预热注入末尾追加强制 cvar
+        self._pov_enabled = False
         # 录制期最近一次使用的 warmup 选项（预留给未来的兜底恢复路径；当前文件级
         # snapshot + restore 方案已足够保护用户配置）。
         self._last_warmup: Optional[RecordingWarmupExtras] = None
@@ -2290,6 +2296,15 @@ class OBSDirector:
         session_lines: list[str] = []
         if inject_session_warmup_cvars and warmup is not None:
             session_lines = self._recording_warmup_console_lines(warmup)
+            if self._pov_enabled:
+                session_lines = [
+                    *session_lines,
+                    *POV_CORE_FORCED_COMMANDS,
+                    *pov_tail_commands(
+                        teamcounter_numeric=warmup.pov_teamcounter_numeric,
+                        radar_mode=warmup.pov_radar_mode,
+                    ),
+                ]
         post_space_console = [*session_lines, *prime_lines]
 
         ok0 = True
@@ -3191,6 +3206,8 @@ class OBSDirector:
         spectator_name: Optional[str] = None,
         spectator_user_id: Optional[int] = None,
         warmup: Optional[RecordingWarmupExtras] = None,
+        *,
+        pov_enabled: bool = False,
     ) -> list[dict]:
         """
         Full pipeline: copy demo -> game/csgo, launch CS2 +playdemo -> OBS record -> cleanup.
@@ -3199,6 +3216,7 @@ class OBSDirector:
         """
         results: list[dict] = []
 
+        self._pov_enabled = bool(pov_enabled)
         try:
             self._launch_cs2(demo_abs, warmup)
             self._set_state(DirectorState.LOADING_DEMO, str(demo_abs))
@@ -3300,6 +3318,7 @@ class OBSDirector:
             self._set_state(DirectorState.ERROR, str(e))
             raise
         finally:
+            self._pov_enabled = False
             await self._cleanup_recording_session()
             self._set_state(DirectorState.COMPLETED)
 
@@ -3309,6 +3328,8 @@ class OBSDirector:
         self,
         demo_jobs: list[tuple[Path, list[dict], Optional[str], Optional[int]]],
         warmup: Optional[RecordingWarmupExtras] = None,
+        *,
+        pov_enabled: bool = False,
     ) -> list[dict]:
         """
         多 Demo 批量录制：OBS 全程保持连接；每个 Demo 启动 CS2 → 录完该 Demo 全部片段 → 关闭游戏，再下一个。
@@ -3320,6 +3341,7 @@ class OBSDirector:
         if not demo_jobs:
             return all_results
 
+        self._pov_enabled = bool(pov_enabled)
         try:
             if not self.connect_obs():
                 self._set_state(DirectorState.ERROR, "Cannot connect to OBS")
@@ -3485,6 +3507,7 @@ class OBSDirector:
             self._set_state(DirectorState.ERROR, str(e))
             raise
         finally:
+            self._pov_enabled = False
             await self._cleanup_recording_session()
             self._set_state(DirectorState.COMPLETED)
 

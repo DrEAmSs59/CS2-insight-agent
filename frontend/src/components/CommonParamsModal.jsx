@@ -6,6 +6,7 @@ import {
   RECORD_WARMUP_DEFAULT_OPTIONS,
   SectionHeader,
 } from "./RecordWarmupModal";
+import ExperimentalPovSection from "./ExperimentalPovSection";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../stores/recordingQueueStore";
 import { warmupUiOptsToPersisted, validateWarmupResolution } from "../utils/warmupDefaults";
 
@@ -24,6 +25,8 @@ export default function CommonParamsModal({
   batchRecording,
   savedWarmupDefaults,
   onPersistWarmupDefaults,
+  experimentalPovEnabled,
+  onExperimentalPovChange,
 }) {
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
@@ -105,7 +108,7 @@ export default function CommonParamsModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[min(92vh,820px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
+      <div className="flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0 pr-2">
             <h2 id="common-params-title" className="text-sm font-bold text-white">
@@ -128,7 +131,7 @@ export default function CommonParamsModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5">
           <section className="mb-6 rounded-lg border border-white/[0.08] bg-black/25 p-3">
             <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
               全局剪辑节奏
@@ -136,7 +139,8 @@ export default function CommonParamsModal({
             <p className="mb-3 text-[10px] leading-relaxed text-zinc-600">
               数值参数与录制队列侧栏「全局节奏设置」同源；恢复数值默认不影响下方入队默认开关与 POV 时序默认值。
             </p>
-            <label className="mb-3 block text-[10px] text-zinc-500">
+            <div className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <label className="block text-[10px] text-zinc-500">
               开场预留 (秒)
               <div className="mt-1 flex items-center gap-2">
                 <input
@@ -163,7 +167,7 @@ export default function CommonParamsModal({
                 />
               </div>
             </label>
-            <label className="mb-3 block text-[10px] text-zinc-500">
+            <label className="block text-[10px] text-zinc-500">
               结尾留白 (秒)
               <div className="mt-1 flex items-center gap-2">
                 <input
@@ -190,7 +194,7 @@ export default function CommonParamsModal({
                 />
               </div>
             </label>
-            <label className="mb-3 block text-[10px] text-zinc-500">
+            <label className="block text-[10px] text-zinc-500">
               防跳剪阈值 (秒)
               <div className="mt-1 flex items-center gap-2">
                 <input
@@ -217,6 +221,7 @@ export default function CommonParamsModal({
                 />
               </div>
             </label>
+            </div>
 
             <button
               type="button"
@@ -255,6 +260,7 @@ export default function CommonParamsModal({
 
               <div className="space-y-3 border-t border-white/[0.06] pt-3">
                 <p className="text-[10px] font-semibold text-cyan-400/90">受害者视角时序</p>
+                <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-[10px] text-zinc-500">
                   击杀前预留 (秒)
                   <div className="mt-1 flex items-center gap-2">
@@ -313,8 +319,10 @@ export default function CommonParamsModal({
                     />
                   </div>
                 </label>
+                </div>
 
                 <p className="pt-1 text-[10px] font-semibold text-amber-400/90">击杀者视角时序</p>
+                <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-[10px] text-zinc-500">
                   击杀前预留 (秒)
                   <div className="mt-1 flex items-center gap-2">
@@ -373,6 +381,7 @@ export default function CommonParamsModal({
                     />
                   </div>
                 </label>
+                </div>
               </div>
             </div>
           </section>
@@ -385,16 +394,19 @@ export default function CommonParamsModal({
               作为批量录制预热阶段的默认控制台与启动参数；分辨率校验通过后约半秒写入配置。
             </p>
 
-            <div className="space-y-6">
+            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+              <div className="min-w-0 space-y-4">
               <section aria-labelledby="cp-sec-visuals">
                 <SectionHeader en="Visuals & HUD" zh="视觉与 UI" />
-                <div id="cp-sec-visuals" className="space-y-2">
-                  <OptionRow
-                    checked={warmupOpts.cl_draw_only_deathnotices}
-                    onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
-                    title="简化观战 HUD"
-                    code="cl_draw_only_deathnotices true"
-                  />
+                <div id="cp-sec-visuals" className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                  {!experimentalPovEnabled ? (
+                    <OptionRow
+                      checked={warmupOpts.cl_draw_only_deathnotices}
+                      onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
+                      title="简化观战 HUD"
+                      code="cl_draw_only_deathnotices true"
+                    />
+                  ) : null}
                   <OptionRow
                     checked={warmupOpts.hud_showtargetid_hide}
                     onChange={(v) => patchWarmup({ hud_showtargetid_hide: v })}
@@ -470,7 +482,9 @@ export default function CommonParamsModal({
                   />
                 </div>
               </section>
+              </div>
 
+              <div className="min-w-0 space-y-4">
               <section aria-labelledby="cp-sec-audio">
                 <SectionHeader en="Audio & Misc" zh="音频与杂项" />
                 <div id="cp-sec-audio" className="space-y-2">
@@ -533,7 +547,20 @@ export default function CommonParamsModal({
                 </div>
               </section>
 
-              <p className="font-mono text-[10px] leading-relaxed text-zinc-600">
+              <ExperimentalPovSection
+                visible={open}
+                experimentalPovEnabled={experimentalPovEnabled}
+                onExperimentalPovChange={onExperimentalPovChange}
+                checkboxDisabled={batchRecording || !onExperimentalPovChange}
+                povRadarMode={warmupOpts.pov_radar_mode}
+                onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
+                povTeamcounterNumeric={warmupOpts.pov_teamcounter_numeric}
+                onPovTeamcounterNumericChange={(v) => patchWarmup({ pov_teamcounter_numeric: v })}
+              />
+              </div>
+            </div>
+
+              <p className="mt-4 font-mono text-[10px] leading-relaxed text-zinc-600">
                 默认预热将注入{" "}
                 {buildWarmupConsoleCommands({
                   ...warmupOpts,
@@ -541,8 +568,8 @@ export default function CommonParamsModal({
                 }).length}{" "}
                 条控制台指令
               </p>
-            </div>
           </section>
+
         </div>
 
         <div className="shrink-0 border-t border-white/[0.08] bg-black/35 px-4 py-3 sm:px-5">

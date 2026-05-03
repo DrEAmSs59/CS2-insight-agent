@@ -254,6 +254,7 @@ export default function App() {
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
+  const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [cs2FpsMax, setCs2FpsMax] = useState(240);
@@ -709,6 +710,9 @@ export default function App() {
           });
         }
         if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
+        if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
+          setExperimentalPovEnabled(data.experimental.pov_enabled);
+        }
         if (data.cs2_path) setCs2Path(data.cs2_path);
         if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
         if (typeof data.cs2_fps_max === "number") setCs2FpsMax(data.cs2_fps_max);
@@ -1127,6 +1131,15 @@ export default function App() {
     setSavedRecordWarmupDefaults(obj);
     try {
       await API.put("config", { default_record_warmup: obj });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  const persistExperimentalPov = useCallback(async (enabled) => {
+    try {
+      await API.put("config", { experimental: { pov_enabled: enabled } });
+      setExperimentalPovEnabled(!!enabled);
     } catch {
       /* silent */
     }
@@ -1867,6 +1880,8 @@ export default function App() {
         batchRecording={batchRecording}
         savedWarmupDefaults={savedRecordWarmupDefaults}
         onPersistWarmupDefaults={persistWarmupDefaults}
+        experimentalPovEnabled={experimentalPovEnabled}
+        onExperimentalPovChange={persistExperimentalPov}
       />
 
       <RecordingQueueDrawer
@@ -1889,6 +1904,8 @@ export default function App() {
         onConfirm={handleWarmupConfirm}
         onWarmupValidationError={(msg) => setRecordingBlockedMessage(msg)}
         defaultOverrides={savedRecordWarmupDefaults ?? undefined}
+        experimentalPovEnabled={experimentalPovEnabled}
+        onExperimentalPovChange={persistExperimentalPov}
       />
 
       <LibraryLoadModeModal

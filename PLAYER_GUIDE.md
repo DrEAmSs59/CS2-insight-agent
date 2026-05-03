@@ -348,6 +348,13 @@ D:\steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe
 
 </details>
 
+<details>
+<summary><b>Q：实验性功能 POV HUD 是什么？</b></summary>
+
+- 在侧边栏打开「常用参数管理」，底部「实验性功能」中可勾选 **POV**。开启后，本地 Demo 回放录制时会临时安装项目自带的 `pov.vpk`，并增量修改 CS2 `game/csgo/gameinfo.gi` 的搜索路径；**录制结束后程序会自动恢复**。
+- 开启 POV 后，部分与 HUD / 雷达相关的预热选项会被隐藏并由程序强制设定；不要用于连接官方匹配服务器。
+- 若异常退出导致修改未恢复，可在同一页面查看提示并点击「恢复 POV 修改」（需先关闭 CS2）。
+
 </details>
 
 <details>
