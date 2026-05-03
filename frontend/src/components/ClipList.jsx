@@ -8,6 +8,7 @@ const COMPILATION_ORDER = {
   nemesis_deaths: 20,
   all_kills: 90,
   all_deaths: 100,
+  freeze_to_death: 110,
 };
 
 /**
@@ -22,6 +23,10 @@ const COMPILATION_ORDER = {
  *   activePlayerTab?: string,
  *   onPlayerTabChange?: (name: string) => void,
  *   parsedPlayers?: Record<string, { clips: any[], match_meta: any }>,
+ *   matchTotalRounds?: number,
+ *   freezeToDeathDraft?: { picked: number[] },
+ *   onFreezeToDeathDraftChange?: (next: { picked: number[] }) => void,
+ *   roundMontagePickerDisabled?: boolean,
  * }} props
  */
 export default function ClipList({
@@ -35,6 +40,10 @@ export default function ClipList({
   activePlayerTab = "",
   onPlayerTabChange,
   parsedPlayers = {},
+  matchTotalRounds = 24,
+  freezeToDeathDraft = { picked: [] },
+  onFreezeToDeathDraftChange,
+  roundMontagePickerDisabled = false,
 }) {
   const queued = queuedClientClipUids ?? NO_QUEUED;
   // 顺序：高光 / 下饭 / 坐牢（已在上游过滤掉）按原顺序混排，合集永远排最后
@@ -117,6 +126,10 @@ export default function ClipList({
               onToggle={onToggle}
               aiMode={aiMode}
               inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
+              matchTotalRounds={matchTotalRounds}
+              freezeToDeathDraft={freezeToDeathDraft}
+              onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
+              roundMontagePickerDisabled={roundMontagePickerDisabled}
             />
           ))}
         </div>

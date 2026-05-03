@@ -14,6 +14,10 @@ import RecordingQueueDrawer from "./components/RecordingQueueDrawer";
 import CommonParamsModal from "./components/CommonParamsModal";
 import { useRecordingQueue, stripGlobalPacingMetaKeys } from "./stores/recordingQueueStore";
 import { ensureClientClipUidsOnClips, stripClientClipUid } from "./utils/clipClientUid";
+import {
+  freezeToDeathDraftFromClipFilter,
+  isFreezeToDeathCompilation,
+} from "./utils/freezeToDeathRoundFilter";
 import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
 import {
   Package,
@@ -193,6 +197,19 @@ function buildBatchGroupsFromQueue(queue, globalPacing = {}) {
     if (Object.keys(mergedPacing).length) {
       clip.pacing_override = mergedPacing;
     }
+    if (clip.fixed_segment_pacing && clip.pacing_override && typeof clip.pacing_override === "object") {
+      const deny = new Set([
+        "pre_first_sec",
+        "post_last_sec",
+        "max_gap_sec",
+        "post_mid_sec",
+        "pre_cont_sec",
+      ]);
+      const po = { ...clip.pacing_override };
+      for (const k of deny) delete po[k];
+      if (Object.keys(po).length) clip.pacing_override = po;
+      else delete clip.pacing_override;
+    }
     byDemoPlayer.get(key).clips.push(clip);
   }
   return Array.from(byDemoPlayer.values());
@@ -233,6 +250,8 @@ export default function App() {
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
   const [selectedPlayers, setSelectedPlayers] = useState({});
+  /** 每场「回合合集」勾选：空 → 请求里发 null（整局合规非赛后）；非空 → 只解析所选回合 */
+  const [freezeToDeathRoundsByMatch, setFreezeToDeathRoundsByMatch] = useState({});
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
   const [activePlayerTabs, setActivePlayerTabs] = useState({});
@@ -304,6 +323,25 @@ export default function App() {
 
   const players = currentUpload?.players ?? [];
   const selectedPlayersList = selectedPlayers[currentMatchIndex] ?? [];
+  const freezeToDeathDraft =
+    freezeToDeathRoundsByMatch[currentMatchIndex] ?? { picked: [] };
+  const setFreezeToDeathDraft = useCallback((next) => {
+    setFreezeToDeathRoundsByMatch((prev) => ({
+      ...prev,
+      [currentMatchIndex]: { picked: [...(next?.picked ?? [])] },
+    }));
+  }, [currentMatchIndex]);
+
+  const roundMontageMaxRounds = useMemo(
+    () =>
+      Math.max(
+        1,
+        Number(matchMeta?.total_rounds) ||
+          Number(currentUpload?.match_meta?.total_rounds) ||
+          24
+      ),
+    [matchMeta, currentUpload]
+  );
 
   const expectedPreviewLines = useMemo(
     () =>
@@ -378,6 +416,20 @@ export default function App() {
   useEffect(() => {
     setSelectedClientClipUids(new Set());
   }, [currentActivePlayer]);
+
+  // 回合合集勾选被清空后，取消其卡片选中（避免看起来已选却不能入队）
+  useEffect(() => {
+    const ftd = clips.find((c) => isFreezeToDeathCompilation(c));
+    const uid = ftd?.client_clip_uid;
+    if (!uid) return;
+    if ((freezeToDeathDraft?.picked?.length ?? 0) > 0) return;
+    setSelectedClientClipUids((prev) => {
+      if (!prev.has(uid)) return prev;
+      const next = new Set(prev);
+      next.delete(uid);
+      return next;
+    });
+  }, [freezeToDeathDraft?.picked, clips]);
 
   const matchTabsData = useMemo(() => {
     const n = uploadedDemos?.length ?? 0;
@@ -618,6 +670,23 @@ export default function App() {
       setCurrentMatchIndex(0);
       setSelectedPlayers(selectedMap);
       setActivePlayerTabs(tabMap);
+      const ftdByIndex = {};
+      loaded.forEach((x, i) => {
+        const clips = x.cached_result?.clips;
+        if (!Array.isArray(clips)) return;
+        const ftd = clips.find(
+          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
+        );
+        if (ftd) {
+          const tr =
+            x.cached_result?.match_meta?.total_rounds ??
+            x.match_meta?.total_rounds ??
+            24;
+          const maxR = Math.max(1, Math.min(64, Number(tr) || 24));
+          ftdByIndex[i] = freezeToDeathDraftFromClipFilter(ftd.freeze_to_death_round_filter, maxR);
+        }
+      });
+      setFreezeToDeathRoundsByMatch(ftdByIndex);
       setSelectedClientClipUids(new Set());
       const cachedCount = loaded.filter((x) => Boolean(x.cached_result)).length;
       setProgressText(
@@ -772,6 +841,7 @@ export default function App() {
       setCurrentMatchIndex(0);
       setSelectedPlayers({});
       setActivePlayerTabs({});
+      setFreezeToDeathRoundsByMatch({});
       setSelectedClientClipUids(new Set());
       setProgressText(
         uploads.length > 1
@@ -785,26 +855,36 @@ export default function App() {
     }
   }, []);
 
+  const roundMontageCanEnqueue = useMemo(() => {
+    const p = freezeToDeathDraft?.picked ?? [];
+    return p.length > 0;
+  }, [freezeToDeathDraft]);
+
   const regularSelectableTotal = useMemo(
     () =>
-      clips.filter(
-        (c) =>
-          c.category !== "meme_death" &&
-          c.client_clip_uid &&
-          !queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)
-      ).length,
-    [clips, queuedClientClipUidsForCurrentDemo]
+      clips.filter((c) => {
+        if (c.category === "meme_death" || !c.client_clip_uid) return false;
+        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
+        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
+        return true;
+      }).length,
+    [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]
   );
   const selectedRegularCount = useMemo(
     () =>
-      clips.filter(
-        (c) =>
-          c.category !== "meme_death" &&
-          c.client_clip_uid &&
-          selectedClientClipUids.has(c.client_clip_uid) &&
-          !queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)
-      ).length,
-    [clips, selectedClientClipUids, queuedClientClipUidsForCurrentDemo]
+      clips.filter((c) => {
+        if (c.category === "meme_death" || !c.client_clip_uid) return false;
+        if (!selectedClientClipUids.has(c.client_clip_uid)) return false;
+        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
+        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
+        return true;
+      }).length,
+    [
+      clips,
+      selectedClientClipUids,
+      queuedClientClipUidsForCurrentDemo,
+      roundMontageCanEnqueue,
+    ]
   );
 
   /**
@@ -833,13 +913,14 @@ export default function App() {
 
       try {
         const activeLibraryDemoId = libIds[idx] ?? demos[idx]?.id;
+        const body = { target_players: names };
+        const ftdCfg = freezeToDeathRoundsByMatch[idx] ?? { picked: [] };
+        const ftdPicked = [...(ftdCfg.picked || [])].sort((a, b) => a - b);
+        // null = 后端按全部合规非赛后回合生成回合合集；[] 会显式跳过生成（见 demo_parser）
+        body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
         const { data } = activeLibraryDemoId
-          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, {
-              target_players: names,
-            })
-          : await API.post(`/demo/parse-multi?filename=${encodeURIComponent(fn)}`, {
-              target_players: names,
-            });
+          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body)
+          : await API.post(`/demo/parse-multi?filename=${encodeURIComponent(fn)}`, body);
 
         const processedPlayers = {};
         for (const [playerName, playerData] of Object.entries(data.players ?? {})) {
@@ -862,9 +943,34 @@ export default function App() {
           return base;
         });
 
+        const firstMeta = Object.values(processedPlayers)[0]?.match_meta;
+        const ftdMaxRounds = Math.max(
+          1,
+          Math.min(
+            64,
+            Number(firstMeta?.total_rounds) ||
+              Number(demos[idx]?.match_meta?.total_rounds) ||
+              24
+          )
+        );
+
+        const refPlayer = names[0];
+        const refClips = processedPlayers[refPlayer]?.clips ?? [];
+        const ftdClip = refClips.find(
+          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
+        );
+        setFreezeToDeathRoundsByMatch((prev) => ({
+          ...prev,
+          [idx]: ftdClip
+            ? freezeToDeathDraftFromClipFilter(
+                ftdClip.freeze_to_death_round_filter,
+                ftdMaxRounds
+              )
+            : { picked: [] },
+        }));
+
         setActivePlayerTabs((prev) => ({ ...prev, [idx]: names[0] }));
 
-        const firstMeta = Object.values(processedPlayers)[0]?.match_meta;
         const rounds = firstMeta?.total_rounds ?? "?";
         const totalRegular = Object.values(processedPlayers).reduce(
           (s, pd) => s + (pd.clips ?? []).filter((c) => c.category !== "meme_death").length,
@@ -898,7 +1004,7 @@ export default function App() {
         });
       }
     },
-    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex]
+    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex, freezeToDeathRoundsByMatch]
   );
 
   const handleParse = useCallback(async () => {
@@ -996,6 +1102,11 @@ export default function App() {
   const handleToggleClip = useCallback(
     (clientClipUid) => {
       if (!clientClipUid || queuedClientClipUidsForCurrentDemo.has(clientClipUid)) return;
+      const clip = clips.find((c) => c.client_clip_uid === clientClipUid);
+      if (clip && isFreezeToDeathCompilation(clip)) {
+        const p = freezeToDeathDraft?.picked ?? [];
+        if (!p.length) return;
+      }
       setSelectedClientClipUids((prev) => {
         const next = new Set(prev);
         if (next.has(clientClipUid)) next.delete(clientClipUid);
@@ -1003,23 +1114,23 @@ export default function App() {
         return next;
       });
     },
-    [queuedClientClipUidsForCurrentDemo]
+    [queuedClientClipUidsForCurrentDemo, clips, freezeToDeathDraft]
   );
 
   const handleSelectAll = useCallback(() => {
     setSelectedClientClipUids((prev) => {
       const next = new Set(prev);
       clips
-        .filter(
-          (c) =>
-            c.category !== "meme_death" &&
-            c.client_clip_uid &&
-            !queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)
-        )
+        .filter((c) => {
+          if (c.category === "meme_death" || !c.client_clip_uid) return false;
+          if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
+          if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
+          return true;
+        })
         .forEach((c) => next.add(c.client_clip_uid));
       return next;
     });
-  }, [clips, queuedClientClipUidsForCurrentDemo]);
+  }, [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]);
 
   const handleDeselectAll = useCallback(() => {
     setSelectedClientClipUids(new Set());
@@ -1064,21 +1175,43 @@ export default function App() {
   const handleAddSelectedToQueue = useCallback(() => {
     if (!currentParsed || selectedClientClipUids.size === 0) return;
     const meta = queueItemMetaForIndex(currentMatchIndex);
-    const toAdd = clips
-      .filter((c) => c.client_clip_uid && selectedClientClipUids.has(c.client_clip_uid))
-      .map((c) => ({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: c.clip_id,
-        clientClipUid: c.client_clip_uid,
-        clipData: { ...c },
-      }));
+    const ftdPicksSorted = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
+    const candidates = clips.filter(
+      (c) => c.client_clip_uid && selectedClientClipUids.has(c.client_clip_uid)
+    );
+    const toAdd = candidates
+      .filter((c) => {
+        if (!isFreezeToDeathCompilation(c)) return true;
+        return ftdPicksSorted.length > 0;
+      })
+      .map((c) => {
+        const row = {
+          demoPath: meta.demoPath,
+          demoFilename: meta.demoFilename,
+          targetPlayer: meta.targetPlayer,
+          targetPlayerUserId: meta.targetPlayerUserId,
+          targetSteamId: meta.targetSteamId,
+          clipId: c.clip_id,
+          clientClipUid: c.client_clip_uid,
+          clipData: { ...c },
+        };
+        if (isFreezeToDeathCompilation(c) && ftdPicksSorted.length) {
+          return { ...row, freezeToDeathQueueRounds: [...ftdPicksSorted] };
+        }
+        return row;
+      });
+    if (!toAdd.length) {
+      if (candidates.some((c) => isFreezeToDeathCompilation(c)) && !ftdPicksSorted.length) {
+        setProgressText("「回合合集」须至少勾选一个回合才能加入队列。");
+      }
+      return;
+    }
     addToQueue(toAdd);
     setSelectedClientClipUids(new Set());
-    setProgressText(`已加入录制队列 ${toAdd.length} 条（当前场次）。`);
+    const skipped = candidates.length - toAdd.length;
+    const skipHint =
+      skipped > 0 ? `（已跳过 ${skipped} 条未满足条件的片段）` : "";
+    setProgressText(`已加入录制队列 ${toAdd.length} 条（当前场次）${skipHint}`);
   }, [
     currentParsed,
     clips,
@@ -1086,6 +1219,7 @@ export default function App() {
     addToQueue,
     currentMatchIndex,
     queueItemMetaForIndex,
+    freezeToDeathDraft,
   ]);
 
   const handleAddAllHighlightsAllMatches = useCallback(() => {
@@ -1314,6 +1448,7 @@ export default function App() {
     setCurrentMatchIndex(0);
     setSelectedPlayers({});
     setActivePlayerTabs({});
+    setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
   }, []);
@@ -1819,6 +1954,12 @@ export default function App() {
                 setActivePlayerTabs((prev) => ({ ...prev, [currentMatchIndex]: name }))
               }
               parsedPlayers={currentParsed?.players ?? {}}
+              matchTotalRounds={roundMontageMaxRounds}
+              freezeToDeathDraft={freezeToDeathDraft}
+              onFreezeToDeathDraftChange={setFreezeToDeathDraft}
+              roundMontagePickerDisabled={Boolean(
+                parsing || parsingByIndex[currentMatchIndex] || batchRecording
+              )}
             />
           )}
         </div>

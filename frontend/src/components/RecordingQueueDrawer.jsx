@@ -766,6 +766,13 @@ export default function RecordingQueueDrawer({
                               {it.clipData.context_tags.join(" · ")}
                             </p>
                           )}
+                          {Array.isArray(it.freezeToDeathQueueRounds) &&
+                          it.freezeToDeathQueueRounds.length > 0 ? (
+                            <p className="mt-0.5 font-mono text-[10px] text-amber-400/85">
+                              回合合集含回合：{it.freezeToDeathQueueRounds.join("、")}
+                            </p>
+                          ) : null}
+                          {!it.clipData?.fixed_segment_pacing ? (
                           <PacingMicroPanel
                             item={it}
                             expanded={pacingExpandedId === it.id}
@@ -777,6 +784,11 @@ export default function RecordingQueueDrawer({
                               })
                             }
                           />
+                          ) : (
+                            <p className="mt-2 border-t border-white/[0.06] pt-2 text-[10px] text-zinc-500">
+                              本合辑为固定 tick 分段，剪辑节奏与全局开场/结尾预留不生效。
+                            </p>
+                          )}
                           <PovSection item={it} updateItemPacing={updateItemPacing} />
                         </div>
                         <button

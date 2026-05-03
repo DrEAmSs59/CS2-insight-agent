@@ -262,9 +262,13 @@ def resolve_uploaded_demo_path(p: str) -> Path:
     raise HTTPException(404, f"未找到 Demo 文件: {raw}")
 
 
-def _analyze_demo_sync(dem_path: str, target_player: str) -> dict:
+def _analyze_demo_sync(
+    dem_path: str,
+    target_player: str,
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
     """Parse in a child process so demoparser native crashes cannot kill FastAPI."""
-    return analyze_demo_isolated(dem_path, target_player)
+    return analyze_demo_isolated(dem_path, target_player, freeze_to_death_rounds)
 
 
 async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
@@ -398,7 +402,12 @@ async def _maybe_update_library_display_for_expected(demo_id: int, dem_path: str
         await demo_library_hub.notify("display_name")
 
 
-async def _run_library_demo_analyze(demo_id: int, dem_path: str, target_players: list[str]) -> dict:
+async def _run_library_demo_analyze(
+    demo_id: int,
+    dem_path: str,
+    target_players: list[str],
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
     await demo_db.clear_result(dem_path)
@@ -406,7 +415,12 @@ async def _run_library_demo_analyze(demo_id: int, dem_path: str, target_players:
     players_out: dict = {}
     try:
         for player in target_players:
-            parsed = await asyncio.to_thread(_analyze_demo_sync, dem_path, player)
+            parsed = await asyncio.to_thread(
+                _analyze_demo_sync,
+                dem_path,
+                player,
+                freeze_to_death_rounds,
+            )
             players_out[player] = parsed
     except IsolatedParseError as e:
         msg = f"Demo 解析失败：{e}"
@@ -609,6 +623,7 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
 
 class ParseRequest(BaseModel):
     target_player: str
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/upload")
@@ -660,7 +675,12 @@ async def parse_demo(req: ParseRequest, filename: str):
         raise HTTPException(404, f"Demo file not found: {filename}")
 
     try:
-        result = await asyncio.to_thread(_analyze_demo_sync, str(dem_path), req.target_player)
+        result = await asyncio.to_thread(
+            _analyze_demo_sync,
+            str(dem_path),
+            req.target_player,
+            req.freeze_to_death_rounds,
+        )
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
@@ -680,6 +700,7 @@ async def parse_demo(req: ParseRequest, filename: str):
 
 class ParseMultiRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/parse-multi")
@@ -694,7 +715,12 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
     results_by_player: dict = {}
     try:
         for player in req.target_players:
-            results_by_player[player] = await asyncio.to_thread(_analyze_demo_sync, str(dem_path), player)
+            results_by_player[player] = await asyncio.to_thread(
+                _analyze_demo_sync,
+                str(dem_path),
+                player,
+                req.freeze_to_death_rounds,
+            )
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
@@ -719,6 +745,7 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
 class BatchParseRequest(BaseModel):
     target_player: str
     paths: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/parse-batch")
@@ -739,7 +766,7 @@ async def parse_demo_batch(req: BatchParseRequest):
     loop = asyncio.get_running_loop()
 
     def run_one(path_str: str) -> dict:
-        return _analyze_demo_sync(path_str, target)
+        return _analyze_demo_sync(path_str, target, req.freeze_to_death_rounds)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         tasks = [loop.run_in_executor(pool, run_one, str(p)) for p in resolved]
@@ -899,6 +926,7 @@ async def reparse_demo(demo_id: int):
 
 class DemoAnalyzeRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.get("/api/demos/{demo_id}/players")
@@ -927,7 +955,12 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     dem_path = row["path"]
-    out = await _run_library_demo_analyze(demo_id, dem_path, req.target_players)
+    out = await _run_library_demo_analyze(
+        demo_id,
+        dem_path,
+        req.target_players,
+        req.freeze_to_death_rounds,
+    )
     return {**out, "demo_filename": row["filename"]}
 
 

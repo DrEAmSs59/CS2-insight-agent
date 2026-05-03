@@ -1891,7 +1891,7 @@ class OBSDirector:
             kills = 0
         compilation_kind = str(clip.get("compilation_kind") or "").strip()
         source_count = len(clip.get("source_ticks") or []) if isinstance(clip.get("source_ticks"), list) else 0
-        if category == "compilation" and compilation_kind in {"nemesis_deaths", "all_deaths"}:
+        if category == "compilation" and compilation_kind in {"nemesis_deaths", "all_deaths", "freeze_to_death"}:
             kill_part = f"{max(1, source_count)}D"
         elif category == "meme_death":
             kill_part = "1D"
@@ -2321,6 +2321,8 @@ class OBSDirector:
             and str(clip.get("category") or "").strip() in ("fail", "meme_death")
         )
         _pacing_override = clip.get("pacing_override") or {}
+        if clip.get("fixed_segment_pacing"):
+            _pacing_override = {}
         has_single_segment_override = isinstance(_pacing_override, dict) and any(
             k in _pacing_override for k in ("pre_first_sec", "post_last_sec")
         )
@@ -2680,6 +2682,8 @@ class OBSDirector:
             # 高光片段：追加每位受害者死亡前后的视角；失误片段：追加击杀者视角。
             # 开关及独立时序参数均来自 clip.pacing_override（由队列抽屉写入）。
             _vpo = clip.get("pacing_override") or {}
+            if clip.get("fixed_segment_pacing"):
+                _vpo = {}
             if bool(_vpo.get("victim_pov", False)) or bool(_vpo.get("killer_pov", False)):
                 _clip_cat   = str(clip.get("category") or "")
                 _is_fail_pov = _clip_cat == "fail"

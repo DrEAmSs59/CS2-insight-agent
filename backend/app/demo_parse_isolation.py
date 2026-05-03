@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 class IsolatedParseError(RuntimeError):
@@ -87,8 +87,17 @@ def run_parse_worker(action: str, **payload: Any) -> Any:
     return data.get("result")
 
 
-def analyze_demo_isolated(dem_path: str, target_player: str) -> dict:
-    result = run_parse_worker("analyze", dem_path=dem_path, target_player=target_player)
+def analyze_demo_isolated(
+    dem_path: str,
+    target_player: str,
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
+    result = run_parse_worker(
+        "analyze",
+        dem_path=dem_path,
+        target_player=target_player,
+        freeze_to_death_rounds=freeze_to_death_rounds,
+    )
     if not isinstance(result, dict):
         raise IsolatedParseError("解析 worker 返回了无效结果")
     return result
