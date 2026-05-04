@@ -26,6 +26,12 @@ from .demo_parser import (
     get_player_list,
     spec_player_extra_offset_for_gsi_failure,
 )
+from .cs2_config_backup import (
+    is_cs2_running,
+    is_restore_required,
+    restore_latest_user_config_backup,
+    write_persistent_backup_from_snap,
+)
 from .env_utils import OBSConfig
 from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_payload_after
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
@@ -66,48 +72,6 @@ class CS2NotReadyError(RuntimeError):
     """
 
 
-def is_cs2_running() -> bool:
-    """Return True when CS2 has either a visible window or a live cs2.exe process."""
-    if sys.platform != "win32":
-        return bool(find_cs2_hwnd())
-    if find_cs2_hwnd():
-        return True
-    try:
-        cp = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH"],
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
-        )
-        if "cs2.exe" in (cp.stdout or "").lower():
-            return True
-    except Exception as e:  # noqa: BLE001
-        logger.debug("Could not query cs2.exe via tasklist: %s", e)
-
-    try:
-        cp = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                "if (Get-Process -Name cs2 -ErrorAction SilentlyContinue) { 'cs2' }",
-            ],
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-        )
-        return "cs2" in (cp.stdout or "").lower()
-    except Exception as e:  # noqa: BLE001
-        logger.debug("Could not query cs2.exe via PowerShell: %s", e)
-        return False
-
-
 TICK_RATE = 64
 PRE_ROLL_TICKS = 300  # ~5 seconds of pre-roll（无 kill_ticks 时的传统 seek）
 # 智能跳跃分段阈值见 ``build_smart_jump_segments`` 内 _env_int 默认值。
@@ -135,82 +99,8 @@ _OBS_GAME_CAPTURE_INPUT_NAME = "CS2 Insight Game Capture"
 _RECORDING_VIDEO_EXTENSIONS = {".mkv", ".mp4", ".mov", ".flv", ".ts", ".m2ts", ".avi"}
 
 
-# ── 用户配置磁盘备份 ────────────────────────────────────────────────────
-# 每次录制启动时把玩家当前磁盘上的 CS2 配置文件原样拷一份到
-#   ``<repo>/.cs2_config_backup/``
-# 下，并写一个 ``manifest.json`` 记录每个备份文件对应的原始绝对路径。下一次录制
-# 启动时会**清空整个目录再重写**，因此项目里只会保留"最近一次录制前的玩家配置"。
-# 这样玩家原始 cfg 始终有一份在项目目录里可手动取用，运行期则继续靠 ``OBSDirector.
-# _user_config_snapshot`` 内存快照在 taskkill CS2 后自动还原。
-_BACKUP_DIR_NAME = ".cs2_config_backup"
-_BACKUP_MANIFEST_NAME = "manifest.json"
-
-
-def _backup_root() -> Path:
-    """Return the project-root backup directory.
-
-    固定指向**本仓库根**（``backend/app/obs_director.py`` → 上溯三级 = repo root），
-    不跟随 ``CS2_INSIGHT_CONFIG`` 环境变量漂移到玩家的 AppData 之类目录。
-    便携包解压到哪儿，备份就放在哪儿，方便玩家自行翻出原始 cfg。
-    """
-    try:
-        return Path(__file__).resolve().parents[2] / _BACKUP_DIR_NAME
-    except Exception:  # noqa: BLE001
-        return Path.cwd() / _BACKUP_DIR_NAME
-
-
-def _write_persistent_backup(snap: "dict[Path, Optional[bytes]]") -> Optional[Path]:
-    """清空 ``<repo>/.cs2_config_backup/`` 后把当前内存快照落盘。返回备份目录路径。"""
-    if not snap:
-        return None
-    import json
-
-    backup_dir = _backup_root()
-    try:
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir, ignore_errors=True)
-        backup_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        logger.warning("Persistent backup mkdir %s failed: %s", backup_dir, e)
-        return None
-    entries: list[dict] = []
-    for idx, (orig_path, original) in enumerate(snap.items()):
-        entry: dict = {
-            "original": str(orig_path),
-            "existed": original is not None,
-        }
-        if original is not None:
-            # 文件名沿用原始 basename 便于人工阅读，前缀加序号避免不同目录下的同名碰撞
-            rel = f"{idx:04d}_{orig_path.name}"
-            target = backup_dir / rel
-            try:
-                target.write_bytes(original)
-            except OSError as e:
-                logger.warning("Persistent backup write %s failed: %s", target, e)
-                continue
-            entry["backup_relpath"] = rel
-        entries.append(entry)
-    manifest = {
-        "version": 3,
-        "created_at": time.time(),
-        "created_at_iso": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-        "entries": entries,
-    }
-    try:
-        (backup_dir / _BACKUP_MANIFEST_NAME).write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except OSError as e:
-        logger.warning("Persistent backup manifest write failed: %s", e)
-        return None
-    logger.info(
-        "Persistent backup written: %s (%d files)",
-        backup_dir,
-        len([e for e in entries if e.get("existed")]),
-    )
-    return backup_dir
-
+# 用户配置磁盘备份 / ``recording_state.json`` 见 ``cs2_config_backup`` 模块；
+# 运行期仍靠 ``_user_config_snapshot`` 在 taskkill 后配合 manifest 恢复。
 
 def _clip_kill_ticks_sorted(clip: dict) -> list[int]:
     raw = clip.get("kill_ticks")
@@ -1526,6 +1416,8 @@ class OBSDirector:
     _USER_CONFIG_GLOB_PATTERNS: tuple[str, ...] = (
         "user_convars_0_slot*.vcfg",
         "cs2_user_convars_0_slot*.vcfg",
+        "cs2_user_keys*.vcfg",
+        "*.vcfg_lastclouded",
     )
 
     def _candidate_user_config_dirs(self) -> list[Path]:
@@ -1614,15 +1506,25 @@ class OBSDirector:
             # 启动会清空目录再重写，项目里只保留"最近一次录制前"的玩家原始 cfg。
             # 玩家事后可以在该目录翻出 config.cfg / video.txt 自行覆盖回去。
             try:
-                _write_persistent_backup(snap)
+                write_persistent_backup_from_snap(snap)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Persistent disk backup failed (in-memory still active): %s", e)
 
     def _restore_user_configs(self) -> None:
-        """强杀 CS2 后对比快照，回滚所有被 CS2 运行期写脏的用户配置文件。
-        若某文件原本不存在但现在出现了（CS2 新建的污染文件），也会被删除。"""
+        """强杀 CS2 后：若 ``recording_state`` 为 ``recording`` 则按 manifest 原子恢复；
+        否则回退为内存快照对比（例如持久化备份未写入 state 的边缘情况）。"""
         snap = self._user_config_snapshot
+        if is_restore_required():
+            try:
+                res = restore_latest_user_config_backup(skip_cs2_running_check=True)
+                if res.get("ok"):
+                    self._user_config_snapshot = {}
+                    return
+                logger.warning("Manifest restore failed post-kill: %s", res)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Manifest restore raised: %s", e)
         if not snap:
+            self._user_config_snapshot = {}
             return
         restored = 0
         for p, original in snap.items():
@@ -1645,11 +1547,8 @@ class OBSDirector:
             except OSError as e:
                 logger.warning("Restore user config %s failed: %s", p, e)
         if restored:
-            logger.info("Restored %d user config file(s) post-kill", restored)
-        # 一次性生效后清空，避免 batch 场景下重复回滚。
+            logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
-        # 磁盘备份保持原样，下一次录制启动时再被覆盖。这里不删除：项目目录里
-        # 永远留着「最近一次录制前」玩家原始 cfg 的快照供事后取用。
 
     def _kill_cs2(self) -> None:
         """强杀整棵 CS2 进程树并等待窗口真正消失。
