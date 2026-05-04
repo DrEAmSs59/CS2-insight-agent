@@ -28,6 +28,7 @@ import {
   RotateCw,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Pencil,
   Search,
   ShieldAlert,
@@ -38,6 +39,39 @@ import {
 } from "lucide-react";
 
 const API = axios.create({ baseURL: "/api" });
+
+/** Demo 库地图筛选下拉项（顺序固定）。 */
+const DEMO_LIBRARY_MAP_OPTIONS = [
+  "de_dust2",
+  "de_mirage",
+  "de_inferno",
+  "de_ancient",
+  "de_nuke",
+  "de_anubis",
+  "de_overpass",
+  "de_train",
+  "de_cache",
+  "de_vertigo",
+];
+
+const DEMO_LIBRARY_STATUS_FILTER_OPTIONS = [
+  { value: "pending", label: "待解析" },
+  { value: "done", label: "已完成" },
+  { value: "error", label: "解析失败" },
+];
+
+const DEMO_LIBRARY_STATUS_LABELS = {
+  pending: "待解析",
+  done: "已完成",
+  parsed: "已完成",
+  error: "解析失败",
+};
+
+function demoLibraryStatusLabel(code) {
+  if (code == null || code === "") return "—";
+  const key = String(code).trim().toLowerCase();
+  return DEMO_LIBRARY_STATUS_LABELS[key] ?? String(code);
+}
 
 /**
  * 推断对话框副标题：根据后端返回的 detail 文本判定具体阻断场景。
@@ -298,6 +332,15 @@ export default function App() {
   const [libraryDeletePrompt, setLibraryDeletePrompt] = useState(null);
   const [librarySearchInput, setLibrarySearchInput] = useState("");
   const [librarySearchQ, setLibrarySearchQ] = useState("");
+  const [libraryAdvFilters, setLibraryAdvFilters] = useState({
+    mapName: "",
+    status: "all",
+    playerQuery: "",
+    minKills: "",
+    maxDeaths: "",
+    minAssists: "",
+    minKd: "",
+  });
   const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
@@ -460,6 +503,12 @@ export default function App() {
   const libraryTotalPages =
     libraryTotal == null ? null : Math.max(1, Math.ceil(libraryTotal / LIBRARY_PAGE_SIZE));
 
+  const libraryAdvFiltersKey = useMemo(() => JSON.stringify(libraryAdvFilters), [libraryAdvFilters]);
+
+  useEffect(() => {
+    setLibraryPage(1);
+  }, [libraryAdvFiltersKey]);
+
   useEffect(() => {
     const t = setTimeout(() => {
       const next = librarySearchInput.trim();
@@ -472,6 +521,35 @@ export default function App() {
     return () => clearTimeout(t);
   }, [librarySearchInput]);
 
+  const appendDemoLibraryFilterParams = useCallback((params) => {
+    const f = libraryAdvFilters;
+    if (f.mapName.trim()) params.map_name = f.mapName.trim();
+    if (f.status && f.status !== "all") params.status = f.status;
+    const pq = f.playerQuery.trim();
+    if (!pq) return;
+    params.player_query = pq;
+    const num = (v) => {
+      const s = String(v ?? "").trim();
+      if (!s) return null;
+      const n = parseInt(s, 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    const fl = (v) => {
+      const s = String(v ?? "").trim();
+      if (!s) return null;
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    };
+    const mk = num(f.minKills);
+    if (mk != null) params.min_kills = mk;
+    const xdth = num(f.maxDeaths);
+    if (xdth != null) params.max_deaths = xdth;
+    const ma = num(f.minAssists);
+    if (ma != null) params.min_assists = ma;
+    const mkd = fl(f.minKd);
+    if (mkd != null) params.min_kd = mkd;
+  }, [libraryAdvFilters]);
+
   const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
     const { manageLoading = true } = opts;
     if (manageLoading) setLibraryLoading(true);
@@ -480,6 +558,7 @@ export default function App() {
       const offset = (page - 1) * limit;
       const params = { limit, offset };
       if (librarySearchQ) params.q = librarySearchQ;
+      appendDemoLibraryFilterParams(params);
       const { data } = await API.get("/demos", { params });
       setDemoLibraryItems(data.items || []);
       const total = typeof data.total === "number" ? data.total : null;
@@ -495,7 +574,7 @@ export default function App() {
     } finally {
       if (manageLoading) setLibraryLoading(false);
     }
-  }, [libraryPage, librarySearchQ]);
+  }, [libraryPage, librarySearchQ, appendDemoLibraryFilterParams]);
 
   useEffect(() => {
     libraryPageRef.current = libraryPage;
@@ -559,17 +638,24 @@ export default function App() {
     }
     setLibraryJumpDraft("");
     setLibraryPage(target);
-    void refreshDemoLibrary(target);
+    void refreshDemoLibrary(target, { manageLoading: false });
   }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary]);
 
   const handleScanDemos = useCallback(async () => {
     setLibraryLoading(true);
-    setProgressText("正在扫描监听目录…");
+    setProgressText("正在扫描监听目录并补全全部缺失的玩家统计索引…");
     try {
-      await API.post("/demos/scan");
+      const { data } = await API.post("/demos/scan");
       setProgressText("扫描完成，正在刷新列表…");
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      setProgressText("已更新 Demo 库。");
+      const idx = data?.player_stats_index;
+      if (idx && idx.processed > 0) {
+        setProgressText(
+          `已更新 Demo 库。玩家统计索引：处理 ${idx.processed}，成功 ${idx.indexed}。`
+        );
+      } else {
+        setProgressText("已更新 Demo 库。");
+      }
     } catch (e) {
       setProgressText(`扫描或列表刷新失败: ${e.response?.data?.detail || e.message}`);
     } finally {
@@ -580,7 +666,7 @@ export default function App() {
   const handleReparseDemo = useCallback(async (id) => {
     try {
       await API.post(`/demos/${id}/parse`);
-      await refreshDemoLibrary(libraryPage);
+      await refreshDemoLibrary(libraryPage, { manageLoading: false });
     } catch (e) {
       setProgressText(`重解析失败: ${e.response?.data?.detail || e.message}`);
     }
@@ -591,7 +677,7 @@ export default function App() {
       try {
         await API.delete(`/demos/${id}`, { params: { rescan } });
         setLibraryDeletePrompt(null);
-        await refreshDemoLibrary(libraryPage);
+        await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
         setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
       }
@@ -604,7 +690,7 @@ export default function App() {
     try {
       await API.patch(`/demos/${libraryRename.id}`, { display_name: libraryRename.draft });
       setLibraryRename(null);
-      await refreshDemoLibrary(libraryPage);
+      await refreshDemoLibrary(libraryPage, { manageLoading: false });
     } catch (e) {
       setProgressText(`改名失败: ${e.response?.data?.detail || e.message}`);
     }
@@ -742,6 +828,7 @@ export default function App() {
       const want = libraryTotal != null ? Math.min(libraryTotal, cap) : cap;
       const params = { limit: want, offset: 0 };
       if (librarySearchQ) params.q = librarySearchQ;
+      appendDemoLibraryFilterParams(params);
       const { data } = await API.get("/demos", { params });
       const rows = data.items || [];
       setSelectedLibraryDemoIds(new Set(rows.map((it) => it.id)));
@@ -751,7 +838,7 @@ export default function App() {
     } catch (e) {
       setProgressText(`全选失败: ${e.response?.data?.detail || e.message}`);
     }
-  }, [libraryTotal, librarySearchQ]);
+  }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams]);
 
   const clearLibrarySelection = useCallback(() => {
     setSelectedLibraryDemoIds(new Set());
@@ -841,8 +928,13 @@ export default function App() {
 
   useEffect(() => {
     // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「刷新」扫描入库。
-    void refreshDemoLibrary(libraryPage);
+    void refreshDemoLibrary(libraryPage, { manageLoading: false });
   }, [refreshDemoLibrary, libraryPage]);
+
+  const hasLibraryAdvancedFilters = useMemo(() => {
+    const f = libraryAdvFilters;
+    return !!(f.mapName.trim() || (f.status && f.status !== "all") || f.playerQuery.trim());
+  }, [libraryAdvFilters]);
 
   const handleUpload = useCallback(async (files) => {
     const list = Array.isArray(files) ? files : [files];
@@ -1734,12 +1826,146 @@ export default function App() {
                 aria-label="搜索 Demo 名称"
               />
             </div>
+            <details className="group mb-2 rounded border border-white/10 bg-cs2-bg-input/20">
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-zinc-400 marker:content-none [&::-webkit-details-marker]:hidden hover:text-zinc-200">
+                <SlidersHorizontal className="h-3 w-3 shrink-0" aria-hidden />
+                高级筛选
+                <ChevronDown className="ml-auto h-3 w-3 shrink-0 transition-transform group-open:rotate-180" aria-hidden />
+              </summary>
+              <div className="space-y-2 border-t border-white/10 px-2 py-2 text-[10px] text-zinc-300">
+                <p className="leading-relaxed text-zinc-500">
+                  玩家表现依赖库内玩家统计；点击「刷新」自动补全玩家信息，首次补全玩家信息时请稍等片刻。填写昵称关键词后才会按玩家表筛选；击杀 / 死亡 / 助攻 /
+                  KD 仅在与昵称同时填写时生效。
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-zinc-500">地图</span>
+                    <select
+                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50"
+                      value={libraryAdvFilters.mapName}
+                      onChange={(e) =>
+                        setLibraryAdvFilters((p) => ({ ...p, mapName: e.target.value }))
+                      }
+                    >
+                      <option value="">全部地图</option>
+                      {DEMO_LIBRARY_MAP_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-zinc-500">状态</span>
+                    <select
+                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 text-[10px] outline-none focus:border-cs2-orange/50"
+                      value={libraryAdvFilters.status}
+                      onChange={(e) =>
+                        setLibraryAdvFilters((p) => ({ ...p, status: e.target.value }))
+                      }
+                    >
+                      <option value="all">全部状态</option>
+                      {DEMO_LIBRARY_STATUS_FILTER_OPTIONS.map(({ value, label }) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="space-y-2 rounded border border-white/5 bg-black/15 p-2">
+                  <p className="text-[9px] font-semibold text-zinc-400">玩家表现</p>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-zinc-500">昵称关键词</span>
+                    <input
+                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 text-[10px] outline-none focus:border-cs2-orange/50"
+                      value={libraryAdvFilters.playerQuery}
+                      onChange={(e) =>
+                        setLibraryAdvFilters((p) => ({ ...p, playerQuery: e.target.value }))
+                      }
+                      placeholder="先填昵称才会按玩家筛选；下方数值须与昵称同时填写才生效"
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-zinc-500">击杀 ≥</span>
+                      <input
+                        inputMode="numeric"
+                        disabled={!libraryAdvFilters.playerQuery.trim()}
+                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        value={libraryAdvFilters.minKills}
+                        onChange={(e) =>
+                          setLibraryAdvFilters((p) => ({ ...p, minKills: e.target.value }))
+                        }
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-zinc-500">死亡 ≤</span>
+                      <input
+                        inputMode="numeric"
+                        disabled={!libraryAdvFilters.playerQuery.trim()}
+                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        value={libraryAdvFilters.maxDeaths}
+                        onChange={(e) =>
+                          setLibraryAdvFilters((p) => ({ ...p, maxDeaths: e.target.value }))
+                        }
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-zinc-500">助攻 ≥</span>
+                      <input
+                        inputMode="numeric"
+                        disabled={!libraryAdvFilters.playerQuery.trim()}
+                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        value={libraryAdvFilters.minAssists}
+                        onChange={(e) =>
+                          setLibraryAdvFilters((p) => ({ ...p, minAssists: e.target.value }))
+                        }
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-zinc-500">KD ≥</span>
+                      <input
+                        inputMode="decimal"
+                        disabled={!libraryAdvFilters.playerQuery.trim()}
+                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        value={libraryAdvFilters.minKd}
+                        onChange={(e) =>
+                          setLibraryAdvFilters((p) => ({ ...p, minKd: e.target.value }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-cs2-border px-2 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200"
+                    onClick={() =>
+                      setLibraryAdvFilters({
+                        mapName: "",
+                        status: "all",
+                        playerQuery: "",
+                        minKills: "",
+                        maxDeaths: "",
+                        minAssists: "",
+                        minKd: "",
+                      })
+                    }
+                  >
+                    清空筛选
+                  </button>
+                </div>
+              </div>
+            </details>
             <div className="space-y-1">
               {demoLibraryItems.length === 0 && !libraryLoading && (
                 <p className="text-[11px] text-cs2-text-secondary">
                   {librarySearchQ
                     ? `没有名称包含「${librarySearchQ}」的 Demo。`
-                    : "暂无数据，配置监听路径后会自动入库。"}
+                    : hasLibraryAdvancedFilters
+                      ? "当前筛选条件下没有匹配的 Demo。"
+                      : "暂无数据，配置监听路径后会自动入库。"}
                 </p>
               )}
               {demoLibraryItems.map((it) => (
@@ -1770,7 +1996,7 @@ export default function App() {
                           文件: {it.filename}
                         </p>
                       ) : null}
-                      <p className="text-[10px] text-cs2-text-secondary">{it.status}</p>
+                      <p className="text-[10px] text-cs2-text-secondary">{demoLibraryStatusLabel(it.status)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -1826,7 +2052,7 @@ export default function App() {
                 onClick={() => {
                   const next = Math.max(1, libraryPage - 1);
                   setLibraryPage(next);
-                  void refreshDemoLibrary(next);
+                  void refreshDemoLibrary(next, { manageLoading: false });
                 }}
               >
                 <ChevronLeft className="h-3 w-3" />
@@ -1843,7 +2069,7 @@ export default function App() {
                 onClick={() => {
                   const next = libraryPage + 1;
                   setLibraryPage(next);
-                  void refreshDemoLibrary(next);
+                  void refreshDemoLibrary(next, { manageLoading: false });
                 }}
               >
                 <ChevronRight className="h-3 w-3" />

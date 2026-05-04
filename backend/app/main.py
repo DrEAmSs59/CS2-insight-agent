@@ -30,7 +30,7 @@ from .demo_parse_isolation import (
 )
 from .env_utils import AppConfig, OBSConfig, LLMConfig, load_config, save_config, ensure_cs2_path, detect_cs2_path, resolve_config_path
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
-from .demo_db import DemoDB, utc_now_iso
+from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher
 from .gsi_ready import gsi_status, notify_gsi_payload
@@ -804,16 +804,152 @@ async def parse_demo_batch(req: BatchParseRequest):
 
 # ─── Local demo library endpoints ─────────────────────────────
 
+_DEMO_LIBRARY_ALLOWED_STATUSES = frozenset({"pending", "done", "error"})
+
+
+def _split_csv_query_param(s: Optional[str]) -> list[str]:
+    if not s:
+        return []
+    return [p.strip() for p in str(s).split(",") if p.strip()]
+
+
+def _demo_library_filters_from_query(
+    *,
+    map_names: Optional[str],
+    map_name: Optional[str],
+    statuses: Optional[str],
+    status: Optional[str],
+    min_kills: Optional[int],
+    max_deaths: Optional[int],
+    min_assists: Optional[int],
+    min_kd: Optional[float],
+    player_query: Optional[str],
+) -> DemoListFilters:
+    f: DemoListFilters = {}
+    mns = _split_csv_query_param(map_names)
+    if not mns and map_name and str(map_name).strip():
+        mns = [str(map_name).strip()]
+    if mns:
+        f["map_names"] = mns
+
+    sts = [x for x in _split_csv_query_param(statuses) if x in _DEMO_LIBRARY_ALLOWED_STATUSES]
+    if not sts and status and str(status).strip():
+        s0 = str(status).strip()
+        if s0 in _DEMO_LIBRARY_ALLOWED_STATUSES:
+            sts = [s0]
+    if sts:
+        f["statuses"] = sts
+    pq = (player_query or "").strip() or None
+    if pq:
+        f["player_query"] = pq
+        if min_kills is not None:
+            f["min_kills"] = min_kills
+        if max_deaths is not None:
+            f["max_deaths"] = max_deaths
+        if min_assists is not None:
+            f["min_assists"] = min_assists
+        if min_kd is not None:
+            f["min_kd"] = min_kd
+    return f
+
+
+async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any]:
+    try:
+        raw = await asyncio.to_thread(get_player_list_isolated, demo_path)
+        if isinstance(raw, dict):
+            players = raw.get("players") or raw.get("roster") or []
+        elif isinstance(raw, list):
+            players = raw
+        else:
+            players = []
+        if isinstance(players, dict):
+            players = list(players.values())
+        if not isinstance(players, list):
+            players = []
+        await demo_db.replace_demo_player_stats(demo_id, demo_path, players)
+        return {"indexed": True, "player_count": len(players), "error": None}
+    except Exception as exc:
+        logger.warning("Failed to index player stats for demo %s: %s", demo_id, exc)
+        return {"indexed": False, "player_count": 0, "error": str(exc)}
+
+
 @app.get("/api/demos")
 async def list_demos(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     q: Optional[str] = Query(default=None, max_length=200, description="按文件名或库内展示名子串筛选"),
+    map_names: Optional[str] = Query(
+        default=None,
+        max_length=4000,
+        description="逗号分隔多地图；与 map_name 二选一，优先本参数",
+    ),
+    map_name: Optional[str] = Query(default=None, max_length=200, description="单地图筛选（兼容旧客户端）"),
+    statuses: Optional[str] = Query(
+        default=None,
+        max_length=256,
+        description="逗号分隔状态 pending,done,error；与 status 二选一，优先本参数",
+    ),
+    status: Optional[str] = Query(default=None, max_length=64, description="单状态（兼容旧客户端）"),
+    min_kills: Optional[int] = Query(default=None, ge=0),
+    max_deaths: Optional[int] = Query(default=None, ge=0),
+    min_assists: Optional[int] = Query(default=None, ge=0),
+    min_kd: Optional[float] = Query(default=None, ge=0),
+    player_query: Optional[str] = Query(default=None, max_length=200),
 ):
     qn = (q or "").strip() or None
-    total = await demo_db.count_demos(name_query=qn)
-    rows = await demo_db.list_demos(limit=limit, offset=offset, name_query=qn)
+    filters = _demo_library_filters_from_query(
+        map_names=map_names,
+        map_name=map_name,
+        statuses=statuses,
+        status=status,
+        min_kills=min_kills,
+        max_deaths=max_deaths,
+        min_assists=min_assists,
+        min_kd=min_kd,
+        player_query=player_query,
+    )
+    total = await demo_db.count_demos(name_query=qn, filters=filters or None)
+    rows = await demo_db.list_demos(limit=limit, offset=offset, name_query=qn, filters=filters or None)
     return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
+
+
+async def _index_all_missing_player_stats() -> dict[str, Any]:
+    """为库内所有尚未建立玩家统计索引的 Demo 依次建索引，直到没有缺失项。"""
+    chunk = 200
+    failed: list[dict[str, Any]] = []
+    indexed = 0
+    processed = 0
+    max_failed_returned = 200
+    while True:
+        candidates = await demo_db.list_demo_ids_missing_player_stats(chunk)
+        if not candidates:
+            break
+        for demo_id, path in candidates:
+            processed += 1
+            if not Path(path).is_file():
+                if len(failed) < max_failed_returned:
+                    failed.append({"demo_id": demo_id, "filename": Path(path).name, "error": "文件不存在"})
+                continue
+            out = await index_demo_player_stats(demo_id, path)
+            if out.get("indexed"):
+                indexed += 1
+            else:
+                if len(failed) < max_failed_returned:
+                    failed.append(
+                        {
+                            "demo_id": demo_id,
+                            "filename": Path(path).name,
+                            "error": str(out.get("error") or "索引失败"),
+                        },
+                    )
+    if indexed:
+        await demo_library_hub.notify("player_stats")
+    return {
+        "ok": True,
+        "processed": processed,
+        "indexed": indexed,
+        "failed": failed,
+    }
 
 
 @app.get("/api/demos/stream")
@@ -853,6 +989,43 @@ async def get_demo_library_item(demo_id: int):
     if not item:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     return item
+
+
+@app.get("/api/demos/{demo_id}/player-stats")
+async def get_demo_player_stats_library(demo_id: int):
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    return {"demo_id": demo_id, "players": await demo_db.list_demo_player_stats(demo_id)}
+
+
+@app.post("/api/demos/{demo_id}/index-player-stats")
+async def post_index_demo_player_stats(demo_id: int):
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    dem_path = str(row["path"])
+    if not Path(dem_path).is_file():
+        raise HTTPException(404, "Demo file not found on disk")
+    out = await index_demo_player_stats(demo_id, dem_path)
+    if out.get("indexed"):
+        await demo_library_hub.notify("player_stats")
+        return {"ok": True, "demo_id": demo_id, "indexed": True, "player_count": int(out.get("player_count") or 0)}
+    return {
+        "ok": False,
+        "demo_id": demo_id,
+        "indexed": False,
+        "player_count": 0,
+        "error": str(out.get("error") or "索引失败"),
+    }
+
+
+@app.get("/api/players/search")
+async def search_players_library(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=100),
+):
+    return {"items": await demo_db.search_players(q, limit=limit)}
 
 
 class BatchResolvePlayersBody(BaseModel):
@@ -915,9 +1088,14 @@ async def patch_demo_display_name(demo_id: int, body: DemoDisplayNamePatch):
 @app.post("/api/demos/scan")
 async def scan_watch_paths():
     if demo_watcher is None:
-        return {"scanned": 0}
+        return {"scanned": 0, "player_stats_index": None}
     scanned = await demo_watcher.scan_existing()
-    return {"scanned": scanned}
+    idx_summary: dict[str, Any] | None = None
+    try:
+        idx_summary = await _index_all_missing_player_stats()
+    except Exception:
+        logger.exception("player stats index batch after scan failed")
+    return {"scanned": scanned, "player_stats_index": idx_summary}
 
 
 @app.post("/api/demos/{demo_id}/parse")
