@@ -34,13 +34,20 @@ from .demo_db import DemoDB, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher
 from .gsi_ready import gsi_status, notify_gsi_payload
+from .cs2_config_backup import (
+    CONFIG_RESTORE_REQUIRED,
+    build_config_backup_status_payload,
+    is_cs2_running,
+    is_restore_required,
+    open_backup_directory,
+    restore_latest_user_config_backup,
+)
 from .obs_director import (
     CS2_RUNNING_MESSAGE,
     CS2AlreadyRunningError,
     CS2NotReadyError,
     OBSDirector,
     RecordingWarmupExtras,
-    is_cs2_running,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -1052,6 +1059,11 @@ def _raise_if_cs2_already_running() -> None:
         raise HTTPException(409, CS2_RUNNING_MESSAGE)
 
 
+def _raise_if_config_restore_required() -> None:
+    if is_restore_required():
+        raise HTTPException(status_code=409, detail=CONFIG_RESTORE_REQUIRED)
+
+
 @app.post("/api/record/start")
 async def start_recording(req: RecordRequest):
     cfg = load_config()
@@ -1064,6 +1076,7 @@ async def start_recording(req: RecordRequest):
             "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
         )
     _raise_if_cs2_already_running()
+    _raise_if_config_restore_required()
 
     dem_path = resolve_uploaded_demo_path(req.demo_filename)
 
@@ -1220,6 +1233,7 @@ async def start_batch_recording(req: BatchRecordRequest):
             "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
         )
     _raise_if_cs2_already_running()
+    _raise_if_config_restore_required()
 
     warmup_opts = req.warmup
     wobj: Optional[RecordingWarmupExtras] = None
@@ -1315,6 +1329,38 @@ def record_abort():
         return {"status": "idle", "message": "当前没有进行中的录制"}
     _recording_abort_event.set()
     return {"status": "ok", "message": "已请求中止，正在收尾…"}
+
+
+@app.get("/api/config-backup/status")
+def config_backup_status():
+    return build_config_backup_status_payload()
+
+
+@app.post("/api/config-backup/restore")
+def config_backup_restore():
+    if not is_restore_required():
+        return {"ok": True, "message": "玩家配置状态正常", "restored": 0}
+    if is_cs2_running():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CS2_RUNNING",
+                "message": "CS2 正在运行，请先关闭 CS2 后再恢复玩家配置。",
+            },
+        )
+    res = restore_latest_user_config_backup()
+    if res.get("ok"):
+        return {"ok": True, "message": "玩家配置已恢复", "restored": res.get("restored", 0)}
+    return {
+        "ok": False,
+        "message": "部分配置恢复失败，请检查文件权限或手动打开备份目录。",
+        "failed": res.get("failed") or [],
+    }
+
+
+@app.post("/api/config-backup/open-dir")
+def config_backup_open_dir():
+    return open_backup_directory()
 
 
 @app.post("/api/gsi/cs2")

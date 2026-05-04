@@ -32,6 +32,8 @@ import {
   Search,
   ShieldAlert,
   SlidersHorizontal,
+  FolderOpen,
+  AlertTriangle,
   X,
 } from "lucide-react";
 
@@ -62,6 +64,9 @@ function recordingBlockedSubtitle(message) {
   if (m.includes("已有录制任务")) {
     return "已有录制任务进行中";
   }
+  if (m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复")) {
+    return "玩家配置需要先恢复";
+  }
   return "录制启动条件未满足";
 }
 
@@ -83,6 +88,7 @@ function formatRecordingApiError(e) {
       .join(" ");
   }
   if (d != null && typeof d === "object") {
+    if (typeof d.message === "string") return d.message;
     try {
       return JSON.stringify(d);
     } catch {
@@ -267,6 +273,8 @@ export default function App() {
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
+  /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
+  const [configBackupStatus, setConfigBackupStatus] = useState(null);
   /** 来自 cs2-insight.config.json，打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
@@ -810,6 +818,19 @@ export default function App() {
     };
   }, []);
 
+  const refreshConfigBackupStatus = useCallback(async () => {
+    try {
+      const { data } = await API.get("/config-backup/status");
+      setConfigBackupStatus(data);
+    } catch {
+      setConfigBackupStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshConfigBackupStatus();
+  }, [refreshConfigBackupStatus]);
+
   useEffect(() => {
     if (!pacingPersistReadyRef.current) return;
     const t = setTimeout(() => {
@@ -1264,10 +1285,16 @@ export default function App() {
 
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
+    if (configBackupStatus?.restore_required) {
+      setRecordingBlockedMessage(
+        "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
+      );
+      return;
+    }
     setQueueDrawerOpen(false);
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
-  }, [queue.length]);
+  }, [queue.length, configBackupStatus?.restore_required]);
 
   const handleWarmupConfirm = useCallback(
     async (warmup) => {
@@ -1302,13 +1329,57 @@ export default function App() {
           setProgressText(`批量录制失败: ${detail}`);
         } finally {
           setBatchRecording(false);
+          void refreshConfigBackupStatus();
         }
         return;
       }
       setWarmupIntent(null);
     },
-    [warmupIntent, queue, clearQueue, obsConfig, globalPacing, persistWarmupDefaults]
+    [
+      warmupIntent,
+      queue,
+      clearQueue,
+      obsConfig,
+      globalPacing,
+      persistWarmupDefaults,
+      refreshConfigBackupStatus,
+    ]
   );
+
+  const handleRestorePlayerConfig = useCallback(async () => {
+    setProgressText("正在恢复玩家配置…");
+    try {
+      const { data } = await API.post("/config-backup/restore");
+      if (data?.ok) {
+        setProgressText(data.message || "玩家配置已恢复");
+      } else {
+        setProgressText(data?.message || "部分配置恢复失败");
+      }
+      await refreshConfigBackupStatus();
+    } catch (e) {
+      const st = e.response?.status;
+      const det = e.response?.data?.detail;
+      if (st === 409 && det?.code === "CS2_RUNNING") {
+        setRecordingBlockedMessage(
+          "CS2 正在运行，无法覆盖配置文件。\n请先关闭 CS2，然后再次点击一键恢复。",
+        );
+      } else {
+        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`);
+      }
+      await refreshConfigBackupStatus();
+    }
+  }, [refreshConfigBackupStatus]);
+
+  const handleOpenConfigBackupDir = useCallback(async () => {
+    try {
+      const { data } = await API.post("/config-backup/open-dir");
+      if (data && data.ok === false && data.backup_dir) {
+        setProgressText(`${data.message || "请手动打开"} ${data.backup_dir}`);
+      }
+    } catch (e) {
+      setProgressText(`打开备份目录失败: ${formatRecordingApiError(e)}`);
+    }
+  }, []);
 
   const handleAbortBatchRecording = useCallback(async () => {
     try {
@@ -1560,6 +1631,42 @@ export default function App() {
         )}
 
         <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-3 sm:px-5 sm:pt-4">
+          {configBackupStatus?.restore_required ? (
+            <section
+              className="rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-3 shadow-sm"
+              role="status"
+            >
+              <div className="flex flex-wrap items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <p className="text-xs font-bold text-amber-100">检测到上次录制异常退出</p>
+                  <p className="text-[11px] leading-relaxed text-amber-100/85">
+                    上次录制过程中程序没有正常结束，玩家 CS2 配置可能尚未恢复。请先关闭 CS2，然后点击「一键恢复玩家配置」。
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      type="button"
+                      className="rounded-md border border-amber-400/60 bg-amber-500/20 px-3 py-1.5 text-[11px] font-bold text-amber-50 hover:bg-amber-500/30"
+                      onClick={() => void handleRestorePlayerConfig()}
+                    >
+                      一键恢复玩家配置
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-black/20 px-3 py-1.5 text-[11px] font-semibold text-zinc-200 hover:border-white/25"
+                      onClick={() => void handleOpenConfigBackupDir()}
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" aria-hidden />
+                      打开备份目录
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : configBackupStatus && configBackupStatus.restore_required === false ? (
+            <p className="text-[10px] text-zinc-600">玩家配置状态：正常</p>
+          ) : null}
+
           <section className="rounded-lg border border-white/10 bg-cs2-bg-card p-3">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-xs font-semibold text-zinc-300">本地 Demo 库</h3>
