@@ -9,6 +9,8 @@ from typing import Any, Literal, Optional
 
 import aiosqlite
 
+DemoListFilters = dict[str, Any]
+
 
 def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -93,6 +95,48 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN display_name TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_player_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    demo_id INTEGER NOT NULL,
+                    demo_path TEXT NOT NULL,
+                    steam_id64 TEXT,
+                    steam_id TEXT,
+                    account_id TEXT,
+                    player_name TEXT NOT NULL,
+                    normalized_name TEXT,
+                    team_name TEXT,
+                    team_number INTEGER,
+                    kills INTEGER DEFAULT 0,
+                    deaths INTEGER DEFAULT 0,
+                    assists INTEGER DEFAULT 0,
+                    kd REAL DEFAULT 0,
+                    indexed_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_demo_id ON demo_player_stats(demo_id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_demo_path ON demo_player_stats(demo_path)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_player_name ON demo_player_stats(normalized_name)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_steam_id64 ON demo_player_stats(steam_id64)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_kills ON demo_player_stats(kills)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_kd ON demo_player_stats(kd)"
+            )
+            await conn.execute(
+                "UPDATE demo_files SET status = 'done' WHERE lower(status) = 'parsed'"
+            )
             await conn.commit()
 
     async def add_demo(self, path: str, file_size: int | None = None) -> tuple[int, bool]:
@@ -178,44 +222,300 @@ class DemoDB:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
             await conn.commit()
 
+    @staticmethod
+    def _need_player_join(f: DemoListFilters) -> bool:
+        return bool(str(f.get("player_query") or "").strip())
+
+    @staticmethod
+    def _merge_demo_filters(
+        *,
+        name_query: str | None,
+        filters: DemoListFilters | None,
+    ) -> DemoListFilters:
+        out: DemoListFilters = dict(filters or {})
+        nq = (name_query or "").strip() or None
+        if nq is not None:
+            out["name_query"] = nq
+        elif "name_query" not in out:
+            out["name_query"] = None
+        return out
+
+    @staticmethod
+    def _build_demo_filters_sql(f: DemoListFilters) -> tuple[str, list[Any], bool]:
+        """返回 ``(where_sql, params, need_player_join)``；``where_sql`` 以 ``WHERE 1=1`` 开头。"""
+        params: list[Any] = []
+        parts: list[str] = ["WHERE 1=1"]
+        nq = f.get("name_query")
+        if isinstance(nq, str) and nq.strip():
+            s = nq.strip()
+            parts.append(
+                "(instr(lower(d.filename), lower(?)) > 0 OR instr(lower(ifnull(d.display_name, '')), lower(?)) > 0)"
+            )
+            params.extend([s, s])
+        map_names_list = f.get("map_names")
+        if isinstance(map_names_list, list) and map_names_list:
+            mns_clean = [str(x).strip() for x in map_names_list if str(x).strip()]
+            if mns_clean:
+                ph = ",".join("?" * len(mns_clean))
+                parts.append(f"d.map_name IN ({ph})")
+                params.extend(mns_clean)
+        else:
+            map_name = f.get("map_name")
+            if isinstance(map_name, str) and map_name.strip():
+                parts.append("d.map_name = ?")
+                params.append(map_name.strip())
+        statuses_list = f.get("statuses")
+        if isinstance(statuses_list, list) and statuses_list:
+            sts_clean = [str(x).strip() for x in statuses_list if str(x).strip()]
+            if sts_clean:
+                ph = ",".join("?" * len(sts_clean))
+                parts.append(f"d.status IN ({ph})")
+                params.extend(sts_clean)
+        else:
+            status = f.get("status")
+            if isinstance(status, str) and status.strip():
+                parts.append("d.status = ?")
+                params.append(status.strip())
+        need_ps = DemoDB._need_player_join(f)
+        if need_ps:
+            ps_parts: list[str] = []
+            pq = str(f.get("player_query") or "").strip()
+            id_sql_bits: list[str] = []
+            if pq:
+                id_sql_bits.append(
+                    "(instr(lower(ifnull(ps.player_name, '')), lower(?)) > 0 "
+                    "OR instr(lower(ifnull(ps.normalized_name, '')), lower(?)) > 0)"
+                )
+                params.append(pq)
+                params.append(pq)
+            if id_sql_bits:
+                parts.append("(" + " OR ".join(id_sql_bits) + ")")
+            if f.get("min_kills") is not None:
+                try:
+                    ps_parts.append("ps.kills >= ?")
+                    params.append(int(f["min_kills"]))
+                except (TypeError, ValueError):
+                    pass
+            if f.get("max_deaths") is not None:
+                try:
+                    ps_parts.append("ps.deaths <= ?")
+                    params.append(int(f["max_deaths"]))
+                except (TypeError, ValueError):
+                    pass
+            if f.get("min_assists") is not None:
+                try:
+                    ps_parts.append("ps.assists >= ?")
+                    params.append(int(f["min_assists"]))
+                except (TypeError, ValueError):
+                    pass
+            if f.get("min_kd") is not None:
+                try:
+                    ps_parts.append("ps.kd >= ?")
+                    params.append(float(f["min_kd"]))
+                except (TypeError, ValueError):
+                    pass
+            if ps_parts:
+                parts.append("(" + " AND ".join(ps_parts) + ")")
+        tail = parts[1:]
+        if tail:
+            where_sql = "WHERE 1=1 AND " + " AND ".join(tail)
+        else:
+            where_sql = "WHERE 1=1"
+        return where_sql, params, need_ps
+
+    _LIST_SELECT = """
+        SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
+               d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.duration_mins, d.match_date,
+               r.result_json, r.created_at AS result_created_at
+        """
+
+    async def replace_demo_player_stats(
+        self,
+        demo_id: int,
+        demo_path: str,
+        players: list[dict[str, Any]],
+    ) -> None:
+        now = utc_now_iso()
+        rows: list[tuple[Any, ...]] = []
+        for p in players:
+            name = (
+                p.get("name")
+                or p.get("player_name")
+                or p.get("nickname")
+                or p.get("persona_name")
+                or "Unknown"
+            )
+            name = str(name).strip() or "Unknown"
+            raw_sid64 = p.get("steam_id64") or p.get("steamid64") or p.get("xuid")
+            raw_sid = p.get("steam_id") or p.get("steamid")
+            if raw_sid64 is None and raw_sid is not None:
+                raw_sid64 = raw_sid
+            steam_id64: str | None = None
+            steam_id: str | None = None
+            if raw_sid64 is not None:
+                s = str(raw_sid64).strip()
+                if s.isdigit() and len(s) >= 15:
+                    steam_id64 = s
+                else:
+                    steam_id = s
+            if raw_sid is not None and steam_id is None:
+                s2 = str(raw_sid).strip()
+                if s2 and s2 != steam_id64:
+                    steam_id = s2
+            account_id = p.get("account_id") or p.get("user_id")
+            account_s = str(account_id).strip() if account_id is not None else None
+            try:
+                kills = int(p.get("kills") or p.get("k") or 0)
+            except (TypeError, ValueError):
+                kills = 0
+            try:
+                deaths = int(p.get("deaths") or p.get("d") or 0)
+            except (TypeError, ValueError):
+                deaths = 0
+            try:
+                assists = int(p.get("assists") or p.get("a") or 0)
+            except (TypeError, ValueError):
+                assists = 0
+            kd = round(kills / max(deaths, 1), 3)
+            norm = name.lower().strip()
+            team_num = p.get("team_number")
+            if team_num is None and p.get("team") is not None:
+                try:
+                    team_num = int(p["team"])
+                except (TypeError, ValueError):
+                    team_num = None
+            team_name = p.get("team_name")
+            team_name_s = str(team_name).strip() if team_name is not None else None
+            rows.append(
+                (
+                    demo_id,
+                    str(demo_path),
+                    steam_id64,
+                    steam_id,
+                    account_s,
+                    name,
+                    norm or None,
+                    team_name_s,
+                    team_num,
+                    kills,
+                    deaths,
+                    assists,
+                    kd,
+                    now,
+                ),
+            )
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+            if rows:
+                await conn.executemany(
+                    """
+                    INSERT INTO demo_player_stats(
+                        demo_id, demo_path, steam_id64, steam_id, account_id,
+                        player_name, normalized_name, team_name, team_number,
+                        kills, deaths, assists, kd, indexed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            await conn.commit()
+
+    async def list_demo_player_stats(self, demo_id: int) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT id, demo_id, demo_path, steam_id64, steam_id, account_id, player_name, normalized_name,
+                       team_name, team_number, kills, deaths, assists, kd, indexed_at
+                FROM demo_player_stats
+                WHERE demo_id = ?
+                ORDER BY kills DESC, player_name ASC
+                """,
+                (demo_id,),
+            )
+            rws = await cur.fetchall()
+        return [dict(r) for r in rws]
+
+    async def search_players(self, q: str, limit: int = 20) -> list[dict[str, Any]]:
+        qq = (q or "").strip()
+        if not qq:
+            return []
+        like = f"%{qq.lower()}%"
+        cap = max(1, min(int(limit), 100))
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT
+                    MIN(player_name) AS player_name,
+                    MAX(normalized_name) AS normalized_name,
+                    steam_id64,
+                    MAX(account_id) AS account_id,
+                    COUNT(DISTINCT demo_id) AS demo_count,
+                    MAX(indexed_at) AS last_seen_at
+                FROM demo_player_stats
+                WHERE instr(lower(ifnull(player_name, '')), lower(?)) > 0
+                   OR instr(lower(ifnull(normalized_name, '')), lower(?)) > 0
+                   OR ifnull(steam_id64, '') LIKE ?
+                GROUP BY COALESCE(steam_id64, lower(player_name))
+                ORDER BY demo_count DESC, last_seen_at DESC
+                LIMIT ?
+                """,
+                (qq, qq, like, cap),
+            )
+            rws = await cur.fetchall()
+        return [dict(r) for r in rws]
+
+    async def list_demo_ids_missing_player_stats(self, limit: int) -> list[tuple[int, str]]:
+        """返回尚未写入 ``demo_player_stats`` 的 demo，按 id 降序。``limit`` 为单次查询条数上限。"""
+        lim = max(1, min(int(limit), 5000))
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT d.id, d.path
+                FROM demo_files d
+                WHERE NOT EXISTS (SELECT 1 FROM demo_player_stats ps WHERE ps.demo_id = d.id)
+                ORDER BY d.id DESC
+                LIMIT ?
+                """,
+                (lim,),
+            )
+            rows = await cur.fetchall()
+        return [(int(r["id"]), str(r["path"])) for r in rows]
+
+    async def list_demo_ids_recent(self, limit: int) -> list[tuple[int, str]]:
+        lim = max(1, min(int(limit), 500))
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, path FROM demo_files ORDER BY id DESC LIMIT ?",
+                (lim,),
+            )
+            rows = await cur.fetchall()
+        return [(int(r["id"]), str(r["path"])) for r in rows]
+
     async def list_demos(
         self,
         limit: int = 200,
         offset: int = 0,
         *,
         name_query: str | None = None,
+        filters: DemoListFilters | None = None,
     ) -> list[dict[str, Any]]:
-        nq = (name_query or "").strip()
+        f = self._merge_demo_filters(name_query=name_query, filters=filters)
+        where_sql, params, need_ps = self._build_demo_filters_sql(f)
+        join_sql = ""
+        if need_ps:
+            join_sql = " JOIN demo_player_stats ps ON ps.demo_id = d.id "
+        sql = (
+            f"{self._LIST_SELECT} FROM demo_files d "
+            f"LEFT JOIN match_results r ON r.demo_path = d.path {join_sql} {where_sql} "
+            "ORDER BY d.id DESC LIMIT ? OFFSET ?"
+        )
+        params_ext = [*params, limit, offset]
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
-            if nq:
-                cur = await conn.execute(
-                    """
-                    SELECT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
-                           d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.duration_mins, d.match_date,
-                           r.result_json, r.created_at AS result_created_at
-                    FROM demo_files d
-                    LEFT JOIN match_results r ON r.demo_path = d.path
-                    WHERE instr(lower(d.filename), lower(?)) > 0
-                       OR instr(lower(ifnull(d.display_name, '')), lower(?)) > 0
-                    ORDER BY d.id DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (nq, nq, limit, offset),
-                )
-            else:
-                cur = await conn.execute(
-                    """
-                    SELECT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
-                           d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.duration_mins, d.match_date,
-                           r.result_json, r.created_at AS result_created_at
-                    FROM demo_files d
-                    LEFT JOIN match_results r ON r.demo_path = d.path
-                    ORDER BY d.id DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (limit, offset),
-                )
+            cur = await conn.execute(sql, params_ext)
             rows = await cur.fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -230,10 +530,8 @@ class DemoDB:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
-                """
-                SELECT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
-                       d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.duration_mins, d.match_date,
-                       r.result_json, r.created_at AS result_created_at
+                f"""
+                {self._LIST_SELECT}
                 FROM demo_files d
                 LEFT JOIN match_results r ON r.demo_path = d.path
                 WHERE d.id = ?
@@ -248,24 +546,24 @@ class DemoDB:
         item["result"] = json.loads(raw) if raw else None
         return item
 
-    async def count_demos(self, *, name_query: str | None = None) -> int:
-        nq = (name_query or "").strip()
+    async def count_demos(
+        self,
+        *,
+        name_query: str | None = None,
+        filters: DemoListFilters | None = None,
+    ) -> int:
+        f = self._merge_demo_filters(name_query=name_query, filters=filters)
+        where_sql, params, need_ps = self._build_demo_filters_sql(f)
+        join_sql = ""
+        if need_ps:
+            join_sql = " JOIN demo_player_stats ps ON ps.demo_id = d.id "
+        sql = f"SELECT COUNT(DISTINCT d.id) FROM demo_files d {join_sql} {where_sql}"
         async with aiosqlite.connect(self.db_path) as conn:
-            if nq:
-                cur = await conn.execute(
-                    """
-                    SELECT COUNT(*) FROM demo_files d
-                    WHERE instr(lower(d.filename), lower(?)) > 0
-                       OR instr(lower(ifnull(d.display_name, '')), lower(?)) > 0
-                    """,
-                    (nq, nq),
-                )
-            else:
-                cur = await conn.execute("SELECT COUNT(*) FROM demo_files")
+            cur = await conn.execute(sql, params)
             row = await cur.fetchone()
-            if not row or row[0] is None:
-                return 0
-            return int(row[0])
+        if not row or row[0] is None:
+            return 0
+        return int(row[0])
 
     async def get_result(self, demo_path: str) -> Optional[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as conn:
@@ -318,6 +616,7 @@ class DemoDB:
         disk_path = str(demo["path"])
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
+            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
             if rescan == "skip":
                 await conn.execute(

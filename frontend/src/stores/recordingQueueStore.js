@@ -37,6 +37,7 @@ export const BACKEND_DEFAULT_PACING = {
  * @property {string} clipId
  * @property {string} clientClipUid 与列表里 clip.client_clip_uid 一致，用于入队/出队与 UI 同步
  * @property {Object} clipData
+ * @property {number[]} [freezeToDeathQueueRounds] 回合合集入队时勾选的回合（仅展示）
  * @property {number} [clipData.score_own] 本回合开局目标方胜场
  * @property {number} [clipData.score_opp] 本回合开局对方胜场
  * @property {PacingOverride} [pacing_override] 单片段剪辑节奏覆写（优先级高于全局节奏）

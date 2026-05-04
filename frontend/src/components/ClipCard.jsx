@@ -1,5 +1,7 @@
 import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
+import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
 import { describeTag } from "../utils/tagDescriptions";
+import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
 
 export const CLIP_CATEGORY_CONFIG = {
   highlight: {
@@ -95,7 +97,15 @@ export default function ClipCard({
   onToggle,
   aiMode: _aiMode,
   inQueue = false,
+  matchTotalRounds = 24,
+  freezeToDeathDraft = { picked: [] },
+  onFreezeToDeathDraftChange,
+  roundMontagePickerDisabled = false,
 }) {
+  const isRoundMontage = isFreezeToDeathCompilation(clip);
+  const ftdPicked = freezeToDeathDraft?.picked || [];
+  const ftdEnqueueBlocked = isRoundMontage && ftdPicked.length === 0;
+
   const cat = CLIP_CATEGORY_CONFIG[clip.category] || CLIP_CATEGORY_CONFIG.highlight;
   const Icon = cat.icon;
 
@@ -120,11 +130,14 @@ export default function ClipCard({
   return (
     <div
       role="button"
-      aria-disabled={inQueue}
-      tabIndex={inQueue ? -1 : 0}
-      onClick={() => !inQueue && clip.client_clip_uid && onToggle(clip.client_clip_uid)}
+      aria-disabled={inQueue || ftdEnqueueBlocked}
+      tabIndex={inQueue || ftdEnqueueBlocked ? -1 : 0}
+      onClick={() => {
+        if (inQueue || ftdEnqueueBlocked || !clip.client_clip_uid) return;
+        onToggle(clip.client_clip_uid);
+      }}
       onKeyDown={(e) => {
-        if (inQueue || !clip.client_clip_uid) return;
+        if (inQueue || ftdEnqueueBlocked || !clip.client_clip_uid) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onToggle(clip.client_clip_uid);
@@ -133,11 +146,13 @@ export default function ClipCard({
       className={`group relative rounded-xl border transition-all duration-200 bg-cs2-bg-card ${
         inQueue
           ? "cursor-not-allowed border-white/[0.06] opacity-[0.72]"
-          : `cursor-pointer hover:shadow-lg ${
-              selected
-                ? "border-cs2-orange shadow-lg shadow-cs2-orange/10"
-                : "border-cs2-border hover:border-cs2-border"
-            }`
+          : ftdEnqueueBlocked
+            ? "cursor-not-allowed border-amber-500/20 opacity-[0.85]"
+            : `cursor-pointer hover:shadow-lg ${
+                selected
+                  ? "border-cs2-orange shadow-lg shadow-cs2-orange/10"
+                  : "border-cs2-border hover:border-cs2-border"
+              }`
       }`}
     >
       {hasAiScore && (
@@ -156,7 +171,13 @@ export default function ClipCard({
               : "border border-cs2-border bg-cs2-bg-input group-hover:border-cs2-orange/40"
         }`}
       >
-        {inQueue ? "队列" : selected ? <Check className="h-3 w-3 text-black" /> : null}
+        {inQueue ? (
+          "队列"
+        ) : ftdEnqueueBlocked ? (
+          <span className="px-0.5 text-[8px] font-bold leading-none text-amber-500/90">—</span>
+        ) : selected ? (
+          <Check className="h-3 w-3 text-black" />
+        ) : null}
       </div>
 
       <div className="p-5 pt-4">
@@ -220,11 +241,11 @@ export default function ClipCard({
             )}
 
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {clip.context_tags?.map((tag) => {
+              {clip.context_tags?.map((tag, ti) => {
                 const desc = describeTag(tag);
                 return (
                   <span
-                    key={tag}
+                    key={`${ti}-${tag}`}
                     title={desc || undefined}
                     className={`rounded border px-2 py-0.5 text-[10px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${desc ? "cursor-help" : ""}`}
                   >
@@ -259,6 +280,22 @@ export default function ClipCard({
             <div className="font-mono text-[10px] text-cs2-text-secondary">
               帧 {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}
             </div>
+
+            {isRoundMontage && typeof onFreezeToDeathDraftChange === "function" && (
+              <div
+                className="mt-2"
+                role="presentation"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <RoundMontageRoundPicker
+                  maxRounds={matchTotalRounds}
+                  picked={ftdPicked}
+                  disabled={roundMontagePickerDisabled || inQueue}
+                  onChange={onFreezeToDeathDraftChange}
+                />
+              </div>
+            )}
           </div>
         </div>
 

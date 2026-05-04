@@ -129,7 +129,7 @@ export default function Sidebar({
           </div>
           <div>
             <div className="text-sm font-bold tracking-wide">CS2 洞察</div>
-            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">智能体 v1.0.1</div>
+            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">智能体 v1.1.2</div>
           </div>
         </div>
       </div>

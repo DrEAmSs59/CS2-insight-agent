@@ -30,7 +30,7 @@ from .demo_parse_isolation import (
 )
 from .env_utils import AppConfig, OBSConfig, LLMConfig, ExperimentalConfig, load_config, save_config, ensure_cs2_path, detect_cs2_path, resolve_config_path
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
-from .demo_db import DemoDB, utc_now_iso
+from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher
 from .gsi_ready import gsi_status, notify_gsi_payload
@@ -38,6 +38,14 @@ from .montage_db import MontageDB
 from .pov_experimental import merge_warmup_extras_for_pov
 from .pov_hud_manager import PovHudError, PovHudManager, try_restore_stale_pov_on_startup
 from .video_composer import MontageComposerError, compose_montage, resolve_ffmpeg_binary, validate_output_path
+from .cs2_config_backup import (
+    CONFIG_RESTORE_REQUIRED,
+    build_config_backup_status_payload,
+    is_cs2_running,
+    is_restore_required,
+    open_backup_directory,
+    restore_latest_user_config_backup,
+)
 from .obs_director import (
     CS2_RUNNING_MESSAGE,
     CS2AlreadyRunningError,
@@ -45,7 +53,6 @@ from .obs_director import (
     OBSDirector,
     RecordingWarmupExtras,
     _RECORDING_RESULT_CLIP_META_KEYS,
-    is_cs2_running,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -272,9 +279,13 @@ def resolve_uploaded_demo_path(p: str) -> Path:
     raise HTTPException(404, f"未找到 Demo 文件: {raw}")
 
 
-def _analyze_demo_sync(dem_path: str, target_player: str) -> dict:
+def _analyze_demo_sync(
+    dem_path: str,
+    target_player: str,
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
     """Parse in a child process so demoparser native crashes cannot kill FastAPI."""
-    return analyze_demo_isolated(dem_path, target_player)
+    return analyze_demo_isolated(dem_path, target_player, freeze_to_death_rounds)
 
 
 async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
@@ -457,7 +468,12 @@ async def _maybe_update_library_display_for_expected(demo_id: int, dem_path: str
         await demo_library_hub.notify("display_name")
 
 
-async def _run_library_demo_analyze(demo_id: int, dem_path: str, target_players: list[str]) -> dict:
+async def _run_library_demo_analyze(
+    demo_id: int,
+    dem_path: str,
+    target_players: list[str],
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
     await demo_db.clear_result(dem_path)
@@ -465,7 +481,12 @@ async def _run_library_demo_analyze(demo_id: int, dem_path: str, target_players:
     players_out: dict = {}
     try:
         for player in target_players:
-            parsed = await asyncio.to_thread(_analyze_demo_sync, dem_path, player)
+            parsed = await asyncio.to_thread(
+                _analyze_demo_sync,
+                dem_path,
+                player,
+                freeze_to_death_rounds,
+            )
             players_out[player] = parsed
     except IsolatedParseError as e:
         msg = f"Demo 解析失败：{e}"
@@ -703,6 +724,7 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
 
 class ParseRequest(BaseModel):
     target_player: str
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/upload")
@@ -754,7 +776,12 @@ async def parse_demo(req: ParseRequest, filename: str):
         raise HTTPException(404, f"Demo file not found: {filename}")
 
     try:
-        result = await asyncio.to_thread(_analyze_demo_sync, str(dem_path), req.target_player)
+        result = await asyncio.to_thread(
+            _analyze_demo_sync,
+            str(dem_path),
+            req.target_player,
+            req.freeze_to_death_rounds,
+        )
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
@@ -774,6 +801,7 @@ async def parse_demo(req: ParseRequest, filename: str):
 
 class ParseMultiRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/parse-multi")
@@ -788,7 +816,12 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
     results_by_player: dict = {}
     try:
         for player in req.target_players:
-            results_by_player[player] = await asyncio.to_thread(_analyze_demo_sync, str(dem_path), player)
+            results_by_player[player] = await asyncio.to_thread(
+                _analyze_demo_sync,
+                str(dem_path),
+                player,
+                req.freeze_to_death_rounds,
+            )
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
@@ -813,6 +846,7 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
 class BatchParseRequest(BaseModel):
     target_player: str
     paths: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.post("/api/demo/parse-batch")
@@ -833,7 +867,7 @@ async def parse_demo_batch(req: BatchParseRequest):
     loop = asyncio.get_running_loop()
 
     def run_one(path_str: str) -> dict:
-        return _analyze_demo_sync(path_str, target)
+        return _analyze_demo_sync(path_str, target, req.freeze_to_death_rounds)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         tasks = [loop.run_in_executor(pool, run_one, str(p)) for p in resolved]
@@ -864,16 +898,152 @@ async def parse_demo_batch(req: BatchParseRequest):
 
 # ─── Local demo library endpoints ─────────────────────────────
 
+_DEMO_LIBRARY_ALLOWED_STATUSES = frozenset({"pending", "done", "error"})
+
+
+def _split_csv_query_param(s: Optional[str]) -> list[str]:
+    if not s:
+        return []
+    return [p.strip() for p in str(s).split(",") if p.strip()]
+
+
+def _demo_library_filters_from_query(
+    *,
+    map_names: Optional[str],
+    map_name: Optional[str],
+    statuses: Optional[str],
+    status: Optional[str],
+    min_kills: Optional[int],
+    max_deaths: Optional[int],
+    min_assists: Optional[int],
+    min_kd: Optional[float],
+    player_query: Optional[str],
+) -> DemoListFilters:
+    f: DemoListFilters = {}
+    mns = _split_csv_query_param(map_names)
+    if not mns and map_name and str(map_name).strip():
+        mns = [str(map_name).strip()]
+    if mns:
+        f["map_names"] = mns
+
+    sts = [x for x in _split_csv_query_param(statuses) if x in _DEMO_LIBRARY_ALLOWED_STATUSES]
+    if not sts and status and str(status).strip():
+        s0 = str(status).strip()
+        if s0 in _DEMO_LIBRARY_ALLOWED_STATUSES:
+            sts = [s0]
+    if sts:
+        f["statuses"] = sts
+    pq = (player_query or "").strip() or None
+    if pq:
+        f["player_query"] = pq
+        if min_kills is not None:
+            f["min_kills"] = min_kills
+        if max_deaths is not None:
+            f["max_deaths"] = max_deaths
+        if min_assists is not None:
+            f["min_assists"] = min_assists
+        if min_kd is not None:
+            f["min_kd"] = min_kd
+    return f
+
+
+async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any]:
+    try:
+        raw = await asyncio.to_thread(get_player_list_isolated, demo_path)
+        if isinstance(raw, dict):
+            players = raw.get("players") or raw.get("roster") or []
+        elif isinstance(raw, list):
+            players = raw
+        else:
+            players = []
+        if isinstance(players, dict):
+            players = list(players.values())
+        if not isinstance(players, list):
+            players = []
+        await demo_db.replace_demo_player_stats(demo_id, demo_path, players)
+        return {"indexed": True, "player_count": len(players), "error": None}
+    except Exception as exc:
+        logger.warning("Failed to index player stats for demo %s: %s", demo_id, exc)
+        return {"indexed": False, "player_count": 0, "error": str(exc)}
+
+
 @app.get("/api/demos")
 async def list_demos(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     q: Optional[str] = Query(default=None, max_length=200, description="按文件名或库内展示名子串筛选"),
+    map_names: Optional[str] = Query(
+        default=None,
+        max_length=4000,
+        description="逗号分隔多地图；与 map_name 二选一，优先本参数",
+    ),
+    map_name: Optional[str] = Query(default=None, max_length=200, description="单地图筛选（兼容旧客户端）"),
+    statuses: Optional[str] = Query(
+        default=None,
+        max_length=256,
+        description="逗号分隔状态 pending,done,error；与 status 二选一，优先本参数",
+    ),
+    status: Optional[str] = Query(default=None, max_length=64, description="单状态（兼容旧客户端）"),
+    min_kills: Optional[int] = Query(default=None, ge=0),
+    max_deaths: Optional[int] = Query(default=None, ge=0),
+    min_assists: Optional[int] = Query(default=None, ge=0),
+    min_kd: Optional[float] = Query(default=None, ge=0),
+    player_query: Optional[str] = Query(default=None, max_length=200),
 ):
     qn = (q or "").strip() or None
-    total = await demo_db.count_demos(name_query=qn)
-    rows = await demo_db.list_demos(limit=limit, offset=offset, name_query=qn)
+    filters = _demo_library_filters_from_query(
+        map_names=map_names,
+        map_name=map_name,
+        statuses=statuses,
+        status=status,
+        min_kills=min_kills,
+        max_deaths=max_deaths,
+        min_assists=min_assists,
+        min_kd=min_kd,
+        player_query=player_query,
+    )
+    total = await demo_db.count_demos(name_query=qn, filters=filters or None)
+    rows = await demo_db.list_demos(limit=limit, offset=offset, name_query=qn, filters=filters or None)
     return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
+
+
+async def _index_all_missing_player_stats() -> dict[str, Any]:
+    """为库内所有尚未建立玩家统计索引的 Demo 依次建索引，直到没有缺失项。"""
+    chunk = 200
+    failed: list[dict[str, Any]] = []
+    indexed = 0
+    processed = 0
+    max_failed_returned = 200
+    while True:
+        candidates = await demo_db.list_demo_ids_missing_player_stats(chunk)
+        if not candidates:
+            break
+        for demo_id, path in candidates:
+            processed += 1
+            if not Path(path).is_file():
+                if len(failed) < max_failed_returned:
+                    failed.append({"demo_id": demo_id, "filename": Path(path).name, "error": "文件不存在"})
+                continue
+            out = await index_demo_player_stats(demo_id, path)
+            if out.get("indexed"):
+                indexed += 1
+            else:
+                if len(failed) < max_failed_returned:
+                    failed.append(
+                        {
+                            "demo_id": demo_id,
+                            "filename": Path(path).name,
+                            "error": str(out.get("error") or "索引失败"),
+                        },
+                    )
+    if indexed:
+        await demo_library_hub.notify("player_stats")
+    return {
+        "ok": True,
+        "processed": processed,
+        "indexed": indexed,
+        "failed": failed,
+    }
 
 
 @app.get("/api/demos/stream")
@@ -913,6 +1083,43 @@ async def get_demo_library_item(demo_id: int):
     if not item:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     return item
+
+
+@app.get("/api/demos/{demo_id}/player-stats")
+async def get_demo_player_stats_library(demo_id: int):
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    return {"demo_id": demo_id, "players": await demo_db.list_demo_player_stats(demo_id)}
+
+
+@app.post("/api/demos/{demo_id}/index-player-stats")
+async def post_index_demo_player_stats(demo_id: int):
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    dem_path = str(row["path"])
+    if not Path(dem_path).is_file():
+        raise HTTPException(404, "Demo file not found on disk")
+    out = await index_demo_player_stats(demo_id, dem_path)
+    if out.get("indexed"):
+        await demo_library_hub.notify("player_stats")
+        return {"ok": True, "demo_id": demo_id, "indexed": True, "player_count": int(out.get("player_count") or 0)}
+    return {
+        "ok": False,
+        "demo_id": demo_id,
+        "indexed": False,
+        "player_count": 0,
+        "error": str(out.get("error") or "索引失败"),
+    }
+
+
+@app.get("/api/players/search")
+async def search_players_library(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=100),
+):
+    return {"items": await demo_db.search_players(q, limit=limit)}
 
 
 class BatchResolvePlayersBody(BaseModel):
@@ -975,9 +1182,14 @@ async def patch_demo_display_name(demo_id: int, body: DemoDisplayNamePatch):
 @app.post("/api/demos/scan")
 async def scan_watch_paths():
     if demo_watcher is None:
-        return {"scanned": 0}
+        return {"scanned": 0, "player_stats_index": None}
     scanned = await demo_watcher.scan_existing()
-    return {"scanned": scanned}
+    idx_summary: dict[str, Any] | None = None
+    try:
+        idx_summary = await _index_all_missing_player_stats()
+    except Exception:
+        logger.exception("player stats index batch after scan failed")
+    return {"scanned": scanned, "player_stats_index": idx_summary}
 
 
 @app.post("/api/demos/{demo_id}/parse")
@@ -993,6 +1205,7 @@ async def reparse_demo(demo_id: int):
 
 class DemoAnalyzeRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
+    freeze_to_death_rounds: Optional[list[int]] = None
 
 
 @app.get("/api/demos/{demo_id}/players")
@@ -1021,7 +1234,12 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     dem_path = row["path"]
-    out = await _run_library_demo_analyze(demo_id, dem_path, req.target_players)
+    out = await _run_library_demo_analyze(
+        demo_id,
+        dem_path,
+        req.target_players,
+        req.freeze_to_death_rounds,
+    )
     return {**out, "demo_filename": row["filename"]}
 
 
@@ -1115,6 +1333,11 @@ def _raise_if_cs2_already_running() -> None:
         raise HTTPException(409, CS2_RUNNING_MESSAGE)
 
 
+def _raise_if_config_restore_required() -> None:
+    if is_restore_required():
+        raise HTTPException(status_code=409, detail=CONFIG_RESTORE_REQUIRED)
+
+
 @app.post("/api/record/start")
 async def start_recording(req: RecordRequest):
     cfg = load_config()
@@ -1127,6 +1350,7 @@ async def start_recording(req: RecordRequest):
             "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
         )
     _raise_if_cs2_already_running()
+    _raise_if_config_restore_required()
 
     dem_path = resolve_uploaded_demo_path(req.demo_filename)
 
@@ -1303,6 +1527,7 @@ async def start_batch_recording(req: BatchRecordRequest):
             "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
         )
     _raise_if_cs2_already_running()
+    _raise_if_config_restore_required()
 
     warmup_opts = req.warmup
     wobj: Optional[RecordingWarmupExtras] = None
@@ -1415,6 +1640,38 @@ def record_abort():
         return {"status": "idle", "message": "当前没有进行中的录制"}
     _recording_abort_event.set()
     return {"status": "ok", "message": "已请求中止，正在收尾…"}
+
+
+@app.get("/api/config-backup/status")
+def config_backup_status():
+    return build_config_backup_status_payload()
+
+
+@app.post("/api/config-backup/restore")
+def config_backup_restore():
+    if not is_restore_required():
+        return {"ok": True, "message": "玩家配置状态正常", "restored": 0}
+    if is_cs2_running():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CS2_RUNNING",
+                "message": "CS2 正在运行，请先关闭 CS2 后再恢复玩家配置。",
+            },
+        )
+    res = restore_latest_user_config_backup()
+    if res.get("ok"):
+        return {"ok": True, "message": "玩家配置已恢复", "restored": res.get("restored", 0)}
+    return {
+        "ok": False,
+        "message": "部分配置恢复失败，请检查文件权限或手动打开备份目录。",
+        "failed": res.get("failed") or [],
+    }
+
+
+@app.post("/api/config-backup/open-dir")
+def config_backup_open_dir():
+    return open_backup_directory()
 
 
 @app.post("/api/gsi/cs2")

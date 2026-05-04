@@ -102,6 +102,33 @@ else:
         _fields_ = (("type", wintypes.DWORD), ("u", INPUT_UNION))
 
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    def _query_process_exe_basename(pid: int) -> str | None:
+        """Lowercase basename of the process image, or None if the query fails."""
+        h = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(2048)
+            size = wintypes.DWORD(len(buf))
+            if not kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return None
+            path = buf.value or ""
+            if not path:
+                return None
+            return os.path.basename(path).lower()
+        finally:
+            kernel32.CloseHandle(h)
+
+    def _window_process_exe_basename(hwnd: int) -> str | None:
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return None
+        return _query_process_exe_basename(int(pid.value))
 
     _CONSOLE_TOGGLE_KEYS: dict[str, tuple[int, int]] = {
         "`": (VK_OEM_3, SCAN_OEM_3),
@@ -188,10 +215,18 @@ else:
         user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
 
     def find_cs2_hwnd() -> int:
-        found: list[int] = []
+        """Locate a top-level CS2 window by title prefix, but require ``cs2.exe`` as the owner process.
+
+        Title-only matching falsely triggers on browsers / other apps whose window title
+        contains ``Counter-Strike`` (e.g. Steam store, wiki, streams).
+        """
+        found: int = 0
 
         @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         def _enum(hwnd: int, _lparam: int) -> bool:
+            nonlocal found
+            if found:
+                return False
             if not user32.IsWindowVisible(hwnd):
                 return True
             length = user32.GetWindowTextLengthW(hwnd) + 1
@@ -203,11 +238,13 @@ else:
             low = title.lower()
             if any(x in low for x in ("obs ", "obs studio", "streamlabs")):
                 return True
-            found.append(hwnd)
+            if _window_process_exe_basename(hwnd) != "cs2.exe":
+                return True
+            found = hwnd
             return False
 
         user32.EnumWindows(_enum, 0)
-        return int(found[0]) if found else 0
+        return found
 
     def _focus_hwnd(hwnd: int) -> int:
         """强制把 CS2 窗口置为前台，返回最终实际的前台 hwnd。
