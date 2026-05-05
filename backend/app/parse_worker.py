@@ -10,15 +10,20 @@ from typing import Any, Optional
 
 if __package__:
     from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list
+    from .radar.radar_data_extractor import extract_radar_timeline_impl
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
     from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list
+    from app.radar.radar_data_extractor import extract_radar_timeline_impl
 
 
 def _run(payload: dict) -> object:
     action = str(payload.get("action") or "")
+    if action == "radar_timeline":
+        args = {k: v for k, v in payload.items() if k != "action"}
+        return extract_radar_timeline_impl(**args)
     dem_path = str(payload.get("dem_path") or "")
     if not dem_path:
         raise ValueError("dem_path is required")

@@ -12,6 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+from .radar.radar_composer import RadarOverlaySkip, apply_radar_overlay_to_clip
+
 logger = logging.getLogger(__name__)
 
 
@@ -350,6 +352,8 @@ def compose_montage(
     output_path: Path,
     transitions: Optional[dict[str, Any]] = None,
     clip_row_ids: Optional[list[int]] = None,
+    radar_overlay: Optional[dict[str, Any]] = None,
+    clip_rows: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -364,22 +368,50 @@ def compose_montage(
         raise MontageComposerError(f"BGM 文件不存在: {bgm_path}")
 
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
-    # 以首段为主分辨率 / 帧率
-    ref = probe_video_audio_summary(clip_paths[0], ffprobe)
-    w, h, fps = int(ref["width"]), int(ref["height"]), float(ref["fps"])
-    if w <= 0 or h <= 0:
-        raise MontageComposerError("无法读取首段视频分辨率")
-    fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
-
-    segments: list[Path] = []
-    if intro_path is not None:
-        segments.append(intro_path)
-    segments.extend(clip_paths)
-    if outro_path is not None:
-        segments.append(outro_path)
 
     tmpdir = tempfile.mkdtemp(prefix="cs2_montage_", dir=str(output_path.parent))
     try:
+        working_clip_paths = list(clip_paths)
+        if radar_overlay and radar_overlay.get("enabled"):
+            if not clip_rows or len(clip_rows) != len(clip_paths):
+                raise MontageComposerError("启用雷达覆盖需要完整的片段元数据")
+            radar_stage = Path(tmpdir) / "radar_stage"
+            radar_stage.mkdir(parents=True, exist_ok=True)
+            radar_clip_paths: list[Path] = []
+            for idx, clip_path in enumerate(working_clip_paths):
+                try:
+                    radar_clip_paths.append(
+                        apply_radar_overlay_to_clip(
+                            ffmpeg_bin=ffmpeg_bin,
+                            ffprobe=ffprobe,
+                            clip_path=clip_path,
+                            clip_row=clip_rows[idx],
+                            tmpdir=radar_stage,
+                            index=idx,
+                        ),
+                    )
+                except RadarOverlaySkip as exc:
+                    logger.warning("跳过片段雷达覆盖 clip=%s reason=%s", clip_path, exc)
+                    radar_clip_paths.append(clip_path)
+                except Exception:
+                    logger.exception("片段雷达覆盖失败 clip=%s", clip_path)
+                    radar_clip_paths.append(clip_path)
+            working_clip_paths = radar_clip_paths
+
+        # 以首段为主分辨率 / 帧率
+        ref = probe_video_audio_summary(working_clip_paths[0], ffprobe)
+        w, h, fps = int(ref["width"]), int(ref["height"]), float(ref["fps"])
+        if w <= 0 or h <= 0:
+            raise MontageComposerError("无法读取首段视频分辨率")
+        fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
+
+        segments: list[Path] = []
+        if intro_path is not None:
+            segments.append(intro_path)
+        segments.extend(working_clip_paths)
+        if outro_path is not None:
+            segments.append(outro_path)
+
         normed: list[Path] = []
         for i, seg in enumerate(segments):
             info = probe_video_audio_summary(seg, ffprobe)
@@ -555,14 +587,14 @@ def compose_montage(
             "[aout]",
             "-c:v",
             "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
         r3 = subprocess.run(cmd_mix, capture_output=True, text=True, timeout=3600)
         if r3.returncode != 0:
             raise MontageComposerError(

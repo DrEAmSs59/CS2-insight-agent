@@ -57,6 +57,11 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "ai_commentary",
     "start_tick",
     "end_tick",
+    "map_name",
+    "target_steam_id",
+    "steamid",
+    "record_start_tick",
+    "record_end_tick",
 )
 
 
@@ -2383,6 +2388,8 @@ class OBSDirector:
         if use_smart_jump:
             # 补偿：往前多跳 engine_burn_ticks，确保 OBS 开始录制时刚好到达逻辑起点
             seek_tick = max(0, segments[0][0] - engine_burn_ticks)
+            meta_record_start_tick = _estimated_record_start_tick(seek_tick)
+            meta_record_end_tick = int(segments[-1][1])
             planned_wall_seconds = post_start_seg0 + first_seg_extra + sum(
                 max(0.0, (ee - ss) / float(TICK_RATE)) for ss, ee in segments
             )
@@ -2390,14 +2397,16 @@ class OBSDirector:
             ss0, ee0 = segments[0]
             seek_tick = max(0, ss0 - engine_burn_ticks)
             kill_seg_pad = 0.2
-            record_start_tick = _estimated_record_start_tick(seek_tick)
-            legacy_duration = max(0.0, (ee0 - record_start_tick) / float(TICK_RATE)) + kill_seg_pad
+            meta_record_start_tick = _estimated_record_start_tick(seek_tick)
+            meta_record_end_tick = int(ee0)
+            legacy_duration = max(0.0, (ee0 - meta_record_start_tick) / float(TICK_RATE)) + kill_seg_pad
             planned_wall_seconds = legacy_duration
         else:
             seek_tick = max(0, start_tick - PRE_ROLL_TICKS - engine_burn_ticks)
             tail = 0.2
-            record_start_tick = _estimated_record_start_tick(seek_tick)
-            legacy_duration = max(0.0, (end_tick - record_start_tick) / float(TICK_RATE)) + tail
+            meta_record_start_tick = _estimated_record_start_tick(seek_tick)
+            meta_record_end_tick = int(end_tick)
+            legacy_duration = max(0.0, (end_tick - meta_record_start_tick) / float(TICK_RATE)) + tail
             planned_wall_seconds = legacy_duration
 
         self._set_state(
@@ -2996,6 +3005,8 @@ class OBSDirector:
                 "duration": planned_wall_seconds,
                 "smart_jump_segments": len(segments) if use_smart_jump else 1,
                 "player_name": player_name_for_db,
+                "record_start_tick": meta_record_start_tick,
+                "record_end_tick": meta_record_end_tick,
                 **output_result,
             }
         return {
@@ -3004,6 +3015,8 @@ class OBSDirector:
             "duration": planned_wall_seconds,
             "smart_jump_segments": len(segments) if use_smart_jump else 1,
             "player_name": player_name_for_db,
+            "record_start_tick": meta_record_start_tick,
+            "record_end_tick": meta_record_end_tick,
             **output_result,
         }
 

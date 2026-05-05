@@ -115,3 +115,8 @@ def get_demo_match_summary_isolated(dem_path: str) -> dict:
     if not isinstance(result, dict):
         raise IsolatedParseError("Demo 摘要 worker 返回了无效结果")
     return result
+
+
+def extract_radar_timeline_isolated(**kwargs: Any) -> Any:
+    """parse_ticks 雷达时间线（子进程隔离，避免 demoparser 原生崩溃拖垮服务）。"""
+    return run_parse_worker("radar_timeline", **kwargs)

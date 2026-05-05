@@ -1689,6 +1689,10 @@ def cs2_gsi_status():
 # ─── Montage (V2) ─────────────────────────────────────────────
 
 
+class RadarOverlayOptions(BaseModel):
+    enabled: bool = False
+
+
 class MontageProjectBody(BaseModel):
     project_id: Optional[int] = None
     name: str = ""
@@ -1698,6 +1702,7 @@ class MontageProjectBody(BaseModel):
     outro_path: Optional[str] = None
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
     transitions: Optional[dict[str, Any]] = None
+    radar_overlay: Optional[RadarOverlayOptions] = None
 
 
 @app.get("/api/recorded-clips")
@@ -1731,6 +1736,8 @@ async def save_montage_project(body: MontageProjectBody):
     }
     if body.transitions is not None:
         proj_body["transitions"] = body.transitions
+    if body.radar_overlay is not None:
+        proj_body["radar_overlay"] = body.radar_overlay.model_dump()
     try:
         pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
     except ValueError as e:
@@ -1751,6 +1758,7 @@ class MontageExportBody(BaseModel):
     output_path: str = Field(..., min_length=1, max_length=2048)
     theme_id: Optional[str] = Field(default=None, max_length=64)
     transitions: Optional[dict[str, Any]] = None
+    radar_overlay: Optional[RadarOverlayOptions] = None
 
 
 @app.post("/api/montage/export")
@@ -1790,6 +1798,14 @@ async def montage_export(body: MontageExportBody):
     if transitions_eff is None and isinstance(extras, dict):
         transitions_eff = extras.get("transitions")
 
+    radar_options: dict[str, Any]
+    if body.radar_overlay is not None:
+        radar_options = body.radar_overlay.model_dump()
+    elif isinstance(extras, dict) and isinstance(extras.get("radar_overlay"), dict):
+        radar_options = {"enabled": bool(extras["radar_overlay"].get("enabled"))}
+    else:
+        radar_options = {"enabled": False}
+
     try:
         out = validate_output_path(body.output_path)
     except MontageComposerError as e:
@@ -1797,11 +1813,13 @@ async def montage_export(body: MontageExportBody):
 
     rows = await montage_db.get_recorded_clips_by_ids([int(x) for x in clip_ids])
     clip_paths: list[Path] = []
+    ordered_clip_rows: list[dict[str, Any]] = []
     for cid in clip_ids:
         row = rows.get(int(cid))
         if not row:
             raise HTTPException(400, f"未知的 recorded_clip id: {cid}")
         clip_paths.append(Path(str(row["output_path"])))
+        ordered_clip_rows.append(dict(row))
 
     intro_p = Path(intro_s).expanduser() if intro_s else None
     outro_p = Path(outro_s).expanduser() if outro_s else None
@@ -1816,6 +1834,7 @@ async def montage_export(body: MontageExportBody):
     }
     if isinstance(transitions_eff, dict):
         snap["transitions"] = transitions_eff
+    snap["radar_overlay"] = radar_options
     if body.ordered_ids is not None:
         snap["ordered_ids"] = list(body.ordered_ids)
     if body.theme_id is not None:
@@ -1839,6 +1858,8 @@ async def montage_export(body: MontageExportBody):
             output_path=out,
             transitions=transitions_eff if isinstance(transitions_eff, dict) else None,
             clip_row_ids=[int(x) for x in clip_ids],
+            radar_overlay=radar_options,
+            clip_rows=ordered_clip_rows,
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)

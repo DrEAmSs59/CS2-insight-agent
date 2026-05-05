@@ -451,6 +451,7 @@ export default function MontageWorkbenchDrawer({ open, onClose }) {
   const [projectId, setProjectId] = useState(null);
   const [draftName, setDraftName] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState("custom");
+  const [radarOverlayEnabled, setRadarOverlayEnabled] = useState(false);
   const [filterKey, setFilterKey] = useState("all");
   const [searchQ, setSearchQ] = useState("");
   const [toast, setToast] = useState(null);
@@ -682,18 +683,22 @@ export default function MontageWorkbenchDrawer({ open, onClose }) {
         outro_path: outroPath.trim() || null,
         output_filename: ensureMp4Filename(outputFilename.trim()) || "montage_export.mp4",
         transitions: transitionsPayload,
+        radar_overlay: {
+          enabled: radarOverlayEnabled,
+        },
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
         setTransitionByClipId(hydrateTransitionsFromApi(data.body.transitions));
       }
+      setRadarOverlayEnabled(Boolean(data?.body?.radar_overlay?.enabled));
       showToast("草稿已保存");
     } catch (e) {
       showToast(e.response?.data?.detail || e.message || "保存失败");
     } finally {
       setSavingDraft(false);
     }
-  }, [projectId, draftName, outputFilename, orderedIds, bgmPath, introPath, outroPath, showToast, transitionsPayload]);
+  }, [projectId, draftName, outputFilename, orderedIds, bgmPath, introPath, outroPath, showToast, transitionsPayload, radarOverlayEnabled]);
 
   const runExport = useCallback(async () => {
     const err = validateExport();
@@ -718,6 +723,9 @@ export default function MontageWorkbenchDrawer({ open, onClose }) {
         outro_path: outroPath.trim() || null,
         output_path: outPath,
         theme_id: selectedThemeId,
+        radar_overlay: {
+          enabled: radarOverlayEnabled,
+        },
       });
       setLastExport({ ok: true, ...data });
       showToast("合辑导出完成");
@@ -739,6 +747,7 @@ export default function MontageWorkbenchDrawer({ open, onClose }) {
     effectiveOutputDir,
     outputFilename,
     selectedThemeId,
+    radarOverlayEnabled,
     showToast,
   ]);
 
@@ -1350,6 +1359,29 @@ export default function MontageWorkbenchDrawer({ open, onClose }) {
               </div>
               <div className="space-y-4 px-3 py-3">
                 <MontageThemeSelector themes={MONTAGE_THEMES} selectedThemeId={selectedThemeId} onSelectTheme={onSelectTheme} />
+
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100">后期雷达覆盖</div>
+                      <div className="mt-1 text-xs leading-relaxed text-zinc-500">
+                        导出时基于 Demo 坐标生成右上角 POV 小地图，仅显示自己和队友，不显示敌人。
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setRadarOverlayEnabled((prev) => !prev)}
+                      className={
+                        radarOverlayEnabled
+                          ? "rounded-lg bg-cs2-orange px-3 py-1.5 text-xs font-semibold text-black"
+                          : "rounded-lg border border-white/10 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300"
+                      }
+                    >
+                      {radarOverlayEnabled ? "已开启" : "关闭"}
+                    </button>
+                  </div>
+                </div>
 
                 <div className="rounded-lg border border-white/10 bg-black/25 p-3">
                   <p className="text-[11px] font-semibold text-zinc-200">转场风格</p>
