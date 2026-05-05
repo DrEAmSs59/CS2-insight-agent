@@ -165,9 +165,14 @@ def _probe_duration_sec(ffprobe: Path, clip_path: Path) -> float:
 
 
 def _overlay_xy(video_width: int) -> tuple[int, int]:
-    x = max(RADAR_MARGIN, video_width - RADAR_SIZE - RADAR_MARGIN)
-    y = RADAR_MARGIN
-    return x, y
+    """
+    后期雷达固定覆盖到视频左上角。
+
+    video_width 参数保留是为了兼容现有调用处。
+    左上角位置不需要依赖视频宽度。
+    """
+    _ = video_width
+    return RADAR_MARGIN, RADAR_MARGIN
 
 
 def apply_radar_overlay_to_clip(

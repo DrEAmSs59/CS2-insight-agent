@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 from typing import Any
@@ -8,13 +9,49 @@ from PIL import Image, ImageDraw, ImageEnhance
 
 from app.radar.map_calibration import RadarMapError, get_map_calibration, world_to_radar_xy
 
+logger = logging.getLogger(__name__)
 
 SELF_COLOR = (255, 180, 64, 255)
 TEAMMATE_COLOR = (120, 190, 255, 255)
 BORDER_COLOR = (255, 255, 255, 160)
-SHADE_COLOR = (0, 0, 0, 22)
+SHADE_COLOR = (0, 0, 0, 8)
 
 _INNER_PAD = 14.0
+
+
+def _validate_map_image(map_img: Image.Image, map_name: str, image_path: str) -> None:
+    """
+    防止透明图、纯黑图、占位图被当成正常雷达底图使用。
+    这些情况会导致最终合成出来的雷达是一块黑色区域。
+    """
+    w, h = map_img.size
+
+    if w < 256 or h < 256:
+        raise RadarMapError(f"雷达底图尺寸异常: {map_name} {w}x{h}, path={image_path}")
+
+    rgba = map_img.convert("RGBA")
+
+    alpha = rgba.getchannel("A")
+    alpha_bbox = alpha.getbbox()
+
+    if alpha_bbox is None:
+        raise RadarMapError(f"雷达底图全透明: {map_name}, path={image_path}")
+
+    sample = rgba.resize((64, 64))
+    pixels = list(sample.getdata())
+
+    visible_pixels = [p for p in pixels if p[3] > 16]
+
+    if not visible_pixels:
+        raise RadarMapError(f"雷达底图没有可见像素: {map_name}, path={image_path}")
+
+    avg_brightness = sum((r + g + b) / 3 for r, g, b, a in visible_pixels) / len(visible_pixels)
+
+    if avg_brightness < 8:
+        raise RadarMapError(
+            f"雷达底图过暗，疑似黑图或占位图: "
+            f"{map_name}, brightness={avg_brightness:.2f}, path={image_path}"
+        )
 
 
 def _draw_triangle(
@@ -119,7 +156,16 @@ def render_radar_frames(
     except RadarMapError:
         raise
     map_img = Image.open(cfg["image_path"]).convert("RGBA")
+    ipath = str(cfg["image_path"])
+    _validate_map_image(map_img, map_name, ipath)
     source_w, source_h = map_img.size
+    logger.info(
+        "加载雷达底图: map=%s path=%s size=%sx%s",
+        map_name,
+        ipath,
+        source_w,
+        source_h,
+    )
 
     bounds = _timeline_radar_bounds(timeline, cfg)
 
