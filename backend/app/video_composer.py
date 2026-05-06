@@ -145,15 +145,20 @@ def validate_output_path(path_str: str) -> Path:
     return resolved
 
 
-def build_bgm_filter(video_duration_sec: float, bgm_input_label: str = "[1:a]") -> str:
+def build_bgm_filter(
+    video_duration_sec: float,
+    bgm_input_label: str = "[1:a]",
+    volume: float = 1.0,
+) -> str:
     """
     生成将 BGM 对齐到成片时长的 filter 片段（不含 amix）。
     BGM 短于成片则循环；长于成片则裁剪。
     """
     d = max(0.01, float(video_duration_sec))
-    # aloop 用于延长短音频；atrim 裁到视频时长
+    vol = max(0.0, min(2.0, float(volume)))
     return (
-        f"{bgm_input_label}aloop=loop=-1:size=2e+09,atrim=0:{d:.6f},asetpts=N/SR/TB[bgmtrim]"
+        f"{bgm_input_label}aloop=loop=-1:size=2e+09,atrim=0:{d:.6f},asetpts=N/SR/TB,"
+        f"volume={vol:.6f}[bgmtrim]"
     )
 
 
@@ -258,7 +263,7 @@ def _clamp_xfade_duration(
     if trans_type == "none":
         return frame
     base = requested if requested > 1e-6 else 0.25
-    return max(frame, min(base, cap, 2.0))
+    return max(frame, min(base, cap, 1.5))
 
 
 def _montage_xfade_chain_to_ts(
@@ -354,6 +359,7 @@ def compose_montage(
     clip_row_ids: Optional[list[int]] = None,
     radar_overlay: Optional[dict[str, Any]] = None,
     clip_rows: Optional[list[dict[str, Any]]] = None,
+    bgm_volume: Optional[float] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -564,9 +570,11 @@ def compose_montage(
             shutil.move(str(mid_playable), str(output_path))
             return
 
+        bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
+
         fc_mix = (
             f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
-            f"{build_bgm_filter(vdur, '[1:a]')};"
+            f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol)};"
             f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
         )
         cmd_mix = [

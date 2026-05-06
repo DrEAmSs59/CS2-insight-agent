@@ -135,6 +135,26 @@ export const useRecordingQueue = create((set, get) => ({
     set((s) => ({ queue: s.queue.filter((q) => q.id !== id) }));
   },
 
+  /**
+   * 拖拽重排：将 `fromIndex` 移至 `toIndex`（0-based，与列表渲染顺序一致）。
+   * @param {number} fromIndex
+   * @param {number} toIndex
+   */
+  reorderQueue(fromIndex, toIndex) {
+    set((s) => {
+      const n = s.queue.length;
+      if (n <= 1) return s;
+      const a = Math.floor(Number(fromIndex));
+      const b = Math.floor(Number(toIndex));
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return s;
+      if (a < 0 || a >= n || b < 0 || b >= n || a === b) return s;
+      const next = [...s.queue];
+      const [item] = next.splice(a, 1);
+      next.splice(b, 0, item);
+      return { queue: next };
+    });
+  },
+
   clearQueue() {
     set({ queue: [] });
   },

@@ -70,6 +70,53 @@ export function getClipTitle(clip) {
   return clip.clip_id ? `片段 ${clip.clip_id}` : "未命名片段";
 }
 
+/** 合集 compilation_kind → 简短中文（仅 UI） */
+export const COMPILATION_KIND_ZH = {
+  rival_kills: "亲儿子喂饭",
+  all_kills: "全部击杀",
+  nemesis_deaths: "本命苦主",
+  all_deaths: "全部死亡",
+  freeze_to_death: "回合死亡合集",
+};
+
+export function humanizeCompilationKind(kind) {
+  if (kind == null || kind === "") return "";
+  const k = String(kind);
+  return COMPILATION_KIND_ZH[k] || k;
+}
+
+/** 队列/检查器展示用：无标题时避免只显示 `片段 c_xxx` 技术 id。 */
+export function friendlyClipTitleForQueue(clip) {
+  if (!clip || typeof clip !== "object") return "未命名片段";
+  const raw = getClipTitle(clip);
+  if (typeof raw !== "string" || !/^片段\s+c_[a-f0-9]{6,}$/i.test(raw.trim())) {
+    return raw;
+  }
+  const tags = Array.isArray(clip.context_tags) ? clip.context_tags : [];
+  for (const t of tags) {
+    if (typeof t === "string" && t.trim()) return t.trim();
+  }
+  const map = String(clip.map_name || clip.map || "").trim();
+  const cat = String(clip.category || "");
+  const kind = String(clip.compilation_kind || "");
+  const typeBase =
+    cat === "highlight"
+      ? "高光片段"
+      : cat === "fail"
+        ? "下饭片段"
+        : cat === "meme_death"
+          ? "梗死亡片段"
+          : cat === "compilation"
+            ? kind
+              ? `合集 · ${humanizeCompilationKind(kind)}`
+              : "合集片段"
+            : "片段";
+  return map ? `${typeBase} · ${map}` : typeBase;
+}
+
+/** CS2 录像 tickrate（与后端 demo_parser.TICK_RATE 一致，用于粗算时长） */
+export const DEMO_TICK_RATE = 64;
+
 export function getClipDurationSeconds(clip) {
   if (!clip || typeof clip !== "object") return null;
   const keys = ["duration_sec", "duration", "length_sec", "length"];
@@ -79,7 +126,31 @@ export function getClipDurationSeconds(clip) {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 0) return n;
   }
+  const st = Number(clip.start_tick);
+  const et = Number(clip.end_tick);
+  if (Number.isFinite(st) && Number.isFinite(et) && et > st) {
+    return (et - st) / DEMO_TICK_RATE;
+  }
   return null;
+}
+
+/**
+ * 亲儿子喂饭 / 全部击杀：按 source_ticks 累加各段跨度（秒）。
+ * @param {Record<string, unknown>} clip
+ */
+export function getCompilationSourceTicksSpanSeconds(clip) {
+  const raw = clip?.source_ticks;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const kind = String(clip?.compilation_kind || "");
+  if (kind !== "rival_kills" && kind !== "all_kills") return null;
+  let sum = 0;
+  for (const p of raw) {
+    if (!Array.isArray(p) || p.length < 2) continue;
+    const a = Number(p[0]);
+    const b = Number(p[1]);
+    if (Number.isFinite(a) && Number.isFinite(b) && b > a) sum += (b - a) / DEMO_TICK_RATE;
+  }
+  return sum > 0 ? sum : null;
 }
 
 export function formatDuration(seconds) {
@@ -215,10 +286,42 @@ function typeRankForFunnyFirst(t) {
   return i >= 0 ? i : 99;
 }
 
-/** strategies: timeline | score | funny_first | highlight_last */
+/** strategies: timeline | score | funny_first | highlight_first | highlight_last | random | rhythm */
 export function sortClipsByStrategy(clipsInOrder, strategy) {
   if (!Array.isArray(clipsInOrder) || clipsInOrder.length === 0) return [];
   const indexed = clipsInOrder.map((c, i) => ({ c, i }));
+
+  if (strategy === "random") {
+    const shuffled = [...indexed];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.map((x) => x.c);
+  }
+
+  if (strategy === "rhythm") {
+    const hl = indexed.filter(({ c }) => c.category === "highlight").map((x) => x.c);
+    const fd = indexed.filter(({ c }) => c.category === "fail" || c.category === "meme_death").map((x) => x.c);
+    const comp = indexed.filter(({ c }) => c.category === "compilation").map((x) => x.c);
+    const rest = indexed
+      .filter(
+        ({ c }) =>
+          c.category !== "highlight" &&
+          c.category !== "fail" &&
+          c.category !== "meme_death" &&
+          c.category !== "compilation",
+      )
+      .map((x) => x.c);
+    const qs = [hl, fd, comp, rest].filter((q) => q.length > 0);
+    const out = [];
+    while (qs.some((q) => q.length)) {
+      for (const q of qs) {
+        if (q.length) out.push(q.shift());
+      }
+    }
+    return out;
+  }
 
   if (strategy === "timeline") {
     return [...indexed].sort((a, b) => compareTimeline(a.c, b.c) || a.i - b.i).map((x) => x.c);
@@ -257,7 +360,100 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
     }).map((x) => x.c);
   }
 
+  if (strategy === "highlight_first") {
+    return [...indexed].sort((a, b) => {
+      const ta = normalizeClipType(a.c);
+      const tb = normalizeClipType(b.c);
+      const ha = ta === "高光" ? 1 : 0;
+      const hb = tb === "高光" ? 1 : 0;
+      if (ha !== hb) return hb - ha;
+      return a.i - b.i;
+    }).map((x) => x.c);
+  }
+
   return [...clipsInOrder];
+}
+
+/** Timeline block coloring: ace | multikill | pov | fail | compilation | highlight */
+export function getMontageTimelineVariant(clip) {
+  if (!clip || typeof clip !== "object") return "neutral";
+  const cat = String(clip.category || "").toLowerCase();
+  if (cat === "fail" || cat === "meme_death") return "fail";
+  if (cat === "compilation") return "compilation";
+  const tags = Array.isArray(clip.context_tags) ? clip.context_tags : [];
+  if (tags.some((t) => String(t).includes("ACE") || String(t).includes("五杀"))) return "ace";
+  const kc = Number(clip.kill_count);
+  if (Number.isFinite(kc) && kc >= 5) return "ace";
+  if (Number.isFinite(kc) && kc >= 3) return "multikill";
+  if (cat === "highlight") return "highlight";
+  if (clip.player_name && String(clip.player_name).trim()) return "pov";
+  return "neutral";
+}
+
+/** 0–1 强度：用于节奏可视化（ACE / 多杀偏高，下饭偏低；时长略加权）。 */
+export function getClipPacingIntensity(clip, maxDurSeconds) {
+  const v = getMontageTimelineVariant(clip);
+  let base = 0.34;
+  if (v === "ace") base = 1;
+  else if (v === "multikill") base = 0.84;
+  else if (v === "highlight") base = 0.62;
+  else if (v === "compilation") base = 0.52;
+  else if (v === "pov") base = 0.46;
+  else if (v === "fail") base = 0.36;
+  const dur = getClipDurationSeconds(clip);
+  let durBoost = 1;
+  if (dur != null && Number.isFinite(maxDurSeconds) && maxDurSeconds > 0.01) {
+    durBoost = 0.62 + 0.38 * Math.min(1, dur / maxDurSeconds);
+  }
+  return Math.min(1, base * durBoost);
+}
+
+export function mapNameFromClip(clip) {
+  if (!clip || typeof clip !== "object") return "";
+  const m =
+    (clip.map_name && String(clip.map_name).trim()) ||
+    (clip.map && String(clip.map).trim()) ||
+    (clip.demo_map && String(clip.demo_map).trim()) ||
+    "";
+  if (m) return m;
+  const df = clip.demo_filename && String(clip.demo_filename).replace(/\.[^.]+$/, "").trim();
+  return df || "";
+}
+
+/** 编排时间线徽标：仅 高光 / 下饭 / 合集（不展示 ACE、几 K 等细分）。 */
+export function getMontageBlockShortLabel(clip) {
+  if (!clip || typeof clip !== "object") return "高光";
+  const cat = String(clip.category || "").toLowerCase();
+  if (cat === "compilation") return "合集";
+  if (cat === "fail" || cat === "meme_death") return "下饭";
+  return "高光";
+}
+
+/** 入库录像卡片：回放视角中文（避免使用 POV / 跟播 等说法） */
+export function getRecordedClipPerspectiveZh(clip) {
+  if (!clip || typeof clip !== "object") return "观战视角";
+  const pn = String(clip.player_name || "").trim();
+  const pnNorm = pn.toLowerCase();
+  const killer = String(clip.killer_name || "").trim();
+  const killerNorm = killer.toLowerCase();
+  const victims = Array.isArray(clip.victims) ? clip.victims : [];
+  const hasVictimNames = victims.some((v) => String(v || "").trim());
+  const cat = String(clip.category || "").toLowerCase();
+
+  const matchesVictim = pnNorm && victims.some((v) => String(v || "").trim().toLowerCase() === pnNorm);
+  const matchesKiller = pnNorm && killerNorm && pnNorm === killerNorm;
+
+  if (matchesVictim && matchesKiller) return "含受害者与击杀者视角";
+  if (matchesVictim) return "受害者视角";
+  if (matchesKiller) return "击杀者视角";
+
+  const segs = clip.record_segments;
+  if (Array.isArray(segs) && segs.length > 1) return "含受害者视角";
+
+  if ((cat === "highlight" || cat === "compilation") && hasVictimNames) return "含受害者视角";
+
+  if (pn) return "玩家视角";
+  return "观战视角";
 }
 
 export function buildDefaultExportName(themeId) {

@@ -1691,6 +1691,10 @@ def cs2_gsi_status():
 
 class RadarOverlayOptions(BaseModel):
     enabled: bool = False
+    hud_overlay: bool = False
+    killfeed_overlay: bool = False
+    crosshair_overlay: bool = False
+    lens_overlay: bool = False
 
 
 class MontageProjectBody(BaseModel):
@@ -1703,6 +1707,8 @@ class MontageProjectBody(BaseModel):
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
     transitions: Optional[dict[str, Any]] = None
     radar_overlay: Optional[RadarOverlayOptions] = None
+    theme_id: Optional[str] = Field(default=None, max_length=64)
+    bgm_volume: Optional[float] = None
 
 
 @app.get("/api/recorded-clips")
@@ -1738,6 +1744,15 @@ async def save_montage_project(body: MontageProjectBody):
         proj_body["transitions"] = body.transitions
     if body.radar_overlay is not None:
         proj_body["radar_overlay"] = body.radar_overlay.model_dump()
+    if body.theme_id is not None:
+        tid = str(body.theme_id).strip()
+        if tid:
+            proj_body["theme_id"] = tid
+    if body.bgm_volume is not None:
+        try:
+            proj_body["bgm_volume"] = max(0.0, min(2.0, float(body.bgm_volume)))
+        except (TypeError, ValueError):
+            pass
     try:
         pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
     except ValueError as e:
@@ -1753,6 +1768,7 @@ class MontageExportBody(BaseModel):
     recorded_clip_ids: Optional[list[int]] = None
     ordered_ids: Optional[list[str]] = None
     bgm_path: Optional[str] = None
+    bgm_volume: Optional[float] = None
     intro_path: Optional[str] = None
     outro_path: Optional[str] = None
     output_path: str = Field(..., min_length=1, max_length=2048)
@@ -1794,17 +1810,43 @@ async def montage_export(body: MontageExportBody):
     intro_s = _coalesce(body.intro_path, "intro_path")
     outro_s = _coalesce(body.outro_path, "outro_path")
 
+    def _coalesce_volume(req_val: Optional[float], key: str) -> Optional[float]:
+        if req_val is not None:
+            try:
+                return max(0.0, min(2.0, float(req_val)))
+            except (TypeError, ValueError):
+                return None
+        if not isinstance(extras, dict):
+            return None
+        v = extras.get(key)
+        if v is None:
+            return None
+        try:
+            return max(0.0, min(2.0, float(v)))
+        except (TypeError, ValueError):
+            return None
+
+    bgm_volume_eff = _coalesce_volume(body.bgm_volume, "bgm_volume")
+
     transitions_eff: Any = body.transitions
     if transitions_eff is None and isinstance(extras, dict):
         transitions_eff = extras.get("transitions")
 
-    radar_options: dict[str, Any]
+    radar_defaults: dict[str, Any] = {
+        "enabled": False,
+        "hud_overlay": False,
+        "killfeed_overlay": False,
+        "crosshair_overlay": False,
+        "lens_overlay": False,
+    }
+    radar_options = dict(radar_defaults)
+    if isinstance(extras, dict) and isinstance(extras.get("radar_overlay"), dict):
+        ro = extras["radar_overlay"]
+        for k in radar_defaults:
+            if k in ro:
+                radar_options[k] = bool(ro[k])
     if body.radar_overlay is not None:
-        radar_options = body.radar_overlay.model_dump()
-    elif isinstance(extras, dict) and isinstance(extras.get("radar_overlay"), dict):
-        radar_options = {"enabled": bool(extras["radar_overlay"].get("enabled"))}
-    else:
-        radar_options = {"enabled": False}
+        radar_options.update(body.radar_overlay.model_dump())
 
     try:
         out = validate_output_path(body.output_path)
@@ -1841,6 +1883,8 @@ async def montage_export(body: MontageExportBody):
         tid = str(body.theme_id).strip()
         if tid:
             snap["theme_id"] = tid
+    if bgm_volume_eff is not None:
+        snap["bgm_volume"] = bgm_volume_eff
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -1860,6 +1904,7 @@ async def montage_export(body: MontageExportBody):
             clip_row_ids=[int(x) for x in clip_ids],
             radar_overlay=radar_options,
             clip_rows=ordered_clip_rows,
+            bgm_volume=bgm_volume_eff,
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)

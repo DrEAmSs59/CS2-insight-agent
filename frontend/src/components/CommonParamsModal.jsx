@@ -22,12 +22,14 @@ const FB_KILL_POST = 1.5;
 export default function CommonParamsModal({
   open,
   onClose,
+  variant = "modal",
   batchRecording,
   savedWarmupDefaults,
   onPersistWarmupDefaults,
   experimentalPovEnabled,
   onExperimentalPovChange,
 }) {
+  const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
   const resetNumericGlobalPacing = useRecordingQueue((s) => s.resetGlobalPacing);
@@ -55,12 +57,12 @@ export default function CommonParamsModal({
   const [warmupResolutionError, setWarmupResolutionError] = useState("");
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !isPage) return;
     setWarmupResolutionError("");
-  }, [open]);
+  }, [open, isPage]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !isPage) return;
     const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
     const o = savedWarmupDefaults;
     if (o && typeof o === "object" && !Array.isArray(o)) {
@@ -76,14 +78,14 @@ export default function CommonParamsModal({
     }
     setWarmupOpts(base);
     // 仅在打开时从 props 快照初始化；保存回写父 state 时不重置正在编辑的内容
-  }, [open]);
+  }, [open, isPage]);
 
   const patchWarmup = useCallback((patch) => {
     setWarmupOpts((prev) => ({ ...prev, ...patch }));
   }, []);
 
   useEffect(() => {
-    if (!open || !onPersistWarmupDefaults) return;
+    if ((!open && !isPage) || !onPersistWarmupDefaults) return;
     const t = setTimeout(() => {
       const vr = validateWarmupResolution(warmupOpts);
       if (!vr.ok) {
@@ -94,21 +96,17 @@ export default function CommonParamsModal({
       onPersistWarmupDefaults(warmupUiOptsToPersisted(warmupOpts));
     }, 500);
     return () => clearTimeout(t);
-  }, [warmupOpts, open, onPersistWarmupDefaults]);
+  }, [warmupOpts, open, isPage, onPersistWarmupDefaults]);
 
-  if (!open) return null;
+  if (!open && !isPage) return null;
 
-  return (
-    <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-3 py-6 backdrop-blur-sm sm:px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="common-params-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
+  const cardShell = isPage
+    ? "flex max-h-none min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-xl"
+    : "flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl";
+
+  const body = (
+    <>
+      <div className={cardShell}>
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0 pr-2">
             <h2 id="common-params-title" className="text-sm font-bold text-white">
@@ -121,14 +119,16 @@ export default function CommonParamsModal({
               的片段；录制前观战选项在批量录制确认时也会沿用此处默认值。
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
-            aria-label="关闭"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {!isPage ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              aria-label="关闭"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5">
@@ -548,7 +548,7 @@ export default function CommonParamsModal({
               </section>
 
               <ExperimentalPovSection
-                visible={open}
+                visible={open || isPage}
                 experimentalPovEnabled={experimentalPovEnabled}
                 onExperimentalPovChange={onExperimentalPovChange}
                 checkboxDisabled={batchRecording || !onExperimentalPovChange}
@@ -572,16 +572,40 @@ export default function CommonParamsModal({
 
         </div>
 
-        <div className="shrink-0 border-t border-white/[0.08] bg-black/35 px-4 py-3 sm:px-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full rounded-lg bg-cs2-orange py-2 text-sm font-extrabold text-black hover:bg-cs2-orange-light sm:w-auto sm:px-6"
-          >
-            完成
-          </button>
-        </div>
+        {!isPage ? (
+          <div className="shrink-0 border-t border-white/[0.08] bg-black/35 px-4 py-3 sm:px-5">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-lg bg-cs2-orange py-2 text-sm font-extrabold text-black hover:bg-cs2-orange-light sm:w-auto sm:px-6"
+            >
+              完成
+            </button>
+          </div>
+        ) : null}
       </div>
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <div className="mx-auto h-full min-h-0 w-full max-w-5xl px-4 py-5 pb-10 sm:px-5">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-3 py-6 backdrop-blur-sm sm:px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="common-params-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {body}
     </div>
   );
 }

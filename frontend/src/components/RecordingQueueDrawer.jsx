@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   Package,
-  X,
   Trash2,
   ChevronRight,
   Rocket,
@@ -26,7 +25,7 @@ function groupByDemo(queue) {
   return Array.from(map.entries());
 }
 
-function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) {
+export function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) {
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const gp = globalPacing || {};
   const po = item.pacing_override || {};
@@ -225,7 +224,7 @@ function PacingMicroPanel({ item, expanded, onToggleExpand, updateItemPacing }) 
  * 高光片段 → 受害者视角；失误片段 → 击杀者视角。
  * 开关与独立时序参数均存入 item.pacing_override。
  */
-function PovSection({ item, updateItemPacing }) {
+export function PovSection({ item, updateItemPacing }) {
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const gp = globalPacing || {};
   const po = item.pacing_override || {};
@@ -473,8 +472,16 @@ function allEligibleKillerPovEnabled(queue) {
 }
 
 /** 全局节奏设置面板（折叠式） */
-function GlobalPacingPanel({ globalPacing, setGlobalPacing, resetGlobalPacing, queue, onToggleAllVictimPov, onToggleAllKillerPov }) {
-  const [open, setOpen] = useState(false);
+export function GlobalPacingPanel({
+  globalPacing,
+  setGlobalPacing,
+  resetGlobalPacing,
+  queue,
+  onToggleAllVictimPov,
+  onToggleAllKillerPov,
+  defaultExpanded = false,
+}) {
+  const [open, setOpen] = useState(defaultExpanded);
   const post = globalPacing.post_last_sec ?? DEFAULT_PACING.post_last_sec;
   const pre  = globalPacing.pre_first_sec ?? DEFAULT_PACING.pre_first_sec;
   const gap  = globalPacing.max_gap_sec   ?? DEFAULT_PACING.max_gap_sec;
@@ -644,9 +651,8 @@ function GlobalPacingPanel({ globalPacing, setGlobalPacing, resetGlobalPacing, q
   );
 }
 
-export default function RecordingQueueDrawer({
-  open,
-  onClose,
+/** 录制队列主面板（页面与旧版抽屉共用） */
+export function RecordingQueuePanel({
   queue,
   onRemove,
   onClear,
@@ -663,21 +669,8 @@ export default function RecordingQueueDrawer({
   const toggleVictimPovForAllHighlightsInQueue = useRecordingQueue((s) => s.toggleVictimPovForAllHighlightsInQueue);
   const toggleKillerPovForAllEligibleInQueue = useRecordingQueue((s) => s.toggleKillerPovForAllEligibleInQueue);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[90] flex justify-end bg-black/50 backdrop-blur-[2px]" role="presentation">
-      <button
-        type="button"
-        className="h-full min-w-0 flex-1 cursor-default"
-        aria-label="关闭抽屉背景"
-        onClick={onClose}
-      />
-      <aside
-        className="flex h-full w-full max-w-md flex-col border-l border-white/10 bg-cs2-bg-sidebar shadow-2xl"
-        role="dialog"
-        aria-labelledby="queue-drawer-title"
-      >
+    <div className="flex h-full min-h-0 w-full max-w-3xl flex-col border border-white/10 bg-cs2-bg-sidebar shadow-xl lg:max-w-none lg:border-l lg:border-y-0 lg:border-r-0">
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h2 id="queue-drawer-title" className="flex items-center gap-2 text-sm font-bold text-white">
             <Package className="h-4 w-4 text-cs2-orange" />
@@ -686,14 +679,6 @@ export default function RecordingQueueDrawer({
               {queue.length}
             </span>
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-2 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
-            aria-label="关闭"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
         {/* 全局节奏设置 */}
@@ -838,6 +823,17 @@ export default function RecordingQueueDrawer({
             </button>
           ) : null}
         </div>
+    </div>
+  );
+}
+
+export default function RecordingQueueDrawer({ open, onClose, ...rest }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[90] flex justify-end bg-black/50 backdrop-blur-[2px]" role="presentation">
+      <button type="button" className="h-full min-w-0 flex-1 cursor-default" aria-label="关闭抽屉背景" onClick={onClose} />
+      <aside className="flex h-full w-full max-w-md flex-col border-l border-white/10 bg-cs2-bg-sidebar shadow-2xl" role="dialog">
+        <RecordingQueuePanel {...rest} />
       </aside>
     </div>
   );

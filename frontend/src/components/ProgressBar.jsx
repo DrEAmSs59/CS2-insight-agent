@@ -1,12 +1,29 @@
-import { Loader2, OctagonX } from "lucide-react";
+import { Loader2, OctagonX, X } from "lucide-react";
 
-export default function ProgressBar({ text, active, batchRecording = false, onAbortBatch }) {
+export default function ProgressBar({
+  text,
+  active,
+  batchRecording = false,
+  onAbortBatch,
+  dismissible = false,
+  onDismiss,
+}) {
   const showSpinner = active || batchRecording;
   return (
-    <div className="bg-cs2-bg-card rounded-xl border border-cs2-border p-4">
+    <div className="relative bg-cs2-bg-card rounded-xl border border-cs2-border p-4">
       <div className="flex flex-wrap items-center gap-3">
         {showSpinner && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs2-orange" aria-hidden />}
         <span className="min-w-0 flex-1 text-xs font-mono text-cs2-text-secondary">{text}</span>
+        {dismissible && typeof onDismiss === "function" ? (
+          <button
+            type="button"
+            onClick={() => onDismiss()}
+            className="inline-flex shrink-0 rounded-md border border-white/12 p-1.5 text-zinc-500 transition-colors hover:border-white/25 hover:text-zinc-200"
+            aria-label="关闭通知"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {batchRecording && typeof onAbortBatch === "function" ? (
           <button
             type="button"

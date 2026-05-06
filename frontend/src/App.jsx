@@ -1,262 +1,36 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import axios from "axios";
-import Sidebar from "./components/Sidebar";
-import DemoUpload from "./components/DemoUpload";
-import PlayerSelect from "./components/PlayerSelect";
-import MatchScoreboard from "./components/MatchScoreboard";
-import ClipList from "./components/ClipList";
-import ActionBar from "./components/ActionBar";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { AppShellProvider } from "./context/AppShellContext";
+import SidebarNav from "./components/SidebarNav";
+import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
-import MatchSwitcher from "./components/MatchSwitcher";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
-import RecordingQueueDrawer from "./components/RecordingQueueDrawer";
-import MontageWorkbenchDrawer from "./components/MontageWorkbenchDrawer";
-import CommonParamsModal from "./components/CommonParamsModal";
-import { useRecordingQueue, stripGlobalPacingMetaKeys } from "./stores/recordingQueueStore";
-import { ensureClientClipUidsOnClips, stripClientClipUid } from "./utils/clipClientUid";
+import DashboardPage from "./pages/DashboardPage";
+import DemoLibraryPage from "./pages/DemoLibraryPage";
+import AnalysisPage from "./pages/AnalysisPage";
+import RecordingQueuePage from "./pages/RecordingQueuePage";
+import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
+import CommonParamsPage from "./pages/CommonParamsPage";
+import SettingsPage from "./pages/SettingsPage";
+import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
+import { useRecordingQueue } from "./stores/recordingQueueStore";
+import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
 } from "./utils/freezeToDeathRoundFilter";
 import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
-import {
-  Package,
-  RefreshCw,
-  Loader2,
-  FolderSync,
-  Trash2,
-  RotateCw,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  Pencil,
-  Search,
-  ShieldAlert,
-  SlidersHorizontal,
-  FolderOpen,
-  AlertTriangle,
-  X,
-} from "lucide-react";
+import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
+import { formatRecordingApiError } from "./utils/formatRecordingApiError";
+import { Loader2 } from "lucide-react";
 
 const API = axios.create({ baseURL: "/api" });
 
-/** Demo 库地图筛选下拉项（顺序固定）。 */
-const DEMO_LIBRARY_MAP_OPTIONS = [
-  "de_dust2",
-  "de_mirage",
-  "de_inferno",
-  "de_ancient",
-  "de_nuke",
-  "de_anubis",
-  "de_overpass",
-  "de_train",
-  "de_cache",
-  "de_vertigo",
-];
-
-const DEMO_LIBRARY_STATUS_FILTER_OPTIONS = [
-  { value: "pending", label: "待解析" },
-  { value: "done", label: "已完成" },
-  { value: "error", label: "解析失败" },
-];
-
-const DEMO_LIBRARY_STATUS_LABELS = {
-  pending: "待解析",
-  done: "已完成",
-  parsed: "已完成",
-  error: "解析失败",
-};
-
-function demoLibraryStatusLabel(code) {
-  if (code == null || code === "") return "—";
-  const key = String(code).trim().toLowerCase();
-  return DEMO_LIBRARY_STATUS_LABELS[key] ?? String(code);
-}
-
-/**
- * 推断对话框副标题：根据后端返回的 detail 文本判定具体阻断场景。
- * 与原 "CS2 正在运行" 路径共用同一个对话框组件，保持视觉风格统一。
- */
-function recordingBlockedSubtitle(message) {
-  const m = String(message || "");
-  if (
-    m.includes("分辨率") ||
-    m.includes("屏幕比例") ||
-    m.includes("宽高") ||
-    m.includes("启动分辨率") ||
-    m.includes("所选屏幕比例") ||
-    m.includes("填写启动分辨率")
-  ) {
-    return "录制预热选项未通过校验";
-  }
-  if (m.includes("GSI") || m.includes("未就绪") || m.includes("未进入游戏")) {
-    return "CS2 未在限定时间内进入游戏画面";
-  }
-  if (m.includes("正在运行") || m.includes("CS2") && m.includes("退出")) {
-    return "当前检测到 CS2 正在运行";
-  }
-  if (m.includes("已有录制任务")) {
-    return "已有录制任务进行中";
-  }
-  if (m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复")) {
-    return "玩家配置需要先恢复";
-  }
-  return "录制启动条件未满足";
-}
-
-/** 提取 FastAPI / axios 报错文案（含 422 校验数组）。 */
-function formatRecordingApiError(e) {
-  const data = e?.response?.data;
-  const d = data?.detail;
-  if (typeof d === "string") return d;
-  if (Array.isArray(d)) {
-    return d
-      .map((item) => {
-        if (item && typeof item === "object" && item.msg != null) return String(item.msg);
-        try {
-          return JSON.stringify(item);
-        } catch {
-          return String(item);
-        }
-      })
-      .join(" ");
-  }
-  if (d != null && typeof d === "object") {
-    if (typeof d.message === "string") return d.message;
-    try {
-      return JSON.stringify(d);
-    } catch {
-      /* fallthrough */
-    }
-  }
-  return String(e?.message || "请求失败");
-}
-
-function RecordingBlockedDialog({ message, onClose }) {
-  if (!message) return null;
-  const subtitle = recordingBlockedSubtitle(message);
-  return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="recording-blocked-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
-          aria-label="关闭"
-        >
-          <X className="h-4 w-4" />
-        </button>
-
-        <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-orange/30 bg-cs2-orange/10 text-cs2-orange">
-            <ShieldAlert className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 pr-7">
-            <h2 id="recording-blocked-title" className="text-sm font-bold text-white">
-              无法开始录制
-            </h2>
-            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{subtitle}</p>
-          </div>
-        </div>
-
-        <div className="px-5 py-4">
-          <p className="text-sm leading-6 text-zinc-300 whitespace-pre-wrap break-words">{message}</p>
-        </div>
-
-        <div className="flex justify-end border-t border-white/10 bg-black/20 px-5 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg bg-cs2-orange px-4 py-2 text-sm font-extrabold text-black shadow-lg shadow-cs2-orange/20 transition-colors hover:bg-cs2-orange-light"
-          >
-            知道了
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function queueItemClientUid(it) {
-  return it.clientClipUid || `legacy:${it.demoFilename}:${it.clipId}`;
-}
-
-/** @param {number} limit @param {T[]} items @param {(item: T) => Promise<void>} work @template T */
-async function runWithConcurrency(limit, items, work) {
-  if (!items.length) return;
-  const n = Math.min(Math.max(1, limit), items.length);
-  let cursor = 0;
-  const worker = async () => {
-    while (true) {
-      const my = cursor++;
-      if (my >= items.length) break;
-      await work(items[my]);
-    }
-  };
-  await Promise.all(Array.from({ length: n }, () => worker()));
-}
-
-/**
- * 构建批量录制 groups 数组。
- * @param {import("./stores/recordingQueueStore").RecordingQueueItem[]} queue
- * @param {import("./stores/recordingQueueStore").PacingOverride} globalPacing
- *   全局节奏参数，作为所有片段的基底；片段自身的 pacing_override 优先级更高（覆盖同名字段）。
- */
-function buildBatchGroupsFromQueue(queue, globalPacing = {}) {
-  // 分组键 = demo文件名 + 玩家名，同一个 demo 的不同玩家各自独立成一个 group，
-  // 这样后端才能在同一 CS2 会话内按玩家切换 spec_player。
-  const byDemoPlayer = new Map();
-  for (const it of queue) {
-    const demoIdentity = it.demoPath || it.demoFilename;
-    const key = `${demoIdentity}::${it.targetPlayer || ""}`;
-    if (!byDemoPlayer.has(key)) {
-      byDemoPlayer.set(key, {
-        demo_filename: it.demoFilename,
-        demo_path: it.demoPath || null,
-        clips: [],
-        target_player: it.targetPlayer || null,
-        target_player_user_id: it.targetPlayerUserId ?? null,
-        target_steam_id: it.targetSteamId || null,
-      });
-    }
-    const clip = { ...stripClientClipUid(it.clipData) };
-    const baseGlobal = stripGlobalPacingMetaKeys(globalPacing);
-    // 全局节奏作为基底，片段自身 pacing_override 覆盖同名字段（优先级更高）
-    const mergedPacing = {
-      ...( Object.keys(baseGlobal).length ? baseGlobal : {} ),
-      ...( it.pacing_override && typeof it.pacing_override === "object" ? it.pacing_override : {} ),
-    };
-    if (Object.keys(mergedPacing).length) {
-      clip.pacing_override = mergedPacing;
-    }
-    if (clip.fixed_segment_pacing && clip.pacing_override && typeof clip.pacing_override === "object") {
-      const deny = new Set([
-        "pre_first_sec",
-        "post_last_sec",
-        "max_gap_sec",
-        "post_mid_sec",
-        "pre_cont_sec",
-      ]);
-      const po = { ...clip.pacing_override };
-      for (const k of deny) delete po[k];
-      if (Object.keys(po).length) clip.pacing_override = po;
-      else delete clip.pacing_override;
-    }
-    byDemoPlayer.get(key).clips.push(clip);
-  }
-  return Array.from(byDemoPlayer.values());
-}
-
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [aiMode, setAiMode] = useState(false);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
@@ -303,7 +77,13 @@ export default function App() {
   const [parsing, setParsing] = useState(false);
   /** 按场次索引的后台解析（与上传时的全局 parsing 区分，便于切换场次） */
   const [parsingByIndex, setParsingByIndex] = useState({});
+  /** 解析分析页内嵌：当前场次解析读条 / 完成或上传成功提示（不占顶部栏） */
+  const [analysisInlineProgress, setAnalysisInlineProgress] = useState(null);
   const [progressText, setProgressText] = useState("");
+
+  useEffect(() => {
+    setAnalysisInlineProgress(null);
+  }, [currentMatchIndex]);
   const [batchRecording, setBatchRecording] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
@@ -323,6 +103,8 @@ export default function App() {
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
   const [demoLibraryItems, setDemoLibraryItems] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
+  /** 仅「扫描本地 demo 库」进行中；不在顶部 ProgressBar 展示，由按钮内 spinner 表示 */
+  const [libraryScanning, setLibraryScanning] = useState(false);
   const [libraryLoadingOverlay, setLibraryLoadingOverlay] = useState(false);
   const [libraryLoadingText, setLibraryLoadingText] = useState("正在加载 Demo...");
   const [libraryPage, setLibraryPage] = useState(1);
@@ -340,12 +122,22 @@ export default function App() {
     mapName: "",
     status: "all",
     playerQuery: "",
+    steamQuery: "",
     minKills: "",
     maxDeaths: "",
     minAssists: "",
     minKd: "",
+    roundsMin: "",
+    roundsMax: "",
+    durationMin: "",
+    durationMax: "",
+    dateFrom: "",
+    dateTo: "",
   });
   const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
+  /** Demo 库列表每页条数（与 GET /demos limit 一致） */
+  const [libraryPageSize, setLibraryPageSize] = useState(10);
+  const libraryPageSizeEffectSkipRef = useRef(false);
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
@@ -503,27 +295,14 @@ export default function App() {
     });
   }, [uploadedDemos, parsedMatches]);
 
-  const LIBRARY_PAGE_SIZE = 5;
   const libraryTotalPages =
-    libraryTotal == null ? null : Math.max(1, Math.ceil(libraryTotal / LIBRARY_PAGE_SIZE));
+    libraryTotal == null ? null : Math.max(1, Math.ceil(libraryTotal / libraryPageSize));
 
   const libraryAdvFiltersKey = useMemo(() => JSON.stringify(libraryAdvFilters), [libraryAdvFilters]);
 
   useEffect(() => {
     setLibraryPage(1);
   }, [libraryAdvFiltersKey]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const next = librarySearchInput.trim();
-      setLibrarySearchQ((prev) => {
-        if (prev === next) return prev;
-        setLibraryPage(1);
-        return next;
-      });
-    }, 320);
-    return () => clearTimeout(t);
-  }, [librarySearchInput]);
 
   const appendDemoLibraryFilterParams = useCallback((params) => {
     const f = libraryAdvFilters;
@@ -555,13 +334,14 @@ export default function App() {
   }, [libraryAdvFilters]);
 
   const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
-    const { manageLoading = true } = opts;
+    const { manageLoading = true, searchQ: searchQOverride } = opts;
     if (manageLoading) setLibraryLoading(true);
     try {
-      const limit = LIBRARY_PAGE_SIZE;
+      const limit = libraryPageSize;
       const offset = (page - 1) * limit;
       const params = { limit, offset };
-      if (librarySearchQ) params.q = librarySearchQ;
+      const qEff = searchQOverride !== undefined ? searchQOverride : librarySearchQ;
+      if (qEff) params.q = qEff;
       appendDemoLibraryFilterParams(params);
       const { data } = await API.get("/demos", { params });
       setDemoLibraryItems(data.items || []);
@@ -578,7 +358,23 @@ export default function App() {
     } finally {
       if (manageLoading) setLibraryLoading(false);
     }
-  }, [libraryPage, librarySearchQ, appendDemoLibraryFilterParams]);
+  }, [libraryPage, librarySearchQ, libraryPageSize, appendDemoLibraryFilterParams]);
+
+  const handleLibrarySearchSubmit = useCallback(() => {
+    const next = librarySearchInput.trim();
+    setLibrarySearchQ(next);
+    setLibraryPage(1);
+    void refreshDemoLibrary(1, { manageLoading: true, searchQ: next });
+  }, [librarySearchInput, refreshDemoLibrary]);
+
+  useEffect(() => {
+    if (!libraryPageSizeEffectSkipRef.current) {
+      libraryPageSizeEffectSkipRef.current = true;
+      return;
+    }
+    setLibraryPage(1);
+    void refreshDemoLibrary(1, { manageLoading: false });
+  }, [libraryPageSize, refreshDemoLibrary]);
 
   useEffect(() => {
     libraryPageRef.current = libraryPage;
@@ -646,35 +442,16 @@ export default function App() {
   }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary]);
 
   const handleScanDemos = useCallback(async () => {
-    setLibraryLoading(true);
-    setProgressText("正在扫描监听目录并补全全部缺失的玩家统计索引…");
+    setLibraryScanning(true);
     try {
-      const { data } = await API.post("/demos/scan");
-      setProgressText("扫描完成，正在刷新列表…");
+      await API.post("/demos/scan");
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      const idx = data?.player_stats_index;
-      if (idx && idx.processed > 0) {
-        setProgressText(
-          `已更新 Demo 库。玩家统计索引：处理 ${idx.processed}，成功 ${idx.indexed}。`
-        );
-      } else {
-        setProgressText("已更新 Demo 库。");
-      }
     } catch (e) {
       setProgressText(`扫描或列表刷新失败: ${e.response?.data?.detail || e.message}`);
     } finally {
-      setLibraryLoading(false);
+      setLibraryScanning(false);
     }
   }, [refreshDemoLibrary, libraryPage]);
-
-  const handleReparseDemo = useCallback(async (id) => {
-    try {
-      await API.post(`/demos/${id}/parse`);
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
-    } catch (e) {
-      setProgressText(`重解析失败: ${e.response?.data?.detail || e.message}`);
-    }
-  }, [refreshDemoLibrary]);
 
   const handleDeleteDemo = useCallback(
     async (id, rescan) => {
@@ -685,6 +462,30 @@ export default function App() {
       } catch (e) {
         setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
       }
+    },
+    [refreshDemoLibrary, libraryPage]
+  );
+
+  const handleLibraryBatchDelete = useCallback(
+    async (ids, rescan = "skip") => {
+      const list = [...ids];
+      if (!list.length) return;
+      setProgressText(`正在批量删除（0 / ${list.length}）…`);
+      let done = 0;
+      for (const id of list) {
+        try {
+          await API.delete(`/demos/${id}`, { params: { rescan } });
+          done += 1;
+          setProgressText(`正在批量删除（${done} / ${list.length}）…`);
+        } catch (e) {
+          setProgressText(`批量删除失败: ${e.response?.data?.detail || e.message}`);
+          await refreshDemoLibrary(libraryPage, { manageLoading: false });
+          return;
+        }
+      }
+      setSelectedLibraryDemoIds(new Set());
+      setProgressText(`已删除 ${list.length} 条 Demo。`);
+      await refreshDemoLibrary(libraryPage, { manageLoading: false });
     },
     [refreshDemoLibrary, libraryPage]
   );
@@ -786,12 +587,8 @@ export default function App() {
       });
       setFreezeToDeathRoundsByMatch(ftdByIndex);
       setSelectedClientClipUids(new Set());
-      const cachedCount = loaded.filter((x) => Boolean(x.cached_result)).length;
-      setProgressText(
-        cachedCount > 0
-          ? `已载入 ${loaded.length} 个 Demo，其中 ${cachedCount} 个命中缓存并已自动展示片段。`
-          : `已从 Demo 库载入 ${loaded.length} 个 Demo`
-      );
+      setProgressText("");
+      navigate("/analysis");
       return loaded;
     } catch (e) {
       setProgressText(`加载 Demo 库失败: ${e.response?.data?.detail || e.message}`);
@@ -802,7 +599,7 @@ export default function App() {
         setLibraryLoadingText("正在加载 Demo...");
       }
     }
-  }, []);
+  }, [navigate]);
 
   const handleLoadSelectedLibraryDemos = useCallback(async () => {
     const ids = Array.from(selectedLibraryDemoIds);
@@ -935,13 +732,29 @@ export default function App() {
   }, [globalPacing]);
 
   useEffect(() => {
-    // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「刷新」扫描入库。
+    // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「扫描本地 demo 库」入库。
     void refreshDemoLibrary(libraryPage, { manageLoading: false });
   }, [refreshDemoLibrary, libraryPage]);
 
   const hasLibraryAdvancedFilters = useMemo(() => {
     const f = libraryAdvFilters;
-    return !!(f.mapName.trim() || (f.status && f.status !== "all") || f.playerQuery.trim());
+    const numOrStr = (v) => String(v ?? "").trim();
+    return !!(
+      f.mapName.trim() ||
+      (f.status && f.status !== "all") ||
+      f.playerQuery.trim() ||
+      f.steamQuery.trim() ||
+      numOrStr(f.minKills) ||
+      numOrStr(f.maxDeaths) ||
+      numOrStr(f.minAssists) ||
+      numOrStr(f.minKd) ||
+      numOrStr(f.roundsMin) ||
+      numOrStr(f.roundsMax) ||
+      numOrStr(f.durationMin) ||
+      numOrStr(f.durationMax) ||
+      numOrStr(f.dateFrom) ||
+      numOrStr(f.dateTo)
+    );
   }, [libraryAdvFilters]);
 
   const handleUpload = useCallback(async (files) => {
@@ -964,17 +777,19 @@ export default function App() {
       setActivePlayerTabs({});
       setFreezeToDeathRoundsByMatch({});
       setSelectedClientClipUids(new Set());
-      setProgressText(
+      const uploadDoneMsg =
         uploads.length > 1
           ? `已上传 ${uploads.length} 个 Demo。请切换场次，分别为每场选择玩家并点击「开始分析」。`
-          : "上传完成，请选择要分析的玩家后点击「开始分析」。"
-      );
+          : "上传完成，请选择要分析的玩家后点击「开始分析」。";
+      setProgressText("");
+      setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
+      navigate("/analysis");
     } catch (e) {
       setProgressText(`上传失败: ${e.response?.data?.detail || e.message}`);
     } finally {
       setParsing(false);
     }
-  }, []);
+  }, [navigate]);
 
   const roundMontageCanEnqueue = useMemo(() => {
     const p = freezeToDeathDraft?.picked ?? [];
@@ -1008,6 +823,18 @@ export default function App() {
     ]
   );
 
+  const canAddAllHighlights = useMemo(
+    () =>
+      Boolean(
+        parsedMatches?.some((pm) =>
+          Object.values(pm?.players ?? {}).some((pd) =>
+            pd.clips?.some((c) => c.category === "highlight")
+          )
+        )
+      ),
+    [parsedMatches]
+  );
+
   /**
    * @param {number} idx
    * @param {string[] | null} [playerListOverride] 非 null 时忽略 selectedPlayers
@@ -1028,7 +855,8 @@ export default function App() {
       setParsingByIndex((prev) => ({ ...prev, [idx]: true }));
       const viewingHere = currentMatchIndexRef.current === idx;
       if (viewingHere && !quietProgress) {
-        setProgressText(`正在解析「${fn}」…`);
+        setProgressText("");
+        setAnalysisInlineProgress({ active: true, text: `正在解析「${fn}」…` });
         setSelectedClientClipUids(new Set());
       }
 
@@ -1108,13 +936,13 @@ export default function App() {
             ? `「${fn}」分析完成 — ${rounds} 回合，${playerLabel}，常规片段 ${totalRegular} 个，另含下饭 ${totalMeme} 段。`
             : `「${fn}」分析完成 — ${rounds} 回合，${playerLabel}，共 ${totalRegular} 个片段。`;
         if (!quietProgress) {
-          if (viewingHere) setProgressText(doneMsg);
+          if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
           else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
         }
       } catch (e) {
         const err = `解析失败「${fn}」: ${e.response?.data?.detail || e.message}`;
         if (!quietProgress) {
-          if (viewingHere) setProgressText(err);
+          if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
           else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
         }
       } finally {
@@ -1205,9 +1033,7 @@ export default function App() {
             setLibraryLoadingText(`正在解析高光（${done} / ${specs.length} 场）…`);
           }
         });
-        setProgressText(
-          `已载入 ${loaded.length} 个 Demo，并完成 ${specs.length} 场高光解析。`
-        );
+        setProgressText("");
       } catch (e) {
         setProgressText(`载入并解析失败: ${e.response?.data?.detail || e.message}`);
       } finally {
@@ -1631,6 +1457,7 @@ export default function App() {
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
+    setAnalysisInlineProgress(null);
   }, []);
 
   const handleDetectCs2 = useCallback(async () => {
@@ -1659,743 +1486,208 @@ export default function App() {
   useEffect(() => {
     setSelectedClientClipUids(new Set());
   }, [currentMatchIndex]);
+  const shell = {
+    aiMode,
+    queue,
+    uploadedDemos,
+    libraryTotal,
+    handleAiModeChange,
+    obsConfig,
+    setObsConfig,
+    persistObsConfig,
+    obsPasswordPlaceholder,
+    handleObsPasswordFocus,
+    handleObsPasswordBlur,
+    llmConfig,
+    setLlmConfig,
+    llmKeySavedOnServer,
+    persistLlmConfig,
+    cs2Path,
+    setCs2Path,
+    ffmpegPath,
+    setFfmpegPath,
+    cs2FpsMax,
+    setCs2FpsMax,
+    demoWatchPaths,
+    setDemoWatchPaths,
+    handleSaveConfig,
+    handleDetectCs2,
+    handleScanDemos,
+    libraryLoading,
+    libraryScanning,
+    expectedParsePlayersText,
+    setExpectedParsePlayersText,
+    handleSaveExpectedParsePlayers,
+    batchRecording,
+    savedRecordWarmupDefaults,
+    persistWarmupDefaults,
+    experimentalPovEnabled,
+    persistExperimentalPov,
+    hasDemos,
+    parsing,
+    handleUpload,
+    currentFilename,
+    matchTabsData,
+    currentMatchIndex,
+    setCurrentMatchIndex,
+    players,
+    matchMeta,
+    currentParsed,
+    selectedPlayersList,
+    setSelectedPlayers,
+    handleParse,
+    parsingByIndex,
+    analysisInlineProgress,
+    anyDemoParsing,
+    progressText,
+    handleAbortBatchRecording,
+    clips,
+    selectedClientClipUids,
+    handleToggleClip,
+    queuedClientClipUidsForCurrentDemo,
+    parsedPlayerNames,
+    currentActivePlayer,
+    setActivePlayerTabs,
+    roundMontageMaxRounds,
+    freezeToDeathDraft,
+    setFreezeToDeathDraft,
+    selectedRegularCount,
+    regularSelectableTotal,
+    handleSelectAll,
+    handleDeselectAll,
+    handleAddSelectedToQueue,
+    handleAddAllHighlightsAllMatches,
+    canAddAllHighlights,
+    handleResetDemo,
+    removeFromQueue,
+    clearQueue,
+    openBatchWarmup,
+    demoLibraryItems,
+    setLibrarySearchInput,
+    librarySearchInput,
+    librarySearchQ,
+    setLibrarySearchQ,
+    handleLibrarySearchSubmit,
+    libraryAdvFilters,
+    setLibraryAdvFilters,
+    selectLibraryPage,
+    selectAllLibraryDemos,
+    clearLibrarySelection,
+    handleLoadSelectedLibraryDemos,
+    setLibraryBatchModalOpen,
+    selectedLibraryDemoIds,
+    setSelectedLibraryDemoIds,
+    libraryPage,
+    setLibraryPage,
+    libraryPageSize,
+    setLibraryPageSize,
+    libraryTotalPages,
+    libraryHasNextPage,
+    libraryJumpDraft,
+    setLibraryJumpDraft,
+    handleLibraryPageJump,
+    refreshDemoLibrary,
+    hasLibraryAdvancedFilters,
+    handleLoadDemoFromLibrary,
+    handleDeleteDemo,
+    handleLibraryBatchDelete,
+    setProgressText,
+    handleSaveLibraryRename,
+    setLibraryRename,
+    setLibraryDeletePrompt,
+    libraryRename,
+    libraryDeletePrompt,
+    configBackupStatus,
+    refreshConfigBackupStatus,
+    handleRestorePlayerConfig,
+    handleOpenConfigBackupDir,
+  };
+
+  const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
+  const parsingShownInline =
+    location.pathname === "/analysis" &&
+    hasDemosInline &&
+    (Boolean(parsingByIndex[currentMatchIndex]) || analysisInlineProgress?.active === true);
+
+  const showGlobalNotice =
+    batchRecording ||
+    Boolean(progressText?.trim()) ||
+    (anyDemoParsing && !parsingShownInline);
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-cs2-bg-dark">
-      {libraryLoadingOverlay && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
-          <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
-            <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
-            <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+    <AppShellProvider value={shell}>
+      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-dark">
+        {libraryLoadingOverlay && (
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
+            <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
+              <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
+              <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+            </div>
           </div>
-        </div>
-      )}
-      <Sidebar
-        aiMode={aiMode}
-        onAiModeChange={handleAiModeChange}
-        obsConfig={obsConfig}
-        onObsConfigChange={setObsConfig}
-        onPersistObs={persistObsConfig}
-        obsPasswordPlaceholder={obsPasswordPlaceholder}
-        onObsPasswordFocus={handleObsPasswordFocus}
-        onObsPasswordBlur={handleObsPasswordBlur}
-        llmConfig={llmConfig}
-        onLlmConfigChange={setLlmConfig}
-        llmKeySavedOnServer={llmKeySavedOnServer}
-        onPersistLlm={persistLlmConfig}
-        cs2Path={cs2Path}
-        onCs2PathChange={setCs2Path}
-        ffmpegPath={ffmpegPath}
-        onFfmpegPathChange={setFfmpegPath}
-        cs2FpsMax={cs2FpsMax}
-        onCs2FpsMaxChange={setCs2FpsMax}
-        demoWatchPaths={demoWatchPaths}
-        onDemoWatchPathsChange={setDemoWatchPaths}
-        onSaveConfig={handleSaveConfig}
-        onDetectCs2={handleDetectCs2}
-        onScanDemos={handleScanDemos}
-        demoLibraryLoading={libraryLoading}
-        expectedParsePlayersText={expectedParsePlayersText}
-        onExpectedParsePlayersTextChange={setExpectedParsePlayersText}
-        onSaveExpectedParsePlayers={handleSaveExpectedParsePlayers}
-      />
-
-      <main className="flex flex-1 flex-col overflow-hidden">
-        {hasDemos && (
-          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-cs2-bg-dark/90 px-4 py-2.5 backdrop-blur-md sm:px-5">
-            <p className="min-w-0 truncate text-[11px] text-zinc-500">
-              <span className="font-mono text-zinc-400">{uploadedDemos.length}</span> 个 Demo 已导入
-            </p>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCommonParamsOpen(true)}
-                disabled={batchRecording}
-                className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                常用参数管理
-              </button>
-              <button
-                type="button"
-                onClick={handleResetDemo}
-                disabled={anyDemoParsing || batchRecording}
-                className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                更换 Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => setMontageDrawerOpen(true)}
-                disabled={batchRecording}
-                className="flex items-center gap-1.5 rounded-md border border-white/15 bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
-              >
-                合辑工作台
-              </button>
-              <button
-                type="button"
-                onClick={() => setQueueDrawerOpen(true)}
-                disabled={batchRecording}
-                className="flex items-center gap-1.5 rounded-md border border-cs2-orange/45 bg-cs2-orange/10 px-2.5 py-1.5 text-[11px] font-bold text-cs2-orange transition-colors hover:border-cs2-orange hover:bg-cs2-orange/15 disabled:opacity-40"
-              >
-                <Package className="h-3.5 w-3.5" />
-                录制队列
-                <span className="rounded bg-cs2-orange/25 px-1.5 font-mono text-[10px] text-white tabular-nums">
-                  {queue.length}
-                </span>
-              </button>
-            </div>
-          </header>
         )}
+        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/library" element={<DemoLibraryPage />} />
+              <Route path="/analysis" element={<AnalysisPage />} />
+              <Route path="/queue" element={<RecordingQueuePage />} />
+              <Route path="/montage" element={<MontageWorkbenchPage />} />
+              <Route path="/params" element={<CommonParamsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-3 sm:px-5 sm:pt-4">
-          {configBackupStatus?.restore_required ? (
-            <section
-              className="rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-3 shadow-sm"
-              role="status"
-            >
-              <div className="flex flex-wrap items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <p className="text-xs font-bold text-amber-100">检测到上次录制异常退出</p>
-                  <p className="text-[11px] leading-relaxed text-amber-100/85">
-                    上次录制过程中程序没有正常结束，玩家 CS2 配置可能尚未恢复。请先关闭 CS2，然后点击「一键恢复玩家配置」。
-                  </p>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <button
-                      type="button"
-                      className="rounded-md border border-amber-400/60 bg-amber-500/20 px-3 py-1.5 text-[11px] font-bold text-amber-50 hover:bg-amber-500/30"
-                      onClick={() => void handleRestorePlayerConfig()}
-                    >
-                      一键恢复玩家配置
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-black/20 px-3 py-1.5 text-[11px] font-semibold text-zinc-200 hover:border-white/25"
-                      onClick={() => void handleOpenConfigBackupDir()}
-                    >
-                      <FolderOpen className="h-3.5 w-3.5" aria-hidden />
-                      打开备份目录
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-          ) : configBackupStatus && configBackupStatus.restore_required === false ? (
-            <p className="text-[10px] text-zinc-600">玩家配置状态：正常</p>
-          ) : null}
-
-          <section className="rounded-lg border border-white/10 bg-cs2-bg-card p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-zinc-300">本地 Demo 库</h3>
-              <div className="flex max-w-[min(100%,28rem)] flex-wrap items-center justify-end gap-1">
-                <button
-                  type="button"
-                  disabled={libraryLoading}
-                  className="inline-flex items-center gap-1 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 text-[10px] font-semibold hover:border-cs2-orange/50 disabled:opacity-50"
-                  onClick={() => void handleScanDemos()}
-                >
-                  <FolderSync className={`h-3 w-3 ${libraryLoading ? "animate-spin" : ""}`} />
-                  刷新
-                </button>
-                <button
-                  type="button"
-                  disabled={demoLibraryItems.length === 0}
-                  className="rounded border border-cs2-border px-2 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200 disabled:opacity-40"
-                  onClick={selectLibraryPage}
-                >
-                  本页全选
-                </button>
-                <button
-                  type="button"
-                  disabled={libraryLoading || (libraryTotal != null && libraryTotal === 0)}
-                  className="rounded border border-cs2-border px-2 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200 disabled:opacity-40"
-                  onClick={() => void selectAllLibraryDemos()}
-                >
-                  全选库内
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedLibraryDemoIds.size === 0}
-                  className="rounded border border-cs2-border px-2 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200 disabled:opacity-40"
-                  onClick={clearLibrarySelection}
-                >
-                  清空
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedLibraryDemoIds.size === 0}
-                  className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-400 hover:border-emerald-500/70 disabled:opacity-40"
-                  onClick={() => void handleLoadSelectedLibraryDemos()}
-                >
-                  载入选中({selectedLibraryDemoIds.size})
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedLibraryDemoIds.size === 0}
-                  className="inline-flex items-center gap-1 rounded border border-cs2-orange/45 bg-cs2-orange/10 px-2 py-1 text-[10px] font-bold text-cs2-orange hover:border-cs2-orange/70 disabled:opacity-40"
-                  onClick={() => setLibraryBatchModalOpen(true)}
-                >
-                  载入并解析…
-                </button>
-              </div>
-            </div>
-            <div className="mb-2 flex items-center gap-2 rounded border border-white/10 bg-cs2-bg-input/40 px-2 py-1.5">
-              <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-              <input
-                type="search"
-                enterKeyHint="search"
-                className="min-w-0 flex-1 bg-transparent text-[11px] text-zinc-200 outline-none placeholder:text-zinc-600"
-                placeholder="按文件名或展示名搜索…"
-                value={librarySearchInput}
-                onChange={(e) => setLibrarySearchInput(e.target.value)}
-                aria-label="搜索 Demo 名称"
+        {showGlobalNotice ? (
+          <div
+            className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
+            aria-live="polite"
+          >
+            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
+              <ProgressBar
+                text={progressText || (batchRecording ? "正在批量录制…" : "")}
+                active={anyDemoParsing}
+                batchRecording={batchRecording}
+                onAbortBatch={handleAbortBatchRecording}
+                dismissible={Boolean(progressText?.trim())}
+                onDismiss={() => setProgressText("")}
               />
             </div>
-            <details className="group mb-2 rounded border border-white/10 bg-cs2-bg-input/20">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-zinc-400 marker:content-none [&::-webkit-details-marker]:hidden hover:text-zinc-200">
-                <SlidersHorizontal className="h-3 w-3 shrink-0" aria-hidden />
-                高级筛选
-                <ChevronDown className="ml-auto h-3 w-3 shrink-0 transition-transform group-open:rotate-180" aria-hidden />
-              </summary>
-              <div className="space-y-2 border-t border-white/10 px-2 py-2 text-[10px] text-zinc-300">
-                <p className="leading-relaxed text-zinc-500">
-                  玩家表现依赖库内玩家统计；点击「刷新」自动补全玩家信息，首次补全玩家信息时请稍等片刻。填写昵称关键词后才会按玩家表筛选；击杀 / 死亡 / 助攻 /
-                  KD 仅在与昵称同时填写时生效。
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-zinc-500">地图</span>
-                    <select
-                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50"
-                      value={libraryAdvFilters.mapName}
-                      onChange={(e) =>
-                        setLibraryAdvFilters((p) => ({ ...p, mapName: e.target.value }))
-                      }
-                    >
-                      <option value="">全部地图</option>
-                      {DEMO_LIBRARY_MAP_OPTIONS.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-zinc-500">状态</span>
-                    <select
-                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 text-[10px] outline-none focus:border-cs2-orange/50"
-                      value={libraryAdvFilters.status}
-                      onChange={(e) =>
-                        setLibraryAdvFilters((p) => ({ ...p, status: e.target.value }))
-                      }
-                    >
-                      <option value="all">全部状态</option>
-                      {DEMO_LIBRARY_STATUS_FILTER_OPTIONS.map(({ value, label }) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="space-y-2 rounded border border-white/5 bg-black/15 p-2">
-                  <p className="text-[9px] font-semibold text-zinc-400">玩家表现</p>
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-zinc-500">昵称关键词</span>
-                    <input
-                      className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 text-[10px] outline-none focus:border-cs2-orange/50"
-                      value={libraryAdvFilters.playerQuery}
-                      onChange={(e) =>
-                        setLibraryAdvFilters((p) => ({ ...p, playerQuery: e.target.value }))
-                      }
-                      placeholder="先填昵称才会按玩家筛选；下方数值须与昵称同时填写才生效"
-                    />
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-zinc-500">击杀 ≥</span>
-                      <input
-                        inputMode="numeric"
-                        disabled={!libraryAdvFilters.playerQuery.trim()}
-                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
-                        value={libraryAdvFilters.minKills}
-                        onChange={(e) =>
-                          setLibraryAdvFilters((p) => ({ ...p, minKills: e.target.value }))
-                        }
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-zinc-500">死亡 ≤</span>
-                      <input
-                        inputMode="numeric"
-                        disabled={!libraryAdvFilters.playerQuery.trim()}
-                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
-                        value={libraryAdvFilters.maxDeaths}
-                        onChange={(e) =>
-                          setLibraryAdvFilters((p) => ({ ...p, maxDeaths: e.target.value }))
-                        }
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-zinc-500">助攻 ≥</span>
-                      <input
-                        inputMode="numeric"
-                        disabled={!libraryAdvFilters.playerQuery.trim()}
-                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
-                        value={libraryAdvFilters.minAssists}
-                        onChange={(e) =>
-                          setLibraryAdvFilters((p) => ({ ...p, minAssists: e.target.value }))
-                        }
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-zinc-500">KD ≥</span>
-                      <input
-                        inputMode="decimal"
-                        disabled={!libraryAdvFilters.playerQuery.trim()}
-                        className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] outline-none focus:border-cs2-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
-                        value={libraryAdvFilters.minKd}
-                        onChange={(e) =>
-                          setLibraryAdvFilters((p) => ({ ...p, minKd: e.target.value }))
-                        }
-                      />
-                    </label>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-cs2-border px-2 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200"
-                    onClick={() =>
-                      setLibraryAdvFilters({
-                        mapName: "",
-                        status: "all",
-                        playerQuery: "",
-                        minKills: "",
-                        maxDeaths: "",
-                        minAssists: "",
-                        minKd: "",
-                      })
-                    }
-                  >
-                    清空筛选
-                  </button>
-                </div>
-              </div>
-            </details>
-            <div className="space-y-1">
-              {demoLibraryItems.length === 0 && !libraryLoading && (
-                <p className="text-[11px] text-cs2-text-secondary">
-                  {librarySearchQ
-                    ? `没有名称包含「${librarySearchQ}」的 Demo。`
-                    : hasLibraryAdvancedFilters
-                      ? "当前筛选条件下没有匹配的 Demo。"
-                      : "暂无数据，配置监听路径后会自动入库。"}
-                </p>
-              )}
-              {demoLibraryItems.map((it) => (
-                <div
-                  key={it.id}
-                  className="flex items-center justify-between rounded border border-white/10 bg-cs2-bg-input/50 px-2 py-1.5 text-[11px]"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedLibraryDemoIds.has(it.id)}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSelectedLibraryDemoIds((prev) => {
-                          const next = new Set(prev);
-                          if (checked) next.add(it.id);
-                          else next.delete(it.id);
-                          return next;
-                        });
-                      }}
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate font-mono text-zinc-300">
-                        {(it.display_name && String(it.display_name).trim()) || it.filename}
-                      </p>
-                      {it.display_name && String(it.display_name).trim() ? (
-                        <p className="truncate text-[10px] text-zinc-500" title={it.path}>
-                          文件: {it.filename}
-                        </p>
-                      ) : null}
-                      <p className="text-[10px] text-cs2-text-secondary">{demoLibraryStatusLabel(it.status)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="rounded border border-cs2-border px-1.5 py-0.5 text-[10px] hover:border-cs2-orange/50"
-                      title="仅改库中展示名"
-                      onClick={() =>
-                        setLibraryRename({
-                          id: it.id,
-                          draft: (it.display_name && String(it.display_name).trim()) || "",
-                        })
-                      }
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded border border-cs2-border px-1.5 py-0.5 text-[10px] hover:border-emerald-500/60"
-                      onClick={() => void handleLoadDemoFromLibrary([it])}
-                    >
-                      选择
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded border border-cs2-border px-1.5 py-0.5 text-[10px] hover:border-cs2-orange/50"
-                      onClick={() => void handleReparseDemo(it.id)}
-                    >
-                      <RotateCw className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded border border-cs2-border px-1.5 py-0.5 text-[10px] hover:border-cs2-fail"
-                      onClick={() =>
-                        setLibraryDeletePrompt({
-                          id: it.id,
-                          label:
-                            (it.display_name && String(it.display_name).trim()) || it.filename || `#${it.id}`,
-                        })
-                      }
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-end gap-x-1 gap-y-1.5">
-              <button
-                type="button"
-                disabled={libraryPage <= 1}
-                className="rounded border border-cs2-border px-1.5 py-1 text-[10px] disabled:opacity-40"
-                onClick={() => {
-                  const next = Math.max(1, libraryPage - 1);
-                  setLibraryPage(next);
-                  void refreshDemoLibrary(next, { manageLoading: false });
-                }}
-              >
-                <ChevronLeft className="h-3 w-3" />
-              </button>
-              <span className="px-2 text-[10px] text-zinc-500">
-                {libraryTotalPages == null
-                  ? `第 ${libraryPage} 页`
-                  : `第 ${libraryPage} / ${libraryTotalPages} 页`}
-              </span>
-              <button
-                type="button"
-                disabled={!libraryHasNextPage}
-                className="rounded border border-cs2-border px-1.5 py-1 text-[10px] disabled:opacity-40"
-                onClick={() => {
-                  const next = libraryPage + 1;
-                  setLibraryPage(next);
-                  void refreshDemoLibrary(next, { manageLoading: false });
-                }}
-              >
-                <ChevronRight className="h-3 w-3" />
-              </button>
-              <form
-                className="flex items-center gap-1 border-l border-white/10 pl-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleLibraryPageJump();
-                }}
-              >
-                <span className="text-[10px] text-zinc-600">跳至</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  className="w-9 rounded border border-cs2-border bg-cs2-bg-input px-1 py-0.5 text-center font-mono text-[10px] text-zinc-200 outline-none focus:border-cs2-orange/50"
-                  value={libraryJumpDraft}
-                  onChange={(e) => setLibraryJumpDraft(e.target.value.replace(/\D/g, "").slice(0, 5))}
-                  placeholder="页"
-                  aria-label="跳转页码"
-                />
-                <button
-                  type="submit"
-                  className="rounded border border-cs2-border px-1.5 py-1 text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/50 hover:text-zinc-200"
-                >
-                  跳转
-                </button>
-              </form>
-            </div>
-          </section>
+          </div>
+        ) : null}
 
-          {libraryDeletePrompt ? (
-            <div
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="library-delete-title"
-              onClick={() => setLibraryDeletePrompt(null)}
-            >
-              <div
-                className="w-full max-w-md rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-zinc-300">
-                  从 Demo 库删除
-                </h4>
-                <p className="mb-3 font-mono text-[11px] text-zinc-400">{libraryDeletePrompt.label}</p>
-                <p className="mb-3 text-[10px] leading-relaxed text-cs2-text-secondary">
-                  仅移除本地库中的记录与解析缓存，不会删除磁盘上的 .dem 文件。请选择删除之后再次扫描时的行为：
-                </p>
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-emerald-200/95 hover:bg-emerald-500/20"
-                    onClick={() => void handleDeleteDemo(libraryDeletePrompt.id, "reimport")}
-                  >
-                    删除后再次扫描仍入库
-                    <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
-                      下次扫描会重新加入库中，入库时间为扫描时刻。
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-white/15 px-3 py-2 text-left text-[11px] leading-snug text-zinc-300 hover:bg-white/[0.06]"
-                    onClick={() => void handleDeleteDemo(libraryDeletePrompt.id, "skip")}
-                  >
-                    删除后再次扫描不再入库
-                    <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
-                      之后目录监听与手动扫描都会跳过该路径；仅改文件名或移动文件可视为新路径再入库。
-                    </span>
-                  </button>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <button
-                    type="button"
-                    className="rounded border border-cs2-border px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200"
-                    onClick={() => setLibraryDeletePrompt(null)}
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+        <RecordWarmupModal
+          open={recordWarmupOpen}
+          onClose={() => {
+            setRecordWarmupOpen(false);
+            setWarmupIntent(null);
+          }}
+          onConfirm={handleWarmupConfirm}
+          onWarmupValidationError={(msg) => setRecordingBlockedMessage(msg)}
+          defaultOverrides={savedRecordWarmupDefaults ?? undefined}
+          experimentalPovEnabled={experimentalPovEnabled}
+          onExperimentalPovChange={persistExperimentalPov}
+        />
 
-          {libraryRename ? (
-            <div
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="library-rename-title"
-              onClick={() => setLibraryRename(null)}
-            >
-              <div
-                className="w-full max-w-sm rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h4 id="library-rename-title" className="mb-2 text-xs font-semibold text-zinc-300">
-                  Demo 展示名
-                </h4>
-                <p className="mb-2 text-[10px] leading-relaxed text-cs2-text-secondary">
-                  仅保存在本地库中，不修改磁盘上的 .dem 文件名。留空并保存则恢复为文件名显示。
-                </p>
-                <input
-                  type="text"
-                  className="mb-3 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-cs2-orange/50"
-                  value={libraryRename.draft}
-                  onChange={(e) =>
-                    setLibraryRename((prev) => (prev ? { ...prev, draft: e.target.value } : null))
-                  }
-                  maxLength={512}
-                  autoFocus
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-cs2-border px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200"
-                    onClick={() => setLibraryRename(null)}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-cs2-orange/50 bg-cs2-orange/15 px-2 py-1 text-[11px] font-semibold text-cs2-orange hover:bg-cs2-orange/25"
-                    onClick={() => void handleSaveLibraryRename()}
-                  >
-                    保存
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+        <LibraryLoadModeModal
+          open={libraryBatchModalOpen}
+          onClose={() => setLibraryBatchModalOpen(false)}
+          expectedPreviewLines={expectedPreviewLines}
+          onConfirm={(payload) => {
+            setLibraryBatchModalOpen(false);
+            void runLibraryBatchLoad(payload);
+          }}
+        />
 
-          {!hasDemos && !parsing && <DemoUpload onUpload={handleUpload} />}
-          {!hasDemos && parsing && (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-cs2-bg-card py-16 text-center">
-              <Loader2 className="h-9 w-9 animate-spin text-cs2-orange" aria-hidden />
-              <p className="mt-4 text-sm font-medium text-zinc-300">正在处理 Demo…</p>
-            </div>
-          )}
-
-          {hasDemos && (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-white/10 bg-cs2-bg-card px-3 py-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-cs2-text-secondary">
-                  <span className="shrink-0 font-semibold text-zinc-400">当前场次</span>
-                  <span className="truncate font-mono text-zinc-300" title={currentFilename}>
-                    {currentFilename}
-                  </span>
-                  {currentParsed && (
-                    <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-emerald-400/90">
-                      已解析
-                    </span>
-                  )}
-                  {uploadedDemos.length > 1 && (
-                    <span className="rounded border border-white/10 px-1.5 py-0 text-[10px] text-zinc-500">
-                      共 {uploadedDemos.length} 个文件
-                    </span>
-                  )}
-                </div>
-                <MatchSwitcher
-                  matches={matchTabsData}
-                  currentIndex={currentMatchIndex}
-                  onChange={setCurrentMatchIndex}
-                  disabled={batchRecording}
-                />
-              </div>
-
-              {players.length > 0 && (
-                <div className="space-y-4">
-                  {matchMeta && <MatchScoreboard matchMeta={matchMeta} />}
-                  <PlayerSelect
-                    players={players}
-                    selected={selectedPlayersList}
-                    onSelect={(name) =>
-                      setSelectedPlayers((prev) => {
-                        const cur = prev[currentMatchIndex] ?? [];
-                        const next = cur.includes(name)
-                          ? cur.filter((n) => n !== name)
-                          : [...cur, name];
-                        return { ...prev, [currentMatchIndex]: next };
-                      })
-                    }
-                    onAnalyze={handleParse}
-                    disabled={
-                      batchRecording ||
-                      parsing ||
-                      Boolean(parsingByIndex[currentMatchIndex])
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {(anyDemoParsing || progressText || batchRecording) && (
-            <ProgressBar
-              text={progressText || (batchRecording ? "正在批量录制…" : "")}
-              active={anyDemoParsing}
-              batchRecording={batchRecording}
-              onAbortBatch={handleAbortBatchRecording}
-            />
-          )}
-          {(clips.length > 0 || parsedPlayerNames.length > 0) && currentParsed && (
-            <ClipList
-              clips={clips}
-              targetPlayer={matchMeta?.target_player ?? ""}
-              selectedIds={selectedClientClipUids}
-              onToggle={handleToggleClip}
-              aiMode={aiMode}
-              queuedClientClipUids={queuedClientClipUidsForCurrentDemo}
-              playerTabs={parsedPlayerNames}
-              activePlayerTab={currentActivePlayer}
-              onPlayerTabChange={(name) =>
-                setActivePlayerTabs((prev) => ({ ...prev, [currentMatchIndex]: name }))
-              }
-              parsedPlayers={currentParsed?.players ?? {}}
-              matchTotalRounds={roundMontageMaxRounds}
-              freezeToDeathDraft={freezeToDeathDraft}
-              onFreezeToDeathDraftChange={setFreezeToDeathDraft}
-              roundMontagePickerDisabled={Boolean(
-                parsing || parsingByIndex[currentMatchIndex] || batchRecording
-              )}
-            />
-          )}
-        </div>
-
-        {clips.length > 0 && (
-          <ActionBar
-            selectedCount={selectedRegularCount}
-            totalCount={regularSelectableTotal}
-            hasSelection={selectedClientClipUids.size > 0}
-            onSelectAll={handleSelectAll}
-            onDeselectAll={handleDeselectAll}
-            onAddSelectedToQueue={handleAddSelectedToQueue}
-            onAddAllHighlightsAllMatches={handleAddAllHighlightsAllMatches}
-            queueLength={queue.length}
-            batchRecording={batchRecording}
-            canAddAllHighlights={Boolean(
-              parsedMatches?.some((pm) =>
-                Object.values(pm?.players ?? {}).some((pd) =>
-                  pd.clips?.some((c) => c.category === "highlight")
-                )
-              )
-            )}
-          />
-        )}
-      </main>
-
-      <MontageWorkbenchDrawer open={montageDrawerOpen} onClose={() => setMontageDrawerOpen(false)} />
-
-      <CommonParamsModal
-        open={commonParamsOpen}
-        onClose={() => setCommonParamsOpen(false)}
-        batchRecording={batchRecording}
-        savedWarmupDefaults={savedRecordWarmupDefaults}
-        onPersistWarmupDefaults={persistWarmupDefaults}
-        experimentalPovEnabled={experimentalPovEnabled}
-        onExperimentalPovChange={persistExperimentalPov}
-      />
-
-      <RecordingQueueDrawer
-        open={queueDrawerOpen}
-        onClose={() => setQueueDrawerOpen(false)}
-        queue={queue}
-        onRemove={removeFromQueue}
-        onClear={clearQueue}
-        onStartBatch={openBatchWarmup}
-        batchRecording={batchRecording}
-        onAbortBatch={handleAbortBatchRecording}
-      />
-
-      <RecordWarmupModal
-        open={recordWarmupOpen}
-        onClose={() => {
-          setRecordWarmupOpen(false);
-          setWarmupIntent(null);
-        }}
-        onConfirm={handleWarmupConfirm}
-        onWarmupValidationError={(msg) => setRecordingBlockedMessage(msg)}
-        defaultOverrides={savedRecordWarmupDefaults ?? undefined}
-        experimentalPovEnabled={experimentalPovEnabled}
-        onExperimentalPovChange={persistExperimentalPov}
-      />
-
-      <LibraryLoadModeModal
-        open={libraryBatchModalOpen}
-        onClose={() => setLibraryBatchModalOpen(false)}
-        expectedPreviewLines={expectedPreviewLines}
-        onConfirm={(payload) => {
-          setLibraryBatchModalOpen(false);
-          void runLibraryBatchLoad(payload);
-        }}
-      />
-
-      <RecordingBlockedDialog
-        message={recordingBlockedMessage}
-        onClose={() => setRecordingBlockedMessage("")}
-      />
-    </div>
+        <RecordingBlockedDialog
+          message={recordingBlockedMessage}
+          onClose={() => setRecordingBlockedMessage("")}
+        />
+      </div>
+    </AppShellProvider>
   );
 }
