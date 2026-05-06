@@ -8,6 +8,181 @@ from app.demo_parse_isolation import extract_radar_timeline_isolated
 logger = logging.getLogger(__name__)
 
 
+def _normalize_record_segments(
+    record_segments: list[dict[str, Any]] | None,
+    tick_rate: float,
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    tr = max(float(tick_rate), 0.001)
+    for raw in record_segments or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            start_tick = int(raw["start_tick"])
+            end_tick = int(raw["end_tick"])
+            video_start_sec = float(raw.get("video_start_sec", 0.0) or 0.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if end_tick <= start_tick:
+            continue
+
+        duration_sec = raw.get("duration_sec")
+        if duration_sec is None:
+            duration_sec = (end_tick - start_tick) / tr
+
+        try:
+            duration_sec = float(duration_sec)
+        except (TypeError, ValueError):
+            duration_sec = (end_tick - start_tick) / tr
+
+        normalized.append(
+            {
+                **raw,
+                "start_tick": start_tick,
+                "end_tick": end_tick,
+                "video_start_sec": video_start_sec,
+                "duration_sec": max(0.0, duration_sec),
+            },
+        )
+
+    normalized.sort(key=lambda seg: float(seg["video_start_sec"]))
+    return normalized
+
+
+def _normalize_radar_timing(radar_timing: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(radar_timing, dict):
+        return []
+
+    raw_segments = radar_timing.get("segments")
+    if not isinstance(raw_segments, list):
+        return []
+
+    segments: list[dict[str, Any]] = []
+
+    for raw in raw_segments:
+        if not isinstance(raw, dict):
+            continue
+
+        try:
+            video_start = float(raw["video_start_sec"])
+            video_end = float(raw["video_end_sec"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if video_end <= video_start:
+            continue
+
+        if raw.get("sync_method") in ("hold_previous", "hold_or_empty") or raw.get("type") == "gap":
+            segments.append(
+                {
+                    **raw,
+                    "video_start_sec": video_start,
+                    "video_end_sec": video_end,
+                    "type": raw.get("type", "gap"),
+                    "sync_method": raw.get("sync_method", "hold_or_empty"),
+                },
+            )
+            continue
+
+        try:
+            demo_start = int(raw["demo_start_tick"])
+            demo_end = int(raw["demo_end_tick"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if demo_end <= demo_start:
+            continue
+
+        segments.append(
+            {
+                **raw,
+                "video_start_sec": video_start,
+                "video_end_sec": video_end,
+                "demo_start_tick": demo_start,
+                "demo_end_tick": demo_end,
+                "sync_method": raw.get("sync_method", "affine"),
+            },
+        )
+
+    segments.sort(key=lambda s: float(s["video_start_sec"]))
+    return segments
+
+
+def _tick_for_video_time_from_radar_timing(
+    video_time_sec: float,
+    segments: list[dict[str, Any]],
+    *,
+    last_tick: int | None,
+) -> int | None:
+    if not segments:
+        return None
+
+    first_vs = float(segments[0]["video_start_sec"])
+    if video_time_sec < first_vs:
+        if "demo_start_tick" in segments[0]:
+            return int(segments[0]["demo_start_tick"])
+        return last_tick
+
+    selected: dict[str, Any] | None = None
+    for seg in segments:
+        vs = float(seg["video_start_sec"])
+        ve = float(seg["video_end_sec"])
+        if vs <= video_time_sec < ve:
+            selected = seg
+            break
+
+    if selected is None:
+        for seg in reversed(segments):
+            if "demo_end_tick" in seg:
+                return int(seg["demo_end_tick"]) - 1
+        return last_tick
+
+    sync_method = selected.get("sync_method", "affine")
+
+    if sync_method in ("hold_previous", "hold_or_empty") or selected.get("type") == "gap":
+        return last_tick
+
+    video_start = float(selected["video_start_sec"])
+    video_end = float(selected["video_end_sec"])
+    demo_start = int(selected["demo_start_tick"])
+    demo_end = int(selected["demo_end_tick"])
+
+    ratio = (video_time_sec - video_start) / max(video_end - video_start, 0.001)
+    ratio = max(0.0, min(1.0, ratio))
+
+    t = demo_start + int(round(ratio * (demo_end - demo_start)))
+    t = max(demo_start, min(t, demo_end - 1))
+
+    return int(t)
+
+
+def _tick_for_video_time_from_segments(
+    video_time_sec: float,
+    segments: list[dict[str, Any]],
+    tick_rate: float,
+    sync_offset_sec: float = 0.0,
+) -> int:
+    if not segments:
+        raise ValueError("record_segments is empty")
+
+    # 取「视频时间所在」的段：最后一个 video_start_sec <= video_time_sec 的 segment
+    selected = segments[0]
+    for seg in segments:
+        if float(seg["video_start_sec"]) <= video_time_sec:
+            selected = seg
+        else:
+            break
+
+    local_time_sec = max(0.0, video_time_sec - float(selected["video_start_sec"]))
+    local_time_sec += float(sync_offset_sec or 0.0)
+
+    t = int(selected["start_tick"]) + int(round(local_time_sec * tick_rate))
+    t = max(int(selected["start_tick"]), min(t, int(selected["end_tick"]) - 1))
+
+    return t
+
+
 def extract_radar_timeline(
     *,
     demo_path: str,
@@ -18,6 +193,10 @@ def extract_radar_timeline(
     end_tick: int,
     fps: float,
     duration_sec: float,
+    demo_tick_rate: float = 64.0,
+    radar_sync_offset_sec: float = 0.0,
+    record_segments: list[dict[str, Any]] | None = None,
+    radar_timing: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Wrap isolated worker (demoparser native crashes cannot kill FastAPI)."""
     try:
@@ -30,6 +209,10 @@ def extract_radar_timeline(
             end_tick=int(end_tick),
             fps=float(fps),
             duration_sec=float(duration_sec),
+            demo_tick_rate=float(demo_tick_rate),
+            radar_sync_offset_sec=float(radar_sync_offset_sec),
+            record_segments=record_segments,
+            radar_timing=radar_timing,
         )
     except Exception as e:
         logger.warning("radar timeline isolated parse failed: %s", e)
@@ -49,10 +232,15 @@ def extract_radar_timeline_impl(
     end_tick: int,
     fps: float,
     duration_sec: float,
+    demo_tick_rate: float = 64.0,
+    radar_sync_offset_sec: float = 0.0,
+    record_segments: list[dict[str, Any]] | None = None,
+    radar_timing: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Runs inside parse_worker child process.
-    从 demo 中提取 start_tick ~ end_tick 的雷达时间线（与成片 fps / 时长对齐，每帧一条）。
+    从 demo 中提取雷达时间线（与成片 fps / 时长对齐，每帧一条）。
+    时间轴：clip_meta.radar_timing > record_segments（旧）> 线性铺满 tick 区间。
     """
     del map_name
 
@@ -80,14 +268,29 @@ def extract_radar_timeline_impl(
             return "T"
         return str(t)
 
+    tick_rate = float(demo_tick_rate or 64.0)
+    tick_rate = max(tick_rate, 0.001)
+    sync_offset_sec = float(radar_sync_offset_sec or 0.0)
+    sync_offset_ticks = int(round(sync_offset_sec * tick_rate))
+    segments = _normalize_record_segments(record_segments, tick_rate)
+    timing_segments = _normalize_radar_timing(radar_timing)
+
+    start_i = int(start_tick)
+    end_i = int(end_tick)
+    if segments:
+        probe_lo = min(int(s["start_tick"]) for s in segments)
+        probe_hi = max(int(s["end_tick"]) for s in segments)
+    else:
+        probe_lo, probe_hi = start_i, end_i
+
     parser = DemoParser(demo_path)
 
     probe_ticks = sorted(
-        {int(start_tick), int(end_tick - 1), int(start_tick + max(0, end_tick - start_tick) // 2)},
+        {int(probe_lo), int(probe_hi - 1), int(probe_lo + max(0, probe_hi - probe_lo) // 2)},
     )
-    probe_ticks = [t for t in probe_ticks if int(start_tick) <= t < int(end_tick)]
+    probe_ticks = [t for t in probe_ticks if int(probe_lo) <= t < int(probe_hi)]
     if not probe_ticks:
-        probe_ticks = [int(start_tick)]
+        probe_ticks = [int(probe_lo)]
 
     pov_sid = _norm_sid(pov_steamid64)
     pov_name_key = (pov_player_name or "").strip().lower()
@@ -121,15 +324,37 @@ def extract_radar_timeline_impl(
         return []
 
     n_frames = max(1, int(round(max(0.01, duration_sec) * max(0.01, fps))))
-    span = max(1, int(end_tick) - int(start_tick))
     sample_ticks: list[int] = []
+    last_tick: int | None = None
     for i in range(n_frames):
-        if n_frames <= 1:
-            t = int(start_tick)
+        video_time_sec = i / max(float(fps), 0.001)
+        t: int
+        if timing_segments:
+            tick_opt = _tick_for_video_time_from_radar_timing(
+                video_time_sec,
+                timing_segments,
+                last_tick=last_tick,
+            )
+            if tick_opt is None:
+                t = int(start_i)
+            else:
+                t = int(tick_opt)
+        elif segments:
+            t = _tick_for_video_time_from_segments(
+                video_time_sec=video_time_sec,
+                segments=segments,
+                tick_rate=tick_rate,
+                sync_offset_sec=sync_offset_sec,
+            )
         else:
-            t = int(start_tick) + int(round((i / (n_frames - 1)) * (span - 1)))
-        t = max(int(start_tick), min(t, int(end_tick) - 1))
-        sample_ticks.append(t)
+            span = max(1, int(end_i) - int(start_i))
+            if n_frames <= 1:
+                t = int(start_i)
+            else:
+                t = int(start_i) + int(round((i / (n_frames - 1)) * (span - 1)))
+            t = max(int(start_i), min(t, int(end_i) - 1))
+        last_tick = int(t)
+        sample_ticks.append(int(t))
 
     fields = [
         "X",

@@ -90,6 +90,8 @@ class Clip:
     kill_count: int
     start_tick: int
     end_tick: int
+    # 与 MatchMeta 同源，供 recorded_clips.clip_meta / 雷达使用（不从成片文件名推断）
+    map_name: str = "unknown"
     context_tags: list[str] = field(default_factory=list)
     # 玩家互动：下饭 = 谁杀了目标；高光 = 目标本回合多杀里杀了哪些人
     killer_name: Optional[str] = None
@@ -1569,6 +1571,7 @@ class DemoAnalyzer:
             round_team_score_map,
             round_result_map,
             round_freeze_end_ticks,
+            map_name=map_name,
             flash_on_target_index=flash_on_target_index,
             grenade_detonate_points=grenade_detonate_points,
         )
@@ -1670,6 +1673,7 @@ class DemoAnalyzer:
 
             highlight_clips.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=rnd,
                 category="highlight",
                 weapon_used=_highlight_weapon_used_label(kills_sorted),
@@ -1701,6 +1705,7 @@ class DemoAnalyzer:
                 )
                 highlight_clips.append(Clip(
                     clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                    map_name=map_name,
                     round=rnd,
                     category="highlight",
                     weapon_used=_translate_weapon(wpn),
@@ -1727,6 +1732,7 @@ class DemoAnalyzer:
             )
             highlight_clips.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=rnd,
                 category="highlight",
                 weapon_used=_translate_weapon(wpn),
@@ -1775,6 +1781,7 @@ class DemoAnalyzer:
                 _end = kt + BUFFER_SECONDS_AFTER * TICK_RATE
                 highlight_clips.append(Clip(
                     clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                    map_name=map_name,
                     round=rnd,
                     category="highlight",
                     weapon_used=_translate_weapon(wpn),
@@ -1825,6 +1832,7 @@ class DemoAnalyzer:
                 _end = kt + BUFFER_SECONDS_AFTER * TICK_RATE
                 highlight_clips.append(Clip(
                     clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                    map_name=map_name,
                     round=rnd,
                     category="highlight",
                     weapon_used=_translate_weapon(_kq_w),
@@ -1879,6 +1887,7 @@ class DemoAnalyzer:
             )
             merged_highlights.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=bh["round"],
                 category="highlight",
                 weapon_used=_translate_weapon("defuse_kit"),
@@ -1907,6 +1916,7 @@ class DemoAnalyzer:
             round_result_map=round_result_map,
             round_team_score_map=round_team_score_map,
             round_death_tick_map=round_death_tick_map,
+            map_name=map_name,
         )
         fail_clips = fail_clips + shoulder_clips
 
@@ -1919,6 +1929,7 @@ class DemoAnalyzer:
             round_result_map,
             round_freeze_end_ticks,
             freeze_to_death_rounds=freeze_to_death_rounds,
+            map_name=map_name,
         )
 
         clips = fail_clips + highlight_clips + meme_clips + compilation_clips
@@ -2132,6 +2143,7 @@ class DemoAnalyzer:
         round_result_map: "dict[int, bool | None]",
         round_team_score_map: dict,
         round_death_tick_map: dict[int, int],
+        map_name: str,
     ) -> "list[Clip]":
         """
         检测「我与敌人肩并肩」场景：目标玩家与敌方玩家在某一段时间内持续近距离
@@ -2257,6 +2269,7 @@ class DemoAnalyzer:
 
             clips.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=rnd,
                 category="fail",
                 weapon_used="",
@@ -2288,6 +2301,7 @@ class DemoAnalyzer:
         round_freeze_end_ticks: dict[int, int],
         *,
         freeze_to_death_rounds: Optional[list[int]] = None,
+        map_name: str,
     ) -> list[Clip]:
         """合集片段：
         - 🥩 亲儿子喂饭：本局击杀同一敌人 ≥ 8 次 → 把所有对该敌人的击杀拼为合集 clip
@@ -2385,6 +2399,7 @@ class DemoAnalyzer:
             _last_rnd, last_t = items[-1]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=first_rnd,
                 category="compilation",
                 weapon_used="",
@@ -2436,6 +2451,7 @@ class DemoAnalyzer:
             _last_rnd, last_t = items[-1]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=first_rnd,
                 category="compilation",
                 weapon_used="",
@@ -2464,6 +2480,7 @@ class DemoAnalyzer:
             victims = [victim for _, _, victim in all_target_kills]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=first_rnd,
                 category="compilation",
                 weapon_used="",
@@ -2491,6 +2508,7 @@ class DemoAnalyzer:
             killers = [attacker for _, _, attacker in all_target_deaths]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                map_name=map_name,
                 round=first_rnd,
                 category="compilation",
                 weapon_used="",
@@ -2641,6 +2659,7 @@ class DemoAnalyzer:
                     ftd_round_filter_out = sorted(ftd_filter)
                 compilations.append(Clip(
                     clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                    map_name=map_name,
                     round=first_rnd,
                     category="compilation",
                     weapon_used="",
@@ -2682,6 +2701,7 @@ class DemoAnalyzer:
         round_result_map: dict[int, bool],
         round_freeze_end_ticks: dict[int, int],
         *,
+        map_name: str,
         flash_on_target_index: Optional[list[tuple[int, float]]] = None,
         grenade_detonate_points: Optional[list[tuple[int, float, float]]] = None,
     ) -> tuple[list[Clip], set[tuple[int, int]]]:
@@ -2720,6 +2740,7 @@ class DemoAnalyzer:
                     score_opp=se,
                     round_won=round_result_map.get(death["round"]),
                     clip_min_tick=round_freeze_end_ticks.get(death["round"]),
+                    map_name=map_name,
                 ))
                 fail_death_keys.add((death["round"], death["tick"]))
                 continue
@@ -2786,6 +2807,7 @@ class DemoAnalyzer:
                     score_opp=se,
                     round_won=round_result_map.get(death["round"]),
                     clip_min_tick=round_freeze_end_ticks.get(death["round"]),
+                    map_name=map_name,
                 ))
                 fail_death_keys.add((death["round"], death["tick"]))
 
@@ -4463,6 +4485,7 @@ class DemoAnalyzer:
         score_opp: Optional[int] = None,
         round_won: Optional[bool] = None,
         clip_min_tick: Optional[int] = None,
+        map_name: str = "unknown",
     ) -> Clip:
         if death_core:
             start = max(0, tick - int(TICK_RATE * float(_DEATH_CLIP_LEAD_SECONDS)))
@@ -4471,6 +4494,7 @@ class DemoAnalyzer:
         end = end_tick_override if end_tick_override else tick + BUFFER_SECONDS_AFTER * TICK_RATE
         return Clip(
             clip_id=f"c_{uuid.uuid4().hex[:8]}",
+            map_name=map_name,
             round=round_num,
             category=category,
             weapon_used=_translate_weapon(weapon),

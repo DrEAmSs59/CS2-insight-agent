@@ -3,30 +3,70 @@
     "image": "de_mirage.png",
     "pos_x": -3230,
     "pos_y": 1713,
-    "scale": 5.0
+    "scale": 5.0,
+    "rotate": 0,
+    "zoom": 1.0,
+    "marker_offset_x": 0.0,
+    "marker_offset_y": 0.0,
+    "lower_level_max_units": null,
+    "lower_image": null,
+    "source": "manual_overview",
+    "image_size": 1024
   },
   "de_dust2": {
     "image": "de_dust2.png",
     "pos_x": -2476,
     "pos_y": 3239,
-    "scale": 4.4
+    "scale": 4.4,
+    "rotate": 0,
+    "zoom": 1.0,
+    "marker_offset_x": 0.0,
+    "marker_offset_y": 0.0,
+    "lower_level_max_units": null,
+    "lower_image": null,
+    "source": "manual_overview",
+    "image_size": 1024
   },
   "de_inferno": {
     "image": "de_inferno.png",
     "pos_x": -2087,
     "pos_y": 3870,
-    "scale": 4.9
+    "scale": 4.9,
+    "rotate": 0,
+    "zoom": 1.0,
+    "marker_offset_x": 0.0,
+    "marker_offset_y": 0.0,
+    "lower_level_max_units": null,
+    "lower_image": null,
+    "source": "manual_overview",
+    "image_size": 1024
   },
   "de_ancient": {
     "image": "de_ancient.png",
     "pos_x": -2952,
     "pos_y": 2166,
-    "scale": 5.2
+    "scale": 5.2,
+    "rotate": 0,
+    "zoom": 1.0,
+    "marker_offset_x": 0.0,
+    "marker_offset_y": 0.0,
+    "lower_level_max_units": null,
+    "lower_image": null,
+    "source": "manual_overview",
+    "image_size": 1024
   },
   "de_anubis": {
     "image": "de_anubis.png",
     "pos_x": -2796,
     "pos_y": 3328,
-    "scale": 5.0
+    "scale": 5.0,
+    "rotate": 0,
+    "zoom": 1.0,
+    "marker_offset_x": 0.0,
+    "marker_offset_y": 0.0,
+    "lower_level_max_units": null,
+    "lower_image": null,
+    "source": "manual_overview",
+    "image_size": 1024
   }
 }

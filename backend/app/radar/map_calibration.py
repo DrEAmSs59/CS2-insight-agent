@@ -43,10 +43,19 @@ def get_map_calibration(map_name: str) -> dict[str, Any]:
 
 
 def world_to_radar_xy(world_x: float, world_y: float, cfg: dict[str, Any]) -> tuple[float, float]:
+    """
+    CS2 世界坐标 -> 原始雷达底图像素坐标。
+
+    只负责投影到原始雷达底图坐标，不负责缩放到最终 overlay 画布。
+    """
     pos_x = float(cfg["pos_x"])
     pos_y = float(cfg["pos_y"])
     scale = float(cfg["scale"])
 
-    image_x = (world_x - pos_x) / scale
-    image_y = (pos_y - world_y) / scale
+    image_x = (float(world_x) - pos_x) / scale
+    image_y = (pos_y - float(world_y)) / scale
+
+    image_x += float(cfg.get("marker_offset_x", 0.0) or 0.0)
+    image_y += float(cfg.get("marker_offset_y", 0.0) or 0.0)
+
     return image_x, image_y

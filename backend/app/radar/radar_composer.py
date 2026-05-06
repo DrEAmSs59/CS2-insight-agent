@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.radar.map_calibration import RadarMapError
-from app.radar.radar_data_extractor import extract_radar_timeline
+from app.radar.radar_data_extractor import _normalize_record_segments, extract_radar_timeline
 from app.radar.radar_renderer import render_radar_frames
 
 logger = logging.getLogger(__name__)
@@ -52,8 +52,6 @@ def _require_clip_meta(clip_row: dict[str, Any]) -> dict[str, Any]:
         raise RadarOverlaySkip("缺少 demo_path")
     if not map_name:
         raise RadarOverlaySkip("缺少 map_name")
-    if start_tick is None or end_tick is None:
-        raise RadarOverlaySkip("缺少 start_tick/end_tick")
     if not pov_steamid64 and not pov_player_name:
         raise RadarOverlaySkip("缺少 POV 玩家标识")
 
@@ -61,14 +59,46 @@ def _require_clip_meta(clip_row: dict[str, Any]) -> dict[str, Any]:
     if not demo_path_obj.exists():
         raise RadarOverlaySkip(f"demo 文件不存在: {demo_path}")
 
+    dr_raw = _first_value(clip_row, ["demo_tick_rate"])
     try:
-        start_tick_int = int(start_tick)
-        end_tick_int = int(end_tick)
-    except Exception as exc:
-        raise RadarOverlaySkip("start_tick/end_tick 不是有效整数") from exc
+        demo_tick_rate = float(dr_raw) if dr_raw is not None else 64.0
+    except (TypeError, ValueError):
+        demo_tick_rate = 64.0
+    if demo_tick_rate <= 0:
+        demo_tick_rate = 64.0
 
-    if end_tick_int <= start_tick_int:
-        raise RadarOverlaySkip("end_tick 必须大于 start_tick")
+    rs_off_raw = clip_row.get("radar_sync_offset_sec")
+    try:
+        radar_sync_offset_sec = float(rs_off_raw) if rs_off_raw is not None else 0.0
+    except (TypeError, ValueError):
+        radar_sync_offset_sec = 0.0
+
+    raw_rs = clip_row.get("record_segments")
+    record_segments_list: list[dict[str, Any]] = []
+    if isinstance(raw_rs, list):
+        record_segments_list = [x for x in raw_rs if isinstance(x, dict)]
+
+    norm_seg = _normalize_record_segments(record_segments_list, demo_tick_rate)
+
+    if norm_seg:
+        start_tick_int = min(int(s["start_tick"]) for s in norm_seg)
+        end_tick_int = max(int(s["end_tick"]) for s in norm_seg)
+        if end_tick_int <= start_tick_int:
+            raise RadarOverlaySkip("record_segments 无效：end_tick 必须大于 start_tick")
+    else:
+        if start_tick is None or end_tick is None:
+            raise RadarOverlaySkip("缺少 start_tick/end_tick")
+        try:
+            start_tick_int = int(start_tick)
+            end_tick_int = int(end_tick)
+        except Exception as exc:
+            raise RadarOverlaySkip("start_tick/end_tick 不是有效整数") from exc
+
+        if end_tick_int <= start_tick_int:
+            raise RadarOverlaySkip("end_tick 必须大于 start_tick")
+
+    raw_timing = clip_row.get("radar_timing")
+    radar_timing: dict[str, Any] | None = raw_timing if isinstance(raw_timing, dict) else None
 
     return {
         "demo_path": str(demo_path_obj),
@@ -77,6 +107,10 @@ def _require_clip_meta(clip_row: dict[str, Any]) -> dict[str, Any]:
         "end_tick": end_tick_int,
         "pov_steamid64": str(pov_steamid64) if pov_steamid64 else None,
         "pov_player_name": str(pov_player_name) if pov_player_name else None,
+        "demo_tick_rate": float(demo_tick_rate),
+        "radar_sync_offset_sec": float(radar_sync_offset_sec),
+        "record_segments": record_segments_list,
+        "radar_timing": radar_timing,
     }
 
 
@@ -203,6 +237,10 @@ def apply_radar_overlay_to_clip(
             end_tick=meta["end_tick"],
             fps=fps,
             duration_sec=duration_sec,
+            demo_tick_rate=float(meta.get("demo_tick_rate") or 64.0),
+            radar_sync_offset_sec=float(meta.get("radar_sync_offset_sec") or 0.0),
+            record_segments=meta.get("record_segments") or [],
+            radar_timing=meta.get("radar_timing"),
         )
     except Exception as exc:
         raise RadarOverlaySkip(f"雷达数据提取失败: {exc}") from exc
@@ -216,6 +254,7 @@ def apply_radar_overlay_to_clip(
             map_name=meta["map_name"],
             output_dir=radar_dir,
             size=RADAR_SIZE,
+            clip_id=_first_value(clip_row, ["clip_id", "id"]),
         )
     except RadarMapError as exc:
         raise RadarOverlaySkip(str(exc)) from exc

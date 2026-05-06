@@ -36,6 +36,7 @@ from .env_utils import OBSConfig
 from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_payload_after
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
+from .radar.radar_data_extractor import _normalize_record_segments
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,19 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "steamid",
     "record_start_tick",
     "record_end_tick",
+    "anchor_tick",
+    "pre_roll_sec",
+    "post_roll_sec",
+    "demo_tick_rate",
+    "radar_sync_offset_sec",
+    "source_ticks",
+    "source_rounds",
+    "fixed_segment_pacing",
+    "freeze_to_death_round_filter",
+    "record_segments",
+    "radar_timing",
+    "pov_player_name",
+    "pov_steamid64",
 )
 
 
@@ -70,8 +84,262 @@ def merge_clip_metadata_into_recording_result(out: dict[str, Any], clip: dict[st
     for k in _RECORDING_RESULT_CLIP_META_KEYS:
         if k not in clip:
             continue
-        out[k] = clip[k]
+        v = clip[k]
+        if k == "record_segments":
+            prev = out.get("record_segments")
+            if isinstance(prev, list) and len(prev) > 0:
+                if not (isinstance(v, list) and len(v) > 0):
+                    continue
+        out[k] = v
     return out
+
+
+def _clip_radar_anchor_tick(clip: dict) -> int:
+    kills = _clip_kill_ticks_sorted(clip)
+    if kills:
+        return int(kills[len(kills) // 2])
+    dt = _clip_death_tick(clip)
+    if dt is not None:
+        return int(dt)
+    st = max(0, int(clip.get("start_tick") or 0))
+    et = max(st, int(clip.get("end_tick") or 0))
+    return int((st + et) // 2)
+
+
+def _source_round_per_demo_segment(clip: dict, segments: list[tuple[int, int]]) -> list[Optional[int]]:
+    raw = clip.get("source_ticks") or []
+    if not raw or str(clip.get("category") or "").strip() != "compilation":
+        return [None] * len(segments)
+    rounds_raw = clip.get("source_rounds") or []
+    spans: list[tuple[int, int, Optional[int]]] = []
+    for idx, item in enumerate(raw):
+        try:
+            ss = int(item[0])
+            ee = int(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        ss = max(0, ss)
+        ee = max(ss + 1, ee)
+        try:
+            rn = int(rounds_raw[idx]) if idx < len(rounds_raw) else None
+        except (TypeError, ValueError):
+            rn = None
+        spans.append((ss, ee, rn))
+    out: list[Optional[int]] = []
+    for seg_ss, seg_ee in segments:
+        best_rn: Optional[int] = None
+        best_ov = -1
+        for ss, ee, rn in spans:
+            lo = max(seg_ss, ss)
+            hi = min(seg_ee, ee)
+            ov = hi - lo
+            if ov > best_ov:
+                best_ov = ov
+                best_rn = rn
+        out.append(best_rn)
+    return out
+
+
+def _radar_record_segments_wall_plan(
+    segments: list[tuple[int, int]],
+    *,
+    post_start_seg0: float,
+    first_seg_extra: float,
+    post_obs_resume_sec: float,
+    settle_between: float,
+    tick_rate: float,
+    source_rounds_per_seg: list[Optional[int]],
+) -> list[dict[str, Any]]:
+    """与 smart-jump 录制 sleep 结构一致的「成片视频时间 → demo tick 段」元数据（供雷达采样）。"""
+    tr = max(float(tick_rate), 0.001)
+    video_t = 0.0
+    out: list[dict[str, Any]] = []
+    for si, (ss, ee) in enumerate(segments):
+        seg_dur_demo = max(0.0, (int(ee) - int(ss)) / tr)
+        if si == 0:
+            dur_video = float(post_start_seg0) + seg_dur_demo + float(first_seg_extra)
+        else:
+            dur_video = float(post_obs_resume_sec) + float(settle_between) + seg_dur_demo
+        dur_video = max(0.0, dur_video)
+        item: dict[str, Any] = {
+            "start_tick": int(ss),
+            "end_tick": int(ee),
+            "video_start_sec": float(video_t),
+            "duration_sec": float(dur_video),
+        }
+        if si < len(source_rounds_per_seg):
+            rn = source_rounds_per_seg[si]
+            if rn is not None:
+                item["source_round"] = int(rn)
+        out.append(item)
+        video_t += dur_video
+    return out
+
+
+def _recording_radar_clip_meta_fields(
+    clip: dict,
+    *,
+    use_smart_jump: bool,
+    segments: list[tuple[int, int]],
+    meta_record_start_tick: int,
+    meta_record_end_tick: int,
+    post_start_seg0: float,
+    first_seg_extra: float,
+    settle_between: float,
+    director: Any,
+) -> dict[str, Any]:
+    tick_rate = float(TICK_RATE)
+    try:
+        sync_off = float((os.environ.get("CS2_INSIGHT_RADAR_TIMELINE_OFFSET_SEC") or "0").strip() or 0.0)
+    except (TypeError, ValueError):
+        sync_off = 0.0
+    anchor = _clip_radar_anchor_tick(clip)
+    pre_roll = max(0.0, (int(anchor) - int(meta_record_start_tick)) / tick_rate)
+    post_roll = max(0.0, (int(meta_record_end_tick) - int(anchor)) / tick_rate)
+    fields: dict[str, Any] = {
+        "demo_tick_rate": tick_rate,
+        "radar_sync_offset_sec": float(sync_off),
+        "anchor_tick": int(anchor),
+        "pre_roll_sec": float(pre_roll),
+        "post_roll_sec": float(post_roll),
+    }
+    if use_smart_jump and segments:
+        post_obs = float(director._env_float("CS2_INSIGHT_POST_OBS_RESUME_DEMO_DELAY", "0.25"))
+        rnds = _source_round_per_demo_segment(clip, segments)
+        fields["record_segments"] = _radar_record_segments_wall_plan(
+            segments,
+            post_start_seg0=float(post_start_seg0),
+            first_seg_extra=float(first_seg_extra),
+            post_obs_resume_sec=post_obs,
+            settle_between=float(settle_between),
+            tick_rate=tick_rate,
+            source_rounds_per_seg=rnds,
+        )
+    else:
+        fields["record_segments"] = []
+    return fields
+
+
+def _ffprobe_duration_sec(video_path: Path) -> Optional[float]:
+    """读取成片实际时长（秒），供 radar_timing 与视频时间轴对齐。"""
+    probe = shutil.which("ffprobe")
+    if not probe:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                probe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=duration",
+                "-of",
+                "default=nokey=1:noprint_wrappers=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return None
+    try:
+        d = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return d if d > 0 else None
+
+
+def _build_radar_timing_payload(
+    *,
+    record_segments: list[dict[str, Any]],
+    meta_record_start_tick: int,
+    meta_record_end_tick: int,
+    anchor_tick: int,
+    tick_rate: float,
+    actual_duration_sec: float,
+) -> dict[str, Any]:
+    """
+    用 ffprobe 实际时长生成 clip_meta.radar_timing，将 video_time 仿射映射到 demo tick。
+    多段 smart-jump 时按各段 planned 时长比例缩放 wall 时间轴以贴合真实成片长度。
+    """
+    tr = max(float(tick_rate), 0.001)
+    norm = _normalize_record_segments(record_segments, tr)
+    actual = max(0.01, float(actual_duration_sec))
+
+    segs_out: list[dict[str, Any]] = []
+
+    if norm:
+        planned_ends: list[float] = []
+        for s in norm:
+            vs = float(s["video_start_sec"])
+            dur = float(s.get("duration_sec", 0.0) or 0.0)
+            planned_ends.append(vs + max(0.0, dur))
+        planned_total = max(planned_ends) if planned_ends else 0.0
+        scale = actual / max(planned_total, 0.001)
+
+        for i, s in enumerate(norm):
+            vs = float(s["video_start_sec"]) * scale
+            ve = (float(s["video_start_sec"]) + float(s.get("duration_sec", 0.0) or 0.0)) * scale
+            if ve <= vs:
+                continue
+            item: dict[str, Any] = {
+                "segment_index": i,
+                "video_start_sec": float(vs),
+                "video_end_sec": float(ve),
+                "demo_start_tick": int(s["start_tick"]),
+                "demo_end_tick": int(s["end_tick"]),
+                "sync_method": "affine",
+            }
+            try:
+                rn = s.get("source_round")
+                if rn is not None:
+                    item["source_round"] = int(rn)
+            except (TypeError, ValueError):
+                pass
+            segs_out.append(item)
+        if segs_out:
+            return {
+                "version": 1,
+                "mode": "segments_affine",
+                "tick_rate_hint": float(tick_rate),
+                "segments": segs_out,
+            }
+
+    anchor = int(anchor_tick)
+    anchor_video_sec: Optional[float] = None
+    try:
+        if meta_record_end_tick > meta_record_start_tick:
+            anchor_video_sec = max(0.0, (anchor - int(meta_record_start_tick)) / tr)
+    except Exception:
+        anchor_video_sec = None
+    segs_out = [
+        {
+            "segment_index": 0,
+            "video_start_sec": 0.0,
+            "video_end_sec": float(actual),
+            "demo_start_tick": int(meta_record_start_tick),
+            "demo_end_tick": int(meta_record_end_tick),
+            "anchor_tick": anchor,
+            "anchor_video_sec": anchor_video_sec,
+            "sync_method": "affine",
+        },
+    ]
+
+    return {
+        "version": 1,
+        "mode": "segments_affine",
+        "tick_rate_hint": float(tick_rate),
+        "segments": segs_out,
+    }
 
 
 def _resolve_gsi_sink_url() -> str:
@@ -1738,6 +2006,8 @@ class OBSDirector:
             if val:
                 return val
         stem = demo_abs.stem
+        # 成片文件名常见形如 player_de_dust2_R1_2K_xxx；在 IGNORECASE 下 [a-z0-9_]+ 会把 _R1… 吃进地图名
+        stem = re.split(r"_R\d+", stem, maxsplit=1, flags=re.IGNORECASE)[0]
         m = re.search(r"(de_[a-z0-9_]+)", stem, flags=re.IGNORECASE)
         if m:
             return m.group(1)
@@ -2997,8 +3267,34 @@ class OBSDirector:
                 )
 
         self._set_state(DirectorState.STOPPING, clip_id)
+        radar_clip_meta = _recording_radar_clip_meta_fields(
+            clip,
+            use_smart_jump=use_smart_jump,
+            segments=segments,
+            meta_record_start_tick=int(meta_record_start_tick),
+            meta_record_end_tick=int(meta_record_end_tick),
+            post_start_seg0=float(post_start_seg0),
+            first_seg_extra=float(first_seg_extra),
+            settle_between=float(settle_between),
+            director=self,
+        )
+        try:
+            _op = (output_result or {}).get("output_path")
+            if _op:
+                _dur_actual = _ffprobe_duration_sec(Path(str(_op)))
+                if _dur_actual is not None:
+                    radar_clip_meta["radar_timing"] = _build_radar_timing_payload(
+                        record_segments=list(radar_clip_meta.get("record_segments") or []),
+                        meta_record_start_tick=int(meta_record_start_tick),
+                        meta_record_end_tick=int(meta_record_end_tick),
+                        anchor_tick=int(radar_clip_meta.get("anchor_tick") or _clip_radar_anchor_tick(clip)),
+                        tick_rate=float(TICK_RATE),
+                        actual_duration_sec=float(_dur_actual),
+                    )
+        except Exception as _rt_exc:
+            logger.warning("radar_timing 构建失败（将依赖旧时间轴）: %s", _rt_exc)
         if fatal_recording_error:
-            return {
+            err_out: dict[str, Any] = {
                 "clip_id": clip_id,
                 "status": "error",
                 "error": fatal_recording_error,
@@ -3009,7 +3305,10 @@ class OBSDirector:
                 "record_end_tick": meta_record_end_tick,
                 **output_result,
             }
-        return {
+            merge_clip_metadata_into_recording_result(err_out, clip)
+            err_out.update(radar_clip_meta)
+            return err_out
+        ok_out: dict[str, Any] = {
             "clip_id": clip_id,
             "status": "recorded",
             "duration": planned_wall_seconds,
@@ -3019,6 +3318,9 @@ class OBSDirector:
             "record_end_tick": meta_record_end_tick,
             **output_result,
         }
+        merge_clip_metadata_into_recording_result(ok_out, clip)
+        ok_out.update(radar_clip_meta)
+        return ok_out
 
     def _obs_apply_hide_cursor_inputs(self) -> None:
         """录制前关闭各输入源的「采集光标」（OBS 5 SetInputSettings capture_cursor）。"""
