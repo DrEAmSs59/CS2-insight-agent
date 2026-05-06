@@ -37,8 +37,64 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _env_bool(name: str) -> bool:
-    return (os.environ.get(name) or "").strip() in ("1", "true", "yes", "on")
+def _radar_pov_rotate_enabled(requested: bool = True) -> bool:
+    """默认开启 POV 旋转；仅当显式关闭环境变量时用于调试。"""
+    raw = (os.environ.get("CS2_INSIGHT_RADAR_POV_ROTATE") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return requested
+
+
+def _pov_rotation_deg(pov_yaw: float, yaw_offset_deg: float = 0.0) -> float:
+    """整图绕画面几何中心旋转的角度（度），使主视角朝向尽量指向雷达上方。"""
+    return -(float(pov_yaw) + float(yaw_offset_deg))
+
+
+def _rotate_full_map_for_yaw(
+    base: Image.Image,
+    rotation_deg: float,
+    *,
+    size: int,
+) -> Image.Image:
+    """整张小地图（已铺满 size×size）绕几何中心旋转，与玩家点同一枢轴。"""
+    if abs(rotation_deg) < 0.02:
+        return base
+    fast_rot = (os.environ.get("CS2_INSIGHT_RADAR_FAST_ROTATE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    try:
+        resample_rot = Image.Resampling.NEAREST if fast_rot else Image.Resampling.BILINEAR
+    except AttributeError:
+        resample_rot = Image.NEAREST if fast_rot else Image.BILINEAR  # type: ignore[attr-defined]
+    cx = float(size) * 0.5
+    cy = float(size) * 0.5
+    try:
+        return base.rotate(
+            float(rotation_deg),
+            resample=resample_rot,
+            center=(cx, cy),
+            fillcolor=(0, 0, 0, 0),
+        )
+    except TypeError:
+        return base.rotate(float(rotation_deg), resample=resample_rot, fillcolor=(0, 0, 0, 0))
+
+
+def _rotate_canvas_point(
+    px: float,
+    py: float,
+    *,
+    cx: float,
+    cy: float,
+    angle_rad: float,
+) -> tuple[float, float]:
+    """画布坐标绕 (cx, cy) 旋转 angle_rad（与整图 rotate 一致）。"""
+    rdx, rdy = _rotate_point(px - cx, py - cy, angle_rad)
+    return cx + rdx, cy + rdy
 
 
 def _validate_map_image(map_img: Image.Image, map_name: str, image_path: str) -> None:
@@ -91,99 +147,6 @@ def _rotate_point(x: float, y: float, angle_rad: float) -> tuple[float, float]:
     return (x * cos_a - y * sin_a, x * sin_a + y * cos_a)
 
 
-def _pov_relative_canvas_xy(
-    *,
-    player_rx: float,
-    player_ry: float,
-    pov_rx: float,
-    pov_ry: float,
-    pov_yaw: float,
-    size: int,
-    source_w: int,
-    source_h: int,
-    yaw_offset_deg: float = 0.0,
-    center_y_ratio: float = 0.58,
-    zoom: float = 1.0,
-) -> tuple[float, float]:
-    dx = player_rx - pov_rx
-    dy = player_ry - pov_ry
-
-    sx = float(size) / float(source_w)
-    sy = float(size) / float(source_h)
-
-    dx *= sx * float(zoom)
-    dy *= sy * float(zoom)
-
-    angle = math.radians(float(pov_yaw) + float(yaw_offset_deg))
-
-    rdx, rdy = _rotate_point(dx, dy, angle)
-
-    center_x = size * 0.5
-    center_y = size * float(center_y_ratio)
-
-    return center_x + rdx, center_y + rdy
-
-
-def _make_pov_rotated_map_layer(
-    *,
-    map_img: Image.Image,
-    pov_rx: float,
-    pov_ry: float,
-    pov_yaw: float,
-    size: int,
-    yaw_offset_deg: float = 0.0,
-    center_y_ratio: float = 0.58,
-    zoom: float = 1.0,
-) -> Image.Image:
-    source_w, source_h = map_img.size
-
-    try:
-        resample = Image.Resampling.LANCZOS
-        resample_bicubic = Image.Resampling.BICUBIC
-    except AttributeError:
-        resample = Image.LANCZOS  # type: ignore[attr-defined]
-        resample_bicubic = Image.BICUBIC  # type: ignore[attr-defined]
-
-    work_size = int(size * 3)
-    work = Image.new("RGBA", (work_size, work_size), (0, 0, 0, 0))
-
-    base_scale = float(size) / float(max(source_w, source_h))
-    scale = base_scale * float(zoom)
-
-    scaled_w = max(1, int(round(source_w * scale)))
-    scaled_h = max(1, int(round(source_h * scale)))
-
-    scaled = map_img.convert("RGBA").resize((scaled_w, scaled_h), resample)
-
-    pov_sx = float(pov_rx) * scale
-    pov_sy = float(pov_ry) * scale
-
-    target_x = work_size * 0.5
-    target_y = work_size * float(center_y_ratio)
-
-    paste_x = int(round(target_x - pov_sx))
-    paste_y = int(round(target_y - pov_sy))
-
-    work.alpha_composite(scaled, (paste_x, paste_y))
-
-    rotate_deg = -(float(pov_yaw) + float(yaw_offset_deg))
-
-    try:
-        rotated = work.rotate(
-            rotate_deg,
-            resample=resample_bicubic,
-            center=(target_x, target_y),
-            fillcolor=(0, 0, 0, 0),
-        )
-    except TypeError:
-        rotated = work.rotate(rotate_deg, resample=resample_bicubic, fillcolor=(0, 0, 0, 0))
-
-    left = int(round(target_x - size * 0.5))
-    top = int(round(target_y - size * float(center_y_ratio)))
-
-    return rotated.crop((left, top, left + size, top + size))
-
-
 def _circle_mask(size: int, padding: int = 0) -> Image.Image:
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
@@ -202,7 +165,12 @@ def _apply_circular_radar_frame(
     border_width: int = 2,
     background_color: tuple[int, int, int, int] = (0, 0, 0, 180),
 ) -> Image.Image:
-    radar = radar.convert("RGBA").resize((size, size))
+    radar = radar.convert("RGBA")
+    if radar.size != (size, size):
+        try:
+            radar = radar.resize((size, size), Image.Resampling.BILINEAR)
+        except AttributeError:
+            radar = radar.resize((size, size), Image.BILINEAR)  # type: ignore[attr-defined]
 
     output = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
@@ -227,10 +195,16 @@ def _apply_circular_radar_frame(
 
 
 def _enhanced_map_rgba(map_img: Image.Image, size: int) -> Image.Image:
+    fast_map = (os.environ.get("CS2_INSIGHT_RADAR_FAST_MAP") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     try:
-        resample = Image.Resampling.LANCZOS
+        resample = Image.Resampling.BILINEAR if fast_map else Image.Resampling.LANCZOS
     except AttributeError:
-        resample = Image.LANCZOS  # type: ignore[attr-defined]
+        resample = Image.BILINEAR if fast_map else Image.LANCZOS  # type: ignore[attr-defined]
 
     base = map_img.convert("RGBA").resize((size, size), resample)
     try:
@@ -307,26 +281,44 @@ def _build_color_indices(players: list[dict[str, Any]]) -> dict[str, int]:
     return {sid: idx for idx, sid in enumerate(ids)}
 
 
-def _draw_direction_tip(
+def _draw_direction_triangle(
     draw: ImageDraw.ImageDraw,
     *,
     cx: float,
     cy: float,
     yaw: float,
-    color: tuple[int, int, int, int],
+    fill: tuple[int, int, int, int],
+    outline: tuple[int, int, int, int],
     length: float,
-    width: int,
+    width: float,
     yaw_offset_deg: float = 0.0,
 ) -> None:
+    """圆点外侧的小方向三角。"""
     a = math.radians(float(yaw) + float(yaw_offset_deg))
 
     dx = math.cos(a)
     dy = -math.sin(a)
 
-    x2 = cx + dx * length
-    y2 = cy + dy * length
+    nx = -dy
+    ny = dx
 
-    draw.line((cx, cy, x2, y2), fill=color, width=width)
+    tip_x = cx + dx * length
+    tip_y = cy + dy * length
+
+    base_x = cx + dx * (length * 0.35)
+    base_y = cy + dy * (length * 0.35)
+
+    p1 = (tip_x, tip_y)
+    p2 = (base_x + nx * width, base_y + ny * width)
+    p3 = (base_x - nx * width, base_y - ny * width)
+
+    outline_expand = 1.3
+    op2 = (base_x + nx * (width + outline_expand), base_y + ny * (width + outline_expand))
+    op3 = (base_x - nx * (width + outline_expand), base_y - ny * (width + outline_expand))
+    otip = (cx + dx * (length + outline_expand), cy + dy * (length + outline_expand))
+
+    draw.polygon([otip, op2, op3], fill=outline)
+    draw.polygon([p1, p2, p3], fill=fill)
 
 
 def _draw_round_player_marker(
@@ -343,22 +335,38 @@ def _draw_round_player_marker(
     if is_pov:
         radius = 5.8
         outline_width = 2.0
-        direction_len = 13.0
-        direction_width = 3
+        triangle_len = 14.0
+        triangle_width = 4.0
     else:
         radius = 4.4
         outline_width = 1.6
-        direction_len = 10.0
-        direction_width = 2
+        triangle_len = 11.0
+        triangle_width = 3.0
 
-    outline = (0, 0, 0, 220)
-    direction_color = (255, 255, 255, 235)
+    outline = (0, 0, 0, 225)
+    direction_fill = fill
 
     if not is_alive:
-        radius = 3.2
+        radius = 3.0
+        outline_width = 1.2
+        triangle_len = 0.0
+        triangle_width = 0.0
         outline = (0, 0, 0, 120)
         fill = DEAD_COLOR
-        direction_color = (180, 180, 180, 90)
+        direction_fill = (150, 150, 150, 100)
+
+    if yaw is not None and is_alive and triangle_len > 0:
+        _draw_direction_triangle(
+            draw,
+            cx=cx,
+            cy=cy,
+            yaw=float(yaw),
+            fill=direction_fill,
+            outline=outline,
+            length=triangle_len,
+            width=triangle_width,
+            yaw_offset_deg=yaw_offset_deg,
+        )
 
     draw.ellipse(
         (
@@ -375,16 +383,16 @@ def _draw_round_player_marker(
         fill=fill,
     )
 
-    if yaw is not None and is_alive:
-        _draw_direction_tip(
-            draw,
-            cx=cx,
-            cy=cy,
-            yaw=float(yaw),
-            color=direction_color,
-            length=direction_len,
-            width=direction_width,
-            yaw_offset_deg=yaw_offset_deg,
+    if is_alive:
+        highlight_radius = max(1.2, radius * 0.28)
+        draw.ellipse(
+            (
+                cx - highlight_radius,
+                cy - highlight_radius,
+                cx + highlight_radius,
+                cy + highlight_radius,
+            ),
+            fill=(255, 255, 255, 90),
         )
 
 
@@ -402,6 +410,10 @@ def render_radar_frames(
     output_dir: Path,
     size: int = 300,
     clip_id: str | int | None = None,
+    pov_rotate: bool = True,
+    pov_zoom: float = 1.0,
+    center_y_ratio: float = 0.5,
+    circular_frame: bool = True,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -422,12 +434,13 @@ def render_radar_frames(
     )
 
     yaw_offset_deg = _env_float("CS2_INSIGHT_RADAR_YAW_OFFSET_DEG", 0.0)
-    pov_rotate = _env_bool("CS2_INSIGHT_RADAR_POV_ROTATE")
-    center_y_ratio = _env_float("CS2_INSIGHT_RADAR_POV_CENTER_Y_RATIO", 0.58)
-    pov_zoom = _env_float("CS2_INSIGHT_RADAR_POV_SCALE", 1.0)
+    pov_enabled = _radar_pov_rotate_enabled(pov_rotate)
+    _ = max(0.22, _env_float("CS2_INSIGHT_RADAR_POV_SCALE", pov_zoom))  # 保留 env，整图模式暂不参与缩放
 
     debug_enabled = os.environ.get("CS2_INSIGHT_RADAR_DEBUG") == "1"
     debug_dir = output_dir / "_radar_debug"
+
+    base_static_map = _enhanced_map_rgba(map_img, size)
 
     outputs: list[Path] = []
 
@@ -436,58 +449,44 @@ def render_radar_frames(
         players.sort(key=lambda p: (1 if p.get("is_pov") else 0,))
         color_idx_by_id = _build_color_indices(players)
 
-        pov_pr = _find_pov_player(players) if pov_rotate else None
-        pov_rx = pov_ry = pov_yaw = 0.0
-        if pov_pr is not None:
-            try:
-                pov_rx, pov_ry = world_to_radar_xy(float(pov_pr["x"]), float(pov_pr["y"]), cfg)
-                pov_yaw = float(pov_pr.get("yaw") or 0.0)
-                base_layer = _make_pov_rotated_map_layer(
-                    map_img=map_img,
-                    pov_rx=pov_rx,
-                    pov_ry=pov_ry,
-                    pov_yaw=pov_yaw,
-                    size=size,
-                    yaw_offset_deg=yaw_offset_deg,
-                    center_y_ratio=center_y_ratio,
-                    zoom=pov_zoom,
-                )
-            except Exception:
-                pov_pr = None
-                base_layer = _enhanced_map_rgba(map_img, size)
-        else:
-            base_layer = _enhanced_map_rgba(map_img, size)
+        pov_pr = _find_pov_player(players) if pov_enabled else None
+        rotation_deg = 0.0
+        rotation_rad = 0.0
 
-        img = _apply_circular_radar_frame(base_layer, size=size)
+        base_layer = base_static_map
+        if pov_enabled and pov_pr is not None:
+            try:
+                pov_yaw = float(pov_pr.get("yaw") or 0.0)
+                rotation_deg = _pov_rotation_deg(pov_yaw, yaw_offset_deg)
+                rotation_rad = math.radians(rotation_deg)
+                base_layer = _rotate_full_map_for_yaw(base_static_map, rotation_deg, size=size)
+            except Exception:
+                base_layer = base_static_map
+
+        if circular_frame:
+            img = _apply_circular_radar_frame(base_layer, size=size)
+        else:
+            img = base_layer if base_layer.size == (size, size) else base_layer.resize((size, size))
+
         draw = ImageDraw.Draw(img)
 
         debug_points: list[dict[str, Any]] = []
 
+        cx = float(size) * 0.5
+        cy = float(size) * 0.5
+
         for player in players:
             try:
                 rx, ry = world_to_radar_xy(float(player["x"]), float(player["y"]), cfg)
-                if pov_rotate and pov_pr is not None:
-                    px, py = _pov_relative_canvas_xy(
-                        player_rx=rx,
-                        player_ry=ry,
-                        pov_rx=pov_rx,
-                        pov_ry=pov_ry,
-                        pov_yaw=pov_yaw,
-                        size=size,
-                        source_w=source_w,
-                        source_h=source_h,
-                        yaw_offset_deg=yaw_offset_deg,
-                        center_y_ratio=center_y_ratio,
-                        zoom=pov_zoom,
-                    )
-                else:
-                    px, py = _radar_pixel_to_canvas(
-                        rx,
-                        ry,
-                        size=size,
-                        source_w=source_w,
-                        source_h=source_h,
-                    )
+                px, py = _radar_pixel_to_canvas(
+                    rx,
+                    ry,
+                    size=size,
+                    source_w=source_w,
+                    source_h=source_h,
+                )
+                if rotation_rad != 0.0 and pov_enabled and pov_pr is not None:
+                    px, py = _rotate_canvas_point(px, py, cx=cx, cy=cy, angle_rad=rotation_rad)
             except Exception:
                 continue
 
@@ -503,9 +502,11 @@ def render_radar_frames(
             except (TypeError, ValueError):
                 yaw_v = None
 
+            tri_yaw_offset = yaw_offset_deg
             display_yaw = yaw_v
-            if pov_rotate and pov_pr is not None and yaw_v is not None:
-                display_yaw = float(yaw_v) - pov_yaw
+            if rotation_rad != 0.0 and pov_enabled and pov_pr is not None and yaw_v is not None:
+                display_yaw = float(yaw_v) + rotation_deg
+                tri_yaw_offset = 0.0
 
             sid = str(player.get("steamid64") or player.get("steamid") or player.get("name") or "")
             ci = color_idx_by_id.get(sid, 0)
@@ -519,7 +520,7 @@ def render_radar_frames(
                 fill=fill,
                 is_pov=is_pov,
                 is_alive=is_alive,
-                yaw_offset_deg=yaw_offset_deg,
+                yaw_offset_deg=tri_yaw_offset,
             )
 
             if debug_enabled and frame_idx % 30 == 0:

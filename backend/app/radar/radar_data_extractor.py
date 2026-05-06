@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from app.demo_parse_isolation import extract_radar_timeline_isolated
@@ -118,13 +119,8 @@ def _tick_for_video_time_from_radar_timing(
     if not segments:
         return None
 
-    first_vs = float(segments[0]["video_start_sec"])
-    if video_time_sec < first_vs:
-        if "demo_start_tick" in segments[0]:
-            return int(segments[0]["demo_start_tick"])
-        return last_tick
-
     selected: dict[str, Any] | None = None
+
     for seg in segments:
         vs = float(seg["video_start_sec"])
         ve = float(seg["video_end_sec"])
@@ -240,7 +236,7 @@ def extract_radar_timeline_impl(
     """
     Runs inside parse_worker child process.
     从 demo 中提取雷达时间线（与成片 fps / 时长对齐，每帧一条）。
-    时间轴：clip_meta.radar_timing > record_segments（旧）> 线性铺满 tick 区间。
+    时间轴：radar_timing > record_segments > record_start/end 线性铺满 tick 区间。
     """
     del map_name
 
@@ -271,7 +267,6 @@ def extract_radar_timeline_impl(
     tick_rate = float(demo_tick_rate or 64.0)
     tick_rate = max(tick_rate, 0.001)
     sync_offset_sec = float(radar_sync_offset_sec or 0.0)
-    sync_offset_ticks = int(round(sync_offset_sec * tick_rate))
     segments = _normalize_record_segments(record_segments, tick_rate)
     timing_segments = _normalize_radar_timing(radar_timing)
 
@@ -326,8 +321,12 @@ def extract_radar_timeline_impl(
     n_frames = max(1, int(round(max(0.01, duration_sec) * max(0.01, fps))))
     sample_ticks: list[int] = []
     last_tick: int | None = None
+    try:
+        sync_lead_sec = float(os.environ.get("CS2_INSIGHT_RADAR_SYNC_LEAD_SEC") or 0.0)
+    except (TypeError, ValueError):
+        sync_lead_sec = 0.0
     for i in range(n_frames):
-        video_time_sec = i / max(float(fps), 0.001)
+        video_time_sec = i / max(float(fps), 0.001) + sync_lead_sec
         t: int
         if timing_segments:
             tick_opt = _tick_for_video_time_from_radar_timing(
