@@ -147,7 +147,7 @@ jobs:
       - name: Set package name
         id: name
         run: |
-          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.event_name }}" -eq "push") {
+          if ("${{ github.ref_type }}" -eq "tag") {
             $ver = "${{ github.ref_name }}" -replace '^V', ''
             $pkg = "CS2-Insight-Agent-V${ver}"
           } else {
