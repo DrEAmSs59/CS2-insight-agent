@@ -216,7 +216,7 @@ export const useRecordingQueue = create((set, get) => ({
   },
 
   /**
-   * 从 cs2-insight.config.json / GET /api/config 一次性替换全局节奏（非合并）。
+   * 从 data/cs2-insight.config.json / GET /api/config 一次性替换全局节奏（非合并）。
    * @param {Record<string, unknown>} obj
    */
   hydrateGlobalPacing(obj) {

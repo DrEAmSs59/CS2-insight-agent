@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
 import shutil
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +36,7 @@ from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher
 from .gsi_ready import gsi_status, notify_gsi_payload
 from .montage_db import MontageDB
+from . import obs_config_center
 from .pov_experimental import merge_warmup_extras_for_pov
 from .pov_hud_manager import PovHudError, PovHudManager, try_restore_stale_pov_on_startup
 from .video_composer import MontageComposerError, compose_montage, resolve_ffmpeg_binary, validate_output_path
@@ -519,6 +521,11 @@ async def _run_library_demo_analyze(
 
     first_player = target_players[0]
     await demo_db.save_result(dem_path, {**players_out[first_player], "auto_target_player": first_player})
+    for player, pdata in players_out.items():
+        if player == first_player:
+            continue
+        if isinstance(pdata, dict):
+            await demo_db.replace_timeline_events(dem_path, player, pdata)
     await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
     await _maybe_update_library_display_for_expected(demo_id, dem_path)
     await demo_library_hub.notify("analyzed")
@@ -718,6 +725,118 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
     obs_use = merge_obs_for_connection(payload, cfg.obs)
     director = OBSDirector(obs_use, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
     return director.test_obs_connection()
+
+
+class ObsConfigApplyRecommended(BaseModel):
+    create_backup: bool = True
+    fix_scene: bool = True
+    # 留空则自动解析本机默认 Profile 目录（如「未命名」/ Untitled），不读环境变量
+    target_profile: str = ""
+    obs: Optional[OBSConfig] = None
+
+
+@app.get("/api/obs-config/status")
+def obs_config_status():
+    cfg = load_config()
+    return obs_config_center.get_status_payload(cfg.obs)
+
+
+@app.post("/api/obs-config/diagnose")
+def obs_config_diagnose(payload: Optional[OBSConfig] = Body(default=None)):
+    cfg = load_config()
+    obs_use = merge_obs_for_connection(payload, cfg.obs)
+    return obs_config_center.diagnose(obs_use)
+
+
+@app.post("/api/obs-config/apply-recommended")
+def obs_config_apply_recommended(body: Optional[ObsConfigApplyRecommended] = Body(default=None)):
+    cfg = load_config()
+    req = body or ObsConfigApplyRecommended()
+    obs_use = merge_obs_for_connection(req.obs, cfg.obs)
+    tp = (req.target_profile or "").strip() or None
+    try:
+        return obs_config_center.apply_recommended(
+            obs_use,
+            project_profile=tp,
+            create_backup=req.create_backup,
+            fix_scene=req.fix_scene,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/obs-config/import-preset")
+async def obs_config_import_preset(
+    file: UploadFile = File(...),
+    create_backup: bool = Form(True),
+):
+    cfg = load_config()
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(400, "无效的 .cs2obs / JSON 文件") from None
+    try:
+        return obs_config_center.import_cs2obs_bytes(data, cfg.obs, create_backup=create_backup)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/obs-config/export-preset")
+def obs_config_export_preset():
+    cfg = load_config()
+    data = obs_config_center.export_cs2obs_dict(cfg.obs)
+    buf = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        io.BytesIO(buf),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="cs2-insight-obs-preset-{ts}.cs2obs"'},
+    )
+
+
+@app.post("/api/obs-config/import-native")
+async def obs_config_import_native(
+    files: list[UploadFile] = File(...),
+    create_backup: bool = Form(True),
+):
+    cfg = load_config()
+    pairs: list[tuple[str, bytes]] = []
+    for f in files:
+        raw = await f.read()
+        pairs.append((f.filename or "", raw))
+    try:
+        return obs_config_center.import_native_files(pairs, cfg.obs, create_backup=create_backup)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/obs-config/backups")
+def obs_config_backups_list():
+    return {"ok": True, "items": obs_config_center.list_backups()}
+
+
+@app.post("/api/obs-config/backups/{backup_id}/restore")
+def obs_config_restore_backup(backup_id: str, payload: Optional[OBSConfig] = Body(default=None)):
+    cfg = load_config()
+    obs_use = merge_obs_for_connection(payload, cfg.obs)
+    try:
+        return obs_config_center.restore_backup(backup_id, obs_use)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/api/obs-config/backups/{backup_id}")
+def obs_config_delete_backup(backup_id: str):
+    try:
+        return obs_config_center.delete_backup(backup_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/obs-config/backups/open-folder")
+def obs_config_open_backup_folder():
+    return obs_config_center.open_backup_folder()
 
 
 # ─── Demo parsing endpoints ───────────────────────────────────

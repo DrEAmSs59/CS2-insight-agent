@@ -59,6 +59,32 @@ class DemoDB:
             )
             await conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS demo_timeline_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    demo_path TEXT NOT NULL,
+                    target_player TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    round_number INTEGER NOT NULL,
+                    tick INTEGER NOT NULL,
+                    record_type TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(demo_path, target_player, event_id)
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dte_demo ON demo_timeline_events(demo_path)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dte_demo_player ON demo_timeline_events(demo_path, target_player)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dte_tick ON demo_timeline_events(demo_path, tick)",
+            )
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS zip_extract_state (
                     zip_path   TEXT PRIMARY KEY NOT NULL,
                     mtime_ns   INTEGER NOT NULL,
@@ -216,10 +242,97 @@ class DemoDB:
                 (demo_path, payload, now),
             )
             await conn.commit()
+        meta = result.get("match_meta")
+        tp = ""
+        if isinstance(meta, dict):
+            tp = str(meta.get("target_player") or "").strip()
+        if not tp:
+            tp = str(result.get("auto_target_player") or "").strip()
+        if tp:
+            await self.replace_timeline_events(demo_path, tp, result)
+
+    async def replace_timeline_events(self, demo_path: str, target_player: str, result: dict[str, Any]) -> None:
+        """按玩家写入时间线：击杀/死亡/助攻行 + 每回合高光标签行（先删后插）。"""
+        tp = str(target_player or "").strip()
+        now = utc_now_iso()
+        rt = result.get("round_timeline")
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "DELETE FROM demo_timeline_events WHERE demo_path = ? AND target_player = ?",
+                (demo_path, tp),
+            )
+            if not tp or not isinstance(rt, list):
+                await conn.commit()
+                return
+            rows: list[tuple[Any, ...]] = []
+            for bucket in rt:
+                if not isinstance(bucket, dict):
+                    continue
+                try:
+                    rn = int(bucket.get("round_number") or 0)
+                except (TypeError, ValueError):
+                    rn = 0
+                htags = bucket.get("highlight_tags")
+                if rn >= 1 and isinstance(htags, list) and any(str(x).strip() for x in htags):
+                    clean_ht = [str(x).strip() for x in htags if str(x).strip()]
+                    tags_json = json.dumps(clean_ht, ensure_ascii=False)
+                    ev_wrap = {"round_number": rn, "highlight_tags": clean_ht}
+                    rows.append(
+                        (
+                            demo_path,
+                            tp,
+                            f"hr{rn}-highlight",
+                            rn,
+                            -1,
+                            "highlight_round",
+                            tags_json,
+                            json.dumps(ev_wrap, ensure_ascii=False),
+                            now,
+                        ),
+                    )
+                for ev in bucket.get("events") or []:
+                    if not isinstance(ev, dict):
+                        continue
+                    typ = str(ev.get("type") or "").strip()
+                    if typ not in ("kill", "death", "assist_only"):
+                        continue
+                    eid = str(ev.get("id") or "").strip()
+                    if not eid:
+                        continue
+                    try:
+                        tick = int(ev.get("tick") or 0)
+                    except (TypeError, ValueError):
+                        tick = 0
+                    ev_clean = {k: v for k, v in ev.items() if k != "tags"}
+                    rows.append(
+                        (
+                            demo_path,
+                            tp,
+                            eid,
+                            rn,
+                            tick,
+                            typ,
+                            "[]",
+                            json.dumps(ev_clean, ensure_ascii=False),
+                            now,
+                        ),
+                    )
+            if rows:
+                await conn.executemany(
+                    """
+                    INSERT INTO demo_timeline_events(
+                        demo_path, target_player, event_id, round_number, tick,
+                        record_type, tags_json, event_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            await conn.commit()
 
     async def clear_result(self, demo_path: str) -> None:
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
+            await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
             await conn.commit()
 
     @staticmethod
@@ -616,6 +729,7 @@ class DemoDB:
         disk_path = str(demo["path"])
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
+            await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
             if rescan == "skip":

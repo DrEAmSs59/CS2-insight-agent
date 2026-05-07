@@ -68,14 +68,25 @@ export function SectionHeader({ en, zh }) {
   );
 }
 
-export function OptionRow({ checked, onChange, title, code }) {
+export function OptionRow({ checked, onChange, title, code, disabled = false, disabledReason }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[0.06] bg-black/25 px-3 py-2.5 transition-colors hover:border-cs2-orange/25">
+    <label
+      title={disabled ? disabledReason : undefined}
+      className={`flex items-start gap-3 rounded-lg border border-white/[0.06] bg-black/25 px-3 py-2.5 transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-45"
+          : "cursor-pointer hover:border-cs2-orange/25"
+      }`}
+    >
       <input
         type="checkbox"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
+        disabled={disabled}
+        onChange={(e) => {
+          if (disabled) return;
+          onChange(e.target.checked);
+        }}
+        className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
       />
       <span className="min-w-0 text-sm leading-snug text-zinc-200">
         {title}{" "}
@@ -87,18 +98,18 @@ export function OptionRow({ checked, onChange, title, code }) {
 
 /**
  * 一键录制前：分组观战 / 摄像机 / 音频与启动项；提交时生成 console_cmds 供后端注入。
- * @param {{ open: boolean, onClose: () => void, onConfirm: (w: object) => void, onWarmupValidationError?: (msg: string) => void, defaultOverrides?: object }} props
+ * @param {{ open: boolean, onClose: () => void, onConfirm: (w: object) => void, defaultOverrides?: object }} props
  */
 export default function RecordWarmupModal({
   open,
   onClose,
   onConfirm,
-  onWarmupValidationError,
   defaultOverrides,
   experimentalPovEnabled = false,
   onExperimentalPovChange,
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
+  const [resolutionError, setResolutionError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -116,7 +127,17 @@ export default function RecordWarmupModal({
       }
     }
     setOpts(base);
+    setResolutionError("");
   }, [open, defaultOverrides]);
+
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      const vr = validateWarmupResolution(opts);
+      setResolutionError(vr.ok ? "" : vr.message);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height]);
 
   const set = useCallback((patch) => {
     setOpts((prev) => ({ ...prev, ...patch }));
@@ -125,7 +146,7 @@ export default function RecordWarmupModal({
   const handleSubmit = () => {
     const vr = validateWarmupResolution(opts);
     if (!vr.ok) {
-      if (onWarmupValidationError) onWarmupValidationError(vr.message);
+      setResolutionError(vr.message);
       return;
     }
 
@@ -298,7 +319,13 @@ export default function RecordWarmupModal({
                 title="静音游戏内玩家语音"
                 code="snd_voipvolume 0"
               />
-              <div className="rounded-lg border border-white/[0.06] bg-black/25 px-3 py-2.5">
+              <div
+                className={`rounded-lg px-3 py-2.5 ${
+                  resolutionError
+                    ? "border border-rose-500/45 bg-rose-950/25"
+                    : "border border-white/[0.06] bg-black/25"
+                }`}
+              >
                 <p className="mb-2 text-sm font-medium text-zinc-200">启动分辨率（可选，不填则为本机当前游戏设置分辨率）</p>
                 <label className="mb-2 block">
                   <span className="mb-1 block text-[11px] text-zinc-500">屏幕比例（与分辨率联动）</span>
@@ -331,9 +358,13 @@ export default function RecordWarmupModal({
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-white placeholder:text-zinc-600"
                   />
                 </div>
-                <p className="mt-1.5 text-[11px] text-zinc-600">
-                  留空宽高则沿用当前分辨率；若填写宽高须选择比例且化简后须匹配（4:3 含游戏内同组的 5:4，如 1280×1024）。
-                </p>
+                {resolutionError ? (
+                  <p className="mt-2 text-[11px] leading-snug text-rose-400">{resolutionError}</p>
+                ) : (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-600">
+                    留空宽高则沿用当前分辨率；若填写宽高须选择比例且化简后须匹配（4:3 含游戏内同组的 5:4，如 1280×1024）。
+                  </p>
+                )}
               </div>
             </div>
           </section>
@@ -369,7 +400,8 @@ export default function RecordWarmupModal({
             <button
               type="button"
               onClick={handleSubmit}
-              className="rounded-lg bg-cs2-orange px-4 py-2 text-sm font-extrabold text-black hover:bg-cs2-orange-light"
+              disabled={Boolean(resolutionError)}
+              className="rounded-lg bg-cs2-orange px-4 py-2 text-sm font-extrabold text-black hover:bg-cs2-orange-light disabled:cursor-not-allowed disabled:opacity-45"
             >
               开始录制
             </button>

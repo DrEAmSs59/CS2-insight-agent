@@ -9,6 +9,7 @@ import {
   Settings,
   Monitor,
   Gamepad2,
+  RadioTower,
 } from "lucide-react";
 
 const linkBase =
@@ -68,6 +69,10 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         <NavLink to="/params" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <SlidersHorizontal className="h-4 w-4 shrink-0 opacity-90" />
           常用参数
+        </NavLink>
+        <NavLink to="/obs-config-center" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
+          <RadioTower className="h-4 w-4 shrink-0 opacity-90" />
+          OBS 配置中心
         </NavLink>
         <NavLink
           to="/player-game-config"

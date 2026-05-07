@@ -8,6 +8,7 @@ import {
   Film,
   Trash2,
   ScanEye,
+  X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 
@@ -126,7 +127,6 @@ export function MontageStyleConsole({
   outputFilename,
   onOutputFilenameChange,
   defaultFilenamePlaceholder,
-  onOpenExportPreview,
   draftName,
   onDraftNameChange,
   draftNamePlaceholder,
@@ -139,7 +139,7 @@ export function MontageStyleConsole({
   lastExport,
   exportDirForButton,
   onCopyText,
-  onCopyShare,
+  onDismissExportSuccess,
 }) {
   return (
     <aside className="flex min-h-0 w-full min-w-0 flex-col border-white/10 bg-gradient-to-b from-zinc-950/80 to-black/40 xl:border-l">
@@ -150,6 +150,56 @@ export function MontageStyleConsole({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div className="space-y-5">
+          {exportingBanner ? (
+            <div className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-100">
+              正在导出合辑，请不要关闭程序…
+            </div>
+          ) : null}
+          {!exportingBanner && exportOk ? (
+            <div className="relative rounded-lg border border-emerald-500/35 bg-emerald-950/25 p-3 pr-9 text-[11px] text-emerald-100">
+              <div className="flex items-center gap-2 font-semibold text-emerald-200">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                导出完成
+              </div>
+              <button
+                type="button"
+                onClick={() => onDismissExportSuccess?.()}
+                className="absolute right-2 top-2 rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-300"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+              <p className="mt-2 text-[10px] text-zinc-400">输出路径</p>
+              <p className="mt-1 break-all font-mono text-[10px] text-zinc-200">{lastExport.output_path}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void onCopyText(lastExport.output_path)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-900/30 px-2.5 py-1.5 text-[10px] font-medium hover:bg-emerald-900/50"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  复制路径
+                </button>
+                {exportDirForButton ? (
+                  <button
+                    type="button"
+                    onClick={() => void onCopyText(exportDirForButton)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-black/30 px-2.5 py-1.5 text-[10px] font-medium text-zinc-200 hover:border-cs2-orange/40"
+                    title="复制上级文件夹路径"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    复制文件夹路径
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {!exportingBanner && lastExport && !lastExport.ok ? (
+            <div className="rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-2 text-[11px] text-red-100">
+              导出失败：{String(lastExport.err)}
+            </div>
+          ) : null}
+
           <section className="space-y-2.5">
             <StyleBlockTitle title="媒体资源" subtitle="片头片尾与背景音乐" />
             <div
@@ -182,14 +232,13 @@ export function MontageStyleConsole({
                   ) : (
                     <p className="mt-0.5 text-[10px] text-zinc-600">拖入音频或粘贴路径 · 导出时混音</p>
                   )}
-                  <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
-                    <span className="rounded border border-white/[0.07] bg-black/40 px-1.5 py-0.5 text-zinc-500">
-                      循环对齐成片
-                    </span>
-                    <span className="rounded border border-white/[0.07] bg-black/40 px-1.5 py-0.5 font-mono text-zinc-400">
-                      时长 — 
-                    </span>
-                  </div>
+                  {bgmPath.trim() ? (
+                    <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
+                      <span className="rounded border border-white/[0.07] bg-black/40 px-1.5 py-0.5 text-zinc-500">
+                        循环对齐成片
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-3">
@@ -273,23 +322,6 @@ export function MontageStyleConsole({
             </div>
           </section>
 
-          <CollapsibleSection title="FFmpeg 与容器" hint="技术说明 · 默认折叠" defaultOpen={false}>
-            <p className="text-[10px] leading-relaxed text-zinc-500">
-              成片经过标准化编码：片段链 xfade / concat，最终混流为 H.264 + AAC 的 MP4（faststart）。无需在此选择编码器。
-            </p>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="输出格式与分辨率" hint="跟随源素材" defaultOpen={false}>
-            <p className="text-[10px] text-zinc-500">
-              分辨率与帧率由首段素材与归一化阶段决定；此处无法强制覆盖（避免无效任务）。
-            </p>
-            <p className="mt-2 font-mono text-[10px] text-zinc-400">{resolutionLabel}</p>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="高级编码" hint="占位 · 后续版本" defaultOpen={false}>
-            <p className="text-[10px] text-zinc-600">CRF / preset / 硬件编码等将在后续版本暴露。</p>
-          </CollapsibleSection>
-
           <CollapsibleSection title="输出路径与文件名" hint="草稿与磁盘输出" defaultOpen={false}>
             <label className="block space-y-1">
               <span className="text-[10px] text-zinc-500">文件名</span>
@@ -300,13 +332,6 @@ export function MontageStyleConsole({
                 className="w-full rounded border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[11px] text-zinc-200"
               />
             </label>
-            <button
-              type="button"
-              onClick={onOpenExportPreview}
-              className="mt-2 h-8 w-full rounded-md border border-white/12 bg-white/[0.05] text-[11px] font-medium text-zinc-200 hover:border-white/20"
-            >
-              编排结构预览
-            </button>
             <div className="mt-3 space-y-1">
               <span className="text-[11px] font-medium text-zinc-300">草稿名称</span>
               <input
@@ -342,61 +367,6 @@ export function MontageStyleConsole({
                 </p>
               ) : null}
             </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="调试与导出日志" hint="最近一次导出" defaultOpen={false}>
-            {exportingBanner ? (
-              <div className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-100">
-                正在导出合辑，请不要关闭程序…
-              </div>
-            ) : null}
-            {exportOk ? (
-              <div className="mt-2 rounded-lg border border-emerald-500/35 bg-emerald-950/25 p-3 text-[11px] text-emerald-100">
-                <div className="flex items-center gap-2 font-semibold text-emerald-200">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  导出完成
-                </div>
-                <p className="mt-2 text-[10px] text-zinc-400">输出路径</p>
-                <p className="mt-1 break-all font-mono text-[10px] text-zinc-200">{lastExport.output_path}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onCopyText(lastExport.output_path)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-900/30 px-2.5 py-1.5 text-[10px] font-medium hover:bg-emerald-900/50"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    复制路径
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onCopyShare()}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-black/30 px-2.5 py-1.5 text-[10px] font-medium text-zinc-200 hover:border-cs2-orange/40"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    复制群聊文案
-                  </button>
-                  {exportDirForButton ? (
-                    <button
-                      type="button"
-                      onClick={() => void onCopyText(exportDirForButton)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-black/30 px-2.5 py-1.5 text-[10px] font-medium text-zinc-200 hover:border-cs2-orange/40"
-                      title="复制上级文件夹路径"
-                    >
-                      <FolderOpen className="h-3.5 w-3.5" />
-                      复制文件夹路径
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {lastExport && !lastExport.ok ? (
-              <div className="mt-2 rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-2 text-[11px] text-red-100">
-                导出失败：{String(lastExport.err)}
-              </div>
-            ) : null}
-            {!exportingBanner && !exportOk && !(lastExport && !lastExport.ok) ? (
-              <p className="text-[11px] text-zinc-600">尚无导出记录。</p>
-            ) : null}
           </CollapsibleSection>
         </div>
       </div>

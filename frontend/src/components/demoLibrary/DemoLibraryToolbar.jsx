@@ -1,6 +1,7 @@
-import { Loader2 } from "lucide-react";
+import { FolderOpen, Loader2 } from "lucide-react";
 
 export default function DemoLibraryToolbar({
+  onOpenWatchPaths,
   onScan,
   libraryLoading,
   libraryScanning,
@@ -14,10 +15,18 @@ export default function DemoLibraryToolbar({
       <div className="min-w-0">
         <h1 className="text-lg font-bold text-white">本地 Demo 库</h1>
         <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-          表格批量管理本地入库的 Demo；监听与扫描在「设置」。
+          表格批量管理本地入库的 Demo；监听目录与扫描见右侧按钮。
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:border-cs2-orange/35 hover:text-white"
+          onClick={() => onOpenWatchPaths?.()}
+        >
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-cs2-orange/90" aria-hidden />
+          监听目录
+        </button>
         <button
           type="button"
           disabled={libraryLoading || libraryScanning}

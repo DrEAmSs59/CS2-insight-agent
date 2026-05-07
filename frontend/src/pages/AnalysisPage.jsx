@@ -1,16 +1,26 @@
+import { useState } from "react";
 import DemoUpload from "../components/DemoUpload";
 import PlayerSelect from "../components/PlayerSelect";
 import MatchScoreboard from "../components/MatchScoreboard";
 import ClipList from "../components/ClipList";
+import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView";
 import ProgressBar from "../components/ProgressBar";
 import ActionBar from "../components/ActionBar";
 import MatchSwitcher from "../components/MatchSwitcher";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Film, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAppShell } from "../context/AppShellContext";
 
 export default function AnalysisPage() {
   const s = useAppShell();
+  const [analysisViewMode, setAnalysisViewMode] = useState("clips");
+  const timelineRounds = s.timeline?.rounds?.length ?? 0;
+  const roundTlLen = s.roundTimeline?.length ?? 0;
+  const hasTimeline = roundTlLen > 0 || timelineRounds > 0;
+  const showResultsBlock =
+    s.currentParsed &&
+    (s.clips.length > 0 || s.parsedPlayerNames.length > 0 || hasTimeline);
+  const showPlayerTabs = s.parsedPlayerNames.length > 1;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -115,27 +125,144 @@ export default function AnalysisPage() {
             </div>
           )}
 
-        {(s.clips.length > 0 || s.parsedPlayerNames.length > 0) && s.currentParsed && (
-          <ClipList
-            clips={s.clips}
-            targetPlayer={s.matchMeta?.target_player ?? ""}
-            selectedIds={s.selectedClientClipUids}
-            onToggle={s.handleToggleClip}
-            aiMode={s.aiMode}
-            queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
-            playerTabs={s.parsedPlayerNames}
-            activePlayerTab={s.currentActivePlayer}
-            onPlayerTabChange={(name) =>
-              s.setActivePlayerTabs((prev) => ({ ...prev, [s.currentMatchIndex]: name }))
-            }
-            parsedPlayers={s.currentParsed?.players ?? {}}
-            matchTotalRounds={s.roundMontageMaxRounds}
-            freezeToDeathDraft={s.freezeToDeathDraft}
-            onFreezeToDeathDraftChange={s.setFreezeToDeathDraft}
-            roundMontagePickerDisabled={Boolean(
-              s.parsing || s.parsingByIndex[s.currentMatchIndex] || s.batchRecording
+        {showResultsBlock && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Film className="h-4 w-4 text-cs2-orange" />
+              <h2 className="text-sm font-bold uppercase tracking-wide text-zinc-200">解析结果</h2>
+              <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
+                {analysisViewMode === "clips" ? (
+                  <>
+                    共 <span className="text-zinc-300">{s.clips.filter((c) => c.category !== "meme_death").length}</span>{" "}
+                    条片段
+                  </>
+                ) : (
+                  <>
+                    共{" "}
+                    <span className="text-zinc-300">
+                      {s.roundTimeline?.length ?? s.timeline?.summary?.round_count ?? timelineRounds}
+                    </span>{" "}
+                    回合 ·{" "}
+                    <span className="text-emerald-400/90">
+                      {s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.kills) || 0), 0) ||
+                        s.timeline?.summary?.kill_count ||
+                        0}
+                    </span>{" "}
+                    击杀 ·{" "}
+                    <span className="text-rose-400/90">
+                      {s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.deaths) || 0), 0) ||
+                        s.timeline?.summary?.death_count ||
+                        0}
+                    </span>{" "}
+                    死亡
+                  </>
+                )}
+              </span>
+            </div>
+
+            <div className="inline-flex rounded-lg border border-white/10 bg-cs2-bg-card/60 p-0.5">
+              <button
+                type="button"
+                onClick={() => setAnalysisViewMode("clips")}
+                className={[
+                  "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                  analysisViewMode === "clips"
+                    ? "bg-cs2-orange text-black shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-200",
+                ].join(" ")}
+              >
+                片段卡片
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalysisViewMode("timeline")}
+                disabled={!hasTimeline}
+                title={!hasTimeline ? "请先完成解析以生成时间线" : undefined}
+                className={[
+                  "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                  analysisViewMode === "timeline"
+                    ? "bg-cs2-orange text-black shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-200",
+                  !hasTimeline ? "cursor-not-allowed opacity-40" : "",
+                ].join(" ")}
+              >
+                回合时间线
+              </button>
+            </div>
+
+            {analysisViewMode === "clips" ? (
+              <ClipList
+                clips={s.clips}
+                targetPlayer={s.matchMeta?.target_player ?? ""}
+                selectedIds={s.selectedClientClipUids}
+                onToggle={s.handleToggleClip}
+                aiMode={s.aiMode}
+                queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                playerTabs={s.parsedPlayerNames}
+                activePlayerTab={s.currentActivePlayer}
+                onPlayerTabChange={(name) =>
+                  s.setActivePlayerTabs((prev) => ({ ...prev, [s.currentMatchIndex]: name }))
+                }
+                parsedPlayers={s.currentParsed?.players ?? {}}
+                matchTotalRounds={s.roundMontageMaxRounds}
+                freezeToDeathDraft={s.freezeToDeathDraft}
+                onFreezeToDeathDraftChange={s.setFreezeToDeathDraft}
+                roundMontagePickerDisabled={Boolean(
+                  s.parsing || s.parsingByIndex[s.currentMatchIndex] || s.batchRecording
+                )}
+                suppressSummaryHeader
+              />
+            ) : (
+              <div className="space-y-4">
+                {showPlayerTabs && (
+                  <div className="flex flex-wrap gap-1.5 rounded-lg border border-white/8 bg-cs2-bg-card/60 p-1.5">
+                    {s.parsedPlayerNames.map((name) => {
+                      const pd = s.currentParsed?.players?.[name];
+                      const cnt = (pd?.clips ?? []).filter((c) => c.category !== "meme_death").length;
+                      const isActive = name === s.currentActivePlayer;
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() =>
+                            s.setActivePlayerTabs((prev) => ({ ...prev, [s.currentMatchIndex]: name }))
+                          }
+                          className={[
+                            "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all duration-150",
+                            isActive
+                              ? "bg-cs2-orange text-black shadow-md shadow-cs2-orange/30"
+                              : "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200",
+                          ].join(" ")}
+                        >
+                          <User className="h-3 w-3 shrink-0" />
+                          <span className="max-w-[120px] truncate">{name}</span>
+                          <span
+                            className={[
+                              "rounded px-1 font-mono text-[10px] tabular-nums",
+                              isActive ? "bg-black/20 text-black/80" : "bg-white/8 text-zinc-500",
+                            ].join(" ")}
+                          >
+                            {cnt}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <RoundTimelineView
+                  roundTimeline={s.roundTimeline}
+                  focusedPlayer={s.currentActivePlayer || s.matchMeta?.target_player || ""}
+                  demoFilename={s.currentFilename}
+                  mapName={s.matchMeta?.map_name ?? ""}
+                  queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                  onAddEvent={s.handleAddTimelineEventToQueue}
+                  onAddRound={s.handleAddTimelineRoundToQueue}
+                  onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue}
+                  suppressSummaryHeader
+                />
+              </div>
             )}
-          />
+          </div>
         )}
       </div>
 

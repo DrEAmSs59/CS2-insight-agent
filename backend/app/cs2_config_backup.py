@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .env_utils import get_data_dir
 from .win_cs2_console import find_cs2_hwnd
 
 logger = logging.getLogger(__name__)
@@ -45,11 +46,8 @@ CONFIG_RESTORE_REQUIRED = {
 
 
 def get_backup_root() -> Path:
-    """仓库根目录下的 ``.cs2_config_backup``（与 ``obs_director`` 历史行为一致）。"""
-    try:
-        return Path(__file__).resolve().parents[2] / _BACKUP_DIR_NAME
-    except Exception:  # noqa: BLE001
-        return Path.cwd() / _BACKUP_DIR_NAME
+    """``<repo>/data/.cs2_config_backup``（旧版本曾为仓库根下的同名目录，启动时自动迁入 data）。"""
+    return get_data_dir() / _BACKUP_DIR_NAME
 
 
 def get_recording_state_path() -> Path:

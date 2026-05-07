@@ -1,10 +1,6 @@
 import { useState } from "react";
-import axios from "axios";
 import { useAppShell } from "../context/AppShellContext";
 import {
-  Settings,
-  Wifi,
-  WifiOff,
   Brain,
   Zap,
   Eye,
@@ -31,12 +27,6 @@ const PROVIDER_PRESETS = {
 function SettingsForm({
   aiMode,
   onAiModeChange,
-  obsConfig,
-  onObsConfigChange,
-  onPersistObs,
-  obsPasswordPlaceholder = "",
-  onObsPasswordFocus,
-  onObsPasswordBlur,
   llmConfig,
   onLlmConfigChange,
   llmKeySavedOnServer = false,
@@ -47,27 +37,17 @@ function SettingsForm({
   onFfmpegPathChange,
   cs2FpsMax = 240,
   onCs2FpsMaxChange,
-  demoWatchPaths = [],
-  onDemoWatchPathsChange,
   onSaveConfig,
   onDetectCs2,
-  onScanDemos,
-  demoLibraryLoading = false,
   expectedParsePlayersText = "",
   onExpectedParsePlayersTextChange,
   onSaveExpectedParsePlayers,
 }) {
-  const [obsOpen, setObsOpen] = useState(true);
   const [cs2Open, setCs2Open] = useState(true);
   const [llmOpen, setLlmOpen] = useState(true);
   const [expectedPlayersOpen, setExpectedPlayersOpen] = useState(true);
-  const [obsTestResult, setObsTestResult] = useState(null);
-  const [obsTesting, setObsTesting] = useState(false);
   const [detectingCs2, setDetectingCs2] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [watchOpen, setWatchOpen] = useState(true);
-  const [watchPathInput, setWatchPathInput] = useState("");
-
   const handleDetectCs2 = async () => {
     if (!onDetectCs2) return;
     setDetectingCs2(true);
@@ -75,22 +55,6 @@ function SettingsForm({
       await onDetectCs2();
     } finally {
       setDetectingCs2(false);
-    }
-  };
-
-  const testObs = async () => {
-    setObsTesting(true);
-    setObsTestResult(null);
-    try {
-      const { data } = await axios.post("/api/obs/test", obsConfig);
-      setObsTestResult(data);
-      if (data?.ok) {
-        await onPersistObs?.();
-      }
-    } catch (e) {
-      setObsTestResult({ ok: false, error: e?.response?.data?.detail || e.message });
-    } finally {
-      setObsTesting(false);
     }
   };
 
@@ -124,7 +88,7 @@ function SettingsForm({
       <div className="mb-6 border-b border-white/10 pb-4">
         <h1 className="text-lg font-bold text-white">设置</h1>
         <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-          OBS WebSocket、CS2 启动路径、Demo 监听目录、关注玩家名单与大模型（AI 洞察模式）。
+          CS2 启动路径、关注玩家名单与大模型（AI 洞察模式）。Demo 监听目录请在「Demo 库」页配置。OBS WebSocket 请在侧边栏「OBS 配置中心」中配置。
         </p>
       </div>
 
@@ -157,68 +121,6 @@ function SettingsForm({
               AI 洞察
             </button>
           </div>
-        </div>
-
-        <div className="border-b border-white/10">
-          <button
-            type="button"
-            onClick={() => setObsOpen(!obsOpen)}
-            className="flex w-full items-center justify-between px-4 py-3 text-left"
-          >
-            <div className="flex items-center gap-2">
-              <Settings className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">OBS 连接配置</span>
-            </div>
-            {obsOpen ? (
-              <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            )}
-          </button>
-          {obsOpen && (
-            <div className="space-y-3 px-4 pb-4">
-              <Input label="主机地址" value={obsConfig.host} onChange={(v) => onObsConfigChange({ ...obsConfig, host: v })} />
-              <Input label="端口" value={obsConfig.port} type="number" onChange={(v) => onObsConfigChange({ ...obsConfig, port: Number(v) })} />
-              <div>
-                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">密码</label>
-                <input
-                  type="password"
-                  value={obsConfig.password}
-                  placeholder={obsPasswordPlaceholder}
-                  onChange={(e) => onObsConfigChange({ ...obsConfig, password: e.target.value })}
-                  onFocus={() => onObsPasswordFocus?.()}
-                  onBlur={() => onObsPasswordBlur?.()}
-                  autoComplete="new-password"
-                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={testObs}
-                disabled={obsTesting}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50 disabled:opacity-50"
-              >
-                {obsTesting ? "测试中..." : "测试连接"}
-              </button>
-              {obsTestResult && (
-                <div
-                  className={`rounded px-2 py-1.5 font-mono text-[11px] ${
-                    obsTestResult.ok ? "bg-cs2-highlight/10 text-cs2-highlight" : "bg-cs2-fail/10 text-cs2-fail"
-                  }`}
-                >
-                  {obsTestResult.ok ? (
-                    <span className="flex items-center gap-1">
-                      <Wifi className="h-3 w-3" /> OBS {obsTestResult.obs_version}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <WifiOff className="h-3 w-3" /> {obsTestResult.error}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <div className="border-b border-white/10">
@@ -278,74 +180,6 @@ function SettingsForm({
                 <span className="font-mono text-zinc-500"> game\bin\win64\cs2.exe </span>
                 并粘贴完整路径。
               </p>
-            </div>
-          )}
-        </div>
-
-        <div className="border-b border-white/10">
-          <button type="button" onClick={() => setWatchOpen(!watchOpen)} className="flex w-full items-center justify-between px-4 py-3 text-left">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">Demo 监听路径</span>
-            </div>
-            {watchOpen ? (
-              <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            )}
-          </button>
-          {watchOpen && (
-            <div className="space-y-2 px-4 pb-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={watchPathInput}
-                  onChange={(e) => setWatchPathInput(e.target.value)}
-                  placeholder="D:\\SteamLibrary\\...\\csgo"
-                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  className="rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-xs font-semibold hover:border-cs2-orange/50"
-                  onClick={() => {
-                    const p = watchPathInput.trim();
-                    if (!p) return;
-                    const next = Array.from(new Set([...(demoWatchPaths || []), p]));
-                    onDemoWatchPathsChange?.(next);
-                    onSaveConfig?.({ demo_watch_paths: next });
-                    setWatchPathInput("");
-                  }}
-                >
-                  添加
-                </button>
-              </div>
-              <div className="space-y-1">
-                {(demoWatchPaths || []).map((p) => (
-                  <div key={p} className="flex items-center justify-between rounded border border-white/10 bg-cs2-bg-input/60 px-2 py-1">
-                    <span className="truncate font-mono text-[10px] text-zinc-300">{p}</span>
-                    <button
-                      type="button"
-                      className="text-[10px] text-cs2-fail hover:opacity-80"
-                      onClick={() => {
-                        const next = (demoWatchPaths || []).filter((x) => x !== p);
-                        onDemoWatchPathsChange?.(next);
-                        onSaveConfig?.({ demo_watch_paths: next });
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                disabled={demoLibraryLoading}
-                onClick={() => void onScanDemos?.()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50 disabled:opacity-50"
-              >
-                <ScanSearch className={`h-3.5 w-3.5 ${demoLibraryLoading ? "animate-spin" : ""}`} />
-                扫描现有 Demo
-              </button>
             </div>
           )}
         </div>
@@ -497,12 +331,6 @@ export default function SettingsPage() {
     <SettingsForm
       aiMode={s.aiMode}
       onAiModeChange={s.handleAiModeChange}
-      obsConfig={s.obsConfig}
-      onObsConfigChange={s.setObsConfig}
-      onPersistObs={s.persistObsConfig}
-      obsPasswordPlaceholder={s.obsPasswordPlaceholder}
-      onObsPasswordFocus={s.handleObsPasswordFocus}
-      onObsPasswordBlur={s.handleObsPasswordBlur}
       llmConfig={s.llmConfig}
       onLlmConfigChange={s.setLlmConfig}
       llmKeySavedOnServer={s.llmKeySavedOnServer}
@@ -513,12 +341,8 @@ export default function SettingsPage() {
       onFfmpegPathChange={s.setFfmpegPath}
       cs2FpsMax={s.cs2FpsMax}
       onCs2FpsMaxChange={s.setCs2FpsMax}
-      demoWatchPaths={s.demoWatchPaths}
-      onDemoWatchPathsChange={s.setDemoWatchPaths}
       onSaveConfig={s.handleSaveConfig}
       onDetectCs2={s.handleDetectCs2}
-      onScanDemos={s.handleScanDemos}
-      demoLibraryLoading={s.libraryLoading}
       expectedParsePlayersText={s.expectedParsePlayersText}
       onExpectedParsePlayersTextChange={s.setExpectedParsePlayersText}
       onSaveExpectedParsePlayers={s.handleSaveExpectedParsePlayers}

@@ -27,6 +27,7 @@ const COMPILATION_ORDER = {
  *   freezeToDeathDraft?: { picked: number[] },
  *   onFreezeToDeathDraftChange?: (next: { picked: number[] }) => void,
  *   roundMontagePickerDisabled?: boolean,
+ *   suppressSummaryHeader?: boolean,
  * }} props
  */
 export default function ClipList({
@@ -44,6 +45,7 @@ export default function ClipList({
   freezeToDeathDraft = { picked: [] },
   onFreezeToDeathDraftChange,
   roundMontagePickerDisabled = false,
+  suppressSummaryHeader = false,
 }) {
   const queued = queuedClientClipUids ?? NO_QUEUED;
   // 顺序：高光 / 下饭 / 坐牢（已在上游过滤掉）按原顺序混排，合集永远排最后
@@ -69,15 +71,16 @@ export default function ClipList({
 
   return (
     <div className="space-y-4">
-      {/* ── 标题行 ── */}
-      <div className="flex items-center gap-2">
-        <Film className="h-4 w-4 text-cs2-orange" />
-        <h2 className="text-sm font-bold uppercase tracking-wide">检测到的片段</h2>
-        <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
-          共 <span className="text-zinc-300">{regularClips.length}</span> 条 · {highlights.length} 高光 ·{" "}
-          {fails.length} 下饭{compilations.length > 0 ? ` · ${compilations.length} 合集` : ""}
-        </span>
-      </div>
+      {!suppressSummaryHeader && (
+        <div className="flex items-center gap-2">
+          <Film className="h-4 w-4 text-cs2-orange" />
+          <h2 className="text-sm font-bold uppercase tracking-wide">检测到的片段</h2>
+          <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
+            共 <span className="text-zinc-300">{regularClips.length}</span> 条 · {highlights.length} 高光 ·{" "}
+            {fails.length} 下饭{compilations.length > 0 ? ` · ${compilations.length} 合集` : ""}
+          </span>
+        </div>
+      )}
 
       {/* ── 玩家 Tab 栏（仅多玩家时显示） ── */}
       {showTabs && (

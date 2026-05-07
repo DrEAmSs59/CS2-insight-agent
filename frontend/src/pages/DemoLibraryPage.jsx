@@ -4,6 +4,7 @@ import DemoAdvancedFilters from "../components/demoLibrary/DemoAdvancedFilters";
 import DemoBatchActionBar from "../components/demoLibrary/DemoBatchActionBar";
 import DemoLibraryQueryBar from "../components/demoLibrary/DemoLibraryQueryBar";
 import DemoLibraryToolbar from "../components/demoLibrary/DemoLibraryToolbar";
+import DemoWatchPathsModal from "../components/demoLibrary/DemoWatchPathsModal";
 import DemoPagination from "../components/demoLibrary/DemoPagination";
 import DemoTable from "../components/demoLibrary/DemoTable";
 import {
@@ -35,6 +36,7 @@ export default function DemoLibraryPage() {
   const [sortKey, setSortKey] = useState("library");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedScoreboardIds, setExpandedScoreboardIds] = useState(() => new Set());
+  const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
 
   const filteredRows = useMemo(() => {
     let rows = s.demoLibraryItems;
@@ -98,7 +100,7 @@ export default function DemoLibraryPage() {
       if (hasQuickOrAdvancedFilters || s.librarySearchQ) {
         return "没有符合条件的 Demo，尝试清空筛选";
       }
-      return "暂无 Demo，前往设置配置监听目录或手动导入";
+      return "暂无 Demo，点击「监听目录」添加路径或手动导入";
     }
     return null;
   }, [
@@ -160,6 +162,7 @@ export default function DemoLibraryPage() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden px-4 py-3 sm:px-5">
       <DemoLibraryToolbar
+        onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
         onScan={() => void s.handleScanDemos()}
         libraryLoading={s.libraryLoading}
         libraryScanning={s.libraryScanning}
@@ -284,6 +287,14 @@ export default function DemoLibraryPage() {
           </div>
         </div>
       ) : null}
+
+      <DemoWatchPathsModal
+        open={watchPathsModalOpen}
+        onClose={() => setWatchPathsModalOpen(false)}
+        demoWatchPaths={s.demoWatchPaths}
+        onDemoWatchPathsChange={s.setDemoWatchPaths}
+        onSaveConfig={s.handleSaveConfig}
+      />
 
       {s.libraryRename ? (
         <div

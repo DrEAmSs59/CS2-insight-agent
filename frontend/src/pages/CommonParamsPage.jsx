@@ -4,7 +4,7 @@ import { useAppShell } from "../context/AppShellContext";
 export default function CommonParamsPage() {
   const s = useAppShell();
   return (
-    <div className="h-full min-h-0 w-full overflow-y-auto">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden px-4 py-3 sm:px-5">
       <CommonParamsModal
         variant="page"
         open

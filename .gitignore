@@ -14,10 +14,6 @@ node_modules/
 frontend/dist/
 .vite/
 
-# Config with secrets (JSON)
-backend/config.json
-cs2-insight.config.json
-
 # IDE
 .vscode/
 .idea/
@@ -25,7 +21,6 @@ cs2-insight.config.json
 # OS
 .DS_Store
 Thumbs.db
-cs2-insight.db
 
 # Portable packaging cache (embeddable Python zips, get-pip.py)
 .packaging-cache/
@@ -50,5 +45,14 @@ package_portable.ps1
 rebuild_frontend.ps1
 dev.sh
 
-# Per-recording user config backup (sensitive: player's CS2 cfg snapshot)
+# --- CS2 Insight local data (SQLite / player cfg backup / secrets — do not push) ---
+backend/config.json
+**/cs2-insight.config.json
+cs2-insight.db
+cs2-insight.db-wal
+cs2-insight.db-shm
 .cs2_config_backup/
+
+# Everything under data/ except the versioned example template
+data/**
+!data/cs2-insight.config.example.json

@@ -13,6 +13,7 @@ import AnalysisPage from "./pages/AnalysisPage";
 import RecordingQueuePage from "./pages/RecordingQueuePage";
 import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
 import CommonParamsPage from "./pages/CommonParamsPage";
+import ObsConfigCenterPage from "./pages/ObsConfigCenterPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
@@ -22,6 +23,7 @@ import {
   isFreezeToDeathCompilation,
 } from "./utils/freezeToDeathRoundFilter";
 import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
+import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
 import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
@@ -79,7 +81,18 @@ export default function App() {
   const [parsingByIndex, setParsingByIndex] = useState({});
   /** 解析分析页内嵌：当前场次解析读条 / 完成或上传成功提示（不占顶部栏） */
   const [analysisInlineProgress, setAnalysisInlineProgress] = useState(null);
-  const [progressText, setProgressText] = useState("");
+  const [progressText, setProgressTextInner] = useState("");
+  /** 底部 ProgressBar 可选行为：自动消失、跳转队列按钮 */
+  const [progressToastMeta, setProgressToastMeta] = useState(null);
+  const setProgressText = useCallback((value, toastMeta) => {
+    if (typeof value === "function") {
+      setProgressTextInner(value);
+      setProgressToastMeta(null);
+    } else {
+      setProgressTextInner(value);
+      setProgressToastMeta(toastMeta !== undefined ? toastMeta ?? null : null);
+    }
+  }, []);
 
   useEffect(() => {
     setAnalysisInlineProgress(null);
@@ -90,7 +103,7 @@ export default function App() {
   const [warmupIntent, setWarmupIntent] = useState(null);
   /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
   const [configBackupStatus, setConfigBackupStatus] = useState(null);
-  /** 来自 cs2-insight.config.json，打开录制预热对话框时作为初始选项 */
+  /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
@@ -166,6 +179,8 @@ export default function App() {
 
   const activePlayerData = currentParsed?.players?.[currentActivePlayer] ?? null;
   const clips = activePlayerData?.clips ?? [];
+  const timeline = activePlayerData?.timeline ?? null;
+  const roundTimeline = activePlayerData?.round_timeline ?? null;
   const matchMeta = activePlayerData?.match_meta ?? currentUpload?.match_meta ?? null;
 
   const players = currentUpload?.players ?? [];
@@ -544,6 +559,8 @@ export default function App() {
               [ap]: {
                 clips: ensureClientClipUidsOnClips(r.clips || []),
                 match_meta: r.match_meta || d.match_meta || null,
+                timeline: r.timeline ?? null,
+                round_timeline: r.round_timeline ?? null,
               },
             },
             demo_path: d.path,
@@ -1158,7 +1175,10 @@ export default function App() {
     const skipped = candidates.length - toAdd.length;
     const skipHint =
       skipped > 0 ? `（已跳过 ${skipped} 条未满足条件的片段）` : "";
-    setProgressText(`已加入录制队列 ${toAdd.length} 条（当前场次）${skipHint}`);
+    setProgressText(`已加入录制队列 ${toAdd.length} 条（当前场次）${skipHint}`, {
+      autoDismissMs: 2000,
+      queueLink: true,
+    });
   }, [
     currentParsed,
     clips,
@@ -1197,8 +1217,150 @@ export default function App() {
       return;
     }
     addToQueue(toAdd);
-    setProgressText(`已将 ${toAdd.length} 条高光片段加入队列（跨场次）。`);
+    setProgressText(`已将 ${toAdd.length} 条高光片段加入队列（跨场次）。`, {
+      autoDismissMs: 2000,
+      queueLink: true,
+    });
   }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal]);
+
+  const handleAddTimelineEventToQueue = useCallback(
+    (event, roundRow) => {
+      const hasWindow =
+        (event?.suggested_clip && typeof event.suggested_clip === "object") ||
+        (event?.start_tick != null && event?.end_tick != null);
+      if (!currentParsed || !hasWindow) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const mapName = matchMeta?.map_name || "";
+      const clipData = buildTimelineEventClipData({
+        event,
+        mapName,
+        targetPlayer: meta.targetPlayer,
+        round: roundRow?.round ?? event?.round,
+      });
+      const uid = clipData.client_clip_uid;
+      const qk = queueItemClientUid({
+        clientClipUid: uid,
+        clipData,
+        demoFilename: meta.demoFilename,
+        clipId: clipData.clip_id,
+      });
+      if (queuedClientClipUidsGlobal.has(qk)) {
+        setProgressText("该项已在录制队列中。", { autoDismissMs: 2000 });
+        return;
+      }
+      addToQueue({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: clipData.clip_id,
+        clientClipUid: uid,
+        clipData,
+      });
+      setProgressText("已加入录制队列（时间线）", { autoDismissMs: 2000, queueLink: true });
+    },
+    [
+      currentParsed,
+      currentMatchIndex,
+      queueItemMetaForIndex,
+      matchMeta,
+      addToQueue,
+      queuedClientClipUidsGlobal,
+      setProgressText,
+    ],
+  );
+
+  const handleAddTimelineRoundToQueue = useCallback(
+    (roundRow) => {
+      if (!currentParsed || !roundRow) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const mapName = matchMeta?.map_name || "";
+      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer });
+      const uid = clipData.client_clip_uid;
+      const qk = queueItemClientUid({
+        clientClipUid: uid,
+        clipData,
+        demoFilename: meta.demoFilename,
+        clipId: clipData.clip_id,
+      });
+      if (queuedClientClipUidsGlobal.has(qk)) {
+        setProgressText("该回合整段已在队列中。", { autoDismissMs: 2000 });
+        return;
+      }
+      addToQueue({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: clipData.clip_id,
+        clientClipUid: uid,
+        clipData,
+      });
+      setProgressText("已加入本回合到录制队列", { autoDismissMs: 2000, queueLink: true });
+    },
+    [
+      currentParsed,
+      currentMatchIndex,
+      queueItemMetaForIndex,
+      matchMeta,
+      addToQueue,
+      queuedClientClipUidsGlobal,
+      setProgressText,
+    ],
+  );
+
+  const handleAddTimelineEventsBatchToQueue = useCallback(
+    (eventList) => {
+      if (!currentParsed || !Array.isArray(eventList) || !eventList.length) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const mapName = matchMeta?.map_name || "";
+      const toAdd = [];
+      for (const ev of eventList) {
+        if (!ev?.suggested_clip && (ev?.start_tick == null || ev?.end_tick == null)) continue;
+        const clipData = buildTimelineEventClipData({
+          event: ev,
+          mapName,
+          targetPlayer: meta.targetPlayer,
+          round: ev.round,
+        });
+        const uid = clipData.client_clip_uid;
+        const qk = queueItemClientUid({
+          clientClipUid: uid,
+          clipData,
+          demoFilename: meta.demoFilename,
+          clipId: clipData.clip_id,
+        });
+        if (queuedClientClipUidsGlobal.has(qk)) continue;
+        toAdd.push({
+          demoPath: meta.demoPath,
+          demoFilename: meta.demoFilename,
+          targetPlayer: meta.targetPlayer,
+          targetPlayerUserId: meta.targetPlayerUserId,
+          targetSteamId: meta.targetSteamId,
+          clipId: clipData.clip_id,
+          clientClipUid: uid,
+          clipData,
+        });
+      }
+      if (!toAdd.length) {
+        setProgressText("所选时间线事件均已在队列中。", { autoDismissMs: 2000 });
+        return;
+      }
+      addToQueue(toAdd);
+      setProgressText(`已加入 ${toAdd.length} 条时间线片段`, { autoDismissMs: 2000, queueLink: true });
+    },
+    [
+      currentParsed,
+      currentMatchIndex,
+      queueItemMetaForIndex,
+      matchMeta,
+      addToQueue,
+      queuedClientClipUidsGlobal,
+      setProgressText,
+    ],
+  );
 
   const persistWarmupDefaults = useCallback(async (obj) => {
     setSavedRecordWarmupDefaults(obj);
@@ -1251,9 +1413,12 @@ export default function App() {
           if (aborted > 0) {
             setProgressText(
               `批量录制已结束：成功 ${ok}，中止 ${aborted}，其余 ${results.length - ok - aborted} 条；共 ${results.length} 个片段。`,
+              { autoDismissMs: 3000 },
             );
           } else {
-            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个片段。`);
+            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个片段。`, {
+              autoDismissMs: 3000,
+            });
           }
           clearQueue();
         } catch (e) {
@@ -1542,6 +1707,11 @@ export default function App() {
     progressText,
     handleAbortBatchRecording,
     clips,
+    timeline,
+    roundTimeline,
+    handleAddTimelineEventToQueue,
+    handleAddTimelineRoundToQueue,
+    handleAddTimelineEventsBatchToQueue,
     selectedClientClipUids,
     handleToggleClip,
     queuedClientClipUidsForCurrentDemo,
@@ -1635,6 +1805,7 @@ export default function App() {
               <Route path="/queue" element={<RecordingQueuePage />} />
               <Route path="/montage" element={<MontageWorkbenchPage />} />
               <Route path="/params" element={<CommonParamsPage />} />
+              <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -1655,6 +1826,8 @@ export default function App() {
                 onAbortBatch={handleAbortBatchRecording}
                 dismissible={Boolean(progressText?.trim())}
                 onDismiss={() => setProgressText("")}
+                autoDismissAfterMs={progressToastMeta?.autoDismissMs ?? undefined}
+                showQueueNavigate={Boolean(progressToastMeta?.queueLink)}
               />
             </div>
           </div>
@@ -1667,7 +1840,6 @@ export default function App() {
             setWarmupIntent(null);
           }}
           onConfirm={handleWarmupConfirm}
-          onWarmupValidationError={(msg) => setRecordingBlockedMessage(msg)}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
           onExperimentalPovChange={persistExperimentalPov}

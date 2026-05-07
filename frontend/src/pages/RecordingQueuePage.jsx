@@ -23,8 +23,13 @@ export default function RecordingQueuePage() {
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
 
   useEffect(() => {
-    if (selectedId && !queue.some((q) => q.id === selectedId)) {
+    if (queue.length === 0) {
       setSelectedId(null);
+      return;
+    }
+    const stillThere = selectedId && queue.some((q) => q.id === selectedId);
+    if (!stillThere) {
+      setSelectedId(queue[0].id);
     }
   }, [queue, selectedId]);
 

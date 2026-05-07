@@ -29,8 +29,16 @@ export function themeLabel(themeId) {
 }
 
 /** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 普通片段 */
+/** 是否来自解析页「按回合时间线」入队（与 clip.category 独立，用于 UI / 合辑筛选） */
+export function isTimelineSourceClip(clip) {
+  if (!clip || typeof clip !== "object") return false;
+  const s = String(clip.timeline_source || "").trim();
+  return s === "round_timeline_event" || s === "round_timeline_round";
+}
+
 export function normalizeClipType(clip) {
   if (!clip || typeof clip !== "object") return "普通片段";
+  if (isTimelineSourceClip(clip)) return "时间线";
   const cat = String(clip.category || "").trim().toLowerCase();
   if (cat === "highlight") return "高光";
   if (cat === "fail") return "下饭";
@@ -56,6 +64,12 @@ export function normalizeClipType(clip) {
 
 export function getClipTitle(clip) {
   if (!clip || typeof clip !== "object") return "未命名片段";
+  if (isTimelineSourceClip(clip)) {
+    const tags = clip.context_tags;
+    if (Array.isArray(tags) && tags[0] && String(tags[0]).trim()) return String(tags[0]).trim();
+    const ts = clip.timeline_source === "round_timeline_round" ? "整回合时间线" : "时间线片段";
+    return ts;
+  }
   const t =
     clip.title ||
     clip.clip_title ||
@@ -281,7 +295,7 @@ function compareTimeline(a, b) {
 }
 
 function typeRankForFunnyFirst(t) {
-  const order = ["下饭", "梗死亡", "普通片段", "高光", "击杀"];
+  const order = ["下饭", "梗死亡", "普通片段", "时间线", "高光", "击杀"];
   const i = order.indexOf(t);
   return i >= 0 ? i : 99;
 }
@@ -353,8 +367,8 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
     return [...indexed].sort((a, b) => {
       const ta = normalizeClipType(a.c);
       const tb = normalizeClipType(b.c);
-      const la = ta === "高光" ? 1 : 0;
-      const lb = tb === "高光" ? 1 : 0;
+      const la = ta === "高光" ? 2 : ta === "时间线" ? 1 : 0;
+      const lb = tb === "高光" ? 2 : tb === "时间线" ? 1 : 0;
       if (la !== lb) return la - lb;
       return a.i - b.i;
     }).map((x) => x.c);
@@ -364,8 +378,8 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
     return [...indexed].sort((a, b) => {
       const ta = normalizeClipType(a.c);
       const tb = normalizeClipType(b.c);
-      const ha = ta === "高光" ? 1 : 0;
-      const hb = tb === "高光" ? 1 : 0;
+      const ha = ta === "高光" ? 2 : ta === "时间线" ? 1 : 0;
+      const hb = tb === "高光" ? 2 : tb === "时间线" ? 1 : 0;
       if (ha !== hb) return hb - ha;
       return a.i - b.i;
     }).map((x) => x.c);
@@ -374,9 +388,35 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
   return [...clipsInOrder];
 }
 
-/** Timeline block coloring: ace | multikill | pov | fail | compilation | highlight */
+/** 素材池第二行：Demo、回合、击杀/死亡对象、武器 */
+export function getMontageClipFactLine(clip) {
+  if (!clip || typeof clip !== "object") return "";
+  const demo =
+    (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
+    (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
+    "";
+  const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? `第${clip.round}回合` : "";
+  const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
+  const cat = String(clip.category || "").toLowerCase();
+  const victims = Array.isArray(clip.victims) ? clip.victims.map((v) => String(v || "").trim()).filter(Boolean) : [];
+  const kc = Number(clip.kill_count);
+  let action = "";
+  if (cat === "fail") {
+    const killer = String(clip.killer_name || "").trim();
+    action = killer ? `被 ${killer} 击杀` : "死亡";
+  } else if (victims.length) {
+    const kPart = Number.isFinite(kc) && kc > 0 ? `${kc}杀 · ` : "";
+    action = `${kPart}${victims.join("、")}`;
+  } else if (Number.isFinite(kc) && kc > 0) {
+    action = `${kc}杀`;
+  }
+  const parts = [demo, rnd, action, w].filter(Boolean);
+  return parts.join(" · ");
+}
+
 export function getMontageTimelineVariant(clip) {
   if (!clip || typeof clip !== "object") return "neutral";
+  if (isTimelineSourceClip(clip)) return "timeline";
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "fail" || cat === "meme_death") return "fail";
   if (cat === "compilation") return "compilation";
@@ -397,6 +437,7 @@ export function getClipPacingIntensity(clip, maxDurSeconds) {
   if (v === "ace") base = 1;
   else if (v === "multikill") base = 0.84;
   else if (v === "highlight") base = 0.62;
+  else if (v === "timeline") base = 0.55;
   else if (v === "compilation") base = 0.52;
   else if (v === "pov") base = 0.46;
   else if (v === "fail") base = 0.36;
@@ -420,9 +461,10 @@ export function mapNameFromClip(clip) {
   return df || "";
 }
 
-/** 编排时间线徽标：仅 高光 / 下饭 / 合集（不展示 ACE、几 K 等细分）。 */
+/** 编排时间线徽标：时间线 | 高光 | 下饭 | 合集 */
 export function getMontageBlockShortLabel(clip) {
   if (!clip || typeof clip !== "object") return "高光";
+  if (isTimelineSourceClip(clip)) return "时间线";
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "compilation") return "合集";
   if (cat === "fail" || cat === "meme_death") return "下饭";
@@ -510,5 +552,6 @@ export function clipMatchesFilter(clip, filterKey, orderedIdSet) {
   if (filterKey === "合集") return t === "合集";
   if (filterKey === "击杀") return t === "击杀";
   if (filterKey === "普通片段") return t === "普通片段";
+  if (filterKey === "时间线") return t === "时间线";
   return true;
 }

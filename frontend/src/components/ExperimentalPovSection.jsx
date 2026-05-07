@@ -16,6 +16,8 @@ export default function ExperimentalPovSection({
   onPovRadarModeChange,
   povTeamcounterNumeric = true,
   onPovTeamcounterNumericChange,
+  omitEyebrow = false,
+  className,
 }) {
   const [povNeedsRestore, setPovNeedsRestore] = useState(false);
   const [povStatusLoading, setPovStatusLoading] = useState(false);
@@ -38,9 +40,15 @@ export default function ExperimentalPovSection({
     })();
   }, [visible, experimentalPovEnabled]);
 
+  const rootClass =
+    className ??
+    "rounded-lg border border-amber-500/25 bg-amber-950/20 p-3";
+
   return (
-    <section className="rounded-lg border border-amber-500/25 bg-amber-950/20 p-3">
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-200/90">实验性功能</p>
+    <section className={rootClass}>
+      {!omitEyebrow ? (
+        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-200/90">实验性功能</p>
+      ) : null}
       <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2">
         <input
           type="checkbox"

@@ -40,6 +40,42 @@ from .radar.radar_data_extractor import _normalize_record_segments
 
 logger = logging.getLogger(__name__)
 
+
+def _friendly_obs_websocket_test_error(exc: BaseException) -> str:
+    """将连接异常写成玩家可读说明，避免直接展示 WinError 等技术串。"""
+    raw = str(exc)
+    low = raw.lower()
+    if "auth" in low or "password" in low or ("invalid" in low and "secret" in low):
+        return (
+            "WebSocket 密码验证失败。请在 OBS「工具 → WebSocket 服务器设置」中核对密码，并与本页填写一致。"
+        )
+    if (
+        "10061" in raw
+        or "积极拒绝" in raw
+        or "connection refused" in low
+        or "拒绝连接" in raw
+        or isinstance(exc, ConnectionRefusedError)
+    ):
+        return (
+            "无法连接到 OBS（连接被拒绝）。请确认：① OBS 已启动；② 已在 OBS「工具 → WebSocket 服务器设置」中"
+            "勾选「启用 WebSocket 服务器」；③ 端口号与本页一致（默认通常为 4455）。"
+        )
+    if "10060" in raw or "timed out" in low or ("超时" in raw and "连接" in raw):
+        return (
+            "连接 OBS 超时。请确认主机填写为 localhost 或 127.0.0.1，OBS 已运行，且防火墙未拦截该端口。"
+        )
+    if "gaierror" in low or "getaddrinfo" in low or "name or service not known" in low or "不知道这样的主机" in raw:
+        return "主机地址无效或无法解析。在本机使用时请填写 localhost 或 127.0.0.1。"
+    if "10054" in raw or "远程主机强迫关闭" in raw or "connection reset" in low:
+        return "连接被中断。请重启 OBS，并确认 WebSocket 服务器仍处于启用状态。"
+    if "10013" in raw or "访问权限" in raw and "套接字" in raw:
+        return "当前环境不允许使用该端口，可能被防火墙或安全软件拦截，请检查后重试。"
+    return (
+        "无法连接 OBS WebSocket。请先启动 OBS，在「工具 → WebSocket 服务器设置」中启用服务器，"
+        "再核对端口与密码是否与本页一致。"
+    )
+
+
 # 写入录制结果 / recorded_clips.clip_meta，供合辑工作台展示回合、比分、标签等
 _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "category",
@@ -76,6 +112,8 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "radar_timing",
     "pov_player_name",
     "pov_steamid64",
+    "timeline_source",
+    "timeline_event_id",
 )
 
 
@@ -831,6 +869,11 @@ class OBSDirector:
     def state(self) -> DirectorState:
         return self._state
 
+    @property
+    def obs_ws(self) -> Optional[obsws]:
+        """当前 OBS WebSocket 客户端（未连接时为 ``None``）。供 OBS 配置中心等模块复用连接。"""
+        return self._ws
+
     def connect_obs(self) -> bool:
         """Establish WebSocket connection to OBS."""
         try:
@@ -875,7 +918,8 @@ class OBSDirector:
             }
         except Exception as e:
             self._ws = prev_ws
-            return {"ok": False, "error": str(e)}
+            logger.warning("OBS WebSocket test failed: %s", e, exc_info=True)
+            return {"ok": False, "error": _friendly_obs_websocket_test_error(e)}
 
     def _obs_ensure_managed_recording_scene(self) -> bool:
         """Ensure the app-owned OBS scene and game capture exist without changing the active scene."""
@@ -932,7 +976,7 @@ class OBSDirector:
 
         if self._obs_scene_has_source(scene_name, input_name):
             self._obs_apply_managed_game_capture_settings(input_name)
-            self._obs_apply_managed_game_capture_transform(scene_name, input_name)
+            self._obs_apply_managed_game_capture_transform(scene_name, input_name, scene_item_id=None)
             self._obs_managed_input_ready = True
             logger.info("OBS managed game capture already in scene: %s", input_name)
             return True
@@ -950,9 +994,18 @@ class OBSDirector:
 
         if input_exists:
             try:
-                self._ws.call(obs_requests.CreateSceneItem(sceneName=scene_name, sourceName=input_name))
+                cs_resp = self._ws.call(obs_requests.CreateSceneItem(sceneName=scene_name, sourceName=input_name))
+                link_sid = self._obs_scene_item_id_from_response(cs_resp)
+                if not getattr(cs_resp, "status", False):
+                    logger.warning(
+                        "OBS CreateSceneItem %r -> %r failed (status=false): %s",
+                        input_name,
+                        scene_name,
+                        getattr(cs_resp, "datain", {}),
+                    )
+                    return False
                 self._obs_apply_managed_game_capture_settings(input_name)
-                self._obs_apply_managed_game_capture_transform(scene_name, input_name)
+                self._obs_apply_managed_game_capture_transform(scene_name, input_name, scene_item_id=link_sid)
                 self._obs_managed_input_ready = True
                 logger.info("OBS managed game capture linked into scene: %s", input_name)
                 return True
@@ -962,7 +1015,7 @@ class OBSDirector:
 
         settings = self._obs_managed_game_capture_settings()
         try:
-            self._ws.call(
+            ci_resp = self._ws.call(
                 obs_requests.CreateInput(
                     sceneName=scene_name,
                     inputName=input_name,
@@ -972,7 +1025,15 @@ class OBSDirector:
                     sceneItemEnabled=True,
                 )
             )
-            self._obs_apply_managed_game_capture_transform(scene_name, input_name)
+            new_sid = self._obs_scene_item_id_from_response(ci_resp)
+            if not getattr(ci_resp, "status", False):
+                logger.warning(
+                    "OBS CreateInput game capture %r failed (status=false): %s",
+                    input_name,
+                    getattr(ci_resp, "datain", {}),
+                )
+                return False
+            self._obs_apply_managed_game_capture_transform(scene_name, input_name, scene_item_id=new_sid)
             self._obs_managed_input_ready = True
             logger.info("OBS managed game capture created: %s in %s", input_name, scene_name)
             return True
@@ -1009,7 +1070,23 @@ class OBSDirector:
             logger.warning("OBS SetInputSettings game capture %r failed: %s", input_name, e)
             return False
 
-    def _obs_apply_managed_game_capture_transform(self, scene_name: str, input_name: str) -> bool:
+    @staticmethod
+    def _obs_scene_item_id_from_response(resp: Any) -> Optional[int]:
+        """Parse ``sceneItemId`` from CreateInput / CreateSceneItem response when successful."""
+        if not getattr(resp, "status", False):
+            return None
+        raw = (getattr(resp, "datain", {}) or {}).get("sceneItemId")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _obs_apply_managed_game_capture_transform(
+        self,
+        scene_name: str,
+        input_name: str,
+        scene_item_id: Optional[int] = None,
+    ) -> bool:
         """Stretch the managed game capture source to the OBS canvas."""
         if not self._ws:
             return False
@@ -1020,8 +1097,14 @@ class OBSDirector:
         ):
             return False
 
-        scene_item_id = self._obs_find_scene_item_id(scene_name, input_name)
-        if scene_item_id is None:
+        resolved_id = scene_item_id
+        if resolved_id is None:
+            for attempt in range(18):
+                resolved_id = self._obs_find_scene_item_id(scene_name, input_name)
+                if resolved_id is not None:
+                    break
+                time.sleep(0.05)
+        if resolved_id is None:
             logger.warning("OBS managed game capture scene item not found: %s in %s", input_name, scene_name)
             return False
 
@@ -1036,30 +1119,38 @@ class OBSDirector:
             base_height = 1080
 
         transform = {
-            "positionX": 0,
-            "positionY": 0,
-            "rotation": 0,
-            "scaleX": 1,
-            "scaleY": 1,
-            "cropTop": 0,
-            "cropBottom": 0,
-            "cropLeft": 0,
-            "cropRight": 0,
+            "positionX": 0.0,
+            "positionY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+            "cropTop": 0.0,
+            "cropBottom": 0.0,
+            "cropLeft": 0.0,
+            "cropRight": 0.0,
             "boundsType": os.environ.get("CS2_INSIGHT_OBS_BOUNDS_TYPE", "OBS_BOUNDS_STRETCH").strip()
             or "OBS_BOUNDS_STRETCH",
             "boundsAlignment": 5,
-            "boundsWidth": base_width,
-            "boundsHeight": base_height,
+            "boundsWidth": float(base_width),
+            "boundsHeight": float(base_height),
             "alignment": 5,
         }
         try:
-            self._ws.call(
+            set_resp = self._ws.call(
                 obs_requests.SetSceneItemTransform(
                     sceneName=scene_name,
-                    sceneItemId=scene_item_id,
+                    sceneItemId=resolved_id,
                     sceneItemTransform=transform,
                 )
             )
+            if not getattr(set_resp, "status", False):
+                logger.warning(
+                    "OBS SetSceneItemTransform failed for %r in %r: %s",
+                    input_name,
+                    scene_name,
+                    getattr(set_resp, "datain", {}),
+                )
+                return False
             logger.info("OBS managed game capture stretched to canvas: %sx%s", base_width, base_height)
             return True
         except Exception as e:
@@ -1824,7 +1915,7 @@ class OBSDirector:
                 len([v for v in snap.values() if v is not None]),
                 [str(d) for d in self._candidate_user_config_dirs()],
             )
-            # 同步把磁盘上的玩家配置原样拷到 ``<repo>/.cs2_config_backup/``，每次录制
+            # 同步把磁盘上的玩家配置原样拷到 ``<repo>/data/.cs2_config_backup/``，每次录制
             # 启动会清空目录再重写，项目里只保留"最近一次录制前"的玩家原始 cfg。
             # 玩家事后可以在该目录翻出 config.cfg / video.txt 自行覆盖回去。
             try:
@@ -2992,8 +3083,11 @@ class OBSDirector:
             # ── 追加 POV 段落（受害者视角 / 击杀者视角） ────────────────────────
             # 高光片段：追加每位受害者死亡前后的视角；失误片段：追加击杀者视角。
             # 开关及独立时序参数均来自 clip.pacing_override（由队列抽屉写入）。
+            # 固定 tick 分段（解析高光/合集）时禁用节奏覆写，但回合时间线入队片段仍允许受害者/击杀者 POV。
             _vpo = clip.get("pacing_override") or {}
-            if clip.get("fixed_segment_pacing"):
+            _tl_src = str(clip.get("timeline_source") or "").strip()
+            _is_round_timeline = _tl_src.startswith("round_timeline")
+            if clip.get("fixed_segment_pacing") and not _is_round_timeline:
                 _vpo = {}
             if bool(_vpo.get("victim_pov", False)) or bool(_vpo.get("killer_pov", False)):
                 _clip_cat   = str(clip.get("category") or "")

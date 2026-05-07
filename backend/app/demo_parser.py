@@ -132,12 +132,19 @@ class Clip:
 class ParseResult:
     match_meta: MatchMeta
     clips: list[Clip]
+    timeline: Optional[dict] = None
+    round_timeline: Optional[list] = None
 
     def to_dict(self) -> dict:
-        return {
+        out: dict = {
             "match_meta": asdict(self.match_meta),
             "clips": [c.to_dict() for c in self.clips],
         }
+        if self.timeline is not None:
+            out["timeline"] = self.timeline
+        if self.round_timeline is not None:
+            out["round_timeline"] = self.round_timeline
+        return out
 
 
 # ━━━ 武器中文翻译 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -450,6 +457,20 @@ _BACKSTAB_SPRAY_WEAPONS = (
 )
 
 _EXTRA_EVENT_FIELDS = ["total_rounds_played"]
+# player_death 额外字段：回合时间线 Death Notice 徽章（未知键由解析库忽略）
+_PLAYER_DEATH_GAME_KEYS = [
+    "headshot",
+    "noscope",
+    "thrusmoke",
+    "attackerblind",
+    "penetrated",
+    "assistedflash",
+    "attackerinair",
+    "attacker_in_air",
+    "inair",
+    "through_smoke",
+    "penetrated_objects",
+]
 
 
 # ━━━ 工具函数 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -933,11 +954,15 @@ class DemoAnalyzer:
             w = _round_end_winner_team_num(row.get(winner_col))
             if w is None:
                 continue
+            # 与 ``_build_round_scores_team_based`` / ``round_end`` 注释一致：
+            # ``total_rounds_played`` 在本事件上已是「刚结束的回合编号」（1-based），勿再 +1。
             if trc is not None:
-                ended_round = _int(row.get(trc)) + 1
+                ended_round = _int(row.get(trc))
             else:
                 seq += 1
                 ended_round = seq
+            if ended_round <= 0:
+                continue
             out[ended_round] = {2: scores[2], 3: scores[3]}
             scores[w] = scores.get(w, 0) + 1
             out[ended_round + 1] = {2: scores[2], 3: scores[3]}
@@ -1050,7 +1075,8 @@ class DemoAnalyzer:
         defused_df = self._safe_parse_event("bomb_defused")
 
         # ── 解析所有需要的事件表 ──
-        events = self.parser.parse_event("player_death", other=_EXTRA_EVENT_FIELDS)
+        _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
+        events = self.parser.parse_event("player_death", other=_death_other)
         equip_df = self._safe_parse_event("item_equip")
         fire_df = self._safe_parse_event("weapon_fire")
         hurt_df = self._safe_parse_event("player_hurt")
@@ -2113,6 +2139,61 @@ class DemoAnalyzer:
         if rounds_by_wins > 0:
             total_rounds = rounds_by_wins
 
+        timeline: Optional[dict] = None
+        round_timeline: Optional[list] = None
+        try:
+            from .round_timeline import build_round_timeline, build_round_timeline_error_fallback
+
+            round_scores_tbl = self._build_round_scores(match_start_tick)
+            re_df_tl = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
+            if match_start_tick > 0 and not re_df_tl.empty and "tick" in re_df_tl.columns:
+                re_df_tl = re_df_tl.loc[
+                    pd.to_numeric(re_df_tl["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
+                ]
+            tteam: Optional[int] = None
+            if round_target_team_map:
+                for rk in (1, *sorted(round_target_team_map.keys())):
+                    if rk in round_target_team_map:
+                        tteam = int(round_target_team_map[rk])
+                        break
+            bundle = build_round_timeline(
+                demo_path=str(self.dem_path),
+                map_name=map_name,
+                target_player=target_player,
+                target_player_user_id=target_player_user_id,
+                target_steam_id=target_steam_id,
+                target_team_num=tteam,
+                round_target_team_map=round_target_team_map or {},
+                events=events,
+                round_freeze_end_ticks=round_freeze_end_ticks,
+                round_result_map=round_result_map,
+                round_scores_by_round=round_scores_tbl,
+                round_end_df=re_df_tl,
+                round_end_tick_map=_round_end_evt_tick_map,
+                clips=[c.to_dict() for c in clips],
+                total_rounds=total_rounds,
+                match_start_tick=match_start_tick,
+                tick_rate=float(TICK_RATE),
+            )
+            timeline = bundle.get("timeline")
+            round_timeline = bundle.get("round_timeline")
+        except BaseException as e:
+            if isinstance(e, _DEMOPARSER_RE_RAISE):
+                raise
+            logger.exception("build_round_timeline failed for %s", self.dem_path)
+            from .round_timeline import build_round_timeline_error_fallback
+
+            fb = build_round_timeline_error_fallback(
+                demo_path=str(self.dem_path),
+                map_name=map_name,
+                target_player=target_player,
+                target_steam_id=target_steam_id,
+                target_player_user_id=target_player_user_id,
+                total_rounds=total_rounds,
+            )
+            timeline = fb["timeline"]
+            round_timeline = fb["round_timeline"]
+
         return ParseResult(
             match_meta=MatchMeta(
                 map_name=map_name,
@@ -2129,6 +2210,8 @@ class DemoAnalyzer:
                 meme_series_badges=meme_series_badges_for_kd(target_total_kills, target_total_deaths),
             ),
             clips=clips,
+            timeline=timeline,
+            round_timeline=round_timeline,
         )
 
     # ────────────────────────────────────────────────────────────

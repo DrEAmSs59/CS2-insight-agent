@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { X, Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
   MontageMaterialPoolCard,
-  MontageRhythmStrip,
 } from "./montage/MontageWorkbenchPanels";
 import { MontageStyleConsole } from "./montage/MontageStyleConsole";
 import {
@@ -16,9 +15,9 @@ import {
   getClipTitle,
   getClipDurationSeconds,
   formatMontageEstimate,
-  buildShareText,
   mapNameFromClip,
   getMontageTimelineVariant,
+  isTimelineSourceClip,
 } from "../utils/montageUtils";
 
 const API = axios.create({ baseURL: "/api" });
@@ -26,6 +25,7 @@ const API = axios.create({ baseURL: "/api" });
 const FILTER_TABS = [
   { id: "all", label: "全部" },
   { id: "highlight", label: "高光" },
+  { id: "timeline", label: "时间线" },
   { id: "fail", label: "下饭" },
   { id: "compilation", label: "合集" },
   { id: "joined", label: "已加入" },
@@ -173,6 +173,7 @@ function clipWeakBlob(clip) {
     clip.clip_id,
     clipBasename(clip),
     clip.demo_filename,
+    clip.timeline_source,
     clip.category,
     clip.compilation_kind,
     clip.clip_type,
@@ -205,6 +206,7 @@ function clipMatchesLibraryFilter(clip, filterKey, orderedIdSet) {
   const b = clipWeakBlob(clip);
   const fn = clipBasename(clip);
   if (filterKey === "highlight") {
+    if (isTimelineSourceClip(clip)) return false;
     if (clip.category === "highlight") return true;
     if (t === "高光") return true;
     if (/\bhighlight\b|高光/.test(b)) return true;
@@ -214,6 +216,9 @@ function clipMatchesLibraryFilter(clip, filterKey, orderedIdSet) {
       if (n >= 3 && n < 48) return true;
     }
     return false;
+  }
+  if (filterKey === "timeline") {
+    return isTimelineSourceClip(clip);
   }
   if (filterKey === "fail") {
     if (clip.category === "fail" || clip.category === "meme_death") return true;
@@ -268,7 +273,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [selectedTimelineClipId, setSelectedTimelineClipId] = useState(null);
   const [timelineMultiSelectedIds, setTimelineMultiSelectedIds] = useState(() => new Set());
   const [transitionEdgeSourceId, setTransitionEdgeSourceId] = useState(null);
-  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
   const [lastDraftSavedAt, setLastDraftSavedAt] = useState(null);
   const draftDirtyBoot = useRef(true);
@@ -563,6 +567,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         } else if (v === "highlight") {
           type = "fade";
           duration = 0.35;
+        } else if (v === "timeline") {
+          type = "cut";
+          duration = 0.22;
         } else if (v === "compilation") {
           type = "zoom";
           duration = 0.3;
@@ -926,12 +933,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           autosaveLabel={autosaveStatusLabel}
           onClose={onClose}
           onAutoSort={() => handleSort("highlight_first")}
+          onTimelineSort={() => handleSort("timeline")}
           onRhythmSort={() => handleSort("rhythm")}
           onRandomSort={() => handleSort("random")}
           onSaveDraft={() => void saveDraft()}
           savingDraft={savingDraft}
-          onExport={() => void runExport()}
-          exporting={exporting}
         />
 
         {toast ? (
@@ -1113,7 +1119,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 outputFilename={outputFilename}
                 onOutputFilenameChange={setOutputFilename}
                 defaultFilenamePlaceholder={buildTimestampMontageFilename()}
-                onOpenExportPreview={() => setExportPreviewOpen(true)}
                 draftName={draftName}
                 onDraftNameChange={setDraftName}
                 draftNamePlaceholder={stripMp4Extension(outputFilename) || "与输出文件名同步"}
@@ -1126,77 +1131,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 lastExport={lastExport}
                 exportDirForButton={exportDirForButton}
                 onCopyText={copyText}
-                onCopyShare={() =>
-                  void copyText(
-                    buildShareText({
-                      themeId: selectedThemeId,
-                      clipCount: orderedIds.length,
-                      durationText,
-                      outputPath: lastExport?.output_path,
-                    }),
-                  )
-                }
+                onDismissExportSuccess={() => setLastExport(null)}
               />
             </div>
 
           </div>
         </div>
       </div>
-      {exportPreviewOpen ? (
-        <div
-          className="fixed inset-0 z-[125] flex items-center justify-center bg-black/65 px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="导出编排预览"
-          onClick={() => setExportPreviewOpen(false)}
-        >
-          <div
-            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/12 bg-cs2-bg-card p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-white">编排预览</h3>
-              <button
-                type="button"
-                onClick={() => setExportPreviewOpen(false)}
-                className="rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-300"
-                aria-label="关闭预览"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-1 text-[11px] text-zinc-500">成片结构概览（非实时画面预览）</p>
-            <div className="mt-3">
-              <MontageRhythmStrip
-                hasIntro={Boolean(introPath.trim())}
-                hasOutro={Boolean(outroPath.trim())}
-                hasBgm={Boolean(bgmPath.trim())}
-                clipCount={orderedClips.length}
-                transitionSlots={Math.max(0, orderedIds.length - 1)}
-              />
-            </div>
-            <ul className="mt-3 max-h-[46vh] space-y-1 overflow-y-auto text-[11px] text-zinc-300">
-              {orderedClips.length === 0 ? (
-                <li className="py-6 text-center text-zinc-600">时间线为空</li>
-              ) : (
-                orderedClips.map((c, i) => {
-                  const d = getClipDurationSeconds(c);
-                  return (
-                    <li
-                      key={c.id}
-                      className="flex justify-between gap-2 border-b border-white/[0.06] py-1.5 font-mono text-[10px]"
-                    >
-                      <span className="text-zinc-600">{String(i + 1).padStart(2, "0")}</span>
-                      <span className="min-w-0 flex-1 truncate text-zinc-200">{getClipTitle(c)}</span>
-                      <span className="shrink-0 text-zinc-500">{d != null ? `${d.toFixed(1)}s` : "?"}</span>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          </div>
-        </div>
-      ) : null}
       {deleteClipPrompt ? (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4"

@@ -1,13 +1,17 @@
 """系统与环境管家 - 配置管理与 CS2 路径探测
 
-配置为单文件 JSON：默认仓库根目录 cs2-insight.config.json；
+配置为单文件 JSON：默认路径为仓库根下 data/cs2-insight.config.json；
+首次启动且无配置文件时，从同目录的 cs2-insight.config.example.json 复制默认值并生成正式配置。
 环境变量 CS2_INSIGHT_CONFIG 可指向其它绝对路径。
 若仅有旧版 backend/config.json，首次加载时会迁移到新文件。
+旧版本将配置 / 数据库 / 备份放在仓库根目录时，启动时会一次性迁入 data/。
 """
 
 import json
+import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,18 +22,167 @@ except ImportError:
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# 轻量 JSON 配置：默认在仓库根目录 cs2-insight.config.json（可用环境变量 CS2_INSIGHT_CONFIG 覆盖绝对路径）
+logger = logging.getLogger(__name__)
+
+# 轻量 JSON 配置：默认在 <repo>/data/cs2-insight.config.json（可用环境变量 CS2_INSIGHT_CONFIG 覆盖绝对路径）
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _BACKEND_DIR.parent
 _LEGACY_CONFIG_PATH = _BACKEND_DIR / "config.json"
 _DEFAULT_CONFIG_FILENAME = "cs2-insight.config.json"
+_DEFAULT_EXAMPLE_FILENAME = "cs2-insight.config.example.json"
+_DATA_SUBDIR = "data"
+_BACKUP_DIR_NAME = ".cs2_config_backup"
+_DB_BASENAME = "cs2-insight.db"
+
+
+def get_data_dir() -> Path:
+    """持久化数据目录：配置、SQLite、玩家配置备份、日志等。"""
+    return _REPO_ROOT / _DATA_SUBDIR
+
+
+def resolve_example_config_path() -> Path:
+    """随仓库提供的示例配置（默认 ``data/cs2-insight.config.example.json``）。"""
+    return get_data_dir() / _DEFAULT_EXAMPLE_FILENAME
+
+
+def migrate_legacy_app_data() -> None:
+    """
+    将旧版散落在仓库根目录的数据迁入 ``data/``（仅默认配置路径、且无 CS2_INSIGHT_CONFIG 时执行）。
+    若目标已存在则跳过对应项，避免覆盖。任一步失败（例如日志目录被占用）仅记录警告，不阻塞启动。
+    """
+    if os.environ.get("CS2_INSIGHT_CONFIG", "").strip():
+        return
+
+    data_dir = get_data_dir()
+    moved_any = False
+
+    def mark_moved() -> None:
+        nonlocal moved_any
+        moved_any = True
+
+    legacy_cfg = _REPO_ROOT / _DEFAULT_CONFIG_FILENAME
+    new_cfg = data_dir / _DEFAULT_CONFIG_FILENAME
+    if legacy_cfg.is_file():
+        if new_cfg.is_file():
+            logger.warning(
+                "Legacy config still at %s but %s already exists; leaving legacy file in place",
+                legacy_cfg,
+                new_cfg,
+            )
+        else:
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy_cfg), str(new_cfg))
+                logger.info("Migrated config: %s -> %s", legacy_cfg, new_cfg)
+                mark_moved()
+            except OSError as e:
+                logger.warning("Could not migrate config to data dir: %s", e)
+
+    legacy_ex = _REPO_ROOT / _DEFAULT_EXAMPLE_FILENAME
+    new_ex = data_dir / _DEFAULT_EXAMPLE_FILENAME
+    if legacy_ex.is_file():
+        if new_ex.is_file():
+            logger.warning(
+                "Legacy example config still at %s but %s already exists; leaving legacy file in place",
+                legacy_ex,
+                new_ex,
+            )
+        else:
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy_ex), str(new_ex))
+                logger.info("Migrated example config: %s -> %s", legacy_ex, new_ex)
+                mark_moved()
+            except OSError as e:
+                logger.warning("Could not migrate example config to data dir: %s", e)
+
+    # SQLite 主库及 WAL/SHM
+    legacy_db = _REPO_ROOT / _DB_BASENAME
+    new_db = data_dir / _DB_BASENAME
+    if legacy_db.is_file():
+        if new_db.is_file():
+            logger.warning(
+                "Legacy DB still at %s but %s already exists; leaving legacy DB in place",
+                legacy_db,
+                new_db,
+            )
+        else:
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                for suffix in ("", "-wal", "-shm"):
+                    name = _DB_BASENAME + suffix
+                    src = _REPO_ROOT / name
+                    if src.is_file():
+                        shutil.move(str(src), str(data_dir / name))
+                logger.info("Migrated SQLite bundle from %s to %s", _REPO_ROOT, data_dir)
+                mark_moved()
+            except OSError as e:
+                logger.warning("Could not migrate SQLite to data dir: %s", e)
+
+    legacy_bak = _REPO_ROOT / _BACKUP_DIR_NAME
+    new_bak = data_dir / _BACKUP_DIR_NAME
+    if legacy_bak.exists():
+        if new_bak.exists():
+            logger.warning(
+                "Legacy backup dir still at %s but %s already exists; not migrating backup tree",
+                legacy_bak,
+                new_bak,
+            )
+        else:
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy_bak), str(new_bak))
+                logger.info("Migrated CS2 config backup: %s -> %s", legacy_bak, new_bak)
+                mark_moved()
+            except OSError as e:
+                logger.warning("Could not migrate backup dir to data/: %s", e)
+
+    legacy_logs = _REPO_ROOT / "logs"
+    new_logs = data_dir / "logs"
+    if legacy_logs.is_dir():
+        if new_logs.exists():
+            logger.warning(
+                "Legacy logs dir %s still present; %s already exists; not merging logs",
+                legacy_logs,
+                new_logs,
+            )
+        else:
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy_logs), str(new_logs))
+                logger.info("Migrated logs: %s -> %s", legacy_logs, new_logs)
+                mark_moved()
+            except OSError as e:
+                logger.warning(
+                    "Could not migrate logs (directory may be in use); new logs will use %s: %s",
+                    new_logs,
+                    e,
+                )
+
+    if moved_any:
+        logger.info("App data directory layout: using %s", data_dir)
+
+
+migrate_legacy_app_data()
 
 
 def resolve_config_path() -> Path:
     override = os.environ.get("CS2_INSIGHT_CONFIG", "").strip()
     if override:
-        return Path(override).expanduser()
-    return _REPO_ROOT / _DEFAULT_CONFIG_FILENAME
+        p = Path(override).expanduser()
+        if p.is_file():
+            return p
+        # 旧启动脚本可能仍指向仓库根下的配置；已迁移到 data/ 时回退，避免“文件不存在”。
+        try:
+            legacy = (_REPO_ROOT / _DEFAULT_CONFIG_FILENAME).resolve()
+            if p.resolve() == legacy:
+                migrated = get_data_dir() / _DEFAULT_CONFIG_FILENAME
+                if migrated.is_file():
+                    return migrated
+        except OSError:
+            pass
+        return p
+    return get_data_dir() / _DEFAULT_CONFIG_FILENAME
 
 DEFAULT_STEAM_PATHS = [
     Path(r"C:\Program Files (x86)\Steam"),
@@ -183,6 +336,12 @@ def load_config() -> AppConfig:
         return AppConfig(**raw)
     if _LEGACY_CONFIG_PATH.is_file():
         raw = _parse_config_json_file(_LEGACY_CONFIG_PATH)
+        cfg = AppConfig(**raw)
+        save_config(cfg)
+        return cfg
+    example_path = resolve_example_config_path()
+    if example_path.is_file():
+        raw = _parse_config_json_file(example_path)
         cfg = AppConfig(**raw)
         save_config(cfg)
         return cfg

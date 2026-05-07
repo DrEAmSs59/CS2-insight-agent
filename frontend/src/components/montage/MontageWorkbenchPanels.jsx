@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Clapperboard,
   GripVertical,
+  History,
   Loader2,
   Save,
   Shuffle,
@@ -17,8 +18,10 @@ import {
   getClipDurationSeconds,
   getClipTitle,
   getMontageBlockShortLabel,
+  getMontageClipFactLine,
   getMontageTimelineVariant,
   getRecordedClipPerspectiveZh,
+  isTimelineSourceClip,
   mapNameFromClip,
 } from "../../utils/montageUtils";
 
@@ -29,6 +32,7 @@ const VARIANT_BAR = {
   fail: "bg-orange-500",
   compilation: "bg-violet-500",
   highlight: "bg-emerald-500",
+  timeline: "bg-cyan-500",
   neutral: "bg-zinc-600",
 };
 
@@ -39,6 +43,7 @@ const VARIANT_RING = {
   fail: "border-orange-500/45 bg-gradient-to-br from-orange-950/55 to-zinc-950/90 text-orange-50",
   compilation: "border-violet-500/45 bg-gradient-to-br from-violet-950/50 to-zinc-950/90 text-violet-50",
   highlight: "border-emerald-500/40 bg-gradient-to-br from-emerald-950/45 to-zinc-950/90 text-emerald-50",
+  timeline: "border-cyan-500/45 bg-gradient-to-br from-cyan-950/50 to-zinc-950/90 text-cyan-50",
   neutral: "border-white/12 bg-zinc-900/90 text-zinc-200",
 };
 
@@ -72,12 +77,11 @@ export function MontageWorkbenchToolbar({
   autosaveLabel,
   onClose,
   onAutoSort,
+  onTimelineSort,
   onRhythmSort,
   onRandomSort,
   onSaveDraft,
   savingDraft,
-  onExport,
-  exporting,
 }) {
   return (
     <header className="flex h-[48px] shrink-0 items-center gap-2 border-b border-white/10 bg-black/50 px-3 sm:px-4">
@@ -100,6 +104,10 @@ export function MontageWorkbenchToolbar({
           <Zap className="h-3.5 w-3.5" />
           自动排序
         </ToolbarMiniButton>
+        <ToolbarMiniButton onClick={onTimelineSort} title="按 Demo 回合与 tick 升序（时间线片段建议）">
+          <History className="h-3.5 w-3.5" />
+          时间线顺序
+        </ToolbarMiniButton>
         <ToolbarMiniButton onClick={onRhythmSort} title="高光与下饭交错">
           <Waves className="h-3.5 w-3.5" />
           节奏优先
@@ -111,15 +119,6 @@ export function MontageWorkbenchToolbar({
         <ToolbarMiniButton onClick={onSaveDraft} disabled={savingDraft} title="保存草稿">
           {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           保存
-        </ToolbarMiniButton>
-        <ToolbarMiniButton
-          onClick={onExport}
-          disabled={exporting}
-          title="导出成片"
-          className="border-cs2-orange/35 bg-cs2-orange/10 text-cs2-orange hover:bg-cs2-orange/18"
-        >
-          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clapperboard className="h-3.5 w-3.5" />}
-          导出
         </ToolbarMiniButton>
         {!isPage ? (
           <button
@@ -309,7 +308,8 @@ export function MontageOrchestrationTimeline({
       const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 6) : [];
       const mapName = mapNameFromClip(clip);
       const perspectiveZh = getRecordedClipPerspectiveZh(clip);
-      return { clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh };
+      const factLine = getMontageClipFactLine(clip);
+      return { clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh, factLine };
     });
   }, [clips, transitionByClipId, formatTransitionLine]);
 
@@ -442,7 +442,7 @@ export function MontageOrchestrationTimeline({
           </div>
         ) : (
           <ul className="flex flex-col gap-0">
-            {rows.map(({ clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh }) => {
+            {rows.map(({ clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh, factLine }) => {
               const active = primarySelectedId === clip.id;
               const inMulti = multiSelectedIds?.has?.(clip.id);
               const dragging = dragId === clip.id;
@@ -500,6 +500,11 @@ export function MontageOrchestrationTimeline({
                           </span>
                         ) : null}
                       </div>
+                      {factLine ? (
+                        <p className="mt-1.5 truncate font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
+                          {factLine}
+                        </p>
+                      ) : null}
                       {tags.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {tags.map((t) => (
@@ -568,43 +573,6 @@ export function MontageOrchestrationTimeline({
   );
 }
 
-export function MontageRhythmStrip({ hasIntro, hasOutro, hasBgm, clipCount, transitionSlots }) {
-  return (
-    <div className="mb-2 rounded border border-white/[0.06] bg-black/40 px-2 py-1.5">
-      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
-        <span className="font-semibold text-zinc-400">编排</span>
-        <span className="rounded border border-white/10 bg-zinc-900/80 px-1.5 py-0.5 font-mono text-zinc-400">
-          {hasIntro ? "intro" : "—"}
-        </span>
-        <span className="text-zinc-700">|</span>
-        <span className="rounded border border-emerald-500/25 bg-emerald-950/30 px-1.5 py-0.5 text-emerald-200/90">
-          clips ×{clipCount}
-        </span>
-        {transitionSlots > 0 ? (
-          <>
-            <span className="text-zinc-700">|</span>
-            <span className="rounded border border-cs2-orange/25 bg-cs2-orange/10 px-1.5 py-0.5 text-cs2-orange/90">
-              转场 ×{transitionSlots}
-            </span>
-          </>
-        ) : null}
-        <span className="text-zinc-700">|</span>
-        <span className="rounded border border-white/10 bg-zinc-900/80 px-1.5 py-0.5 font-mono text-zinc-400">
-          {hasOutro ? "outro" : "—"}
-        </span>
-        <span className="text-zinc-700">|</span>
-        <span
-          className={`rounded border px-1.5 py-0.5 font-mono ${
-            hasBgm ? "border-violet-500/30 bg-violet-950/35 text-violet-200/90" : "border-white/10 text-zinc-600"
-          }`}
-        >
-          BGM {hasBgm ? "on" : "off"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function onDropOnItem(e, targetId, onDropOnBlock) {
   e.preventDefault();
   e.stopPropagation();
@@ -641,7 +609,11 @@ export function MontageMaterialPoolCard({
   const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 5) : [];
   const playerName = clip.player_name?.trim() || "未知玩家";
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
-  const highlightRing = VARIANT_RING.highlight || VARIANT_RING.neutral;
+  const factLine = getMontageClipFactLine(clip);
+  const timeline = isTimelineSourceClip(clip);
+  const Icon = timeline ? History : Zap;
+  const badgeRing = timeline ? VARIANT_RING.timeline : VARIANT_RING.highlight;
+  const badgeLabel = timeline ? "时间线" : "高光";
 
   return (
     <li
@@ -653,16 +625,26 @@ export function MontageMaterialPoolCard({
         selected ? "border-cs2-orange/55 ring-1 ring-cs2-orange/25" : "border-white/[0.06] hover:border-white/14"
       }`}
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-emerald-500/65" aria-hidden />
+      <div
+        className={`absolute inset-x-0 top-0 h-1 ${timeline ? "bg-cyan-500/70" : "bg-emerald-500/65"}`}
+        aria-hidden
+      />
       <div className="flex gap-2 p-2.5 pt-3">
         <div
-          className={`flex w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border px-1 py-2 ${highlightRing}`}
+          className={`flex w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border px-1 py-2 ${badgeRing}`}
         >
-          <Zap className="h-4 w-4 text-emerald-200/95" aria-hidden />
-          <span className="max-w-full truncate text-center text-[10px] font-bold leading-tight text-white/95">高光</span>
+          <Icon className="h-4 w-4 shrink-0 text-white/95" aria-hidden />
+          <span className="max-w-full truncate text-center text-[10px] font-bold leading-tight text-white/95">
+            {badgeLabel}
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</p>
+          {factLine ? (
+            <p className="mt-1 line-clamp-2 font-mono text-[10px] leading-snug text-zinc-400" title={factLine}>
+              {factLine}
+            </p>
+          ) : null}
           <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
             {weaponShow ? (
               <span className="max-w-[140px] truncate rounded-md bg-black/45 px-1.5 py-0.5 font-medium text-zinc-200" title={weaponPrimary}>
