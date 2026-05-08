@@ -65,10 +65,13 @@ export function normalizeClipType(clip) {
 export function getClipTitle(clip) {
   if (!clip || typeof clip !== "object") return "未命名片段";
   if (isTimelineSourceClip(clip)) {
-    const tags = clip.context_tags;
-    if (Array.isArray(tags) && tags[0] && String(tags[0]).trim()) return String(tags[0]).trim();
-    const ts = clip.timeline_source === "round_timeline_round" ? "整回合时间线" : "时间线片段";
-    return ts;
+    if (String(clip.timeline_source || "").trim() === "round_timeline_round") {
+      return "整回合时间线";
+    }
+    const kind = String(clip.timeline_record_kind || "").trim();
+    if (kind === "death") return "时间线死亡";
+    if (kind === "kill") return "时间线击杀";
+    return "时间线片段";
   }
   const t =
     clip.title ||

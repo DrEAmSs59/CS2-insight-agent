@@ -7,10 +7,12 @@ import {
   Crosshair,
   ChevronRight,
   GripVertical,
+  History,
 } from "lucide-react";
 import QueueMiniTimeline from "./QueueMiniTimeline";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
-import { friendlyClipTitleForQueue } from "../../utils/montageUtils";
+import { friendlyClipTitleForQueue, isTimelineSourceClip } from "../../utils/montageUtils";
+import { timelineQueueMetaOneLiner } from "../../utils/timelineQueue";
 
 const CAT_ICON = {
   highlight: Sparkles,
@@ -58,7 +60,8 @@ export default function QueueWorkspaceRow({
 }) {
   const cd = item.clipData || {};
   const cat = cd.category || "";
-  const Icon = CAT_ICON[cat] || Crosshair;
+  const timeline = isTimelineSourceClip(cd);
+  const Icon = timeline ? History : CAT_ICON[cat] || Crosshair;
   const title = friendlyClipTitleForQueue(cd);
   const showTimeline = cat !== "compilation";
   const demoLabel = String(item.demoFilename || item.demoPath || "").trim() || "—";
@@ -72,7 +75,10 @@ export default function QueueWorkspaceRow({
         : "—";
   const kills = Number(cd.kill_count) || 0;
   const estSec = estimateItemRecordSeconds(item, globalPacing);
+  const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec) : "";
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
+  const queueSummary = String(cd.queue_summary_line || "").trim();
+  const catBadgeZh = timeline ? "时间线" : categoryZh(cat);
 
   return (
     <div
@@ -115,7 +121,14 @@ export default function QueueWorkspaceRow({
         }}
         className="flex min-w-0 flex-1 gap-2 outline-none focus-visible:ring-2 focus-visible:ring-cs2-orange/45"
       >
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-black/35 text-cs2-orange shadow-inner">
+      <div
+        className={[
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border shadow-inner",
+          timeline
+            ? "border-cyan-500/35 bg-gradient-to-br from-cyan-950/55 to-black/50 text-cyan-200"
+            : "border-white/12 bg-black/35 text-cs2-orange",
+        ].join(" ")}
+      >
         <Icon className="h-5 w-5" aria-hidden />
       </div>
 
@@ -126,8 +139,15 @@ export default function QueueWorkspaceRow({
             <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
           </span>
           <span className="truncate text-[11px] font-semibold text-zinc-200">{title}</span>
-          <span className="rounded border border-white/12 bg-white/[0.04] px-1.5 py-0 text-[9px] font-semibold text-zinc-400">
-            {categoryZh(cat)}
+          <span
+            className={[
+              "rounded border px-1.5 py-0 text-[9px] font-semibold",
+              timeline
+                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200/95"
+                : "border-white/12 bg-white/[0.04] text-zinc-400",
+            ].join(" ")}
+          >
+            {catBadgeZh}
           </span>
         </div>
         <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-snug">
@@ -139,13 +159,20 @@ export default function QueueWorkspaceRow({
             玩家 <span className="font-semibold text-zinc-200">{playerLabel}</span>
           </span>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-zinc-500">
-          <span title="地图">{mapName}</span>
-          <span title="回合 / 比分">{roundLabel}</span>
-          <span>{kills > 0 ? `${kills} 杀` : "—"}</span>
-          <span className="text-zinc-600">~{estSec}s</span>
-        </div>
-        {tags.length > 0 ? (
+        {queueSummary ? (
+          <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-cyan-100/85">{queueSummary}</p>
+        ) : null}
+        {timeline ? (
+          <p className="mt-1 font-mono text-[10px] leading-snug text-zinc-400">{timelineMetaLine}</p>
+        ) : (
+          <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-zinc-500">
+            <span title="地图">{mapName}</span>
+            <span title="回合 / 比分">{roundLabel}</span>
+            <span>{kills > 0 ? `${kills} 杀` : "—"}</span>
+            <span className="text-zinc-600">~{estSec}s</span>
+          </div>
+        )}
+        {!timeline && tags.length > 0 ? (
           <p className="mt-0.5 truncate text-[9px] text-zinc-600">{tags.join(" · ")}</p>
         ) : null}
         {showTimeline ? (

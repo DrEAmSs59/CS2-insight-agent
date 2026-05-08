@@ -520,7 +520,19 @@ async def _run_library_demo_analyze(
         await asyncio.gather(*[_enrich_library_player(p) for p in target_players])
 
     first_player = target_players[0]
-    await demo_db.save_result(dem_path, {**players_out[first_player], "auto_target_player": first_player})
+    first_pdata = players_out[first_player]
+    players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
+    composite: dict[str, Any] = {
+        "players": players_payload,
+        "analyzed_target_players": list(target_players),
+        "auto_target_player": first_player,
+        # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
+        "clips": first_pdata.get("clips") or [],
+        "match_meta": first_pdata.get("match_meta"),
+        "timeline": first_pdata.get("timeline"),
+        "round_timeline": first_pdata.get("round_timeline"),
+    }
+    await demo_db.save_result(dem_path, composite)
     for player, pdata in players_out.items():
         if player == first_player:
             continue

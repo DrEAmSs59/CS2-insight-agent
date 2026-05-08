@@ -529,7 +529,12 @@ export default function App() {
           const { data } = await API.get(`/demos/${item.id}/players`);
           const cachedResult = item?.result || null;
           const cachedMeta = cachedResult?.match_meta || null;
+          const ordered =
+            Array.isArray(cachedResult?.analyzed_target_players) && cachedResult.analyzed_target_players.length
+              ? cachedResult.analyzed_target_players.filter((n) => typeof n === "string" && n.trim())
+              : null;
           const autoPlayer =
+            (ordered && ordered[0]) ||
             cachedResult?.auto_target_player ||
             cachedMeta?.target_player ||
             data.players?.[0]?.name ||
@@ -552,8 +557,31 @@ export default function App() {
       setParsedMatches(
         loaded.map((d) => {
           const r = d.cached_result;
+          if (!r) return null;
+          const pObj = r.players;
+          if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
+            const names = Object.keys(pObj).filter((n) => String(n).trim());
+            if (!names.length) return null;
+            const players = {};
+            for (const name of names) {
+              const pd = pObj[name];
+              if (!pd || typeof pd !== "object") continue;
+              players[name] = {
+                clips: ensureClientClipUidsOnClips(pd.clips || []),
+                match_meta: pd.match_meta || r.match_meta || d.match_meta || null,
+                timeline: pd.timeline ?? null,
+                round_timeline: pd.round_timeline ?? null,
+              };
+            }
+            if (!Object.keys(players).length) return null;
+            return {
+              players,
+              demo_path: d.path,
+              demo_filename: d.filename,
+            };
+          }
           const ap = d.cached_auto_player;
-          if (!r || !ap || !Array.isArray(r.clips)) return null;
+          if (!ap || !Array.isArray(r.clips)) return null;
           return {
             players: {
               [ap]: {
@@ -566,7 +594,7 @@ export default function App() {
             demo_path: d.path,
             demo_filename: d.filename,
           };
-        })
+        }),
       );
       const idMap = {};
       const selectedMap = {};
@@ -577,9 +605,21 @@ export default function App() {
           const r = resolvedByDemoId[x.id] ?? [];
           selectedMap[i] = r;
           if (r.length) tabMap[i] = r[0];
-        } else if (x.cached_result && x.cached_auto_player) {
-          selectedMap[i] = [x.cached_auto_player];
-          tabMap[i] = x.cached_auto_player;
+        } else if (x.cached_result) {
+          const r = x.cached_result;
+          let names = [];
+          if (Array.isArray(r.analyzed_target_players) && r.analyzed_target_players.length) {
+            names = r.analyzed_target_players.filter((n) => typeof n === "string" && n.trim());
+          } else if (r.players && typeof r.players === "object" && !Array.isArray(r.players)) {
+            names = Object.keys(r.players).filter((n) => String(n).trim());
+          }
+          if (names.length) {
+            selectedMap[i] = names;
+            tabMap[i] = names[0];
+          } else if (x.cached_auto_player) {
+            selectedMap[i] = [x.cached_auto_player];
+            tabMap[i] = x.cached_auto_player;
+          }
         }
       });
       setLibraryDemoIdsByIndex(idMap);
@@ -588,7 +628,22 @@ export default function App() {
       setActivePlayerTabs(tabMap);
       const ftdByIndex = {};
       loaded.forEach((x, i) => {
-        const clips = x.cached_result?.clips;
+        const r = x.cached_result;
+        if (!r) return;
+        let clips = null;
+        const pObj = r.players;
+        if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
+          const keys = Object.keys(pObj).filter((k) => String(k).trim());
+          const ref =
+            typeof r.auto_target_player === "string" &&
+            r.auto_target_player.trim() &&
+            pObj[r.auto_target_player]
+              ? r.auto_target_player
+              : keys[0];
+          clips = ref && pObj[ref] && Array.isArray(pObj[ref].clips) ? pObj[ref].clips : null;
+        } else {
+          clips = r.clips;
+        }
         if (!Array.isArray(clips)) return;
         const ftd = clips.find(
           (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"

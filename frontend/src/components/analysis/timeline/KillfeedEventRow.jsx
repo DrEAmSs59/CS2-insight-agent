@@ -43,9 +43,23 @@ function modifierBadges(mods, flashAssistLine) {
 
 /**
  * 紧凑 Killfeed 行（时间线中间栏）。
- * @param {{ event: Record<string, unknown>, focusedPlayer?: string, queued?: boolean, onRowClick?: () => void }} props
+ * @param {{
+ *   event: Record<string, unknown>,
+ *   focusedPlayer?: string,
+ *   queued?: boolean,
+ *   onRowClick?: () => void,
+ *   roundNumber?: number,
+ *   variant?: "default" | "timeline",
+ * }} props
  */
-export default function KillfeedEventRow({ event, focusedPlayer = "", queued = false, onRowClick }) {
+export default function KillfeedEventRow({
+  event,
+  focusedPlayer = "",
+  queued = false,
+  onRowClick,
+  roundNumber,
+  variant = "default",
+}) {
   const typ = String(event?.type || "");
   const isAssistOnly = typ === "assist_only";
   const isKill = typ === "kill" || event?.record_type === "kill";
@@ -83,21 +97,29 @@ export default function KillfeedEventRow({ event, focusedPlayer = "", queued = f
     queued ? "ring-1 ring-cs2-orange/45" : "",
   ].join(" ");
 
-  const badgeRow = modifierBadges(mods, flashAssistLine).map((b) => (
-    <span
-      key={b.k}
-      title={b.title}
-      className="rounded border border-white/14 bg-black/55 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-zinc-200"
-    >
-      {b.label}
-    </span>
-  ));
+  const badgeRow =
+    variant === "timeline"
+      ? []
+      : modifierBadges(mods, flashAssistLine).map((b) => (
+          <span
+            key={b.k}
+            title={b.title}
+            className="rounded border border-white/14 bg-black/55 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-zinc-200"
+          >
+            {b.label}
+          </span>
+        ));
 
   if (isAssistOnly) {
     return (
       <div className={rowClass}>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-snug">
-          <span className="shrink-0 font-mono text-[11px] text-zinc-600">[{timeText}]</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-snug">
+        <span className="shrink-0 font-mono text-[11px] text-zinc-600">[{timeText}]</span>
+        {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
+          <span className="shrink-0 rounded border border-cyan-500/25 bg-cyan-950/35 px-1 py-0 font-mono text-[10px] font-semibold text-cyan-200/90">
+            第 {roundNumber} 回合
+          </span>
+        ) : null}
           <span className="text-zinc-500">{String(event?.assist_note || "助攻")}</span>
         </div>
       </div>
@@ -123,6 +145,11 @@ export default function KillfeedEventRow({ event, focusedPlayer = "", queued = f
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] leading-tight">
         <span className="shrink-0 font-mono text-[11px] text-zinc-500">[{timeText}]</span>
+        {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
+          <span className="shrink-0 rounded border border-cyan-500/30 bg-cyan-950/40 px-1 py-0 font-mono text-[10px] font-semibold text-cyan-200/95">
+            第 {roundNumber} 回合
+          </span>
+        ) : null}
         <span
           className={[
             "shrink-0 font-bold tracking-tight",

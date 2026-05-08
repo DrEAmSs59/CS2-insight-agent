@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { Monitor, Radio } from "lucide-react";
 import { PacingMicroPanel, PovSection, GlobalPacingPanel } from "../RecordingQueueDrawer";
 import { useRecordingQueue } from "../../stores/recordingQueueStore";
-import { friendlyClipTitleForQueue, humanizeCompilationKind } from "../../utils/montageUtils";
+import { friendlyClipTitleForQueue, humanizeCompilationKind, isTimelineSourceClip } from "../../utils/montageUtils";
 
 function clipTypeLabel(cd) {
+  if (isTimelineSourceClip(cd)) return "时间线";
   const cat = cd.category;
   const kind = cd.compilation_kind;
   const base =
@@ -100,6 +101,11 @@ export default function QueueInspectorPanel({ selectedId, selectedItem, queue })
           </h3>
           <div className="text-[10px] text-zinc-400">
             <Row label="类型">{clipTypeLabel(cd)}</Row>
+            {String(cd.queue_summary_line || "").trim() ? (
+              <Row label="时间线摘要" title={String(cd.queue_summary_line)}>
+                {String(cd.queue_summary_line).trim()}
+              </Row>
+            ) : null}
             <Row label="Demo 文件" title={selectedItem.demoFilename}>
               {selectedItem.demoFilename || "—"}
             </Row>

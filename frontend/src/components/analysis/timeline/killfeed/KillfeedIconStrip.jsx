@@ -51,7 +51,7 @@ function WeaponHudImg({ chain, title }) {
  * @param {{ event: Record<string, unknown>, weaponName?: string, weaponKey?: string }} props
  */
 export default function KillfeedIconStrip({ event, weaponName = "", weaponKey = "" }) {
-  const wStem = resolveHudWeaponStem(weaponKey);
+  const wStem = resolveHudWeaponStem(weaponKey, weaponName);
   const weaponChain = useMemo(() => [...new Set([wStem, "knife", "ak47"])], [wStem]);
 
   const parts = [];

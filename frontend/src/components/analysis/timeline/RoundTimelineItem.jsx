@@ -41,9 +41,6 @@ export default function RoundTimelineItem({
   const en = roundRow?.end_tick;
   const scoreText = String(roundRow?.score_text || "—");
   const side = roundRow?.side ? String(roundRow.side) : "";
-  const hlTags = Array.isArray(roundRow?.highlight_tags)
-    ? roundRow.highlight_tags.map((t) => String(t).trim()).filter(Boolean)
-    : [];
 
   const killsOnly = useMemo(
     () => events.filter((e) => e?.record_type === "kill" || e?.type === "kill"),
@@ -64,9 +61,6 @@ export default function RoundTimelineItem({
   const defaultCollapsed = noEvents || onlyAssists;
   const [expanded, setExpanded] = useState(!defaultCollapsed);
   const [hovered, setHovered] = useState(false);
-
-  const mainTags = hlTags.slice(0, 3);
-  const extraTags = hlTags.slice(3);
 
   const isQueued = (ev) => {
     if (!queuedUids || !ev) return false;
@@ -162,20 +156,6 @@ export default function RoundTimelineItem({
           ) : null}
         </div>
 
-        {mainTags.length ? (
-          <div className="mb-2 flex flex-wrap gap-1">
-            {mainTags.map((t, i) => (
-              <span
-                key={`mt-${i}-${t}`}
-                className="max-w-full truncate rounded border border-cs2-orange/25 bg-cs2-orange/10 px-1.5 py-0.5 text-[10px] font-medium text-cs2-orange/95"
-                title={t}
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
         <div className="flex flex-col gap-1">
           {events.map((ev) => (
             <div
@@ -186,6 +166,7 @@ export default function RoundTimelineItem({
                 event={ev}
                 focusedPlayer={focusedPlayer}
                 queued={isQueued(ev)}
+                variant="timeline"
                 onRowClick={
                   ev?.can_record && onAddEvent && String(ev?.type || "") !== "assist_only"
                     ? () => onAddEvent(ev, roundRow)
@@ -212,7 +193,7 @@ export default function RoundTimelineItem({
           deaths={td}
           assists={ta}
           headshots={ths}
-          extraTags={extraTags}
+          extraTags={[]}
           roundQueued={Boolean(roundQueued)}
           killsOnly={killsOnly}
           deathsOnly={deathsOnly}

@@ -11,6 +11,9 @@ import {
   OctagonX,
 } from "lucide-react";
 import { useRecordingQueue, BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
+import { isTimelineSourceClip } from "../utils/montageUtils";
+import { estimateItemRecordSeconds } from "../utils/recordingQueueDerive";
+import { timelineQueueMetaOneLiner } from "../utils/timelineQueue";
 
 // 与后端 build_smart_jump_segments 保持一致
 const DEFAULT_PACING = BACKEND_DEFAULT_PACING;
@@ -719,26 +722,46 @@ export function RecordingQueuePanel({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                             <span className="font-mono text-cs2-text-secondary">{it.clipId}</span>
-                            {it.clipData?.category && (
-                              <span className="rounded border border-white/10 px-1 py-0 text-[10px] text-zinc-500">
-                                {({
-                                  highlight: "高光",
-                                  fail: "下饭",
-                                  meme_death: "坐牢集锦",
-                                  compilation: "合集",
-                                }[it.clipData.category]) || it.clipData.category}
-                              </span>
-                            )}
-                            {it.clipData?.round != null &&
-                              it.clipData?.score_own != null &&
-                              it.clipData?.score_opp != null && (
+                            {(() => {
+                              const tl = isTimelineSourceClip(it.clipData || {});
+                              const cat = it.clipData?.category;
+                              const label = tl
+                                ? "时间线"
+                                : cat
+                                  ? {
+                                      highlight: "高光",
+                                      fail: "下饭",
+                                      meme_death: "坐牢集锦",
+                                      compilation: "合集",
+                                    }[cat] || cat
+                                  : null;
+                              return label ? (
+                                <span
+                                  className={[
+                                    "rounded border px-1 py-0 text-[10px]",
+                                    tl
+                                      ? "border-cyan-500/35 bg-cyan-500/10 text-cyan-200/95"
+                                      : "border-white/10 text-zinc-500",
+                                  ].join(" ")}
+                                >
+                                  {label}
+                                </span>
+                              ) : null;
+                            })()}
+                            {it.clipData?.round != null && !isTimelineSourceClip(it.clipData) ? (
+                              it.clipData?.score_own != null && it.clipData?.score_opp != null ? (
                                 <span
                                   className="font-mono text-[10px] tabular-nums text-zinc-500"
                                   title="本回合开局时比分（目标方 : 对方）"
                                 >
                                   第 {it.clipData.round} 回合 · {it.clipData.score_own}:{it.clipData.score_opp}
                                 </span>
-                              )}
+                              ) : (
+                                <span className="font-mono text-[10px] tabular-nums text-zinc-500">
+                                  R{it.clipData.round}
+                                </span>
+                              )
+                            ) : null}
                           </div>
                           {(it.targetPlayer || "").trim() ? (
                             <p className="mt-1 text-[10px] text-zinc-400">
@@ -746,11 +769,23 @@ export function RecordingQueuePanel({
                               <span className="font-semibold text-zinc-200">{String(it.targetPlayer).trim()}</span>
                             </p>
                           ) : null}
-                          {it.clipData?.context_tags?.length > 0 && (
+                          {String(it.clipData?.queue_summary_line || "").trim() ? (
+                            <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-cyan-100/85">
+                              {String(it.clipData.queue_summary_line).trim()}
+                            </p>
+                          ) : it.clipData?.context_tags?.length > 0 && !isTimelineSourceClip(it.clipData) ? (
                             <p className="mt-0.5 truncate text-[10px] text-zinc-600">
                               {it.clipData.context_tags.join(" · ")}
                             </p>
-                          )}
+                          ) : null}
+                          {isTimelineSourceClip(it.clipData) ? (
+                            <p className="mt-0.5 font-mono text-[10px] leading-snug text-zinc-400">
+                              {timelineQueueMetaOneLiner(
+                                it.clipData || {},
+                                estimateItemRecordSeconds(it, globalPacing),
+                              )}
+                            </p>
+                          ) : null}
                           {Array.isArray(it.freezeToDeathQueueRounds) &&
                           it.freezeToDeathQueueRounds.length > 0 ? (
                             <p className="mt-0.5 font-mono text-[10px] text-amber-400/85">

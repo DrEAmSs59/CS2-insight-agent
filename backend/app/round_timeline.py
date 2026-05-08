@@ -83,6 +83,54 @@ def _adjust_round_for_pre_freeze(
     return rn
 
 
+# 整回合时间线录制结束 tick：固定缓冲（与 demo_parser 默认策略一致），不读环境变量。
+_TIMELINE_ROUND_POST_ROUND_END_SEC = 3.0
+_TIMELINE_LAST_ROUND_KILL_TAIL_SEC = 2.5
+
+
+def _timeline_round_record_end_tick(
+    rn: int,
+    raw_round_end: Optional[int],
+    tick_rate: float,
+    round_freeze_end_ticks: dict[int, int],
+    evs: list[dict[str, Any]],
+) -> Optional[int]:
+    """与 ``demo_parser`` 填充 ``clip_max_tick`` 的非最后一回合策略对齐：``round_end`` 后留缓冲并顶到下一回合 freeze。
+
+    整回合时间线若仅用 ``round_end`` 原始 tick 作为 ``end_tick``，最后一杀常与 ``round_end`` 同刻度或略早，
+    成片会在击杀动画/死亡反馈播完前结束。录制应使用本函数返回值（经 ``record_end_tick`` 暴露给前端）。
+    """
+    if raw_round_end is None:
+        return None
+    re = int(raw_round_end)
+    trf = float(tick_rate) if float(tick_rate) > 0 else 64.0
+    buf_mid = int(_TIMELINE_ROUND_POST_ROUND_END_SEC * trf)
+    kill_ts = [
+        int(x.get("tick") or 0)
+        for x in evs
+        if str(x.get("type") or "") == "kill" and int(x.get("tick") or 0) > 0
+    ]
+    last_k = max(kill_ts) if kill_ts else None
+
+    nxt_raw = round_freeze_end_ticks.get(int(rn) + 1)
+    nxt_fe = int(nxt_raw) if nxt_raw is not None else None
+
+    if nxt_fe is not None and nxt_fe > re:
+        clip_lim = re + buf_mid
+        if last_k is not None and last_k > re and nxt_fe > re:
+            clip_lim = nxt_fe
+        return int(min(clip_lim, nxt_fe))
+
+    tail = int(_TIMELINE_LAST_ROUND_KILL_TAIL_SEC * trf)
+    fe0 = round_freeze_end_ticks.get(int(rn))
+    fe_tick = int(fe0) if fe0 is not None else re
+    loose_cap = fe_tick + int(60.0 * trf)
+    out = re + buf_mid
+    if last_k is not None:
+        out = max(out, last_k + tail)
+    return int(min(out, loose_cap))
+
+
 def _parse_round_winners_side(round_end_df: pd.DataFrame, match_start_tick: int) -> dict[int, str]:
     from .demo_parser import _round_end_winner_team_num
 
@@ -500,6 +548,9 @@ def build_round_timeline(
 
         fe = freeze_tick_for_round(rn)
         ret = round_end_tick_for(rn)
+        record_end = _timeline_round_record_end_tick(
+            rn, ret, float(tick_rate), round_freeze_end_ticks, evs,
+        )
 
         target_won = round_result_map.get(rn)
         winner_tct = winners_by_ended.get(int(rn))
@@ -533,6 +584,7 @@ def build_round_timeline(
                 "round": rn,
                 "round_start_tick": int(fe) if fe is not None else None,
                 "round_end_tick": int(ret) if ret is not None else None,
+                "record_end_tick": int(record_end) if record_end is not None else None,
                 "winner": winner_tct,
                 "target_won_round": bool(target_won) if isinstance(target_won, bool) else None,
                 "score_t": st_t,
@@ -563,6 +615,7 @@ def build_round_timeline(
                 "score_text": score_text,
                 "start_tick": int(fe) if fe is not None else None,
                 "end_tick": int(ret) if ret is not None else None,
+                "record_end_tick": int(record_end) if record_end is not None else None,
                 "focused_player": tp,
                 "summary": {"kills": tk, "deaths": td, "assists": ta},
                 "player_stats": {"kills": tk, "deaths": td, "assists": ta, "headshots": headshots},
@@ -606,6 +659,7 @@ def build_round_timeline_error_fallback(
         "round": 0,
         "round_start_tick": None,
         "round_end_tick": None,
+        "record_end_tick": None,
         "winner": None,
         "target_won_round": None,
         "score_t": None,
@@ -625,6 +679,7 @@ def build_round_timeline_error_fallback(
             "score_text": "--",
             "start_tick": None,
             "end_tick": None,
+            "record_end_tick": None,
             "focused_player": target_player,
             "summary": {"kills": 0, "deaths": 0, "assists": 0},
             "player_stats": {"kills": 0, "deaths": 0, "assists": 0, "headshots": 0},

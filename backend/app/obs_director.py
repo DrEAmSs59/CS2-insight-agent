@@ -2768,6 +2768,9 @@ class OBSDirector:
             meta_record_start_tick = _estimated_record_start_tick(seek_tick)
             meta_record_end_tick = int(end_tick)
             legacy_duration = max(0.0, (end_tick - meta_record_start_tick) / float(TICK_RATE)) + tail
+            if str(clip.get("timeline_source") or "").strip() == "round_timeline_round":
+                # 整回合固定 tick 窗口：墙钟略长于纯 tick 换算，抵消准备阶段少量漂移（常量，不读环境变量）。
+                legacy_duration += 0.35
             planned_wall_seconds = legacy_duration
 
         self._set_state(
