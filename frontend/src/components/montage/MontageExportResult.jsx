@@ -17,6 +17,9 @@ export default function MontageExportResult({ result, themeId, clipCount, durati
         <CheckCircle2 className="h-4 w-4 shrink-0" />
         导出完成
       </div>
+      <p className="mt-2 text-[10px] text-zinc-500">
+        {Number(clipCount) || 0} 段 · 时长约 {durationText || "未知"}
+      </p>
       <p className="mt-2 text-[10px] text-zinc-400">视频路径</p>
       <p className="mt-1 break-all font-mono text-[10px] text-zinc-200">{result.output_path}</p>
       <div className="mt-3 flex flex-wrap gap-2">

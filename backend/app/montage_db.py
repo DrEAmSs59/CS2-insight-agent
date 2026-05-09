@@ -18,6 +18,7 @@ class MontageDB:
     @staticmethod
     def _expand_clip_meta_row(row: dict[str, Any]) -> dict[str, Any]:
         """将 clip_meta JSON 展平到行字典，便于前端与解析片段字段对齐。"""
+        # clip_meta 含录制侧扩展字段（如 recording_perspective、victim_pov_segments 等），无固定列白名单。
         out = dict(row)
         raw = out.pop("clip_meta", None)
         if not raw:

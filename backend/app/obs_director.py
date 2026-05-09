@@ -114,6 +114,11 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "pov_steamid64",
     "timeline_source",
     "timeline_event_id",
+    "pov_hud_enabled",
+    "recording_perspective",
+    "victim_pov_segments",
+    "death_tick",
+    "kill_ticks",
 )
 
 
@@ -2807,6 +2812,7 @@ class OBSDirector:
         stop_record_output_path: Optional[Path] = None
         output_result: dict = {}
         fatal_recording_error: Optional[str] = None
+        _victim_pov_segments: list[dict[str, Any]] = []
 
         def _obs_record_paused() -> Optional[bool]:
             if not self._ws:
@@ -3119,7 +3125,7 @@ class OBSDirector:
                     _killer_name = str(clip.get("killer_name") or "").strip()
                     _death_t     = clip.get("death_tick")
                     if _want_killer_pov and _killer_name and _death_t is not None:
-                        _vic_pairs.append((_killer_name, int(_death_t), None))
+                        _vic_pairs.append((_killer_name, int(_death_t), None, "killer"))
                 else:
                     _vk_ticks  = _clip_kill_ticks_in_order(clip)
                     if _want_victim_pov:
@@ -3127,7 +3133,7 @@ class OBSDirector:
                         _vic_list  = clip.get("victims") or []
                         for _i, (_vn, _vt) in enumerate(zip(_vic_list, _vk_ticks)):
                             _nxt = int(_vk_ticks[_i + 1]) if _i + 1 < len(_vk_ticks) else None
-                            _vic_pairs.append((_vn, int(_vt), _nxt))
+                            _vic_pairs.append((_vn, int(_vt), _nxt, "victim"))
                     if _want_killer_pov:
                         _killer_list = clip.get("killers") or []
                         if not _killer_list:
@@ -3138,7 +3144,7 @@ class OBSDirector:
                             )
                             _killer_list = [_fallback_killer] * len(_vk_ticks)
                         for _kn, _kt in zip(_killer_list, _vk_ticks):
-                            _vic_pairs.append((_kn, int(_kt), None))
+                            _vic_pairs.append((_kn, int(_kt), None, "killer"))
                 _pre_vic_t  = int(_pre_vic  * DEMO_TICK_RATE)
                 _post_vic_t = int(_post_vic * DEMO_TICK_RATE)
                 _clip_min   = max(0, int(clip.get("clip_min_tick") or 0))
@@ -3162,7 +3168,7 @@ class OBSDirector:
                     int(self._env_float("CS2_INSIGHT_POV_NEXT_KILL_SAFETY_SEC", "0.15") * DEMO_TICK_RATE),
                 )
 
-                for _vname, _vtick, _next_kill_tick in _vic_pairs:
+                for _vname, _vtick, _next_kill_tick, _pov_kind in _vic_pairs:
                     if not _vname:
                         continue
                     _vs_start = max(_clip_min, _vtick - _pre_vic_t)
@@ -3312,6 +3318,14 @@ class OBSDirector:
 
                     if not _ok_vdr:
                         logger.warning("POV resume/spec injection failed for %s; segment may be unstable", _vname)
+                    _victim_pov_segments.append(
+                        {
+                            "player_name": str(_vname),
+                            "duration_sec": round(float(_pov_record_dur), 4),
+                            "anchor_tick": int(_vtick),
+                            "perspective_type": str(_pov_kind),
+                        }
+                    )
                     await self._sleep_abortable(_pov_record_dur)
 
                 # 最后一回合：POV 全部录完后立即 OBS 暂停 + demo_pause。
@@ -3417,6 +3431,16 @@ class OBSDirector:
         }
         merge_clip_metadata_into_recording_result(ok_out, clip)
         ok_out.update(radar_clip_meta)
+        ok_out["pov_hud_enabled"] = bool(getattr(self, "_pov_enabled", False))
+        if getattr(self, "_pov_enabled", False):
+            ok_out["recording_perspective"] = "pov_hud"
+        elif player_name_for_db:
+            ok_out["recording_perspective"] = "player_follow"
+        else:
+            ok_out["recording_perspective"] = "spectator"
+        ok_out["victim_pov_segments"] = list(_victim_pov_segments)
+        ok_out["death_tick"] = _clip_death_tick(clip)
+        ok_out["kill_ticks"] = list(_clip_kill_ticks_in_order(clip))
         return ok_out
 
     def _obs_apply_hide_cursor_inputs(self) -> None:

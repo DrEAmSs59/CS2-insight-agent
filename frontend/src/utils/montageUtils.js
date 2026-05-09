@@ -474,9 +474,74 @@ export function getMontageBlockShortLabel(clip) {
   return "高光";
 }
 
-/** 入库录像卡片：回放视角中文（避免使用 POV / 跟播 等说法） */
+/** 回合比分：优先 CS2 双方 CT/T；否则回退为解析侧 己方/对方。 */
+export function getMontageScorePair(clip) {
+  if (!clip || typeof clip !== "object") return null;
+  const ct = clip.score_ct;
+  const st = clip.score_t != null ? clip.score_t : clip.score_st;
+  if (ct != null && st != null && Number.isFinite(Number(ct)) && Number.isFinite(Number(st))) {
+    return { leftLabel: "CT", left: Number(ct), rightLabel: "T", right: Number(st) };
+  }
+  const o = clip.score_own;
+  const p = clip.score_opp;
+  if (o != null && p != null && Number.isFinite(Number(o)) && Number.isFinite(Number(p))) {
+    return { leftLabel: "己", left: Number(o), rightLabel: "敌", right: Number(p) };
+  }
+  return null;
+}
+
+/** 地图名右侧小圆点用色（与具体地图名弱关联，仅作视觉区分） */
+export function mapNameAccentDotClass(mapName) {
+  const s = String(mapName || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 33 + s.charCodeAt(i)) >>> 0;
+  const palette = [
+    "bg-sky-400",
+    "bg-emerald-400",
+    "bg-amber-400",
+    "bg-fuchsia-400",
+    "bg-cyan-400",
+    "bg-rose-400",
+    "bg-violet-400",
+  ];
+  return palette[h % palette.length];
+}
+
+/** 受害者/击杀者 POV 段 tooltip：逐段玩家名 */
+export function getVictimPovSegmentsTooltip(clip) {
+  const segs = Array.isArray(clip?.victim_pov_segments) ? clip.victim_pov_segments : [];
+  if (segs.length === 0) return "";
+  return segs
+    .map((s) => {
+      const n = String(s?.player_name || "").trim();
+      if (!n) return "";
+      const t = String(s?.perspective_type || "").toLowerCase();
+      if (t === "victim") return `${n}（受害者）`;
+      if (t === "killer") return `${n}（击杀者）`;
+      return n;
+    })
+    .filter(Boolean)
+    .join("、");
+}
+
+/** 入库录像卡片：回放视角中文；优先落库字段 recording_perspective + victim_pov_segments */
 export function getRecordedClipPerspectiveZh(clip) {
   if (!clip || typeof clip !== "object") return "观战视角";
+  const rp = String(clip.recording_perspective || "").trim();
+  const fromEnum = {
+    pov_hud: "POV HUD 视角",
+    player_follow: "玩家视角",
+    spectator: "观战视角",
+  }[rp];
+
+  const segs = Array.isArray(clip.victim_pov_segments) ? clip.victim_pov_segments : [];
+  const nVictim = segs.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length;
+  const victimSuffix = nVictim > 0 ? `含 ${nVictim} 段受害者视角` : "";
+
+  if (fromEnum) {
+    return victimSuffix ? `${fromEnum} · ${victimSuffix}` : fromEnum;
+  }
+
   const pn = String(clip.player_name || "").trim();
   const pnNorm = pn.toLowerCase();
   const killer = String(clip.killer_name || "").trim();
@@ -488,17 +553,24 @@ export function getRecordedClipPerspectiveZh(clip) {
   const matchesVictim = pnNorm && victims.some((v) => String(v || "").trim().toLowerCase() === pnNorm);
   const matchesKiller = pnNorm && killerNorm && pnNorm === killerNorm;
 
-  if (matchesVictim && matchesKiller) return "含受害者与击杀者视角";
-  if (matchesVictim) return "受害者视角";
-  if (matchesKiller) return "击杀者视角";
+  let legacy = "";
+  if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
+  else if (matchesVictim) legacy = "受害者视角";
+  else if (matchesKiller) legacy = "击杀者视角";
+  else if (Array.isArray(clip.record_segments) && clip.record_segments.length > 1) legacy = "含受害者视角";
+  else if ((cat === "highlight" || cat === "compilation") && hasVictimNames) legacy = "含受害者视角";
+  else if (pn) legacy = "玩家视角";
+  else legacy = "观战视角";
 
-  const segs = clip.record_segments;
-  if (Array.isArray(segs) && segs.length > 1) return "含受害者视角";
+  return victimSuffix ? `${legacy} · ${victimSuffix}` : legacy;
+}
 
-  if ((cat === "highlight" || cat === "compilation") && hasVictimNames) return "含受害者视角";
-
-  if (pn) return "玩家视角";
-  return "观战视角";
+/** 不含「含 N 段受害者视角」后缀，便于与独立受害者 chip 并排展示 */
+export function getRecordedClipPerspectivePrimaryZh(clip) {
+  const full = getRecordedClipPerspectiveZh(clip);
+  const idx = full.indexOf(" · 含 ");
+  if (idx >= 0) return full.slice(0, idx).trim();
+  return full;
 }
 
 export function buildDefaultExportName(themeId) {

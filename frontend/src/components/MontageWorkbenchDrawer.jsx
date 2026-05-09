@@ -847,6 +847,21 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const durationText = formatMontageEstimate(totalKnownSeconds, orderedIds.length);
 
+  const exportReady = useMemo(() => {
+    if (orderedIds.length < 1) return false;
+    if (!String(outputFilename || "").trim()) return false;
+    if (!effectiveOutputDir) return false;
+    return true;
+  }, [orderedIds.length, outputFilename, effectiveOutputDir]);
+
+  const fullOutputPathPreview = useMemo(() => {
+    const dir = effectiveOutputDir;
+    const fn = ensureMp4Filename(String(outputFilename || "").trim());
+    if (!dir || !fn) return "";
+    const sep = String(dir).includes("\\") ? "\\" : "/";
+    return String(dir).replace(/[/\\]+$/, "") + sep + fn;
+  }, [effectiveOutputDir, outputFilename]);
+
   const displayMontageTitle = useMemo(
     () => draftName.trim() || stripMp4Extension(outputFilename).trim() || "未命名合辑",
     [draftName, outputFilename],
@@ -1038,9 +1053,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                   <p className="text-[11px] text-zinc-500">没有符合筛选或搜索条件的片段。</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
-                    {filteredLibrary.map((clip) => (
+                    {filteredLibrary.map((clip, idx) => (
                       <MontageMaterialPoolCard
                         key={clip.id}
+                        index={idx + 1}
                         clip={clip}
                         added={orderedIdSet.has(clip.id)}
                         selected={librarySelectedIds.has(clip.id)}
@@ -1116,6 +1132,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 resolutionLabel="跟随源素材 · MP4"
                 exporting={exporting}
                 onExport={() => void runExport()}
+                onSaveDraft={() => void saveDraft()}
+                savingDraft={savingDraft}
+                exportReady={exportReady}
+                fullOutputPathPreview={fullOutputPathPreview}
                 outputFilename={outputFilename}
                 onOutputFilenameChange={setOutputFilename}
                 defaultFilenamePlaceholder={buildTimestampMontageFilename()}

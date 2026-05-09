@@ -14,6 +14,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { AiScoreBadge } from "../ClipCard";
 import {
   getClipDurationSeconds,
   getClipTitle,
@@ -21,9 +22,23 @@ import {
   getMontageClipFactLine,
   getMontageTimelineVariant,
   getRecordedClipPerspectiveZh,
+  getRecordedClipPerspectivePrimaryZh,
   isTimelineSourceClip,
   mapNameFromClip,
+  getMontageScorePair,
+  mapNameAccentDotClass,
+  getVictimPovSegmentsTooltip,
+  getClipComment,
+  getClipScore,
 } from "../../utils/montageUtils";
+
+function montageAiExplainText(clip) {
+  const c = getClipComment(clip);
+  if (c) return c.length > 80 ? `${c.slice(0, 78)}…` : c;
+  const s = getClipScore(clip);
+  if (s != null && Number.isFinite(Number(s))) return `AI 评分 ${Math.round(Number(s))} 分`;
+  return "";
+}
 
 const VARIANT_BAR = {
   ace: "bg-rose-500",
@@ -57,7 +72,7 @@ export function CollapsibleSection({ title, hint, defaultOpen = false, children 
         className="flex w-full items-center justify-between gap-2 py-2.5 text-left"
       >
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold tracking-wide text-zinc-200">{title}</p>
+          <div className="text-[11px] font-semibold tracking-wide text-zinc-200">{title}</div>
           {hint ? <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">{hint}</p> : null}
         </div>
         <ChevronDown
@@ -308,8 +323,32 @@ export function MontageOrchestrationTimeline({
       const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 6) : [];
       const mapName = mapNameFromClip(clip);
       const perspectiveZh = getRecordedClipPerspectiveZh(clip);
+      const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
       const factLine = getMontageClipFactLine(clip);
-      return { clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh, factLine };
+      const scorePair = getMontageScorePair(clip);
+      const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
+      const povTip = getVictimPovSegmentsTooltip(clip);
+      const victimSegCount = Array.isArray(clip.victim_pov_segments)
+        ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
+        : 0;
+      return {
+        clip,
+        next,
+        trLine,
+        variant,
+        dur,
+        weapon,
+        tags,
+        mapName,
+        perspectiveZh,
+        perspectivePrimary,
+        factLine,
+        rowIndex: idx + 1,
+        scorePair,
+        rnd,
+        povTip,
+        victimSegCount,
+      };
     });
   }, [clips, transitionByClipId, formatTransitionLine]);
 
@@ -442,7 +481,25 @@ export function MontageOrchestrationTimeline({
           </div>
         ) : (
           <ul className="flex flex-col gap-0">
-            {rows.map(({ clip, next, trLine, variant, dur, weapon, tags, mapName, perspectiveZh, factLine }) => {
+            {rows.map(
+              ({
+                clip,
+                next,
+                trLine,
+                variant,
+                dur,
+                weapon,
+                tags,
+                mapName,
+                perspectiveZh,
+                perspectivePrimary,
+                factLine,
+                rowIndex,
+                scorePair,
+                rnd,
+                povTip,
+                victimSegCount,
+              }) => {
               const active = primarySelectedId === clip.id;
               const inMulti = multiSelectedIds?.has?.(clip.id);
               const dragging = dragId === clip.id;
@@ -474,35 +531,74 @@ export function MontageOrchestrationTimeline({
                     <div className={`absolute inset-y-2 left-0 w-1 rounded-full ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`} />
                     <GripVertical className="mt-1 h-5 w-5 shrink-0 text-zinc-500" aria-hidden />
                     <div className="min-w-0 flex-1 pl-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-mono text-[10px] text-zinc-600">#{rowIndex}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
                         <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${vCls}`}>{killBadge}</span>
                         <span className="truncate text-[13px] font-bold text-white">{clip.player_name || "未知玩家"}</span>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400">
-                        <span>
-                          <span className="text-zinc-600">武器</span>{" "}
-                          <span className="font-medium text-zinc-200">{weapon || "—"}</span>
-                        </span>
-                        <span className="font-mono tabular-nums text-zinc-300">{dur != null ? `${dur.toFixed(1)}s` : "?"}</span>
-                        <span
-                          className={`rounded px-1.5 py-px text-[10px] font-semibold ${
-                            perspectiveZh !== "观战视角"
-                              ? "bg-sky-500/15 text-sky-200"
-                              : "bg-zinc-800 text-zinc-600"
-                          }`}
-                          title={perspectiveZh}
-                        >
-                          {perspectiveZh}
-                        </span>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-400">
+                        {rnd != null ? (
+                          <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-zinc-300">
+                            R{rnd}
+                          </span>
+                        ) : null}
+                        {scorePair ? (
+                          <>
+                            <span className="rounded-md bg-sky-500/20 px-1.5 py-px font-mono font-semibold text-sky-100">
+                              {scorePair.leftLabel} {scorePair.left}
+                            </span>
+                            <span className="rounded-md bg-amber-500/20 px-1.5 py-px font-mono font-semibold text-amber-100">
+                              {scorePair.rightLabel} {scorePair.right}
+                            </span>
+                          </>
+                        ) : null}
                         {mapName ? (
                           <span className="truncate text-zinc-500" title={mapName}>
                             {mapName}
                           </span>
                         ) : null}
                       </div>
-                      {factLine ? (
-                        <p className="mt-1.5 truncate font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
-                          {factLine}
+                      <div className="mt-2 border-t border-white/[0.06] bg-white/[0.02] px-1 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="rounded-md border border-white/10 bg-black/40 px-2 py-0.5 font-mono text-[10px] tabular-nums text-zinc-200">
+                            {dur != null ? `${dur.toFixed(1)}s` : "时长 ?"}
+                          </span>
+                          {factLine ? (
+                            <p className="min-w-0 flex-1 truncate text-right font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
+                              {factLine}
+                            </p>
+                          ) : (
+                            <span className="text-[10px] text-zinc-600">—</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {victimSegCount > 0 ? (
+                          <span
+                            className="max-w-[11rem] truncate rounded-md bg-violet-500/15 px-1.5 py-px text-[10px] font-semibold text-violet-100"
+                            title={povTip || undefined}
+                          >
+                            含 {victimSegCount} 段受害者视角
+                          </span>
+                        ) : null}
+                        <span
+                          className={`max-w-[14rem] truncate rounded-md px-1.5 py-px text-[10px] font-semibold ${
+                            perspectivePrimary !== "观战视角"
+                              ? "bg-sky-500/15 text-sky-200"
+                              : "bg-zinc-800 text-zinc-600"
+                          }`}
+                          title={perspectiveZh}
+                        >
+                          {perspectivePrimary}
+                        </span>
+                        {clip.pov_hud_enabled === true ? (
+                          <span className="rounded-md bg-sky-500/15 px-1.5 py-px text-[10px] font-bold text-sky-200">HUD</span>
+                        ) : null}
+                      </div>
+                      {weapon ? (
+                        <p className="mt-1.5 text-[10px] text-zinc-500">
+                          <span className="text-zinc-600">武器</span>{" "}
+                          <span className="font-medium text-zinc-300">{weapon}</span>
                         </p>
                       ) : null}
                       {tags.length ? (
@@ -584,6 +680,7 @@ function onDropOnItem(e, targetId, onDropOnBlock) {
 
 export function MontageMaterialPoolCard({
   clip,
+  index = 0,
   added,
   selected,
   onAdd,
@@ -594,7 +691,6 @@ export function MontageMaterialPoolCard({
 }) {
   const mapName = mapNameFromClip(clip);
   const dur = getClipDurationSeconds(clip);
-  const durLabel = dur != null ? `${dur.toFixed(1)}s` : "?";
   const weaponPrimary =
     clip.weapon_used &&
     String(clip.weapon_used)
@@ -609,11 +705,17 @@ export function MontageMaterialPoolCard({
   const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 5) : [];
   const playerName = clip.player_name?.trim() || "未知玩家";
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
+  const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
   const factLine = getMontageClipFactLine(clip);
   const timeline = isTimelineSourceClip(clip);
-  const Icon = timeline ? History : Zap;
-  const badgeRing = timeline ? VARIANT_RING.timeline : VARIANT_RING.highlight;
-  const badgeLabel = timeline ? "时间线" : "高光";
+  const killBadge = getMontageBlockShortLabel(clip);
+  const scorePair = getMontageScorePair(clip);
+  const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
+  const povTip = getVictimPovSegmentsTooltip(clip);
+  const victimSegCount = Array.isArray(clip.victim_pov_segments)
+    ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
+    : 0;
+  const aiExplain = montageAiExplainText(clip);
 
   return (
     <li
@@ -629,76 +731,115 @@ export function MontageMaterialPoolCard({
         className={`absolute inset-x-0 top-0 h-1 ${timeline ? "bg-cyan-500/70" : "bg-emerald-500/65"}`}
         aria-hidden
       />
-      <div className="flex gap-2 p-2.5 pt-3">
-        <div
-          className={`flex w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border px-1 py-2 ${badgeRing}`}
-        >
-          <Icon className="h-4 w-4 shrink-0 text-white/95" aria-hidden />
-          <span className="max-w-full truncate text-center text-[10px] font-bold leading-tight text-white/95">
-            {badgeLabel}
-          </span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</p>
-          {factLine ? (
-            <p className="mt-1 line-clamp-2 font-mono text-[10px] leading-snug text-zinc-400" title={factLine}>
-              {factLine}
-            </p>
-          ) : null}
-          <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
-            {weaponShow ? (
-              <span className="max-w-[140px] truncate rounded-md bg-black/45 px-1.5 py-0.5 font-medium text-zinc-200" title={weaponPrimary}>
-                {weaponShow}
-              </span>
-            ) : null}
-            <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-mono tabular-nums text-zinc-300">{durLabel}</span>
-            <span
-              className={`max-w-[7.5rem] truncate rounded-md px-1.5 py-0.5 font-semibold ${
-                perspectiveZh !== "观战视角" ? "bg-sky-500/15 text-sky-200" : "bg-zinc-800 text-zinc-500"
-              }`}
-              title={perspectiveZh}
-            >
-              {perspectiveZh}
+      <div className="p-2.5 pt-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-mono text-[10px] font-semibold text-zinc-500">#{index}</span>
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${timeline ? VARIANT_RING.timeline : "border border-white/12 bg-zinc-900/80 text-zinc-100"}`}>
+              {killBadge}
             </span>
-            {mapName ? (
-              <span className="max-w-[100px] truncate rounded-md border border-white/[0.08] px-1.5 py-0.5 text-zinc-400" title={mapName}>
-                {mapName}
-              </span>
-            ) : null}
+            <span className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</span>
           </div>
-          {tags.length ? (
-            <div className="mt-2 flex min-w-0 flex-wrap gap-1">
-              {tags.map((t) => (
-                <span
-                  key={t}
-                  className="truncate rounded-md border border-white/[0.06] bg-black/35 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-400"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
+          <AiScoreBadge score={clip.ai_score} />
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          <span className="flex min-w-0 items-center gap-1.5 font-medium text-zinc-200">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${mapNameAccentDotClass(mapName)}`} aria-hidden />
+            <span className="truncate">{mapName || "—"}</span>
+          </span>
+          {rnd != null ? (
+            <span className="rounded border border-white/[0.08] bg-black/35 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+              R{rnd}
+            </span>
           ) : null}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAdd(clip.id);
-              }}
-              disabled={added}
-              className={`rounded-md border px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                added
-                  ? "cursor-default border-emerald-500/25 bg-emerald-950/30 text-emerald-400/90"
-                  : "border-cs2-orange/45 bg-cs2-orange/14 text-cs2-orange hover:bg-cs2-orange/22"
-              }`}
+          {scorePair ? (
+            <>
+              <span className="rounded-md bg-sky-500/20 px-1.5 py-px font-mono text-[10px] font-semibold text-sky-100">
+                {scorePair.leftLabel} {scorePair.left}
+              </span>
+              <span className="rounded-md bg-amber-500/20 px-1.5 py-px font-mono text-[10px] font-semibold text-amber-100">
+                {scorePair.rightLabel} {scorePair.right}
+              </span>
+            </>
+          ) : null}
+        </div>
+
+        {factLine ? (
+          <p className="mt-1.5 line-clamp-2 font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
+            {factLine}
+          </p>
+        ) : null}
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {weaponShow ? (
+            <span className="max-w-[160px] truncate rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-zinc-200" title={weaponPrimary}>
+              {weaponShow}
+            </span>
+          ) : null}
+          {victimSegCount > 0 ? (
+            <span
+              className="max-w-[11rem] truncate rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-100"
+              title={povTip || undefined}
             >
-              {added ? "已在编排" : "加入编排"}
-            </button>
-            {selected ? (
-              <span className="text-[9px] font-medium text-cs2-orange">已选中 · 点列表上方「批量加入编排」</span>
-            ) : null}
+              含 {victimSegCount} 段受害者视角
+            </span>
+          ) : null}
+          <span
+            className={`max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+              perspectivePrimary !== "观战视角" ? "bg-sky-500/15 text-sky-200" : "bg-zinc-800 text-zinc-500"
+            }`}
+            title={perspectiveZh}
+          >
+            {perspectivePrimary}
+          </span>
+          {clip.pov_hud_enabled === true ? (
+            <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-bold text-sky-200">HUD</span>
+          ) : null}
+        </div>
+
+        {tags.length ? (
+          <div className="mt-2 flex min-w-0 flex-wrap gap-1">
+            {tags.map((t) => (
+              <span
+                key={t}
+                className="truncate rounded-md border border-white/[0.06] bg-black/35 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-400"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd(clip.id);
+            }}
+            disabled={added}
+            className={`rounded-md border px-2.5 py-1 text-[10px] font-bold transition-colors ${
+              added
+                ? "cursor-default border-emerald-500/25 bg-emerald-950/30 text-emerald-400/90"
+                : "border-cs2-orange/45 bg-cs2-orange/14 text-cs2-orange hover:bg-cs2-orange/22"
+            }`}
+          >
+            {added ? "已在编排" : "加入编排"}
+          </button>
+          <div className="min-w-0 flex-1 text-right">
+            {aiExplain ? (
+              <p className="line-clamp-2 text-[9px] leading-snug text-zinc-500" title={aiExplain}>
+                {aiExplain}
+              </p>
+            ) : (
+              <span className="text-[9px] text-zinc-600">—</span>
+            )}
           </div>
         </div>
+        {selected ? (
+          <p className="mt-1.5 text-center text-[9px] font-medium text-cs2-orange">已选中 · 点列表上方「批量加入编排」</p>
+        ) : null}
       </div>
 
       <button
