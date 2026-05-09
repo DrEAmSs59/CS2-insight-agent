@@ -365,6 +365,7 @@ def extract_radar_timeline_impl(
         "team_num",
         "is_alive",
         "health",
+        "player_color",
     ]
 
     snap_by_tick: dict[int, pd.DataFrame] = {}
@@ -377,7 +378,7 @@ def extract_radar_timeline_impl(
         except Exception:
             try:
                 raw = parser.parse_ticks(
-                    ["X", "Y", "Z", "yaw", "name", "steamid", "team_num", "is_alive"],
+                    ["X", "Y", "Z", "yaw", "name", "steamid", "team_num", "is_alive", "player_color"],
                     ticks=uniq,
                 )
             except Exception:
@@ -435,6 +436,15 @@ def extract_radar_timeline_impl(
                 elif pov_display_name and nm.strip().lower() == pov_display_name.strip().lower():
                     is_pov = True
 
+                color_slot = -1
+                if "player_color" in work.columns:
+                    try:
+                        raw_slot = r.get("player_color")
+                        if raw_slot is not None and not (isinstance(raw_slot, float) and pd.isna(raw_slot)):
+                            color_slot = int(float(raw_slot))
+                    except (TypeError, ValueError):
+                        color_slot = -1
+
                 players_out.append(
                     {
                         "steamid64": sid_c or None,
@@ -447,6 +457,7 @@ def extract_radar_timeline_impl(
                         "is_alive": alive,
                         "is_pov": is_pov,
                         "is_teammate": True,
+                        "slot_color_index": color_slot if 0 <= color_slot <= 4 else -1,
                     },
                 )
             if players_out:

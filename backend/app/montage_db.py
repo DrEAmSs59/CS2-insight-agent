@@ -87,6 +87,10 @@ class MontageDB:
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_montage_exports_status ON montage_exports(status)",
             )
+            cur2 = await conn.execute("PRAGMA table_info(montage_exports)")
+            export_cols = {str(r[1]) for r in await cur2.fetchall()}
+            if "name" not in export_cols:
+                await conn.execute("ALTER TABLE montage_exports ADD COLUMN name TEXT")
             await conn.commit()
 
     async def insert_recorded_clip(
@@ -281,3 +285,51 @@ class MontageDB:
         d = dict(row)
         d["body"] = json.loads(str(d.pop("body_json")))
         return d
+
+    async def list_exports(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        status: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = "WHERE status = ?" if status else ""
+        params_count: list[Any] = [status] if status else []
+        params_rows: list[Any] = [*params_count, limit, offset]
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            total_cur = await conn.execute(
+                f"SELECT COUNT(*) FROM montage_exports {where}", params_count
+            )
+            total = (await total_cur.fetchone())[0]
+            rows_cur = await conn.execute(
+                f"SELECT * FROM montage_exports {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params_rows,
+            )
+            rows = await rows_cur.fetchall()
+        items = []
+        for row in rows:
+            d = dict(row)
+            try:
+                d["body"] = json.loads(str(d.pop("body_json")))
+            except Exception:
+                d.pop("body_json", None)
+                d["body"] = {}
+            items.append(d)
+        return items, int(total)
+
+    async def rename_export(self, export_id: int, name: str) -> None:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "UPDATE montage_exports SET name = ?, updated_at = ? WHERE id = ?",
+                (name.strip() or None, utc_now_iso(), int(export_id)),
+            )
+            await conn.commit()
+
+    async def delete_export(self, export_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "DELETE FROM montage_exports WHERE id = ?", (int(export_id),)
+            )
+            await conn.commit()
+        return cur.rowcount > 0

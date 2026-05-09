@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from app.radar.map_calibration import RadarMapError
 from app.radar.radar_data_extractor import _normalize_record_segments, extract_radar_timeline
 from app.radar.radar_renderer import render_radar_frames
 
@@ -255,12 +254,9 @@ def apply_radar_overlay_to_clip(
             output_dir=radar_dir,
             size=RADAR_SIZE,
             clip_id=_first_value(clip_row, ["clip_id", "id"]),
-            pov_rotate=True,
-            pov_zoom=1.0,
-            center_y_ratio=0.5,
             circular_frame=True,
         )
-    except RadarMapError as exc:
+    except RuntimeError as exc:
         raise RadarOverlaySkip(str(exc)) from exc
 
     frame_pattern = radar_dir / "radar_%06d.png"

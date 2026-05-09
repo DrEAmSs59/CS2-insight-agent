@@ -1,16 +1,53 @@
 import { mergedPacingForItem } from "../../utils/recordingQueueDerive";
-import { DEMO_TICK_RATE } from "../../utils/montageUtils";
+import { DEMO_TICK_RATE, isRoundTimelineRoundClip, isTimelineSourceClip } from "../../utils/montageUtils";
+
+function clipDataUsesDeathTickOverlay(clipData) {
+  const cat = clipData?.category;
+  const kind = String(clipData?.compilation_kind || "");
+  return (
+    cat === "fail" ||
+    (cat === "compilation" && ["nemesis_deaths", "all_deaths"].includes(kind))
+  );
+}
+
+/**
+ * 按 start/end_tick 映射击杀刻度（高光、时间线击杀等；与下饭死亡条互斥）。
+ * @param {{ clipData: Record<string, unknown> }} props
+ */
+function KillTickMarksOverlay({ clipData }) {
+  if (!isTimelineSourceClip(clipData)) return null;
+  if (clipDataUsesDeathTickOverlay(clipData)) return null;
+  const start = Number(clipData?.start_tick);
+  const end = Number(clipData?.end_tick);
+  const span = end - start;
+  if (!Number.isFinite(span) || span <= 0) return null;
+  const killTicks = Array.isArray(clipData?.kill_ticks)
+    ? [...new Set(clipData.kill_ticks.map((x) => Number(x)).filter(Number.isFinite))].sort((a, b) => a - b)
+    : [];
+  if (!killTicks.length) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[2]" aria-hidden>
+      {killTicks.map((kt, i) => {
+        const p = Math.min(100, Math.max(0, ((kt - start) / span) * 100));
+        return (
+          <span
+            key={`k-${kt}-${i}`}
+            title={`击杀 tick ${kt}`}
+            className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-white/80 shadow-[0_0_5px_rgba(255,255,255,0.45)]"
+            style={{ left: `${p}%` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * 下饭 / 死亡合集：在与主条同一时间轴上叠加热力刻度（不单独占一行）。
  * @param {{ clipData: Record<string, unknown> }} props
  */
 function DeathTickOverlay({ clipData }) {
-  const cat = clipData?.category;
-  const kind = String(clipData?.compilation_kind || "");
-  const show =
-    cat === "fail" ||
-    (cat === "compilation" && ["nemesis_deaths", "all_deaths"].includes(kind));
+  const show = clipDataUsesDeathTickOverlay(clipData);
   if (!show) return null;
 
   const start = Number(clipData?.start_tick);
@@ -116,6 +153,10 @@ function barClass(type) {
  * }} props
  */
 export default function QueueMiniTimeline({ clipData, pacingOverride, globalPacing }) {
+  if (isRoundTimelineRoundClip(clipData)) {
+    return null;
+  }
+
   const item = { pacing_override: pacingOverride, clipData };
   const { pre_first_sec, post_last_sec } = mergedPacingForItem(item, globalPacing);
   const pre = Math.max(0.5, pre_first_sec);
@@ -174,6 +215,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
   }
 
   const killCount = Number(clipData?.kill_count) || 0;
+  const timelineSrc = isTimelineSourceClip(clipData);
   const coreHint =
     typeof clipData?.duration_sec === "number" && Number.isFinite(clipData.duration_sec)
       ? Math.max(4, clipData.duration_sec)
@@ -182,17 +224,19 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
   const sum = pre + core + post;
   const wp = (x) => `${Math.max(6, (x / sum) * 100)}%`;
 
-  const dots =
-    killCount > 1
-      ? Array.from({ length: Math.min(killCount, 8) }, (_, i) => (
-          <span
-            key={i}
-            className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-white/85 shadow-[0_0_6px_rgba(225,116,57,0.9)]"
-            style={{
-              left: `${16 + (i / Math.max(1, killCount - 1)) * 68}%`,
-            }}
-          />
-        ))
+  const highlightDots =
+    !timelineSrc && killCount >= 1
+      ? Array.from({ length: Math.min(killCount, 8) }, (_, i) => {
+          const leftPct =
+            killCount === 1 ? 50 : 16 + (i / Math.max(1, killCount - 1)) * 68;
+          return (
+            <span
+              key={i}
+              className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-white/85 shadow-[0_0_6px_rgba(225,116,57,0.9)]"
+              style={{ left: `${leftPct}%` }}
+            />
+          );
+        })
       : null;
 
   return (
@@ -208,13 +252,14 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
           style={{ width: wp(core) }}
           title="击杀片段主体"
         >
-          {dots}
+          {highlightDots}
         </div>
         <div
           className="h-full bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
           style={{ width: wp(post) }}
           title={`收尾 ${post.toFixed(1)}s`}
         />
+        <KillTickMarksOverlay clipData={clipData} />
         <DeathTickOverlay clipData={clipData} />
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">

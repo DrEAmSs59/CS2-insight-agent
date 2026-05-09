@@ -7,7 +7,7 @@ import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
-import DashboardPage from "./pages/DashboardPage";
+import GuidePage from "./pages/GuidePage";
 import DemoLibraryPage from "./pages/DemoLibraryPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import RecordingQueuePage from "./pages/RecordingQueuePage";
@@ -1854,7 +1854,7 @@ export default function App() {
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="min-h-0 flex-1 overflow-hidden">
             <Routes>
-              <Route path="/" element={<DashboardPage />} />
+              <Route path="/" element={<GuidePage />} />
               <Route path="/library" element={<DemoLibraryPage />} />
               <Route path="/analysis" element={<AnalysisPage />} />
               <Route path="/queue" element={<RecordingQueuePage />} />

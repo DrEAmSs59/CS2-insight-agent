@@ -11,7 +11,11 @@ import {
 } from "lucide-react";
 import QueueMiniTimeline from "./QueueMiniTimeline";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
-import { friendlyClipTitleForQueue, isTimelineSourceClip } from "../../utils/montageUtils";
+import {
+  formatClipCombatSummaryLine,
+  friendlyClipTitleForQueue,
+  isTimelineSourceClip,
+} from "../../utils/montageUtils";
 import { timelineQueueMetaOneLiner } from "../../utils/timelineQueue";
 
 const CAT_ICON = {
@@ -20,6 +24,45 @@ const CAT_ICON = {
   meme_death: Ghost,
   compilation: Layers,
 };
+
+function queueRowIconShellClass(timeline, cat) {
+  const base =
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border shadow-inner ";
+  if (timeline) {
+    return base + "border-cyan-500/35 bg-gradient-to-br from-cyan-950/55 to-black/50 text-cyan-200";
+  }
+  switch (cat) {
+    case "highlight":
+      return base + "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
+    case "fail":
+      return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
+    case "meme_death":
+      return base + "border-fuchsia-500/35 bg-fuchsia-950/40 text-fuchsia-200";
+    case "compilation":
+      return base + "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
+    default:
+      return base + "border-white/12 bg-black/35 text-zinc-200";
+  }
+}
+
+function queueRowCatTagClass(timeline, cat) {
+  const base = "rounded border px-1.5 py-0 text-[9px] font-semibold ";
+  if (timeline) {
+    return base + "border-cyan-500/30 bg-cyan-500/10 text-cyan-200/95";
+  }
+  switch (cat) {
+    case "highlight":
+      return base + "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
+    case "fail":
+      return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
+    case "meme_death":
+      return base + "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200/95";
+    case "compilation":
+      return base + "border-cs2-compilation/30 bg-cs2-compilation/10 text-cs2-compilation";
+    default:
+      return base + "border-white/12 bg-white/[0.04] text-zinc-400";
+  }
+}
 
 function categoryZh(cat) {
   return (
@@ -78,6 +121,7 @@ export default function QueueWorkspaceRow({
   const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec) : "";
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
   const queueSummary = String(cd.queue_summary_line || "").trim();
+  const combatSummary = !timeline ? formatClipCombatSummaryLine(cd) : "";
   const catBadgeZh = timeline ? "时间线" : categoryZh(cat);
 
   return (
@@ -121,14 +165,7 @@ export default function QueueWorkspaceRow({
         }}
         className="flex min-w-0 flex-1 gap-2 outline-none focus-visible:ring-2 focus-visible:ring-cs2-orange/45"
       >
-      <div
-        className={[
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border shadow-inner",
-          timeline
-            ? "border-cyan-500/35 bg-gradient-to-br from-cyan-950/55 to-black/50 text-cyan-200"
-            : "border-white/12 bg-black/35 text-cs2-orange",
-        ].join(" ")}
-      >
+      <div className={queueRowIconShellClass(timeline, cat)}>
         <Icon className="h-5 w-5" aria-hidden />
       </div>
 
@@ -139,14 +176,7 @@ export default function QueueWorkspaceRow({
             <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
           </span>
           <span className="truncate text-[11px] font-semibold text-zinc-200">{title}</span>
-          <span
-            className={[
-              "rounded border px-1.5 py-0 text-[9px] font-semibold",
-              timeline
-                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200/95"
-                : "border-white/12 bg-white/[0.04] text-zinc-400",
-            ].join(" ")}
-          >
+          <span className={queueRowCatTagClass(timeline, cat)}>
             {catBadgeZh}
           </span>
         </div>
@@ -161,6 +191,14 @@ export default function QueueWorkspaceRow({
         </div>
         {queueSummary ? (
           <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-cyan-100/85">{queueSummary}</p>
+        ) : null}
+        {!timeline && combatSummary ? (
+          <p
+            className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-400"
+            title={combatSummary}
+          >
+            {combatSummary}
+          </p>
         ) : null}
         {timeline ? (
           <p className="mt-1 font-mono text-[10px] leading-snug text-zinc-400">{timelineMetaLine}</p>

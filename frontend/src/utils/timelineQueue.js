@@ -1,5 +1,5 @@
 /**
- * 将回合时间线事件/整回合转为与导播兼容的 clipData（fixed_segment_pacing + tick 窗口）。
+ * 将回合时间线事件/整回合转为与导播兼容的 clipData（整回合带 fixed_segment；单事件可走智能节奏）。
  */
 
 import { isTimelineSourceClip } from "./montageUtils";
@@ -38,7 +38,7 @@ export function timelineQueueMetaOneLiner(clipData, estSeconds) {
     }
   }
   parts.push(est != null ? `~${est}s` : "~—s");
-  return parts.join(" ");
+  return parts.join(" · ");
 }
 
 /**
@@ -87,7 +87,6 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     context_tags: [],
     queue_summary_line: queueSummaryLine,
     timeline_record_kind: isKill ? "kill" : isDeath ? "death" : "other",
-    fixed_segment_pacing: true,
     clip_min_tick: safeSt,
     clip_max_tick: safeEt,
     kill_ticks: isKill && Number.isFinite(tick) ? [tick] : [],

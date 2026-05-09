@@ -200,8 +200,10 @@ def _radar_record_segments_wall_plan(
     for si, (ss, ee) in enumerate(segments):
         seg_dur_demo = max(0.0, (int(ee) - int(ss)) / tr)
         if si == 0:
-            dur_video = float(post_start_seg0) + seg_dur_demo + float(first_seg_extra)
+            pre_hold = float(post_start_seg0)
+            dur_video = pre_hold + seg_dur_demo + float(first_seg_extra)
         else:
+            pre_hold = 0.0
             dur_video = float(post_obs_resume_sec) + float(settle_between) + seg_dur_demo
         dur_video = max(0.0, dur_video)
         item: dict[str, Any] = {
@@ -209,6 +211,7 @@ def _radar_record_segments_wall_plan(
             "end_tick": int(ee),
             "video_start_sec": float(video_t),
             "duration_sec": float(dur_video),
+            "pre_hold_sec": float(pre_hold),
         }
         if si < len(source_rounds_per_seg):
             rn = source_rounds_per_seg[si]
@@ -330,14 +333,27 @@ def _build_radar_timing_payload(
         scale = actual / max(planned_total, 0.001)
 
         for i, s in enumerate(norm):
-            vs = float(s["video_start_sec"]) * scale
-            ve = (float(s["video_start_sec"]) + float(s.get("duration_sec", 0.0) or 0.0)) * scale
-            if ve <= vs:
+            vs_base = float(s["video_start_sec"]) * scale
+            ve_base = (float(s["video_start_sec"]) + float(s.get("duration_sec", 0.0) or 0.0)) * scale
+            if ve_base <= vs_base:
                 continue
+            pre_hold = float(s.get("pre_hold_sec", 0.0) or 0.0) * scale
+            if pre_hold > 0.005 and ve_base > vs_base + pre_hold + 0.001:
+                # demo 暂停阶段（OBS 已在录制，demo 尚未开始推进）
+                segs_out.append({
+                    "segment_index": i,
+                    "video_start_sec": float(vs_base),
+                    "video_end_sec": float(vs_base + pre_hold),
+                    "type": "gap",
+                    "sync_method": "hold_or_empty",
+                })
+                vs_affine = vs_base + pre_hold
+            else:
+                vs_affine = vs_base
             item: dict[str, Any] = {
                 "segment_index": i,
-                "video_start_sec": float(vs),
-                "video_end_sec": float(ve),
+                "video_start_sec": float(vs_affine),
+                "video_end_sec": float(ve_base),
                 "demo_start_tick": int(s["start_tick"]),
                 "demo_end_tick": int(s["end_tick"]),
                 "sync_method": "affine",
@@ -2936,6 +2952,7 @@ class OBSDirector:
             record_started_at_wall = time.time()
             self._ws.call(obs_requests.StartRecord())
 
+            radar_post_start_sec = 0.0  # 从 StartRecord 到 demo 实际开始推 tick 的实测时长
             if pause_bracket:
                 ok_dr0 = await asyncio.to_thread(
                     inject_console_sequence,
@@ -2946,6 +2963,7 @@ class OBSDirector:
                 if not ok_dr0:
                     logger.warning("demo_resume immediately after StartRecord failed")
                 await asyncio.sleep(0.08)
+                radar_post_start_sec = time.time() - record_started_at_wall
 
             if not use_smart_jump:
                 await self._sleep_abortable(legacy_duration)
@@ -3384,7 +3402,7 @@ class OBSDirector:
             segments=segments,
             meta_record_start_tick=int(meta_record_start_tick),
             meta_record_end_tick=int(meta_record_end_tick),
-            post_start_seg0=float(post_start_seg0),
+            post_start_seg0=float(radar_post_start_sec),
             first_seg_extra=float(first_seg_extra),
             settle_between=float(settle_between),
             director=self,

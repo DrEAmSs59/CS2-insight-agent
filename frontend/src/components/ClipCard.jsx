@@ -85,11 +85,6 @@ export function AiScoreBadge({ score }) {
   );
 }
 
-function namesDiffer(a, b) {
-  const s = (v) => String(v ?? "").trim();
-  return s(a) !== "" && s(a) !== s(b);
-}
-
 export default function ClipCard({
   clip,
   targetPlayer = "",
@@ -110,13 +105,10 @@ export default function ClipCard({
   const Icon = cat.icon;
 
   const showKillerBadge =
-    clip.category === "fail" && namesDiffer(clip.killer_name, targetPlayer);
+    clip.category === "fail" && String(clip.killer_name ?? "").trim() !== "";
 
   const victimsList = Array.isArray(clip.victims) ? clip.victims.filter(Boolean) : [];
-  const showVictimsBadge =
-    clip.category === "highlight" &&
-    clip.kill_count !== 5 &&
-    victimsList.length > 0;
+  const showVictimsBadge = clip.category === "highlight" && victimsList.length > 0;
 
   const hasAiScore = normalizeAiScore(clip.ai_score) != null;
   const aiCommentary = String(clip.ai_commentary ?? "").trim();

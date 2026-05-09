@@ -729,6 +729,46 @@ def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> 
     return OBSConfig(host=host, port=port, password=password)
 
 
+# ─── Setup status endpoint ─────────────────────────────────────
+
+@app.get("/api/status/setup")
+def setup_status():
+    """快速核查四项配置是否就绪，供新手引导页轮询。"""
+    cfg = load_config()
+    cfg = ensure_cs2_path(cfg)
+
+    # OBS connectivity
+    obs_connected = False
+    try:
+        director = OBSDirector(cfg.obs, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
+        result = director.test_obs_connection()
+        obs_connected = result.get("success", False)
+    except Exception:
+        obs_connected = False
+
+    # CS2 path
+    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
+
+    # FFmpeg: configured path takes priority, then fall back to PATH
+    ffmpeg_ok = False
+    if cfg.ffmpeg_path:
+        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
+    else:
+        ffmpeg_ok = shutil.which("ffmpeg") is not None
+
+    # AI key
+    ai_key_ok = bool(cfg.llm.api_key and not cfg.llm.api_key.startswith("****"))
+
+    return {
+        "obs_connected": obs_connected,
+        "cs2_path_ok": cs2_path_ok,
+        "ffmpeg_ok": ffmpeg_ok,
+        "ai_key_ok": ai_key_ok,
+        "cs2_path": cfg.cs2_path or "",
+        "ffmpeg_path": cfg.ffmpeg_path or "",
+    }
+
+
 # ─── OBS endpoints ─────────────────────────────────────────────
 
 @app.post("/api/obs/test")
@@ -2045,12 +2085,60 @@ async def montage_export(body: MontageExportBody):
     return {"export_id": export_id, "status": "done", "output_path": str(out)}
 
 
+class OpenFolderBody(BaseModel):
+    path: str = Field(..., min_length=1, max_length=2048)
+
+
+@app.post("/api/open-folder")
+def open_folder(body: OpenFolderBody):
+    import os, subprocess as sp, sys
+    p = body.path.strip()
+    try:
+        if sys.platform == "win32":
+            os.startfile(p)  # noqa: S606
+        elif sys.platform == "darwin":
+            sp.run(["open", p], check=False, timeout=10)
+        else:
+            sp.run(["xdg-open", p], check=False, timeout=10)
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
+
+
+@app.get("/api/montage/exports")
+async def list_montage_exports(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None),
+):
+    items, total = await montage_db.list_exports(limit=limit, offset=offset, status=status or None)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @app.get("/api/montage/exports/{export_id}")
 async def get_montage_export(export_id: int):
     row = await montage_db.get_export(export_id)
     if not row:
         raise HTTPException(404, "导出记录不存在")
     return row
+
+
+class RenameExportBody(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+@app.patch("/api/montage/exports/{export_id}")
+async def rename_montage_export(export_id: int, body: RenameExportBody):
+    await montage_db.rename_export(export_id, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/montage/exports/{export_id}")
+async def delete_montage_export(export_id: int):
+    deleted = await montage_db.delete_export(export_id)
+    if not deleted:
+        raise HTTPException(404, "导出记录不存在")
+    return {"ok": True}
 
 
 # ─── Health ────────────────────────────────────────────────────

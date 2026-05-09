@@ -5,15 +5,8 @@ import {
   getClipScore,
   getClipComment,
   getClipMetaLine,
+  montageTypeTagBadgeClass,
 } from "../../utils/montageUtils";
-
-function typeBadgeClass(t) {
-  if (t === "高光") return "bg-amber-500/20 text-amber-200 ring-amber-500/40";
-  if (t === "下饭") return "bg-orange-500/20 text-orange-200 ring-orange-500/40";
-  if (t === "梗死亡") return "bg-fuchsia-500/20 text-fuchsia-200 ring-fuchsia-500/40";
-  if (t === "击杀") return "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40";
-  return "bg-zinc-500/15 text-zinc-400 ring-white/10";
-}
 
 export default function RecordedClipCard({ clip, isAdded, onAdd }) {
   if (!clip) return null;
@@ -29,7 +22,7 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/40 p-3 text-[11px] shadow-inner">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${typeBadgeClass(tag)}`}>
+        <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${montageTypeTagBadgeClass(tag)}`}>
           {tag}
         </span>
         <span className="text-zinc-400">{sub || durLabel}</span>

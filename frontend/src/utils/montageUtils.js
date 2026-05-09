@@ -1,5 +1,7 @@
 /** Montage workbench helpers — all functions tolerate missing fields. */
 
+import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
+
 export const MONTAGE_THEMES = [
   {
     id: "highlight",
@@ -28,7 +30,6 @@ export function themeLabel(themeId) {
   return t?.name || "自定义合集";
 }
 
-/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 普通片段 */
 /** 是否来自解析页「按回合时间线」入队（与 clip.category 独立，用于 UI / 合辑筛选） */
 export function isTimelineSourceClip(clip) {
   if (!clip || typeof clip !== "object") return false;
@@ -36,6 +37,57 @@ export function isTimelineSourceClip(clip) {
   return s === "round_timeline_event" || s === "round_timeline_round";
 }
 
+/** 解析页「整回合」入队：固定 tick 窗口，不支持剪辑节奏微调与回看视角 */
+export function isRoundTimelineRoundClip(clip) {
+  return String(clip?.timeline_source || "").trim() === "round_timeline_round";
+}
+
+/** 仅「整回合时间线」与「回合死亡合集」锁定单条剪辑节奏与回看；时间线单事件可改节奏 */
+export function isClipPacingAndPovLocked(clip) {
+  if (!clip || typeof clip !== "object") return false;
+  return isRoundTimelineRoundClip(clip) || isFreezeToDeathCompilation(clip);
+}
+
+/**
+ * 与 ClipCard CLIP_CATEGORY_CONFIG 一致：高光绿、下饭红、合集黄、时间线青、坐牢紫。
+ * @param {Record<string, unknown>} clip
+ */
+export function queueBlockBadgeClass(clip) {
+  if (!clip || typeof clip !== "object") return "border-white/15 bg-zinc-900/80 text-zinc-100";
+  if (isTimelineSourceClip(clip)) {
+    return "border-cyan-500/45 bg-cyan-950/55 text-cyan-100";
+  }
+  const cat = String(clip.category || "").toLowerCase();
+  if (cat === "fail") return "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
+  if (cat === "meme_death") return "border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-300";
+  if (cat === "compilation") return "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
+  if (cat === "highlight") return "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
+  return "border-white/15 bg-zinc-900/80 text-zinc-100";
+}
+
+export const MONTAGE_NEUTRAL_TYPE_BADGE_CLASS =
+  "bg-zinc-500/15 text-zinc-400 ring-1 ring-white/10";
+
+/** @param {string} tag `normalizeClipType` 返回值 */
+export function montageTypeTagBadgeClass(tag) {
+  switch (tag) {
+    case "高光":
+    case "击杀":
+      return "bg-cs2-highlight/10 text-cs2-highlight ring-1 ring-cs2-highlight/35";
+    case "下饭":
+      return "bg-cs2-fail/10 text-cs2-fail ring-1 ring-cs2-fail/35";
+    case "梗死亡":
+      return "bg-fuchsia-500/15 text-fuchsia-200 ring-1 ring-fuchsia-500/40";
+    case "合集":
+      return "bg-cs2-compilation/10 text-cs2-compilation ring-1 ring-cs2-compilation/40";
+    case "时间线":
+      return "bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-500/35";
+    default:
+      return MONTAGE_NEUTRAL_TYPE_BADGE_CLASS;
+  }
+}
+
+/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 时间线 | 普通片段 */
 export function normalizeClipType(clip) {
   if (!clip || typeof clip !== "object") return "普通片段";
   if (isTimelineSourceClip(clip)) return "时间线";
@@ -129,6 +181,41 @@ export function friendlyClipTitleForQueue(clip) {
               : "合集片段"
             : "片段";
   return map ? `${typeBase} · ${map}` : typeBase;
+}
+
+/**
+ * 高光 / 下饭：一行展示「击杀了谁 / 被谁击杀」与武器（与解析字段 weapon_used、victims、killer_name 对齐）。
+ * @param {Record<string, unknown>} clip
+ */
+export function formatClipCombatSummaryLine(clip) {
+  if (!clip || typeof clip !== "object") return "";
+  const cat = String(clip.category || "").trim().toLowerCase();
+  const rawW = String(clip.weapon_used || "").trim();
+  const weapons = rawW
+    ? rawW
+        .split(" / ")
+        .map((x) => String(x).trim())
+        .filter(Boolean)
+    : [];
+
+  if (cat === "highlight") {
+    const victims = Array.isArray(clip.victims)
+      ? clip.victims.map((v) => String(v ?? "").trim()).filter(Boolean)
+      : [];
+    const parts = [];
+    if (victims.length) parts.push(`击杀 ${victims.join("、")}`);
+    if (weapons.length) parts.push(weapons.join(" / "));
+    return parts.join(" · ");
+  }
+  if (cat === "fail") {
+    const killer = String(clip.killer_name || "").trim();
+    const parts = [];
+    if (killer) parts.push(`击杀者 ${killer}`);
+    if (weapons.length) parts.push(weapons.join(" / "));
+    else if (rawW) parts.push(rawW);
+    return parts.join(" · ");
+  }
+  return "";
 }
 
 /** CS2 录像 tickrate（与后端 demo_parser.TICK_RATE 一致，用于粗算时长） */
