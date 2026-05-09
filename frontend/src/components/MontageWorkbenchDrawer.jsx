@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { useMontageStore } from "../stores/montageStore";
+import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import { Loader2 } from "lucide-react";
 import {
   MontageWorkbenchToolbar,
@@ -255,8 +257,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [outroPath, setOutroPath] = useState("");
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
-  const [exporting, setExporting] = useState(false);
-  const [lastExport, setLastExport] = useState(null);
+  const exporting = useMontageStore((s) => s.exporting);
+  const setExporting = useMontageStore((s) => s.setExporting);
+  const lastExport = useMontageStore((s) => s.lastExport);
+  const setLastExport = useMontageStore((s) => s.setLastExport);
+  const markExportRead = useMontageStore((s) => s.markExportRead);
   const [projectId, setProjectId] = useState(null);
   const [draftName, setDraftName] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState("custom");
@@ -268,6 +273,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [savingDraft, setSavingDraft] = useState(false);
   const [dragId, setDragId] = useState(null);
   const [transitionByClipId, setTransitionByClipId] = useState({});
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteClipPrompt, setDeleteClipPrompt] = useState(null);
   const [librarySelectedIds, setLibrarySelectedIds] = useState(() => new Set());
   const [selectedTimelineClipId, setSelectedTimelineClipId] = useState(null);
@@ -295,15 +301,27 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setItems(data.items || []);
     } catch {
       setItems([]);
+      showToast("片段列表加载失败，请重试");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     if (!open && !isPage) return;
     void loadClips();
   }, [open, loadClips, isPage]);
+
+  useEffect(() => {
+    if (!open && !isPage) return;
+    if (!lastExport?.unread || exporting) return;
+    if (lastExport.ok) {
+      showToast("合辑导出已完成");
+    } else if (lastExport.err) {
+      showToast(lastExport.err);
+    }
+    markExportRead();
+  }, [open, isPage, lastExport, exporting, showToast, markExportRead]);
 
   useEffect(() => {
     if (!open && !isPage) {
@@ -692,7 +710,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       showToast("合辑导出完成");
     } catch (e) {
       const detail = e.response?.data?.detail;
-      setLastExport({ ok: false, err: humanizeExportError(detail || e.message) });
+      const errMsg = humanizeExportError(detail || e.message);
+      setLastExport({ ok: false, err: errMsg });
+      showToast(errMsg);
     } finally {
       setExporting(false);
     }
@@ -757,8 +777,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setSelectedTimelineClipId(id);
       return;
     }
-    setTimelineMultiSelectedIds(new Set([id]));
-    setSelectedTimelineClipId(id);
+    setTimelineMultiSelectedIds((prev) => {
+      if (prev.size === 1 && prev.has(id)) return new Set();
+      return new Set([id]);
+    });
+    setSelectedTimelineClipId((prev) => (prev === id ? null : id));
   }, []);
 
   const shiftTimelineSelection = useCallback(
@@ -907,7 +930,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       });
       return;
     }
-    setLibrarySelectedIds(new Set([id]));
+    setLibrarySelectedIds((prev) => {
+      if (prev.size === 1 && prev.has(id)) return new Set();
+      return new Set([id]);
+    });
     setSelectedTimelineClipId(null);
   }, []);
 
@@ -935,12 +961,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const exportDirForButton = exportOk ? dirnamePath(lastExport.output_path) : "";
 
   const shellClass = isPage
-    ? "flex h-full min-h-0 w-full flex-col overflow-hidden border border-white/10 bg-cs2-bg-card shadow-xl"
+    ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-white/[0.08]"
     : "flex h-full w-[min(1680px,99vw)] flex-col border-l border-white/10 bg-cs2-bg-card shadow-2xl";
 
   const inner = (
     <>
-    <div className={shellClass}>
+    <div className={`relative ${shellClass}`}>
         <MontageWorkbenchToolbar
           isPage={isPage}
           montageTitle={displayMontageTitle}
@@ -953,7 +979,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           onRandomSort={() => handleSort("random")}
           onSaveDraft={() => void saveDraft()}
           savingDraft={savingDraft}
+          onHistory={() => setHistoryOpen(true)}
         />
+        <MontageHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
 
         {toast ? (
           <div className="border-b border-emerald-500/30 bg-emerald-950/40 px-4 py-2 text-center text-[11px] text-emerald-200">
@@ -1208,10 +1236,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   if (isPage) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-cs2-bg-dark px-4 py-4 sm:px-5">
-        <div className="mx-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden lg:max-w-[1920px]">
-          {inner}
-        </div>
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-5">
+        {inner}
       </div>
     );
   }

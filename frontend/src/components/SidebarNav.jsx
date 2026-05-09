@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
+  BookOpen,
   Library,
   Microscope,
   Package,
@@ -38,8 +38,8 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           end
           className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}
         >
-          <LayoutDashboard className="h-4 w-4 shrink-0 opacity-90" />
-          仪表盘
+          <BookOpen className="h-4 w-4 shrink-0 opacity-90" />
+          上手指南
         </NavLink>
         <NavLink to="/library" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Library className="h-4 w-4 shrink-0 opacity-90" />

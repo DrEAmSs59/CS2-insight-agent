@@ -23,7 +23,6 @@ import {
   getMontageTimelineVariant,
   getRecordedClipPerspectiveZh,
   getRecordedClipPerspectivePrimaryZh,
-  isTimelineSourceClip,
   mapNameFromClip,
   getMontageScorePair,
   mapNameAccentDotClass,
@@ -44,8 +43,8 @@ const VARIANT_BAR = {
   ace: "bg-rose-500",
   multikill: "bg-amber-500",
   pov: "bg-sky-500",
-  fail: "bg-orange-500",
-  compilation: "bg-violet-500",
+  fail: "bg-red-500",
+  compilation: "bg-amber-500",
   highlight: "bg-emerald-500",
   timeline: "bg-cyan-500",
   neutral: "bg-zinc-600",
@@ -55,8 +54,8 @@ const VARIANT_RING = {
   ace: "border-rose-500/45 bg-gradient-to-br from-rose-950/60 to-zinc-950/90 text-rose-50",
   multikill: "border-amber-500/40 bg-gradient-to-br from-amber-950/50 to-zinc-950/90 text-amber-50",
   pov: "border-sky-500/35 bg-gradient-to-br from-sky-950/40 to-zinc-950/90 text-sky-50",
-  fail: "border-orange-500/45 bg-gradient-to-br from-orange-950/55 to-zinc-950/90 text-orange-50",
-  compilation: "border-violet-500/45 bg-gradient-to-br from-violet-950/50 to-zinc-950/90 text-violet-50",
+  fail: "border-red-500/45 bg-gradient-to-br from-red-950/55 to-zinc-950/90 text-red-50",
+  compilation: "border-amber-500/45 bg-gradient-to-br from-amber-950/55 to-zinc-950/90 text-amber-50",
   highlight: "border-emerald-500/40 bg-gradient-to-br from-emerald-950/45 to-zinc-950/90 text-emerald-50",
   timeline: "border-cyan-500/45 bg-gradient-to-br from-cyan-950/50 to-zinc-950/90 text-cyan-50",
   neutral: "border-white/12 bg-zinc-900/90 text-zinc-200",
@@ -97,9 +96,10 @@ export function MontageWorkbenchToolbar({
   onRandomSort,
   onSaveDraft,
   savingDraft,
+  onHistory,
 }) {
   return (
-    <header className="flex h-[48px] shrink-0 items-center gap-2 border-b border-white/10 bg-black/50 px-3 sm:px-4">
+    <header className={`flex h-[48px] shrink-0 items-center gap-2 border-b px-3 sm:px-4 ${isPage ? "border-white/[0.06] rounded-t-lg" : "border-white/10 bg-black/50"}`}>
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <Clapperboard className="h-4 w-4 shrink-0 text-cs2-orange" aria-hidden />
         <div className="min-w-0">
@@ -130,6 +130,10 @@ export function MontageWorkbenchToolbar({
         <ToolbarMiniButton onClick={onRandomSort} title="随机打乱当前顺序">
           <Shuffle className="h-3.5 w-3.5" />
           随机
+        </ToolbarMiniButton>
+        <ToolbarMiniButton onClick={onHistory} title="查看历史合集记录">
+          <History className="h-3.5 w-3.5" />
+          历史
         </ToolbarMiniButton>
         <ToolbarMiniButton onClick={onSaveDraft} disabled={savingDraft} title="保存草稿">
           {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -678,6 +682,18 @@ function onDropOnItem(e, targetId, onDropOnBlock) {
   onDropOnBlock?.(draggedId, targetId);
 }
 
+function demoShortLabel(clip) {
+  const raw =
+    (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
+    (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
+    "";
+  if (!raw) return "";
+  // e.g. "g161-20260509172073390_de_dust2" → "de_dust2"
+  const underIdx = raw.indexOf("_");
+  const afterUnderscore = underIdx >= 0 ? raw.slice(underIdx + 1) : raw;
+  return afterUnderscore.length > 28 ? `${afterUnderscore.slice(0, 26)}…` : afterUnderscore;
+}
+
 export function MontageMaterialPoolCard({
   clip,
   index = 0,
@@ -707,8 +723,8 @@ export function MontageMaterialPoolCard({
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
   const factLine = getMontageClipFactLine(clip);
-  const timeline = isTimelineSourceClip(clip);
   const killBadge = getMontageBlockShortLabel(clip);
+  const variant = getMontageTimelineVariant(clip);
   const scorePair = getMontageScorePair(clip);
   const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
   const povTip = getVictimPovSegmentsTooltip(clip);
@@ -716,6 +732,7 @@ export function MontageMaterialPoolCard({
     ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
     : 0;
   const aiExplain = montageAiExplainText(clip);
+  const demoLabel = demoShortLabel(clip);
 
   return (
     <li
@@ -728,14 +745,14 @@ export function MontageMaterialPoolCard({
       }`}
     >
       <div
-        className={`absolute inset-x-0 top-0 h-1 ${timeline ? "bg-cyan-500/70" : "bg-emerald-500/65"}`}
+        className={`absolute inset-x-0 top-0 h-1 opacity-[0.72] ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
         aria-hidden
       />
       <div className="p-2.5 pt-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-[10px] font-semibold text-zinc-500">#{index}</span>
-            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${timeline ? VARIANT_RING.timeline : "border border-white/12 bg-zinc-900/80 text-zinc-100"}`}>
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${VARIANT_RING[variant] || VARIANT_RING.neutral}`}>
               {killBadge}
             </span>
             <span className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</span>
@@ -765,9 +782,19 @@ export function MontageMaterialPoolCard({
           ) : null}
         </div>
 
-        {factLine ? (
-          <p className="mt-1.5 line-clamp-2 font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
+        {demoLabel ? (
+          <p className="mt-1 truncate text-[10px] text-zinc-600" title={factLine || demoLabel}>
+            <span className="mr-1 text-zinc-700">来源</span>
+            <span className="font-mono text-zinc-500">{demoLabel}</span>
+          </p>
+        ) : factLine ? (
+          <p className="mt-1 line-clamp-1 font-mono text-[10px] text-zinc-600" title={factLine}>
             {factLine}
+          </p>
+        ) : null}
+        {demoLabel && factLine ? (
+          <p className="mt-0.5 line-clamp-1 font-mono text-[10px] text-zinc-600" title={factLine}>
+            {factLine.replace(/^[^·]*·\s*/, "")}
           </p>
         ) : null}
 

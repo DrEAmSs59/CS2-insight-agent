@@ -1,160 +1,67 @@
 from __future__ import annotations
 
+import io
 import logging
-import math
 import os
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageEnhance
-
-from app.radar.map_calibration import RadarMapError, get_map_calibration, world_to_radar_xy
-from app.radar.radar_debug import write_radar_debug_points
+import matplotlib
+matplotlib.use("Agg")  # 无头模式，必须在 pyplot import 之前
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
-RADAR_PLAYER_COLORS: list[tuple[int, int, int, int]] = [
-    (86, 156, 255, 255),
-    (88, 214, 141, 255),
-    (255, 221, 87, 255),
-    (255, 145, 45, 255),
-    (184, 120, 255, 255),
+# CS2 5 槽位颜色（与游戏内 player_color 0-4 对应，matplotlib hex 格式）
+_SLOT_COLORS_HEX = [
+    "#569CFF",  # 0: 蓝
+    "#58D68D",  # 1: 绿
+    "#FFDD57",  # 2: 黄
+    "#FF912D",  # 3: 橙
+    "#B878FF",  # 4: 紫
 ]
-
-DEFAULT_POV_COLOR = (255, 145, 45, 255)
-DEAD_COLOR = (150, 150, 150, 110)
-
-CIRCLE_BORDER_COLOR = (255, 120, 190, 150)
+_DEAD_COLOR_HEX = "#808080"
+CIRCLE_BORDER_COLOR = (80, 230, 120, 230)
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
+# ---------------------------------------------------------------------------
+# 确保 awpy 地图资源存在
+# ---------------------------------------------------------------------------
+
+def _ensure_awpy_maps() -> None:
+    """若 awpy 地图文件夹为空则自动触发下载。"""
     try:
-        return float(raw)
-    except ValueError:
-        return default
+        from awpy.data import MAPS_DIR
+        if not MAPS_DIR.exists() or not any(MAPS_DIR.glob("*.png")):
+            logger.info("awpy 地图资源不存在，正在下载…")
+            import subprocess, sys
+            subprocess.run(
+                [sys.executable, "-m", "awpy", "get", "maps"],
+                check=True,
+                timeout=120,
+            )
+            logger.info("awpy 地图资源下载完成")
+    except Exception as exc:
+        logger.warning("awpy 地图资源检查/下载失败（首次使用请手动运行 `awpy get maps`）: %s", exc)
 
 
-def _radar_pov_rotate_enabled(requested: bool = True) -> bool:
-    """默认开启 POV 旋转；仅当显式关闭环境变量时用于调试。"""
-    raw = (os.environ.get("CS2_INSIGHT_RADAR_POV_ROTATE") or "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return False
-    if raw in ("1", "true", "yes", "on"):
-        return True
-    return requested
-
-
-def _pov_rotation_deg(pov_yaw: float, yaw_offset_deg: float = 0.0) -> float:
-    """整图绕画面几何中心旋转的角度（度），使主视角朝向尽量指向雷达上方。"""
-    return -(float(pov_yaw) + float(yaw_offset_deg))
-
-
-def _rotate_full_map_for_yaw(
-    base: Image.Image,
-    rotation_deg: float,
-    *,
-    size: int,
-) -> Image.Image:
-    """整张小地图（已铺满 size×size）绕几何中心旋转，与玩家点同一枢轴。"""
-    if abs(rotation_deg) < 0.02:
-        return base
-    fast_rot = (os.environ.get("CS2_INSIGHT_RADAR_FAST_ROTATE") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    try:
-        resample_rot = Image.Resampling.NEAREST if fast_rot else Image.Resampling.BILINEAR
-    except AttributeError:
-        resample_rot = Image.NEAREST if fast_rot else Image.BILINEAR  # type: ignore[attr-defined]
-    cx = float(size) * 0.5
-    cy = float(size) * 0.5
-    try:
-        return base.rotate(
-            float(rotation_deg),
-            resample=resample_rot,
-            center=(cx, cy),
-            fillcolor=(0, 0, 0, 0),
-        )
-    except TypeError:
-        return base.rotate(float(rotation_deg), resample=resample_rot, fillcolor=(0, 0, 0, 0))
-
-
-def _rotate_canvas_point(
-    px: float,
-    py: float,
-    *,
-    cx: float,
-    cy: float,
-    angle_rad: float,
-) -> tuple[float, float]:
-    """画布坐标绕 (cx, cy) 旋转 angle_rad（与整图 rotate 一致）。"""
-    rdx, rdy = _rotate_point(px - cx, py - cy, angle_rad)
-    return cx + rdx, cy + rdy
-
-
-def _validate_map_image(map_img: Image.Image, map_name: str, image_path: str) -> None:
-    w, h = map_img.size
-
-    if w < 256 or h < 256:
-        raise RadarMapError(f"雷达底图尺寸异常: {map_name} {w}x{h}, path={image_path}")
-
-    rgba = map_img.convert("RGBA")
-
-    alpha = rgba.getchannel("A")
-    alpha_bbox = alpha.getbbox()
-
-    if alpha_bbox is None:
-        raise RadarMapError(f"雷达底图全透明: {map_name}, path={image_path}")
-
-    sample = rgba.resize((64, 64))
-    pixels = list(sample.getdata())
-
-    visible_pixels = [p for p in pixels if p[3] > 16]
-
-    if not visible_pixels:
-        raise RadarMapError(f"雷达底图没有可见像素: {map_name}, path={image_path}")
-
-    avg_brightness = sum((r + g + b) / 3 for r, g, b, a in visible_pixels) / len(visible_pixels)
-
-    if avg_brightness < 8:
-        raise RadarMapError(
-            f"雷达底图过暗，疑似黑图或占位图: "
-            f"{map_name}, brightness={avg_brightness:.2f}, path={image_path}"
-        )
-
-
-def _radar_pixel_to_canvas(
-    rx: float,
-    ry: float,
-    *,
-    size: int,
-    source_w: int,
-    source_h: int,
-) -> tuple[float, float]:
-    px = rx * float(size) / float(source_w)
-    py = ry * float(size) / float(source_h)
-    return px, py
-
-
-def _rotate_point(x: float, y: float, angle_rad: float) -> tuple[float, float]:
-    cos_a = math.cos(angle_rad)
-    sin_a = math.sin(angle_rad)
-    return (x * cos_a - y * sin_a, x * sin_a + y * cos_a)
-
+# ---------------------------------------------------------------------------
+# 圆形边框工具（PIL 实现，保留高质量 AA）
+# ---------------------------------------------------------------------------
 
 def _circle_mask(size: int, padding: int = 0) -> Image.Image:
-    mask = Image.new("L", (size, size), 0)
+    """4× 超采样生成无锯齿圆形遮罩。"""
+    ss = 4
+    big = size * ss
+    mask = Image.new("L", (big, big), 0)
     draw = ImageDraw.Draw(mask)
-    draw.ellipse(
-        (padding, padding, size - padding - 1, size - padding - 1),
-        fill=255,
-    )
-    return mask
+    p = padding * ss
+    draw.ellipse((p, p, big - p - 1, big - p - 1), fill=255)
+    try:
+        return mask.resize((size, size), Image.Resampling.LANCZOS)
+    except AttributeError:
+        return mask.resize((size, size), Image.LANCZOS)  # type: ignore[attr-defined]
 
 
 def _apply_circular_radar_frame(
@@ -163,7 +70,7 @@ def _apply_circular_radar_frame(
     size: int,
     border_color: tuple[int, int, int, int] = CIRCLE_BORDER_COLOR,
     border_width: int = 2,
-    background_color: tuple[int, int, int, int] = (0, 0, 0, 180),
+    background_color: tuple[int, int, int, int] = (0, 0, 0, 200),
 ) -> Image.Image:
     radar = radar.convert("RGBA")
     if radar.size != (size, size):
@@ -174,234 +81,148 @@ def _apply_circular_radar_frame(
 
     output = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
-    bg = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    bg_draw = ImageDraw.Draw(bg)
-    bg_draw.ellipse((0, 0, size - 1, size - 1), fill=background_color)
-    output.alpha_composite(bg, (0, 0))
+    # 背景圆
+    bg_mask = _circle_mask(size, padding=0)
+    bg_fill = Image.new("RGBA", (size, size), background_color)
+    output.paste(bg_fill, (0, 0), bg_mask)
 
-    mask = _circle_mask(size, padding=border_width + 1)
+    # 地图内容（带内边距圆形裁剪）
+    inner_mask = _circle_mask(size, padding=border_width + 1)
     clipped = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    clipped.paste(radar, (0, 0), mask)
+    clipped.paste(radar, (0, 0), inner_mask)
     output.alpha_composite(clipped, (0, 0))
 
-    draw = ImageDraw.Draw(output)
-    for i in range(border_width):
-        draw.ellipse(
-            (i, i, size - 1 - i, size - 1 - i),
+    # 绿色边框（4× 超采样）
+    ss = 4
+    big = size * ss
+    bw = max(ss, border_width * ss)
+    half_bw = bw // 2
+    border_big = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(border_big)
+    try:
+        bd.ellipse(
+            (half_bw, half_bw, big - 1 - half_bw, big - 1 - half_bw),
             outline=border_color,
+            width=bw,
         )
+    except TypeError:
+        for i in range(bw):
+            bd.ellipse((i, i, big - 1 - i, big - 1 - i), outline=border_color)
+    try:
+        border_small = border_big.resize((size, size), Image.Resampling.LANCZOS)
+    except AttributeError:
+        border_small = border_big.resize((size, size), Image.LANCZOS)  # type: ignore[attr-defined]
+    output.alpha_composite(border_small, (0, 0))
 
     return output
 
 
-def _enhanced_map_rgba(map_img: Image.Image, size: int) -> Image.Image:
-    fast_map = (os.environ.get("CS2_INSIGHT_RADAR_FAST_MAP") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    try:
-        resample = Image.Resampling.BILINEAR if fast_map else Image.Resampling.LANCZOS
-    except AttributeError:
-        resample = Image.BILINEAR if fast_map else Image.LANCZOS  # type: ignore[attr-defined]
+# ---------------------------------------------------------------------------
+# 颜色工具
+# ---------------------------------------------------------------------------
 
-    base = map_img.convert("RGBA").resize((size, size), resample)
-    try:
-        base = ImageEnhance.Brightness(base).enhance(1.22)
-        base = ImageEnhance.Contrast(base).enhance(1.08)
-    except Exception:
-        pass
-    return base
-
-
-def _parse_rgba_color(value: object) -> tuple[int, int, int, int] | None:
-    if value is None:
-        return None
-
-    if isinstance(value, str):
-        raw = value.strip()
-        if raw.startswith("#") and len(raw) == 7:
-            try:
-                r = int(raw[1:3], 16)
-                g = int(raw[3:5], 16)
-                b = int(raw[5:7], 16)
-                return (r, g, b, 255)
-            except ValueError:
-                return None
-
-    if isinstance(value, (list, tuple)) and len(value) >= 3:
-        try:
-            r = int(value[0])
-            g = int(value[1])
-            b = int(value[2])
-            a = int(value[3]) if len(value) >= 4 else 255
-            return (r, g, b, a)
-        except (TypeError, ValueError):
-            return None
-
-    if isinstance(value, dict):
-        try:
-            r = int(value.get("r"))
-            g = int(value.get("g"))
-            b = int(value.get("b"))
-            a = int(value.get("a", 255))
-            return (r, g, b, a)
-        except (TypeError, ValueError):
-            return None
-
-    return None
-
-
-def _player_marker_color(
-    player: dict[str, Any],
-    *,
-    is_pov: bool,
-    color_index: int,
-) -> tuple[int, int, int, int]:
-    for key in ("player_color", "color", "team_color", "comp_color", "slot_color"):
-        parsed = _parse_rgba_color(player.get(key))
-        if parsed is not None:
-            return parsed
-
-    if is_pov:
-        return DEFAULT_POV_COLOR
-
-    return RADAR_PLAYER_COLORS[color_index % len(RADAR_PLAYER_COLORS)]
+def _player_color_hex(player: dict[str, Any], color_index: int) -> str:
+    slot = player.get("slot_color_index", -1)
+    if isinstance(slot, int) and 0 <= slot < len(_SLOT_COLORS_HEX):
+        return _SLOT_COLORS_HEX[slot]
+    return _SLOT_COLORS_HEX[color_index % len(_SLOT_COLORS_HEX)]
 
 
 def _build_color_indices(players: list[dict[str, Any]]) -> dict[str, int]:
     ids: list[str] = []
-
     for p in players:
         sid = str(p.get("steamid64") or p.get("steamid") or p.get("name") or "")
         if sid and sid not in ids:
             ids.append(sid)
-
     return {sid: idx for idx, sid in enumerate(ids)}
 
 
-def _draw_direction_triangle(
-    draw: ImageDraw.ImageDraw,
-    *,
-    cx: float,
-    cy: float,
-    yaw: float,
-    fill: tuple[int, int, int, int],
-    outline: tuple[int, int, int, int],
-    length: float,
-    width: float,
-    yaw_offset_deg: float = 0.0,
-) -> None:
-    """圆点外侧的小方向三角。"""
-    a = math.radians(float(yaw) + float(yaw_offset_deg))
+# ---------------------------------------------------------------------------
+# awpy 单帧渲染 → PIL Image
+# ---------------------------------------------------------------------------
 
-    dx = math.cos(a)
-    dy = -math.sin(a)
+def _render_frame_awpy(
+    map_name: str,
+    players: list[dict[str, Any]],
+    color_idx_by_id: dict[str, int],
+    output_size: int,
+) -> Image.Image | None:
+    from awpy.plot import plot as awpy_plot  # lazy import
 
-    nx = -dy
-    ny = dx
+    points: list[tuple[float, float, float]] = []
+    point_settings: list[dict[str, Any]] = []
 
-    tip_x = cx + dx * length
-    tip_y = cy + dy * length
+    for player in players:
+        try:
+            x = float(player["x"])
+            y = float(player["y"])
+            z = float(player.get("z", 0.0))
+        except (KeyError, TypeError, ValueError):
+            continue
 
-    base_x = cx + dx * (length * 0.35)
-    base_y = cy + dy * (length * 0.35)
+        is_alive = bool(player.get("is_alive", True))
+        is_pov = bool(player.get("is_pov", False))
 
-    p1 = (tip_x, tip_y)
-    p2 = (base_x + nx * width, base_y + ny * width)
-    p3 = (base_x - nx * width, base_y - ny * width)
+        sid = str(player.get("steamid64") or player.get("steamid") or player.get("name") or "")
+        ci = color_idx_by_id.get(sid, 0)
+        color = _player_color_hex(player, ci) if is_alive else _DEAD_COLOR_HEX
 
-    outline_expand = 1.3
-    op2 = (base_x + nx * (width + outline_expand), base_y + ny * (width + outline_expand))
-    op3 = (base_x - nx * (width + outline_expand), base_y - ny * (width + outline_expand))
-    otip = (cx + dx * (length + outline_expand), cy + dy * (length + outline_expand))
-
-    draw.polygon([otip, op2, op3], fill=outline)
-    draw.polygon([p1, p2, p3], fill=fill)
-
-
-def _draw_round_player_marker(
-    draw: ImageDraw.ImageDraw,
-    *,
-    cx: float,
-    cy: float,
-    yaw: float | None,
-    fill: tuple[int, int, int, int],
-    is_pov: bool,
-    is_alive: bool,
-    yaw_offset_deg: float = 0.0,
-) -> None:
-    if is_pov:
-        radius = 5.8
-        outline_width = 2.0
-        triangle_len = 14.0
-        triangle_width = 4.0
-    else:
-        radius = 4.4
-        outline_width = 1.6
-        triangle_len = 11.0
-        triangle_width = 3.0
-
-    outline = (0, 0, 0, 225)
-    direction_fill = fill
-
-    if not is_alive:
-        radius = 3.0
-        outline_width = 1.2
-        triangle_len = 0.0
-        triangle_width = 0.0
-        outline = (0, 0, 0, 120)
-        fill = DEAD_COLOR
-        direction_fill = (150, 150, 150, 100)
-
-    if yaw is not None and is_alive and triangle_len > 0:
-        _draw_direction_triangle(
-            draw,
-            cx=cx,
-            cy=cy,
-            yaw=float(yaw),
-            fill=direction_fill,
-            outline=outline,
-            length=triangle_len,
-            width=triangle_width,
-            yaw_offset_deg=yaw_offset_deg,
+        points.append((x, y, z))
+        # 不传 hp/armor/direction —— 避免 awpy 内部 NoneType 崩溃，
+        # 也避免显示 HP/armor 条（minimap 上不需要）。
+        # direction=None 时 awpy 不会检查 hp，所以安全。
+        point_settings.append(
+            {
+                "marker": "o",
+                "color": color,
+                "size": 10 if is_pov else 7,
+                "alpha": 1.0 if is_alive else 0.35,
+            }
         )
 
-    draw.ellipse(
-        (
-            cx - radius - outline_width,
-            cy - radius - outline_width,
-            cx + radius + outline_width,
-            cy + radius + outline_width,
-        ),
-        fill=outline,
-    )
+    if not points:
+        return None
 
-    draw.ellipse(
-        (cx - radius, cy - radius, cx + radius, cy + radius),
-        fill=fill,
-    )
-
-    if is_alive:
-        highlight_radius = max(1.2, radius * 0.28)
-        draw.ellipse(
-            (
-                cx - highlight_radius,
-                cy - highlight_radius,
-                cx + highlight_radius,
-                cy + highlight_radius,
-            ),
-            fill=(255, 255, 255, 90),
+    try:
+        fig, _ax = awpy_plot(
+            map_name,
+            points,
+            point_settings=point_settings,
         )
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        import traceback
+        logger.warning("awpy plot error [map=%s points=%d]: %s\n%s",
+                       map_name, len(points), exc, traceback.format_exc())
+        plt.close("all")
+        return None
+
+    buf = io.BytesIO()
+    try:
+        fig.savefig(buf, format="png", facecolor="black", dpi=100)
+    except Exception as exc:
+        logger.warning("fig.savefig error: %s", exc)
+        plt.close(fig)
+        return None
+    finally:
+        plt.close(fig)
+
+    buf.seek(0)
+    img = Image.open(buf).copy()
+    img = img.convert("RGBA")
+
+    try:
+        img = img.resize((output_size, output_size), Image.Resampling.LANCZOS)
+    except AttributeError:
+        img = img.resize((output_size, output_size), Image.LANCZOS)  # type: ignore[attr-defined]
+
+    return img
 
 
-def _find_pov_player(players: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for p in players:
-        if p.get("is_pov"):
-            return p
-    return None
-
+# ---------------------------------------------------------------------------
+# 主入口
+# ---------------------------------------------------------------------------
 
 def render_radar_frames(
     *,
@@ -410,153 +231,57 @@ def render_radar_frames(
     output_dir: Path,
     size: int = 300,
     clip_id: str | int | None = None,
-    pov_rotate: bool = True,
-    pov_zoom: float = 1.0,
-    center_y_ratio: float = 0.5,
+    pov_rotate: bool = False,       # awpy 暂不支持旋转，参数保留兼容
+    pov_zoom: float = 0.0,          # 同上
+    center_y_ratio: float = 0.5,    # 同上
     circular_frame: bool = True,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_awpy_maps()
 
-    try:
-        cfg = get_map_calibration(map_name)
-    except RadarMapError:
-        raise
-    map_img = Image.open(cfg["image_path"]).convert("RGBA")
-    ipath = str(cfg["image_path"])
-    _validate_map_image(map_img, map_name, ipath)
-    source_w, source_h = map_img.size
-    logger.info(
-        "加载雷达底图: map=%s path=%s size=%sx%s",
-        map_name,
-        ipath,
-        source_w,
-        source_h,
-    )
-
-    yaw_offset_deg = _env_float("CS2_INSIGHT_RADAR_YAW_OFFSET_DEG", 0.0)
-    pov_enabled = _radar_pov_rotate_enabled(pov_rotate)
-    _ = max(0.22, _env_float("CS2_INSIGHT_RADAR_POV_SCALE", pov_zoom))  # 保留 env，整图模式暂不参与缩放
-
-    debug_enabled = os.environ.get("CS2_INSIGHT_RADAR_DEBUG") == "1"
-    debug_dir = output_dir / "_radar_debug"
-
-    base_static_map = _enhanced_map_rgba(map_img, size)
+    # awpy 地图名格式：de_dust2、cs_office 等（小写，带前缀）
+    map_key = map_name.lower().strip()
+    if not map_key.startswith(("de_", "cs_", "ar_", "gg_", "dm_", "mm_")):
+        map_key = "de_" + map_key
 
     outputs: list[Path] = []
+    last_img: Image.Image | None = None
 
     for frame_idx, frame in enumerate(timeline):
         players = list(frame.get("players", []))
-        players.sort(key=lambda p: (1 if p.get("is_pov") else 0,))
+        # POV 最后绘制（在最上层）
+        players.sort(key=lambda p: (1 if p.get("is_pov") else 0))
         color_idx_by_id = _build_color_indices(players)
 
-        pov_pr = _find_pov_player(players) if pov_enabled else None
-        rotation_deg = 0.0
-        rotation_rad = 0.0
+        img: Image.Image | None = None
+        try:
+            img = _render_frame_awpy(map_key, players, color_idx_by_id, size)
+        except FileNotFoundError:
+            logger.error(
+                "awpy 找不到地图 %s 的雷达图，请先运行: awpy get maps", map_key
+            )
+            raise RuntimeError(
+                f"缺少 awpy 雷达底图: {map_key}。请在后端环境中运行 `python -m awpy get maps`"
+            )
 
-        base_layer = base_static_map
-        if pov_enabled and pov_pr is not None:
-            try:
-                pov_yaw = float(pov_pr.get("yaw") or 0.0)
-                rotation_deg = _pov_rotation_deg(pov_yaw, yaw_offset_deg)
-                rotation_rad = math.radians(rotation_deg)
-                base_layer = _rotate_full_map_for_yaw(base_static_map, rotation_deg, size=size)
-            except Exception:
-                base_layer = base_static_map
+        if img is None:
+            # 没有玩家数据时复用上一帧
+            img = last_img
+
+        if img is None:
+            # 彻底没有内容：生成纯黑圆
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 200))
 
         if circular_frame:
-            img = _apply_circular_radar_frame(base_layer, size=size)
-        else:
-            img = base_layer if base_layer.size == (size, size) else base_layer.resize((size, size))
+            img = _apply_circular_radar_frame(img, size=size)
 
-        draw = ImageDraw.Draw(img)
-
-        debug_points: list[dict[str, Any]] = []
-
-        cx = float(size) * 0.5
-        cy = float(size) * 0.5
-
-        for player in players:
-            try:
-                rx, ry = world_to_radar_xy(float(player["x"]), float(player["y"]), cfg)
-                px, py = _radar_pixel_to_canvas(
-                    rx,
-                    ry,
-                    size=size,
-                    source_w=source_w,
-                    source_h=source_h,
-                )
-                if rotation_rad != 0.0 and pov_enabled and pov_pr is not None:
-                    px, py = _rotate_canvas_point(px, py, cx=cx, cy=cy, angle_rad=rotation_rad)
-            except Exception:
-                continue
-
-            if px < -40 or py < -40 or px > size + 40 or py > size + 40:
-                continue
-
-            is_alive = bool(player.get("is_alive", True))
-            is_pov = bool(player.get("is_pov"))
-            yaw_raw = player.get("yaw")
-            yaw_v: float | None
-            try:
-                yaw_v = float(yaw_raw) if yaw_raw is not None else None
-            except (TypeError, ValueError):
-                yaw_v = None
-
-            tri_yaw_offset = yaw_offset_deg
-            display_yaw = yaw_v
-            if rotation_rad != 0.0 and pov_enabled and pov_pr is not None and yaw_v is not None:
-                display_yaw = float(yaw_v) + rotation_deg
-                tri_yaw_offset = 0.0
-
-            sid = str(player.get("steamid64") or player.get("steamid") or player.get("name") or "")
-            ci = color_idx_by_id.get(sid, 0)
-            fill = _player_marker_color(player, is_pov=is_pov, color_index=ci)
-
-            _draw_round_player_marker(
-                draw,
-                cx=px,
-                cy=py,
-                yaw=display_yaw,
-                fill=fill,
-                is_pov=is_pov,
-                is_alive=is_alive,
-                yaw_offset_deg=tri_yaw_offset,
-            )
-
-            if debug_enabled and frame_idx % 30 == 0:
-                debug_points.append(
-                    {
-                        "name": player.get("name"),
-                        "steamid64": player.get("steamid64"),
-                        "team": player.get("team"),
-                        "is_pov": is_pov,
-                        "alive": is_alive,
-                        "world_x": player.get("x"),
-                        "world_y": player.get("y"),
-                        "yaw": yaw_v,
-                        "radar_x": rx,
-                        "radar_y": ry,
-                        "canvas_x": px,
-                        "canvas_y": py,
-                    },
-                )
-
-        if debug_enabled and frame_idx % 30 == 0 and debug_points:
-            write_radar_debug_points(
-                output_dir=debug_dir,
-                clip_id=clip_id,
-                map_name=map_name,
-                frame_index=frame_idx,
-                video_time_sec=float(frame.get("time_sec") or 0.0),
-                tick=int(frame.get("tick") or 0),
-                source_w=source_w,
-                source_h=source_h,
-                points=debug_points,
-            )
-
+        last_img = img
         serial = frame_idx + 1
         out = output_dir / f"radar_{serial:06d}.png"
         img.save(out)
         outputs.append(out)
+
+        if frame_idx % 30 == 0:
+            logger.debug("雷达帧进度: %d / %d", frame_idx + 1, len(timeline))
 
     return outputs

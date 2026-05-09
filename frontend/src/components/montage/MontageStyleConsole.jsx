@@ -34,13 +34,12 @@ function MediaVideoSlotCard({
   onClear,
   placeholder,
   onVideoDrop,
-  accentClass,
 }) {
   const filled = Boolean(path.trim());
   const base = pathBasename(path);
   return (
     <div
-      className={`rounded-xl border bg-black/35 p-2.5 shadow-sm ${filled ? "border-white/12" : "border-dashed border-white/15"}`}
+      className={`rounded-lg border bg-black/35 p-2 ${filled ? "border-white/12" : "border-dashed border-white/15"}`}
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -56,42 +55,31 @@ function MediaVideoSlotCard({
         onVideoDrop?.(f.name, null);
       }}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold text-zinc-400">{label}</p>
-          {filled ? (
-            <p className="mt-1 truncate font-mono text-[11px] text-zinc-200" title={path}>
-              {base || path}
-            </p>
-          ) : (
-            <p className="mt-1 text-[10px] text-zinc-600">拖入视频或粘贴路径 · 浏览器需手动填写完整路径</p>
-          )}
-        </div>
-        <div
-          className={`flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] bg-gradient-to-br ${accentClass} opacity-90`}
-        >
-          <Film className="h-6 w-6 text-white/25" aria-hidden />
-        </div>
+      <div className="flex items-center gap-1.5">
+        <Film className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+        <p className="text-[10px] font-semibold text-zinc-300">{label}</p>
+        {filled ? (
+          <p className="ml-auto max-w-[12rem] truncate font-mono text-[10px] text-zinc-400" title={path}>
+            {base || path}
+          </p>
+        ) : (
+          <p className="ml-1 text-[10px] text-zinc-600">拖入视频或粘贴路径</p>
+        )}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
-        <span>时长</span>
-        <span className="rounded border border-white/[0.06] bg-black/40 px-1.5 py-0.5 font-mono text-zinc-400">导出时读取</span>
-      </div>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-1.5 flex gap-2">
         <input
           value={path}
           onChange={(e) => onPathChange(e.target.value)}
           placeholder={placeholder}
-          className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600"
         />
         {filled ? (
           <button
             type="button"
             onClick={onClear}
-            className="inline-flex shrink-0 items-center gap-1 rounded border border-white/12 px-2 py-1.5 text-[10px] text-zinc-400 hover:border-red-500/35 hover:text-red-300"
+            className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-500 hover:border-red-500/35 hover:text-red-300"
           >
-            <Trash2 className="h-3.5 w-3.5" />
-            删除
+            <Trash2 className="h-3 w-3" />
           </button>
         ) : null}
       </div>
@@ -224,10 +212,13 @@ export function MontageStyleConsole({
             </div>
           ) : null}
 
-          <section className="space-y-2.5">
-            <StyleBlockTitle title="媒体资源" subtitle="片头片尾与背景音乐" />
+          <CollapsibleSection
+            title="媒体资源"
+            hint="BGM、片头与片尾（均可选）"
+            defaultOpen={bgmFilled || introFilled || outroFilled}
+          >
             <div
-              className={`rounded-xl border p-2.5 ${bgmPath.trim() ? "border-violet-500/25 bg-violet-950/15" : "border-dashed border-white/15 bg-black/30"}`}
+              className={`rounded-lg border p-2 ${bgmPath.trim() ? "border-violet-500/25 bg-violet-950/15" : "border-dashed border-white/15 bg-black/30"}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -243,29 +234,18 @@ export function MontageStyleConsole({
                 onMediaDropHint?.(`已识别「${f.name}」· 请粘贴完整路径到下方`);
               }}
             >
-              <div className="flex items-start gap-2">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-200">
-                  <Music className="h-5 w-5" aria-hidden />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-semibold text-zinc-200">背景音乐</p>
-                  {bgmPath.trim() ? (
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-zinc-400" title={bgmPath}>
-                      {pathBasename(bgmPath)}
-                    </p>
-                  ) : (
-                    <p className="mt-0.5 text-[10px] text-zinc-600">拖入音频或粘贴路径 · 导出时混音</p>
-                  )}
-                  {bgmPath.trim() ? (
-                    <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
-                      <span className="rounded border border-white/[0.07] bg-black/40 px-1.5 py-0.5 text-zinc-500">
-                        循环对齐成片
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
+              <div className="flex items-center gap-1.5">
+                <Music className="h-3.5 w-3.5 shrink-0 text-violet-300" aria-hidden />
+                <p className="text-[10px] font-semibold text-zinc-300">背景音乐</p>
+                {bgmPath.trim() ? (
+                  <p className="ml-auto max-w-[12rem] truncate font-mono text-[10px] text-zinc-400" title={bgmPath}>
+                    {pathBasename(bgmPath)}
+                  </p>
+                ) : (
+                  <p className="ml-1 text-[10px] text-zinc-600">拖入音频或粘贴路径 · 导出时混音</p>
+                )}
               </div>
-              <div className="mt-3">
+              <div className="mt-2">
                 <div className="flex items-center justify-between gap-2 text-[10px] text-zinc-500">
                   <span>音量</span>
                   <span className="font-mono text-zinc-400">{bgmVolume}%</span>
@@ -279,20 +259,20 @@ export function MontageStyleConsole({
                   className="mt-1 h-1.5 w-full accent-violet-400"
                 />
               </div>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-1.5 flex gap-2">
                 <input
                   value={bgmPath}
                   onChange={(e) => onBgmPathChange(e.target.value)}
                   placeholder="例如 D:\Music\bgm.mp3"
-                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[10px] text-zinc-200"
+                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200"
                 />
                 {bgmPath.trim() ? (
                   <button
                     type="button"
                     onClick={onBgmClear}
-                    className="inline-flex shrink-0 items-center gap-1 rounded border border-white/12 px-2 py-1.5 text-[10px] text-zinc-400 hover:text-red-300"
+                    className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-500 hover:text-red-300"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-3 w-3" />
                   </button>
                 ) : null}
               </div>
@@ -308,7 +288,6 @@ export function MontageStyleConsole({
                 if (err) onMediaDropHint?.(err);
                 else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整视频路径`);
               }}
-              accentClass="from-amber-900/40 to-zinc-900"
             />
             <MediaVideoSlotCard
               label="片尾"
@@ -320,9 +299,8 @@ export function MontageStyleConsole({
                 if (err) onMediaDropHint?.(err);
                 else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整视频路径`);
               }}
-              accentClass="from-sky-900/35 to-zinc-900"
             />
-          </section>
+          </CollapsibleSection>
 
           <section className="space-y-2.5">
             <StyleBlockTitle title="画面覆盖" subtitle="仅展示已接入能力" />
