@@ -59,3 +59,4 @@ cs2-insight.db-shm
 # Everything under data/ except the versioned example template
 data/**
 !data/cs2-insight.config.example.json
+!data/basic.ini
