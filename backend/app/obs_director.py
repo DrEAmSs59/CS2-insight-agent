@@ -110,6 +110,7 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "freeze_to_death_round_filter",
     "record_segments",
     "radar_timing",
+    "obs_recording_markers",
     "pov_player_name",
     "pov_steamid64",
     "timeline_source",
@@ -398,6 +399,137 @@ def _build_radar_timing_payload(
         "mode": "segments_affine",
         "tick_rate_hint": float(tick_rate),
         "segments": segs_out,
+    }
+
+
+def _active_video_intervals_from_obs_markers(
+    markers: list[dict[str, Any]],
+) -> tuple[list[tuple[float, float]], float]:
+    """
+    将 OBS Start/Pause/Resume/Stop 边界（monotonic 时间戳）解析为成片内连续的视频时长区间。
+    仅在 outputPaused=false 时累积时长；Pause 期间成片时间轴不前进。
+    """
+    if not markers:
+        return [], 0.0
+    intervals: list[tuple[float, float]] = []
+    cum = 0.0
+    active_start: Optional[float] = None
+    for m in markers:
+        op = str(m.get("op") or "")
+        try:
+            t = float(m["mono"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if op == "start":
+            active_start = t
+        elif op == "resume":
+            active_start = t
+        elif op == "pause":
+            if active_start is not None:
+                dur = max(0.0, t - active_start)
+                intervals.append((cum, cum + dur))
+                cum += dur
+                active_start = None
+        elif op == "stop":
+            if active_start is not None:
+                dur = max(0.0, t - active_start)
+                intervals.append((cum, cum + dur))
+                cum += dur
+                active_start = None
+    return intervals, cum
+
+
+def _build_radar_timing_from_obs_markers(
+    *,
+    markers: list[dict[str, Any]],
+    segments: list[tuple[int, int]],
+    pov_demo_spans: list[tuple[int, int]],
+    use_smart_jump: bool,
+    meta_record_start_tick: int,
+    meta_record_end_tick: int,
+    tick_rate: float,
+    actual_duration_sec: float,
+) -> Optional[dict[str, Any]]:
+    """
+    严格按 OBS 边界打点构造 radar_timing，不做 buffer 推算。
+    若标记与 demo 段数量无法对齐则返回 None，由调用方回退到旧版仿射推算。
+    """
+    raw_intervals, model_total = _active_video_intervals_from_obs_markers(markers)
+    if not raw_intervals or model_total <= 1e-9:
+        return None
+
+    tr = max(float(tick_rate), 0.001)
+    tick_rows: list[tuple[int, int]] = []
+    if use_smart_jump and segments:
+        tick_rows = [(int(ss), int(ee)) for ss, ee in segments]
+        tick_rows.extend([(int(a), int(b)) for a, b in pov_demo_spans])
+    else:
+        tick_rows = [(int(meta_record_start_tick), int(meta_record_end_tick))]
+        tick_rows.extend([(int(a), int(b)) for a, b in pov_demo_spans])
+
+    primary_n = len(tick_rows)
+    if primary_n <= 0:
+        return None
+
+    lengths = [max(0.0, b - a) for a, b in raw_intervals]
+    total_len = sum(lengths)
+    if total_len <= 1e-9:
+        return None
+
+    actual = max(0.01, float(actual_duration_sec))
+    scale = actual / total_len
+
+    scaled: list[tuple[float, float, float]] = []
+    cum_v = 0.0
+    for L in lengths:
+        Ls = L * scale
+        scaled.append((cum_v, cum_v + Ls, Ls))
+        cum_v += Ls
+
+    segs_out: list[dict[str, Any]] = []
+    for idx in range(primary_n):
+        if idx >= len(scaled):
+            logger.warning(
+                "obs_markers radar_timing: interval shortage idx=%d need=%d have=%d",
+                idx,
+                primary_n,
+                len(scaled),
+            )
+            return None
+        vs, ve, _ = scaled[idx]
+        ss, ee = tick_rows[idx]
+        if ee <= ss:
+            return None
+        segs_out.append(
+            {
+                "segment_index": idx,
+                "video_start_sec": float(vs),
+                "video_end_sec": float(ve),
+                "demo_start_tick": int(ss),
+                "demo_end_tick": int(ee),
+                "sync_method": "affine",
+            },
+        )
+
+    for idx in range(primary_n, len(scaled)):
+        vs, ve, _ = scaled[idx]
+        segs_out.append(
+            {
+                "segment_index": idx,
+                "video_start_sec": float(vs),
+                "video_end_sec": float(ve),
+                "type": "gap",
+                "sync_method": "hold_or_empty",
+            },
+        )
+
+    return {
+        "version": 2,
+        "mode": "obs_markers",
+        "tick_rate_hint": float(tr),
+        "segments": segs_out,
+        "obs_model_duration_sec": float(model_total),
+        "uniform_scale": float(scale),
     }
 
 
@@ -1349,7 +1481,7 @@ class OBSDirector:
             "{",
             f'  "uri" "{gsi_url}"',
             '  "timeout" "1.0"',
-            '  "buffer" "0.1"',
+            '  "buffer" "0.0"',
             '  "throttle" "0.1"',
             '  "heartbeat" "1.0"',
             '  "data"',
@@ -1359,7 +1491,11 @@ class OBSDirector:
             '    "round" "1"',
             '    "player_id" "1"',
             '    "player_state" "1"',
+            '    "player_position" "1"',
             '    "allplayers_id" "1"',
+            '    "allplayers_state" "1"',
+            '    "allplayers_position" "1"',
+            '    "allplayers_team" "1"',
             '    "phase_countdowns" "1"',
             "  }",
             "}",
@@ -2721,6 +2857,7 @@ class OBSDirector:
 
         clip_id = str(clip["clip_id"])
         player_name_for_db = (spectator_name or "").strip() or None
+
         self._check_abort()
         start_tick = max(0, int(clip["start_tick"]))
         end_tick = max(start_tick, int(clip["end_tick"]))
@@ -2829,6 +2966,11 @@ class OBSDirector:
         output_result: dict = {}
         fatal_recording_error: Optional[str] = None
         _victim_pov_segments: list[dict[str, Any]] = []
+        obs_timing_markers: list[dict[str, Any]] = []
+        _pov_demo_spans: list[tuple[int, int]] = []
+
+        def _mark_obs(op: str) -> None:
+            obs_timing_markers.append({"op": op, "mono": time.monotonic()})
 
         def _obs_record_paused() -> Optional[bool]:
             if not self._ws:
@@ -2867,6 +3009,7 @@ class OBSDirector:
                 self._ws.call(req())
             except Exception as e:
                 if _obs_record_paused() is True:
+                    _mark_obs("pause")
                     return True
                 logger.warning("OBS PauseRecord failed (%s); fallback to continuous recording", e)
                 return False
@@ -2888,6 +3031,7 @@ class OBSDirector:
                         if paused is None:
                             paused = getattr(resp, "outputPaused", None)
                         if paused is True:
+                            _mark_obs("pause")
                             return True
                         time.sleep(0.05)
                     if paused is False:
@@ -2900,6 +3044,7 @@ class OBSDirector:
             except Exception as e:
                 # GetRecordStatus unavailable on this OBS/plugin version — proceed optimistically
                 logger.debug("GetRecordStatus check skipped: %s", e)
+            _mark_obs("pause")
             return True
 
         def _obs_resume() -> None:
@@ -2910,6 +3055,7 @@ class OBSDirector:
                 if req is None:
                     return
                 self._ws.call(req())
+                _mark_obs("resume")
             except Exception as e:
                 logger.warning("OBS ResumeRecord failed: %s", e)
 
@@ -2950,7 +3096,9 @@ class OBSDirector:
                 self._win_cursor_move_corner(cursor_bak)
             pre_record_video_paths = self._obs_snapshot_record_dir_video_paths()
             record_started_at_wall = time.time()
+
             self._ws.call(obs_requests.StartRecord())
+            _mark_obs("start")
 
             radar_post_start_sec = 0.0  # 从 StartRecord 到 demo 实际开始推 tick 的实测时长
             if pause_bracket:
@@ -3251,6 +3399,8 @@ class OBSDirector:
                         logger.warning("OBS PauseRecord failed for POV append (%s); skipping", _vname)
                         break
 
+                    _pov_demo_spans.append((int(_vs_start), int(_vs_end)))
+
                     _ok_vdr = False
                     try:
                         # skip_leading=False：内部完整注入 demo_pause + demo_timescale 1 + demo_gototick，
@@ -3371,9 +3521,11 @@ class OBSDirector:
                         req_resume = getattr(obs_requests, "ResumeRecord", None)
                         if req_resume is not None:
                             self._ws.call(req_resume())
+                            _mark_obs("resume")
                     except Exception:
                         pass  # 未暂停时 OBS 可能返回错误，忽略即可
                     stop_resp = self._ws.call(obs_requests.StopRecord())
+                    _mark_obs("stop")
                     stop_record_output_path = self._obs_response_output_path(stop_resp)
             except Exception as se:
                 logger.debug("StopRecord: %s", se)
@@ -3407,12 +3559,14 @@ class OBSDirector:
             settle_between=float(settle_between),
             director=self,
         )
+        if obs_timing_markers:
+            radar_clip_meta["obs_recording_markers"] = list(obs_timing_markers)
         try:
             _op = (output_result or {}).get("output_path")
             if _op:
                 _dur_actual = _ffprobe_duration_sec(Path(str(_op)))
                 if _dur_actual is not None:
-                    radar_clip_meta["radar_timing"] = _build_radar_timing_payload(
+                    legacy_rt = _build_radar_timing_payload(
                         record_segments=list(radar_clip_meta.get("record_segments") or []),
                         meta_record_start_tick=int(meta_record_start_tick),
                         meta_record_end_tick=int(meta_record_end_tick),
@@ -3420,6 +3574,21 @@ class OBSDirector:
                         tick_rate=float(TICK_RATE),
                         actual_duration_sec=float(_dur_actual),
                     )
+                    strict_rt = _build_radar_timing_from_obs_markers(
+                        markers=list(obs_timing_markers),
+                        segments=list(segments),
+                        pov_demo_spans=list(_pov_demo_spans),
+                        use_smart_jump=use_smart_jump,
+                        meta_record_start_tick=int(meta_record_start_tick),
+                        meta_record_end_tick=int(meta_record_end_tick),
+                        tick_rate=float(TICK_RATE),
+                        actual_duration_sec=float(_dur_actual),
+                    )
+                    if strict_rt is not None:
+                        radar_clip_meta["radar_timing"] = strict_rt
+                        radar_clip_meta["record_segments"] = []
+                    else:
+                        radar_clip_meta["radar_timing"] = legacy_rt
         except Exception as _rt_exc:
             logger.warning("radar_timing 构建失败（将依赖旧时间轴）: %s", _rt_exc)
         if fatal_recording_error:

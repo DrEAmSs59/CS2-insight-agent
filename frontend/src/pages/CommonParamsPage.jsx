@@ -14,6 +14,8 @@ export default function CommonParamsPage() {
         onPersistWarmupDefaults={s.persistWarmupDefaults}
         experimentalPovEnabled={s.experimentalPovEnabled}
         onExperimentalPovChange={s.persistExperimentalPov}
+        radarLiveCache={s.radarLiveCache}
+        onRadarLiveCacheChange={s.persistRadarLiveCache}
       />
     </div>
   );

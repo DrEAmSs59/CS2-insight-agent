@@ -253,8 +253,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [items, setItems] = useState([]);
   const [orderedIds, setOrderedIds] = useState([]);
   const [bgmPath, setBgmPath] = useState("");
+  const [bgmStartSec, setBgmStartSec] = useState(0);
   const [introPath, setIntroPath] = useState("");
+  const [introDuration, setIntroDuration] = useState(3);
   const [outroPath, setOutroPath] = useState("");
+  const [outroDuration, setOutroDuration] = useState(3);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
   const exporting = useMontageStore((s) => s.exporting);
@@ -293,6 +296,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       toastTimer.current = null;
     }, 3200);
   }, []);
+
+  const pickFile = useCallback(async (fileType, onResult) => {
+    try {
+      const { data } = await API.post("/file-picker", { file_type: fileType });
+      if (data?.path) onResult(data.path);
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      showToast(typeof detail === "string" ? detail : "文件选择器不可用（仅 Windows）");
+    }
+  }, [showToast]);
 
   const loadClips = useCallback(async () => {
     setLoading(true);
@@ -364,8 +377,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     orderedIds,
     transitionByClipId,
     bgmPath,
+    bgmStartSec,
     introPath,
+    introDuration,
     outroPath,
+    outroDuration,
     outputFilename,
     outputDir,
     radarOverlayEnabled,
@@ -383,6 +399,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
   const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
+
+  // 雷达叠层：仅当时间轴含 POV HUD 录制片段（入库 pov_hud_enabled）时才允许开启
+  const hasPovClips = useMemo(
+    () => orderedClips.some((c) => c?.pov_hud_enabled === true),
+    [orderedClips],
+  );
+
+  useEffect(() => {
+    if (!hasPovClips && radarOverlayEnabled) setRadarOverlayEnabled(false);
+  }, [hasPovClips, radarOverlayEnabled]);
 
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
@@ -630,8 +656,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         name: effectiveName,
         recorded_clip_ids: orderedIds,
         bgm_path: bgmPath.trim() || null,
+        bgm_start_sec: bgmStartSec > 0 ? bgmStartSec : undefined,
         intro_path: introPath.trim() || null,
+        intro_image_duration: introDuration !== 3 ? introDuration : undefined,
         outro_path: outroPath.trim() || null,
+        outro_image_duration: outroDuration !== 3 ? outroDuration : undefined,
         output_filename: ensureMp4Filename(outputFilename.trim()) || "montage_export.mp4",
         transitions: transitionsPayload,
         radar_overlay: {
@@ -669,8 +698,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outputFilename,
     orderedIds,
     bgmPath,
+    bgmStartSec,
     introPath,
+    introDuration,
     outroPath,
+    outroDuration,
     showToast,
     transitionsPayload,
     radarOverlayEnabled,
@@ -698,8 +730,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         transitions: transitionsPayload,
         bgm_path: bgmPath.trim() || null,
         ...(bgmPath.trim() ? { bgm_volume: bgmVolume / 100 } : {}),
+        ...(bgmPath.trim() && bgmStartSec > 0 ? { bgm_start_sec: bgmStartSec } : {}),
         intro_path: introPath.trim() || null,
+        ...(introPath.trim() ? { intro_image_duration: introDuration } : {}),
         outro_path: outroPath.trim() || null,
+        ...(outroPath.trim() ? { outro_image_duration: outroDuration } : {}),
         output_path: outPath,
         theme_id: selectedThemeId,
         radar_overlay: {
@@ -723,8 +758,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     orderedIdsAsStrings,
     transitionsPayload,
     bgmPath,
+    bgmStartSec,
     introPath,
+    introDuration,
     outroPath,
+    outroDuration,
     effectiveOutputDir,
     outputFilename,
     selectedThemeId,
@@ -966,7 +1004,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const inner = (
     <>
-    <div className={`relative ${shellClass}`}>
+    <div className={shellClass}>
         <MontageWorkbenchToolbar
           isPage={isPage}
           montageTitle={displayMontageTitle}
@@ -1146,15 +1184,23 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onBgmClear={() => setBgmPath("")}
                 bgmVolume={bgmVolume}
                 onBgmVolumeChange={setBgmVolume}
+                bgmStartSec={bgmStartSec}
+                onBgmStartSecChange={setBgmStartSec}
                 introPath={introPath}
                 onIntroPathChange={setIntroPath}
                 onIntroClear={() => setIntroPath("")}
+                introDuration={introDuration}
+                onIntroDurationChange={setIntroDuration}
                 outroPath={outroPath}
                 onOutroPathChange={setOutroPath}
                 onOutroClear={() => setOutroPath("")}
+                outroDuration={outroDuration}
+                onOutroDurationChange={setOutroDuration}
                 onMediaDropHint={showToast}
+                onFilePick={pickFile}
                 radarOverlayEnabled={radarOverlayEnabled}
                 onRadarOverlayEnabledChange={setRadarOverlayEnabled}
+                hasPovClips={hasPovClips}
                 clipCount={orderedIds.length}
                 durationText={durationText}
                 resolutionLabel="跟随源素材 · MP4"

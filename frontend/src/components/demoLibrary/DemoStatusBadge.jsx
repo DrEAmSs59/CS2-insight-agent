@@ -2,6 +2,7 @@ import { classifyDemoStatus } from "../../utils/demoLibraryDisplay";
 
 const styles = {
   pending: "border-amber-500/35 bg-amber-500/10 text-amber-200",
+  loaded: "border-sky-500/35 bg-sky-500/10 text-sky-200",
   parsing: "border-cs2-orange/45 bg-cs2-orange/12 text-cs2-orange",
   done: "border-emerald-500/35 bg-emerald-500/10 text-emerald-200",
   error: "border-red-500/40 bg-red-500/10 text-red-200",

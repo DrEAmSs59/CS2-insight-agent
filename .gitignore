@@ -38,7 +38,10 @@ cs2_demo_lib
 开发白皮书.md
 
 # Local tooling scripts (keep local only)
+debug_demoparser2.py
+debug_parse_demo.py
 .cursor/
+.claude/
 /scripts/
 build_portable.bat
 package_portable.ps1

@@ -92,7 +92,7 @@ export function rowAddedAtTs(it) {
 export function libraryStatusTier(it) {
   const st = String(it.status ?? "").toLowerCase();
   if (st === "error") return 0;
-  if (st === "pending" || st === "parsing" || st === "running" || st === "processing") return 1;
+  if (st === "pending" || st === "loaded" || st === "parsing" || st === "running" || st === "processing") return 1;
   if (st === "done" || st === "parsed") return 2;
   return 1;
 }
@@ -110,7 +110,7 @@ export function deriveTags(it) {
 }
 
 /**
- * @returns {{ kind: 'pending'|'parsing'|'done'|'error'|'meta_missing'|'unknown'; label: string; tooltip?: string }}
+ * @returns {{ kind: 'pending'|'loaded'|'parsing'|'done'|'error'|'meta_missing'|'unknown'; label: string; tooltip?: string }}
  */
 export function classifyDemoStatus(it) {
   const st = String(it.status ?? "").toLowerCase();
@@ -119,7 +119,8 @@ export function classifyDemoStatus(it) {
     return { kind: "error", label: "解析失败", tooltip: err || undefined };
   if (st === "parsing" || st === "running" || st === "processing")
     return { kind: "parsing", label: "解析中" };
-  if (st === "pending") return { kind: "pending", label: "待解析" };
+  if (st === "pending") return { kind: "pending", label: "待入库" };
+  if (st === "loaded") return { kind: "loaded", label: "待高光解析" };
   const doneLike = st === "done" || st === "parsed";
   if (doneLike) {
     const hasCore =
@@ -127,7 +128,11 @@ export function classifyDemoStatus(it) {
       (it.total_rounds != null && Number.isFinite(Number(it.total_rounds))) ||
       (it.result && typeof it.result === "object");
     if (!hasCore) return { kind: "meta_missing", label: "元数据缺失" };
-    return { kind: "done", label: "已完成" };
+    const datePart =
+      it.parsed_at != null && String(it.parsed_at).trim() !== ""
+        ? new Date(it.parsed_at).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
+        : "未知";
+    return { kind: "done", label: `解析于 ${datePart}` };
   }
   return { kind: "unknown", label: demoLibraryStatusLabel(it.status) };
 }

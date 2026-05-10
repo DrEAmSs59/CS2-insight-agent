@@ -1,17 +1,24 @@
 import { useCallback, useMemo, useState } from "react";
+import axios from "axios";
+import { LayoutGrid, List } from "lucide-react";
 import { useAppShell } from "../context/AppShellContext";
+import { useRecordingQueue } from "../stores/recordingQueueStore";
 import DemoAdvancedFilters from "../components/demoLibrary/DemoAdvancedFilters";
 import DemoBatchActionBar from "../components/demoLibrary/DemoBatchActionBar";
 import DemoLibraryQueryBar from "../components/demoLibrary/DemoLibraryQueryBar";
 import DemoLibraryToolbar from "../components/demoLibrary/DemoLibraryToolbar";
 import DemoWatchPathsModal from "../components/demoLibrary/DemoWatchPathsModal";
 import DemoPagination from "../components/demoLibrary/DemoPagination";
-import DemoTable from "../components/demoLibrary/DemoTable";
+import MatchCard, { MatchListRow } from "../components/MatchCard";
+import DemoInfoModal from "../components/DemoInfoModal";
+import IngestModal from "../components/IngestModal";
 import {
   applyClientSideDemoFilters,
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
+
+const API = axios.create({ baseURL: "/api" });
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -32,11 +39,81 @@ const INITIAL_ADV_FILTERS = {
 
 export default function DemoLibraryPage() {
   const s = useAppShell();
+  const addToQueue = useRecordingQueue((st) => st.addToQueue);
+  const queue = useRecordingQueue((st) => st.queue);
+
+  const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [sortKey, setSortKey] = useState("library");
   const [sortDir, setSortDir] = useState("desc");
-  const [expandedScoreboardIds, setExpandedScoreboardIds] = useState(() => new Set());
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
+  const [demoInfoModalId, setDemoInfoModalId] = useState(null);
+  const [ingestModalOpen, setIngestModalOpen] = useState(false);
+
+  const queuedClientClipUids = useMemo(
+    () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
+    [queue]
+  );
+
+  const expectedPlayers = useMemo(() => {
+    const raw = s.expectedParsePlayersText || "";
+    return raw.split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
+  }, [s.expectedParsePlayersText]);
+
+  const handleAddToQueue = useCallback((clips) => {
+    if (!clips?.length) return;
+    addToQueue(clips);
+  }, [addToQueue]);
+
+  const handleBatchIngest = useCallback(async (ids) => {
+    await API.post("/demos/batch-ingest", { demo_ids: ids });
+    void s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
+  }, [s]);
+
+  const handleUpdateRemark = useCallback(async (demoId, remark) => {
+    try {
+      await API.patch(`/demos/${demoId}/remark`, { remark: remark || "" });
+      void s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
+    } catch (e) {
+      console.error("Update remark failed", e);
+    }
+  }, [s]);
+
+  const handleCardPlay = useCallback((demoId) => {
+    const item = s.demoLibraryItems.find((it) => it.id === demoId);
+    if (item) void s.handleLoadDemoFromLibrary([item]);
+  }, [s]);
+
+  const handleOpenFile = useCallback(
+    async (demoId) => {
+      const row = s.demoLibraryItems.find((it) => it.id === demoId);
+      let p = row?.path;
+      if (!p || typeof p !== "string" || !String(p).trim()) {
+        try {
+          const { data } = await API.get(`/demos/${demoId}`);
+          p = data?.path;
+        } catch {
+          p = null;
+        }
+      }
+      if (!p || typeof p !== "string" || !String(p).trim()) {
+        s.setProgressText("无法获取该 Demo 的磁盘路径。");
+        return;
+      }
+      try {
+        await API.post("/reveal-file-in-explorer", { path: String(p).trim() });
+      } catch (e) {
+        const d = e?.response?.data?.detail;
+        const msg = Array.isArray(d)
+          ? d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("；")
+          : typeof d === "string"
+            ? d
+            : e?.message || "定位失败";
+        s.setProgressText(`在资源管理器中打开失败: ${msg}`);
+      }
+    },
+    [s],
+  );
 
   const filteredRows = useMemo(() => {
     let rows = s.demoLibraryItems;
@@ -150,26 +227,20 @@ export default function DemoLibraryPage() {
     [s]
   );
 
-  const toggleScoreboardExpand = useCallback((id) => {
-    setExpandedScoreboardIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden px-4 py-3 sm:px-5">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
         onScan={() => void s.handleScanDemos()}
+        onOpenIngest={() => setIngestModalOpen(true)}
         libraryLoading={s.libraryLoading}
         libraryScanning={s.libraryScanning}
         pageSelectableCount={filteredRows.length}
         libraryTotal={s.libraryTotal}
         onSelectPage={handleSelectVisiblePage}
         onSelectAllLibrary={() => void s.selectAllLibraryDemos()}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       <DemoLibraryQueryBar
@@ -193,23 +264,59 @@ export default function DemoLibraryPage() {
       ) : null}
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-white/[0.07] bg-cs2-bg-card/80">
-        <DemoTable
-          rows={filteredRows}
-          selectedIds={s.selectedLibraryDemoIds}
-          onToggleSelect={onToggleSelect}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onColumnSort={onColumnSort}
-          libraryLoading={s.libraryLoading}
-          emptyHint={emptyMessage}
-          expandedScoreboardIds={expandedScoreboardIds}
-          onToggleScoreboardExpand={toggleScoreboardExpand}
-          highlightQuery={s.libraryAdvFilters.playerQuery ?? ""}
-          steamHighlightQuery={s.libraryAdvFilters.steamQuery ?? ""}
-          onRename={onRename}
-          onLoadRow={(it) => void s.handleLoadDemoFromLibrary([it])}
-          onDelete={onDeleteRow}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+          {s.libraryLoading ? (
+            <div className="flex h-32 items-center justify-center text-zinc-500 text-sm">加载中...</div>
+          ) : filteredRows.length === 0 ? (
+            <div className="flex h-32 items-center justify-center text-zinc-500 text-sm">{emptyMessage || "暂无 Demo"}</div>
+          ) : viewMode === "grid" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredRows.map((it) => (
+                <MatchCard
+                  key={it.id}
+                  demo={it}
+                  isSelected={s.selectedLibraryDemoIds.has(it.id)}
+                  onSelect={(id, checked) => {
+                    s.setSelectedLibraryDemoIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(id); else next.delete(id);
+                      return next;
+                    });
+                  }}
+                  onPlay={handleCardPlay}
+                  onOpenFile={handleOpenFile}
+                  onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
+                  onUpdateRemark={handleUpdateRemark}
+                  onOpenInfo={(id) => setDemoInfoModalId(id)}
+                  expectedPlayers={expectedPlayers}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filteredRows.map((it) => (
+                <MatchListRow
+                  key={it.id}
+                  demo={it}
+                  isSelected={s.selectedLibraryDemoIds.has(it.id)}
+                  onSelect={(id, checked) => {
+                    s.setSelectedLibraryDemoIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(id); else next.delete(id);
+                      return next;
+                    });
+                  }}
+                  onPlay={handleCardPlay}
+                  onOpenFile={handleOpenFile}
+                  onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
+                  onUpdateRemark={handleUpdateRemark}
+                  onOpenInfo={(id) => setDemoInfoModalId(id)}
+                  expectedPlayers={expectedPlayers}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="flex shrink-0 justify-end border-t border-white/[0.06] px-2 py-1.5">
           <DemoPagination
@@ -341,6 +448,23 @@ export default function DemoLibraryPage() {
           </div>
         </div>
       ) : null}
+
+      <DemoInfoModal
+        open={demoInfoModalId !== null}
+        onClose={() => setDemoInfoModalId(null)}
+        demoId={demoInfoModalId}
+        onAddToQueue={handleAddToQueue}
+        expectedPlayers={expectedPlayers}
+        aiMode={s.aiMode}
+        queuedClientClipUids={queuedClientClipUids}
+      />
+
+      <IngestModal
+        isOpen={ingestModalOpen}
+        onClose={() => setIngestModalOpen(false)}
+        onIngest={handleBatchIngest}
+        onUpload={s.handleUpload}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from datetime import datetime
@@ -88,6 +89,54 @@ _enqueue_striped_init_lock = asyncio.Lock()
 _ENQUEUE_STRIPE_COUNT = 64
 
 
+def infer_demo_source(filename: str, server_name: str | None = None) -> str:
+    fn = filename.lower()
+    sn = (server_name or "").lower()
+
+    if "faceit" in sn:
+        return "Faceit"
+    if "5eplay" in sn or "5e" in sn:
+        return "5E"
+    if "完美世界" in sn or "wanmei" in sn:
+        return "Perfect World"
+    if "valve" in sn:
+        return "Matchmaking"
+    if "esl" in sn:
+        return "ESL"
+    if "esea" in sn:
+        return "ESEA"
+    if "blast" in sn:
+        return "Blast"
+    if "pgl" in sn:
+        return "PGL"
+    if "starladder" in sn:
+        return "StarLadder"
+    if "flashpoint" in sn:
+        return "Flashpoint"
+    if "challengermode" in sn:
+        return "Challengermode"
+
+    if re.match(r"^g\d+-", fn):
+        return "5E"
+    if re.match(r"^\d+_team", fn):
+        return "Faceit"
+
+    if "faceit" in fn:
+        return "Faceit"
+    if "5e" in fn:
+        return "5E"
+    if "perfectworld" in fn or "pvp" in fn:
+        return "Perfect World"
+    if "match730" in fn or "matchmaking" in fn:
+        return "Matchmaking"
+    if "esl" in fn:
+        return "ESL"
+    if "esea" in fn:
+        return "ESEA"
+
+    return "Local/Other"
+
+
 async def _enqueue_demo_path(path: Path) -> None:
     global _enqueue_striped_locks
     async with _enqueue_striped_init_lock:
@@ -100,11 +149,16 @@ async def _enqueue_demo_path(path: Path) -> None:
     stripe = (hash(demo_path) & 0x7FFFFFFF) % _ENQUEUE_STRIPE_COUNT
     async with _enqueue_striped_locks[stripe]:
         size: int | None = None
+        mtime_iso: str | None = None
         try:
-            size = path.stat().st_size
+            st = path.stat()
+            size = st.st_size
+            from datetime import timezone
+            mtime_iso = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat()
         except OSError:
             pass
-        _, inserted = await demo_db.add_demo(demo_path, file_size=size)
+        source = infer_demo_source(path.name)
+        _, inserted = await demo_db.add_demo(demo_path, file_size=size, source=source, status="pending", added_at=mtime_iso)
         if not inserted:
             # 已入库：若仍无展示名且配置了关注名单，补跑一次（与新建入库一样同步完成）
             cfg_dup = load_config()
@@ -117,7 +171,8 @@ async def _enqueue_demo_path(path: Path) -> None:
         try:
             meta = await asyncio.to_thread(get_demo_match_summary_isolated, demo_path)
             if isinstance(meta, dict):
-                await demo_db.update_lightweight_meta(demo_path, meta)
+                refined_source = infer_demo_source(path.name, server_name=meta.get("server_name"))
+                await demo_db.update_lightweight_meta(demo_path, meta, source=refined_source)
         except Exception:
             logger.exception("Lightweight meta parse failed for %s", demo_path)
         await demo_db.update_status(demo_path, "pending", error_msg=None, parsed_at=None)
@@ -479,7 +534,7 @@ async def _run_library_demo_analyze(
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
     await demo_db.clear_result(dem_path)
-    await demo_db.update_status(dem_path, "pending", error_msg=None, parsed_at=None)
+    await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
     try:
         for player in target_players:
@@ -674,8 +729,9 @@ async def update_config(payload: ConfigPayload):
             if isinstance(payload.default_record_warmup, dict)
             else {}
         )
-    if payload.experimental is not None and payload.experimental.pov_enabled is not None:
-        cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
+    if payload.experimental is not None:
+        if payload.experimental.pov_enabled is not None:
+            cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -742,7 +798,7 @@ def setup_status():
     try:
         director = OBSDirector(cfg.obs, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
         result = director.test_obs_connection()
-        obs_connected = result.get("success", False)
+        obs_connected = bool(result.get("ok", False))
     except Exception:
         obs_connected = False
 
@@ -1069,7 +1125,7 @@ async def parse_demo_batch(req: BatchParseRequest):
 
 # ─── Local demo library endpoints ─────────────────────────────
 
-_DEMO_LIBRARY_ALLOWED_STATUSES = frozenset({"pending", "done", "error"})
+_DEMO_LIBRARY_ALLOWED_STATUSES = frozenset({"loaded", "parsing", "done", "error"})
 
 
 def _split_csv_query_param(s: Optional[str]) -> list[str]:
@@ -1152,9 +1208,9 @@ async def list_demos(
     statuses: Optional[str] = Query(
         default=None,
         max_length=256,
-        description="逗号分隔状态 pending,done,error；与 status 二选一，优先本参数",
+        description="逗号分隔状态 loaded,parsing,done,error；与 status 二选一，优先本参数（不含 pending，待入库见 /demos/discovered）",
     ),
-    status: Optional[str] = Query(default=None, max_length=64, description="单状态（兼容旧客户端）"),
+    status: Optional[str] = Query(default=None, max_length=64, description="单状态（不含 pending）"),
     min_kills: Optional[int] = Query(default=None, ge=0),
     max_deaths: Optional[int] = Query(default=None, ge=0),
     min_assists: Optional[int] = Query(default=None, ge=0),
@@ -1245,6 +1301,19 @@ async def demo_library_event_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/demos/discovered")
+async def list_discovered_demos(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
+):
+    """列出已发现但尚未入库（status='pending'）的 demo。"""
+    qn = (q or "").strip() or None
+    total = await demo_db.count_discovered_demos(name_query=qn)
+    rows = await demo_db.list_discovered_demos(limit=limit, offset=offset, name_query=qn)
+    return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
 
 
 @app.get("/api/demos/{demo_id}")
@@ -1353,14 +1422,19 @@ async def patch_demo_display_name(demo_id: int, body: DemoDisplayNamePatch):
 @app.post("/api/demos/scan")
 async def scan_watch_paths():
     if demo_watcher is None:
-        return {"scanned": 0, "player_stats_index": None}
+        return {"scanned": 0, "player_stats_index": None, "discovered_count": 0}
     scanned = await demo_watcher.scan_existing()
     idx_summary: dict[str, Any] | None = None
     try:
         idx_summary = await _index_all_missing_player_stats()
     except Exception:
         logger.exception("player stats index batch after scan failed")
-    return {"scanned": scanned, "player_stats_index": idx_summary}
+    try:
+        discovered_count = await demo_db.count_discovered_demos()
+    except Exception:
+        logger.exception("count discovered demos after scan failed")
+        discovered_count = 0
+    return {"scanned": scanned, "player_stats_index": idx_summary, "discovered_count": discovered_count}
 
 
 @app.post("/api/demos/{demo_id}/parse")
@@ -1369,9 +1443,9 @@ async def reparse_demo(demo_id: int):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     await demo_db.clear_result(row["path"])
-    await demo_db.update_status(row["path"], "pending", error_msg=None, parsed_at=None)
+    await demo_db.update_status(row["path"], "loaded", error_msg=None, parsed_at=None)
     await demo_library_hub.notify("reparse")
-    return {"status": "pending", "demo_id": demo_id}
+    return {"status": "loaded", "demo_id": demo_id}
 
 
 class DemoAnalyzeRequest(BaseModel):
@@ -1424,6 +1498,57 @@ async def delete_demo(
         raise HTTPException(404, f"Demo not found: {demo_id}")
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id}
+
+
+class BatchIngestBody(BaseModel):
+    demo_ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+@app.post("/api/demos/batch-ingest")
+async def batch_ingest_demos(body: BatchIngestBody):
+    """批量入库：对每个 pending demo 运行轻量元数据提取，状态改为 loaded。"""
+    ingested = 0
+    failed: list[dict[str, Any]] = []
+    for demo_id in body.demo_ids:
+        row = await demo_db.get_demo_by_id(demo_id)
+        if not row:
+            failed.append({"demo_id": demo_id, "error": "Demo 不存在"})
+            continue
+        if (row.get("status") or "") != "pending":
+            failed.append({"demo_id": demo_id, "error": f"当前状态为 {row.get('status')}，非 pending"})
+            continue
+        dem_path = str(row["path"])
+        if not Path(dem_path).is_file():
+            failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": "文件不存在"})
+            continue
+        try:
+            meta = await asyncio.to_thread(get_demo_match_summary_isolated, dem_path)
+            if isinstance(meta, dict):
+                refined_source = infer_demo_source(Path(dem_path).name, server_name=meta.get("server_name"))
+                await demo_db.update_lightweight_meta(dem_path, meta, source=refined_source)
+            await index_demo_player_stats(demo_id, dem_path)
+            await demo_db.update_status(dem_path, "loaded", error_msg=None, parsed_at=utc_now_iso())
+            await _maybe_update_library_display_for_expected(demo_id, dem_path)
+            ingested += 1
+        except Exception as e:
+            logger.exception("Ingest failed demo_id=%s path=%s", demo_id, dem_path)
+            failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": str(e)})
+    if ingested:
+        await demo_library_hub.notify("enqueue")
+    return {"ingested": ingested, "failed": failed}
+
+
+class DemoRemarkPatch(BaseModel):
+    remark: str = Field(default="", max_length=2000)
+
+
+@app.patch("/api/demos/{demo_id}/remark")
+async def patch_demo_remark(demo_id: int, body: DemoRemarkPatch):
+    ok = await demo_db.update_remark(demo_id, body.remark or None)
+    if not ok:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    await demo_library_hub.notify("remark")
+    return {"status": "ok", "demo_id": demo_id}
 
 
 # ─── Recording endpoints ──────────────────────────────────────
@@ -1784,7 +1909,11 @@ async def start_batch_recording(req: BatchRecordRequest):
             pov_mgr = PovHudManager(cfg)
             pov_mgr.install()
         director = OBSDirector(obs_cfg, cfg.cs2_path, abort_event=abort_ev, cs2_fps_max=cfg.cs2_fps_max)
-        results = await director.execute_batch_recording(demo_jobs, warmup=warmup_eff, pov_enabled=pov_on)
+        results = await director.execute_batch_recording(
+            demo_jobs,
+            warmup=warmup_eff,
+            pov_enabled=pov_on,
+        )
         _raise_if_recording_never_started(results)
         await _persist_recorded_clips_from_results(results)
         return {"status": "completed", "results": results}
@@ -1848,7 +1977,17 @@ def config_backup_open_dir():
 @app.post("/api/gsi/cs2")
 async def cs2_gsi(payload: Optional[dict] = Body(default=None)):
     """CS2 Game State Integration sink used as a recording startup ready gate."""
-    ready = notify_gsi_payload(payload or {})
+    _payload = payload or {}
+    ready = notify_gsi_payload(_payload)
+    # 实时雷达缓存：转发快照到活跃会话
+    try:
+        from app.radar.radar_live_session import get_active_session
+        _sess = get_active_session()
+        if _sess is not None:
+            import time as _time
+            _sess.push_gsi_snapshot(_payload, wall_time=_time.monotonic())
+    except Exception:
+        pass
     return {"ok": True, "ready": ready}
 
 
@@ -1873,13 +2012,16 @@ class MontageProjectBody(BaseModel):
     name: str = ""
     recorded_clip_ids: list[int] = Field(default_factory=list)
     bgm_path: Optional[str] = None
+    bgm_volume: Optional[float] = None
+    bgm_start_sec: Optional[float] = None
     intro_path: Optional[str] = None
+    intro_image_duration: Optional[float] = None
     outro_path: Optional[str] = None
+    outro_image_duration: Optional[float] = None
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
     transitions: Optional[dict[str, Any]] = None
     radar_overlay: Optional[RadarOverlayOptions] = None
     theme_id: Optional[str] = Field(default=None, max_length=64)
-    bgm_volume: Optional[float] = None
 
 
 @app.get("/api/recorded-clips")
@@ -1924,6 +2066,21 @@ async def save_montage_project(body: MontageProjectBody):
             proj_body["bgm_volume"] = max(0.0, min(2.0, float(body.bgm_volume)))
         except (TypeError, ValueError):
             pass
+    if body.bgm_start_sec is not None:
+        try:
+            proj_body["bgm_start_sec"] = max(0.0, float(body.bgm_start_sec))
+        except (TypeError, ValueError):
+            pass
+    if body.intro_image_duration is not None:
+        try:
+            proj_body["intro_image_duration"] = max(1.0, float(body.intro_image_duration))
+        except (TypeError, ValueError):
+            pass
+    if body.outro_image_duration is not None:
+        try:
+            proj_body["outro_image_duration"] = max(1.0, float(body.outro_image_duration))
+        except (TypeError, ValueError):
+            pass
     try:
         pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
     except ValueError as e:
@@ -1940,8 +2097,11 @@ class MontageExportBody(BaseModel):
     ordered_ids: Optional[list[str]] = None
     bgm_path: Optional[str] = None
     bgm_volume: Optional[float] = None
+    bgm_start_sec: Optional[float] = None
     intro_path: Optional[str] = None
+    intro_image_duration: Optional[float] = None
     outro_path: Optional[str] = None
+    outro_image_duration: Optional[float] = None
     output_path: str = Field(..., min_length=1, max_length=2048)
     theme_id: Optional[str] = Field(default=None, max_length=64)
     transitions: Optional[dict[str, Any]] = None
@@ -1998,6 +2158,19 @@ async def montage_export(body: MontageExportBody):
             return None
 
     bgm_volume_eff = _coalesce_volume(body.bgm_volume, "bgm_volume")
+
+    def _coalesce_float(req_val: Optional[float], key: str, lo: float = 0.0, hi: float = 1e9) -> Optional[float]:
+        v = req_val if req_val is not None else (extras.get(key) if isinstance(extras, dict) else None)
+        if v is None:
+            return None
+        try:
+            return max(lo, min(hi, float(v)))
+        except (TypeError, ValueError):
+            return None
+
+    bgm_start_eff = _coalesce_float(body.bgm_start_sec, "bgm_start_sec", lo=0.0)
+    intro_img_dur_eff = _coalesce_float(body.intro_image_duration, "intro_image_duration", lo=1.0, hi=60.0)
+    outro_img_dur_eff = _coalesce_float(body.outro_image_duration, "outro_image_duration", lo=1.0, hi=60.0)
 
     transitions_eff: Any = body.transitions
     if transitions_eff is None and isinstance(extras, dict):
@@ -2056,6 +2229,12 @@ async def montage_export(body: MontageExportBody):
             snap["theme_id"] = tid
     if bgm_volume_eff is not None:
         snap["bgm_volume"] = bgm_volume_eff
+    if bgm_start_eff is not None:
+        snap["bgm_start_sec"] = bgm_start_eff
+    if intro_img_dur_eff is not None:
+        snap["intro_image_duration"] = intro_img_dur_eff
+    if outro_img_dur_eff is not None:
+        snap["outro_image_duration"] = outro_img_dur_eff
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -2076,6 +2255,9 @@ async def montage_export(body: MontageExportBody):
             radar_overlay=radar_options,
             clip_rows=ordered_clip_rows,
             bgm_volume=bgm_volume_eff,
+            bgm_start_sec=bgm_start_eff,
+            intro_image_duration=intro_img_dur_eff,
+            outro_image_duration=outro_img_dur_eff,
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)
@@ -2085,8 +2267,59 @@ async def montage_export(body: MontageExportBody):
     return {"export_id": export_id, "status": "done", "output_path": str(out)}
 
 
+class FilePickerBody(BaseModel):
+    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|any)$")
+
+
+_FILE_PICKER_FILTERS: dict[str, str] = {
+    "audio": "音频文件|*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a|所有文件|*.*",
+    "video_or_image": "视频与图片|*.mp4;*.mov;*.mkv;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif|所有文件|*.*",
+    "any": "所有文件|*.*",
+}
+
+
+@app.post("/api/file-picker")
+async def file_picker(body: FilePickerBody):
+    import sys
+    import subprocess as sp
+
+    if sys.platform != "win32":
+        raise HTTPException(400, "文件浏览对话框仅 Windows 可用")
+
+    ft = body.file_type if body.file_type in _FILE_PICKER_FILTERS else "any"
+    filt = _FILE_PICKER_FILTERS[ft].replace("'", "''")
+
+    ps = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$d = New-Object System.Windows.Forms.OpenFileDialog;"
+        f"$d.Filter = '{filt}';"
+        "$d.Multiselect = $false;"
+        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }"
+    )
+
+    def _run() -> str:
+        r = sp.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True,
+            timeout=120,
+        )
+        return (r.stdout or b"").decode("utf-8", errors="replace").strip()
+
+    try:
+        path = await asyncio.to_thread(_run)
+    except Exception as exc:
+        raise HTTPException(500, f"文件选择器失败: {exc}") from exc
+
+    return {"path": path or None}
+
+
 class OpenFolderBody(BaseModel):
     path: str = Field(..., min_length=1, max_length=2048)
+
+
+class RevealFileInExplorerBody(BaseModel):
+    path: str = Field(..., min_length=1, max_length=2600)
 
 
 @app.post("/api/open-folder")
@@ -2100,6 +2333,37 @@ def open_folder(body: OpenFolderBody):
             sp.run(["open", p], check=False, timeout=10)
         else:
             sp.run(["xdg-open", p], check=False, timeout=10)
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
+
+
+@app.post("/api/reveal-file-in-explorer")
+def reveal_file_in_explorer(body: RevealFileInExplorerBody):
+    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。"""
+    import subprocess as sp
+    import sys
+
+    raw = (body.path or "").strip().strip('"')
+    if not raw:
+        raise HTTPException(400, "path 为空")
+    try:
+        p = Path(raw).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise HTTPException(400, f"无效路径: {exc}") from exc
+    if not p.exists():
+        raise HTTPException(404, f"路径不存在: {p}")
+    try:
+        if sys.platform == "win32":
+            if p.is_dir():
+                os.startfile(str(p))  # noqa: S606
+            else:
+                sp.Popen(["explorer", "/select," + str(p)])
+        elif sys.platform == "darwin":
+            sp.run(["open", "-R", str(p)], check=False, timeout=20)
+        else:
+            target = str(p.parent) if p.is_file() else str(p)
+            sp.run(["xdg-open", target], check=False, timeout=20)
     except Exception as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True}
@@ -2134,11 +2398,48 @@ async def rename_montage_export(export_id: int, body: RenameExportBody):
 
 
 @app.delete("/api/montage/exports/{export_id}")
-async def delete_montage_export(export_id: int):
-    deleted = await montage_db.delete_export(export_id)
-    if not deleted:
+async def delete_montage_export(
+    export_id: int,
+    delete_file: bool = Query(False),
+):
+    output_path = await montage_db.delete_export(export_id)
+    if output_path is None:
         raise HTTPException(404, "导出记录不存在")
-    return {"ok": True}
+    file_deleted = False
+    if delete_file and output_path:
+        try:
+            import os as _os
+            _os.remove(output_path)
+            file_deleted = True
+        except FileNotFoundError:
+            file_deleted = False
+        except OSError as e:
+            raise HTTPException(400, f"文件删除失败：{e}") from e
+    return {"ok": True, "file_deleted": file_deleted}
+
+
+class BatchDeleteExportsBody(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+    delete_files: bool = False
+
+
+@app.post("/api/montage/exports/batch-delete")
+async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
+    paths = await montage_db.delete_exports_batch(body.ids)
+    file_results: dict[str, str] = {}
+    if body.delete_files:
+        import os as _os
+        for p in paths:
+            if not p:
+                continue
+            try:
+                _os.remove(p)
+                file_results[p] = "deleted"
+            except FileNotFoundError:
+                file_results[p] = "not_found"
+            except OSError as e:
+                file_results[p] = f"error: {e}"
+    return {"ok": True, "deleted_count": len(paths), "file_results": file_results}
 
 
 # ─── Health ────────────────────────────────────────────────────

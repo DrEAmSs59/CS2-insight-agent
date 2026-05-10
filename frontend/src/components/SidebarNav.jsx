@@ -7,7 +7,6 @@ import {
   Clapperboard,
   SlidersHorizontal,
   Settings,
-  Monitor,
   Gamepad2,
   RadioTower,
 } from "lucide-react";
@@ -21,10 +20,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
   return (
     <aside className="flex w-44 shrink-0 flex-col border-r border-cs2-border bg-cs2-bg-sidebar">
       <div className="border-b border-cs2-border px-2.5 py-3">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-cs2-orange/20">
-            <Monitor className="h-4 w-4 text-cs2-orange" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <img
+            src="/cs2-insight-logo.png"
+            alt="CS2 洞察"
+            width={72}
+            height={72}
+            decoding="async"
+            className="h-[72px] w-[72px] shrink-0 object-contain mix-blend-lighten"
+          />
           <div className="min-w-0">
             <div className="truncate text-sm font-bold tracking-wide text-white">CS2 洞察</div>
             <div className="font-mono text-[10px] tracking-widest text-cs2-text-secondary">v2.0.0</div>

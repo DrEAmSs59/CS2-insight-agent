@@ -438,10 +438,19 @@ def extract_radar_timeline_impl(
 
                 color_slot = -1
                 if "player_color" in work.columns:
+                    _COLOR_STR_MAP = {
+                        "blue": 0, "green": 1, "yellow": 2, "orange": 3, "purple": 4,
+                    }
                     try:
                         raw_slot = r.get("player_color")
                         if raw_slot is not None and not (isinstance(raw_slot, float) and pd.isna(raw_slot)):
-                            color_slot = int(float(raw_slot))
+                            raw_str = str(raw_slot).strip().lower()
+                            if raw_str in _COLOR_STR_MAP:
+                                # demoparser2 returns color as string name
+                                color_slot = _COLOR_STR_MAP[raw_str]
+                            else:
+                                # Fallback: might be numeric in some versions
+                                color_slot = int(float(raw_slot))
                     except (TypeError, ValueError):
                         color_slot = -1
 

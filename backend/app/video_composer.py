@@ -149,15 +149,19 @@ def build_bgm_filter(
     video_duration_sec: float,
     bgm_input_label: str = "[1:a]",
     volume: float = 1.0,
+    start_sec: float = 0.0,
 ) -> str:
     """
     生成将 BGM 对齐到成片时长的 filter 片段（不含 amix）。
-    BGM 短于成片则循环；长于成片则裁剪。
+    BGM 短于成片则循环；长于成片则裁剪。start_sec 指定从音频第几秒开始使用。
     """
     d = max(0.01, float(video_duration_sec))
     vol = max(0.0, min(2.0, float(volume)))
+    s = max(0.0, float(start_sec))
+    # 先裁掉起始段，重置 PTS，再循环，再裁到视频时长
+    seek = f"atrim=start={s:.6f},asetpts=N/SR/TB," if s > 1e-6 else ""
     return (
-        f"{bgm_input_label}aloop=loop=-1:size=2e+09,atrim=0:{d:.6f},asetpts=N/SR/TB,"
+        f"{bgm_input_label}{seek}aloop=loop=-1:size=2e+09,atrim=0:{d:.6f},asetpts=N/SR/TB,"
         f"volume={vol:.6f}[bgmtrim]"
     )
 
@@ -217,6 +221,59 @@ def _finalize_mp4_for_common_players(ffmpeg_bin: Path, src: Path, dst: Path) -> 
 
 
 _VALID_XFADE_TYPES = frozenset({"fade", "cut", "flash", "dip_black", "zoom", "none"})
+
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"})
+
+
+def _is_image_path(p: Path) -> bool:
+    return p.suffix.lower() in _IMAGE_EXTS
+
+
+def _image_to_ts_with_fade(
+    *,
+    ffmpeg_bin: Path,
+    image_path: Path,
+    out_ts: Path,
+    width: int,
+    height: int,
+    fps: float,
+    duration: float = 3.0,
+    fade_duration: float = 0.5,
+) -> None:
+    """Convert a static image to an mpegts clip with fade-in and fade-out."""
+    fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
+    d = max(1.0, float(duration))
+    fd = min(float(fade_duration), d / 3)
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+        f"fps={fps_s},setsar=1,format=yuv420p,"
+        f"fade=t=in:st=0:d={fd:.4f},"
+        f"fade=t=out:st={d - fd:.4f}:d={fd:.4f}"
+    )
+    cmd = [
+        str(ffmpeg_bin),
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-loop", "1",
+        "-framerate", fps_s,
+        "-i", str(image_path),
+        "-filter_complex",
+        f"[0:v]{vf}[v];anullsrc=r=48000:cl=stereo,atrim=0:{d:.6f},asetpts=N/SR/TB[a]",
+        "-map", "[v]",
+        "-map", "[a]",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-t", str(d),
+        str(out_ts),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        raise MontageComposerError(
+            f"图片转视频失败 ({image_path.name}): {(r.stderr or r.stdout or '').strip()[-600:]}",
+        )
 
 
 def _xfade_transition_name(trans_type: str) -> str:
@@ -360,6 +417,9 @@ def compose_montage(
     radar_overlay: Optional[dict[str, Any]] = None,
     clip_rows: Optional[list[dict[str, Any]]] = None,
     bgm_volume: Optional[float] = None,
+    bgm_start_sec: Optional[float] = None,
+    intro_image_duration: Optional[float] = None,
+    outro_image_duration: Optional[float] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -418,8 +478,27 @@ def compose_montage(
         if outro_path is not None:
             segments.append(outro_path)
 
+        _intro_img_dur = max(1.0, float(intro_image_duration)) if intro_image_duration is not None else 3.0
+        _outro_img_dur = max(1.0, float(outro_image_duration)) if outro_image_duration is not None else 3.0
+        _intro_idx = 0 if intro_path is not None else -1
+        _outro_idx = len(segments) - 1 if outro_path is not None else -1
+
         normed: list[Path] = []
         for i, seg in enumerate(segments):
+            out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
+            if _is_image_path(seg):
+                img_dur = _intro_img_dur if i == _intro_idx else _outro_img_dur
+                _image_to_ts_with_fade(
+                    ffmpeg_bin=ffmpeg_bin,
+                    image_path=seg,
+                    out_ts=out_ts,
+                    width=w,
+                    height=h,
+                    fps=fps,
+                    duration=img_dur,
+                )
+                normed.append(out_ts)
+                continue
             info = probe_video_audio_summary(seg, ffprobe)
             dur = info.get("duration")
             if dur is None or dur <= 0:
@@ -428,7 +507,6 @@ def compose_montage(
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={fps_s},setsar=1,format=yuv420p"
             )
-            out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
             if info["has_audio"]:
                 fc = f"[0:v]{vf}[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
                 cmd = [
@@ -571,10 +649,11 @@ def compose_montage(
             return
 
         bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
+        bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
 
         fc_mix = (
             f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
-            f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol)};"
+            f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol, start_sec=bgm_start)};"
             f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
         )
         cmd_mix = [
