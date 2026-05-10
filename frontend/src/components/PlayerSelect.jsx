@@ -24,8 +24,8 @@ function normalizePlayer(p) {
     return { name: p, team: 0, kills: 0, deaths: 0, assists: 0, steam_id: null };
   }
   return {
-    name: p.name ?? "",
-    team: Number(p.team) || 0,
+    name: p.name ?? p.player_name ?? "",
+    team: Number(p.team ?? p.team_number) || 0,
     kills: Number(p.kills) || 0,
     deaths: Number(p.deaths) || 0,
     assists: Number(p.assists) || 0,

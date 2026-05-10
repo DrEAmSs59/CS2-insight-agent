@@ -27,6 +27,15 @@ function StyleBlockTitle({ title, subtitle }) {
   );
 }
 
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"]);
+
+function isImagePath(p) {
+  const s = String(p || "").trim().toLowerCase();
+  const dot = s.lastIndexOf(".");
+  if (dot < 0) return false;
+  return IMAGE_EXTS.has(s.slice(dot));
+}
+
 function MediaVideoSlotCard({
   label,
   path,
@@ -34,9 +43,13 @@ function MediaVideoSlotCard({
   onClear,
   placeholder,
   onVideoDrop,
+  onBrowse,
+  imageDuration,
+  onImageDurationChange,
 }) {
   const filled = Boolean(path.trim());
   const base = pathBasename(path);
+  const isImg = filled && isImagePath(path);
   return (
     <div
       className={`rounded-lg border bg-black/35 p-2 ${filled ? "border-white/12" : "border-dashed border-white/15"}`}
@@ -48,8 +61,11 @@ function MediaVideoSlotCard({
         e.preventDefault();
         const f = e.dataTransfer.files?.[0];
         if (!f) return;
-        if (!String(f.type || "").startsWith("video/")) {
-          onVideoDrop?.(null, "请拖入视频文件");
+        const type = String(f.type || "");
+        const name = String(f.name || "");
+        const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+        if (!type.startsWith("video/") && !type.startsWith("image/") && !IMAGE_EXTS.has(ext)) {
+          onVideoDrop?.(null, "请拖入视频或图片文件");
           return;
         }
         onVideoDrop?.(f.name, null);
@@ -59,13 +75,31 @@ function MediaVideoSlotCard({
         <Film className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
         <p className="text-[10px] font-semibold text-zinc-300">{label}</p>
         {filled ? (
-          <p className="ml-auto max-w-[12rem] truncate font-mono text-[10px] text-zinc-400" title={path}>
+          <p className="ml-auto max-w-[10rem] truncate font-mono text-[10px] text-zinc-400" title={path}>
             {base || path}
           </p>
         ) : (
-          <p className="ml-1 text-[10px] text-zinc-600">拖入视频或粘贴路径</p>
+          <p className="ml-1 text-[10px] text-zinc-600">拖入视频 / 图片或粘贴路径</p>
         )}
       </div>
+      {isImg ? (
+        <div className="mt-1.5 flex items-center gap-2">
+          <p className="text-[10px] text-violet-300/80">图片渐入渐出 · 时长</p>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            step={0.5}
+            value={imageDuration ?? 3}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v) && v >= 1) onImageDurationChange?.(v);
+            }}
+            className="w-16 rounded border border-white/10 bg-black/50 px-2 py-0.5 font-mono text-[10px] text-zinc-200 outline-none focus:border-violet-400/50"
+          />
+          <span className="text-[10px] text-zinc-600">秒</span>
+        </div>
+      ) : null}
       <div className="mt-1.5 flex gap-2">
         <input
           value={path}
@@ -73,6 +107,16 @@ function MediaVideoSlotCard({
           placeholder={placeholder}
           className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600"
         />
+        {onBrowse ? (
+          <button
+            type="button"
+            onClick={onBrowse}
+            title="浏览文件"
+            className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-400 hover:border-white/25 hover:text-zinc-200"
+          >
+            <FolderOpen className="h-3 w-3" />
+          </button>
+        ) : null}
         {filled ? (
           <button
             type="button"
@@ -107,16 +151,24 @@ export function MontageStyleConsole({
   onBgmClear,
   bgmVolume,
   onBgmVolumeChange,
+  bgmStartSec,
+  onBgmStartSecChange,
   introPath,
   onIntroPathChange,
   onIntroClear,
+  introDuration,
+  onIntroDurationChange,
   outroPath,
   onOutroPathChange,
   onOutroClear,
+  outroDuration,
+  onOutroDurationChange,
   onMediaDropHint,
+  onFilePick,
   // overlay
   radarOverlayEnabled,
   onRadarOverlayEnabledChange,
+  hasPovClips = false,
   // export footer
   clipCount,
   durationText,
@@ -259,6 +311,21 @@ export function MontageStyleConsole({
                   className="mt-1 h-1.5 w-full accent-violet-400"
                 />
               </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[10px] text-zinc-500">从第</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={bgmStartSec ?? 0}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    onBgmStartSecChange?.(Number.isFinite(v) && v >= 0 ? v : 0);
+                  }}
+                  className="w-16 rounded border border-white/10 bg-black/50 px-2 py-0.5 font-mono text-[10px] text-zinc-200 outline-none focus:border-violet-400/50"
+                />
+                <span className="text-[10px] text-zinc-500">秒开始</span>
+              </div>
               <div className="mt-1.5 flex gap-2">
                 <input
                   value={bgmPath}
@@ -266,6 +333,16 @@ export function MontageStyleConsole({
                   placeholder="例如 D:\Music\bgm.mp3"
                   className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200"
                 />
+                {onFilePick ? (
+                  <button
+                    type="button"
+                    onClick={() => onFilePick("audio", onBgmPathChange)}
+                    title="浏览音频文件"
+                    className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-400 hover:border-white/25 hover:text-zinc-200"
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                  </button>
+                ) : null}
                 {bgmPath.trim() ? (
                   <button
                     type="button"
@@ -283,43 +360,63 @@ export function MontageStyleConsole({
               path={introPath}
               onPathChange={onIntroPathChange}
               onClear={onIntroClear}
-              placeholder="例如 D:\Videos\intro.mp4"
+              placeholder="例如 D:\Videos\intro.mp4 或 D:\img.png"
               onVideoDrop={(name, err) => {
                 if (err) onMediaDropHint?.(err);
-                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整视频路径`);
+                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整路径`);
               }}
+              onBrowse={onFilePick ? () => onFilePick("video_or_image", onIntroPathChange) : undefined}
+              imageDuration={introDuration}
+              onImageDurationChange={onIntroDurationChange}
             />
             <MediaVideoSlotCard
               label="片尾"
               path={outroPath}
               onPathChange={onOutroPathChange}
               onClear={onOutroClear}
-              placeholder="例如 D:\Videos\outro.mp4"
+              placeholder="例如 D:\Videos\outro.mp4 或 D:\img.png"
               onVideoDrop={(name, err) => {
                 if (err) onMediaDropHint?.(err);
-                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整视频路径`);
+                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整路径`);
               }}
+              onBrowse={onFilePick ? () => onFilePick("video_or_image", onOutroPathChange) : undefined}
+              imageDuration={outroDuration}
+              onImageDurationChange={onOutroDurationChange}
             />
           </CollapsibleSection>
 
           <section className="space-y-2.5">
             <StyleBlockTitle title="画面覆盖" subtitle="仅展示已接入能力" />
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.07] bg-black/35 px-2.5 py-2">
+            <div
+              className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${
+                hasPovClips
+                  ? "border-white/[0.07] bg-black/35"
+                  : "border-white/[0.04] bg-black/20 opacity-50"
+              }`}
+              title={hasPovClips ? "" : "需要至少一个 POV HUD 录制的片段（pov_hud_enabled）才能启用雷达覆盖"}
+            >
               <div className="flex items-center gap-2">
-                <ScanEye className="h-4 w-4 text-sky-300" aria-hidden />
+                <ScanEye className={`h-4 w-4 ${hasPovClips ? "text-sky-300" : "text-zinc-600"}`} aria-hidden />
                 <div>
                   <p className="text-[11px] font-medium text-zinc-200">回放小地图 / 雷达叠层</p>
-                  <p className="text-[9px] text-zinc-600">导出链路已支持</p>
+                  <p className="text-[9px] text-zinc-600">
+                    {hasPovClips ? "从 Demo 解析位置，颜色与游戏一致" : "需含 POV HUD 录制片段"}
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => onRadarOverlayEnabledChange(!radarOverlayEnabled)}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold ${
-                  radarOverlayEnabled ? "bg-cs2-orange text-black" : "border border-white/12 bg-zinc-900 text-zinc-400"
+                disabled={!hasPovClips}
+                onClick={() => hasPovClips && onRadarOverlayEnabledChange(!radarOverlayEnabled)}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                  !hasPovClips
+                    ? "cursor-not-allowed border border-white/10 bg-zinc-900 text-zinc-600"
+                    : radarOverlayEnabled
+                    ? "bg-cs2-orange text-black"
+                    : "border border-white/12 bg-zinc-900 text-zinc-400"
                 }`}
               >
-                {radarOverlayEnabled ? "开" : "关"}
+                {radarOverlayEnabled && hasPovClips ? "开" : "关"}
               </button>
             </div>
           </section>
@@ -398,8 +495,8 @@ export function MontageStyleConsole({
                 <ExportCheckRow ok={dirOk} optional={false} label="输出目录" />
                 <ExportCheckRow ok={nameOk} optional={false} label="视频名称" />
                 <ExportCheckRow ok={bgmFilled} optional label="背景音乐" />
-                <ExportCheckRow ok={introFilled} optional label="片头" />
-                <ExportCheckRow ok={outroFilled} optional label="片尾" />
+                <ExportCheckRow ok={introFilled} optional label="片头（视频 / 图片）" />
+                <ExportCheckRow ok={outroFilled} optional label="片尾（视频 / 图片）" />
               </div>
             </div>
 

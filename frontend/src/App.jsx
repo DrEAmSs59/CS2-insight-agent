@@ -375,6 +375,9 @@ export default function App() {
     }
   }, [libraryPage, librarySearchQ, libraryPageSize, appendDemoLibraryFilterParams]);
 
+  const refreshDemoLibraryRef = useRef(refreshDemoLibrary);
+  refreshDemoLibraryRef.current = refreshDemoLibrary;
+
   const handleLibrarySearchSubmit = useCallback(() => {
     const next = librarySearchInput.trim();
     setLibrarySearchQ(next);
@@ -388,8 +391,8 @@ export default function App() {
       return;
     }
     setLibraryPage(1);
-    void refreshDemoLibrary(1, { manageLoading: false });
-  }, [libraryPageSize, refreshDemoLibrary]);
+    void refreshDemoLibraryRef.current(1, { manageLoading: false });
+  }, [libraryPageSize]);
 
   useEffect(() => {
     libraryPageRef.current = libraryPage;
@@ -459,8 +462,12 @@ export default function App() {
   const handleScanDemos = useCallback(async () => {
     setLibraryScanning(true);
     try {
-      await API.post("/demos/scan");
+      const { data } = await API.post("/demos/scan");
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
+      const n = data?.discovered_count;
+      if (typeof n === "number" && n > 0) {
+        setProgressText(`扫描完成：当前有 ${n} 个待入库 Demo，可点击「待入库」批量入库。`);
+      }
     } catch (e) {
       setProgressText(`扫描或列表刷新失败: ${e.response?.data?.detail || e.message}`);
     } finally {

@@ -286,6 +286,24 @@ class MontageDB:
         d["body"] = json.loads(str(d.pop("body_json")))
         return d
 
+    # 从 clip_meta JSON 中提取需要展示的关键字段
+    _CLIP_PREVIEW_META_KEYS = (
+        "category", "map_name", "kill_count", "context_tags",
+        "weapon_used", "victims", "killers", "round",
+        "compilation_kind", "ai_score",
+    )
+
+    def _clip_preview_from_meta(self, raw_meta: str | None) -> dict[str, Any]:
+        if not raw_meta:
+            return {}
+        try:
+            m = json.loads(raw_meta)
+        except Exception:
+            return {}
+        if not isinstance(m, dict):
+            return {}
+        return {k: m[k] for k in self._CLIP_PREVIEW_META_KEYS if k in m}
+
     async def list_exports(
         self,
         *,
@@ -307,15 +325,55 @@ class MontageDB:
                 params_rows,
             )
             rows = await rows_cur.fetchall()
-        items = []
-        for row in rows:
-            d = dict(row)
-            try:
-                d["body"] = json.loads(str(d.pop("body_json")))
-            except Exception:
-                d.pop("body_json", None)
-                d["body"] = {}
-            items.append(d)
+
+            # 收集所有涉及的 clip id，批量查
+            items: list[dict[str, Any]] = []
+            all_clip_ids: list[int] = []
+            for row in rows:
+                d = dict(row)
+                try:
+                    d["body"] = json.loads(str(d.pop("body_json")))
+                except Exception:
+                    d.pop("body_json", None)
+                    d["body"] = {}
+                clip_ids = d["body"].get("recorded_clip_ids") or []
+                d["_clip_ids"] = [int(c) for c in clip_ids if str(c).isdigit() or isinstance(c, int)]
+                all_clip_ids.extend(d["_clip_ids"])
+                items.append(d)
+
+            # 批量拉片段基础信息
+            clip_map: dict[int, dict[str, Any]] = {}
+            if all_clip_ids:
+                placeholders = ",".join("?" * len(all_clip_ids))
+                clips_cur = await conn.execute(
+                    f"SELECT id, player_name, demo_filename, duration_sec, clip_meta FROM recorded_clips WHERE id IN ({placeholders})",
+                    all_clip_ids,
+                )
+                for cr in await clips_cur.fetchall():
+                    cd = dict(cr)
+                    cid = int(cd["id"])
+                    clip_map[cid] = {
+                        "id": cid,
+                        "player_name": cd.get("player_name"),
+                        "demo_filename": cd.get("demo_filename"),
+                        "duration_sec": cd.get("duration_sec"),
+                        **self._clip_preview_from_meta(cd.get("clip_meta")),
+                    }
+
+        # 给每条 export 附上 clips_preview（按 ordered_ids 顺序）
+        for d in items:
+            ordered_ids = d["body"].get("ordered_ids") or []
+            clip_ids_ordered: list[int] = []
+            for oid in ordered_ids:
+                try:
+                    clip_ids_ordered.append(int(oid))
+                except (TypeError, ValueError):
+                    pass
+            if not clip_ids_ordered:
+                clip_ids_ordered = d["_clip_ids"]
+            d["clips_preview"] = [clip_map[c] for c in clip_ids_ordered if c in clip_map]
+            del d["_clip_ids"]
+
         return items, int(total)
 
     async def rename_export(self, export_id: int, name: str) -> None:
@@ -326,10 +384,35 @@ class MontageDB:
             )
             await conn.commit()
 
-    async def delete_export(self, export_id: int) -> bool:
+    async def delete_export(self, export_id: int) -> Optional[str]:
+        """删除单条记录，返回 output_path（调用方决定是否删除文件），不存在返回 None。"""
         async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
-                "DELETE FROM montage_exports WHERE id = ?", (int(export_id),)
+                "SELECT output_path FROM montage_exports WHERE id = ?", (int(export_id),)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            output_path = row["output_path"]
+            await conn.execute("DELETE FROM montage_exports WHERE id = ?", (int(export_id),))
+            await conn.commit()
+        return output_path or ""
+
+    async def delete_exports_batch(self, export_ids: list[int]) -> list[str]:
+        """批量删除，返回所有 output_path 列表。"""
+        if not export_ids:
+            return []
+        placeholders = ",".join("?" * len(export_ids))
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                f"SELECT output_path FROM montage_exports WHERE id IN ({placeholders})",
+                export_ids,
+            )
+            paths = [str(r["output_path"] or "") for r in await cur.fetchall()]
+            await conn.execute(
+                f"DELETE FROM montage_exports WHERE id IN ({placeholders})", export_ids
             )
             await conn.commit()
-        return cur.rowcount > 0
+        return paths

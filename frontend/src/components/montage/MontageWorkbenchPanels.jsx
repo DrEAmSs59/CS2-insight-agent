@@ -547,14 +547,9 @@ export function MontageOrchestrationTimeline({
                           </span>
                         ) : null}
                         {scorePair ? (
-                          <>
-                            <span className="rounded-md bg-sky-500/20 px-1.5 py-px font-mono font-semibold text-sky-100">
-                              {scorePair.leftLabel} {scorePair.left}
-                            </span>
-                            <span className="rounded-md bg-amber-500/20 px-1.5 py-px font-mono font-semibold text-amber-100">
-                              {scorePair.rightLabel} {scorePair.right}
-                            </span>
-                          </>
+                          <span className="rounded-md bg-white/[0.07] px-1.5 py-px font-mono font-semibold text-zinc-200">
+                            {scorePair.left}:{scorePair.right}
+                          </span>
                         ) : null}
                         {mapName ? (
                           <span className="truncate text-zinc-500" title={mapName}>
@@ -771,14 +766,9 @@ export function MontageMaterialPoolCard({
             </span>
           ) : null}
           {scorePair ? (
-            <>
-              <span className="rounded-md bg-sky-500/20 px-1.5 py-px font-mono text-[10px] font-semibold text-sky-100">
-                {scorePair.leftLabel} {scorePair.left}
-              </span>
-              <span className="rounded-md bg-amber-500/20 px-1.5 py-px font-mono text-[10px] font-semibold text-amber-100">
-                {scorePair.rightLabel} {scorePair.right}
-              </span>
-            </>
+            <span className="rounded-md bg-white/[0.07] px-1.5 py-px font-mono text-[10px] font-semibold text-zinc-200">
+              {scorePair.left}:{scorePair.right}
+            </span>
           ) : null}
         </div>
 

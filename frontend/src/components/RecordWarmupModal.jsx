@@ -379,6 +379,7 @@ export default function RecordWarmupModal({
             povTeamcounterNumeric={opts.pov_teamcounter_numeric}
             onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
           />
+
           </div>
         </div>
 

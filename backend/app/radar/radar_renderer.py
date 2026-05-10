@@ -24,6 +24,8 @@ _DOT_RADIUS_POV   = 6
 _DOT_RADIUS_ALIVE = 5
 _DOT_RADIUS_DEAD  = 3
 
+_SS = 3  # 超采样倍率（抗锯齿）
+
 
 # ---------------------------------------------------------------------------
 # 确保 awpy 地图资源存在（仅 prerender 路径需要）
@@ -147,6 +149,30 @@ def _build_color_indices(players: list[dict[str, Any]]) -> dict[str, int]:
 # PIL 单帧渲染（快速，无 matplotlib）
 # ---------------------------------------------------------------------------
 
+def _draw_dot_ss(
+    draw: ImageDraw.ImageDraw,
+    cx: float,
+    cy: float,
+    radius: int,
+    fill: tuple[int, int, int, int],
+    *,
+    ss: int,
+    pov_ring: bool = False,
+) -> None:
+    """在超采样坐标系中绘制平滑实心圆（无描边）。"""
+    scx = cx * ss
+    scy = cy * ss
+    sr = radius * ss
+    draw.ellipse((scx - sr, scy - sr, scx + sr, scy + sr), fill=fill)
+    if pov_ring:
+        ring = sr + 3 * ss
+        draw.ellipse(
+            (scx - ring, scy - ring, scx + ring, scy + ring),
+            outline=(255, 255, 255, 220),
+            width=max(1, ss),
+        )
+
+
 def _render_frame_pil(
     background: Image.Image,
     players: list[dict[str, Any]],
@@ -154,7 +180,7 @@ def _render_frame_pil(
     color_idx_by_id: dict[str, int],
     circle_mask: Image.Image,
 ) -> Image.Image:
-    """在预渲染背景上用 PIL 绘制玩家点。
+    """在预渲染背景上用 PIL 绘制玩家点（3× 超采样抗锯齿，无黑框）。
 
     background 已经是带圆形边框的 RGBA 画布（来自 prerender_map_background）。
     玩家点绘制到透明图层，用 circle_mask 裁掉边界溢出部分，再合成到背景上，
@@ -162,9 +188,10 @@ def _render_frame_pil(
     """
     size = transform.canvas_size
 
-    # 玩家点单独画到透明图层
-    dot_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(dot_layer)
+    # 超采样画布
+    big = size * _SS
+    dot_layer_big = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(dot_layer_big)
 
     for player in players:
         try:
@@ -182,32 +209,18 @@ def _render_frame_pil(
         alpha     = 255 if is_alive else 90
 
         cx, cy = transform.world_to_canvas(wx, wy)
-        cx, cy = int(round(cx)), int(round(cy))
-
         radius = _DOT_RADIUS_POV if is_pov else (_DOT_RADIUS_ALIVE if is_alive else _DOT_RADIUS_DEAD)
         fill   = _hex_to_rgba(hex_color, alpha)
 
-        # 外圈黑色描边
-        outline_r = radius + 1
-        draw.ellipse(
-            (cx - outline_r, cy - outline_r, cx + outline_r, cy + outline_r),
-            fill=(0, 0, 0, min(alpha + 40, 255)),
-        )
-        # 内圈彩色填充
-        draw.ellipse(
-            (cx - radius, cy - radius, cx + radius, cy + radius),
-            fill=fill,
-        )
-        # POV 玩家额外白环
-        if is_pov and is_alive:
-            ring = radius + 3
-            draw.ellipse(
-                (cx - ring, cy - ring, cx + ring, cy + ring),
-                outline=(255, 255, 255, 200),
-                width=1,
-            )
+        _draw_dot_ss(draw, cx, cy, radius, fill, ss=_SS, pov_ring=(is_pov and is_alive))
 
-    # 用 circle_mask 裁掉边界溢出的玩家点（circle_mask padding=1 略小于背景圆）
+    # 超采样缩回原始尺寸（LANCZOS 自带 AA）
+    try:
+        dot_layer = dot_layer_big.resize((size, size), Image.Resampling.LANCZOS)
+    except AttributeError:
+        dot_layer = dot_layer_big.resize((size, size), Image.LANCZOS)  # type: ignore
+
+    # 用 circle_mask 裁掉边界溢出的玩家点
     clipped_dots = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     clipped_dots.paste(dot_layer, (0, 0), circle_mask)
 

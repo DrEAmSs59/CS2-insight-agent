@@ -226,6 +226,9 @@ def apply_radar_overlay_to_clip(
     radar_dir = tmpdir / f"radar_frames_{index:03d}"
     radar_dir.mkdir(parents=True, exist_ok=True)
 
+    # Demo 解析路径：从 .dem 文件按录制 tick 区间提取位置数据。
+    # 数据来源是 demo tick（64-128 Hz），无 GSI 频率过低导致的闪烁，
+    # 颜色直接读 player_color 字段，准确无误。
     try:
         timeline = extract_radar_timeline(
             demo_path=meta["demo_path"],

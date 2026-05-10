@@ -4,10 +4,10 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Download,
   Eye,
   EyeOff,
   Pencil,
+  ScanSearch,
   Trash2,
 } from "lucide-react";
 import DemoScoreboardPreview from "./DemoScoreboardPreview";
@@ -99,8 +99,8 @@ export default function DemoTable({
   highlightQuery,
   steamHighlightQuery,
   onRename,
-  onLoadRow,
   onDelete,
+  onAnalyze,
 }) {
   const iconBtn =
     "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-zinc-500 transition-colors duration-150 hover:bg-white/[0.06] hover:text-zinc-200 active:bg-white/[0.09]";
@@ -195,10 +195,11 @@ export default function DemoTable({
               <Fragment key={id}>
                 <tr
                   className={[
-                    "group/row border-b border-white/[0.04] transition-[background-color,border-color] duration-150 last:border-b-0",
+                    "group/row cursor-pointer border-b border-white/[0.04] transition-[background-color,border-color] duration-150 last:border-b-0",
                     expanded ? "border-b-0" : "",
                     checked ? "bg-cs2-orange/[0.055]" : "hover:bg-white/[0.035]",
                   ].join(" ")}
+                  onClick={() => onAnalyze?.(it)}
                 >
                   <td
                     className={[
@@ -240,7 +241,9 @@ export default function DemoTable({
                           比分预览
                         </span>
                       </button>
-                      <DemoRowCheckbox checked={checked} onToggle={() => onToggleSelect(id)} title={`选择 ${title}`} />
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <DemoRowCheckbox checked={checked} onToggle={() => onToggleSelect(id)} title={`选择 ${title}`} />
+                      </span>
                     </div>
                   </td>
                   <td className="max-w-[240px] align-middle px-2 py-2">
@@ -304,10 +307,10 @@ export default function DemoTable({
                       ))}
                     </div>
                   </td>
-                  <td className="align-middle px-1 py-2">
+                  <td className="align-middle px-1 py-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap items-center justify-end gap-0.5 opacity-90 transition-opacity group-hover/row:opacity-100">
-                      <button type="button" className={iconBtn} title="载入到工作台" onClick={() => onLoadRow(it)}>
-                        <Download className="h-3.5 w-3.5" />
+                      <button type="button" className={iconBtn} title="战绩 / 高光分析" onClick={() => onAnalyze?.(it)}>
+                        <ScanSearch className="h-3.5 w-3.5" />
                       </button>
                       <button type="button" className={iconBtn} title="重命名展示名" onClick={() => onRename(it)}>
                         <Pencil className="h-3.5 w-3.5" />

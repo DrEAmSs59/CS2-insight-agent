@@ -34,13 +34,17 @@ class DemoDB:
                     total_rounds INTEGER,
                     team_a_score INTEGER,
                     team_b_score INTEGER,
+                    team_a_name TEXT,
+                    team_b_name TEXT,
                     duration_mins REAL,
                     match_date TEXT,
                     status    TEXT NOT NULL DEFAULT 'pending',
                     added_at  TEXT NOT NULL,
                     parsed_at TEXT,
                     error_msg TEXT,
-                    display_name TEXT
+                    display_name TEXT,
+                    source TEXT,
+                    remark TEXT
                 )
                 """,
             )
@@ -119,6 +123,14 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN match_date TEXT")
             if "display_name" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN display_name TEXT")
+            if "team_a_name" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN team_a_name TEXT")
+            if "team_b_name" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN team_b_name TEXT")
+            if "source" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN source TEXT")
+            if "remark" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN remark TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
             await conn.execute(
@@ -165,16 +177,24 @@ class DemoDB:
             )
             await conn.commit()
 
-    async def add_demo(self, path: str, file_size: int | None = None) -> tuple[int, bool]:
+    async def add_demo(
+        self,
+        path: str,
+        file_size: int | None = None,
+        source: str | None = None,
+        status: str = "pending",
+        added_at: str | None = None,
+    ) -> tuple[int, bool]:
         """返回 (id, inserted)。path 已存在时 inserted=False，调用方应跳过后续轻量解析以加速扫描。"""
         p = Path(path)
+        final_added_at = added_at or utc_now_iso()
         async with aiosqlite.connect(self.db_path) as conn:
             cur = await conn.execute(
                 """
-                INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at)
-                VALUES (?, ?, ?, 'pending', ?)
+                INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (str(p), p.name, file_size, utc_now_iso()),
+                (str(p), p.name, file_size, status, final_added_at, source),
             )
             await conn.commit()
             if cur.rowcount == 0:
@@ -204,29 +224,62 @@ class DemoDB:
             )
             await conn.commit()
 
-    async def update_lightweight_meta(self, demo_path: str, meta: dict[str, Any]) -> None:
+    async def update_lightweight_meta(self, demo_path: str, meta: dict[str, Any], source: str | None = None) -> None:
         async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute(
-                """
-                UPDATE demo_files
-                SET map_name = ?,
-                    total_rounds = ?,
-                    team_a_score = ?,
-                    team_b_score = ?,
-                    duration_mins = ?,
-                    match_date = ?
-                WHERE path = ?
-                """,
-                (
-                    meta.get("map_name"),
-                    meta.get("total_rounds"),
-                    meta.get("team_a_score"),
-                    meta.get("team_b_score"),
-                    meta.get("duration_mins"),
-                    meta.get("match_date"),
-                    demo_path,
-                ),
-            )
+            if source:
+                await conn.execute(
+                    """
+                    UPDATE demo_files
+                    SET map_name = ?,
+                        total_rounds = ?,
+                        team_a_score = ?,
+                        team_b_score = ?,
+                        team_a_name = ?,
+                        team_b_name = ?,
+                        duration_mins = ?,
+                        match_date = ?,
+                        source = ?
+                    WHERE path = ?
+                    """,
+                    (
+                        meta.get("map_name"),
+                        meta.get("total_rounds"),
+                        meta.get("team_a_score"),
+                        meta.get("team_b_score"),
+                        meta.get("team_a_name"),
+                        meta.get("team_b_name"),
+                        meta.get("duration_mins"),
+                        meta.get("match_date"),
+                        source,
+                        demo_path,
+                    ),
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE demo_files
+                    SET map_name = ?,
+                        total_rounds = ?,
+                        team_a_score = ?,
+                        team_b_score = ?,
+                        team_a_name = ?,
+                        team_b_name = ?,
+                        duration_mins = ?,
+                        match_date = ?
+                    WHERE path = ?
+                    """,
+                    (
+                        meta.get("map_name"),
+                        meta.get("total_rounds"),
+                        meta.get("team_a_score"),
+                        meta.get("team_b_score"),
+                        meta.get("team_a_name"),
+                        meta.get("team_b_name"),
+                        meta.get("duration_mins"),
+                        meta.get("match_date"),
+                        demo_path,
+                    ),
+                )
             await conn.commit()
 
     async def save_result(self, demo_path: str, result: dict[str, Any]) -> None:
@@ -355,9 +408,12 @@ class DemoDB:
 
     @staticmethod
     def _build_demo_filters_sql(f: DemoListFilters) -> tuple[str, list[Any], bool]:
-        """返回 ``(where_sql, params, need_player_join)``；``where_sql`` 以 ``WHERE 1=1`` 开头。"""
+        """返回 ``(where_sql, params, need_player_join)``；``where_sql`` 以 ``WHERE 1=1`` 开头。
+
+        主库列表始终排除 ``status='pending'``（待入库 staging，仅 ``GET /api/demos/discovered`` 展示）。
+        """
         params: list[Any] = []
-        parts: list[str] = ["WHERE 1=1"]
+        parts: list[str] = ["WHERE 1=1", "d.status != 'pending'"]
         nq = f.get("name_query")
         if isinstance(nq, str) and nq.strip():
             s = nq.strip()
@@ -438,7 +494,7 @@ class DemoDB:
 
     _LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
-               d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.duration_mins, d.match_date,
+               d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
                r.result_json, r.created_at AS result_created_at
         """
 
@@ -630,13 +686,18 @@ class DemoDB:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(sql, params_ext)
             rows = await cur.fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            item = dict(row)
-            raw = item.pop("result_json", None)
-            item["result"] = json.loads(raw) if raw else None
-            out.append(item)
-        return out
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                raw = item.pop("result_json", None)
+                item["result"] = json.loads(raw) if raw else None
+                players_cur = await conn.execute(
+                    "SELECT player_name AS name, team_number, team_name, kills, deaths, assists, kd FROM demo_player_stats WHERE demo_id = ?",
+                    (item["id"],),
+                )
+                item["players"] = [dict(pr) for pr in await players_cur.fetchall()]
+                out.append(item)
+            return out
 
     async def get_demo_list_item(self, demo_id: int) -> Optional[dict[str, Any]]:
         """与 ``list_demos`` 单条结构一致（含 ``result``），供跨页载入选中等。"""
@@ -657,6 +718,13 @@ class DemoDB:
         item = dict(row)
         raw = item.pop("result_json", None)
         item["result"] = json.loads(raw) if raw else None
+        async with aiosqlite.connect(self.db_path) as conn_p:
+            conn_p.row_factory = aiosqlite.Row
+            players_cur = await conn_p.execute(
+                "SELECT player_name AS name, team_number, team_name, kills, deaths, assists, kd FROM demo_player_stats WHERE demo_id = ?",
+                (item["id"],),
+            )
+            item["players"] = [dict(pr) for pr in await players_cur.fetchall()]
         return item
 
     async def count_demos(
@@ -756,6 +824,45 @@ class DemoDB:
             )
             await conn.commit()
             return cur.rowcount > 0
+
+    async def update_remark(self, demo_id: int, remark: str | None) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "UPDATE demo_files SET remark = ? WHERE id = ?",
+                (remark, demo_id),
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    async def list_discovered_demos(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        name_query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """列出已发现但尚未入库（status='pending'）的 demo。"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            sql = "SELECT id, path, filename, file_size, source, added_at FROM demo_files WHERE status = 'pending'"
+            params: list[Any] = []
+            if name_query:
+                sql += " AND filename LIKE ?"
+                params.append(f"%{name_query}%")
+            sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            cur = await conn.execute(sql, params)
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def count_discovered_demos(self, name_query: str | None = None) -> int:
+        async with aiosqlite.connect(self.db_path) as conn:
+            sql = "SELECT COUNT(*) FROM demo_files WHERE status = 'pending'"
+            params: list[Any] = []
+            if name_query:
+                sql += " AND filename LIKE ?"
+                params.append(f"%{name_query}%")
+            cur = await conn.execute(sql, params)
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
 
     async def zip_unchanged_since_extract(self, zip_path: str, mtime_ns: int, size_bytes: int) -> bool:
         """若库中已记录同一 zip 且 mtime+大小未变，则不应再次解压（避免每次扫描生成 _fromzip_*_N.dem）。"""
