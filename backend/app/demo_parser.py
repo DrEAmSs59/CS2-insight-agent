@@ -2763,7 +2763,7 @@ class DemoAnalyzer:
                     death_tick=last_death,
                     source_ticks=source_ticks,
                     source_rounds=[sr for (_s, _e, sr, _er, _d) in ftd_segments],
-                    source_round_ends=[er for (_s, _e, sr, _er, _d) in ftd_segments],
+                    source_round_ends=[_er for (_s, _e, sr, _er, _d) in ftd_segments],
                     compilation_kind="freeze_to_death",
                     fixed_segment_pacing=True,
                     freeze_to_death_round_filter=ftd_round_filter_out,
