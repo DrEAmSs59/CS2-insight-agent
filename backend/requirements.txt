@@ -10,5 +10,4 @@ openai>=1.40.0
 pydantic>=2.9.0
 aiosqlite>=0.20.0
 watchdog>=4.0.0
-awpy>=2.0.0
 matplotlib>=3.8.0

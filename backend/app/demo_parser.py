@@ -117,6 +117,8 @@ class Clip:
     # 导播剪辑按此列表逐个跳转，中间可插转场。非合集片段保持空列表。
     source_ticks: list[list[int]] = field(default_factory=list)
     source_rounds: list[int] = field(default_factory=list)
+    # 与 source_ticks 等长；freeze_to_death 每段 (start_round, end_round) 含端点，供前端按勾选子集入队切片
+    source_round_ends: list[int] = field(default_factory=list)
     compilation_kind: Optional[str] = None
     # 为 True 时：导播与入队合并忽略智能分段/开场结尾预留等 pacing（仍保留 POV 开关类字段的显式覆写）
     fixed_segment_pacing: bool = False
@@ -2761,6 +2763,7 @@ class DemoAnalyzer:
                     death_tick=last_death,
                     source_ticks=source_ticks,
                     source_rounds=[sr for (_s, _e, sr, _er, _d) in ftd_segments],
+                    source_round_ends=[er for (_s, _e, sr, _er, _d) in ftd_segments],
                     compilation_kind="freeze_to_death",
                     fixed_segment_pacing=True,
                     freeze_to_death_round_filter=ftd_round_filter_out,

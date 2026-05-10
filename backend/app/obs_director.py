@@ -106,6 +106,7 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "radar_sync_offset_sec",
     "source_ticks",
     "source_rounds",
+    "source_round_ends",
     "fixed_segment_pacing",
     "freeze_to_death_round_filter",
     "record_segments",
@@ -760,7 +761,42 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
     )
 
     if not kills:
-        has_single_segment_override = any(k in override for k in ("pre_first_sec", "post_last_sec"))
+        has_single_segment_override = isinstance(override, dict) and any(
+            k in override for k in ("pre_first_sec", "post_last_sec")
+        )
+        # 纯死亡锚点（含回合时间线 death 事件）：必须压在 death_tick 附近结束。
+        # 若沿用片段整体 end_tick（建议窗 often 为死亡 +4s），CS2 死亡视角约 2s 后会把观战切到
+        # 他人，后半段录到的已不是目标画面。
+        dt_only = _clip_death_tick(clip) if not has_single_segment_override else None
+        if dt_only is not None:
+            anchor_tick = int(dt_only)
+            seg_start = max(0, anchor_tick - PRE_FIRST)
+            if clip_min_start_tick > 0:
+                seg_start = max(seg_start, clip_min_start_tick)
+            val_po = override.get("post_last_sec")
+            if val_po is not None and str(val_po).strip():
+                post_ticks = max(0, int(float(val_po) * DEMO_TICK_RATE))
+            elif str(clip.get("timeline_source") or "").strip() == "round_timeline_event":
+                post_ticks = _env_int(
+                    "CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS",
+                    int(DEMO_TICK_RATE * 2.0),
+                )
+            else:
+                post_ticks = POST_LAST
+            seg_end = anchor_tick + post_ticks
+            if clip_max_tick > 0:
+                seg_end = min(seg_end, clip_max_tick)
+            if seg_end <= seg_start:
+                seg_end = seg_start + 1
+            segment = (seg_start, seg_end)
+            logger.info(
+                "[build_segments] death_only_anchor clip_id=%s anchor=%s segment=%s",
+                clip.get("clip_id"),
+                anchor_tick,
+                segment,
+            )
+            return [segment]
+
         if not has_single_segment_override:
             return [(start_tick, end_tick)]
 

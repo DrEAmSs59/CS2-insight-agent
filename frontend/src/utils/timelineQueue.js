@@ -110,6 +110,19 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
   const st = fe != null && Number.isFinite(Number(fe)) ? Number(fe) : 0;
   let et = en != null && Number.isFinite(Number(en)) ? Number(en) : st + 64 * 45;
   if (et <= st) et = st + 64 * 10;
+  /** 本回合目标死亡后短留白即结束，避免死亡观战结束镜头切到他人仍长时间录制 */
+  const ROUND_DEATH_TAIL_TICKS = Math.round(64 * 2.0);
+  const events = Array.isArray(roundRow?.events) ? roundRow.events : [];
+  const deathTicks = events
+    .filter((e) => e?.record_type === "death" || e?.type === "death")
+    .map((e) => Number(e?.tick))
+    .filter((t) => Number.isFinite(t) && t > 0);
+  const lastDeathTick = deathTicks.length ? Math.max(...deathTicks) : null;
+  if (lastDeathTick != null) {
+    const cap = lastDeathTick + ROUND_DEATH_TAIL_TICKS;
+    et = Math.min(et, cap);
+    if (et <= st) et = st + 64;
+  }
   const client_clip_uid = `tl_round_${Number.isFinite(rn) ? rn : "x"}`;
   const sum = roundRow?.summary && typeof roundRow.summary === "object" ? roundRow.summary : {};
   const ps = roundRow?.player_stats && typeof roundRow.player_stats === "object" ? roundRow.player_stats : {};

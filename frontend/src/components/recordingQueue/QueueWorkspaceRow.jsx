@@ -16,6 +16,10 @@ import {
   friendlyClipTitleForQueue,
   isTimelineSourceClip,
 } from "../../utils/montageUtils";
+import {
+  freezeToDeathQueueRoundBadgeText,
+  isFreezeToDeathCompilation,
+} from "../../utils/freezeToDeathRoundFilter";
 import { timelineQueueMetaOneLiner } from "../../utils/timelineQueue";
 
 const CAT_ICON = {
@@ -110,12 +114,19 @@ export default function QueueWorkspaceRow({
   const demoLabel = String(item.demoFilename || item.demoPath || "").trim() || "—";
   const playerLabel = String(item.targetPlayer || "").trim() || "—";
   const mapName = String(cd.map_name || cd.map || "").trim() || "—";
-  const roundLabel =
-    cd.round != null && cd.score_own != null && cd.score_opp != null
-      ? `R${cd.round} · ${cd.score_own}:${cd.score_opp}`
-      : cd.round != null
-        ? `R${cd.round}`
-        : "—";
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd);
+  const roundLabel = (() => {
+    if (isFreezeToDeathCompilation(cd)) {
+      return ftdRoundBadge || "—";
+    }
+    if (cd.round != null && cd.score_own != null && cd.score_opp != null) {
+      return `R${cd.round} · ${cd.score_own}:${cd.score_opp}`;
+    }
+    if (cd.round != null) {
+      return `R${cd.round}`;
+    }
+    return "—";
+  })();
   const kills = Number(cd.kill_count) || 0;
   const estSec = estimateItemRecordSeconds(item, globalPacing);
   const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec) : "";

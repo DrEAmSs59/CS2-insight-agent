@@ -28,24 +28,13 @@ _SS = 3  # 超采样倍率（抗锯齿）
 
 
 # ---------------------------------------------------------------------------
-# 确保 awpy 地图资源存在（仅 prerender 路径需要）
+# 内置雷达资源（backend/assets/bundled_radar_maps，随仓库分发）
 # ---------------------------------------------------------------------------
 
-def _ensure_awpy_maps() -> None:
-    """若 awpy 地图文件夹为空则自动触发下载。"""
-    try:
-        from awpy.data import MAPS_DIR
-        if not MAPS_DIR.exists() or not any(MAPS_DIR.glob("*.png")):
-            logger.info("awpy 地图资源不存在，正在下载…")
-            import subprocess, sys
-            subprocess.run(
-                [sys.executable, "-m", "awpy", "get", "maps"],
-                check=True,
-                timeout=120,
-            )
-            logger.info("awpy 地图资源下载完成")
-    except Exception as exc:
-        logger.warning("awpy 地图资源检查/下载失败（首次使用请手动运行 `awpy get maps`）: %s", exc)
+def _warn_if_bundled_radar_missing() -> None:
+    from app.radar.radar_map_assets import warn_if_bundle_incomplete
+
+    warn_if_bundle_incomplete()
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +238,9 @@ def render_radar_frames(
     from app.radar.radar_background import prerender_map_background
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_awpy_maps()
+    _warn_if_bundled_radar_missing()
 
-    # awpy 地图名格式（小写，带前缀）
+    # 地图名格式（与 bundled map-data.json 键一致：小写，带前缀）
     map_key = map_name.lower().strip()
     if not map_key.startswith(("de_", "cs_", "ar_", "gg_", "dm_", "mm_")):
         map_key = "de_" + map_key
@@ -264,9 +253,10 @@ def render_radar_frames(
         )
     except Exception as exc:
         logger.error("雷达背景预渲染失败 [map=%s]: %s", map_key, exc)
-        if "not in awpy MAP_DATA" in str(exc) or "FileNotFoundError" in type(exc).__name__:
+        if isinstance(exc, (KeyError, FileNotFoundError)):
             raise RuntimeError(
-                f"缺少 awpy 雷达底图: {map_key}。请在后端环境中运行 `python -m awpy get maps`"
+                f"缺少内置雷达底图: {map_key}。请确认 backend/assets/bundled_radar_maps 含 "
+                f"map-data.json 与 PNG；开发机可运行 backend/scripts/vendor_bundled_radar_maps.py 更新。"
             ) from exc
         background = Image.new("RGBA", (size, size), (0, 0, 0, 200))
         if circular_frame:
