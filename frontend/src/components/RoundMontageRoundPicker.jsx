@@ -36,7 +36,7 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
       </div>
       {picked.length === 0 ? (
         <p className="mb-1 text-[10px] leading-snug text-amber-400/90">
-          未勾选时不可加入录制队列。解析在未勾选时仍按整局合规非赛后回合生成合辑；勾选后再解析可只生成所选回合。
+          未勾选时不可加入录制队列。解析在未勾选时仍按整局合规非赛后回合生成合辑；勾选后再解析可只生成所选回合；整局合辑也可在格内保留默认全选后取消勾选，入队时按勾选子集切片。
         </p>
       ) : null}
       <div className="max-h-24 overflow-y-auto rounded border border-white/[0.06] bg-black/35 p-1.5">

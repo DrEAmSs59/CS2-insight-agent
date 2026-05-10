@@ -18,6 +18,10 @@ import {
   isClipPacingAndPovLocked,
   queueBlockBadgeClass,
 } from "../utils/montageUtils";
+import {
+  freezeToDeathQueueRoundBadgeText,
+  isFreezeToDeathCompilation,
+} from "../utils/freezeToDeathRoundFilter";
 import { estimateItemRecordSeconds } from "../utils/recordingQueueDerive";
 import { timelineQueueMetaOneLiner } from "../utils/timelineQueue";
 import { AiScoreBadge } from "./ClipCard";
@@ -587,6 +591,7 @@ function QueueItemCard({
   const killBadge = getMontageBlockShortLabel(cd);
   const playerName = String(item.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd);
   const own = cd.score_own != null ? Number(cd.score_own) : null;
   const opp = cd.score_opp != null ? Number(cd.score_opp) : null;
   const hasScorePair = own != null && opp != null && Number.isFinite(own) && Number.isFinite(opp);
@@ -625,7 +630,11 @@ function QueueItemCard({
 
       {/* 比分 / 地图行 */}
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        {round != null ? (
+        {isFreezeToDeathCompilation(cd) && ftdRoundBadge ? (
+          <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+            {ftdRoundBadge}
+          </span>
+        ) : round != null ? (
           <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
             R{round}
           </span>

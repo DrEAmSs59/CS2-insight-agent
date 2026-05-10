@@ -39,7 +39,7 @@ class RadarLiveSession:
 
     @staticmethod
     def _normalize_map_name(raw: str) -> str:
-        """Normalize to awpy map key: lowercase, add de_ prefix if missing."""
+        """Normalize to bundled map-data key: lowercase, add de_ prefix if missing."""
         key = raw.lower().strip()
         if key and not key.startswith(("de_", "cs_", "ar_", "gg_", "dm_", "mm_")):
             key = "de_" + key
@@ -65,7 +65,7 @@ class RadarLiveSession:
         self._demo_resume_wall: Optional[float] = None
         self._finalized = False
 
-        # Pre-render background eagerly (may take ~1s with awpy)
+        # Pre-render background eagerly（内置 PNG + map-data）
         output_dir.mkdir(parents=True, exist_ok=True)
         self._bg_path = output_dir / "radar_bg.png"
         self._transform = None
@@ -228,7 +228,7 @@ class RadarLiveSession:
     ) -> list[Path]:
         """
         Render radar frame PNG sequence from cached GSI snapshots.
-        Called by radar_composer.py instead of the slow awpy pipeline.
+        Called by radar_composer.py instead of the slower disk-cache pipeline.
 
         Player positions are linearly interpolated between adjacent GSI
         snapshots so there is no visible stepping/flickering at the GSI

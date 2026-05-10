@@ -21,6 +21,7 @@ import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
+  sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
 import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
@@ -1205,31 +1206,35 @@ export default function App() {
     const candidates = clips.filter(
       (c) => c.client_clip_uid && selectedClientClipUids.has(c.client_clip_uid)
     );
-    const toAdd = candidates
-      .filter((c) => {
-        if (!isFreezeToDeathCompilation(c)) return true;
-        return ftdPicksSorted.length > 0;
-      })
-      .map((c) => {
-        const row = {
-          demoPath: meta.demoPath,
-          demoFilename: meta.demoFilename,
-          targetPlayer: meta.targetPlayer,
-          targetPlayerUserId: meta.targetPlayerUserId,
-          targetSteamId: meta.targetSteamId,
-          clipId: c.clip_id,
-          clientClipUid: c.client_clip_uid,
-          clipData: { ...c },
-        };
-        if (isFreezeToDeathCompilation(c) && ftdPicksSorted.length) {
-          return { ...row, freezeToDeathQueueRounds: [...ftdPicksSorted] };
+    const toAdd = [];
+    for (const c of candidates) {
+      const row = {
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: c.clip_id,
+        clientClipUid: c.client_clip_uid,
+        clipData: { ...c },
+      };
+      if (isFreezeToDeathCompilation(c)) {
+        const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
+        if (!sliced.ok) {
+          setProgressText(sliced.error);
+          return;
         }
-        return row;
-      });
-    if (!toAdd.length) {
-      if (candidates.some((c) => isFreezeToDeathCompilation(c)) && !ftdPicksSorted.length) {
-        setProgressText("「回合合集」须至少勾选一个回合才能加入队列。");
+        toAdd.push({
+          ...row,
+          clientClipUid: sliced.clip.client_clip_uid,
+          clipData: sliced.clip,
+          freezeToDeathQueueRounds: [...ftdPicksSorted],
+        });
+      } else {
+        toAdd.push(row);
       }
+    }
+    if (!toAdd.length) {
       return;
     }
     addToQueue(toAdd);

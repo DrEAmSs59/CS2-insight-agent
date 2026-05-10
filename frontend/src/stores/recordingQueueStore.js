@@ -63,6 +63,13 @@ export function clipVictimPovEnqueueEligible(clipData) {
 /** 与队列抽屉「击杀者视角」资格判定一致 */
 export function clipKillerPovEnqueueEligible(clipData) {
   if (!clipData || typeof clipData !== "object") return false;
+  // 回合时间线上的「被击杀」条目：主段已锚在死亡附近，自动追加击杀者 POV 会像又切到别人身上。
+  if (
+    String(clipData.timeline_source || "").trim() === "round_timeline_event" &&
+    String(clipData.timeline_record_kind || "").trim() === "death"
+  ) {
+    return false;
+  }
   const killers = Array.isArray(clipData.killers) ? clipData.killers : [];
   const hasKillerList = killers.some((v) => String(v ?? "").trim().length > 0);
   const kind = clipData.compilation_kind;

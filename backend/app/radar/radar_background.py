@@ -8,6 +8,7 @@ from typing import NamedTuple, Optional
 
 from PIL import Image
 
+from app.radar.radar_map_assets import lookup_map_data, resolve_map_png_path
 from app.radar.radar_renderer import _apply_circular_radar_frame
 
 logger = logging.getLogger(__name__)
@@ -32,36 +33,6 @@ class RadarTransform(NamedTuple):
         return cx, cy
 
 
-def _get_awpy_map_data(map_name: str) -> dict:
-    try:
-        from awpy.data.map_data import MAP_DATA  # type: ignore[import]
-        data = MAP_DATA.get(map_name) or MAP_DATA.get(map_name.lower())
-        if data is None:
-            raise KeyError(
-                f"Map {map_name!r} not in awpy MAP_DATA; available: {list(MAP_DATA.keys())[:10]}"
-            )
-        return dict(data)
-    except ImportError as exc:
-        raise RuntimeError("awpy not installed; run: pip install awpy") from exc
-
-
-def _get_awpy_map_png(map_name: str) -> Path:
-    try:
-        from awpy.data import MAPS_DIR  # type: ignore
-        for candidate in [
-            MAPS_DIR / f"{map_name}.png",
-            MAPS_DIR / f"{map_name}_radar.png",
-        ]:
-            if candidate.exists():
-                return candidate
-        raise FileNotFoundError(
-            f"awpy map PNG not found for {map_name!r} in {MAPS_DIR}. "
-            "Run: awpy get maps"
-        )
-    except ImportError as exc:
-        raise RuntimeError("awpy not installed") from exc
-
-
 def prerender_map_background(
     map_name: str,
     canvas_size: int = 300,
@@ -75,12 +46,12 @@ def prerender_map_background(
         (background_rgba, transform): background is canvas_size×canvas_size RGBA;
         transform converts world→canvas pixel coordinates for PIL dot drawing.
     """
-    map_data = _get_awpy_map_data(map_name)
+    map_data = lookup_map_data(map_name)
     pos_x = float(map_data["pos_x"])
     pos_y = float(map_data["pos_y"])
     scale = float(map_data["scale"])
 
-    map_img = Image.open(_get_awpy_map_png(map_name)).convert("RGBA")
+    map_img = Image.open(resolve_map_png_path(map_name)).convert("RGBA")
     map_w, map_h = map_img.size
 
     # Diagonal-fit: all 4 corners inside circle

@@ -1,6 +1,6 @@
 /** 前端片段实例 id：与后端 clip_id 解耦，用于列表选中态与录制队列双向绑定 */
 
-function newClientClipUid() {
+export function newClientClipUid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `cc_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }

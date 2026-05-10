@@ -8,6 +8,10 @@ import {
 import { useRecordingQueue } from "../../stores/recordingQueueStore";
 import { AiScoreBadge } from "../ClipCard";
 import { getMontageBlockShortLabel, isClipPacingAndPovLocked, isRoundTimelineRoundClip } from "../../utils/montageUtils";
+import {
+  freezeToDeathQueueRoundBadgeText,
+  isFreezeToDeathCompilation,
+} from "../../utils/freezeToDeathRoundFilter";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 
 function FieldGroup({ icon: Icon, title, children }) {
@@ -70,6 +74,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const killBadge = getMontageBlockShortLabel(cd);
   const playerName = String(selectedItem.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(selectedItem, cd);
   const own = cd.score_own != null ? Number(cd.score_own) : null;
   const opp = cd.score_opp != null ? Number(cd.score_opp) : null;
   const hasScorePair = own != null && opp != null && Number.isFinite(own) && Number.isFinite(opp);
@@ -124,7 +129,11 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
                   </span>
                 </>
               ) : null}
-              {round != null ? (
+              {isFreezeToDeathCompilation(cd) && ftdRoundBadge ? (
+                <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+                  {ftdRoundBadge}
+                </span>
+              ) : round != null ? (
                 <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
                   R{round}
                 </span>

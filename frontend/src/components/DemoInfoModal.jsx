@@ -10,6 +10,8 @@ import {
 } from "../utils/clipClientUid";
 import {
   freezeToDeathDraftFromClipFilter,
+  isFreezeToDeathCompilation,
+  sliceFreezeToDeathClipForEnqueue,
 } from "../utils/freezeToDeathRoundFilter";
 import MatchScoreboard from "./MatchScoreboard";
 import PlayerSelect from "./PlayerSelect";
@@ -142,10 +144,12 @@ export default function DemoInfoModal({
     if (!demoId || !selectedPlayers.length) return;
     setParsing(true);
     setProgressText("正在解析高光时刻…");
-    try {
-      const { data } = await API.post(`/demos/${demoId}/analyze`, {
-        target_players: selectedPlayers,
-      });
+      try {
+        const ftdPicked = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
+        const { data } = await API.post(`/demos/${demoId}/analyze`, {
+          target_players: selectedPlayers,
+          freeze_to_death_rounds: ftdPicked.length ? ftdPicked : null,
+        });
       const playersOut = data.players || {};
       
       // 处理 UIDs
@@ -177,12 +181,30 @@ export default function DemoInfoModal({
       setActivePlayerTab(firstPlayer);
       setTab("clips");
       setProgressText("");
+
+      const metaRounds =
+        playersOut[firstPlayer]?.match_meta?.total_rounds ?? demoData?.match_meta?.total_rounds ?? 24;
+      const maxR = Math.max(1, Math.min(64, Number(metaRounds) || 24));
+      let ftdClip = null;
+      for (const pname of selectedPlayers) {
+        const pcs = playersOut[pname]?.clips || [];
+        const hit = pcs.find(
+          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
+        );
+        if (hit) {
+          ftdClip = hit;
+          break;
+        }
+      }
+      setFreezeToDeathDraft(
+        ftdClip ? freezeToDeathDraftFromClipFilter(ftdClip.freeze_to_death_round_filter, maxR) : { picked: [] }
+      );
     } catch (e) {
       setProgressText(`解析失败: ${e.response?.data?.detail || e.message}`);
     } finally {
       setParsing(false);
     }
-  }, [demoId, selectedPlayers]);
+  }, [demoId, selectedPlayers, freezeToDeathDraft]);
 
   const handleToggleClip = useCallback((uid) => {
     if (!uid || queuedClientClipUids.has(uid)) return;
@@ -196,29 +218,46 @@ export default function DemoInfoModal({
 
   const handleAddSelected = useCallback(() => {
     if (selectedClipUids.size === 0) return;
-    
-    // 合并所有已解析玩家的片段
+
+    const ftdPicksSorted = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
+
     const allClips = [];
-    Object.keys(parsedPlayers).forEach(pname => {
+    for (const pname of Object.keys(parsedPlayers)) {
       const pd = parsedPlayers[pname];
-      (pd.clips || []).forEach(c => {
-        if (c.client_clip_uid && selectedClipUids.has(c.client_clip_uid)) {
+      for (const c of pd.clips || []) {
+        if (!c.client_clip_uid || !selectedClipUids.has(c.client_clip_uid)) continue;
+        const base = {
+          demoPath: demoData?.path || "",
+          demoFilename: demoData?.filename || "",
+          targetPlayer: pname,
+          clipId: c.clip_id,
+          clientClipUid: c.client_clip_uid,
+          clipData: { ...c },
+        };
+        if (isFreezeToDeathCompilation(c)) {
+          const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
+          if (!sliced.ok) {
+            setProgressText(sliced.error);
+            return;
+          }
           allClips.push({
-            demoPath: demoData?.path || "",
-            demoFilename: demoData?.filename || "",
-            targetPlayer: pname,
-            clipId: c.clip_id,
-            clientClipUid: c.client_clip_uid,
-            clipData: c,
+            ...base,
+            clientClipUid: sliced.clip.client_clip_uid,
+            clipData: sliced.clip,
+            freezeToDeathQueueRounds: [...ftdPicksSorted],
           });
+        } else {
+          allClips.push(base);
         }
-      });
-    });
+      }
+    }
+
+    if (!allClips.length) return;
 
     onAddToQueue(allClips);
     setSelectedClipUids(new Set());
     setProgressText(`已将 ${allClips.length} 条片段加入录制队列`);
-  }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue]);
+  }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue, freezeToDeathDraft]);
 
   const handleSelectAll = useCallback(() => {
     setSelectedClipUids((prev) => {
