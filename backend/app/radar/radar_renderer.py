@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import io
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-matplotlib.use("Agg")  # 无头模式，必须在 pyplot import 之前
-import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
-# CS2 5 槽位颜色（与游戏内 player_color 0-4 对应，matplotlib hex 格式）
+# CS2 5 槽位颜色（与游戏内 player_color 0-4 对应）
 _SLOT_COLORS_HEX = [
     "#569CFF",  # 0: 蓝
     "#58D68D",  # 1: 绿
@@ -24,9 +20,13 @@ _SLOT_COLORS_HEX = [
 _DEAD_COLOR_HEX = "#808080"
 CIRCLE_BORDER_COLOR = (80, 230, 120, 230)
 
+_DOT_RADIUS_POV   = 6
+_DOT_RADIUS_ALIVE = 5
+_DOT_RADIUS_DEAD  = 3
+
 
 # ---------------------------------------------------------------------------
-# 确保 awpy 地图资源存在
+# 确保 awpy 地图资源存在（仅 prerender 路径需要）
 # ---------------------------------------------------------------------------
 
 def _ensure_awpy_maps() -> None:
@@ -47,7 +47,7 @@ def _ensure_awpy_maps() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 圆形边框工具（PIL 实现，保留高质量 AA）
+# 圆形遮罩 / 圆形边框（PIL，保留高质量 AA）
 # ---------------------------------------------------------------------------
 
 def _circle_mask(size: int, padding: int = 0) -> Image.Image:
@@ -70,7 +70,7 @@ def _apply_circular_radar_frame(
     size: int,
     border_color: tuple[int, int, int, int] = CIRCLE_BORDER_COLOR,
     border_width: int = 2,
-    background_color: tuple[int, int, int, int] = (0, 0, 0, 200),
+    background_color: tuple[int, int, int, int] = (0, 0, 0, 140),
 ) -> Image.Image:
     radar = radar.convert("RGBA")
     if radar.size != (size, size):
@@ -121,6 +121,12 @@ def _apply_circular_radar_frame(
 # 颜色工具
 # ---------------------------------------------------------------------------
 
+def _hex_to_rgba(hex_color: str, alpha: int = 255) -> tuple[int, int, int, int]:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return r, g, b, alpha
+
+
 def _player_color_hex(player: dict[str, Any], color_index: int) -> str:
     slot = player.get("slot_color_index", -1)
     if isinstance(slot, int) and 0 <= slot < len(_SLOT_COLORS_HEX):
@@ -138,86 +144,77 @@ def _build_color_indices(players: list[dict[str, Any]]) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# awpy 单帧渲染 → PIL Image
+# PIL 单帧渲染（快速，无 matplotlib）
 # ---------------------------------------------------------------------------
 
-def _render_frame_awpy(
-    map_name: str,
+def _render_frame_pil(
+    background: Image.Image,
     players: list[dict[str, Any]],
+    transform: Any,                        # RadarTransform
     color_idx_by_id: dict[str, int],
-    output_size: int,
-) -> Image.Image | None:
-    from awpy.plot import plot as awpy_plot  # lazy import
+    circle_mask: Image.Image,
+) -> Image.Image:
+    """在预渲染背景上用 PIL 绘制玩家点。
 
-    points: list[tuple[float, float, float]] = []
-    point_settings: list[dict[str, Any]] = []
+    background 已经是带圆形边框的 RGBA 画布（来自 prerender_map_background）。
+    玩家点绘制到透明图层，用 circle_mask 裁掉边界溢出部分，再合成到背景上，
+    这样背景的圆形边框像素永远不会被破坏。
+    """
+    size = transform.canvas_size
+
+    # 玩家点单独画到透明图层
+    dot_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(dot_layer)
 
     for player in players:
         try:
-            x = float(player["x"])
-            y = float(player["y"])
-            z = float(player.get("z", 0.0))
+            wx = float(player["x"])
+            wy = float(player["y"])
         except (KeyError, TypeError, ValueError):
             continue
 
         is_alive = bool(player.get("is_alive", True))
-        is_pov = bool(player.get("is_pov", False))
+        is_pov   = bool(player.get("is_pov", False))
 
         sid = str(player.get("steamid64") or player.get("steamid") or player.get("name") or "")
-        ci = color_idx_by_id.get(sid, 0)
-        color = _player_color_hex(player, ci) if is_alive else _DEAD_COLOR_HEX
+        ci  = color_idx_by_id.get(sid, 0)
+        hex_color = _player_color_hex(player, ci) if is_alive else _DEAD_COLOR_HEX
+        alpha     = 255 if is_alive else 90
 
-        points.append((x, y, z))
-        # 不传 hp/armor/direction —— 避免 awpy 内部 NoneType 崩溃，
-        # 也避免显示 HP/armor 条（minimap 上不需要）。
-        # direction=None 时 awpy 不会检查 hp，所以安全。
-        point_settings.append(
-            {
-                "marker": "o",
-                "color": color,
-                "size": 10 if is_pov else 7,
-                "alpha": 1.0 if is_alive else 0.35,
-            }
+        cx, cy = transform.world_to_canvas(wx, wy)
+        cx, cy = int(round(cx)), int(round(cy))
+
+        radius = _DOT_RADIUS_POV if is_pov else (_DOT_RADIUS_ALIVE if is_alive else _DOT_RADIUS_DEAD)
+        fill   = _hex_to_rgba(hex_color, alpha)
+
+        # 外圈黑色描边
+        outline_r = radius + 1
+        draw.ellipse(
+            (cx - outline_r, cy - outline_r, cx + outline_r, cy + outline_r),
+            fill=(0, 0, 0, min(alpha + 40, 255)),
         )
-
-    if not points:
-        return None
-
-    try:
-        fig, _ax = awpy_plot(
-            map_name,
-            points,
-            point_settings=point_settings,
+        # 内圈彩色填充
+        draw.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            fill=fill,
         )
-    except FileNotFoundError:
-        raise
-    except Exception as exc:
-        import traceback
-        logger.warning("awpy plot error [map=%s points=%d]: %s\n%s",
-                       map_name, len(points), exc, traceback.format_exc())
-        plt.close("all")
-        return None
+        # POV 玩家额外白环
+        if is_pov and is_alive:
+            ring = radius + 3
+            draw.ellipse(
+                (cx - ring, cy - ring, cx + ring, cy + ring),
+                outline=(255, 255, 255, 200),
+                width=1,
+            )
 
-    buf = io.BytesIO()
-    try:
-        fig.savefig(buf, format="png", facecolor="black", dpi=100)
-    except Exception as exc:
-        logger.warning("fig.savefig error: %s", exc)
-        plt.close(fig)
-        return None
-    finally:
-        plt.close(fig)
+    # 用 circle_mask 裁掉边界溢出的玩家点（circle_mask padding=1 略小于背景圆）
+    clipped_dots = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    clipped_dots.paste(dot_layer, (0, 0), circle_mask)
 
-    buf.seek(0)
-    img = Image.open(buf).copy()
-    img = img.convert("RGBA")
-
-    try:
-        img = img.resize((output_size, output_size), Image.Resampling.LANCZOS)
-    except AttributeError:
-        img = img.resize((output_size, output_size), Image.LANCZOS)  # type: ignore[attr-defined]
-
-    return img
+    # 合成：background（含完整圆形边框）+ 裁剪后的玩家点图层
+    result = background.copy()
+    result.alpha_composite(clipped_dots, (0, 0))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -231,18 +228,46 @@ def render_radar_frames(
     output_dir: Path,
     size: int = 300,
     clip_id: str | int | None = None,
-    pov_rotate: bool = False,       # awpy 暂不支持旋转，参数保留兼容
-    pov_zoom: float = 0.0,          # 同上
-    center_y_ratio: float = 0.5,    # 同上
+    pov_rotate: bool = False,       # 保留兼容，暂不使用
+    pov_zoom: float = 0.0,          # 保留兼容，暂不使用
+    center_y_ratio: float = 0.5,    # 保留兼容，暂不使用
     circular_frame: bool = True,
 ) -> list[Path]:
+    from app.radar.radar_background import prerender_map_background
+
     output_dir.mkdir(parents=True, exist_ok=True)
     _ensure_awpy_maps()
 
-    # awpy 地图名格式：de_dust2、cs_office 等（小写，带前缀）
+    # awpy 地图名格式（小写，带前缀）
     map_key = map_name.lower().strip()
     if not map_key.startswith(("de_", "cs_", "ar_", "gg_", "dm_", "mm_")):
         map_key = "de_" + map_key
+
+    # 预渲染背景（含圆形边框），失败则用纯黑圆
+    try:
+        background, transform = prerender_map_background(
+            map_name=map_key,
+            canvas_size=size,
+        )
+    except Exception as exc:
+        logger.error("雷达背景预渲染失败 [map=%s]: %s", map_key, exc)
+        if "not in awpy MAP_DATA" in str(exc) or "FileNotFoundError" in type(exc).__name__:
+            raise RuntimeError(
+                f"缺少 awpy 雷达底图: {map_key}。请在后端环境中运行 `python -m awpy get maps`"
+            ) from exc
+        background = Image.new("RGBA", (size, size), (0, 0, 0, 200))
+        if circular_frame:
+            background = _apply_circular_radar_frame(background, size=size)
+        transform = None
+
+    # 预生成圆形遮罩（只建一次，复用于所有帧）
+    circle_mask = _circle_mask(size, padding=1)
+
+    # 颜色索引一次性从整条时间线所有玩家里建好
+    all_players: list[dict[str, Any]] = []
+    for frame in timeline:
+        all_players.extend(frame.get("players", []))
+    color_idx_by_id = _build_color_indices(all_players)
 
     outputs: list[Path] = []
     last_img: Image.Image | None = None
@@ -251,29 +276,25 @@ def render_radar_frames(
         players = list(frame.get("players", []))
         # POV 最后绘制（在最上层）
         players.sort(key=lambda p: (1 if p.get("is_pov") else 0))
-        color_idx_by_id = _build_color_indices(players)
 
-        img: Image.Image | None = None
-        try:
-            img = _render_frame_awpy(map_key, players, color_idx_by_id, size)
-        except FileNotFoundError:
-            logger.error(
-                "awpy 找不到地图 %s 的雷达图，请先运行: awpy get maps", map_key
-            )
-            raise RuntimeError(
-                f"缺少 awpy 雷达底图: {map_key}。请在后端环境中运行 `python -m awpy get maps`"
-            )
+        if transform is not None and players:
+            try:
+                img = _render_frame_pil(
+                    background=background,
+                    players=players,
+                    transform=transform,
+                    color_idx_by_id=color_idx_by_id,
+                    circle_mask=circle_mask,
+                )
+            except Exception as exc:
+                logger.debug("雷达帧 %d 渲染错误: %s", frame_idx, exc)
+                img = None
+        else:
+            img = None
 
         if img is None:
-            # 没有玩家数据时复用上一帧
-            img = last_img
-
-        if img is None:
-            # 彻底没有内容：生成纯黑圆
-            img = Image.new("RGBA", (size, size), (0, 0, 0, 200))
-
-        if circular_frame:
-            img = _apply_circular_radar_frame(img, size=size)
+            # 无玩家或渲染失败：复用上一帧；若无上一帧，用纯背景
+            img = last_img if last_img is not None else background.copy()
 
         last_img = img
         serial = frame_idx + 1
