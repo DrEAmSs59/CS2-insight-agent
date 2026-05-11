@@ -322,6 +322,10 @@ class AppConfig(BaseModel):
     recording_global_pacing: dict[str, Any] = Field(default_factory=dict)
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
+    # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
+    cs2_extra_launch_args: str = ""
+    # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
+    record_inject_console_lines: str = ""
 
 
 def _parse_config_json_file(path: Path) -> dict:

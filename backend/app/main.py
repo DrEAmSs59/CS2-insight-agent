@@ -652,6 +652,8 @@ class ConfigPayload(BaseModel):
     cs2_fps_max: Optional[int] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
+    cs2_extra_launch_args: Optional[str] = None
+    record_inject_console_lines: Optional[str] = None
     experimental: Optional[ExperimentalPayload] = None
 
 
@@ -829,6 +831,10 @@ async def update_config(payload: ConfigPayload):
             if isinstance(payload.default_record_warmup, dict)
             else {}
         )
+    if payload.cs2_extra_launch_args is not None:
+        cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
+    if payload.record_inject_console_lines is not None:
+        cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
@@ -896,7 +902,13 @@ def setup_status():
     # OBS connectivity
     obs_connected = False
     try:
-        director = OBSDirector(cfg.obs, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
+        director = OBSDirector(
+            cfg.obs,
+            cfg.cs2_path,
+            cs2_fps_max=cfg.cs2_fps_max,
+            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+            record_inject_console_lines=cfg.record_inject_console_lines,
+        )
         result = director.test_obs_connection()
         obs_connected = bool(result.get("ok", False))
     except Exception:
@@ -931,7 +943,13 @@ def setup_status():
 def test_obs(payload: OBSConfig | None = Body(default=None)):
     cfg = load_config()
     obs_use = merge_obs_for_connection(payload, cfg.obs)
-    director = OBSDirector(obs_use, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
+    director = OBSDirector(
+        obs_use,
+        cfg.cs2_path,
+        cs2_fps_max=cfg.cs2_fps_max,
+        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+        record_inject_console_lines=cfg.record_inject_console_lines,
+    )
     return director.test_obs_connection()
 
 
@@ -1824,7 +1842,14 @@ async def start_recording(req: RecordRequest):
         if pov_on:
             pov_mgr = PovHudManager(cfg)
             pov_mgr.install()
-        director = OBSDirector(obs_cfg, cfg.cs2_path, abort_event=abort_ev, cs2_fps_max=cfg.cs2_fps_max)
+        director = OBSDirector(
+            obs_cfg,
+            cfg.cs2_path,
+            abort_event=abort_ev,
+            cs2_fps_max=cfg.cs2_fps_max,
+            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+            record_inject_console_lines=cfg.record_inject_console_lines,
+        )
         results = await director.execute_recording_pipeline(
             dem_path,
             req.clips,
@@ -2008,7 +2033,14 @@ async def start_batch_recording(req: BatchRecordRequest):
         if pov_on:
             pov_mgr = PovHudManager(cfg)
             pov_mgr.install()
-        director = OBSDirector(obs_cfg, cfg.cs2_path, abort_event=abort_ev, cs2_fps_max=cfg.cs2_fps_max)
+        director = OBSDirector(
+            obs_cfg,
+            cfg.cs2_path,
+            abort_event=abort_ev,
+            cs2_fps_max=cfg.cs2_fps_max,
+            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+            record_inject_console_lines=cfg.record_inject_console_lines,
+        )
         results = await director.execute_batch_recording(
             demo_jobs,
             warmup=warmup_eff,

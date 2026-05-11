@@ -1058,7 +1058,13 @@ def apply_recommended(
     bw, bh, ow, oh, fps_v = _parse_basic_ini_video_dims(basic_ini)
 
     restart_obs_required = True
-    director = OBSDirector(obs_cfg, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
+    director = OBSDirector(
+        obs_cfg,
+        cfg.cs2_path,
+        cs2_fps_max=cfg.cs2_fps_max,
+        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+        record_inject_console_lines=cfg.record_inject_console_lines,
+    )
     try:
         if director.connect_obs() and director.obs_ws:
             ws = director.obs_ws
@@ -1177,7 +1183,13 @@ def import_cs2obs_bytes(
 
     changed = ["set_video", "set_recording_encoder_policy"]
     restart_obs_required = True
-    director = OBSDirector(obs_cfg, cfg.cs2_path, cs2_fps_max=cfg.cs2_fps_max)
+    director = OBSDirector(
+        obs_cfg,
+        cfg.cs2_path,
+        cs2_fps_max=cfg.cs2_fps_max,
+        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
+        record_inject_console_lines=cfg.record_inject_console_lines,
+    )
     try:
         if not director.connect_obs():
             raise ValueError("无法连接 OBS WebSocket")

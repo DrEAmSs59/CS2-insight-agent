@@ -52,15 +52,21 @@ function StatusLine({ tone, children }) {
 function SettingsCard({ title, hint, children, className = "", fill = false }) {
   return (
     <section
-      className={`rounded-xl border border-white/[0.08] bg-cs2-bg-card/90 p-4 shadow-sm shadow-black/20 ${
-        fill ? "flex min-h-0 flex-1 flex-col" : "flex flex-col"
+      className={`rounded-xl border border-white/[0.08] bg-cs2-bg-card/90 p-3 shadow-sm shadow-black/20 sm:p-4 ${
+        fill
+          ? "flex min-h-0 flex-col @min-[52rem]/settings:flex-1"
+          : "flex flex-col"
       } ${className}`}
     >
       <div className="mb-3 shrink-0">
         <h2 className="text-[13px] font-bold tracking-wide text-zinc-100">{title}</h2>
         {hint ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{hint}</p> : null}
       </div>
-      {fill ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
+      {fill ? (
+        <div className="flex min-h-0 flex-col @min-[52rem]/settings:flex-1">{children}</div>
+      ) : (
+        children
+      )}
     </section>
   );
 }
@@ -91,17 +97,22 @@ function PrimaryButton({ children, className = "", ...rest }) {
 
 function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPastePath }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
-      <div className="flex gap-2">
+      <div className="flex min-w-0 flex-col gap-2 @min-[28rem]/settings:flex-row @min-[28rem]/settings:items-stretch">
         <input
           value={value ?? ""}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlurSave}
-          className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+          className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[11px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none sm:text-[12px]"
         />
-        <SecondaryButton type="button" className="shrink-0 px-2.5 py-2" onClick={onPastePath} title="从剪贴板粘贴完整路径">
+        <SecondaryButton
+          type="button"
+          className="w-full shrink-0 px-2.5 py-2 @min-[28rem]/settings:w-auto"
+          onClick={onPastePath}
+          title="从剪贴板粘贴完整路径"
+        >
           粘贴路径
         </SecondaryButton>
       </div>
@@ -248,7 +259,7 @@ export default function SettingsPage() {
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
             管理 CS2、FFmpeg、AI 洞察与录制相关选项。
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="mt-3 grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 min-[420px]:gap-x-3">
             <StatusLine tone={cs2Status.tone}>{cs2Status.text}</StatusLine>
             <StatusLine tone={ffmpegStatus.tone}>{ffmpegStatus.text}</StatusLine>
             <StatusLine
@@ -270,19 +281,19 @@ export default function SettingsPage() {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
-          <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col px-4 py-4 sm:px-5">
-            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 pb-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:items-stretch xl:gap-5">
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+          <div className="@container/settings flex min-h-0 w-full min-w-0 flex-1 flex-col px-3 py-3 sm:px-5 sm:py-4">
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 pb-5 @min-[52rem]/settings:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] @min-[52rem]/settings:items-stretch @min-[52rem]/settings:gap-5 @min-[52rem]/settings:pb-6">
+              <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/settings:min-h-0 @min-[52rem]/settings:flex-1 @min-[52rem]/settings:gap-4">
             <SettingsCard
               title="运行模式"
               hint="切换后会影响解析是否请求大模型；AI 模式需配置密钥。"
               fill
             >
-              <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 @min-[36rem]/settings:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(false)}
-                  className={`relative flex min-h-[7.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[8.5rem] ${
+                  className={`relative flex min-h-[5.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[7.5rem] sm:min-h-[8rem] ${
                     !s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
@@ -300,7 +311,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(true)}
-                  className={`relative flex min-h-[7.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[8.5rem] ${
+                  className={`relative flex min-h-[5.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[7.5rem] sm:min-h-[8rem] ${
                     s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
@@ -346,7 +357,7 @@ export default function SettingsPage() {
               fill
             >
               <div className="flex min-h-0 flex-1 flex-col gap-3">
-                <div className="flex min-h-[6rem] flex-1 flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/25 p-2 sm:min-h-[8rem]">
+                <div className="flex min-h-[4.5rem] flex-1 flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/25 p-2 @min-[40rem]/settings:min-h-[6rem] @min-[52rem]/settings:min-h-[8rem]">
                 {players.length === 0 ? (
                   <span className="py-1 text-[11px] text-zinc-600">尚未添加玩家</span>
                 ) : (
@@ -375,7 +386,7 @@ export default function SettingsPage() {
                   ))
                 )}
                 </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <div className="flex shrink-0 flex-col gap-2 @min-[24rem]/settings:flex-row @min-[24rem]/settings:flex-wrap @min-[24rem]/settings:items-center">
                 <input
                   value={playerDraft}
                   onChange={(e) => setPlayerDraft(e.target.value)}
@@ -386,10 +397,10 @@ export default function SettingsPage() {
                     }
                   }}
                   placeholder="输入昵称后回车或点添加"
-                  className="min-w-[12rem] flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
+                  className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
                   spellCheck={false}
                 />
-                <SecondaryButton type="button" onClick={() => addPlayer(playerDraft)}>
+                <SecondaryButton type="button" className="w-full shrink-0 @min-[24rem]/settings:w-auto" onClick={() => addPlayer(playerDraft)}>
                   ＋ 添加玩家
                 </SecondaryButton>
               </div>
@@ -399,7 +410,7 @@ export default function SettingsPage() {
               </div>
 
               {/* 右列 */}
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+              <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/settings:min-h-0 @min-[52rem]/settings:flex-1 @min-[52rem]/settings:gap-4">
             <SettingsCard title="FFmpeg 与合辑" hint="合辑导出与编码器；fps_max 作用于录制启动时的 CS2。" fill>
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
                 <div className="shrink-0">
@@ -449,11 +460,11 @@ export default function SettingsPage() {
             </SettingsCard>
 
             {s.aiMode ? (
-              <SettingsCard title="大模型（AI）" hint="密钥在服务器保存后刷新不显示明文；更换时输入新密钥失焦即可。" fill>
+              <SettingsCard title="大模型（AI）" hint="密钥在服务器保存后刷新不显示明文。" fill>
                 <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                   <div>
                     <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">服务商</label>
-                    <div className="relative max-w-md">
+                    <div className="relative min-w-0 w-full max-w-full @min-[40rem]/settings:max-w-md">
                       <select
                         value={s.llmConfig.provider}
                         onChange={(e) => handleProviderChange(e.target.value)}
@@ -487,7 +498,7 @@ export default function SettingsPage() {
                       placeholder={currentPreset?.model || ""}
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, model: e.target.value })}
                       onBlur={schedulePersistLlm}
-                      className="w-full max-w-md rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+                      className="w-full min-w-0 max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none @min-[40rem]/settings:max-w-md"
                     />
                   </SmallField>
                   {!isLocal && (
@@ -498,7 +509,7 @@ export default function SettingsPage() {
                           密钥已在服务器保存。更换请输入新密钥后失焦保存。
                         </p>
                       )}
-                      <div className="relative max-w-xl">
+                      <div className="relative min-w-0 w-full max-w-full @min-[40rem]/settings:max-w-xl">
                         <input
                           type={showApiKey ? "text" : "password"}
                           value={s.llmConfig.api_key}
@@ -530,7 +541,7 @@ export default function SettingsPage() {
               </SettingsCard>
             ) : null}
 
-            <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <p className="text-[11px] leading-relaxed text-zinc-400">
                 将路径、帧率、编码、关注名单与大模型选项一次性写入配置文件。
               </p>
