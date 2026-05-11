@@ -106,6 +106,8 @@ export default function App() {
   const [configBackupStatus, setConfigBackupStatus] = useState(null);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
+  const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
+  const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
@@ -772,6 +774,12 @@ export default function App() {
         ) {
           setSavedRecordWarmupDefaults(data.default_record_warmup);
         }
+        if (typeof data.cs2_extra_launch_args === "string") {
+          setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
+        }
+        if (typeof data.record_inject_console_lines === "string") {
+          setRecordInjectConsoleLines(data.record_inject_console_lines);
+        }
         if (
           data.recording_global_pacing &&
           typeof data.recording_global_pacing === "object" &&
@@ -1433,6 +1441,14 @@ export default function App() {
     ],
   );
 
+  const persistCs2RecordExtras = useCallback(async (payload) => {
+    try {
+      await API.put("config", payload);
+    } catch {
+      /* silent */
+    }
+  }, []);
+
   const persistWarmupDefaults = useCallback(async (obj) => {
     setSavedRecordWarmupDefaults(obj);
     try {
@@ -1963,6 +1979,11 @@ export default function App() {
     batchRecording,
     savedRecordWarmupDefaults,
     persistWarmupDefaults,
+    cs2ExtraLaunchArgs,
+    setCs2ExtraLaunchArgs,
+    recordInjectConsoleLines,
+    setRecordInjectConsoleLines,
+    persistCs2RecordExtras,
     experimentalPovEnabled,
     persistExperimentalPov,
     hasDemos,
@@ -2120,6 +2141,11 @@ export default function App() {
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
           onExperimentalPovChange={persistExperimentalPov}
+          cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
+          onCs2ExtraLaunchArgsChange={setCs2ExtraLaunchArgs}
+          recordInjectConsoleLines={recordInjectConsoleLines}
+          onRecordInjectConsoleLinesChange={setRecordInjectConsoleLines}
+          onPersistCs2RecordExtras={persistCs2RecordExtras}
         />
 
         <LibraryLoadModeModal

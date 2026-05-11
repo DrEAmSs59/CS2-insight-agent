@@ -124,3 +124,30 @@ export function warmupApiPayloadToPersisted(warmup) {
     pov_teamcounter_numeric: warmup.pov_teamcounter_numeric !== false,
   };
 }
+
+export function formatResolutionSummary(aspectRatio, wStr, hStr) {
+  const w = String(wStr || "").trim();
+  const h = String(hStr || "").trim();
+  if (w && h) return `${w}×${h}`;
+  const ar = String(aspectRatio || "").trim();
+  if (ar === "4:3") return "示例 1920×1440（填写宽高后显示实际值）";
+  if (ar === "16:9") return "示例 1920×1080（填写宽高后显示实际值）";
+  if (ar === "16:10") return "示例 1920×1200（填写宽高后显示实际值）";
+  return "未指定输出分辨率";
+}
+
+export function aspectHint(aspectRatio) {
+  const ar = String(aspectRatio || "").trim();
+  if (ar === "4:3") return "适合赛事复古构图，画面两侧黑边或拉伸策略取决于 OBS 场景";
+  if (ar === "16:9") return "适合主流视频平台全屏播放";
+  if (ar === "16:10") return "适合部分宽屏显示器满屏取景";
+  return "选择比例并填写宽高后，本次启动 CS2 将使用该画布录制";
+}
+
+export function aspectExportHint(aspectRatio) {
+  const ar = String(aspectRatio || "").trim();
+  if (ar === "4:3") return "横向成片偏「赛场转播」比例";
+  if (ar === "16:9") return "横向成片偏「流媒体的默认」方向";
+  if (ar === "16:10") return "横向成片略宽于 16:9 显示器常见比例";
+  return "由 OBS 场景与画布决定最终导出方向；此处为游戏内渲染分辨率";
+}

@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
-import {
-  buildWarmupConsoleCommands,
-  OptionRow,
-  RECORD_WARMUP_DEFAULT_OPTIONS,
-} from "./RecordWarmupModal";
+import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../stores/recordingQueueStore";
-import { warmupUiOptsToPersisted, validateWarmupResolution } from "../utils/warmupDefaults";
+import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
+import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
+import {
+  aspectExportHint,
+  aspectHint,
+  formatResolutionSummary,
+  warmupUiOptsToPersisted,
+  validateWarmupResolution,
+} from "../utils/warmupDefaults";
 
 /** 未写入配置时的展示用回退（与队列微调面板一致） */
 const FB_VIC_PRE = 1.5;
 const FB_VIC_POST = 1.0;
 const FB_KILL_PRE = 3.0;
 const FB_KILL_POST = 1.5;
-
-const POV_CONFLICT_HUD =
-  "POV HUD 已启用：观战 HUD 由 POV 资源接管，此项与简化 HUD 冲突，无法单独调节。";
 
 function WorkflowSection({ title, subtitle, badge, defaultOpen = true, accentClass = "", children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -90,80 +91,6 @@ function PacingSlider({
   );
 }
 
-/** 录制画面效果：名称 / 指令 / 开关 / 说明 / 启用后的成片预期 */
-function RecordingHudCard({
-  title,
-  code,
-  description,
-  checked,
-  onChange,
-  outcomeOn,
-  disabled = false,
-  disabledReason,
-}) {
-  return (
-    <div
-      title={disabled ? disabledReason : undefined}
-      className={`flex flex-col rounded-lg border border-white/[0.07] bg-black/30 p-3 ${
-        disabled ? "opacity-45" : ""
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-zinc-100">{title}</p>
-          <code className="mt-0.5 block font-mono text-[10px] text-cs2-orange/90">{code}</code>
-          <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">{description}</p>
-        </div>
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => {
-            if (disabled) return;
-            onChange(e.target.checked);
-          }}
-          className="mt-1 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
-        />
-      </div>
-      {checked && !disabled && outcomeOn ? (
-        <p className="mt-3 border-t border-white/[0.06] pt-2.5 text-[10px] leading-relaxed text-emerald-400/95">
-          成片预期：{outcomeOn}
-        </p>
-      ) : null}
-      {disabled ? (
-        <p className="mt-2 text-[10px] leading-relaxed text-amber-200/80">{disabledReason}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function formatResolutionSummary(aspectRatio, wStr, hStr) {
-  const w = String(wStr || "").trim();
-  const h = String(hStr || "").trim();
-  if (w && h) return `${w}×${h}`;
-  const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "示例 1920×1440（填写宽高后显示实际值）";
-  if (ar === "16:9") return "示例 1920×1080（填写宽高后显示实际值）";
-  if (ar === "16:10") return "示例 1920×1200（填写宽高后显示实际值）";
-  return "未指定输出分辨率";
-}
-
-function aspectHint(aspectRatio) {
-  const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "适合赛事复古构图，画面两侧黑边或拉伸策略取决于 OBS 场景";
-  if (ar === "16:9") return "适合主流视频平台全屏播放";
-  if (ar === "16:10") return "适合部分宽屏显示器满屏取景";
-  return "选择比例并填写宽高后，本次启动 CS2 将使用该画布录制";
-}
-
-function aspectExportHint(aspectRatio) {
-  const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "横向成片偏「赛场转播」比例";
-  if (ar === "16:9") return "横向成片偏「流媒体的默认」方向";
-  if (ar === "16:10") return "横向成片略宽于 16:9 显示器常见比例";
-  return "由 OBS 场景与画布决定最终导出方向；此处为游戏内渲染分辨率";
-}
-
 /**
  * 常用参数：内联编辑「全局节奏（数值）+ 入队默认 POV」与「录制前观战默认选项」，写入 data/cs2-insight.config.json。
  */
@@ -176,6 +103,11 @@ export default function CommonParamsModal({
   onPersistWarmupDefaults,
   experimentalPovEnabled,
   onExperimentalPovChange,
+  cs2ExtraLaunchArgs = "",
+  onCs2ExtraLaunchArgsChange,
+  recordInjectConsoleLines = "",
+  onRecordInjectConsoleLinesChange,
+  onPersistCs2RecordExtras,
 }) {
   const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
@@ -245,24 +177,37 @@ export default function CommonParamsModal({
     return () => clearTimeout(t);
   }, [warmupOpts, open, isPage, onPersistWarmupDefaults]);
 
+  useEffect(() => {
+    if ((!open && !isPage) || !onPersistCs2RecordExtras) return;
+    const t = setTimeout(() => {
+      void onPersistCs2RecordExtras({
+        cs2_extra_launch_args: cs2ExtraLaunchArgs,
+        record_inject_console_lines: recordInjectConsoleLines,
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [
+    cs2ExtraLaunchArgs,
+    recordInjectConsoleLines,
+    open,
+    isPage,
+    onPersistCs2RecordExtras,
+  ]);
+
   if (!open && !isPage) return null;
 
-  const cardShell = isPage
-    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-white/[0.07] bg-cs2-bg-card/80"
+  const outerClass = isPage
+    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
     : "flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl";
 
   const preFlex = Math.max(pre, 0.35);
   const postFlex = Math.max(post, 0.35);
   const midFlex = 1.6;
 
-  const consoleCmdCount = buildWarmupConsoleCommands({
-    ...warmupOpts,
-    spec_show_xray: !!warmupOpts.spec_show_xray,
-  }).length;
-
   const body = (
     <>
-      <div className={cardShell}>
+      <div className={outerClass}>
+        {!isPage ? (
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0 pr-2">
             <h2 id="common-params-title" className="text-sm font-bold text-white">
@@ -288,12 +233,16 @@ export default function CommonParamsModal({
             </button>
           ) : null}
         </div>
+        ) : null}
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5">
-          {/* 1 录制时间控制 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4">
+          <div className="@container/params w-full min-w-0">
+            <div className="grid min-w-0 grid-cols-1 gap-3 pb-2 @min-[52rem]/params:grid-cols-2 @min-[52rem]/params:items-start @min-[52rem]/params:gap-5 @min-[52rem]/params:pb-4">
+              <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
+          {/* A1 时间与多段节奏 */}
           <WorkflowSection
-            title="录制时间控制"
-            subtitle="单片段成片的前后留白与多片段衔接阈值，决定导出片的「时间结构」。"
+            title="时间与多段节奏"
+            subtitle="成片前后留白、多段衔接阈值与全局节奏重置；决定导出片的时间结构。"
             defaultOpen
           >
             <div className="mb-5 overflow-hidden rounded-lg border border-white/[0.07] bg-black/35 p-3">
@@ -383,11 +332,12 @@ export default function CommonParamsModal({
             </button>
           </WorkflowSection>
 
-          {/* 2 受害者 / 击杀者镜头 */}
+          {/* A2 镜头与 POV */}
           <WorkflowSection
-            title="受害者 / 击杀者镜头"
-            subtitle="追加镜头段的停留节奏与入队默认开关；仅对解析结果中带有对应名单的片段类型生效。"
+            title="镜头与 POV"
+            subtitle="受害者 / 击杀者追加视角、FOV 与持枪模型、实验性 POV；入队默认与解析名单类型相关。"
             defaultOpen
+            accentClass="ring-1 ring-white/[0.04]"
           >
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border-l-4 border-cyan-500/55 bg-cyan-950/15 pl-4 pr-3 py-3">
@@ -482,62 +432,11 @@ export default function CommonParamsModal({
                 </div>
               </div>
             </div>
-          </WorkflowSection>
 
-          {/* 3 画面表现 */}
-          <WorkflowSection
-            title="画面表现"
-            subtitle="预热阶段注入的 HUD / UI 开关，直接决定 OBS 抓取的游戏画面内容。"
-            defaultOpen
-          >
+            <div className="my-5 border-t border-white/[0.08]" />
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-              录制画面效果
+              视野、持枪与实验性 POV
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <RecordingHudCard
-                title="简化观战 HUD"
-                code="cl_draw_only_deathnotices true"
-                description="仅保留击杀公告等核心提示，弱化其余观战 UI。"
-                checked={warmupOpts.cl_draw_only_deathnotices}
-                onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
-                outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
-                disabled={!!experimentalPovEnabled}
-                disabledReason={POV_CONFLICT_HUD}
-              />
-              <RecordingHudCard
-                title="隐藏准星目标信息"
-                code="hud_showtargetid 0"
-                description="准星指向玩家时不再弹出名称与血量提示。"
-                checked={warmupOpts.hud_showtargetid_hide}
-                onChange={(v) => patchWarmup({ hud_showtargetid_hide: v })}
-                outcomeOn="最终画面中不出现准星下的 ID / 血量条提示。"
-              />
-              <RecordingHudCard
-                title="屏蔽文字聊天"
-                code="tv_nochat 1"
-                description="隐藏观战文字聊天区域。"
-                checked={warmupOpts.tv_nochat}
-                onChange={(v) => patchWarmup({ tv_nochat: v })}
-                outcomeOn="导出视频中不显示文字聊天栏。"
-              />
-              <RecordingHudCard
-                title="隐藏投掷物轨迹与画中窗"
-                code="sv_grenade_trajectory 0; …"
-                description="关闭投掷物轨迹、练习画中窗与时间轴。"
-                checked={warmupOpts.hide_grenade_trajectory_pip}
-                onChange={(v) => patchWarmup({ hide_grenade_trajectory_pip: v })}
-                outcomeOn="画面中不出现投掷物轨迹线与辅助画中窗。"
-              />
-            </div>
-          </WorkflowSection>
-
-          {/* 4 镜头与视角（POV 强化） */}
-          <WorkflowSection
-            title="镜头与视角"
-            subtitle="FOV、持枪模型与实验性 POV HUD；POV 为特殊录制模式，与部分传统观战 HUD 选项冲突。"
-            defaultOpen
-            accentClass="ring-1 ring-white/[0.04]"
-          >
             <div className="mb-5 rounded-xl border-2 border-amber-500/40 bg-gradient-to-br from-amber-950/45 via-black/40 to-black/60 p-4 shadow-[0_0_40px_-12px_rgba(245,158,11,0.35)]">
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-amber-500/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-100">
@@ -620,12 +519,96 @@ export default function CommonParamsModal({
             </div>
           </WorkflowSection>
 
-          {/* 5 音频与启动 */}
-          <WorkflowSection
-            title="音频与启动"
-            subtitle="静音语音与 CS2 启动分辨率（写入 -w / -h），决定采集画布比例。"
-            defaultOpen
-          >
+            </div>
+            <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
+              <WorkflowSection
+                title="观战画面与调试"
+                subtitle="HUD / UI、Demo 调试条与 X 光；决定采集画面与预热注入内容。"
+                defaultOpen
+              >
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  录制画面效果
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <RecordingHudCard
+                    title="简化观战 HUD"
+                    code="cl_draw_only_deathnotices true"
+                    description="仅保留击杀公告等核心提示，弱化其余观战 UI。"
+                    checked={warmupOpts.cl_draw_only_deathnotices}
+                    onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
+                    outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
+                    disabled={!!experimentalPovEnabled}
+                    disabledReason={POV_CONFLICT_HUD}
+                  />
+                  <RecordingHudCard
+                    title="隐藏准星目标信息"
+                    code="hud_showtargetid 0"
+                    description="准星指向玩家时不再弹出名称与血量提示。"
+                    checked={warmupOpts.hud_showtargetid_hide}
+                    onChange={(v) => patchWarmup({ hud_showtargetid_hide: v })}
+                    outcomeOn="最终画面中不出现准星下的 ID / 血量条提示。"
+                  />
+                  <RecordingHudCard
+                    title="屏蔽文字聊天"
+                    code="tv_nochat 1"
+                    description="隐藏观战文字聊天区域。"
+                    checked={warmupOpts.tv_nochat}
+                    onChange={(v) => patchWarmup({ tv_nochat: v })}
+                    outcomeOn="导出视频中不显示文字聊天栏。"
+                  />
+                  <RecordingHudCard
+                    title="隐藏投掷物轨迹与画中窗"
+                    code="sv_grenade_trajectory 0; …"
+                    description="关闭投掷物轨迹、练习画中窗与时间轴。"
+                    checked={warmupOpts.hide_grenade_trajectory_pip}
+                    onChange={(v) => patchWarmup({ hide_grenade_trajectory_pip: v })}
+                    outcomeOn="画面中不出现投掷物轨迹线与辅助画中窗。"
+                  />
+                </div>
+
+                <div className="my-5 border-t border-white/[0.08]" />
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Demo 条与透视
+                </p>
+                <div className="space-y-3">
+                  <RecordingHudCard
+                    title="隐藏 Demo 进度条与回放控制条"
+                    code="sv_cheats 1 → demoui false"
+                    description="预热阶段关闭 Demo UI 条，需临时开启作弊指令通道。"
+                    checked={warmupOpts.hide_demo_playback_ui}
+                    onChange={(v) => patchWarmup({ hide_demo_playback_ui: v })}
+                    outcomeOn="回放进度条与控制台 Demo 控制条不会出现在采集画面中。"
+                  />
+                  <RecordingHudCard
+                    title="开启 X 光透视"
+                    code="spec_show_xray 1 / 0"
+                    description="观战穿透显示轮廓（竞技裁判视角常用）。"
+                    checked={warmupOpts.spec_show_xray}
+                    onChange={(v) => patchWarmup({ spec_show_xray: v })}
+                    outcomeOn="墙后可透视敌方轮廓，成片更具「上帝视角」信息密度。"
+                  />
+                </div>
+              </WorkflowSection>
+
+              <WorkflowSection
+                title="启动、音频与画布"
+                subtitle="命令行与预热控制台、语音静音与录制分辨率（-w / -h）。"
+                defaultOpen
+              >
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  命令行与控制台
+                </p>
+                <Cs2LaunchConsoleFields
+                  cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
+                  onCs2ExtraLaunchArgsChange={onCs2ExtraLaunchArgsChange}
+                  recordInjectConsoleLines={recordInjectConsoleLines}
+                  onRecordInjectConsoleLinesChange={onRecordInjectConsoleLinesChange}
+                />
+
+                <div className="my-5 border-t border-white/[0.08]" />
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  采集与静音
+                </p>
             <OptionRow
               checked={warmupOpts.snd_voipvolume_mute}
               onChange={(v) => patchWarmup({ snd_voipvolume_mute: v })}
@@ -751,36 +734,9 @@ export default function CommonParamsModal({
             </div>
           </WorkflowSection>
 
-          {/* 6 高级行为 */}
-          <WorkflowSection
-            title="高级行为"
-            subtitle="涉及 sv_cheats、调试透视与更多控制台行；适合熟悉竞技导播与引擎指令的用户。"
-            defaultOpen={false}
-          >
-            <div className="space-y-3">
-              <RecordingHudCard
-                title="隐藏 Demo 进度条与回放控制条"
-                code="sv_cheats 1 → demoui false"
-                description="预热阶段关闭 Demo UI 条，需临时开启作弊指令通道。"
-                checked={warmupOpts.hide_demo_playback_ui}
-                onChange={(v) => patchWarmup({ hide_demo_playback_ui: v })}
-                outcomeOn="回放进度条与控制台 Demo 控制条不会出现在采集画面中。"
-              />
-              <RecordingHudCard
-                title="开启 X 光透视"
-                code="spec_show_xray 1 / 0"
-                description="观战穿透显示轮廓（竞技裁判视角常用）。"
-                checked={warmupOpts.spec_show_xray}
-                onChange={(v) => patchWarmup({ spec_show_xray: v })}
-                outcomeOn="墙后可透视敌方轮廓，成片更具「上帝视角」信息密度。"
-              />
             </div>
-
-            <p className="mt-4 font-mono text-[10px] leading-relaxed text-zinc-600">
-              默认预热将注入 {consoleCmdCount} 条控制台指令（与后端拼装顺序一致）。
-            </p>
-          </WorkflowSection>
-
+          </div>
+        </div>
         </div>
 
         {!isPage ? (
@@ -800,7 +756,18 @@ export default function CommonParamsModal({
 
   if (isPage) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
+      <div className="flex h-full min-h-0 w-full flex-col bg-cs2-bg-dark">
+        <header className="shrink-0 border-b border-white/10 bg-cs2-bg-dark/95 px-4 py-3 backdrop-blur-sm sm:px-5">
+          <div className="w-full min-w-0">
+            <h1 className="text-lg font-bold tracking-tight text-white">常用参数</h1>
+            <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-zinc-500">
+              全局节奏、观战默认与预热画面写入{" "}
+              <span className="font-mono text-zinc-400">data/cs2-insight.config.json</span>
+            </p>
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
+      </div>
     );
   }
 

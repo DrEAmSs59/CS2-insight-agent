@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import shutil
+import shlex
 import subprocess
 import time
 import unicodedata
@@ -944,6 +945,56 @@ class RecordingWarmupExtras:
 _ASPECT_RATIO_VIDEOCFG_MODE: dict[str, int] = {"4:3": 0, "16:9": 1, "16:10": 2}
 
 
+def _parse_cs2_extra_launch_argv(raw: str) -> tuple[str, ...]:
+    """前端按「一条一行」写入；旧配置可为单行整段 shlex。每行单独 shlex 后拼成 argv。"""
+    text = raw or ""
+    out: list[str] = []
+    if "\n" in text or "\r" in text:
+        for line in text.splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                parts = shlex.split(s, posix=False)
+            except ValueError:
+                logger.warning("cs2_extra_launch_args line shlex failed, skip: %r", s[:120])
+                continue
+            for p in parts:
+                t = str(p).strip()
+                if t:
+                    out.append(t)
+                if len(out) >= 48:
+                    return tuple(out)
+        return tuple(out)
+    s = text.strip()
+    if not s:
+        return ()
+    try:
+        parts = shlex.split(s, posix=False)
+    except ValueError:
+        logger.warning("cs2_extra_launch_args shlex parse failed, ignoring: %r", s[:160])
+        return ()
+    for p in parts:
+        t = str(p).strip()
+        if t:
+            out.append(t)
+        if len(out) >= 48:
+            break
+    return tuple(out)
+
+
+def _parse_record_inject_console_lines(raw: str) -> tuple[str, ...]:
+    lines: list[str] = []
+    for line in (raw or "").splitlines():
+        s = line.strip()
+        if not s or s.startswith("//") or s.startswith("#"):
+            continue
+        lines.append(s[:800])
+        if len(lines) >= 60:
+            break
+    return tuple(lines)
+
+
 class OBSDirector:
     """Controls OBS recording and CS2 demo playback for automated clip capture."""
 
@@ -954,10 +1005,15 @@ class OBSDirector:
         on_state_change: Optional[Callable[[DirectorState, str], None]] = None,
         abort_event: Optional[asyncio.Event] = None,
         cs2_fps_max: int = 240,
+        *,
+        cs2_extra_launch_args: str = "",
+        record_inject_console_lines: str = "",
     ):
         self.obs_config = obs_config
         self.cs2_path = cs2_path
         self._cs2_fps_max: int = max(0, min(int(cs2_fps_max), 9999))
+        self._extra_launch_argv = _parse_cs2_extra_launch_argv(cs2_extra_launch_args)
+        self._extra_warmup_console_lines = _parse_record_inject_console_lines(record_inject_console_lines)
         self._ws: Optional[obsws] = None
         self._cs2_process: Optional[subprocess.Popen] = None
         self._on_state_change = on_state_change
@@ -1579,6 +1635,9 @@ class OBSDirector:
                 mode = _ASPECT_RATIO_VIDEOCFG_MODE.get(arm) if arm else None
                 if mode is not None:
                     argv.extend(["+setting.aspectratiomode", str(mode)])
+
+        if self._extra_launch_argv:
+            argv.extend(self._extra_launch_argv)
 
         argv.extend(["+exec", stem])
         logger.info("Launch CS2 cwd=%s cmd=%s", cwd, " ".join(argv))
@@ -2586,8 +2645,12 @@ class OBSDirector:
         )
         return {}
 
-    @staticmethod
-    def _recording_warmup_console_lines(w: RecordingWarmupExtras) -> list[str]:
+    def _append_config_warmup_console_lines(self, lines: list[str]) -> list[str]:
+        if not self._extra_warmup_console_lines:
+            return lines
+        return [*lines, *self._extra_warmup_console_lines]
+
+    def _recording_warmup_console_lines(self, w: RecordingWarmupExtras) -> list[str]:
         """录制会话首次 seek 前注入的观战 cvar（与空格预热后的控制台批次合并）。
 
         在所有 cvar 之前注入 ``unbindall`` + 一组最小默认绑定，把玩家自定义
@@ -2600,8 +2663,8 @@ class OBSDirector:
             cmds = [str(x).strip() for x in w.console_cmds if str(x).strip()]
             fix0 = _WARMUP_FIXED_CONSOLE_LINES[0]
             if cmds and cmds[0].strip() == fix0.strip():
-                return [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
-            return [*_RECORDING_KEYBIND_RESET_LINES, fix0, *cmds]
+                return self._append_config_warmup_console_lines([*_RECORDING_KEYBIND_RESET_LINES, *cmds])
+            return self._append_config_warmup_console_lines([*_RECORDING_KEYBIND_RESET_LINES, fix0, *cmds])
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
         lines.extend(_WARMUP_FIXED_CONSOLE_LINES)
@@ -2633,7 +2696,7 @@ class OBSDirector:
             lines.append("sv_grenade_trajectory_prac_pipreview 0")
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
-        return lines
+        return self._append_config_warmup_console_lines(lines)
 
     async def _prepare_clip_playback(
         self,

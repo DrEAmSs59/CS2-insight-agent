@@ -15,5 +15,7 @@
   "ai_mode": false,
   "cs2_fps_max": 240,
   "recording_global_pacing": {},
-  "default_record_warmup": {}
+  "default_record_warmup": {},
+  "cs2_extra_launch_args": "",
+  "record_inject_console_lines": ""
 }
