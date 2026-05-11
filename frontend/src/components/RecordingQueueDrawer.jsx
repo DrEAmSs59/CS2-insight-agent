@@ -588,6 +588,7 @@ function QueueItemCard({
 }) {
   const cd = item.clipData || {};
   const tl = isTimelineSourceClip(cd);
+  const hideQueueAi = tl || cd.category === "compilation";
   const killBadge = getMontageBlockShortLabel(cd);
   const playerName = String(item.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
@@ -624,7 +625,7 @@ function QueueItemCard({
           {playerName}
         </span>
         <div className="ml-auto shrink-0">
-          <AiScoreBadge score={aiScore} />
+          {hideQueueAi ? null : <AiScoreBadge score={aiScore} />}
         </div>
       </div>
 

@@ -45,6 +45,8 @@ export default function Sidebar({
   onCs2PathChange,
   ffmpegPath = "",
   onFfmpegPathChange,
+  montageEncoder = "auto",
+  onMontageEncoderChange,
   cs2FpsMax = 240,
   onCs2FpsMaxChange,
   demoWatchPaths = [],
@@ -259,6 +261,23 @@ export default function Sidebar({
               onChange={(v) => onFfmpegPathChange?.(v)}
               onBlur={() => onSaveConfig?.({ ffmpeg_path: ffmpegPath ?? "" })}
             />
+            <div className="space-y-1">
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+                合辑视频编码
+              </label>
+              <select
+                value={montageEncoder ?? "auto"}
+                onChange={(e) => onMontageEncoderChange?.(e.target.value)}
+                onBlur={() => onSaveConfig?.({ montage_encoder: montageEncoder ?? "auto" })}
+                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white transition-colors focus:border-cs2-orange/50 focus:outline-none"
+              >
+                <option value="auto">自动（优先 NVENC → QSV → AMF，否则 x264）</option>
+                <option value="h264_nvenc">NVIDIA NVENC</option>
+                <option value="h264_qsv">Intel Quick Sync (QSV)</option>
+                <option value="h264_amf">AMD AMF</option>
+                <option value="libx264">x264 软件（CPU）</option>
+              </select>
+            </div>
             <div className="space-y-1">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
                 录制帧率上限 (fps_max，0=不限制)

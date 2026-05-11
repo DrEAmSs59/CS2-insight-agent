@@ -720,13 +720,14 @@ export function MontageMaterialPoolCard({
   const factLine = getMontageClipFactLine(clip);
   const killBadge = getMontageBlockShortLabel(clip);
   const variant = getMontageTimelineVariant(clip);
+  const suppressMontageAi = variant === "timeline" || variant === "compilation";
   const scorePair = getMontageScorePair(clip);
   const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
   const povTip = getVictimPovSegmentsTooltip(clip);
   const victimSegCount = Array.isArray(clip.victim_pov_segments)
     ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
     : 0;
-  const aiExplain = montageAiExplainText(clip);
+  const aiExplain = suppressMontageAi ? "" : montageAiExplainText(clip);
   const demoLabel = demoShortLabel(clip);
 
   return (
@@ -752,7 +753,7 @@ export function MontageMaterialPoolCard({
             </span>
             <span className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</span>
           </div>
-          <AiScoreBadge score={clip.ai_score} />
+          {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">

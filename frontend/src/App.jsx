@@ -112,6 +112,7 @@ export default function App() {
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [montageEncoder, setMontageEncoder] = useState("auto");
   const [cs2FpsMax, setCs2FpsMax] = useState(240);
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
@@ -756,6 +757,9 @@ export default function App() {
         }
         if (data.cs2_path) setCs2Path(data.cs2_path);
         if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+        if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
+          setMontageEncoder(data.montage_encoder.trim().toLowerCase());
+        }
         if (typeof data.cs2_fps_max === "number") setCs2FpsMax(data.cs2_fps_max);
         if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
         if (Array.isArray(data.expected_parse_players)) {
@@ -1472,7 +1476,7 @@ export default function App() {
         setBatchRecording(true);
         setProgressText("正在执行批量 OBS 导播…");
         try {
-          const groups = buildBatchGroupsFromQueue(queue, globalPacing);
+          const groups = buildBatchGroupsFromQueue(queue, useRecordingQueue.getState().globalPacing);
           const { data } = await API.post("/record/batch", { groups, warmup, obs: obsConfig });
           const results = data.results ?? [];
           const ok = results.filter((r) => r.status === "recorded").length;
@@ -1650,6 +1654,16 @@ export default function App() {
       await API.put("config", { llm: payload });
       if (k && !k.startsWith("****")) {
         setLlmKeySavedOnServer(true);
+      } else {
+        try {
+          const { data } = await API.get("config");
+          const rawKey = data.llm?.api_key ?? "";
+          setLlmKeySavedOnServer(
+            typeof rawKey === "string" && rawKey.trim().length > 0 && rawKey.startsWith("****")
+          );
+        } catch {
+          /* keep prior llmKeySavedOnServer */
+        }
       }
     } catch (e) {
       setProgressText(`保存大模型配置失败: ${e.response?.data?.detail || e.message}`);
@@ -1705,6 +1719,192 @@ export default function App() {
     }
   }, []);
 
+  const saveExpectedPlayersFromList = useCallback(async (playersList) => {
+    const cleaned = Array.isArray(playersList)
+      ? [...new Set(playersList.map((s) => String(s).trim()).filter(Boolean))].slice(0, 50)
+      : [];
+    try {
+      await API.put("config", { expected_parse_players: cleaned });
+      setExpectedParsePlayersText(cleaned.join("\n"));
+      setProgressText(
+        cleaned.length ? `已保存 ${cleaned.length} 个关注昵称。` : "已清空关注名单。",
+        { autoDismissMs: 2500 },
+      );
+    } catch (e) {
+      setProgressText(`保存关注名单失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, []);
+
+  const handleSaveAllSettingsPage = useCallback(
+    async (expectedPlayersList) => {
+      const arr = Array.isArray(expectedPlayersList)
+        ? [...new Set(expectedPlayersList.map((s) => String(s).trim()).filter(Boolean))].slice(0, 50)
+        : [];
+      try {
+        await API.put("config", {
+          cs2_path: cs2Path,
+          ffmpeg_path: ffmpegPath,
+          montage_encoder: montageEncoder,
+          cs2_fps_max: cs2FpsMax,
+          expected_parse_players: arr,
+        });
+        setExpectedParsePlayersText(arr.join("\n"));
+        await persistLlmConfig();
+        setProgressText("设置已保存。", { autoDismissMs: 2200 });
+      } catch (e) {
+        setProgressText(`保存失败: ${e.response?.data?.detail || e.message}`);
+      }
+    },
+    [cs2Path, ffmpegPath, montageEncoder, cs2FpsMax, persistLlmConfig, setExpectedParsePlayersText],
+  );
+
+  const handleExportSettingsConfig = useCallback(async () => {
+    try {
+      const { data } = await API.get("config");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `cs2-insight-config-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setProgressText("已导出配置 JSON（导出中的密钥为脱敏显示）。", { autoDismissMs: 3500 });
+    } catch (e) {
+      setProgressText(`导出失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, []);
+
+  const applyImportedSettings = useCallback(async (raw) => {
+    if (!raw || typeof raw !== "object") {
+      setProgressText("导入失败：不是有效的 JSON 对象。");
+      return;
+    }
+    try {
+      const put = {};
+      if (typeof raw.cs2_path === "string") {
+        put.cs2_path = raw.cs2_path;
+        setCs2Path(raw.cs2_path);
+      }
+      if (typeof raw.ffmpeg_path === "string") {
+        put.ffmpeg_path = raw.ffmpeg_path;
+        setFfmpegPath(raw.ffmpeg_path);
+      }
+      if (typeof raw.montage_encoder === "string" && raw.montage_encoder.trim()) {
+        put.montage_encoder = raw.montage_encoder.trim().toLowerCase();
+        setMontageEncoder(put.montage_encoder);
+      }
+      if (typeof raw.cs2_fps_max === "number") {
+        put.cs2_fps_max = raw.cs2_fps_max;
+        setCs2FpsMax(raw.cs2_fps_max);
+      }
+      if (typeof raw.ai_mode === "boolean") {
+        put.ai_mode = raw.ai_mode;
+        setAiMode(raw.ai_mode);
+      }
+      if (Array.isArray(raw.demo_watch_paths)) {
+        put.demo_watch_paths = raw.demo_watch_paths;
+        setDemoWatchPaths(raw.demo_watch_paths);
+      }
+      if (Array.isArray(raw.expected_parse_players)) {
+        put.expected_parse_players = raw.expected_parse_players;
+        setExpectedParsePlayersText(raw.expected_parse_players.join("\n"));
+      }
+      if (Object.keys(put).length) {
+        await API.put("config", put);
+      }
+      if (raw.llm && typeof raw.llm === "object") {
+        const lm = raw.llm;
+        const payload = {
+          provider: String(lm.provider || "deepseek").trim(),
+          model: String(lm.model || "deepseek-chat").trim(),
+          base_url: lm.base_url != null ? String(lm.base_url).trim() || null : null,
+        };
+        const k = lm.api_key != null ? String(lm.api_key).trim() : "";
+        if (k && !k.startsWith("****")) {
+          payload.api_key = k;
+        }
+        await API.put("config", { llm: payload });
+        setLlmConfig((prev) => ({
+          provider: payload.provider,
+          model: payload.model,
+          base_url: payload.base_url || "",
+          api_key: payload.api_key ?? prev.api_key,
+        }));
+        if (k && !k.startsWith("****")) {
+          setLlmKeySavedOnServer(true);
+        }
+      }
+      setProgressText("已应用导入的配置。", { autoDismissMs: 2800 });
+    } catch (e) {
+      setProgressText(`导入失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, []);
+
+  const handleResetSettingsDefaults = useCallback(async () => {
+    if (
+      !window.confirm(
+        "将 CS2/FFmpeg 路径、合辑编码、fps_max、分析模式、关注名单与大模型选项恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
+      )
+    ) {
+      return;
+    }
+    const defaults = {
+      cs2_path: "",
+      ffmpeg_path: "",
+      montage_encoder: "auto",
+      cs2_fps_max: 240,
+      ai_mode: false,
+      expected_parse_players: [],
+      llm: {
+        provider: "deepseek",
+        model: "deepseek-chat",
+        base_url: "https://api.deepseek.com",
+      },
+    };
+    try {
+      await API.put("config", defaults);
+      setCs2Path("");
+      setFfmpegPath("");
+      setMontageEncoder("auto");
+      setCs2FpsMax(240);
+      setAiMode(false);
+      setExpectedParsePlayersText("");
+      setLlmConfig({
+        provider: "deepseek",
+        model: "deepseek-chat",
+        api_key: "",
+        base_url: "https://api.deepseek.com",
+      });
+      setProgressText("已恢复默认（路径与解析相关项）。", { autoDismissMs: 3000 });
+    } catch (e) {
+      setProgressText(`恢复默认失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, []);
+
+  const handleOpenConfigDataDir = useCallback(async () => {
+    try {
+      const { data } = await API.post("config/open-dir");
+      if (data?.ok === false) {
+        setProgressText(`${data.message || "无法打开目录"} ${data.path || ""}`.trim());
+      }
+    } catch (e) {
+      setProgressText(`打开目录失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, []);
+
+  const handleTestLlmConnection = useCallback(async () => {
+    await persistLlmConfig();
+    try {
+      const { data } = await API.post("config/test-llm");
+      if (data?.ok) {
+        setProgressText(`AI 连接正常${data.detail ? `：${data.detail}` : ""}`, { autoDismissMs: 4000 });
+      } else {
+        setProgressText(`AI 连接失败：${data?.detail || "未知错误"}`);
+      }
+    } catch (e) {
+      setProgressText(`AI 测试请求失败: ${e.response?.data?.detail || e.message}`);
+    }
+  }, [persistLlmConfig]);
+
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
 
@@ -1738,18 +1938,28 @@ export default function App() {
     setCs2Path,
     ffmpegPath,
     setFfmpegPath,
+    montageEncoder,
+    setMontageEncoder,
     cs2FpsMax,
     setCs2FpsMax,
     demoWatchPaths,
     setDemoWatchPaths,
     handleSaveConfig,
     handleDetectCs2,
+    handleSaveAllSettingsPage,
+    saveExpectedPlayersFromList,
+    handleExportSettingsConfig,
+    applyImportedSettings,
+    handleResetSettingsDefaults,
+    handleOpenConfigDataDir,
+    handleTestLlmConnection,
     handleScanDemos,
     libraryLoading,
     libraryScanning,
     expectedParsePlayersText,
     setExpectedParsePlayersText,
     handleSaveExpectedParsePlayers,
+    currentDemoFilename,
     batchRecording,
     savedRecordWarmupDefaults,
     persistWarmupDefaults,

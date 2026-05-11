@@ -20,6 +20,7 @@ from typing import Any, Callable, List, Literal, Optional, Tuple
 from obswebsocket import obsws, requests as obs_requests
 
 from .demo_parser import (
+    BUFFER_SECONDS_AFTER,
     TICK_RATE as DEMO_TICK_RATE,
     compute_spec_player_slot_one_based,
     get_demo_spec_calibration_tick,
@@ -109,6 +110,7 @@ _RECORDING_RESULT_CLIP_META_KEYS: tuple[str, ...] = (
     "source_round_ends",
     "fixed_segment_pacing",
     "freeze_to_death_round_filter",
+    "freeze_to_death_round_windows",
     "record_segments",
     "radar_timing",
     "obs_recording_markers",
@@ -863,13 +865,24 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             else:
                 merged.append((s, e))
 
-    # 扩展最后一段以覆盖 clip end_tick（极限拆包）。
+    # 扩展最后一段以覆盖 clip.end_tick（极限拆包等：末段需长于「末杀 + post_last」）。
+    # 若 end_tick 仅落在解析器为高光写的「末杀 + BUFFER_SECONDS_AFTER」典型窗内，而用户已通过 pacing
+    # 把 post_last 缩得比该窗更短，则不得再拉长。注意：典型窗必须与 demo_parser 的 BUFFER_SECONDS_AFTER
+    # 一致，且不得复用 CS2_INSIGHT_SMART_POST_LAST_TICKS 环境变量 —— 否则用户把 env 调小后
+    # end_tick <= last_kill + env_ticks 恒为假，会误判为「拆包」而再次拉长到 clip.end_tick（约 3s）。
+    _parser_default_tail_ticks = int(float(BUFFER_SECONDS_AFTER) * float(DEMO_TICK_RATE))
     if merged and end_tick > 0:
         ls, le = merged[-1]
         if end_tick > le:
             le_ext = min(end_tick, clip_max_tick) if clip_max_tick > 0 else end_tick
             if le_ext > le:
-                merged[-1] = (ls, le_ext)
+                last_kill = kills[-1]
+                default_parser_tail_end = last_kill + _parser_default_tail_ticks
+                user_tightened_post = POST_LAST < _parser_default_tail_ticks
+                end_within_typical_parser_tail = end_tick <= default_parser_tail_end
+                if not (user_tightened_post and end_within_typical_parser_tail):
+                    merged[-1] = (ls, le_ext)
+
     # 扩展第一段以覆盖 clip start_tick（拆包后击杀）。
     if merged and start_tick > 0:
         fs, fe = merged[0]
@@ -2466,6 +2479,14 @@ class OBSDirector:
             self._safe_filename_part(kill_part, "clip"),
             self._safe_filename_part(clip_id, "clip", max_len=32),
         ]
+        jcx = clip.get("_stem_jumpcut_part")
+        if jcx is not None and str(jcx).strip():
+            try:
+                ji = int(jcx)
+            except (TypeError, ValueError):
+                ji = 0
+            if ji > 0:
+                parts.append(f"jc{ji}")
         stem = "_".join(p for p in parts if p)
         return stem[:180].strip(" ._-") or "cs2_clip"
 
@@ -2937,6 +2958,26 @@ class OBSDirector:
         engine_burn_ticks = int(burn_sec * TICK_RATE)
         # ========================================================
 
+        # CS2 Demo 关键帧对齐补偿：demo_gototick 会跳到目标 tick 前最近的关键帧（非精确 tick），
+        # 若 pre_first_sec 比默认值小，seek 目标更靠近击杀帧，但仍落在同一个关键帧上，
+        # 导致录制起点固定在约 5.5s 前，与用户设定无关。
+        # 修复：demo_pause 后先 demo_resume，等待多余的预滚走完，再 StartRecord。
+        # delay = max(0, calibrated_default_pre - target_pre_first)
+        _KEYFRAME_PRE_FIRST_SEC = self._env_float("CS2_INSIGHT_KEYFRAME_PRE_FIRST_SEC", "5.5")
+        _pre_first_override_val = (
+            _pacing_override.get("pre_first_sec") if isinstance(_pacing_override, dict) else None
+        )
+        _target_pre_first_sec = (
+            float(_pre_first_override_val) if _pre_first_override_val is not None else _KEYFRAME_PRE_FIRST_SEC
+        )
+        _apply_kf_delay = (
+            (has_kill_timeline or has_single_segment_override or has_death_timeline)
+            and not clip.get("fixed_segment_pacing")
+        )
+        delay_pre_sec = (
+            max(0.0, _KEYFRAME_PRE_FIRST_SEC - _target_pre_first_sec) if _apply_kf_delay else 0.0
+        )
+
         def _estimated_record_start_tick(seek: int) -> int:
             return max(0, int(seek)) + max(0, int(engine_burn_ticks))
 
@@ -3000,6 +3041,7 @@ class OBSDirector:
         pre_record_video_paths: set[str] = set()
         stop_record_output_path: Optional[Path] = None
         output_result: dict = {}
+        jumpcut_extra_outputs: list[dict] = []
         fatal_recording_error: Optional[str] = None
         _victim_pov_segments: list[dict[str, Any]] = []
         obs_timing_markers: list[dict[str, Any]] = []
@@ -3131,13 +3173,40 @@ class OBSDirector:
                 cursor_bak = self._win_cursor_corner_backup()
                 self._win_cursor_move_corner(cursor_bak)
             pre_record_video_paths = self._obs_snapshot_record_dir_video_paths()
-            record_started_at_wall = time.time()
 
+            # 关键帧延迟：先 demo_resume，等多余预滚走完，再 StartRecord，使成片起点对齐目标。
+            demo_resumed_before_record = False
+            if pause_bracket and delay_pre_sec > 0.05:
+                ok_dr_pre = await asyncio.to_thread(
+                    inject_console_sequence,
+                    ["demo_resume"],
+                    skip_console_toggle=True,
+                    close_console=False,
+                )
+                if ok_dr_pre:
+                    demo_resumed_before_record = True
+                    logger.info(
+                        "[record] kf_delay clip=%s: default_pre=%.2fs target=%.2fs → delay StartRecord %.2fs",
+                        clip_id,
+                        _KEYFRAME_PRE_FIRST_SEC,
+                        _target_pre_first_sec,
+                        delay_pre_sec,
+                    )
+                    await asyncio.sleep(delay_pre_sec)
+                else:
+                    logger.warning(
+                        "[record] demo_resume before StartRecord failed for clip=%s; "
+                        "recording will have ~%.2fs extra pre-roll",
+                        clip_id,
+                        delay_pre_sec,
+                    )
+
+            record_started_at_wall = time.time()
             self._ws.call(obs_requests.StartRecord())
             _mark_obs("start")
 
             radar_post_start_sec = 0.0  # 从 StartRecord 到 demo 实际开始推 tick 的实测时长
-            if pause_bracket:
+            if pause_bracket and not demo_resumed_before_record:
                 ok_dr0 = await asyncio.to_thread(
                     inject_console_sequence,
                     ["demo_resume"],
@@ -3148,17 +3217,69 @@ class OBSDirector:
                     logger.warning("demo_resume immediately after StartRecord failed")
                 await asyncio.sleep(0.08)
                 radar_post_start_sec = time.time() - record_started_at_wall
+            elif pause_bracket and demo_resumed_before_record:
+                await asyncio.sleep(0.08)
+                radar_post_start_sec = time.time() - record_started_at_wall
+
+            # 关键帧预滚：StartRecord 前已 demo_resume 并 sleep(delay_pre_sec)，demo 在片头已向前走了
+            # delay_pre_sec；StartRecord 后又 sleep(0.08) demo 仍在走。若此处仍按整段 legacy_duration
+            #（按 seg 起算的墙钟全长）去睡，会整体多录约 delay_pre_sec，末杀后的 post_last 观感被「吃掉」。
+            _rec_wall_trim = 0.0
+            if pause_bracket:
+                _rec_wall_trim += 0.08
+            if pause_bracket and demo_resumed_before_record and delay_pre_sec > 0.05:
+                _rec_wall_trim += float(delay_pre_sec)
 
             if not use_smart_jump:
-                await self._sleep_abortable(legacy_duration)
+                await self._sleep_abortable(max(0.0, float(legacy_duration) - _rec_wall_trim))
             else:
                 await self._sleep_abortable(post_start_seg0)
                 jump_cut_active = True
+                file_split_jumpcut = False
+                split_fallback_on = os.environ.get(
+                    "CS2_INSIGHT_SMART_JUMP_FILE_SPLIT_FALLBACK",
+                    "1",
+                ).strip().lower() not in ("0", "false", "no")
+
+                async def _split_close_open_obs(part_idx: int) -> None:
+                    """PauseRecord 不可用时：结束当前 OBS 文件并开始新录制，再执行段间 seek（控制台不入镜）。"""
+                    nonlocal record_started_at_wall, pre_record_video_paths
+                    stop_resp = self._ws.call(obs_requests.StopRecord())
+                    _mark_obs("stop")
+                    stop_path = self._obs_response_output_path(stop_resp)
+                    clip_tag = dict(clip)
+                    clip_tag["_stem_jumpcut_part"] = int(part_idx)
+                    part_meta = await self._finalize_obs_recording_rename(
+                        stop_path,
+                        clip_tag,
+                        demo_abs,
+                        spectator_name,
+                        record_started_at_wall,
+                        pre_record_video_paths,
+                    )
+                    if part_meta:
+                        jumpcut_extra_outputs.append(part_meta)
+                    pre_record_video_paths = self._obs_snapshot_record_dir_video_paths()
+                    record_started_at_wall = time.time()
+                    self._ws.call(obs_requests.StartRecord())
+                    _mark_obs("start")
+                    if pause_bracket:
+                        ok_dr0 = await asyncio.to_thread(
+                            inject_console_sequence,
+                            ["demo_resume"],
+                            skip_console_toggle=True,
+                            close_console=False,
+                        )
+                        if not ok_dr0:
+                            logger.warning("demo_resume after split StartRecord failed")
+                        await asyncio.sleep(0.08)
+
                 for si, (seg_start, seg_end) in enumerate(segments):
                     seg_dur = max(0.0, (seg_end - seg_start) / float(TICK_RATE))
                     if si == 0:
-                        # seg_dur 已对齐 tick 区间；first_seg_extra 默认 0，仅 env 可选微垫
-                        await self._sleep_abortable(seg_dur + first_seg_extra)
+                        # 首段与单段同理：StartRecord 前/刚开录时 demo 已先走 _rec_wall_trim 秒。
+                        seg0 = max(0.0, seg_dur + float(first_seg_extra) - _rec_wall_trim)
+                        await self._sleep_abortable(seg0)
                         continue
                     if not jump_cut_active:
                         break
@@ -3172,22 +3293,54 @@ class OBSDirector:
                     # seg_dur sleep 刚结束、demo tick 已到 seg_end，后面本不需要再录，
                     # 提前暂停对内容完整性无影响。POV 段不漏控制台就是因为外层「防结算」
                     # 已提前 OBS pause。
-                    if not _obs_pause():
-                        jump_cut_active = False
-                        fatal_recording_error = (
-                            "OBS recording pause is required for smart jump-cut, "
-                            "but PauseRecord did not enter the paused state."
-                        )
-                        logger.error(
-                            "%s clip_id=%s segment=%d/%d; stopping instead of recording a continuous tail",
-                            fatal_recording_error,
-                            clip_id,
-                            si + 1,
-                            len(segments),
-                        )
-                        break
+                    if file_split_jumpcut:
+                        await _split_close_open_obs(si)
+                    elif not _obs_pause():
+                        if split_fallback_on:
+                            logger.warning(
+                                "PauseRecord unavailable (e.g. MP4); using StopRecord/StartRecord between "
+                                "segments clip_id=%s segment=%d/%d. Prefer MKV recording format for a single file.",
+                                clip_id,
+                                si + 1,
+                                len(segments),
+                            )
+                            file_split_jumpcut = True
+                            fatal_recording_error = None
+                            await _split_close_open_obs(si)
+                        else:
+                            jump_cut_active = False
+                            fatal_recording_error = (
+                                "OBS recording pause is required for smart jump-cut, "
+                                "but PauseRecord did not enter the paused state."
+                            )
+                            logger.error(
+                                "%s clip_id=%s segment=%d/%d; stopping instead of recording a continuous tail",
+                                fatal_recording_error,
+                                clip_id,
+                                si + 1,
+                                len(segments),
+                            )
+                            break
 
                     skip_leading_pause = False
+                    # 回合合集首段往往很长：纯墙钟 sleep(seg_dur) 与 demo 实际 tick 易有漂移，
+                    # 段末可能已略过 seg_end 进入下一回合（观感像「到 R2 了」）。OBS 已 Pause 后先
+                    # demo_gototick 钳回上一段结束 tick，再执行下一段大跨度跳转，避免锚点落在错误回合。
+                    ftd_snap = (
+                        str(clip.get("compilation_kind") or "").strip() == "freeze_to_death" and si >= 1
+                    )
+                    if ftd_snap:
+                        snap_tick = max(0, int(segments[si - 1][1]))
+                        boundary_cmds = ["demo_pause", "demo_timescale 1", f"demo_gototick {snap_tick}"]
+                        logger.info(
+                            "freeze_to_death segment boundary resync snap_tick=%s before seg=%d/%d clip_id=%s",
+                            snap_tick,
+                            si + 1,
+                            len(segments),
+                            clip_id,
+                        )
+                    else:
+                        boundary_cmds = ["demo_pause"]
                     # 【demo_pause 必须 skip_console_toggle=False + close_console=True】
                     # 上一段 stage 5 用 hideconsole 关掉了控制台，这里若 skip=True 直接投
                     # WM_CHAR("demo_pause\r") 会被 CS2 主窗口丢弃（没有控制台 UI 接收）→
@@ -3200,7 +3353,7 @@ class OBSDirector:
                     # （OBS 已在上面先 pause，此时开控制台不会录进成片。）
                     ok_seg_pause = await asyncio.to_thread(
                         inject_console_sequence,
-                        ["demo_pause"],
+                        boundary_cmds,
                         skip_console_toggle=False,
                         close_console=True,
                     )
@@ -3652,6 +3805,11 @@ class OBSDirector:
             "record_end_tick": meta_record_end_tick,
             **output_result,
         }
+        if jumpcut_extra_outputs:
+            _parts = [x.get("output_path") for x in jumpcut_extra_outputs if x.get("output_path")]
+            if _parts:
+                ok_out["smart_jump_split_files"] = _parts
+                ok_out["smart_jump_file_split_used"] = True
         merge_clip_metadata_into_recording_result(ok_out, clip)
         ok_out.update(radar_clip_meta)
         ok_out["pov_hud_enabled"] = bool(getattr(self, "_pov_enabled", False))

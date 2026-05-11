@@ -280,6 +280,20 @@ class LLMConfig(BaseModel):
     base_url: Optional[str] = None
 
 
+def llm_api_key_configured(api_key: Optional[str]) -> bool:
+    """
+    True when a non-empty key is present — including a masked placeholder saved on disk
+    (e.g. re-imported export: \"****\" + last 4). Those cannot be used for real API calls
+    but should not read as \"missing\" in setup UI.
+    """
+    k = (api_key or "").strip()
+    if not k:
+        return False
+    if k.startswith("****"):
+        return len(k) > 4
+    return True
+
+
 class ExperimentalConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -294,6 +308,8 @@ class AppConfig(BaseModel):
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
+    # 合辑 H.264：auto=NVENC→QSV→AMF→libx264；亦可指定编码器名
+    montage_encoder: str = "auto"
     cs2_path: str = ""
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)

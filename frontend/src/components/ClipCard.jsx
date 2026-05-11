@@ -2,6 +2,7 @@ import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
 import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
 import { describeTag } from "../utils/tagDescriptions";
 import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
+import { isTimelineSourceClip } from "../utils/montageUtils";
 
 export const CLIP_CATEGORY_CONFIG = {
   highlight: {
@@ -90,7 +91,7 @@ export default function ClipCard({
   targetPlayer = "",
   selected,
   onToggle,
-  aiMode: _aiMode,
+  aiMode = false,
   inQueue = false,
   matchTotalRounds = 24,
   freezeToDeathDraft = { picked: [] },
@@ -110,8 +111,14 @@ export default function ClipCard({
   const victimsList = Array.isArray(clip.victims) ? clip.victims.filter(Boolean) : [];
   const showVictimsBadge = clip.category === "highlight" && victimsList.length > 0;
 
+  const suppressAiRuiPing =
+    clip.category === "compilation" || isTimelineSourceClip(clip);
+  const showAiUi = Boolean(aiMode) && !suppressAiRuiPing;
+
+  const aiCommentary = [clip.ai_commentary, clip.ai_comment]
+    .map((x) => String(x ?? "").trim())
+    .find(Boolean);
   const hasAiScore = normalizeAiScore(clip.ai_score) != null;
-  const aiCommentary = String(clip.ai_commentary ?? "").trim();
 
   const hasScore = clip.score_own != null && clip.score_opp != null;
 
@@ -147,7 +154,7 @@ export default function ClipCard({
               }`
       }`}
     >
-      {hasAiScore && (
+      {showAiUi && hasAiScore && (
         <div className="absolute right-11 top-3 z-10 max-w-[calc(100%-5.5rem)] sm:right-12">
           <AiScoreBadge score={clip.ai_score} />
         </div>
@@ -291,7 +298,7 @@ export default function ClipCard({
           </div>
         </div>
 
-        {aiCommentary ? (
+        {showAiUi && aiCommentary ? (
           <div className="relative mt-4 min-w-0 overflow-hidden rounded-lg bg-zinc-950/75 pl-3.5 pr-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ring-1 ring-white/[0.06]">
             <div
               className="pointer-events-none absolute bottom-1 left-0 top-1 w-[3px] rounded-full bg-gradient-to-b from-cs2-orange via-fuchsia-500/80 to-cyan-500/40 opacity-90"

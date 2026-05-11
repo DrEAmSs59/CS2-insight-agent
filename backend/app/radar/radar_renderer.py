@@ -125,13 +125,27 @@ def _player_color_hex(player: dict[str, Any], color_index: int) -> str:
     return _SLOT_COLORS_HEX[color_index % len(_SLOT_COLORS_HEX)]
 
 
+def _radar_player_palette_key(player: dict[str, Any]) -> str:
+    """稳定区分「不同玩家」，避免人机/缺 steamid 时全部落到同一 fallback 色。"""
+    raw_sid = str(player.get("steamid64") or player.get("steamid") or "").strip()
+    name = str(player.get("name") or "").strip()
+    # Demo 里人机常见 steamid=0；多个人机若只按 id 建表会共用 color index 0。
+    if raw_sid and raw_sid != "0":
+        return f"sid:{raw_sid}"
+    if name:
+        return f"name:{name.casefold()}"
+    if raw_sid:
+        return f"sid:{raw_sid}"
+    return "anon"
+
+
 def _build_color_indices(players: list[dict[str, Any]]) -> dict[str, int]:
     ids: list[str] = []
     for p in players:
-        sid = str(p.get("steamid64") or p.get("steamid") or p.get("name") or "")
-        if sid and sid not in ids:
-            ids.append(sid)
-    return {sid: idx for idx, sid in enumerate(ids)}
+        key = _radar_player_palette_key(p)
+        if key != "anon" and key not in ids:
+            ids.append(key)
+    return {key: idx for idx, key in enumerate(ids)}
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +206,8 @@ def _render_frame_pil(
         is_alive = bool(player.get("is_alive", True))
         is_pov   = bool(player.get("is_pov", False))
 
-        sid = str(player.get("steamid64") or player.get("steamid") or player.get("name") or "")
-        ci  = color_idx_by_id.get(sid, 0)
+        pkey = _radar_player_palette_key(player)
+        ci = color_idx_by_id.get(pkey, 0) if pkey != "anon" else 0
         hex_color = _player_color_hex(player, ci) if is_alive else _DEAD_COLOR_HEX
         alpha     = 255 if is_alive else 90
 
