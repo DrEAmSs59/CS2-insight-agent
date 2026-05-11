@@ -215,6 +215,10 @@ class AIReviewer:
 
     async def _review_one(self, clip: Clip, match_meta: dict) -> None:
         async with self._sem:
+            if clip.category == "compilation":
+                clip.ai_score = None
+                clip.ai_commentary = None
+                return
             try:
                 score, comment = await asyncio.wait_for(
                     self._call_llm(clip, match_meta),

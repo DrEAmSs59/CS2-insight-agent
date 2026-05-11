@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import { useAppShell } from "../context/AppShellContext";
 import {
   Brain,
@@ -6,12 +7,11 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
-  ChevronUp,
+  Check,
   Server,
-  FolderOpen,
-  ScanSearch,
-  Users,
 } from "lucide-react";
+
+const API = axios.create({ baseURL: "/api" });
 
 const PROVIDER_PRESETS = {
   deepseek: { label: "DeepSeek", model: "deepseek-chat", base_url: "https://api.deepseek.com", local: false },
@@ -24,344 +24,529 @@ const PROVIDER_PRESETS = {
   lmstudio: { label: "LM Studio (本地)", model: "loaded-model", base_url: "http://localhost:1234", local: true },
 };
 
-function SettingsForm({
-  aiMode,
-  onAiModeChange,
-  llmConfig,
-  onLlmConfigChange,
-  llmKeySavedOnServer = false,
-  onPersistLlm,
-  cs2Path,
-  onCs2PathChange,
-  ffmpegPath = "",
-  onFfmpegPathChange,
-  cs2FpsMax = 240,
-  onCs2FpsMaxChange,
-  onSaveConfig,
-  onDetectCs2,
-  expectedParsePlayersText = "",
-  onExpectedParsePlayersTextChange,
-  onSaveExpectedParsePlayers,
-}) {
-  const [cs2Open, setCs2Open] = useState(true);
-  const [llmOpen, setLlmOpen] = useState(true);
-  const [expectedPlayersOpen, setExpectedPlayersOpen] = useState(true);
-  const [detectingCs2, setDetectingCs2] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
-  const handleDetectCs2 = async () => {
-    if (!onDetectCs2) return;
-    setDetectingCs2(true);
-    try {
-      await onDetectCs2();
-    } finally {
-      setDetectingCs2(false);
-    }
-  };
+function parsePlayerLines(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
-  const schedulePersistLlm = () => {
-    if (!onPersistLlm) return;
-    queueMicrotask(() => {
-      void onPersistLlm();
-    });
-  };
-
-  const handleProviderChange = (provider) => {
-    const preset = PROVIDER_PRESETS[provider];
-    if (preset) {
-      onLlmConfigChange({
-        ...llmConfig,
-        provider,
-        model: preset.model,
-        base_url: preset.base_url,
-      });
-    } else {
-      onLlmConfigChange({ ...llmConfig, provider });
-    }
-    schedulePersistLlm();
-  };
-
-  const currentPreset = PROVIDER_PRESETS[llmConfig.provider];
-  const isLocal = currentPreset?.local ?? false;
-
+/** @param {"ok"|"warn"|"err"|"muted"} tone */
+function StatusLine({ tone, children }) {
+  const dot =
+    tone === "ok"
+      ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.45)]"
+      : tone === "warn"
+        ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.35)]"
+        : tone === "err"
+          ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.35)]"
+          : "bg-zinc-500";
   return (
-    <div className="h-full min-h-0 w-full overflow-y-auto px-4 py-4 pb-12 sm:px-5">
-      <div className="mb-6 border-b border-white/10 pb-4">
-        <h1 className="text-lg font-bold text-white">设置</h1>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-          CS2 启动路径、关注玩家名单与大模型（AI 洞察模式）。Demo 监听目录请在「Demo 库」页配置。OBS WebSocket 请在侧边栏「OBS 配置中心」中配置。
-        </p>
+    <div className="flex items-start gap-2 text-[11px] leading-snug text-zinc-300">
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function SettingsCard({ title, hint, children, className = "", fill = false }) {
+  return (
+    <section
+      className={`rounded-xl border border-white/[0.08] bg-cs2-bg-card/90 p-4 shadow-sm shadow-black/20 ${
+        fill ? "flex min-h-0 flex-1 flex-col" : "flex flex-col"
+      } ${className}`}
+    >
+      <div className="mb-3 shrink-0">
+        <h2 className="text-[13px] font-bold tracking-wide text-zinc-100">{title}</h2>
+        {hint ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{hint}</p> : null}
       </div>
+      {fill ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
+    </section>
+  );
+}
 
-      <div className="rounded-lg border border-white/10 bg-cs2-bg-card/80">
-        <div className="border-b border-white/10 px-4 py-4">
-          <div className="text-[10px] font-semibold uppercase tracking-widest text-cs2-text-secondary">分析模式</div>
-          <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-cs2-bg-dark p-1">
-            <button
-              type="button"
-              onClick={() => void onAiModeChange(false)}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-2.5 text-xs font-semibold transition-all ${
-                !aiMode
-                  ? "bg-cs2-orange text-black shadow-lg shadow-cs2-orange/20"
-                  : "text-cs2-text-secondary hover:text-white"
-              }`}
-            >
-              <Zap className="h-3.5 w-3.5" />
-              极速本地
-            </button>
-            <button
-              type="button"
-              onClick={() => void onAiModeChange(true)}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-2.5 text-xs font-semibold transition-all ${
-                aiMode
-                  ? "bg-cs2-orange text-black shadow-lg shadow-cs2-orange/20"
-                  : "text-cs2-text-secondary hover:text-white"
-              }`}
-            >
-              <Brain className="h-3.5 w-3.5" />
-              AI 洞察
-            </button>
-          </div>
-        </div>
+function SecondaryButton({ children, className = "", ...rest }) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-zinc-200 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-45 ${className}`}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
 
-        <div className="border-b border-white/10">
-          <button type="button" onClick={() => setCs2Open(!cs2Open)} className="flex w-full items-center justify-between px-4 py-3 text-left">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">CS2 路径</span>
-            </div>
-            {cs2Open ? (
-              <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            )}
-          </button>
-          {cs2Open && (
-            <div className="space-y-2 px-4 pb-4">
-              <Input
-                label="cs2.exe 完整路径"
-                value={cs2Path ?? ""}
-                placeholder="...\\game\\bin\\win64\\cs2.exe"
-                onChange={(v) => onCs2PathChange?.(v)}
-                onBlur={() => onSaveConfig?.({ cs2_path: cs2Path ?? "" })}
-              />
-              <Input
-                label="FFmpeg 可执行文件（合辑导出，可选）"
-                value={ffmpegPath ?? ""}
-                placeholder="留空则使用 PATH 中的 ffmpeg"
-                onChange={(v) => onFfmpegPathChange?.(v)}
-                onBlur={() => onSaveConfig?.({ ffmpeg_path: ffmpegPath ?? "" })}
-              />
-              <div className="space-y-1">
-                <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                  录制帧率上限 (fps_max，0=不限制)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={9999}
-                  step={10}
-                  value={cs2FpsMax}
-                  onChange={(e) => onCs2FpsMaxChange?.(Number(e.target.value))}
-                  onBlur={() => onSaveConfig?.({ cs2_fps_max: cs2FpsMax })}
-                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleDetectCs2}
-                disabled={detectingCs2}
-                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50 disabled:opacity-50"
-              >
-                <ScanSearch className="h-3.5 w-3.5" />
-                {detectingCs2 ? "探测中…" : "自动探测"}
-              </button>
-              <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
-                一键录制会启动本机 CS2 播放 Demo。若探测失败，请从 Steam 库右键 CS2 → 管理 → 浏览本地文件，找到
-                <span className="font-mono text-zinc-500"> game\bin\win64\cs2.exe </span>
-                并粘贴完整路径。
-              </p>
-            </div>
-          )}
-        </div>
+function PrimaryButton({ children, className = "", ...rest }) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md bg-cs2-orange px-4 py-2.5 text-xs font-bold text-black shadow-md shadow-cs2-orange/25 transition-colors hover:bg-cs2-orange/90 disabled:opacity-50 ${className}`}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
 
-        <div className="border-b border-white/10">
-          <button
-            type="button"
-            onClick={() => setExpectedPlayersOpen(!expectedPlayersOpen)}
-            className="flex w-full items-center justify-between px-4 py-3 text-left"
-          >
-            <div className="flex items-center gap-2">
-              <Users className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">关注玩家</span>
-            </div>
-            {expectedPlayersOpen ? (
-              <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
-            )}
-          </button>
-          {expectedPlayersOpen && (
-            <div className="space-y-2 px-4 pb-4">
-              <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
-                每行一个游戏内昵称，<strong className="text-zinc-400">可写多行多名</strong>。
-                <strong className="text-zinc-400">不会</strong>自动拆高光；要出片段请在库里选中后自行点解析。
-              </p>
-              <textarea
-                rows={5}
-                value={expectedParsePlayersText}
-                onChange={(e) => onExpectedParsePlayersTextChange?.(e.target.value)}
-                placeholder={"PlayerOne\nPlayerTwo"}
-                className="w-full resize-y rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[11px] text-white placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50"
-                onClick={() => void onSaveExpectedParsePlayers?.()}
-              >
-                保存名单
-              </button>
-            </div>
-          )}
-        </div>
-
-        {aiMode && (
-          <div className="border-b border-white/10">
-            <button type="button" onClick={() => setLlmOpen(!llmOpen)} className="flex w-full items-center justify-between px-4 py-3 text-left">
-              <div className="flex items-center gap-2">
-                <Brain className="h-3.5 w-3.5 text-cs2-text-secondary" />
-                <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">大模型配置</span>
-              </div>
-              {llmOpen ? (
-                <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
-              )}
-            </button>
-            {llmOpen && (
-              <div className="space-y-3 px-4 pb-4">
-                <div>
-                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">服务商</label>
-                  <div className="relative">
-                    <select
-                      value={llmConfig.provider}
-                      onChange={(e) => handleProviderChange(e.target.value)}
-                      className="w-full cursor-pointer appearance-none rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 pr-8 text-xs text-white transition-colors focus:border-cs2-orange/50 focus:outline-none"
-                    >
-                      <optgroup label="云端服务">
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="qwen">通义千问 (Qwen)</option>
-                        <option value="glm">智谱 (GLM)</option>
-                        <option value="minimax">MiniMax</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="openrouter">OpenRouter</option>
-                      </optgroup>
-                      <optgroup label="本地模型">
-                        <option value="ollama">Ollama (本地)</option>
-                        <option value="lmstudio">LM Studio (本地)</option>
-                      </optgroup>
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-secondary" />
-                  </div>
-                </div>
-
-                {isLocal && (
-                  <div className="flex items-center gap-1.5 rounded-md border border-cs2-orange/20 bg-cs2-orange/10 px-2.5 py-2">
-                    <Server className="h-3 w-3 shrink-0 text-cs2-orange" />
-                    <span className="text-[10px] text-cs2-orange">本地模型无需 API 密钥，请确保服务已启动</span>
-                  </div>
-                )}
-
-                <Input
-                  label="模型名称"
-                  value={llmConfig.model}
-                  placeholder={currentPreset?.model || ""}
-                  onChange={(v) => onLlmConfigChange({ ...llmConfig, model: v })}
-                  onBlur={schedulePersistLlm}
-                />
-
-                {!isLocal && (
-                  <div>
-                    <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">API 密钥</label>
-                    {llmKeySavedOnServer && !llmConfig.api_key?.trim() && (
-                      <p className="mb-1.5 text-[10px] leading-relaxed text-emerald-500/90">
-                        密钥已在服务器保存（刷新不显示明文）。若要更换，输入新密钥后失焦即可覆盖。
-                      </p>
-                    )}
-                    <div className="relative">
-                      <input
-                        type={showApiKey ? "text" : "password"}
-                        value={llmConfig.api_key}
-                        placeholder={llmKeySavedOnServer && !llmConfig.api_key?.trim() ? "留空沿用已保存密钥" : "sk-..."}
-                        onChange={(e) => onLlmConfigChange({ ...llmConfig, api_key: e.target.value })}
-                        onBlur={schedulePersistLlm}
-                        className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 pr-9 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary transition-colors hover:text-white"
-                      >
-                        {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <Input
-                  label="接口地址"
-                  value={llmConfig.base_url || ""}
-                  onChange={(v) => onLlmConfigChange({ ...llmConfig, base_url: v })}
-                  onBlur={schedulePersistLlm}
-                />
-              </div>
-            )}
-          </div>
-        )}
+function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPastePath }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
+      <div className="flex gap-2">
+        <input
+          value={value ?? ""}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurSave}
+          className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+        />
+        <SecondaryButton type="button" className="shrink-0 px-2.5 py-2" onClick={onPastePath} title="从剪贴板粘贴完整路径">
+          粘贴路径
+        </SecondaryButton>
       </div>
+    </div>
+  );
+}
 
-      <p className="mt-8 text-center font-mono text-[10px] text-cs2-text-secondary">CS2 洞察智能体 · v2.0.0</p>
+function SmallField({ label, children }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
+      {children}
     </div>
   );
 }
 
 export default function SettingsPage() {
   const s = useAppShell();
-  return (
-    <SettingsForm
-      aiMode={s.aiMode}
-      onAiModeChange={s.handleAiModeChange}
-      llmConfig={s.llmConfig}
-      onLlmConfigChange={s.setLlmConfig}
-      llmKeySavedOnServer={s.llmKeySavedOnServer}
-      onPersistLlm={s.persistLlmConfig}
-      cs2Path={s.cs2Path}
-      onCs2PathChange={s.setCs2Path}
-      ffmpegPath={s.ffmpegPath}
-      onFfmpegPathChange={s.setFfmpegPath}
-      cs2FpsMax={s.cs2FpsMax}
-      onCs2FpsMaxChange={s.setCs2FpsMax}
-      onSaveConfig={s.handleSaveConfig}
-      onDetectCs2={s.handleDetectCs2}
-      expectedParsePlayersText={s.expectedParsePlayersText}
-      onExpectedParsePlayersTextChange={s.setExpectedParsePlayersText}
-      onSaveExpectedParsePlayers={s.handleSaveExpectedParsePlayers}
-    />
-  );
-}
+  const [setup, setSetup] = useState(null);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [players, setPlayers] = useState(() => parsePlayerLines(s.expectedParsePlayersText));
+  const [playerDraft, setPlayerDraft] = useState("");
 
-function Input({ label, value, type = "text", placeholder, onChange, onBlur }) {
+  useEffect(() => {
+    setPlayers(parsePlayerLines(s.expectedParsePlayersText));
+  }, [s.expectedParsePlayersText]);
+
+  const refreshSetup = useCallback(async () => {
+    try {
+      const { data } = await API.get("status/setup");
+      setSetup(data);
+    } catch {
+      setSetup(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSetup();
+    const id = window.setInterval(() => void refreshSetup(), 10000);
+    return () => window.clearInterval(id);
+  }, [refreshSetup]);
+
+  const currentPreset = PROVIDER_PRESETS[s.llmConfig.provider];
+  const isLocal = currentPreset?.local ?? false;
+
+  const schedulePersistLlm = () => {
+    queueMicrotask(() => void s.persistLlmConfig());
+  };
+
+  const handleProviderChange = (provider) => {
+    const preset = PROVIDER_PRESETS[provider];
+    if (preset) {
+      s.setLlmConfig({
+        ...s.llmConfig,
+        provider,
+        model: preset.model,
+        base_url: preset.base_url,
+      });
+    } else {
+      s.setLlmConfig({ ...s.llmConfig, provider });
+    }
+    schedulePersistLlm();
+  };
+
+  const cs2Status = useMemo(() => {
+    if (!setup) return { tone: "muted", text: "CS2：检测中…" };
+    if (setup.cs2_path_ok) return { tone: "ok", text: "CS2：已检测到可执行文件" };
+    if (String(s.cs2Path || "").trim())
+      return { tone: "warn", text: "CS2：路径已填但文件不存在或不可访问" };
+    return { tone: "err", text: "CS2：未配置" };
+  }, [setup, s.cs2Path]);
+
+  const ffmpegStatus = useMemo(() => {
+    if (!setup) return { tone: "muted", text: "FFmpeg：检测中…" };
+    if (setup.ffmpeg_ok) return { tone: "ok", text: "FFmpeg：编码器 / 可执行文件可用" };
+    return { tone: "warn", text: "FFmpeg：未在 PATH 或自定义路径中找到" };
+  }, [setup]);
+
+  const aiRowStatus = useMemo(() => {
+    if (!s.aiMode) return { tone: "muted", text: "AI：极速本地（未启用云端锐评）" };
+    if (isLocal) {
+      return { tone: "ok", text: `AI：本地「${currentPreset?.label || s.llmConfig.provider}」` };
+    }
+    if (!setup) return { tone: "muted", text: "AI：检测中…" };
+    if (setup.ai_key_ok || s.llmKeySavedOnServer) {
+      return { tone: "ok", text: `AI：${currentPreset?.label || s.llmConfig.provider} 已配置密钥` };
+    }
+    return { tone: "warn", text: "AI：请填写并保存 API 密钥" };
+  }, [s.aiMode, s.llmKeySavedOnServer, setup, isLocal, currentPreset, s.llmConfig.provider]);
+
+  const handlePasteCs2 = async () => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      if (t) {
+        s.setCs2Path(t);
+        await s.handleSaveConfig({ cs2_path: t });
+      }
+    } catch {
+      s.setProgressText("无法读取剪贴板，请手动粘贴路径。");
+    }
+  };
+
+  const handlePasteFfmpeg = async () => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      if (t) {
+        s.setFfmpegPath(t);
+        await s.handleSaveConfig({ ffmpeg_path: t });
+      }
+    } catch {
+      s.setProgressText("无法读取剪贴板，请手动粘贴路径。");
+    }
+  };
+
+  const addPlayer = (name) => {
+    const n = String(name || "").trim();
+    if (!n) return;
+    if (players.includes(n)) {
+      setPlayerDraft("");
+      return;
+    }
+    if (players.length >= 50) return;
+    setPlayers((p) => [...p, n]);
+    setPlayerDraft("");
+  };
+
+  const removePlayer = (name) => {
+    setPlayers((p) => p.filter((x) => x !== name));
+  };
+
+  const editPlayer = (name) => {
+    const next = window.prompt("编辑昵称", name);
+    if (next == null) return;
+    const t = String(next).trim();
+    if (!t || t === name) return;
+    setPlayers((p) => p.map((x) => (x === name ? t : x)));
+  };
+
   return (
-    <div>
-      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-      />
+    <div className="flex h-full min-h-0 w-full flex-col bg-cs2-bg-dark">
+      <header className="shrink-0 border-b border-white/10 bg-cs2-bg-dark/95 px-4 py-3 backdrop-blur-sm sm:px-5">
+        <div className="w-full min-w-0">
+          <h1 className="text-lg font-bold tracking-tight text-white">设置中心</h1>
+          <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
+            管理 CS2、FFmpeg、AI 洞察与录制相关选项。
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <StatusLine tone={cs2Status.tone}>{cs2Status.text}</StatusLine>
+            <StatusLine tone={ffmpegStatus.tone}>{ffmpegStatus.text}</StatusLine>
+            <StatusLine
+              tone={
+                aiRowStatus.tone === "err"
+                  ? "err"
+                  : aiRowStatus.tone === "warn"
+                    ? "warn"
+                    : aiRowStatus.tone === "ok"
+                      ? "ok"
+                      : "muted"
+              }
+            >
+              {aiRowStatus.text}
+            </StatusLine>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
+          <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col px-4 py-4 sm:px-5">
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 pb-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:items-stretch xl:gap-5">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+            <SettingsCard
+              title="运行模式"
+              hint="切换后会影响解析是否请求大模型；AI 模式需配置密钥。"
+              fill
+            >
+              <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void s.handleAiModeChange(false)}
+                  className={`relative flex min-h-[7.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[8.5rem] ${
+                    !s.aiMode
+                      ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
+                      : "border-white/[0.08] bg-black/20 hover:border-white/15"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Zap className={`h-4 w-4 ${!s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
+                    <span className={`text-sm font-bold ${!s.aiMode ? "text-white" : "text-zinc-400"}`}>极速本地</span>
+                    {!s.aiMode ? (
+                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">本地规则提取片段，无需 AI</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void s.handleAiModeChange(true)}
+                  className={`relative flex min-h-[7.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[8.5rem] ${
+                    s.aiMode
+                      ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
+                      : "border-white/[0.08] bg-black/20 hover:border-white/15"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Brain className={`h-4 w-4 ${s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
+                    <span className={`text-sm font-bold ${s.aiMode ? "text-white" : "text-zinc-400"}`}>AI 洞察</span>
+                    {s.aiMode ? (
+                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
+                    ) : null}
+                  </div>
+                  <ul className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-zinc-500">
+                    <li>· AI 锐评与评分</li>
+                  </ul>
+                </button>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard
+              title="CS2 路径"
+              hint="一键录制依赖本机 CS2；若自动探测失败请粘贴 Steam 库中的 cs2.exe 完整路径。"
+              fill
+            >
+              <div className="flex min-h-0 flex-1 flex-col space-y-3">
+                <PathFieldRow
+                  label="cs2.exe 完整路径"
+                  value={s.cs2Path}
+                  placeholder="...\\game\\bin\\win64\\cs2.exe"
+                  onChange={s.setCs2Path}
+                  onBlurSave={() => void s.handleSaveConfig({ cs2_path: s.cs2Path ?? "" })}
+                  onPastePath={() => void handlePasteCs2()}
+                />
+                <p className="mt-auto text-[10px] leading-relaxed text-zinc-600">
+                  可从资源管理器地址栏复制路径，使用「粘贴路径」。
+                </p>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard
+              title="关注玩家"
+              hint="用于 Demo 库展示名匹配等；不会自动拆高光。最多 50 名。"
+              fill
+            >
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="flex min-h-[6rem] flex-1 flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/25 p-2 sm:min-h-[8rem]">
+                {players.length === 0 ? (
+                  <span className="py-1 text-[11px] text-zinc-600">尚未添加玩家</span>
+                ) : (
+                  players.map((p) => (
+                    <span
+                      key={p}
+                      className="group inline-flex items-center gap-1 rounded-md border border-cs2-orange/30 bg-cs2-orange/10 pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-orange"
+                    >
+                      <button
+                        type="button"
+                        className="max-w-[140px] truncate text-left hover:underline"
+                        title="双击编辑"
+                        onDoubleClick={() => editPlayer(p)}
+                      >
+                        {p}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-zinc-500 hover:bg-white/10 hover:text-white"
+                        aria-label={`移除 ${p}`}
+                        onClick={() => removePlayer(p)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))
+                )}
+                </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <input
+                  value={playerDraft}
+                  onChange={(e) => setPlayerDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addPlayer(playerDraft);
+                    }
+                  }}
+                  placeholder="输入昵称后回车或点添加"
+                  className="min-w-[12rem] flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
+                  spellCheck={false}
+                />
+                <SecondaryButton type="button" onClick={() => addPlayer(playerDraft)}>
+                  ＋ 添加玩家
+                </SecondaryButton>
+              </div>
+              </div>
+            </SettingsCard>
+
+              </div>
+
+              {/* 右列 */}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+            <SettingsCard title="FFmpeg 与合辑" hint="合辑导出与编码器；fps_max 作用于录制启动时的 CS2。" fill>
+              <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
+                <div className="shrink-0">
+                  <PathFieldRow
+                    label="FFmpeg 可执行文件（可选）"
+                    value={s.ffmpegPath}
+                    placeholder="留空则使用 PATH 中的 ffmpeg"
+                    onChange={s.setFfmpegPath}
+                    onBlurSave={() => void s.handleSaveConfig({ ffmpeg_path: s.ffmpegPath ?? "" })}
+                    onPastePath={() => void handlePasteFfmpeg()}
+                  />
+                </div>
+                <div className="shrink-0">
+                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+                    合辑视频编码
+                  </label>
+                  <select
+                    value={s.montageEncoder ?? "auto"}
+                    onChange={(e) => s.setMontageEncoder(e.target.value)}
+                    onBlur={() => void s.handleSaveConfig({ montage_encoder: s.montageEncoder ?? "auto" })}
+                    className="w-full max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+                  >
+                    <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
+                    <option value="h264_nvenc">NVIDIA NVENC</option>
+                    <option value="h264_qsv">Intel Quick Sync (QSV)</option>
+                    <option value="h264_amf">AMD AMF</option>
+                    <option value="libx264">x264 软件（CPU）</option>
+                  </select>
+                  <p className="mt-1 text-[10px] text-zinc-600">失败时可改用 x264 软件编码。</p>
+                </div>
+                <div className="shrink-0">
+                  <SmallField label="录制帧率上限 fps_max（0=不限制）">
+                    <input
+                      type="number"
+                      min={0}
+                      max={9999}
+                      step={10}
+                      value={s.cs2FpsMax}
+                      onChange={(e) => s.setCs2FpsMax(Number(e.target.value))}
+                      onBlur={() => void s.handleSaveConfig({ cs2_fps_max: s.cs2FpsMax })}
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+                    />
+                  </SmallField>
+                </div>
+                <div className="flex-1" aria-hidden />
+              </div>
+            </SettingsCard>
+
+            {s.aiMode ? (
+              <SettingsCard title="大模型（AI）" hint="密钥在服务器保存后刷新不显示明文；更换时输入新密钥失焦即可。" fill>
+                <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">服务商</label>
+                    <div className="relative max-w-md">
+                      <select
+                        value={s.llmConfig.provider}
+                        onChange={(e) => handleProviderChange(e.target.value)}
+                        className="w-full cursor-pointer appearance-none rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 pr-8 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+                      >
+                        <optgroup label="云端服务">
+                          <option value="deepseek">DeepSeek</option>
+                          <option value="qwen">通义千问 (Qwen)</option>
+                          <option value="glm">智谱 (GLM)</option>
+                          <option value="minimax">MiniMax</option>
+                          <option value="openai">OpenAI</option>
+                          <option value="openrouter">OpenRouter</option>
+                        </optgroup>
+                        <optgroup label="本地模型">
+                          <option value="ollama">Ollama (本地)</option>
+                          <option value="lmstudio">LM Studio (本地)</option>
+                        </optgroup>
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-secondary" />
+                    </div>
+                  </div>
+                  {isLocal && (
+                    <div className="flex items-center gap-1.5 rounded-md border border-cs2-orange/20 bg-cs2-orange/10 px-2.5 py-2">
+                      <Server className="h-3 w-3 shrink-0 text-cs2-orange" />
+                      <span className="text-[10px] text-cs2-orange">本地模型无需 API 密钥，请确保服务已启动。</span>
+                    </div>
+                  )}
+                  <SmallField label="模型名称">
+                    <input
+                      value={s.llmConfig.model}
+                      placeholder={currentPreset?.model || ""}
+                      onChange={(e) => s.setLlmConfig({ ...s.llmConfig, model: e.target.value })}
+                      onBlur={schedulePersistLlm}
+                      className="w-full max-w-md rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+                    />
+                  </SmallField>
+                  {!isLocal && (
+                    <div>
+                      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">API 密钥</label>
+                      {s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() && (
+                        <p className="mb-1.5 text-[10px] leading-relaxed text-emerald-500/90">
+                          密钥已在服务器保存。更换请输入新密钥后失焦保存。
+                        </p>
+                      )}
+                      <div className="relative max-w-xl">
+                        <input
+                          type={showApiKey ? "text" : "password"}
+                          value={s.llmConfig.api_key}
+                          placeholder={s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() ? "留空沿用已保存密钥" : "sk-..."}
+                          onChange={(e) => s.setLlmConfig({ ...s.llmConfig, api_key: e.target.value })}
+                          onBlur={schedulePersistLlm}
+                          className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2.5 pl-3 pr-10 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary hover:text-white"
+                        >
+                          {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">接口地址</label>
+                    <input
+                      value={s.llmConfig.base_url || ""}
+                      onChange={(e) => s.setLlmConfig({ ...s.llmConfig, base_url: e.target.value })}
+                      onBlur={schedulePersistLlm}
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </SettingsCard>
+            ) : null}
+
+            <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] leading-relaxed text-zinc-400">
+                将路径、帧率、编码、关注名单与大模型选项一次性写入配置文件。
+              </p>
+              <PrimaryButton
+                className="shrink-0 sm:min-w-[140px]"
+                onClick={() => void s.handleSaveAllSettingsPage(players)}
+              >
+                保存设置
+              </PrimaryButton>
+            </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

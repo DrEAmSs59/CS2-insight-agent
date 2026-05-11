@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
 from .radar.radar_composer import RadarOverlaySkip, apply_radar_overlay_to_clip
 
 logger = logging.getLogger(__name__)
@@ -172,10 +173,15 @@ def _concat_file_line(p: Path) -> str:
     return f"file '{s}'"
 
 
-def _finalize_mp4_for_common_players(ffmpeg_bin: Path, src: Path, dst: Path) -> None:
+def _finalize_mp4_for_common_players(
+    ffmpeg_bin: Path,
+    src: Path,
+    dst: Path,
+    video_encode_fast: list[str],
+) -> None:
     """
     concat 直拷 .ts → .mp4 在部分播放器上不可靠（moov/时间基/流封装）。
-    统一重编码为 H.264 Main + AAC-LC，并写入 faststart 便于随机访问。
+    统一重编码为 H.264（Main/High 依编码器）+ AAC-LC，并写入 faststart 便于随机访问。
     """
     cmd = [
         str(ffmpeg_bin),
@@ -189,18 +195,7 @@ def _finalize_mp4_for_common_players(ffmpeg_bin: Path, src: Path, dst: Path) -> 
         "0:v:0",
         "-map",
         "0:a:0",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "faster",
-        "-crf",
-        "20",
-        "-profile:v",
-        "main",
-        "-level",
-        "4.0",
-        "-pix_fmt",
-        "yuv420p",
+        *video_encode_fast,
         "-c:a",
         "aac",
         "-b:a",
@@ -237,6 +232,7 @@ def _image_to_ts_with_fade(
     width: int,
     height: int,
     fps: float,
+    video_encode_quality: list[str],
     duration: float = 3.0,
     fade_duration: float = 0.5,
 ) -> None:
@@ -261,9 +257,7 @@ def _image_to_ts_with_fade(
         f"[0:v]{vf}[v];anullsrc=r=48000:cl=stereo,atrim=0:{d:.6f},asetpts=N/SR/TB[a]",
         "-map", "[v]",
         "-map", "[a]",
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "18",
+        *video_encode_quality,
         "-c:a", "aac",
         "-b:a", "192k",
         "-t", str(d),
@@ -332,6 +326,7 @@ def _montage_xfade_chain_to_ts(
     transitions: dict[str, Any],
     fps: float,
     out_ts: Path,
+    video_encode_quality: list[str],
 ) -> None:
     """将已归一化的 .ts 片段链用 xfade + acrossfade 连成单路 mpegts（片段需同分辨率/帧率）。"""
     n = len(clip_ts_paths)
@@ -385,12 +380,7 @@ def _montage_xfade_chain_to_ts(
         "[vout]",
         "-map",
         "[aout]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "18",
+        *video_encode_quality,
         "-c:a",
         "aac",
         "-b:a",
@@ -420,6 +410,7 @@ def compose_montage(
     bgm_start_sec: Optional[float] = None,
     intro_image_duration: Optional[float] = None,
     outro_image_duration: Optional[float] = None,
+    montage_encoder: str = "auto",
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -432,6 +423,10 @@ def compose_montage(
         raise MontageComposerError(f"片尾文件不存在: {outro_path}")
     if bgm_path is not None and not bgm_path.is_file():
         raise MontageComposerError(f"BGM 文件不存在: {bgm_path}")
+
+    _codec = resolve_h264_codec_name(ffmpeg_bin, montage_encoder)
+    video_encode_quality = h264_encode_cli_args(_codec, "quality")
+    video_encode_fast = h264_encode_cli_args(_codec, "fast")
 
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
@@ -454,6 +449,7 @@ def compose_montage(
                             clip_row=clip_rows[idx],
                             tmpdir=radar_stage,
                             index=idx,
+                            video_encode_quality=video_encode_quality,
                         ),
                     )
                 except RadarOverlaySkip as exc:
@@ -495,6 +491,7 @@ def compose_montage(
                     width=w,
                     height=h,
                     fps=fps,
+                    video_encode_quality=video_encode_quality,
                     duration=img_dur,
                 )
                 normed.append(out_ts)
@@ -523,12 +520,7 @@ def compose_montage(
                     "[v]",
                     "-map",
                     "[a]",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "medium",
-                    "-crf",
-                    "18",
+                    *video_encode_quality,
                     "-c:a",
                     "aac",
                     "-b:a",
@@ -555,12 +547,7 @@ def compose_montage(
                     "[v]",
                     "-map",
                     "[a]",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "medium",
-                    "-crf",
-                    "18",
+                    *video_encode_quality,
                     "-c:a",
                     "aac",
                     "-b:a",
@@ -596,6 +583,7 @@ def compose_montage(
                 transitions=transitions,
                 fps=fps,
                 out_ts=chain_ts,
+                video_encode_quality=video_encode_quality,
             )
             concat_paths: list[Path] = []
             if intro_path is not None:
@@ -634,7 +622,7 @@ def compose_montage(
             )
 
         mid_playable = Path(tmpdir) / "mid_playable.mp4"
-        _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable)
+        _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable, video_encode_fast)
 
         mid_info = ffprobe_streams(mid_playable, ffprobe)
         try:

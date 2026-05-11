@@ -7,7 +7,12 @@ import {
 } from "../RecordingQueueDrawer";
 import { useRecordingQueue } from "../../stores/recordingQueueStore";
 import { AiScoreBadge } from "../ClipCard";
-import { getMontageBlockShortLabel, isClipPacingAndPovLocked, isRoundTimelineRoundClip } from "../../utils/montageUtils";
+import {
+  getMontageBlockShortLabel,
+  isClipPacingAndPovLocked,
+  isRoundTimelineRoundClip,
+  isTimelineSourceClip,
+} from "../../utils/montageUtils";
 import {
   freezeToDeathQueueRoundBadgeText,
   isFreezeToDeathCompilation,
@@ -71,6 +76,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   }
 
   const cd = selectedItem.clipData || {};
+  const hideQueueAi = isTimelineSourceClip(cd) || cd.category === "compilation";
   const killBadge = getMontageBlockShortLabel(cd);
   const playerName = String(selectedItem.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
@@ -115,7 +121,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
                 {playerName}
               </span>
               <div className="ml-auto shrink-0">
-                <AiScoreBadge score={aiScore} />
+                {hideQueueAi ? null : <AiScoreBadge score={aiScore} />}
               </div>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">

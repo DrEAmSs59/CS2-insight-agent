@@ -18,22 +18,8 @@ function normalizePositiveIntRounds(arr, maxRounds = 64) {
   ].sort((a, b) => a - b);
 }
 
-function segmentOverlapsPicks(sr, er, pickSet) {
-  const lo = Math.min(sr, er);
-  const hi = Math.max(sr, er);
-  for (let r = lo; r <= hi; r++) {
-    if (pickSet.has(r)) return true;
-  }
-  return false;
-}
-
-function setsEqualSorted(a, b) {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
+/** 与后端 CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC 默认 0.45s 对齐（64 tick/s） */
+const _FTD_CLIP_MAX_BUF_TICKS = Math.round(0.45 * 64);
 
 /**
  * 从解析结果片段上的 freeze_to_death_round_filter 还原勾选。
@@ -78,8 +64,8 @@ export function freezeToDeathQueueRoundBadgeText(item, clip) {
 }
 
 /**
- * 按勾选回合从整局/多段合辑中切出子 clip（与 main 行为一致：不必先重解析）。
- * 依赖 source_rounds + source_round_ends（新解析）；旧缓存无 ends 时按单回合段处理。
+ * 按勾选从解析器下发的 `freeze_to_death_round_windows` 重建 source_ticks（精确 freeze 起点），
+ * 连续回合合并为一段，与 demo_parser 段合并规则一致；无需重新解析。
  * @param {any} clip
  * @param {number[]} pickedSorted
  * @returns {{ ok: true, clip: any } | { ok: false, error: string }}
@@ -92,98 +78,98 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   if (!picks.length) {
     return { ok: false, error: "「回合合集」须至少勾选一个回合才能加入队列。" };
   }
+  const wins = clip.freeze_to_death_round_windows;
+  if (!Array.isArray(wins) || wins.length === 0) {
+    return {
+      ok: false,
+      error: "该回合合集缺少 per-round 窗口数据，请重新解析本玩家一次后再入队。",
+    };
+  }
+
   const pickSet = new Set(picks);
-  const rawTicks = Array.isArray(clip.source_ticks) ? clip.source_ticks : [];
-  const roundsStart = Array.isArray(clip.source_rounds) ? clip.source_rounds : [];
-  const roundsEnd = Array.isArray(clip.source_round_ends) ? clip.source_round_ends : [];
-  if (!rawTicks.length) {
-    return { ok: false, error: "合辑缺少 source_ticks，无法按回合筛选。" };
-  }
+  const filtered = wins
+    .map((w) => ({
+      round: parseInt(String(w.round), 10),
+      freeze_end_tick: parseInt(String(w.freeze_end_tick), 10),
+      start_tick: parseInt(String(w.start_tick), 10),
+      end_tick: parseInt(String(w.end_tick), 10),
+      death_tick:
+        w.death_tick != null && String(w.death_tick).trim() !== ""
+          ? parseInt(String(w.death_tick), 10)
+          : null,
+    }))
+    .filter(
+      (w) =>
+        Number.isFinite(w.round) &&
+        w.round > 0 &&
+        pickSet.has(w.round) &&
+        Number.isFinite(w.start_tick) &&
+        Number.isFinite(w.end_tick) &&
+        w.end_tick > w.start_tick &&
+        Number.isFinite(w.freeze_end_tick)
+    )
+    .sort((a, b) => a.round - b.round);
 
-  const indices = [];
-  for (let i = 0; i < rawTicks.length; i++) {
-    let sr = parseInt(String(roundsStart[i]), 10);
-    if (!Number.isFinite(sr) || sr <= 0) sr = 1;
-    let er = i < roundsEnd.length ? parseInt(String(roundsEnd[i]), 10) : NaN;
-    if (!Number.isFinite(er) || er <= 0) er = sr;
-    if (segmentOverlapsPicks(sr, er, pickSet)) indices.push(i);
-  }
-
-  if (!indices.length) {
+  if (!filtered.length) {
     return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
   }
 
-  if (rawTicks.length === 1 && indices.length === 1 && indices[0] === 0) {
-    const i = 0;
-    let sr = parseInt(String(roundsStart[i]), 10);
-    if (!Number.isFinite(sr) || sr <= 0) sr = 1;
-    let er = i < roundsEnd.length ? parseInt(String(roundsEnd[i]), 10) : NaN;
-    if (!Number.isFinite(er) || er <= 0) er = sr;
-    const lo = Math.min(sr, er);
-    const hi = Math.max(sr, er);
-    if (hi > lo) {
-      const spanN = hi - lo + 1;
-      const pickedInSpan = picks.filter((p) => p >= lo && p <= hi);
-      const uniqPick = new Set(pickedInSpan);
-      if (uniqPick.size > 0 && uniqPick.size < spanN) {
-        return {
-          ok: false,
-          error:
-            "该合辑为单段跨多回合数据，无法只入其中几回合。请重新解析该 Demo（新版解析器会为每段写入回合跨度）后再试。",
-        };
-      }
+  /** @type {{ loR: number, hiR: number, s: number, e: number, death: number|null, freezeLo: number }[]} */
+  const merged = [];
+  let buf = null;
+  for (const w of filtered) {
+    if (!buf) {
+      buf = {
+        loR: w.round,
+        hiR: w.round,
+        s: w.start_tick,
+        e: w.end_tick,
+        death: Number.isFinite(w.death_tick) ? w.death_tick : null,
+        freezeLo: w.freeze_end_tick,
+      };
+      continue;
+    }
+    if (w.round === buf.hiR + 1) {
+      buf.hiR = w.round;
+      buf.e = w.end_tick;
+      if (Number.isFinite(w.death_tick)) buf.death = w.death_tick;
+    } else {
+      merged.push(buf);
+      buf = {
+        loR: w.round,
+        hiR: w.round,
+        s: w.start_tick,
+        e: w.end_tick,
+        death: Number.isFinite(w.death_tick) ? w.death_tick : null,
+        freezeLo: w.freeze_end_tick,
+      };
     }
   }
+  if (buf) merged.push(buf);
 
-  const fullIdx = [...Array(rawTicks.length).keys()];
-  const keptAllSegments =
-    indices.length === fullIdx.length && indices.every((v, j) => v === fullIdx[j]);
-  const filterNorm = normalizePositiveIntRounds(clip.freeze_to_death_round_filter, 64);
-  const unionRounds = (() => {
-    const s = new Set();
-    for (let i = 0; i < rawTicks.length; i++) {
-      let sr = parseInt(String(roundsStart[i]), 10);
-      if (!Number.isFinite(sr) || sr <= 0) sr = 1;
-      let er = i < roundsEnd.length ? parseInt(String(roundsEnd[i]), 10) : NaN;
-      if (!Number.isFinite(er) || er <= 0) er = sr;
-      const lo = Math.min(sr, er);
-      const hi = Math.max(sr, er);
-      for (let r = lo; r <= hi; r++) s.add(r);
-    }
-    return [...s].sort((a, b) => a - b);
-  })();
-
-  if (keptAllSegments) {
-    if (filterNorm.length > 0 && setsEqualSorted(filterNorm, picks)) {
-      return { ok: true, clip: { ...clip } };
-    }
-    if (clip.freeze_to_death_round_filter == null && setsEqualSorted(unionRounds, picks)) {
-      return { ok: true, clip: { ...clip } };
-    }
+  const newTicks = [];
+  const newSr = [];
+  const newEr = [];
+  const newKills = [];
+  for (const m of merged) {
+    newTicks.push([m.s, m.e]);
+    newSr.push(m.loR);
+    newEr.push(m.hiR);
+    const kt =
+      m.death != null && Number.isFinite(m.death)
+        ? m.death
+        : Math.max(m.s, m.e - 1);
+    newKills.push(kt);
   }
 
-  const newTicks = indices.map((i) => {
-    const row = rawTicks[i];
-    return [Number(row[0]), Number(row[1])];
-  });
-  const newSr = indices.map((i) => {
-    const v = parseInt(String(roundsStart[i]), 10);
-    return Number.isFinite(v) && v > 0 ? v : 1;
-  });
-  const newEr = indices.map((i, j) => {
-    const v = i < roundsEnd.length ? parseInt(String(roundsEnd[i]), 10) : NaN;
-    if (Number.isFinite(v) && v > 0) return v;
-    return newSr[j];
-  });
-  const ktls = Array.isArray(clip.kill_ticks) ? clip.kill_ticks : [];
-  const newKills = indices.map((i) => {
-    if (i < ktls.length) {
-      const kt = Number(ktls[i]);
-      if (Number.isFinite(kt)) return kt;
+  let lastRealDeath = null;
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const d = merged[i].death;
+    if (d != null && Number.isFinite(d)) {
+      lastRealDeath = d;
+      break;
     }
-    const seg = rawTicks[i];
-    return Number(seg[0]);
-  });
+  }
 
   const newClip = {
     ...clip,
@@ -195,8 +181,19 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     end_tick: newTicks[newTicks.length - 1][1],
     round: newSr[0],
     freeze_to_death_round_filter: [...picks],
-    death_tick: newKills.length ? newKills[newKills.length - 1] : clip.death_tick,
+    death_tick: lastRealDeath != null ? lastRealDeath : clip.death_tick,
+    clip_min_tick: merged[0].freezeLo,
+    clip_max_tick:
+      lastRealDeath != null ? lastRealDeath + _FTD_CLIP_MAX_BUF_TICKS : clip.clip_max_tick,
     client_clip_uid: newClientClipUid(),
+    freeze_to_death_round_windows: clip.freeze_to_death_round_windows,
   };
+  if (
+    newClip.clip_max_tick != null &&
+    Number.isFinite(newClip.clip_max_tick) &&
+    newClip.end_tick > newClip.clip_max_tick
+  ) {
+    newClip.end_tick = newClip.clip_max_tick;
+  }
   return { ok: true, clip: newClip };
 }

@@ -15,7 +15,7 @@ import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -125,6 +125,8 @@ class Clip:
     # 回合合集（compilation_kind=freeze_to_death）：本次解析使用的回合范围，写入结果 JSON 供库缓存/前端恢复。
     # None = 使用全部合规非赛后回合；非空 list = 仅这些回合（与 source_ticks 同源）。
     freeze_to_death_round_filter: Optional[list[int]] = None
+    # 每合规回合一条精确 [start_tick,end_tick]（与 source_ticks 合并段不同）；前端按勾选子集合并连续回合入队，无需重新解析。
+    freeze_to_death_round_windows: Optional[list[dict[str, Any]]] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1948,6 +1950,9 @@ class DemoAnalyzer:
         )
         fail_clips = fail_clips + shoulder_clips
 
+        _re_df_for_demo_max = self._safe_parse_event("round_end", other=["total_rounds_played"])
+        _demo_max_tick = _max_demo_tick(self.parser, _re_df_for_demo_max, match_start_tick)
+
         # ── 跨回合合集片段（🥩 亲儿子喂饭 / ☠️ 本命苦主）──
         compilation_clips = self._build_rival_compilations(
             target_player,
@@ -1958,6 +1963,7 @@ class DemoAnalyzer:
             round_freeze_end_ticks,
             freeze_to_death_rounds=freeze_to_death_rounds,
             map_name=map_name,
+            demo_max_tick=_demo_max_tick,
         )
 
         clips = fail_clips + highlight_clips + meme_clips + compilation_clips
@@ -2059,7 +2065,13 @@ class DemoAnalyzer:
             if _c.clip_max_tick is not None:
                 pass  # 已由外部设置，跳过
             elif _c.category == "compilation":
-                pass
+                _ck = str(getattr(_c, "compilation_kind", None) or "").strip()
+                if _ck == "freeze_to_death":
+                    _ld = getattr(_c, "death_tick", None)
+                    if _ld is not None and int(_ld) > 0:
+                        _c.clip_max_tick = int(_ld) + _last_kill_buf_ticks
+                        if _c.end_tick > _c.clip_max_tick:
+                            _c.end_tick = _c.clip_max_tick
             elif _c.round == _last_rnd_num:
                 # 最后一回合：以该 clip 自身的最后击杀/死亡 tick 为基准
                 if _c.kill_ticks:
@@ -2387,6 +2399,7 @@ class DemoAnalyzer:
         *,
         freeze_to_death_rounds: Optional[list[int]] = None,
         map_name: str,
+        demo_max_tick: int = 0,
     ) -> list[Clip]:
         """合集片段：
         - 🥩 亲儿子喂饭：本局击杀同一敌人 ≥ 8 次 → 把所有对该敌人的击杀拼为合集 clip
@@ -2618,6 +2631,8 @@ class DemoAnalyzer:
         if freeze_to_death_rounds is not None and len(freeze_to_death_rounds) == 0:
             pass
         else:
+            _ftd_demo_mx = max(0, int(demo_max_tick or 0))
+
             ftd_filter: Optional[set[int]] = None
             if freeze_to_death_rounds is not None:
                 ftd_filter = {int(x) for x in freeze_to_death_rounds if int(x) > 0}
@@ -2666,6 +2681,34 @@ class DemoAnalyzer:
                     continue
                 eligible.append(rnd)
 
+            ftd_round_windows: list[dict[str, Any]] = []
+            for rnd in eligible:
+                fe = int(round_freeze_end_ticks.get(rnd) or 0)
+                if fe <= 0:
+                    continue
+                dt = death_tick_by_round.get(rnd)
+                s = max(0, fe - pre_ticks)
+                if dt is not None and int(dt) > 0:
+                    _dtk = int(dt)
+                    raw_end = _dtk + post_ticks
+                    cap_e = _ftd_cap_at_death_round(rnd, _dtk)
+                    e = max(s + 1, min(raw_end, cap_e))
+                else:
+                    e = max(s + 1, _ftd_safe_end_alive_round(rnd))
+                if _ftd_demo_mx > 0:
+                    e = max(s + 1, min(e, _ftd_demo_mx))
+                ftd_round_windows.append(
+                    {
+                        "round": int(rnd),
+                        "freeze_end_tick": int(fe),
+                        "start_tick": int(s),
+                        "end_tick": int(e),
+                        "death_tick": int(dt)
+                        if dt is not None and int(dt) > 0
+                        else None,
+                    }
+                )
+
             # (seg_start, seg_end, first_round, last_round, death_tick|None)
             ftd_segments: list[tuple[int, int, int, int, Optional[int]]] = []
             run_start_r: Optional[int] = None
@@ -2676,12 +2719,16 @@ class DemoAnalyzer:
                 raw_end = int(d_tick) + post_ticks
                 cap_e = _ftd_cap_at_death_round(er, d_tick)
                 seg_end = max(s_tick + 1, min(raw_end, cap_e))
+                if _ftd_demo_mx > 0:
+                    seg_end = max(s_tick + 1, min(seg_end, _ftd_demo_mx))
                 if seg_end <= s_tick:
                     return
                 ftd_segments.append((s_tick, seg_end, sr, er, d_tick))
 
             def _emit_alive_segment(sr: int, s_tick: int, er: int) -> None:
                 cap_e = _ftd_safe_end_alive_round(er)
+                if _ftd_demo_mx > 0:
+                    cap_e = min(cap_e, _ftd_demo_mx)
                 if cap_e <= s_tick:
                     return
                 ftd_segments.append((s_tick, cap_e, sr, er, None))
@@ -2767,6 +2814,7 @@ class DemoAnalyzer:
                     compilation_kind="freeze_to_death",
                     fixed_segment_pacing=True,
                     freeze_to_death_round_filter=ftd_round_filter_out,
+                    freeze_to_death_round_windows=ftd_round_windows,
                 ))
 
         return compilations

@@ -9,6 +9,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -30,7 +32,18 @@ from .demo_parse_isolation import (
     get_demo_match_summary_isolated,
     get_player_list_isolated,
 )
-from .env_utils import AppConfig, OBSConfig, LLMConfig, ExperimentalConfig, load_config, save_config, ensure_cs2_path, detect_cs2_path, resolve_config_path
+from .env_utils import (
+    AppConfig,
+    OBSConfig,
+    LLMConfig,
+    ExperimentalConfig,
+    load_config,
+    save_config,
+    ensure_cs2_path,
+    detect_cs2_path,
+    resolve_config_path,
+    llm_api_key_configured,
+)
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
@@ -631,6 +644,7 @@ class ConfigPayload(BaseModel):
     obs: Optional[OBSConfig] = None
     llm: Optional[LLMConfig] = None
     ffmpeg_path: Optional[str] = None
+    montage_encoder: Optional[str] = None
     cs2_path: Optional[str] = None
     demo_watch_paths: Optional[list[str]] = None
     ai_mode: Optional[bool] = None
@@ -668,6 +682,90 @@ def detect_cs2_save():
     cfg.cs2_path = path
     save_config(cfg)
     return {"cs2_path": path}
+
+
+@app.post("/api/config/open-dir")
+def open_config_data_dir():
+    """在资源管理器中打开主配置文件所在目录（含 cs2-insight.config.json）。"""
+    path = resolve_config_path()
+    folder = str(path.parent.resolve())
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", folder], check=False, timeout=30)
+        else:
+            subprocess.run(["xdg-open", folder], check=False, timeout=30)
+        return {"ok": True, "path": folder}
+    except Exception as e:  # noqa: BLE001
+        logging.warning("open config dir failed: %s", e)
+        return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
+
+
+@app.post("/api/config/test-llm")
+async def test_llm_connection():
+    """轻量探测当前大模型配置是否可用（本地 HTTP 或云端一次极短补全）。"""
+    cfg = load_config()
+    llm = cfg.llm
+    prov = (llm.provider or "").strip().lower()
+    if prov in ("ollama", "lmstudio"):
+        if prov == "ollama":
+            base = (llm.base_url or "").strip() or "http://localhost:11434"
+            base = base.rstrip("/")
+            url = f"{base}/api/tags"
+        else:
+            root = (llm.base_url or "").strip() or "http://localhost:1234"
+            root = root.rstrip("/").removesuffix("/v1").rstrip("/")
+            url = f"{root}/v1/models"
+
+        def _ping() -> tuple[bool, str]:
+            import urllib.error
+            import urllib.request
+
+            try:
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})  # noqa: S310
+                with urllib.request.urlopen(req, timeout=4.0) as r:  # noqa: S310
+                    return True, f"HTTP {r.getcode()}"
+            except urllib.error.HTTPError as e:
+                return False, f"HTTP {e.code}"
+            except Exception as ex:  # noqa: BLE001
+                return False, str(ex)[:200]
+
+        ok, detail = await asyncio.to_thread(_ping)
+        return {"ok": ok, "detail": detail if ok else detail}
+
+    api_key = (llm.api_key or "").strip()
+    if not llm_api_key_configured(llm.api_key):
+        return {"ok": False, "detail": "请填写 API 密钥并保存后再测试。"}
+    if api_key.startswith("****"):
+        return {
+            "ok": False,
+            "detail": "配置文件中的密钥为脱敏占位（****…），请在设置中重新粘贴完整 API 密钥并保存后再测试。",
+        }
+
+    from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+
+    bu = (llm.base_url or "").strip() or None
+    model = (llm.model or "").strip() or "gpt-4o-mini"
+    try:
+        client = AsyncOpenAI(api_key=api_key, base_url=bu, timeout=12.0)
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=2,
+            ),
+            timeout=18.0,
+        )
+        ok = bool(resp.choices)
+        return {"ok": ok, "detail": "连接成功" if ok else "未收到模型输出"}
+    except asyncio.TimeoutError:
+        return {"ok": False, "detail": "请求超时"}
+    except (APIConnectionError, APITimeoutError, RateLimitError, APIError) as e:
+        return {"ok": False, "detail": str(e)[:300]}
+    except Exception as e:  # noqa: BLE001
+        logging.warning("test_llm: %s", e)
+        return {"ok": False, "detail": str(e)[:300]}
 
 
 @app.put("/api/config")
@@ -717,6 +815,8 @@ async def update_config(payload: ConfigPayload):
         cfg.cs2_fps_max = max(0, min(v, 9999))
     if payload.ffmpeg_path is not None:
         cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
+    if payload.montage_encoder is not None:
+        cfg.montage_encoder = str(payload.montage_encoder).strip().lower() or "auto"
     if payload.recording_global_pacing is not None:
         cfg.recording_global_pacing = (
             dict(payload.recording_global_pacing)
@@ -812,8 +912,8 @@ def setup_status():
     else:
         ffmpeg_ok = shutil.which("ffmpeg") is not None
 
-    # AI key
-    ai_key_ok = bool(cfg.llm.api_key and not cfg.llm.api_key.startswith("****"))
+    # AI key（含误写入磁盘的脱敏占位，避免 setup 与「已保存」前端状态长期不一致）
+    ai_key_ok = llm_api_key_configured(cfg.llm.api_key)
 
     return {
         "obs_connected": obs_connected,
@@ -2258,6 +2358,7 @@ async def montage_export(body: MontageExportBody):
             bgm_start_sec=bgm_start_eff,
             intro_image_duration=intro_img_dur_eff,
             outro_image_duration=outro_img_dur_eff,
+            montage_encoder=cfg.montage_encoder or "auto",
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)
