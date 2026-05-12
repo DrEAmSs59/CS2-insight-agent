@@ -66,28 +66,34 @@ const SETUP_ITEMS = [
 function SetupChecklist() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const timerRef = useRef(null);
 
-  const fetchStatus = async () => {
+  const fetchStatus = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const { data } = await axios.get("/api/status/setup");
       setStatus(data);
     } catch {
       setStatus(null);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchStatus();
-    timerRef.current = setInterval(fetchStatus, 8000);
+    fetchStatus(false);
+    timerRef.current = setInterval(() => fetchStatus(true), 8000);
     return () => clearInterval(timerRef.current);
   }, []);
 
-  const handleRefresh = () => {
-    setLoading(true);
-    fetchStatus();
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchStatus(true);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const allRequired =
@@ -101,9 +107,10 @@ function SetupChecklist() {
         </h2>
         <button
           onClick={handleRefresh}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+          disabled={refreshing}
+          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:opacity-50"
         >
-          <RefreshCw className="h-3 w-3" />
+          <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
           刷新
         </button>
       </div>

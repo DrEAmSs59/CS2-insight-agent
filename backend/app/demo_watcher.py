@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -16,9 +17,11 @@ from watchdog.observers import Observer
 if TYPE_CHECKING:
     from .demo_db import DemoDB
 
+from .file_hash import file_md5_hex
+
 logger = logging.getLogger(__name__)
 
-OnDemoDetected = Callable[[Path], Awaitable[None]]
+OnDemoDetected = Callable[[Path, Optional[str]], Awaitable[None]]
 
 
 def _sort_paths_by_mtime_newest_first(paths: Iterable[Path]) -> list[Path]:
@@ -76,6 +79,54 @@ def _extract_dems_from_zip_sync(zip_path: Path) -> list[Path]:
             target = _pick_extract_path(dest_dir, base, zip_path)
             with zf.open(m, "r") as src, target.open("wb") as dst:
                 dst.write(src.read())
+            out.append(target.resolve())
+    return out
+
+
+def _demo_ingest_md5_enabled() -> bool:
+    v = (os.environ.get("CS2_INSIGHT_DISABLE_DEMO_MD5") or "").strip().lower()
+    return v not in ("1", "true", "yes")
+
+
+def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str]) -> list[Path]:
+    """解压 zip 内 .dem；若与库中已有 content_md5 相同则不落盘（避免重复内容与重复解析）。"""
+    out: list[Path] = []
+    seen: set[str] = set(existing_md5s)
+    dest_dir = zip_path.parent
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        members = [m for m in zf.namelist() if _safe_zip_member_name(m)]
+        if not members:
+            return out
+        for m in members:
+            base = _safe_zip_member_name(m)
+            if not base:
+                continue
+            target = _pick_extract_path(dest_dir, base, zip_path)
+            h = hashlib.md5()
+            try:
+                with zf.open(m, "r") as src, target.open("wb") as dst:
+                    while True:
+                        chunk = src.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                        dst.write(chunk)
+            except Exception:
+                try:
+                    if target.is_file():
+                        target.unlink()
+                except OSError:
+                    pass
+                raise
+            md5_hex = h.hexdigest()
+            if md5_hex in seen:
+                try:
+                    if target.is_file():
+                        target.unlink()
+                except OSError:
+                    pass
+                continue
+            seen.add(md5_hex)
             out.append(target.resolve())
     return out
 
@@ -155,7 +206,7 @@ class DemoWatcher:
         if not await self._wait_until_stable(path):
             logger.warning("Demo file not stable, skip: %s", path)
             return
-        await self._on_detected(path)
+        await self._on_detected(path, None)
 
     async def _on_raw_zip_detected(
         self,
@@ -185,35 +236,99 @@ class DemoWatcher:
                 return
             mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
             size_b = int(st.st_size)
+            loop = asyncio.get_running_loop()
+            col_md5 = self._demo_db is not None and getattr(self._demo_db, "ingest_md5_supported", False)
+            dedupe_md5 = col_md5 and _demo_ingest_md5_enabled()
             if self._demo_db is not None:
                 try:
-                    if await self._demo_db.zip_unchanged_since_extract(zip_resolved, mtime_ns, size_b):
-                        logger.info("Zip unchanged since last extract, skip re-import: %s", path)
-                        return
+                    if col_md5:
+                        st_row = await self._demo_db.get_zip_extract_state(zip_resolved)
+                        if st_row and dedupe_md5:
+                            zip_md5_stored = (st_row.get("zip_md5") or "").strip()
+                            if zip_md5_stored:
+                                zm = await loop.run_in_executor(None, file_md5_hex, path)
+                                if zm == zip_md5_stored:
+                                    logger.info("Zip unchanged (md5), skip extract: %s", path)
+                                    await self._demo_db.record_zip_extracted(
+                                        zip_resolved,
+                                        mtime_ns,
+                                        size_b,
+                                        zip_md5=zm,
+                                    )
+                                    return
+                            if st_row and not zip_md5_stored:
+                                if int(st_row["mtime_ns"]) == mtime_ns and int(st_row["size_bytes"]) == size_b:
+                                    zm = await loop.run_in_executor(None, file_md5_hex, path)
+                                    await self._demo_db.record_zip_extracted(
+                                        zip_resolved,
+                                        mtime_ns,
+                                        size_b,
+                                        zip_md5=zm,
+                                    )
+                                    logger.info(
+                                        "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                        path,
+                                    )
+                                    return
+                        if not dedupe_md5 and await self._demo_db.zip_unchanged_since_extract(
+                            zip_resolved,
+                            mtime_ns,
+                            size_b,
+                        ):
+                            zm = await loop.run_in_executor(None, file_md5_hex, path)
+                            await self._demo_db.record_zip_extracted(
+                                zip_resolved,
+                                mtime_ns,
+                                size_b,
+                                zip_md5=zm,
+                            )
+                            logger.info(
+                                "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                path,
+                            )
+                            return
+                    else:
+                        if await self._demo_db.zip_unchanged_since_extract(zip_resolved, mtime_ns, size_b):
+                            logger.info("Zip unchanged since last extract, skip re-import: %s", path)
+                            return
                 except Exception:
-                    logger.exception("zip_extract_state check failed for %s", path)
+                    logger.exception("zip_extract_state / md5 check failed for %s", path)
 
-            loop = asyncio.get_running_loop()
             try:
-                extracted = await loop.run_in_executor(None, _extract_dems_from_zip_sync, path)
+                if col_md5 and self._demo_db is not None:
+                    existing = frozenset(await self._demo_db.all_content_md5_hexes())
+                    extracted = await loop.run_in_executor(None, _extract_zip_dems_dedupe_sync, path, existing)
+                else:
+                    extracted = await loop.run_in_executor(None, _extract_dems_from_zip_sync, path)
             except zipfile.BadZipFile:
                 logger.warning("Not a valid zip, skip: %s", path)
                 return
             except Exception:
                 logger.exception("Failed to extract zip: %s", path)
                 return
+            zip_md5_val: str | None = None
+            if col_md5:
+                try:
+                    zip_md5_val = await loop.run_in_executor(None, file_md5_hex, path)
+                except Exception:
+                    logger.exception("zip md5 after extract failed: %s", path)
             if self._demo_db is not None:
                 try:
-                    await self._demo_db.record_zip_extracted(zip_resolved, mtime_ns, size_b)
+                    await self._demo_db.record_zip_extracted(
+                        zip_resolved,
+                        mtime_ns,
+                        size_b,
+                        zip_md5=zip_md5_val,
+                    )
                 except Exception:
                     logger.exception("record_zip_extracted failed for %s", path)
             if not extracted:
-                logger.info("Zip contains no .dem files, skip: %s", path)
+                logger.info("Zip contains no new .dem files (or empty), skip: %s", path)
                 return
             logger.info("Extracted %d .dem from zip %s", len(extracted), path)
             if enqueue_extracted:
                 for dem in extracted:
-                    await self._on_detected(dem)
+                    await self._on_detected(dem, zip_resolved)
 
     async def start(self) -> None:
         if self._observer is not None:
@@ -257,7 +372,7 @@ class DemoWatcher:
         async def _enqueue_dem(path: Path) -> None:
             async with sem:
                 try:
-                    await self._on_detected(path)
+                    await self._on_detected(path, None)
                 except Exception:
                     logger.exception("scan_existing: enqueue failed for %s", path)
 

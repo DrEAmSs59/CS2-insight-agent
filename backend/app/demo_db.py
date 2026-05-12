@@ -19,6 +19,8 @@ def utc_now_iso() -> str:
 class DemoDB:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+        # init_db 末尾根据 PRAGMA 设置：无 content_md5 列的旧库则全流程走旧逻辑
+        self.ingest_md5_supported: bool = False
 
     async def init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,7 +95,8 @@ class DemoDB:
                     zip_path   TEXT PRIMARY KEY NOT NULL,
                     mtime_ns   INTEGER NOT NULL,
                     size_bytes INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    zip_md5    TEXT
                 )
                 """
             )
@@ -131,8 +134,19 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN source TEXT")
             if "remark" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN remark TEXT")
+            if "content_md5" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN content_md5 TEXT")
+            if "origin_zip" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN origin_zip TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_content_md5 ON demo_files(content_md5)",
+            )
+            cur_z = await conn.execute("PRAGMA table_info(zip_extract_state)")
+            zcols = {str(r[1]) for r in await cur_z.fetchall()}
+            if "zip_md5" not in zcols:
+                await conn.execute("ALTER TABLE zip_extract_state ADD COLUMN zip_md5 TEXT")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS demo_player_stats (
@@ -176,6 +190,10 @@ class DemoDB:
                 "UPDATE demo_files SET status = 'done' WHERE lower(status) = 'parsed'"
             )
             await conn.commit()
+        async with aiosqlite.connect(self.db_path) as conn2:
+            cur_fc = await conn2.execute("PRAGMA table_info(demo_files)")
+            fin_cols = {str(r[1]) for r in await cur_fc.fetchall()}
+        self.ingest_md5_supported = "content_md5" in fin_cols
 
     async def add_demo(
         self,
@@ -184,18 +202,29 @@ class DemoDB:
         source: str | None = None,
         status: str = "pending",
         added_at: str | None = None,
+        content_md5: str | None = None,
+        origin_zip: str | None = None,
     ) -> tuple[int, bool]:
         """返回 (id, inserted)。path 已存在时 inserted=False，调用方应跳过后续轻量解析以加速扫描。"""
         p = Path(path)
         final_added_at = added_at or utc_now_iso()
         async with aiosqlite.connect(self.db_path) as conn:
-            cur = await conn.execute(
-                """
-                INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (str(p), p.name, file_size, status, final_added_at, source),
-            )
+            if self.ingest_md5_supported:
+                cur = await conn.execute(
+                    """
+                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source, content_md5, origin_zip)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (str(p), p.name, file_size, status, final_added_at, source, content_md5, origin_zip),
+                )
+            else:
+                cur = await conn.execute(
+                    """
+                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (str(p), p.name, file_size, status, final_added_at, source),
+                )
             await conn.commit()
             if cur.rowcount == 0:
                 existing = await conn.execute("SELECT id FROM demo_files WHERE path = ?", (str(p),))
@@ -204,6 +233,47 @@ class DemoDB:
                     raise RuntimeError(f"Failed to fetch existing demo row for {path}")
                 return int(row[0]), False
             return int(cur.lastrowid), True
+
+    async def content_md5_exists(self, md5_hex: str) -> bool:
+        if not md5_hex or not self.ingest_md5_supported:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM demo_files WHERE content_md5 = ? LIMIT 1",
+                (md5_hex,),
+            )
+            row = await cur.fetchone()
+        return row is not None
+
+    async def update_demo_content_md5_if_absent(
+        self,
+        demo_path: str,
+        content_md5: str,
+        origin_zip: str | None = None,
+    ) -> bool:
+        """若该行尚无 content_md5，则写入（并可补 origin_zip）；已有则不动。"""
+        if not self.ingest_md5_supported or not content_md5:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            if origin_zip:
+                cur = await conn.execute(
+                    """
+                    UPDATE demo_files
+                    SET content_md5 = ?, origin_zip = COALESCE(origin_zip, ?)
+                    WHERE path = ? AND (content_md5 IS NULL OR trim(content_md5) = '')
+                    """,
+                    (content_md5, origin_zip, demo_path),
+                )
+            else:
+                cur = await conn.execute(
+                    """
+                    UPDATE demo_files SET content_md5 = ?
+                    WHERE path = ? AND (content_md5 IS NULL OR trim(content_md5) = '')
+                    """,
+                    (content_md5, demo_path),
+                )
+            await conn.commit()
+        return cur.rowcount > 0
 
     async def update_status(
         self,
@@ -495,8 +565,19 @@ class DemoDB:
     _LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
+               d.content_md5, d.origin_zip,
                r.result_json, r.created_at AS result_created_at
         """
+
+    # 主库列表：待高光解析(loaded)置顶，其次 parsing / error，已解析 done 靠后；同档仍按 id 从新到旧
+    _LIST_ORDER_BY = (
+        "ORDER BY CASE lower(ifnull(d.status, '')) "
+        "WHEN 'loaded' THEN 0 "
+        "WHEN 'parsing' THEN 1 "
+        "WHEN 'error' THEN 2 "
+        "WHEN 'done' THEN 3 "
+        "ELSE 4 END ASC, d.id DESC"
+    )
 
     async def replace_demo_player_stats(
         self,
@@ -679,7 +760,7 @@ class DemoDB:
         sql = (
             f"{self._LIST_SELECT} FROM demo_files d "
             f"LEFT JOIN match_results r ON r.demo_path = d.path {join_sql} {where_sql} "
-            "ORDER BY d.id DESC LIMIT ? OFFSET ?"
+            f"{self._LIST_ORDER_BY} LIMIT ? OFFSET ?"
         )
         params_ext = [*params, limit, offset]
         async with aiosqlite.connect(self.db_path) as conn:
@@ -864,6 +945,27 @@ class DemoDB:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
+    async def all_content_md5_hexes(self) -> set[str]:
+        """已入库 demo 的内容 MD5 集合，供 zip 解压前去重。"""
+        if not self.ingest_md5_supported:
+            return set()
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "SELECT content_md5 FROM demo_files WHERE content_md5 IS NOT NULL AND length(trim(content_md5)) > 0",
+            )
+            rows = await cur.fetchall()
+        return {str(r[0]) for r in rows if r and r[0]}
+
+    async def get_zip_extract_state(self, zip_path: str) -> Optional[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT zip_path, mtime_ns, size_bytes, zip_md5, updated_at FROM zip_extract_state WHERE zip_path = ?",
+                (zip_path,),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def zip_unchanged_since_extract(self, zip_path: str, mtime_ns: int, size_bytes: int) -> bool:
         """若库中已记录同一 zip 且 mtime+大小未变，则不应再次解压（避免每次扫描生成 _fromzip_*_N.dem）。"""
         async with aiosqlite.connect(self.db_path) as conn:
@@ -876,18 +978,26 @@ class DemoDB:
             return False
         return int(row[0]) == int(mtime_ns) and int(row[1]) == int(size_bytes)
 
-    async def record_zip_extracted(self, zip_path: str, mtime_ns: int, size_bytes: int) -> None:
+    async def record_zip_extracted(
+        self,
+        zip_path: str,
+        mtime_ns: int,
+        size_bytes: int,
+        *,
+        zip_md5: str | None = None,
+    ) -> None:
         now = utc_now_iso()
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute(
                 """
-                INSERT INTO zip_extract_state(zip_path, mtime_ns, size_bytes, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO zip_extract_state(zip_path, mtime_ns, size_bytes, updated_at, zip_md5)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(zip_path) DO UPDATE SET
                     mtime_ns = excluded.mtime_ns,
                     size_bytes = excluded.size_bytes,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    zip_md5 = COALESCE(excluded.zip_md5, zip_extract_state.zip_md5)
                 """,
-                (zip_path, int(mtime_ns), int(size_bytes), now),
+                (zip_path, int(mtime_ns), int(size_bytes), now, zip_md5),
             )
             await conn.commit()
