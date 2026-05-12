@@ -20,7 +20,7 @@ export default function CustomTitleBar() {
 
   return (
     <div 
-      className="flex justify-between items-center w-full bg-gray-900 text-white z-50 shrink-0" 
+      className="flex justify-between items-center w-full bg-[#111111] text-white z-50 shrink-0" 
       style={{ height: '50px', WebkitAppRegion: 'drag' }}
     >
       <div className="flex items-center px-4">
@@ -31,13 +31,13 @@ export default function CustomTitleBar() {
       <div className="flex h-full" style={{ WebkitAppRegion: 'no-drag' }}>
         <button 
           onClick={() => window.electron.minimize()} 
-          className="flex items-center justify-center w-12 h-full hover:bg-gray-800 transition-colors"
+          className="flex items-center justify-center w-12 h-full hover:bg-white/10 transition-colors"
         >
           <Minus size={16} />
         </button>
         <button 
           onClick={() => window.electron.maximize()} 
-          className="flex items-center justify-center w-12 h-full hover:bg-gray-800 transition-colors"
+          className="flex items-center justify-center w-12 h-full hover:bg-white/10 transition-colors"
         >
           {isMaximized ? <Copy size={14} /> : <Square size={14} />}
         </button>
