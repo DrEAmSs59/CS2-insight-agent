@@ -1,4 +1,5 @@
 # Python
+python/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -60,3 +61,6 @@ cs2-insight.db-shm
 data/**
 !data/cs2-insight.config.example.json
 !data/basic.ini
+
+# Electron distribution
+frontend/dist_electron/
