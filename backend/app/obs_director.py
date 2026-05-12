@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import socket
 import sys
 import shutil
 import shlex
@@ -18,7 +19,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional, Tuple
 
+import websocket
+from obswebsocket import exceptions as obs_ws_exceptions
 from obswebsocket import obsws, requests as obs_requests
+from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
@@ -41,6 +45,73 @@ from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_consol
 from .radar.radar_data_extractor import _normalize_record_segments
 
 logger = logging.getLogger(__name__)
+
+
+class _ObswsBoundedHandshake(obsws):
+    """与 obsws 相同，但对 ``WebSocket.connect`` 传入 ``timeout``，避免无服务时长时间阻塞。"""
+
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int | str = 4444,
+        password: str = "",
+        *,
+        handshake_timeout_sec: float = 4.0,
+        legacy=None,
+        timeout: int = 60,
+        authreconnect: int = 0,
+        on_connect: Optional[Callable] = None,
+        on_disconnect: Optional[Callable] = None,
+    ):
+        self._obs_handshake_timeout_sec = max(0.5, float(handshake_timeout_sec))
+        super().__init__(
+            host,
+            port,
+            password,
+            legacy=legacy,
+            timeout=timeout,
+            authreconnect=authreconnect,
+            on_connect=on_connect,
+            on_disconnect=on_disconnect,
+        )
+
+    def connect(self):
+        try:
+            self.ws = websocket.WebSocket()
+            url = "ws://{}:{}".format(self.host, self.port)
+            logger.info(
+                "Connecting to %s (handshake timeout=%ss)...",
+                url,
+                self._obs_handshake_timeout_sec,
+            )
+            self.ws.connect(url, timeout=self._obs_handshake_timeout_sec)
+            logger.info("Connected to OBS WebSocket")
+            if self.legacy:
+                self._auth_legacy()
+            else:
+                self._auth()
+
+            if self.thread_recv is not None:
+                self.thread_recv.running = False
+            self.thread_recv = RecvThread(self)
+            self.thread_recv.daemon = True
+            self.thread_recv.start()
+            if self.on_connect:
+                self.on_connect(self)
+        except socket.error as e:
+            if self.authreconnect:
+                if not self.thread_reco:
+                    logger.warning(
+                        "Connection failed, reconnecting in %s second(s).",
+                        self.authreconnect,
+                    )
+                    self.thread_reco = ReconnectThread(self)
+                    self.thread_reco.daemon = True
+                    self.thread_reco.start()
+                else:
+                    logger.warning("Connection failed, but reconnect timer already running.")
+            else:
+                raise obs_ws_exceptions.ConnectionFailure(str(e)) from e
 
 
 def _friendly_obs_websocket_test_error(exc: BaseException) -> str:
@@ -1156,11 +1227,24 @@ class OBSDirector:
                 pass
             self._ws = None
 
-    def test_obs_connection(self) -> dict:
-        """Quick connection test — returns version info or error."""
+    def test_obs_connection(self, *, handshake_timeout_sec: Optional[float] = None) -> dict:
+        """Quick connection test — returns version info or error.
+
+        handshake_timeout_sec:
+            传入时对 TCP + WebSocket 握手使用 ``websocket`` 的 ``connect(..., timeout=)``，
+            供 ``/api/status/setup`` 等场景避免无 OBS 时阻塞过久。录制与「测试连接」接口不传，沿用库默认。
+        """
         prev_ws = self._ws
         try:
-            ws = obsws(self.obs_config.host, self.obs_config.port, self.obs_config.password)
+            if handshake_timeout_sec is not None:
+                ws = _ObswsBoundedHandshake(
+                    self.obs_config.host,
+                    self.obs_config.port,
+                    self.obs_config.password,
+                    handshake_timeout_sec=handshake_timeout_sec,
+                )
+            else:
+                ws = obsws(self.obs_config.host, self.obs_config.port, self.obs_config.password)
             ws.connect()
             ver = ws.call(obs_requests.GetVersion())
             self._ws = ws

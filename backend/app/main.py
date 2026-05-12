@@ -47,7 +47,8 @@ from .env_utils import (
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
-from .demo_watcher import DemoWatcher
+from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
+from .file_hash import file_md5_hex
 from .gsi_ready import gsi_status, notify_gsi_payload
 from .montage_db import MontageDB
 from . import obs_config_center
@@ -105,7 +106,6 @@ _ENQUEUE_STRIPE_COUNT = 64
 def infer_demo_source(filename: str, server_name: str | None = None) -> str:
     fn = filename.lower()
     sn = (server_name or "").lower()
-
     if "faceit" in sn:
         return "Faceit"
     if "5eplay" in sn or "5e" in sn:
@@ -116,9 +116,13 @@ def infer_demo_source(filename: str, server_name: str | None = None) -> str:
         return "Matchmaking"
     if "esl" in sn:
         return "ESL"
+    if "ESL" in sn:
+        return "ESL"
     if "esea" in sn:
         return "ESEA"
     if "blast" in sn:
+        return "Blast"
+    if "BLAST" in sn:
         return "Blast"
     if "pgl" in sn:
         return "PGL"
@@ -150,8 +154,10 @@ def infer_demo_source(filename: str, server_name: str | None = None) -> str:
     return "Local/Other"
 
 
-async def _enqueue_demo_path(path: Path) -> None:
+async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
     global _enqueue_striped_locks
+    can_store_md5 = demo_db.ingest_md5_supported
+    use_md5 = can_store_md5 and _demo_ingest_md5_enabled()
     async with _enqueue_striped_init_lock:
         if not _enqueue_striped_locks:
             _enqueue_striped_locks = [asyncio.Lock() for _ in range(_ENQUEUE_STRIPE_COUNT)]
@@ -167,19 +173,45 @@ async def _enqueue_demo_path(path: Path) -> None:
             st = path.stat()
             size = st.st_size
             from datetime import timezone
+
             mtime_iso = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat()
         except OSError:
             pass
         source = infer_demo_source(path.name)
-        _, inserted = await demo_db.add_demo(demo_path, file_size=size, source=source, status="pending", added_at=mtime_iso)
+
+        md5_hex: str | None = None
+        if use_md5:
+            try:
+                md5_hex = await asyncio.to_thread(file_md5_hex, path)
+            except OSError as e:
+                logger.warning("Demo file md5 failed, continue without md5 dedupe: %s (%s)", demo_path, e)
+            if md5_hex and await demo_db.content_md5_exists(md5_hex):
+                logger.info("Skip enqueue duplicate demo content (md5): %s", demo_path)
+                return
+
+        _, inserted = await demo_db.add_demo(
+            demo_path,
+            file_size=size,
+            source=source,
+            status="pending",
+            added_at=mtime_iso,
+            content_md5=md5_hex if use_md5 else None,
+            origin_zip=origin_zip if use_md5 else None,
+        )
         if not inserted:
-            # 已入库：若仍无展示名且配置了关注名单，补跑一次（与新建入库一样同步完成）
+            if can_store_md5:
+                try:
+                    fill = await asyncio.to_thread(file_md5_hex, path)
+                    await demo_db.update_demo_content_md5_if_absent(demo_path, fill, origin_zip)
+                except OSError:
+                    pass
             cfg_dup = load_config()
             if _normalized_expected_parse_players(cfg_dup):
                 row_dup = await demo_db.get_demo_by_path(demo_path)
                 if row_dup and not (row_dup.get("display_name") or "").strip():
                     await _auto_tag_library_demo_for_expected_players(demo_path)
             return
+
         # 轻量解析：只提取地图与记分板元数据，避免重量级玩家片段解析。
         try:
             meta = await asyncio.to_thread(get_demo_match_summary_isolated, demo_path)
@@ -192,6 +224,12 @@ async def _enqueue_demo_path(path: Path) -> None:
         cfg_now = load_config()
         if _normalized_expected_parse_players(cfg_now):
             await _auto_tag_library_demo_for_expected_players(demo_path)
+        if can_store_md5:
+            try:
+                fill = md5_hex if md5_hex else await asyncio.to_thread(file_md5_hex, path)
+                await demo_db.update_demo_content_md5_if_absent(demo_path, fill, origin_zip)
+            except OSError:
+                pass
     await demo_library_hub.notify("enqueue")
 
 
@@ -546,6 +584,16 @@ async def _run_library_demo_analyze(
 ) -> dict:
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
+    # 列表筛选 / PlayerSelect 依赖 demo_player_stats；待入库入库失败或旧数据可能缺失，解析前强制补索引
+    idx = await index_demo_player_stats(demo_id, dem_path)
+    if idx.get("indexed"):
+        await demo_library_hub.notify("player_stats")
+    elif idx.get("error"):
+        logger.warning(
+            "index_demo_player_stats before library analyze demo_id=%s: %s",
+            demo_id,
+            idx.get("error"),
+        )
     await demo_db.clear_result(dem_path)
     await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
@@ -893,13 +941,34 @@ def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> 
 
 # ─── Setup status endpoint ─────────────────────────────────────
 
+def _setup_status_obs_handshake_timeout_sec() -> float:
+    """新手引导 ``/api/status/setup`` 中 OBS 行探测用的握手超时（秒），过短易误判，过长会拖住整页。"""
+    raw = (os.environ.get("CS2_INSIGHT_SETUP_OBS_PROBE_SEC") or "").strip()
+    if raw:
+        try:
+            return max(0.5, min(float(raw), 60.0))
+        except ValueError:
+            pass
+    return 4.0
+
+
 @app.get("/api/status/setup")
 def setup_status():
     """快速核查四项配置是否就绪，供新手引导页轮询。"""
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
 
-    # OBS connectivity
+    # 本地项先算好（不依赖网络），OBS 失败时也能立刻返回其余状态
+    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
+
+    ffmpeg_ok = False
+    if cfg.ffmpeg_path:
+        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
+    else:
+        ffmpeg_ok = shutil.which("ffmpeg") is not None
+
+    ai_key_ok = llm_api_key_configured(cfg.llm.api_key)
+
     obs_connected = False
     try:
         director = OBSDirector(
@@ -909,23 +978,11 @@ def setup_status():
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
         )
-        result = director.test_obs_connection()
+        probe_timeout = _setup_status_obs_handshake_timeout_sec()
+        result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
         obs_connected = bool(result.get("ok", False))
     except Exception:
         obs_connected = False
-
-    # CS2 path
-    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
-
-    # FFmpeg: configured path takes priority, then fall back to PATH
-    ffmpeg_ok = False
-    if cfg.ffmpeg_path:
-        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
-    else:
-        ffmpeg_ok = shutil.which("ffmpeg") is not None
-
-    # AI key（含误写入磁盘的脱敏占位，避免 setup 与「已保存」前端状态长期不一致）
-    ai_key_ok = llm_api_key_configured(cfg.llm.api_key)
 
     return {
         "obs_connected": obs_connected,
@@ -1352,45 +1409,6 @@ async def list_demos(
     return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
 
 
-async def _index_all_missing_player_stats() -> dict[str, Any]:
-    """为库内所有尚未建立玩家统计索引的 Demo 依次建索引，直到没有缺失项。"""
-    chunk = 200
-    failed: list[dict[str, Any]] = []
-    indexed = 0
-    processed = 0
-    max_failed_returned = 200
-    while True:
-        candidates = await demo_db.list_demo_ids_missing_player_stats(chunk)
-        if not candidates:
-            break
-        for demo_id, path in candidates:
-            processed += 1
-            if not Path(path).is_file():
-                if len(failed) < max_failed_returned:
-                    failed.append({"demo_id": demo_id, "filename": Path(path).name, "error": "文件不存在"})
-                continue
-            out = await index_demo_player_stats(demo_id, path)
-            if out.get("indexed"):
-                indexed += 1
-            else:
-                if len(failed) < max_failed_returned:
-                    failed.append(
-                        {
-                            "demo_id": demo_id,
-                            "filename": Path(path).name,
-                            "error": str(out.get("error") or "索引失败"),
-                        },
-                    )
-    if indexed:
-        await demo_library_hub.notify("player_stats")
-    return {
-        "ok": True,
-        "processed": processed,
-        "indexed": indexed,
-        "failed": failed,
-    }
-
-
 @app.get("/api/demos/stream")
 async def demo_library_event_stream():
     """SSE：库内 demo 新增 / 改名 / 解析状态变化时推送，前端防抖刷新列表。"""
@@ -1542,17 +1560,13 @@ async def scan_watch_paths():
     if demo_watcher is None:
         return {"scanned": 0, "player_stats_index": None, "discovered_count": 0}
     scanned = await demo_watcher.scan_existing()
-    idx_summary: dict[str, Any] | None = None
-    try:
-        idx_summary = await _index_all_missing_player_stats()
-    except Exception:
-        logger.exception("player stats index batch after scan failed")
+    logger.info("POST /api/demos/scan: scan_existing finished scanned=%s", scanned)
     try:
         discovered_count = await demo_db.count_discovered_demos()
     except Exception:
         logger.exception("count discovered demos after scan failed")
         discovered_count = 0
-    return {"scanned": scanned, "player_stats_index": idx_summary, "discovered_count": discovered_count}
+    return {"scanned": scanned, "player_stats_index": None, "discovered_count": discovered_count}
 
 
 @app.post("/api/demos/{demo_id}/parse")
