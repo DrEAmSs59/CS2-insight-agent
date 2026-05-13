@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from math import gcd
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .demo_parse_isolation import (
     IsolatedParseError,
@@ -37,6 +37,7 @@ from .env_utils import (
     OBSConfig,
     LLMConfig,
     ExperimentalConfig,
+    SpecPlayerVerifyConfig,
     load_config,
     save_config,
     ensure_cs2_path,
@@ -80,11 +81,17 @@ try:
     _log_dir_raw = (os.environ.get("CS2_INSIGHT_LOG_DIR") or "").strip()
     _log_dir = Path(_log_dir_raw) if _log_dir_raw else (resolve_config_path().parent / "logs")
     _log_dir.mkdir(parents=True, exist_ok=True)
+    # 每次进程启动清空本地 *.log，避免单文件无限增长；与「重启程序」语义一致。
+    for _old_log in _log_dir.glob("*.log"):
+        try:
+            _old_log.unlink(missing_ok=True)
+        except OSError:
+            pass
     _backend_log = _log_dir / "backend.log"
-    _file_handler = logging.FileHandler(_backend_log, encoding="utf-8")
+    _file_handler = logging.FileHandler(_backend_log, mode="w", encoding="utf-8")
     _file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_file_handler)
-    _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("a", encoding="utf-8")
+    _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("w", encoding="utf-8")
     faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
     logging.getLogger(__name__).info("Backend file logging enabled: %s", _backend_log)
 except Exception:
@@ -689,6 +696,15 @@ class ExperimentalPayload(BaseModel):
     pov_enabled: Optional[bool] = None
 
 
+class SpecPlayerVerifyPatch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    demo_timescale: Optional[float] = Field(default=None, ge=0.01, le=1.0)
+    max_retries: Optional[int] = Field(default=None, ge=1, le=16)
+    per_retry_timeout_sec: Optional[float] = Field(default=None, ge=0.05, le=5.0)
+    settle_sec: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+
 class ConfigPayload(BaseModel):
     obs: Optional[OBSConfig] = None
     llm: Optional[LLMConfig] = None
@@ -704,6 +720,7 @@ class ConfigPayload(BaseModel):
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
     experimental: Optional[ExperimentalPayload] = None
+    spec_player_verify: Optional[SpecPlayerVerifyPatch] = None
 
 
 @app.get("/api/config")
@@ -893,6 +910,10 @@ async def update_config(payload: ConfigPayload):
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
+    if payload.spec_player_verify is not None:
+        patch = payload.spec_player_verify.model_dump(exclude_unset=True, exclude_none=True)
+        if patch:
+            cfg.spec_player_verify = cfg.spec_player_verify.model_copy(update=patch)
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -986,6 +1007,7 @@ def setup_status():
             cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
+            spec_player_verify=cfg.spec_player_verify,
         )
         probe_timeout = _setup_status_obs_handshake_timeout_sec()
         result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
@@ -1015,6 +1037,7 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
         cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
+        spec_player_verify=cfg.spec_player_verify,
     )
     return director.test_obs_connection()
 
@@ -1872,6 +1895,7 @@ async def start_recording(req: RecordRequest):
             cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
+            spec_player_verify=cfg.spec_player_verify,
         )
         results = await director.execute_recording_pipeline(
             dem_path,
@@ -2063,6 +2087,7 @@ async def start_batch_recording(req: BatchRecordRequest):
             cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
+            spec_player_verify=cfg.spec_player_verify,
         )
         results = await director.execute_batch_recording(
             demo_jobs,
@@ -2197,6 +2222,18 @@ async def delete_recorded_clip(clip_id: int):
     if r is None:
         raise HTTPException(404, "片段不存在或已删除")
     return r
+
+
+class BatchDeleteRecordedClipsBody(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=500)
+
+
+@app.post("/api/recorded-clips/batch-delete")
+async def batch_delete_recorded_clips(body: BatchDeleteRecordedClipsBody):
+    try:
+        return await montage_db.delete_recorded_clips_batch(body.ids)
+    except ValueError as e:
+        raise HTTPException(500, str(e)) from e
 
 
 @app.post("/api/montage/projects")

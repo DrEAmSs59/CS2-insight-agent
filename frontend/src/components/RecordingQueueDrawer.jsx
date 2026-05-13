@@ -110,8 +110,6 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
   const pre = po.pre_first_sec ?? gNum("pre_first_sec") ?? DEFAULT_PACING.pre_first_sec;
   const post = po.post_last_sec ?? gNum("post_last_sec") ?? DEFAULT_PACING.post_last_sec;
   const gap = po.max_gap_sec ?? gNum("max_gap_sec") ?? DEFAULT_PACING.max_gap_sec;
-  const postMid = po.post_mid_sec ?? gNum("post_mid_sec") ?? DEFAULT_PACING.post_mid_sec;
-  const preCont = po.pre_cont_sec ?? gNum("pre_cont_sec") ?? DEFAULT_PACING.pre_cont_sec;
 
   const commit = (partial) => {
     const next = { ...partial };
@@ -130,7 +128,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
         </p>
         <div className="space-y-3">
           <PacingSliderRow
-            label="开场预留 (秒)"
+            label="击杀前预留 (秒)"
             value={pre}
             min={0}
             max={20}
@@ -138,7 +136,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ pre_first_sec: n })}
           />
           <PacingSliderRow
-            label="结尾留白 (秒)"
+            label="击杀后预留 (秒)"
             value={post}
             min={0}
             max={10}
@@ -155,32 +153,6 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
           />
         </div>
       </div>
-
-      <details className="group rounded border border-white/[0.08] bg-black/20 [&_summary::-webkit-details-marker]:hidden">
-        <summary className="cursor-pointer list-none px-2 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:text-cs2-orange">
-          <span className="select-none">🔽 展开专业跳剪参数 (Pro)</span>
-        </summary>
-        <div className="space-y-3 border-t border-white/[0.06] px-2 pb-2 pt-2">
-          <PacingSliderRow
-            label="中间击杀后停顿 (秒)"
-            hint="触发闪切前的保留时间(适合保留切刀)"
-            value={postMid}
-            min={0}
-            max={10}
-            step={0.1}
-            onChange={(n) => commit({ post_mid_sec: n })}
-          />
-          <PacingSliderRow
-            label="跳跃后切入缓冲 (秒)"
-            hint="闪切后距离下次开枪的时间"
-            value={preCont}
-            min={0}
-            max={10}
-            step={0.1}
-            onChange={(n) => commit({ pre_cont_sec: n })}
-          />
-        </div>
-      </details>
     </div>
   );
 }
@@ -461,7 +433,7 @@ export function GlobalPacingPanel({
 
       <div className="space-y-3 rounded border border-white/[0.06] bg-black/30 p-2">
         <PacingSliderRow
-          label="开场预留 (秒)"
+          label="击杀前预留 (秒)"
           value={pre}
           min={0}
           max={20}
@@ -469,7 +441,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ pre_first_sec: n })}
         />
         <PacingSliderRow
-          label="结尾留白 (秒)"
+          label="击杀后预留 (秒)"
           value={post}
           min={0}
           max={10}
@@ -697,8 +669,8 @@ function QueueItemCard({
         isClipPacingAndPovLocked(cd) ? (
           <p className="mt-2 rounded border border-amber-500/20 bg-amber-950/20 px-2 py-1.5 text-[10px] text-amber-200/90">
             {isRoundTimelineRoundClip(cd)
-              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局预留不生效。"
-              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局预留不生效。"}
+              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀前/击杀后预留不生效。"
+              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀前/击杀后预留不生效。"}
           </p>
         ) : (
           <div className="mt-2">

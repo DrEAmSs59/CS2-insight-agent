@@ -319,15 +319,29 @@ class ExperimentalConfig(BaseModel):
     pov_enabled: bool = False
 
 
+class SpecPlayerVerifyConfig(BaseModel):
+    """录制期 spec_player 注入后，用 GSI 校验当前观战 Steam64 是否为目标玩家；重试期间用慢放倍率避免 demo 空转。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    demo_timescale: float = Field(default=0.05, ge=0.01, le=1.0)
+    max_retries: int = Field(default=4, ge=1, le=16)
+    per_retry_timeout_sec: float = Field(default=0.6, ge=0.05, le=5.0)
+    settle_sec: float = Field(default=0.12, ge=0.0, le=2.0)
+    # None = 按倒退 seek 距离自适应；有值 = 叠在 CS2_INSIGHT_GOTO_DELAY_JUMP_CUT 上的额外 gototick 等待（秒）
+    pov_goto_delay_extra_sec: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     obs: OBSConfig = Field(default_factory=OBSConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
+    spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
-    # 合辑 H.264：auto=NVENC→QSV→AMF→libx264；亦可指定编码器名
+    # 合辑 H.264：auto=按 NVENC→QSV→AMF→libx264 顺序，对硬件编码器做单帧实测后再选用；亦可指定编码器名
     montage_encoder: str = "auto"
     cs2_path: str = ""
     demo_directory: str = ""

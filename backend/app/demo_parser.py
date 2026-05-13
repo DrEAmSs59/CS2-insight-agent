@@ -122,7 +122,7 @@ class Clip:
     # 与 source_ticks 等长；freeze_to_death 每段 (start_round, end_round) 含端点，供前端按勾选子集入队切片
     source_round_ends: list[int] = field(default_factory=list)
     compilation_kind: Optional[str] = None
-    # 为 True 时：导播与入队合并忽略智能分段/开场结尾预留等 pacing（仍保留 POV 开关类字段的显式覆写）
+    # 为 True 时：导播与入队合并忽略智能分段 / 击杀前后预留等 pacing（仍保留 POV 开关类字段的显式覆写）
     fixed_segment_pacing: bool = False
     # 回合合集（compilation_kind=freeze_to_death）：本次解析使用的回合范围，写入结果 JSON 供库缓存/前端恢复。
     # None = 使用全部合规非赛后回合；非空 list = 仅这些回合（与 source_ticks 同源）。
@@ -268,7 +268,7 @@ def _highlight_weapon_used_label(kills_sorted: list[dict]) -> str:
 # ━━━ 武器分类 & 常量 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 TICK_RATE = 64
-# 「冻结结束前 → 死亡后固定留白」合辑：冻结结束 tick 之前开录的秒数（不受全局开场预留影响）
+# 「冻结结束前 → 死亡后固定留白」合辑：冻结结束 tick 之前开录的秒数（不受全局击杀前预留影响）
 _FREEZE_TO_DEATH_PRE_FREEZE_SEC = float(
     os.environ.get("CS2_INSIGHT_FREEZE_TO_DEATH_PRE_SEC", "8.0") or "8.0",
 )
