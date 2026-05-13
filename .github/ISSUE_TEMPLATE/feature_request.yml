@@ -1,0 +1,68 @@
+name: 功能建议
+description: 提议新能力或改进现有行为（非紧急缺陷）
+title: "[Feature]: "
+labels:
+  - type: feature
+  - status: planned
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请说明动机与使用场景，便于在 Roadmap 上排期与拆分。
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: 检索
+      options:
+        - label: 我已搜索现有 Issues / Discussions，未发现重复需求
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题？
+      description: 用户场景、痛点、当前替代方案。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 期望的交互、API、配置项或验收标准（可粗略）。
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关模块（可选）
+      multiple: true
+      options:
+        - OBS
+        - demo-parser
+        - recorder
+        - radar
+        - UI
+        - settings
+        - release
+        - installer
+        - 不确定
+    validations:
+      required: false
+  - type: dropdown
+    id: priority_hint
+    attributes:
+      label: 你认为的优先级（仅供参考）
+      options:
+        - P3 — 锦上添花
+        - P2 — 一般改进
+        - P1 — 明显影响体验
+        - P0 — 阻塞发布或核心流程
+      default: 1
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其它说明
+      description: 参考设计、竞品、截图或 Demo 等。
+    validations:
+      required: false
