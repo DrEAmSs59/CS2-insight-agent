@@ -18,6 +18,8 @@ export default function CommonParamsPage() {
       recordInjectConsoleLines={s.recordInjectConsoleLines}
       onRecordInjectConsoleLinesChange={s.setRecordInjectConsoleLines}
       onPersistCs2RecordExtras={s.persistCs2RecordExtras}
+      specPlayerVerify={s.specPlayerVerify}
+      patchSpecPlayerVerify={s.patchSpecPlayerVerify}
     />
   );
 }

@@ -856,7 +856,9 @@ export function MontageMaterialPoolCard({
           </div>
         </div>
         {selected ? (
-          <p className="mt-1.5 text-center text-[9px] font-medium text-cs2-orange">已选中 · 点列表上方「批量加入编排」</p>
+          <p className="mt-1.5 text-center text-[9px] font-medium text-cs2-orange">
+            已选中 · 可用上方「全选当前列表」「批量加入编排」或「批量删除选中」
+          </p>
         ) : null}
       </div>
 

@@ -1064,6 +1064,7 @@ def apply_recommended(
         cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
+        spec_player_verify=cfg.spec_player_verify,
     )
     try:
         if director.connect_obs() and director.obs_ws:
@@ -1189,6 +1190,7 @@ def import_cs2obs_bytes(
         cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
+        spec_player_verify=cfg.spec_player_verify,
     )
     try:
         if not director.connect_obs():

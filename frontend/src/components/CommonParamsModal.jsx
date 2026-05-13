@@ -108,6 +108,8 @@ export default function CommonParamsModal({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
   onPersistCs2RecordExtras,
+  specPlayerVerify,
+  patchSpecPlayerVerify,
 }) {
   const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
@@ -242,7 +244,7 @@ export default function CommonParamsModal({
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title="时间与多段节奏"
-            subtitle="成片前后留白、多段衔接阈值与全局节奏重置；决定导出片的时间结构。"
+            subtitle="成片击杀前/击杀后预留、多段衔接阈值与全局节奏重置；决定导出片的时间结构。"
             defaultOpen
           >
             <div className="mb-5 overflow-hidden rounded-lg border border-white/[0.07] bg-black/35 p-3">
@@ -255,7 +257,7 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center border-r border-black/30 bg-gradient-to-br from-cs2-orange/35 to-cs2-orange/10 px-2 py-1.5"
                 >
                   <span className="text-[9px] font-bold uppercase tracking-wide text-white/90">
-                    开场预留
+                    击杀前预留
                   </span>
                   <span className="font-mono text-[11px] text-white">{pre}s</span>
                 </div>
@@ -275,19 +277,19 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center bg-gradient-to-bl from-cyan-500/25 to-cyan-500/5 px-2 py-1.5"
                 >
                   <span className="text-[9px] font-bold uppercase tracking-wide text-white/90">
-                    结尾保留
+                    击杀后预留
                   </span>
                   <span className="font-mono text-[11px] text-white">{post}s</span>
                 </div>
               </div>
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                左段为开场预留、右段为结尾留白；中间表示高光本体（时长由片段本身决定）。调整左右数值即改变成片「入场」与「收场」的松紧。
+                左段为击杀前预留、右段为击杀后预留；中间为解析得到的高光主体（时长由片段本身决定）。左右数值即每段击杀前回拨与每次击杀后收束的松紧；智能跳剪各段一致。
               </p>
             </div>
 
             <div className="mb-4 grid gap-4 sm:grid-cols-2">
               <PacingSlider
-                label="开场预留 (秒)"
+                label="击杀前预留 (秒)"
                 min={0}
                 max={20}
                 step={0.1}
@@ -296,7 +298,7 @@ export default function CommonParamsModal({
                 onCommit={(n) => commitPacingNumbers({ pre_first_sec: n })}
               />
               <PacingSlider
-                label="结尾留白 (秒)"
+                label="击杀后预留 (秒)"
                 min={0}
                 max={10}
                 step={0.1}
@@ -330,6 +332,60 @@ export default function CommonParamsModal({
             >
               恢复数值类节奏为后端内置默认（保留入队默认视角与 POV 时序默认值）
             </button>
+          </WorkflowSection>
+
+          <WorkflowSection
+            title="观战槽位 GSI 校验"
+            subtitle="注入 spec_player 后用 GSI 核对当前观战是否为目标 Steam；校验阶段的 demo 倍率过小可避免准备耗时吃掉「击杀后预留」时间轴。"
+            defaultOpen={false}
+            accentClass="ring-1 ring-emerald-500/10"
+          >
+            <div className="mb-3 text-[10px] leading-relaxed text-zinc-500">
+              写入 <span className="font-mono text-zinc-400">spec_player_verify</span>{" "}
+              配置块；与全局节奏、POV 时序同级持久化。
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PacingSlider
+                label="校验期 demo_timescale（越小越不推进时间轴，默认 0.05）"
+                min={0.01}
+                max={0.5}
+                step={0.01}
+                value={specPlayerVerify.demo_timescale}
+                disabled={batchRecording}
+                onCommit={(n) => patchSpecPlayerVerify({ demo_timescale: n })}
+                accentClass="accent-emerald-500"
+              />
+              <PacingSlider
+                label="单次重试最长等待 GSI（秒）"
+                min={0.1}
+                max={3}
+                step={0.05}
+                value={specPlayerVerify.per_retry_timeout_sec}
+                disabled={batchRecording}
+                onCommit={(n) => patchSpecPlayerVerify({ per_retry_timeout_sec: n })}
+                accentClass="accent-emerald-500"
+              />
+              <PacingSlider
+                label="每次 spec 注入后等待（秒）"
+                min={0}
+                max={0.5}
+                step={0.02}
+                value={specPlayerVerify.settle_sec}
+                disabled={batchRecording}
+                onCommit={(n) => patchSpecPlayerVerify({ settle_sec: n })}
+                accentClass="accent-emerald-500"
+              />
+              <PacingSlider
+                label="最多重试次数（依次 spec_player+1）"
+                min={1}
+                max={16}
+                step={1}
+                value={specPlayerVerify.max_retries}
+                disabled={batchRecording}
+                onCommit={(n) => patchSpecPlayerVerify({ max_retries: Math.round(n) })}
+                accentClass="accent-emerald-500"
+              />
+            </div>
           </WorkflowSection>
 
           {/* A2 镜头与 POV */}

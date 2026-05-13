@@ -31,6 +31,13 @@ import { Loader2 } from "lucide-react";
 
 const API = axios.create({ baseURL: "/api" });
 
+const DEFAULT_SPEC_PLAYER_VERIFY = Object.freeze({
+  demo_timescale: 0.05,
+  max_retries: 4,
+  per_retry_timeout_sec: 0.6,
+  settle_sec: 0.12,
+});
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -111,6 +118,7 @@ export default function App() {
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
+  const [specPlayerVerify, setSpecPlayerVerify] = useState(() => ({ ...DEFAULT_SPEC_PLAYER_VERIFY }));
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
@@ -753,8 +761,27 @@ export default function App() {
           });
         }
         if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
-        if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
+        if (typeof data.experimental?.pov_enabled === "boolean") {
           setExperimentalPovEnabled(data.experimental.pov_enabled);
+        }
+        if (data.spec_player_verify && typeof data.spec_player_verify === "object") {
+          const spv = data.spec_player_verify;
+          setSpecPlayerVerify((prev) => ({
+            ...prev,
+            ...(typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)
+              ? { demo_timescale: spv.demo_timescale }
+              : {}),
+            ...(typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)
+              ? { max_retries: Math.round(spv.max_retries) }
+              : {}),
+            ...(typeof spv.per_retry_timeout_sec === "number" &&
+            Number.isFinite(spv.per_retry_timeout_sec)
+              ? { per_retry_timeout_sec: spv.per_retry_timeout_sec }
+              : {}),
+            ...(typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)
+              ? { settle_sec: spv.settle_sec }
+              : {}),
+          }));
         }
         if (data.cs2_path) setCs2Path(data.cs2_path);
         if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
@@ -821,6 +848,14 @@ export default function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [globalPacing]);
+
+  useEffect(() => {
+    if (!pacingPersistReadyRef.current) return;
+    const t = setTimeout(() => {
+      void API.put("config", { spec_player_verify: specPlayerVerify }).catch(() => {});
+    }, 600);
+    return () => clearTimeout(t);
+  }, [specPlayerVerify]);
 
   useEffect(() => {
     // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「扫描本地 demo 库」入库。
@@ -1466,6 +1501,10 @@ export default function App() {
     }
   }, []);
 
+  const patchSpecPlayerVerify = useCallback((partial) => {
+    setSpecPlayerVerify((prev) => ({ ...prev, ...partial }));
+  }, []);
+
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
     if (configBackupStatus?.restore_required) {
@@ -1825,6 +1864,29 @@ export default function App() {
       if (Object.keys(put).length) {
         await API.put("config", put);
       }
+      if (raw.spec_player_verify && typeof raw.spec_player_verify === "object") {
+        const spv = raw.spec_player_verify;
+        const merged = {
+          demo_timescale: 0.05,
+          max_retries: 4,
+          per_retry_timeout_sec: 0.6,
+          settle_sec: 0.12,
+        };
+        if (typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)) {
+          merged.demo_timescale = spv.demo_timescale;
+        }
+        if (typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)) {
+          merged.max_retries = Math.round(spv.max_retries);
+        }
+        if (typeof spv.per_retry_timeout_sec === "number" && Number.isFinite(spv.per_retry_timeout_sec)) {
+          merged.per_retry_timeout_sec = spv.per_retry_timeout_sec;
+        }
+        if (typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)) {
+          merged.settle_sec = spv.settle_sec;
+        }
+        await API.put("config", { spec_player_verify: merged });
+        setSpecPlayerVerify(merged);
+      }
       if (raw.llm && typeof raw.llm === "object") {
         const lm = raw.llm;
         const payload = {
@@ -1980,6 +2042,8 @@ export default function App() {
     persistCs2RecordExtras,
     experimentalPovEnabled,
     persistExperimentalPov,
+    specPlayerVerify,
+    patchSpecPlayerVerify,
     hasDemos,
     parsing,
     handleUpload,

@@ -182,6 +182,29 @@ class MontageDB:
             await conn.commit()
         return {"id": cid, "output_path": str(out), "removed_file": removed_file}
 
+    async def delete_recorded_clips_batch(self, clip_ids: list[int]) -> dict[str, Any]:
+        """按 id 列表依次删除入库片段（与单条 delete 行为一致：删库行并尝试删本地文件）。"""
+        ordered: list[int] = []
+        seen: set[int] = set()
+        for raw in clip_ids:
+            try:
+                cid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if cid <= 0 or cid in seen:
+                continue
+            seen.add(cid)
+            ordered.append(cid)
+        deleted: list[dict[str, Any]] = []
+        not_found: list[int] = []
+        for cid in ordered:
+            row = await self.delete_recorded_clip(cid)
+            if row:
+                deleted.append(row)
+            else:
+                not_found.append(cid)
+        return {"deleted": deleted, "not_found": not_found}
+
     async def save_project(self, *, name: str | None, body: dict[str, Any], project_id: int | None = None) -> int:
         now = utc_now_iso()
         payload = json.dumps(body, ensure_ascii=False)

@@ -18,6 +18,80 @@ _VALID_USER_MODES = frozenset({"auto", "libx264", "h264_nvenc", "h264_qsv", "h26
 _HW_ORDER = ("h264_nvenc", "h264_qsv", "h264_amf")
 
 _encoder_check_cache: dict[str, frozenset[str]] = {}
+# FFmpeg 常把 NVENC/QSV/AMF 编进列表，但无对应硬件时打开编码器会失败；auto 需实测。
+_hw_probe_cache: dict[tuple[str, str], bool] = {}
+
+
+def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
+    """单帧 lavfi 探测用参数（与成片不必一致，但求各编码器能接受）。"""
+    if codec == "libx264":
+        return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "35", "-pix_fmt", "yuv420p"]
+    if codec == "h264_nvenc":
+        return ["-c:v", "h264_nvenc", "-preset", "p7", "-pix_fmt", "yuv420p"]
+    if codec == "h264_qsv":
+        return [
+            "-c:v",
+            "h264_qsv",
+            "-preset",
+            "veryfast",
+            "-global_quality",
+            "28",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    if codec == "h264_amf":
+        return [
+            "-c:v",
+            "h264_amf",
+            "-quality",
+            "speed",
+            "-rc",
+            "cqp",
+            "-qp_i",
+            "28",
+            "-qp_p",
+            "30",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    return []
+
+
+def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
+    if codec not in _HW_ORDER:
+        return True
+    key = (str(ffmpeg_bin.resolve()), codec)
+    if key in _hw_probe_cache:
+        return _hw_probe_cache[key]
+    extra = _minimal_h264_probe_encode_args(codec)
+    if not extra:
+        _hw_probe_cache[key] = False
+        return False
+    cmd = [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=64x64:r=1:d=0.05,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-an",
+        *extra,
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        ok = proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    _hw_probe_cache[key] = ok
+    return ok
 
 
 def _ffmpeg_encoder_names(ffmpeg_bin: Path) -> frozenset[str]:
@@ -42,7 +116,7 @@ def _ffmpeg_encoder_names(ffmpeg_bin: Path) -> frozenset[str]:
 
 def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
     """
-    user_mode: auto（优先 NVENC→QSV→AMF，否则 libx264）或明确编码器名。
+    user_mode: auto（NVENC→QSV→AMF→libx264；硬件项除 -encoders 外再做单帧实测）或明确编码器名。
     """
     raw = (user_mode or "auto").strip().lower()
     if raw not in _VALID_USER_MODES:
@@ -51,7 +125,7 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
 
     if raw == "auto":
         for name in _HW_ORDER:
-            if name in avail:
+            if name in avail and _hw_encoder_runtime_ok(ffmpeg_bin, name):
                 return name
         if "libx264" in avail:
             return "libx264"
