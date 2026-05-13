@@ -14,7 +14,6 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 | demoparser2       | MIT            | https://github.com/LaihoE/demoparser                                |
 | pandas            | BSD-3-Clause   | https://github.com/pandas-dev/pandas                                |
 | obs-websocket-py  | MIT            | https://github.com/Elektordi/obs-websocket-py                       |
-| litellm           | MIT            | https://github.com/BerriAI/litellm                                  |
 | openai            | Apache-2.0     | https://github.com/openai/openai-python                             |
 | pydantic          | MIT            | https://github.com/pydantic/pydantic                                |
 | aiosqlite         | MIT            | https://github.com/omnilib/aiosqlite                                |

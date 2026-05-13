@@ -43,6 +43,7 @@ from .env_utils import (
     detect_cs2_path,
     resolve_config_path,
     llm_api_key_configured,
+    llm_base_url_is_local_host,
 )
 from .ai_reviewer import enrich_clips_dicts_with_reviewer
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
@@ -757,31 +758,37 @@ async def test_llm_connection():
     """轻量探测当前大模型配置是否可用（本地 HTTP 或云端一次极短补全）。"""
     cfg = load_config()
     llm = cfg.llm
-    prov = (llm.provider or "").strip().lower()
-    if prov in ("ollama", "lmstudio"):
-        if prov == "ollama":
-            base = (llm.base_url or "").strip() or "http://localhost:11434"
-            base = base.rstrip("/")
-            url = f"{base}/api/tags"
-        else:
-            root = (llm.base_url or "").strip() or "http://localhost:1234"
-            root = root.rstrip("/").removesuffix("/v1").rstrip("/")
-            url = f"{root}/v1/models"
+    bu_raw = (llm.base_url or "").strip()
+    if bu_raw and llm_base_url_is_local_host(bu_raw):
+        root = bu_raw.rstrip("/").removesuffix("/v1").rstrip("/")
+        probe_urls = []
+        for u in (f"{root}/api/tags", f"{root}/v1/models"):
+            if u not in probe_urls:
+                probe_urls.append(u)
 
-        def _ping() -> tuple[bool, str]:
+        def _ping_one(url: str) -> tuple[bool, str]:
             import urllib.error
             import urllib.request
 
             try:
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})  # noqa: S310
                 with urllib.request.urlopen(req, timeout=4.0) as r:  # noqa: S310
-                    return True, f"HTTP {r.getcode()}"
+                    return True, f"HTTP {r.getcode()} {url}"
             except urllib.error.HTTPError as e:
-                return False, f"HTTP {e.code}"
+                return False, f"HTTP {e.code} {url}"
             except Exception as ex:  # noqa: BLE001
                 return False, str(ex)[:200]
 
-        ok, detail = await asyncio.to_thread(_ping)
+        def _ping_local() -> tuple[bool, str]:
+            last_err = "无可用探测 URL"
+            for url in probe_urls:
+                ok, detail = _ping_one(url)
+                if ok:
+                    return True, detail
+                last_err = detail
+            return False, last_err
+
+        ok, detail = await asyncio.to_thread(_ping_local)
         return {"ok": ok, "detail": detail if ok else detail}
 
     api_key = (llm.api_key or "").strip()
@@ -967,7 +974,9 @@ def setup_status():
     else:
         ffmpeg_ok = shutil.which("ffmpeg") is not None
 
-    ai_key_ok = llm_api_key_configured(cfg.llm.api_key)
+    ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
+        cfg.llm.base_url
+    )
 
     obs_connected = False
     try:

@@ -46,8 +46,7 @@ export default function App() {
   /** GET /api/config 已注入录制队列全局节奏后再允许自动写回，避免覆盖用户在本页会话内的修改 */
   const pacingPersistReadyRef = useRef(false);
   const [llmConfig, setLlmConfig] = useState({
-    provider: "deepseek",
-    model: "deepseek-chat",
+    model: "",
     api_key: "",
     base_url: "",
   });
@@ -1658,7 +1657,6 @@ export default function App() {
     await Promise.resolve();
     const c = llmConfigRef.current;
     const payload = {
-      provider: c.provider,
       model: c.model,
       base_url: (c.base_url || "").trim() || null,
     };
@@ -1830,8 +1828,7 @@ export default function App() {
       if (raw.llm && typeof raw.llm === "object") {
         const lm = raw.llm;
         const payload = {
-          provider: String(lm.provider || "deepseek").trim(),
-          model: String(lm.model || "deepseek-chat").trim(),
+          model: String(lm.model ?? "").trim(),
           base_url: lm.base_url != null ? String(lm.base_url).trim() || null : null,
         };
         const k = lm.api_key != null ? String(lm.api_key).trim() : "";
@@ -1840,7 +1837,6 @@ export default function App() {
         }
         await API.put("config", { llm: payload });
         setLlmConfig((prev) => ({
-          provider: payload.provider,
           model: payload.model,
           base_url: payload.base_url || "",
           api_key: payload.api_key ?? prev.api_key,
@@ -1858,7 +1854,7 @@ export default function App() {
   const handleResetSettingsDefaults = useCallback(async () => {
     if (
       !window.confirm(
-        "将 CS2/FFmpeg 路径、合辑编码、fps_max、分析模式、关注名单与大模型选项恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
+        "将 CS2/FFmpeg 路径、合辑编码、fps_max、分析模式、关注名单与大模型接口/模型名恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
       )
     ) {
       return;
@@ -1871,9 +1867,8 @@ export default function App() {
       ai_mode: false,
       expected_parse_players: [],
       llm: {
-        provider: "deepseek",
-        model: "deepseek-chat",
-        base_url: "https://api.deepseek.com",
+        model: "",
+        base_url: null,
       },
     };
     try {
@@ -1885,10 +1880,9 @@ export default function App() {
       setAiMode(false);
       setExpectedParsePlayersText("");
       setLlmConfig({
-        provider: "deepseek",
-        model: "deepseek-chat",
+        model: "",
         api_key: "",
-        base_url: "https://api.deepseek.com",
+        base_url: "",
       });
       setProgressText("已恢复默认（路径与解析相关项）。", { autoDismissMs: 3000 });
     } catch (e) {
