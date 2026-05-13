@@ -21,17 +21,23 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 
 ## Frontend (Node)
 
-| Package                 | License | Source                                            |
-| ----------------------- | ------- | ------------------------------------------------- |
-| react                   | MIT     | https://github.com/facebook/react                 |
-| react-dom               | MIT     | https://github.com/facebook/react                 |
-| axios                   | MIT     | https://github.com/axios/axios                    |
-| lucide-react            | ISC     | https://github.com/lucide-icons/lucide            |
-| zustand                 | MIT     | https://github.com/pmndrs/zustand                 |
-| tailwindcss             | MIT     | https://github.com/tailwindlabs/tailwindcss       |
-| @tailwindcss/vite       | MIT     | https://github.com/tailwindlabs/tailwindcss       |
-| vite                    | MIT     | https://github.com/vitejs/vite                    |
-| @vitejs/plugin-react    | MIT     | https://github.com/vitejs/vite-plugin-react       |
+| Package                 | License | Source                                                 |
+| ----------------------- | ------- | ------------------------------------------------------ |
+| react                   | MIT     | https://github.com/facebook/react                      |
+| react-dom               | MIT     | https://github.com/facebook/react-dom                  |
+| axios                   | MIT     | https://github.com/axios/axios                         |
+| lucide-react            | ISC     | https://github.com/lucide-icons/lucide                 |
+| zustand                 | MIT     | https://github.com/pmndrs/zustand                      |
+| tailwindcss             | MIT     | https://github.com/tailwindlabs/tailwindcss            |
+| @tailwindcss/vite       | MIT     | https://github.com/tailwindlabs/tailwindcss            |
+| vite                    | MIT     | https://github.com/vitejs/vite                         |
+| @vitejs/plugin-react    | MIT     | https://github.com/vitejs/vite-plugin-react            |
+| concurrently            | MIT     | https://github.com/open-cli-tools/concurrently         |
+| cross-env               | MIT     | https://github.com/kentcdodds/cross-env                |
+| electron                | MIT     | https://github.com/electron/electron                   |
+| electron-builder        | MIT     | https://github.com/electron-userland/electron-builder  |
+| wait-on                 | MIT     | https://github.com/jeffbski/wait-on                    |
+
 
 ## Trademark Notices
 
