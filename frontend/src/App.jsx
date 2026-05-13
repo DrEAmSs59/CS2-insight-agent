@@ -29,6 +29,8 @@ import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } fro
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
 
+import CustomTitleBar from "./components/CustomTitleBar";
+
 const API = axios.create({ baseURL: "/api" });
 
 export default function App() {
@@ -2078,32 +2080,35 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-dark">
-        {libraryLoadingOverlay && (
-          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
-            <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
-              <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
-              <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+      <div className="relative flex flex-col h-screen overflow-hidden bg-cs2-bg-dark">
+        <CustomTitleBar />
+        <div className="relative flex flex-1 overflow-hidden">
+          {libraryLoadingOverlay && (
+            <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
+              <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
+                <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
+                <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+              </div>
             </div>
-          </div>
-        )}
-        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <Routes>
-              <Route path="/" element={<GuidePage />} />
-              <Route path="/library" element={<DemoLibraryPage />} />
-              <Route path="/analysis" element={<AnalysisPage />} />
-              <Route path="/queue" element={<RecordingQueuePage />} />
-              <Route path="/montage" element={<MontageWorkbenchPage />} />
-              <Route path="/params" element={<CommonParamsPage />} />
-              <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        </main>
+          )}
+          <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <Routes>
+                <Route path="/" element={<GuidePage />} />
+                <Route path="/library" element={<DemoLibraryPage />} />
+                <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/queue" element={<RecordingQueuePage />} />
+                <Route path="/montage" element={<MontageWorkbenchPage />} />
+                <Route path="/params" element={<CommonParamsPage />} />
+                <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
+          </main>
+        </div>
 
         {showGlobalNotice ? (
           <div

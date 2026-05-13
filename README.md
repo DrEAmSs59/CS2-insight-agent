@@ -74,7 +74,7 @@ CS2-insight-agent/
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000 or python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ### 2. Frontend
@@ -82,8 +82,19 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev or npm run electron:dev // start frontend dev server
 ```
+前端打包：
+```bash
+npm run build
+```
+Electron 打包：
+```bash
+npm run electron:build
+```
+Electron打包位置：`frontend/dist_electron/`
+
+
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
 
