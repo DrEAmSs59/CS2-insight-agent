@@ -5,8 +5,8 @@
     "password": ""
   },
   "llm": {
-    "provider": "deepseek",
-    "model": "deepseek-chat",
+    "provider": "",
+    "model": "",
     "api_key": "",
     "base_url": null
   },

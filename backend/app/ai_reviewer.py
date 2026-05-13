@@ -13,7 +13,7 @@ from typing import Any, Optional
 from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from .demo_parser import Clip, meme_series_badges_for_kd
-from .env_utils import LLMConfig
+from .env_utils import LLMConfig, llm_base_url_is_local_host
 
 logger = logging.getLogger(__name__)
 
@@ -176,8 +176,13 @@ class AIReviewer:
 
     @classmethod
     def from_llm_config(cls, llm: LLMConfig, **kwargs: Any) -> AIReviewer:
+        key = (llm.api_key or "").strip()
+        if key.startswith("****"):
+            raise ValueError("AIReviewer: invalid or masked api_key")
+        if not key and llm_base_url_is_local_host(llm.base_url):
+            key = (os.environ.get("CS2_INSIGHT_LOCAL_LLM_API_KEY") or "local").strip() or "local"
         return cls(
-            api_key=llm.api_key,
+            api_key=key,
             base_url=llm.base_url,
             model_name=llm.model,
             **kwargs,

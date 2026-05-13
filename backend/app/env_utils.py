@@ -14,6 +14,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 try:
     import winreg
@@ -274,10 +275,28 @@ class OBSConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: str = "deepseek"
-    model: str = "deepseek-chat"
+    """OpenAI 兼容网关：由用户填写 base_url + model；provider 仅兼容旧配置。"""
+    provider: str = ""
+    model: str = ""
     api_key: str = ""
     base_url: Optional[str] = None
+
+
+def llm_base_url_is_local_host(base_url: Optional[str]) -> bool:
+    """本机 OpenAI 兼容服务（Ollama / LM Studio 等）：可不填 API 密钥。"""
+    raw = (base_url or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw:
+        raw = "http://" + raw
+    try:
+        host = urlparse(raw).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    h = host.lower()
+    return h in ("localhost", "127.0.0.1", "::1") or h.endswith(".localhost")
 
 
 def llm_api_key_configured(api_key: Optional[str]) -> bool:

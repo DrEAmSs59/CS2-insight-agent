@@ -6,23 +6,28 @@ import {
   Zap,
   Eye,
   EyeOff,
-  ChevronDown,
   Check,
   Server,
 } from "lucide-react";
 
 const API = axios.create({ baseURL: "/api" });
 
-const PROVIDER_PRESETS = {
-  deepseek: { label: "DeepSeek", model: "deepseek-chat", base_url: "https://api.deepseek.com", local: false },
-  openai: { label: "OpenAI", model: "gpt-4o", base_url: "https://api.openai.com", local: false },
-  qwen: { label: "通义千问 (Qwen)", model: "qwen-plus", base_url: "https://dashscope.aliyuncs.com/compatible-mode", local: false },
-  glm: { label: "智谱 (GLM)", model: "glm-4-flash", base_url: "https://open.bigmodel.cn/api/paas", local: false },
-  minimax: { label: "MiniMax", model: "MiniMax-Text-01", base_url: "https://api.minimax.chat", local: false },
-  openrouter: { label: "OpenRouter", model: "deepseek/deepseek-chat", base_url: "https://openrouter.ai/api", local: false },
-  ollama: { label: "Ollama (本地)", model: "qwen2.5:7b", base_url: "http://localhost:11434", local: true },
-  lmstudio: { label: "LM Studio (本地)", model: "loaded-model", base_url: "http://localhost:1234", local: true },
-};
+function llmBaseUrlLooksLocal(baseUrl) {
+  try {
+    const u = String(baseUrl || "").trim();
+    if (!u) return false;
+    const withProto = u.includes("://") ? u : `http://${u}`;
+    const host = new URL(withProto).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host.endsWith(".localhost")
+    );
+  } catch {
+    return false;
+  }
+}
 
 function parsePlayerLines(text) {
   return String(text || "")
@@ -155,26 +160,10 @@ export default function SettingsPage() {
     return () => window.clearInterval(id);
   }, [refreshSetup]);
 
-  const currentPreset = PROVIDER_PRESETS[s.llmConfig.provider];
-  const isLocal = currentPreset?.local ?? false;
+  const isLocal = llmBaseUrlLooksLocal(s.llmConfig.base_url);
 
   const schedulePersistLlm = () => {
     queueMicrotask(() => void s.persistLlmConfig());
-  };
-
-  const handleProviderChange = (provider) => {
-    const preset = PROVIDER_PRESETS[provider];
-    if (preset) {
-      s.setLlmConfig({
-        ...s.llmConfig,
-        provider,
-        model: preset.model,
-        base_url: preset.base_url,
-      });
-    } else {
-      s.setLlmConfig({ ...s.llmConfig, provider });
-    }
-    schedulePersistLlm();
   };
 
   const cs2Status = useMemo(() => {
@@ -194,14 +183,14 @@ export default function SettingsPage() {
   const aiRowStatus = useMemo(() => {
     if (!s.aiMode) return { tone: "muted", text: "AI：极速本地（未启用云端锐评）" };
     if (isLocal) {
-      return { tone: "ok", text: `AI：本地「${currentPreset?.label || s.llmConfig.provider}」` };
+      return { tone: "ok", text: "AI：本机接口（可不填密钥）" };
     }
     if (!setup) return { tone: "muted", text: "AI：检测中…" };
     if (setup.ai_key_ok || s.llmKeySavedOnServer) {
-      return { tone: "ok", text: `AI：${currentPreset?.label || s.llmConfig.provider} 已配置密钥` };
+      return { tone: "ok", text: "AI：已配置网关与密钥" };
     }
     return { tone: "warn", text: "AI：请填写并保存 API 密钥" };
-  }, [s.aiMode, s.llmKeySavedOnServer, setup, isLocal, currentPreset, s.llmConfig.provider]);
+  }, [s.aiMode, s.llmKeySavedOnServer, setup, isLocal]);
 
   const handlePasteCs2 = async () => {
     try {
@@ -460,47 +449,38 @@ export default function SettingsPage() {
             </SettingsCard>
 
             {s.aiMode ? (
-              <SettingsCard title="大模型（AI）" hint="密钥在服务器保存后刷新不显示明文。" fill>
+              <SettingsCard
+                title="大模型（AI）"
+                hint="填写 OpenAI 兼容网关的 base URL 与模型 id。密钥在服务器保存后刷新不显示明文。"
+                fill
+              >
                 <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-                  <div>
-                    <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">服务商</label>
-                    <div className="relative min-w-0 w-full max-w-full @min-[40rem]/settings:max-w-md">
-                      <select
-                        value={s.llmConfig.provider}
-                        onChange={(e) => handleProviderChange(e.target.value)}
-                        className="w-full cursor-pointer appearance-none rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 pr-8 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
-                      >
-                        <optgroup label="云端服务">
-                          <option value="deepseek">DeepSeek</option>
-                          <option value="qwen">通义千问 (Qwen)</option>
-                          <option value="glm">智谱 (GLM)</option>
-                          <option value="minimax">MiniMax</option>
-                          <option value="openai">OpenAI</option>
-                          <option value="openrouter">OpenRouter</option>
-                        </optgroup>
-                        <optgroup label="本地模型">
-                          <option value="ollama">Ollama (本地)</option>
-                          <option value="lmstudio">LM Studio (本地)</option>
-                        </optgroup>
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-secondary" />
-                    </div>
-                  </div>
-                  {isLocal && (
-                    <div className="flex items-center gap-1.5 rounded-md border border-cs2-orange/20 bg-cs2-orange/10 px-2.5 py-2">
-                      <Server className="h-3 w-3 shrink-0 text-cs2-orange" />
-                      <span className="text-[10px] text-cs2-orange">本地模型无需 API 密钥，请确保服务已启动。</span>
-                    </div>
-                  )}
+                  <SmallField label="接口地址 (OpenAI 兼容)">
+                    <input
+                      value={s.llmConfig.base_url || ""}
+                      placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
+                      onChange={(e) => s.setLlmConfig({ ...s.llmConfig, base_url: e.target.value })}
+                      onBlur={schedulePersistLlm}
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
+                    />
+                  </SmallField>
                   <SmallField label="模型名称">
                     <input
                       value={s.llmConfig.model}
-                      placeholder={currentPreset?.model || ""}
+                      placeholder="网关上注册的模型名，如 deepseek-chat、gpt-4o-mini"
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, model: e.target.value })}
                       onBlur={schedulePersistLlm}
                       className="w-full min-w-0 max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none @min-[40rem]/settings:max-w-md"
                     />
                   </SmallField>
+                  {isLocal && (
+                    <div className="flex items-center gap-1.5 rounded-md border border-cs2-orange/20 bg-cs2-orange/10 px-2.5 py-2">
+                      <Server className="h-3 w-3 shrink-0 text-cs2-orange" />
+                      <span className="text-[10px] text-cs2-orange">
+                        检测到本机地址：可不填 API 密钥（后端使用占位密钥）。请确保兼容服务已启动。
+                      </span>
+                    </div>
+                  )}
                   {!isLocal && (
                     <div>
                       <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">API 密钥</label>
@@ -528,22 +508,13 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   )}
-                  <div>
-                    <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">接口地址</label>
-                    <input
-                      value={s.llmConfig.base_url || ""}
-                      onChange={(e) => s.setLlmConfig({ ...s.llmConfig, base_url: e.target.value })}
-                      onBlur={schedulePersistLlm}
-                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
-                    />
-                  </div>
                 </div>
               </SettingsCard>
             ) : null}
 
             <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <p className="text-[11px] leading-relaxed text-zinc-400">
-                将路径、帧率、编码、关注名单与大模型选项一次性写入配置文件。
+                将路径、帧率、编码、关注名单与大模型接口/模型名一次性写入配置文件。
               </p>
               <PrimaryButton
                 className="shrink-0 sm:min-w-[140px]"
