@@ -1887,7 +1887,13 @@ async def start_recording(req: RecordRequest):
     try:
         if pov_on:
             pov_mgr = PovHudManager(cfg)
-            pov_mgr.install()
+            demo_map_for_pov = ""
+            try:
+                sm = await asyncio.to_thread(get_demo_match_summary_isolated, str(dem_path))
+                demo_map_for_pov = str(sm.get("map_name") or "").strip()
+            except IsolatedParseError:
+                pass
+            pov_mgr.install(demo_map_for_pov)
         director = OBSDirector(
             obs_cfg,
             cfg.cs2_path,
@@ -2070,6 +2076,14 @@ async def start_batch_recording(req: BatchRecordRequest):
     if not demo_jobs:
         raise HTTPException(400, "没有可录制的片段（clips 为空）")
 
+    demo_map_for_pov = ""
+    if pov_on:
+        try:
+            sm0 = await asyncio.to_thread(get_demo_match_summary_isolated, str(demo_jobs[0][0]))
+            demo_map_for_pov = str(sm0.get("map_name") or "").strip()
+        except IsolatedParseError:
+            demo_map_for_pov = ""
+
     global _recording_abort_event
     if _recording_abort_event is not None:
         raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
@@ -2079,7 +2093,7 @@ async def start_batch_recording(req: BatchRecordRequest):
     try:
         if pov_on:
             pov_mgr = PovHudManager(cfg)
-            pov_mgr.install()
+            pov_mgr.install(demo_map_for_pov)
         director = OBSDirector(
             obs_cfg,
             cfg.cs2_path,
@@ -2093,6 +2107,7 @@ async def start_batch_recording(req: BatchRecordRequest):
             demo_jobs,
             warmup=warmup_eff,
             pov_enabled=pov_on,
+            pov_hud_manager=pov_mgr if pov_on else None,
         )
         _raise_if_recording_never_started(results)
         await _persist_recorded_clips_from_results(results)

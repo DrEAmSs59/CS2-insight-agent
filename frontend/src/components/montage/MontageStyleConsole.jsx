@@ -6,7 +6,7 @@ import {
   Music,
   Film,
   Trash2,
-  ScanEye,
+  // ScanEye, // 雷达覆盖 UI 已隐藏，恢复区块时一并取消注释
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
@@ -209,7 +209,10 @@ export function MontageStyleConsole({
     <aside className="flex min-h-0 w-full min-w-0 flex-col border-white/10 bg-gradient-to-b from-zinc-950/80 to-black/40 xl:border-l">
       <div className="shrink-0 border-b border-white/10 px-3 py-2.5">
         <p className="text-[12px] font-bold text-white">合辑成片控制台</p>
-        <p className="mt-0.5 text-[10px] text-zinc-500">BGM、片头片尾与雷达覆盖；转场在中间「合集结构」里点衔接处编辑</p>
+        <p className="mt-0.5 text-[10px] text-zinc-500">
+          {/* BGM、片头片尾与雷达覆盖；转场在中间「合集结构」里点衔接处编辑 */}
+          BGM、片头片尾；转场在中间「合集结构」里点衔接处编辑
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -385,6 +388,7 @@ export function MontageStyleConsole({
             />
           </CollapsibleSection>
 
+          {/*
           <section className="space-y-2.5">
             <StyleBlockTitle title="画面覆盖" subtitle="仅展示已接入能力" />
             <div
@@ -420,6 +424,7 @@ export function MontageStyleConsole({
               </button>
             </div>
           </section>
+          */}
 
           <CollapsibleSection
             title={

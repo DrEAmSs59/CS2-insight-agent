@@ -24,6 +24,7 @@ from obswebsocket import exceptions as obs_ws_exceptions
 from obswebsocket import obsws, requests as obs_requests
 from obswebsocket.core import RecvThread, ReconnectThread
 
+from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     TICK_RATE as DEMO_TICK_RATE,
@@ -733,6 +734,7 @@ _RECORDING_KEYBIND_RESET_LINES: tuple[str, ...] = (
     'bind "a" "+moveleft"',
     'bind "s" "+back"',
     'bind "d" "+moveright"',
+    "unbind alt",
 )
 _OBS_RECORDING_SCENE_NAME = "CS2 Insight Recording"
 _OBS_GAME_CAPTURE_INPUT_NAME = "CS2 Insight Game Capture"
@@ -788,6 +790,23 @@ def _clip_death_tick(clip: dict) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return tick if tick >= 0 else None
+
+
+def _pacing_pre_first_sec_effective(clip: dict) -> float:
+    """与 ``build_smart_jump_segments`` 内 ``pre_first_sec`` 解析一致（秒）。
+
+    须基于 ``clip.pacing_override`` 原文：录制流程里若对 pacing 做「固定分段」类清空，
+    会与解析分段用的击杀前预留脱节，导致关键帧补偿用错目标、片头偏短。"""
+    raw = clip.get("pacing_override")
+    if isinstance(raw, dict):
+        v = raw.get("pre_first_sec")
+        if v is not None and str(v).strip():
+            try:
+                return max(0.0, float(v))
+            except (TypeError, ValueError):
+                pass
+    ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 5.5))
+    return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
 def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
@@ -1724,6 +1743,7 @@ class OBSDirector:
             "cl_spec_show_bindings 0",
             "con_enable 1",
             *console_bind_lines,
+            "unbind alt",
             f'playdemo "{stem}.dem"',
         ]
         cfg_path.write_text("\n".join(cfg_lines) + "\n", encoding="ascii")
@@ -3283,11 +3303,11 @@ class OBSDirector:
             death_anchor_tick is not None
             and str(clip.get("category") or "").strip() in ("fail", "meme_death")
         )
-        _pacing_override = clip.get("pacing_override") or {}
-        if clip.get("fixed_segment_pacing"):
-            _pacing_override = {}
-        has_single_segment_override = isinstance(_pacing_override, dict) and any(
-            k in _pacing_override for k in ("pre_first_sec", "post_last_sec")
+        # 与 build_smart_jump_segments 一致：用 clip 上原始 pacing（含队列合并后的击杀前/后），
+        # 勿因 fixed_segment_pacing 先清空再算 has_single / 关键帧目标，否则会丢掉用户预留。
+        _raw_po = clip.get("pacing_override") if isinstance(clip.get("pacing_override"), dict) else {}
+        has_single_segment_override = bool(_raw_po) and any(
+            k in _raw_po for k in ("pre_first_sec", "post_last_sec")
         )
         use_smart_jump = len(segments) > 1
         post_start_seg0 = 0.0
@@ -3311,6 +3331,18 @@ class OBSDirector:
                 # 总额外 burn ≈ 2s（可通过环境变量精确校准）。
                 + self._env_float("CS2_INSIGHT_INJECT_OVERHEAD_SEC", "2.0")
             )
+            # 仅 clip_idx==0 会跑 _prepare_clip_playback(..., inject_session_warmup_cvars=True) 里那批
+            # 会话级 cvar；后续片段少一整轮长注入，prepare 后 tick 推进偏少，仍用同一 burn 会
+            # seek 过头 → 片头离首杀偏长（常见 +2s 量级）。
+            if clip_idx > 0 and warmup is not None:
+                try:
+                    _wl = self._recording_warmup_console_lines(warmup)
+                    _credit = min(2.6, max(0.0, float(len(_wl)) * 0.06))
+                    burn_sec = max(0.85, burn_sec - _credit)
+                except Exception:
+                    burn_sec = max(0.85, burn_sec - 1.35)
+            elif clip_idx > 0:
+                burn_sec = max(0.85, burn_sec - 1.35)
         else:
             burn_sec = 0.0
         engine_burn_ticks = int(burn_sec * TICK_RATE)
@@ -3322,19 +3354,28 @@ class OBSDirector:
         # 修复：demo_pause 后先 demo_resume，等待多余的预滚走完，再 StartRecord。
         # delay = max(0, calibrated_default_pre - target_pre_first)
         _KEYFRAME_PRE_FIRST_SEC = self._env_float("CS2_INSIGHT_KEYFRAME_PRE_FIRST_SEC", "5.5")
-        _pre_first_override_val = (
-            _pacing_override.get("pre_first_sec") if isinstance(_pacing_override, dict) else None
+        _target_pre_first_sec = _pacing_pre_first_sec_effective(clip)
+        _apply_kf_delay = bool(
+            has_kill_timeline or has_single_segment_override or has_death_timeline
         )
-        _target_pre_first_sec = (
-            float(_pre_first_override_val) if _pre_first_override_val is not None else _KEYFRAME_PRE_FIRST_SEC
-        )
-        _apply_kf_delay = (
-            (has_kill_timeline or has_single_segment_override or has_death_timeline)
-            and not clip.get("fixed_segment_pacing")
-        )
-        delay_pre_sec = (
+        _kf_delay_raw = (
             max(0.0, _KEYFRAME_PRE_FIRST_SEC - _target_pre_first_sec) if _apply_kf_delay else 0.0
         )
+        # StartRecord 前：pause → demo_resume → sleep(delay)。这段 1× 回放若长于「击杀前预留」墙钟，
+        # 会在尚未开录时演过首杀；智能跳剪首段 sleep 再被 _rec_wall_trim 扣掉整段 → 直接切下一段。
+        if has_kill_timeline and _kf_delay_raw > 0.05 and _target_pre_first_sec > 0:
+            _pre_roll_cap = max(0.08, _target_pre_first_sec * 0.92)
+            delay_pre_sec = min(_kf_delay_raw, _pre_roll_cap)
+            if delay_pre_sec + 1e-6 < _kf_delay_raw:
+                logger.info(
+                    "[record] kf_delay capped clip=%s raw=%.3fs cap(pre_roll)=%.3fs target_pre=%.3fs",
+                    clip_id,
+                    _kf_delay_raw,
+                    delay_pre_sec,
+                    _target_pre_first_sec,
+                )
+        else:
+            delay_pre_sec = _kf_delay_raw
 
         def _estimated_record_start_tick(seek: int) -> int:
             return max(0, int(seek)) + max(0, int(engine_burn_ticks))
@@ -3665,7 +3706,7 @@ class OBSDirector:
                     seg_dur = max(0.0, (seg_end - seg_start) / float(TICK_RATE))
                     if si == 0:
                         # 首段与单段同理：StartRecord 前/刚开录时 demo 已先走 _rec_wall_trim 秒。
-                        seg0 = max(0.0, seg_dur + float(first_seg_extra) - _rec_wall_trim)
+                        seg0 = max(0.08, seg_dur + float(first_seg_extra) - _rec_wall_trim)
                         await self._sleep_abortable(seg0)
                         continue
                     if not jump_cut_active:
@@ -3953,8 +3994,6 @@ class OBSDirector:
                             _killer_list = [_fallback_killer] * len(_vk_ticks)
                         for _kn, _kt in zip(_killer_list, _vk_ticks):
                             _vic_pairs.append((_kn, int(_kt), None, "killer"))
-                _pre_vic_t  = int(_pre_vic  * DEMO_TICK_RATE)
-                _post_vic_t = int(_post_vic * DEMO_TICK_RATE)
                 _clip_min   = max(0, int(clip.get("clip_min_tick") or 0))
                 _clip_max   = int(clip.get("clip_max_tick") or 0)
                 _pov_post_resume_delay = self._env_float("CS2_INSIGHT_POST_OBS_RESUME_DEMO_DELAY", "0.25")
@@ -3979,6 +4018,16 @@ class OBSDirector:
                 for _pov_i, (_vname, _vtick, _next_kill_tick, _pov_kind) in enumerate(_vic_pairs):
                     if not _vname:
                         continue
+                    # Use killer_pov_pre/post_sec overrides when recording killer POV;
+                    # fall back to victim_pov_pre/post_sec (or category default) otherwise.
+                    if _pov_kind == "killer":
+                        _pre_pov  = float(_vpo.get("killer_pov_pre_sec",  _vpo.get("victim_pov_pre_sec",  _default_pov_pre)))
+                        _post_pov = float(_vpo.get("killer_pov_post_sec", _vpo.get("victim_pov_post_sec", _default_pov_post)))
+                    else:
+                        _pre_pov  = float(_vpo.get("victim_pov_pre_sec",  _default_pov_pre))
+                        _post_pov = float(_vpo.get("victim_pov_post_sec", _default_pov_post))
+                    _pre_vic_t  = int(_pre_pov  * DEMO_TICK_RATE)
+                    _post_vic_t = int(_post_pov * DEMO_TICK_RATE)
                     _vs_start = max(_clip_min, _vtick - _pre_vic_t)
                     _vs_end   = _vtick + _post_vic_t
                     # 最后一回合结束后 CS2 进入结算界面，渲染单向锁定；
@@ -4655,11 +4704,13 @@ class OBSDirector:
         warmup: Optional[RecordingWarmupExtras] = None,
         *,
         pov_enabled: bool = False,
+        pov_hud_manager: Optional[Any] = None,
     ) -> list[dict]:
         """
         多 Demo 批量录制：OBS 全程保持连接；每个 Demo 启动 CS2 → 录完该 Demo 全部片段 → 关闭游戏，再下一个。
         ``demo_jobs`` 每项为 ``(demo_abs, clips, spectator_name, spectator_user_id)``。
         返回扁平结果列表，每条含 ``demo_filename`` 便于前端对照。
+        若 ``pov_hud_manager`` 与 ``pov_enabled`` 同时传入，则在第 2 个及之后的 Demo 启动前按地图覆盖已安装的 ``pov.vpk``（首个 Demo 应在调用方已完成 ``install``）。
         """
         all_results: list[dict] = []
 
@@ -4690,6 +4741,13 @@ class OBSDirector:
                 if not clips:
                     continue
                 demo_name = demo_abs.name
+                if job_idx > 0 and self._pov_enabled and pov_hud_manager is not None:
+                    try:
+                        sm = await asyncio.to_thread(get_demo_match_summary_isolated, str(demo_abs))
+                        pov_map = str(sm.get("map_name") or "").strip()
+                    except IsolatedParseError:
+                        pov_map = ""
+                    pov_hud_manager.replace_pov_vpk_for_map(pov_map)
                 self._set_state(DirectorState.LAUNCHING_CS2, f"batch job {job_idx + 1}/{len(demo_jobs)} {demo_name}")
                 try:
                     self._launch_cs2(demo_abs, warmup)

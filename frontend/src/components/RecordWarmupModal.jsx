@@ -238,7 +238,7 @@ export default function RecordWarmupModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex max-h-[min(94vh,920px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-cs2-bg-card shadow-2xl">
+      <div className="relative flex max-h-[min(96vh,1080px)] w-full max-w-[min(92vw,1400px)] flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-cs2-bg-card shadow-2xl">
         <button
           type="button"
           onClick={onClose}
@@ -380,18 +380,16 @@ export default function RecordWarmupModal({
           </div>
 
           <div className="min-w-0 space-y-4">
-          <section aria-labelledby="sec-launch">
-            <SectionHeader en="Launch & console" zh="启动与控制台" />
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-              命令行与控制台
-            </p>
-            <Cs2LaunchConsoleFields
-              cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
-              onCs2ExtraLaunchArgsChange={onCs2ExtraLaunchArgsChange}
-              recordInjectConsoleLines={recordInjectConsoleLines}
-              onRecordInjectConsoleLinesChange={onRecordInjectConsoleLinesChange}
-            />
-          </section>
+          <ExperimentalPovSection
+            visible={open}
+            experimentalPovEnabled={experimentalPovEnabled}
+            onExperimentalPovChange={onExperimentalPovChange}
+            checkboxDisabled={!onExperimentalPovChange}
+            povRadarMode={opts.pov_radar_mode}
+            onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
+            povTeamcounterNumeric={opts.pov_teamcounter_numeric}
+            onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
+          />
 
           <section aria-labelledby="sec-audio">
             <SectionHeader en="Audio & canvas" zh="音频与画布" />
@@ -523,16 +521,18 @@ export default function RecordWarmupModal({
             </div>
           </section>
 
-          <ExperimentalPovSection
-            visible={open}
-            experimentalPovEnabled={experimentalPovEnabled}
-            onExperimentalPovChange={onExperimentalPovChange}
-            checkboxDisabled={!onExperimentalPovChange}
-            povRadarMode={opts.pov_radar_mode}
-            onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
-            povTeamcounterNumeric={opts.pov_teamcounter_numeric}
-            onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
-          />
+          <section aria-labelledby="sec-launch">
+            <SectionHeader en="Launch & console" zh="启动与控制台" />
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              命令行与控制台
+            </p>
+            <Cs2LaunchConsoleFields
+              cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
+              onCs2ExtraLaunchArgsChange={onCs2ExtraLaunchArgsChange}
+              recordInjectConsoleLines={recordInjectConsoleLines}
+              onRecordInjectConsoleLinesChange={onRecordInjectConsoleLinesChange}
+            />
+          </section>
 
           </div>
         </div>
