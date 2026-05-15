@@ -5,6 +5,7 @@ import {
   Microscope,
   Package,
   Clapperboard,
+  Download,
   SlidersHorizontal,
   Settings,
   Gamepad2,
@@ -16,7 +17,7 @@ const linkBase =
 const linkIdle = "text-zinc-400 hover:border-white/10 hover:bg-white/[0.04] hover:text-zinc-200";
 const linkActive = "border-cs2-orange/45 bg-cs2-orange/10 text-cs2-orange";
 
-export default function SidebarNav({ queueLength = 0, disabled = false }) {
+export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   return (
     <aside className="flex w-44 shrink-0 flex-col border-r border-cs2-border bg-cs2-bg-sidebar">
       <div className="border-b border-cs2-border px-2.5 py-3">
@@ -90,6 +91,17 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           设置
         </NavLink>
       </nav>
+      <div className="border-t border-cs2-border px-1.5 py-2">
+        <button
+          type="button"
+          disabled={disabled || !onCheckUpdate}
+          onClick={() => onCheckUpdate?.()}
+          className={`${linkBase} w-full justify-center text-zinc-400 hover:border-white/10 hover:bg-white/[0.04] hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-40`}
+        >
+          <Download className="h-4 w-4 shrink-0 opacity-90" />
+          检查更新
+        </button>
+      </div>
     </aside>
   );
 }

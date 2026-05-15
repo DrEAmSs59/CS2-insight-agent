@@ -3,6 +3,7 @@ import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
+import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordWarmupModal, { RECORD_WARMUP_DEFAULT_OPTIONS } from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
@@ -47,6 +48,9 @@ export default function App() {
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
   /** 用户是否正在编辑密码框（用于失焦时恢复“已保存”提示） */
   const [obsPasswordEditing, setObsPasswordEditing] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateModalManual, setUpdateModalManual] = useState(false);
   const obsConfigRef = useRef(obsConfig);
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
@@ -2000,6 +2004,40 @@ export default function App() {
     }
   }, [persistLlmConfig]);
 
+  const fetchUpdateInfo = useCallback(async (opts = { force: false, manual: false }) => {
+    try {
+      const { data } = await API.get("/app/update-info", {
+        params: opts.force ? { force: "true" } : {},
+      });
+      setUpdateInfo(data);
+      if (data?.update_available) {
+        setUpdateModalManual(Boolean(opts.manual));
+        setUpdateModalOpen(true);
+      } else if (opts.manual) {
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    } catch {
+      if (opts.manual) {
+        setUpdateInfo({
+          error: "无法连接服务器",
+          current_version: "",
+          latest_version: null,
+          update_available: false,
+          release_notes: "",
+          release_url: "",
+          downloads: { setup_url: null, zip_url: null },
+        });
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchUpdateInfo({ force: false, manual: false });
+  }, [fetchUpdateInfo]);
+
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
 
@@ -2172,7 +2210,11 @@ export default function App() {
             </div>
           </div>
         )}
-        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+        <SidebarNav
+          queueLength={queue.length}
+          disabled={batchRecording}
+          onCheckUpdate={() => void fetchUpdateInfo({ force: true, manual: true })}
+        />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="min-h-0 flex-1 overflow-hidden">
             <Routes>
@@ -2240,6 +2282,17 @@ export default function App() {
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
           onClose={() => setRecordingBlockedMessage("")}
+        />
+
+        <UpdateCheckModal
+          open={updateModalOpen}
+          info={updateInfo}
+          manual={updateModalManual}
+          title={updateModalManual ? "检查更新" : "发现新版本"}
+          onClose={() => {
+            setUpdateModalOpen(false);
+            setUpdateModalManual(false);
+          }}
         />
       </div>
     </AppShellProvider>

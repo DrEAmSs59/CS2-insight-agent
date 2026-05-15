@@ -38,3 +38,8 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 - *Counter-Strike 2*, *CS2*, *Steam*, and *Valve* are trademarks of Valve Corporation. This project is **not affiliated with, endorsed by, or sponsored by Valve Corporation**.
 - *5E* (5E对战平台) and *完美世界竞技平台 (Perfect World Arena)* are trademarks of their respective owners. This project is not affiliated with these platforms; it only consumes the standard `.dem` files they export.
 - *OBS Studio* is a trademark of the OBS Project. This project communicates with OBS over the public WebSocket protocol and does not redistribute any OBS code or assets.
+
+## Bundled / optional Windows runtime pieces
+
+- **CPython Windows runtime** (installer and portable zip): sourced from the Astral `python-build-standalone` project (`install_only` tarball), Python Software Foundation license. See `packaging/windows/python-runtime.json` for the pinned URL.
+- **Optional FFmpeg** (GPL): when the user selects the matching Inno task, the installer downloads `ffmpeg-8.1.1-essentials_build.zip` from the GyanD `codexffmpeg` GitHub release (see `packaging/windows/ffmpeg-redist.json`). FFmpeg is a trademark of the FFmpeg project.

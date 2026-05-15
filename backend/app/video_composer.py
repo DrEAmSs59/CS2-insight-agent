@@ -28,6 +28,11 @@ def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
         if p.is_file():
             return p.resolve()
         raise MontageComposerError(f"配置的 FFmpeg 不存在或不可执行: {raw}")
+    from .env_utils import get_data_dir
+
+    bundled = get_data_dir().parent / "third_party" / "ffmpeg" / "ffmpeg.exe"
+    if bundled.is_file():
+        return bundled.resolve()
     found = shutil.which("ffmpeg")
     if not found:
         raise MontageComposerError(

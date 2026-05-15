@@ -52,6 +52,7 @@ from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import gsi_status, notify_gsi_payload
+from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
 from . import obs_config_center
 from .pov_experimental import merge_warmup_extras_for_pov
@@ -737,6 +738,13 @@ def get_config():
     return data
 
 
+@app.get("/api/app/update-info")
+def get_app_update_info(force: bool = False):
+    """对比 GitHub 最新 Release；force=true 跳过进程内短缓存（手动「检查更新」）。"""
+    cur, src = resolve_local_version_info()
+    return build_update_payload(cur, src, force_refresh=bool(force))
+
+
 @app.post("/api/config/detect-cs2")
 def detect_cs2_save():
     """扫描本机 Steam 库并写入 cs2-insight.config.json 中的 cs2_path。"""
@@ -989,11 +997,13 @@ def setup_status():
     # 本地项先算好（不依赖网络），OBS 失败时也能立刻返回其余状态
     cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
 
+    # 与 video_composer.resolve_ffmpeg_binary 一致：配置路径 → 安装目录 third_party/ffmpeg → PATH
     ffmpeg_ok = False
-    if cfg.ffmpeg_path:
-        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
-    else:
-        ffmpeg_ok = shutil.which("ffmpeg") is not None
+    try:
+        resolve_ffmpeg_binary(cfg.ffmpeg_path or None)
+        ffmpeg_ok = True
+    except MontageComposerError:
+        ffmpeg_ok = False
 
     ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
         cfg.llm.base_url
