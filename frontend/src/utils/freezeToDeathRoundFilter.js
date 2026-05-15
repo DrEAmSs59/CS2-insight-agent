@@ -87,6 +87,37 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   }
 
   const pickSet = new Set(picks);
+
+  const allWindows = wins
+    .map((w) => ({
+      round: parseInt(String(w.round), 10),
+      start_tick: parseInt(String(w.start_tick), 10),
+      end_tick: parseInt(String(w.end_tick), 10),
+      death_tick:
+        w.death_tick != null && String(w.death_tick).trim() !== ""
+          ? parseInt(String(w.death_tick), 10)
+          : null,
+    }))
+    .filter(
+      (w) =>
+        Number.isFinite(w.round) &&
+        w.round > 0 &&
+        Number.isFinite(w.start_tick) &&
+        Number.isFinite(w.end_tick) &&
+        w.end_tick > w.start_tick
+    )
+    .sort((a, b) => a.round - b.round);
+
+  /** 下一真实回合的 start_tick（来自完整窗口，含未勾选回合），用于截断本段 end，避免吃进下一回合 */
+  const nextStartByRound = new Map();
+  for (let i = 0; i < allWindows.length - 1; i += 1) {
+    const cur = allWindows[i];
+    const next = allWindows[i + 1];
+    if (cur && next && Number.isFinite(cur.round) && Number.isFinite(next.start_tick)) {
+      nextStartByRound.set(cur.round, next.start_tick);
+    }
+  }
+
   const filtered = wins
     .map((w) => ({
       round: parseInt(String(w.round), 10),
@@ -131,7 +162,11 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
 
     let endTick = rawEndTick;
     if (deathTick != null && Number.isFinite(deathTick)) {
-      endTick = Math.min(rawEndTick, deathTick + postDeathTicks);
+      endTick = Math.min(endTick, deathTick + postDeathTicks);
+    }
+    const nextRoundStartTick = nextStartByRound.get(w.round);
+    if (Number.isFinite(nextRoundStartTick)) {
+      endTick = Math.min(endTick, nextRoundStartTick);
     }
 
     if (!Number.isFinite(endTick)) continue;
@@ -168,6 +203,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   if (import.meta.env.DEV) {
     console.info("[freeze-to-death enqueue]", {
       pickedRounds: picks,
+      nextStartByRound: Object.fromEntries(nextStartByRound),
       sourceTicks: newTicks,
       sourceRounds: newSr,
       sourceRoundEnds: newEr,

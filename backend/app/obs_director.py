@@ -580,8 +580,85 @@ def _is_timeline_event_clip(clip: dict) -> bool:
 
 
 def _is_round_timeline_event_clip(clip: dict) -> bool:
-    """时间轴上单事件入队（非整回合固定窗）；前后预留 / POV / trim 等按此收紧。"""
+    """时间轴上单事件入队（非整回合固定窗）；前后预留 / trim 等按此收紧。"""
     return str(clip.get("timeline_source") or "").strip() == "round_timeline_event"
+
+
+def _build_pov_pairs_for_clip(
+    clip: dict,
+    *,
+    want_victim_pov: bool,
+    want_killer_pov: bool,
+    spectator_name: Optional[str],
+) -> list[dict[str, Any]]:
+    """从 clip 生成 POV 锚点；next_kill_tick 仅用于 POV 段 clamp，不影响主段 segment。"""
+    pairs: list[dict[str, Any]] = []
+
+    kill_ticks = _extract_kill_ticks_for_segment(clip)
+    victims = clip.get("victims") or []
+    if not isinstance(victims, list):
+        victims = []
+
+    if want_victim_pov and kill_ticks and victims and str(clip.get("category") or "").strip() != "fail":
+        for index, victim_name in enumerate(victims):
+            vn = str(victim_name or "").strip()
+            if not vn:
+                continue
+            tick_index = min(index, len(kill_ticks) - 1)
+            event_tick = int(kill_ticks[tick_index])
+            next_kill_tick: Optional[int] = None
+            if tick_index + 1 < len(kill_ticks):
+                next_kill_tick = int(kill_ticks[tick_index + 1])
+            pairs.append(
+                {
+                    "player_name": vn,
+                    "tick": event_tick,
+                    "kind": "victim",
+                    "next_kill_tick": next_kill_tick,
+                }
+            )
+
+    death_tick = _extract_death_tick_for_segment(clip)
+    killer_name = str(clip.get("killer_name") or "").strip()
+
+    if (
+        want_killer_pov
+        and death_tick is not None
+        and killer_name
+        and str(clip.get("category") or "").strip() == "fail"
+    ):
+        pairs.append(
+            {
+                "player_name": killer_name,
+                "tick": int(death_tick),
+                "kind": "killer",
+                "next_kill_tick": None,
+            }
+        )
+
+    if want_killer_pov and kill_ticks and str(clip.get("category") or "").strip() != "fail":
+        killer_list = clip.get("killers") or []
+        if not killer_list:
+            _fb = (
+                str(clip.get("_spec_name") or "").strip()
+                or str(clip.get("target_player") or "").strip()
+                or str(spectator_name or "").strip()
+            )
+            killer_list = [_fb] * len(kill_ticks) if _fb else []
+        for _kn, _kt in zip(killer_list, kill_ticks):
+            kn = str(_kn or "").strip()
+            if not kn:
+                continue
+            pairs.append(
+                {
+                    "player_name": kn,
+                    "tick": int(_kt),
+                    "kind": "killer",
+                    "next_kill_tick": None,
+                }
+            )
+
+    return pairs
 
 
 def _cluster_ticks_by_gap(ticks: list[int], max_gap_ticks: int) -> list[list[int]]:
@@ -760,6 +837,20 @@ def _pacing_pre_first_sec_effective(clip: dict) -> float:
             except (TypeError, ValueError):
                 pass
     ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
+    return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
+
+
+def _pacing_post_last_sec_effective(clip: dict) -> float:
+    """与 ``build_smart_jump_segments`` 内 ``post_last_sec`` 解析一致（秒）。"""
+    raw = clip.get("pacing_override")
+    if isinstance(raw, dict):
+        v = raw.get("post_last_sec")
+        if v is not None and str(v).strip():
+            try:
+                return max(0.0, float(v))
+            except (TypeError, ValueError):
+                pass
+    ticks = _env_int("CS2_INSIGHT_SMART_POST_LAST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
     return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
@@ -1124,30 +1215,41 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
                 ftd_segments.append((ss, ee))
             ftd_segments.sort(key=lambda seg: seg[0])
             if ftd_segments:
-                _cid = clip.get("clip_id") or clip.get("id")
-                logger.info(
-                    "[freeze-to-death-segments] clip_id=%s source_rounds=%s source_round_ends=%s "
-                    "source_ticks=%s final_segments=%s kill_ticks=%s death_tick=%s",
-                    _cid,
-                    clip.get("source_rounds"),
-                    clip.get("source_round_ends"),
-                    raw_source_ticks,
-                    ftd_segments,
-                    clip.get("kill_ticks"),
-                    clip.get("death_tick"),
-                )
-                _log_smart_jump_segment_debug(
-                    clip,
-                    ftd_segments,
-                    override,
-                    pre_sec=float(pre_first_sec_eff),
-                    post_sec=float(post_last_sec_eff),
-                    max_gap_sec=float(max_gap_sec_eff),
-                    tick_rate=DEMO_TICK_RATE,
-                    has_user_pacing=has_user_pacing,
-                    max_gap_ticks=_max_gap_ticks_i,
-                )
-                return ftd_segments
+                fixed_ftd: list[tuple[int, int]] = []
+                for i, (ss, ee) in enumerate(ftd_segments):
+                    s_i = max(0, int(ss))
+                    e_i = int(ee)
+                    if i + 1 < len(ftd_segments):
+                        next_s = int(ftd_segments[i + 1][0])
+                        e_i = min(e_i, next_s)
+                    if e_i > s_i:
+                        fixed_ftd.append((s_i, e_i))
+                ftd_segments = fixed_ftd
+                if ftd_segments:
+                    _cid = clip.get("clip_id") or clip.get("id")
+                    logger.info(
+                        "[freeze-to-death-segments] clip_id=%s source_rounds=%s source_round_ends=%s "
+                        "source_ticks=%s final_segments=%s kill_ticks=%s death_tick=%s",
+                        _cid,
+                        clip.get("source_rounds"),
+                        clip.get("source_round_ends"),
+                        raw_source_ticks,
+                        ftd_segments,
+                        clip.get("kill_ticks"),
+                        clip.get("death_tick"),
+                    )
+                    _log_smart_jump_segment_debug(
+                        clip,
+                        ftd_segments,
+                        override,
+                        pre_sec=float(pre_first_sec_eff),
+                        post_sec=float(post_last_sec_eff),
+                        max_gap_sec=float(max_gap_sec_eff),
+                        tick_rate=DEMO_TICK_RATE,
+                        has_user_pacing=has_user_pacing,
+                        max_gap_ticks=_max_gap_ticks_i,
+                    )
+                    return ftd_segments
 
         source_records: list[tuple[int, int, int, int]] = []
         kill_ticks_for_source = _clip_kill_ticks_in_order(clip)
@@ -4125,6 +4227,7 @@ class OBSDirector:
         # CS2_INSIGHT_JC_BURN_SEC（默认 0.9）可微调，覆盖 demo_resume 注入本身的阻塞耗时差异。
         _jc_burn_sec = self._env_float("CS2_INSIGHT_JC_BURN_SEC", "0.9")
         _jc_burn_ticks = int(_jc_burn_sec * TICK_RATE)
+        _jc_burn_sec_capped = max(0.0, min(float(_jc_burn_ticks) / float(TICK_RATE), 0.8))
         record_started_at_wall: Optional[float] = None
         pre_record_video_paths: set[str] = set()
         stop_record_output_path: Optional[Path] = None
@@ -4434,11 +4537,33 @@ class OBSDirector:
 
                 for si, (seg_start, seg_end) in enumerate(segments):
                     seg_dur = max(0.0, (seg_end - seg_start) / float(TICK_RATE))
+                    _seg_jc_extra = _jc_burn_sec_capped if len(segments) > 1 else 0.0
                     if si == 0:
                         # 首段与单段同理：StartRecord 前/刚开录时 demo 已先走 _rec_wall_trim 秒。
                         # 勿用 meta_record_start_tick 缩短本 sleep：engine_burn 为保守上界时 mst 常高于
                         # 实际开录 tick，会误剪短首段导致首杀未进成片（单段路径用 mst 是因无「整段 tick 窗」可对照）。
-                        seg0 = max(0.08, seg_dur + float(first_seg_extra) - _rec_wall_trim_eff)
+                        # 多段 jump-cut 时 seek 提前 jc_burn_ticks，墙钟 sleep 须加回 jc burn，否则末段 post 被吃掉。
+                        seg0 = max(
+                            0.08,
+                            seg_dur + float(first_seg_extra) - _rec_wall_trim_eff + _seg_jc_extra,
+                        )
+                        logger.info(
+                            "[jumpcut-debug] clip_id=%s segment_idx=%s/%s "
+                            "seg_start=%s seg_end=%s seg_dur=%.3f "
+                            "jc_burn_ticks=%s jc_burn_sec=%.3f seg_sleep=%.3f "
+                            "kill_ticks=%s post_sec=%.3f",
+                            clip_id,
+                            si + 1,
+                            len(segments),
+                            seg_start,
+                            seg_end,
+                            float(seg_dur),
+                            _jc_burn_ticks,
+                            float(_seg_jc_extra),
+                            float(seg0),
+                            _extract_kill_ticks_for_segment(clip),
+                            _pacing_post_last_sec_effective(clip),
+                        )
                         logger.info(
                             "[smart_jump] clip=%s seg=0/%d tick_window=[%s,%s] seg_dur_sec=%.4f "
                             "rec_wall_trim_sec=%.4f seg0_sleep_sec=%.4f",
@@ -4595,7 +4720,25 @@ class OBSDirector:
                         await self._sleep_abortable(settle_between)
                     finally:
                         _obs_resume()
-                    await self._sleep_abortable(seg_dur)
+                    seg_sleep = seg_dur + _seg_jc_extra
+                    logger.info(
+                        "[jumpcut-debug] clip_id=%s segment_idx=%s/%s "
+                        "seg_start=%s seg_end=%s seg_dur=%.3f "
+                        "jc_burn_ticks=%s jc_burn_sec=%.3f seg_sleep=%.3f "
+                        "kill_ticks=%s post_sec=%.3f",
+                        clip_id,
+                        si + 1,
+                        len(segments),
+                        seg_start,
+                        seg_end,
+                        float(seg_dur),
+                        _jc_burn_ticks,
+                        float(_seg_jc_extra),
+                        float(seg_sleep),
+                        _extract_kill_ticks_for_segment(clip),
+                        _pacing_post_last_sec_effective(clip),
+                    )
+                    await self._sleep_abortable(seg_sleep)
 
             # ── 主录制墙钟结束后立刻 PauseRecord，再按需 demo_pause ─────────────
             # 击杀后预留（post_last）已折合进 legacy_duration / 智能跳剪末段 seg_dur；
@@ -4707,10 +4850,21 @@ class OBSDirector:
             _is_round_timeline = _tl_src.startswith("round_timeline")
             if clip.get("fixed_segment_pacing") and not _is_round_timeline:
                 _vpo = {}
-            elif _is_round_timeline_event_clip(clip) and not bool(_vpo.get("timeline_append_pov", False)):
-                _vpo["victim_pov"] = False
-                _vpo["killer_pov"] = False
             if bool(_vpo.get("victim_pov", False)) or bool(_vpo.get("killer_pov", False)):
+                logger.info(
+                    "[pov-debug] clip_id=%s category=%s timeline_source=%s "
+                    "timeline_record_kind=%s vpo=%s victims=%s killer_name=%s "
+                    "kill_ticks=%s death_tick=%s",
+                    clip_id,
+                    clip.get("category"),
+                    clip.get("timeline_source"),
+                    clip.get("timeline_record_kind"),
+                    _vpo,
+                    clip.get("victims"),
+                    clip.get("killer_name"),
+                    _extract_kill_ticks_for_segment(clip),
+                    _extract_death_tick_for_segment(clip),
+                )
                 _clip_cat   = str(clip.get("category") or "")
                 _is_fail_pov = _clip_cat == "fail"
                 _default_pov_pre = self._env_float(
@@ -4728,35 +4882,29 @@ class OBSDirector:
                 _want_killer_pov = bool(_vpo.get("killer_pov", False)) or (
                     bool(_vpo.get("victim_pov", False)) and _clip_cat == "fail"
                 )
-                # 每个 pair 形如 (name, kill_tick, next_kill_tick or None)；
-                # next_kill_tick 用于把"中间受害者"的录制窗口提前关掉，
-                # 避免同 killer 的下一颗子弹打死人触发 CS2 spec 镜头被抢到 killer 身上。
-                _vic_pairs = []
-                if _clip_cat == "fail":
-                    # 击杀者视角：以玩家死亡帧为基准（单段，无后续 kill 联动）
-                    _killer_name = str(clip.get("killer_name") or "").strip()
-                    _death_t     = clip.get("death_tick")
-                    if _want_killer_pov and _killer_name and _death_t is not None:
-                        _vic_pairs.append((_killer_name, int(_death_t), None, "killer"))
-                else:
-                    _vk_ticks  = _clip_kill_ticks_in_order(clip)
-                    if _want_victim_pov:
-                        # 受害者视角（高光/合集片段）：按 kill_ticks 顺序逐一追加
-                        _vic_list  = clip.get("victims") or []
-                        for _i, (_vn, _vt) in enumerate(zip(_vic_list, _vk_ticks)):
-                            _nxt = int(_vk_ticks[_i + 1]) if _i + 1 < len(_vk_ticks) else None
-                            _vic_pairs.append((_vn, int(_vt), _nxt, "victim"))
-                    if _want_killer_pov:
-                        _killer_list = clip.get("killers") or []
-                        if not _killer_list:
-                            _fallback_killer = (
-                                str(clip.get("_spec_name") or "").strip()
-                                or str(clip.get("target_player") or "").strip()
-                                or str(spectator_name or "").strip()
-                            )
-                            _killer_list = [_fallback_killer] * len(_vk_ticks)
-                        for _kn, _kt in zip(_killer_list, _vk_ticks):
-                            _vic_pairs.append((_kn, int(_kt), None, "killer"))
+                _pov_pair_dicts = _build_pov_pairs_for_clip(
+                    clip,
+                    want_victim_pov=_want_victim_pov,
+                    want_killer_pov=_want_killer_pov,
+                    spectator_name=spectator_name,
+                )
+                logger.info(
+                    "[pov-debug] clip_id=%s want_victim=%s want_killer=%s pov_pairs=%s",
+                    clip_id,
+                    _want_victim_pov,
+                    _want_killer_pov,
+                    _pov_pair_dicts,
+                )
+                _vic_pairs: list[tuple[Any, ...]] = []
+                for p in _pov_pair_dicts:
+                    _nm = str(p.get("player_name") or "").strip()
+                    if not _nm:
+                        continue
+                    _pk = str(p.get("kind") or "")
+                    _pov_kind = "victim" if _pk == "victim" else "killer"
+                    _nxt = p.get("next_kill_tick")
+                    _nxt_i = int(_nxt) if _nxt is not None else None
+                    _vic_pairs.append((_nm, int(p["tick"]), _nxt_i, _pov_kind))
                 _clip_min   = max(0, int(clip.get("clip_min_tick") or 0))
                 _clip_max   = int(clip.get("clip_max_tick") or 0)
                 _pov_post_resume_delay = self._env_float("CS2_INSIGHT_POST_OBS_RESUME_DEMO_DELAY", "0.25")
