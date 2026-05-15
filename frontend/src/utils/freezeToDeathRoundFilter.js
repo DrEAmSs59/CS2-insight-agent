@@ -18,8 +18,8 @@ function normalizePositiveIntRounds(arr, maxRounds = 64) {
   ].sort((a, b) => a - b);
 }
 
-/** 与后端 CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC 默认 0.45s 对齐（64 tick/s） */
-const _FTD_CLIP_MAX_BUF_TICKS = Math.round(0.45 * 64);
+/** 死后固定留白（与 demo_parser 默认 _FREEZE_TO_DEATH_POST_DEATH_SEC 2.0s 一致） */
+const POST_DEATH_AFTER_DEATH_SEC = 2;
 
 /**
  * 从解析结果片段上的 freeze_to_death_round_filter 还原勾选。
@@ -64,8 +64,8 @@ export function freezeToDeathQueueRoundBadgeText(item, clip) {
 }
 
 /**
- * 按勾选从解析器下发的 `freeze_to_death_round_windows` 重建 source_ticks（精确 freeze 起点），
- * 连续回合合并为一段，与 demo_parser 段合并规则一致；无需重新解析。
+ * 按勾选从解析器下发的 `freeze_to_death_round_windows` 重建 source_ticks（精确 freeze 起点）。
+ * 每个勾选回合独立一段，**不**合并连续回合，以便死亡回合在死后留白后 pause/seek 进入下一段。
  * @param {any} clip
  * @param {number[]} pickedSorted
  * @returns {{ ok: true, clip: any } | { ok: false, error: string }}
@@ -114,61 +114,63 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
   }
 
-  /** @type {{ loR: number, hiR: number, s: number, e: number, death: number|null, freezeLo: number }[]} */
-  const merged = [];
-  let buf = null;
-  for (const w of filtered) {
-    if (!buf) {
-      buf = {
-        loR: w.round,
-        hiR: w.round,
-        s: w.start_tick,
-        e: w.end_tick,
-        death: Number.isFinite(w.death_tick) ? w.death_tick : null,
-        freezeLo: w.freeze_end_tick,
-      };
-      continue;
-    }
-    if (w.round === buf.hiR + 1) {
-      buf.hiR = w.round;
-      buf.e = w.end_tick;
-      if (Number.isFinite(w.death_tick)) buf.death = w.death_tick;
-    } else {
-      merged.push(buf);
-      buf = {
-        loR: w.round,
-        hiR: w.round,
-        s: w.start_tick,
-        e: w.end_tick,
-        death: Number.isFinite(w.death_tick) ? w.death_tick : null,
-        freezeLo: w.freeze_end_tick,
-      };
-    }
-  }
-  if (buf) merged.push(buf);
+  const tickRate = Number(clip.tick_rate ?? clip.tickRate ?? 64) || 64;
+  const postDeathTicks = Math.round(POST_DEATH_AFTER_DEATH_SEC * tickRate);
 
   const newTicks = [];
   const newSr = [];
   const newEr = [];
   const newKills = [];
-  for (const m of merged) {
-    newTicks.push([m.s, m.e]);
-    newSr.push(m.loR);
-    newEr.push(m.hiR);
+  let firstFreezeLo = null;
+
+  for (const w of filtered) {
+    const startTick = w.start_tick;
+    const rawEndTick = w.end_tick;
+    const deathTick = w.death_tick;
+
+    let endTick = rawEndTick;
+    if (deathTick != null && Number.isFinite(deathTick)) {
+      endTick = Math.min(rawEndTick, deathTick + postDeathTicks);
+    }
+
+    if (!Number.isFinite(endTick)) continue;
+    if (endTick <= startTick) continue;
+
+    if (firstFreezeLo === null) firstFreezeLo = w.freeze_end_tick;
+
+    newTicks.push([Math.floor(startTick), Math.ceil(endTick)]);
+    newSr.push(w.round);
+    newEr.push(w.round);
     const kt =
-      m.death != null && Number.isFinite(m.death)
-        ? m.death
-        : Math.max(m.s, m.e - 1);
+      deathTick != null && Number.isFinite(deathTick)
+        ? Math.floor(deathTick)
+        : Math.max(startTick, Math.ceil(endTick) - 1);
     newKills.push(kt);
   }
 
+  if (!newTicks.length) {
+    return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
+  }
+
   let lastRealDeath = null;
-  for (let i = merged.length - 1; i >= 0; i--) {
-    const d = merged[i].death;
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    const d = filtered[i].death_tick;
     if (d != null && Number.isFinite(d)) {
       lastRealDeath = d;
       break;
     }
+  }
+
+  const maxSegEnd = newTicks.reduce((m, [, e]) => Math.max(m, e), 0);
+
+  if (import.meta.env.DEV) {
+    console.info("[freeze-to-death enqueue]", {
+      pickedRounds: picks,
+      sourceTicks: newTicks,
+      sourceRounds: newSr,
+      sourceRoundEnds: newEr,
+      killTicks: newKills,
+    });
   }
 
   const newClip = {
@@ -182,9 +184,8 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     round: newSr[0],
     freeze_to_death_round_filter: [...picks],
     death_tick: lastRealDeath != null ? lastRealDeath : clip.death_tick,
-    clip_min_tick: merged[0].freezeLo,
-    clip_max_tick:
-      lastRealDeath != null ? lastRealDeath + _FTD_CLIP_MAX_BUF_TICKS : clip.clip_max_tick,
+    clip_min_tick: firstFreezeLo ?? clip.clip_min_tick,
+    clip_max_tick: maxSegEnd > 0 ? maxSegEnd : clip.clip_max_tick,
     client_clip_uid: newClientClipUid(),
     freeze_to_death_round_windows: clip.freeze_to_death_round_windows,
   };
