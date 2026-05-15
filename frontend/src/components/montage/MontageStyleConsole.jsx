@@ -6,7 +6,6 @@ import {
   Music,
   Film,
   Trash2,
-  // ScanEye, // 雷达覆盖 UI 已隐藏，恢复区块时一并取消注释
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
@@ -16,15 +15,6 @@ function pathBasename(path) {
   if (!s) return "";
   const parts = s.split(/[/\\]/);
   return parts[parts.length - 1] || s;
-}
-
-function StyleBlockTitle({ title, subtitle }) {
-  return (
-    <div className="border-b border-cs2-orange/25 pb-2">
-      <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-cs2-orange">{title}</h3>
-      {subtitle ? <p className="mt-0.5 text-[10px] leading-snug text-zinc-600">{subtitle}</p> : null}
-    </div>
-  );
 }
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"]);
@@ -165,10 +155,6 @@ export function MontageStyleConsole({
   onOutroDurationChange,
   onMediaDropHint,
   onFilePick,
-  // overlay
-  radarOverlayEnabled,
-  onRadarOverlayEnabledChange,
-  hasPovClips = false,
   // export footer
   clipCount,
   durationText,
@@ -387,44 +373,6 @@ export function MontageStyleConsole({
               onImageDurationChange={onOutroDurationChange}
             />
           </CollapsibleSection>
-
-          {/*
-          <section className="space-y-2.5">
-            <StyleBlockTitle title="画面覆盖" subtitle="仅展示已接入能力" />
-            <div
-              className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${
-                hasPovClips
-                  ? "border-white/[0.07] bg-black/35"
-                  : "border-white/[0.04] bg-black/20 opacity-50"
-              }`}
-              title={hasPovClips ? "" : "需要至少一个 POV HUD 录制的片段（pov_hud_enabled）才能启用雷达覆盖"}
-            >
-              <div className="flex items-center gap-2">
-                <ScanEye className={`h-4 w-4 ${hasPovClips ? "text-sky-300" : "text-zinc-600"}`} aria-hidden />
-                <div>
-                  <p className="text-[11px] font-medium text-zinc-200">回放小地图 / 雷达叠层</p>
-                  <p className="text-[9px] text-zinc-600">
-                    {hasPovClips ? "从 Demo 解析位置，颜色与游戏一致" : "需含 POV HUD 录制片段"}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={!hasPovClips}
-                onClick={() => hasPovClips && onRadarOverlayEnabledChange(!radarOverlayEnabled)}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                  !hasPovClips
-                    ? "cursor-not-allowed border border-white/10 bg-zinc-900 text-zinc-600"
-                    : radarOverlayEnabled
-                    ? "bg-cs2-orange text-black"
-                    : "border border-white/12 bg-zinc-900 text-zinc-400"
-                }`}
-              >
-                {radarOverlayEnabled && hasPovClips ? "开" : "关"}
-              </button>
-            </div>
-          </section>
-          */}
 
           <CollapsibleSection
             title={

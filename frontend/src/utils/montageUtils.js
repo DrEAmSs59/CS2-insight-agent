@@ -644,6 +644,7 @@ export function getRecordedClipPerspectiveZh(clip) {
   if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
   else if (matchesVictim) legacy = "受害者视角";
   else if (matchesKiller) legacy = "击杀者视角";
+  else if (Array.isArray(clip.planned_segments) && clip.planned_segments.length > 1) legacy = "含受害者视角";
   else if (Array.isArray(clip.record_segments) && clip.record_segments.length > 1) legacy = "含受害者视角";
   else if ((cat === "highlight" || cat === "compilation") && hasVictimNames) legacy = "含受害者视角";
   else if (pn) legacy = "玩家视角";

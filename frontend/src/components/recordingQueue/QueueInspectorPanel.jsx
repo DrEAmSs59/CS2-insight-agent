@@ -191,8 +191,8 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
           {isClipPacingAndPovLocked(cd) ? (
             <p className="rounded border border-amber-500/20 bg-amber-950/20 px-2 py-1.5 text-[10px] text-amber-200/90">
               {isRoundTimelineRoundClip(cd)
-                ? "整回合时间线为固定 tick 窗口，智能击杀前/击杀后预留对该条目不生效。"
-                : "回合死亡合集为固定分段合辑，智能击杀前/击杀后预留对该条目不生效。"}
+                ? "整回合时间线为固定 tick 窗口，智能击杀段前/击杀段后预留对该条目不生效。"
+                : "回合死亡合集为固定分段合辑，智能击杀段前/击杀段后预留对该条目不生效。"}
             </p>
           ) : (
             <PacingMicroPanel

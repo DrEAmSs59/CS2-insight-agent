@@ -31,7 +31,7 @@ export function mergedPacingForItem(item, globalPacing) {
 }
 
 /**
- * 粗算单条入 OBS 的素材时长（秒）：tick 跨度 / source_ticks 累加；每段含击杀前预留 + 击杀后预留；
+ * 粗算单条入 OBS 的素材时长（秒）：tick 跨度 / source_ticks 累加；每段含击杀段前预留 + 击杀段后预留；
  * 多段 smart jump-cut 时段间再各加一组（与后端分段一致）。含 POV 追加。
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {Record<string, unknown>} globalPacing

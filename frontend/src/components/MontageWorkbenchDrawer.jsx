@@ -268,7 +268,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [projectId, setProjectId] = useState(null);
   const [draftName, setDraftName] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState("custom");
-  const [radarOverlayEnabled, setRadarOverlayEnabled] = useState(false);
   const [bgmVolume, setBgmVolume] = useState(70);
   const [filterKey, setFilterKey] = useState("all");
   const [searchQ, setSearchQ] = useState("");
@@ -386,7 +385,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroDuration,
     outputFilename,
     outputDir,
-    radarOverlayEnabled,
     selectedThemeId,
     draftName,
     bgmVolume,
@@ -401,16 +399,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
   const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
-
-  // 雷达叠层：仅当时间轴含 POV HUD 录制片段（入库 pov_hud_enabled）时才允许开启
-  const hasPovClips = useMemo(
-    () => orderedClips.some((c) => c?.pov_hud_enabled === true),
-    [orderedClips],
-  );
-
-  useEffect(() => {
-    if (!hasPovClips && radarOverlayEnabled) setRadarOverlayEnabled(false);
-  }, [hasPovClips, radarOverlayEnabled]);
 
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
@@ -726,9 +714,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         outro_image_duration: outroDuration !== 3 ? outroDuration : undefined,
         output_filename: ensureMp4Filename(outputFilename.trim()) || "montage_export.mp4",
         transitions: transitionsPayload,
-        radar_overlay: {
-          enabled: radarOverlayEnabled,
-        },
         theme_id: selectedThemeId,
         bgm_volume: bgmVolume / 100,
       });
@@ -742,10 +727,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       const bv = data?.body?.bgm_volume;
       if (bv != null && Number.isFinite(Number(bv))) {
         setBgmVolume(Math.round(Number(bv) * 100));
-      }
-      const ro = data?.body?.radar_overlay;
-      if (ro && typeof ro === "object") {
-        setRadarOverlayEnabled(Boolean(ro.enabled));
       }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
@@ -768,7 +749,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroDuration,
     showToast,
     transitionsPayload,
-    radarOverlayEnabled,
     selectedThemeId,
     bgmVolume,
   ]);
@@ -800,9 +780,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         ...(outroPath.trim() ? { outro_image_duration: outroDuration } : {}),
         output_path: outPath,
         theme_id: selectedThemeId,
-        radar_overlay: {
-          enabled: radarOverlayEnabled,
-        },
       });
       setLastExport({ ok: true, ...data });
       showToast("合辑导出完成");
@@ -829,7 +806,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     effectiveOutputDir,
     outputFilename,
     selectedThemeId,
-    radarOverlayEnabled,
     bgmVolume,
     showToast,
   ]);
@@ -1288,9 +1264,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onOutroDurationChange={setOutroDuration}
                 onMediaDropHint={showToast}
                 onFilePick={pickFile}
-                radarOverlayEnabled={radarOverlayEnabled}
-                onRadarOverlayEnabledChange={setRadarOverlayEnabled}
-                hasPovClips={hasPovClips}
                 clipCount={orderedIds.length}
                 durationText={durationText}
                 resolutionLabel="跟随源素材 · MP4"

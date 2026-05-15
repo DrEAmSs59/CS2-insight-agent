@@ -244,7 +244,7 @@ export default function CommonParamsModal({
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title="时间与多段节奏"
-            subtitle="成片击杀前/击杀后预留、多段衔接阈值与全局节奏重置；决定导出片的时间结构。"
+            subtitle="成片击杀段前/击杀段后预留、跳剪间隔阈值与全局节奏重置；决定导出片的时间结构。"
             defaultOpen
           >
             <div className="mb-5 overflow-hidden rounded-lg border border-white/[0.07] bg-black/35 p-3">
@@ -257,7 +257,7 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center border-r border-black/30 bg-gradient-to-br from-cs2-orange/35 to-cs2-orange/10 px-2 py-1.5"
                 >
                   <span className="text-[9px] font-bold uppercase tracking-wide text-white/90">
-                    击杀前预留
+                    击杀段前预留
                   </span>
                   <span className="font-mono text-[11px] text-white">{pre}s</span>
                 </div>
@@ -277,19 +277,19 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center bg-gradient-to-bl from-cyan-500/25 to-cyan-500/5 px-2 py-1.5"
                 >
                   <span className="text-[9px] font-bold uppercase tracking-wide text-white/90">
-                    击杀后预留
+                    击杀段后预留
                   </span>
                   <span className="font-mono text-[11px] text-white">{post}s</span>
                 </div>
               </div>
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                左段为击杀前预留、右段为击杀后预留；中间为解析得到的高光主体（时长由片段本身决定）。左右数值即每段击杀前回拨与每次击杀后收束的松紧；智能跳剪各段一致。
+                左段为击杀段前预留、右段为击杀段后预留；中间为解析得到的高光主体（时长由片段本身决定）。左值为每段首杀前回拨，右值为每段末杀后收束（非每个击杀各加一段尾垫）；智能跳剪各段一致。
               </p>
             </div>
 
             <div className="mb-4 grid gap-4 sm:grid-cols-2">
               <PacingSlider
-                label="击杀前预留 (秒)"
+                label="击杀段前预留 (秒)"
                 min={0}
                 max={20}
                 step={0.1}
@@ -298,7 +298,7 @@ export default function CommonParamsModal({
                 onCommit={(n) => commitPacingNumbers({ pre_first_sec: n })}
               />
               <PacingSlider
-                label="击杀后预留 (秒)"
+                label="击杀段后预留 (秒)"
                 min={0}
                 max={10}
                 step={0.1}
@@ -310,7 +310,7 @@ export default function CommonParamsModal({
 
             <div className="rounded-lg border border-amber-500/15 bg-amber-950/10 px-3 py-2.5">
               <PacingSlider
-                label="防跳剪阈值 (秒) — 相邻片段间隔小于该值时合并为一段成片"
+                label="跳剪间隔阈值 (秒) — 相邻击杀间隔小于该值时合并为同一段成片"
                 min={2}
                 max={70}
                 step={0.5}
@@ -336,7 +336,7 @@ export default function CommonParamsModal({
 
           <WorkflowSection
             title="观战槽位 GSI 校验"
-            subtitle="注入 spec_player 后用 GSI 核对当前观战是否为目标 Steam；校验阶段的 demo 倍率过小可避免准备耗时吃掉「击杀后预留」时间轴。"
+            subtitle="注入 spec_player 后用 GSI 核对当前观战是否为目标 Steam；校验阶段的 demo 倍率过小可避免准备耗时吃掉「击杀段后预留」时间轴。"
             defaultOpen={false}
             accentClass="ring-1 ring-emerald-500/10"
           >
@@ -420,7 +420,7 @@ export default function CommonParamsModal({
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="击杀前预留 (秒)"
+                    label="回看前停留 (秒)"
                     min={0.5}
                     max={5}
                     step={0.5}
@@ -466,7 +466,7 @@ export default function CommonParamsModal({
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="击杀前预留 (秒)"
+                    label="回看前停留 (秒)"
                     min={0.5}
                     max={5}
                     step={0.5}

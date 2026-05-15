@@ -190,9 +190,9 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
                 style={{ width: `${b.pct}%` }}
                 title={
                   b.type === "pre"
-                    ? `击杀前预留 ${pre.toFixed(1)}s`
+                    ? `击杀段前预留 ${pre.toFixed(1)}s`
                     : b.type === "post"
-                      ? `击杀后预留 ${post.toFixed(1)}s`
+                      ? `击杀段后预留 ${post.toFixed(1)}s`
                       : "击杀窗口（tick 跨度）"
                 }
               />
@@ -201,7 +201,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">
             <span className="text-zinc-500">
-              ×{segmentCount} 段（每段：击杀前 {pre.toFixed(1)}s · 击杀窗口 · 击杀后 {post.toFixed(1)}s）
+              ×{segmentCount} 段（每段：击杀段前 {pre.toFixed(1)}s · 击杀窗口 · 击杀段后 {post.toFixed(1)}s）
             </span>
             {extraParts.map((t) => (
               <span key={t} className="text-zinc-500">
@@ -245,7 +245,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
         <div
           className="h-full bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
           style={{ width: wp(pre) }}
-          title={`击杀前预留 ${pre.toFixed(1)}s`}
+          title={`击杀段前预留 ${pre.toFixed(1)}s`}
         />
         <div
           className="relative h-full bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
@@ -257,14 +257,14 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
         <div
           className="h-full bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
           style={{ width: wp(post) }}
-          title={`击杀后预留 ${post.toFixed(1)}s`}
+          title={`击杀段后预留 ${post.toFixed(1)}s`}
         />
         <KillTickMarksOverlay clipData={clipData} />
         <DeathTickOverlay clipData={clipData} />
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀前 {pre.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段前 {pre.toFixed(1)}s
         </span>
         <span className="text-zinc-700">·</span>
         <span className="inline-flex items-center gap-0.5">
@@ -272,7 +272,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
         </span>
         <span className="text-zinc-700">·</span>
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀后 {post.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段后 {post.toFixed(1)}s
         </span>
         {extraParts.map((t) => (
           <span key={t} className="text-zinc-500">

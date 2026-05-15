@@ -1,5 +1,3 @@
-"""Post-production radar overlay helpers for montage export."""
+"""Radar / map utilities (parse timeline extraction, live preview). Post-process montage overlay removed."""
 
-from app.radar.radar_composer import RadarOverlaySkip, apply_radar_overlay_to_clip
-
-__all__ = ["RadarOverlaySkip", "apply_radar_overlay_to_clip"]
+__all__: list[str] = []
