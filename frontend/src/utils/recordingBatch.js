@@ -1,4 +1,4 @@
-import { stripGlobalPacingMetaKeys } from "../stores/recordingQueueStore";
+import { stripGlobalPacingMetaKeys, BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
 import { stripClientClipUid } from "./clipClientUid";
 
 export function queueItemClientUid(it) {
@@ -40,9 +40,15 @@ export function buildBatchGroupsFromQueue(queue, globalPacing = {}) {
       });
     }
     const clip = { ...stripClientClipUid(it.clipData) };
-    const baseGlobal = stripGlobalPacingMetaKeys(globalPacing);
+    // Always include BACKEND_DEFAULT_PACING so that UI display values (which fall back to these)
+    // are actually sent to the backend even when the user hasn't explicitly moved a slider.
+    // User-set globalPacing keys override the defaults; per-clip pacing_override wins over both.
+    const baseGlobal = {
+      ...BACKEND_DEFAULT_PACING,
+      ...stripGlobalPacingMetaKeys(globalPacing),
+    };
     const mergedPacing = {
-      ...(Object.keys(baseGlobal).length ? baseGlobal : {}),
+      ...baseGlobal,
       ...(it.pacing_override && typeof it.pacing_override === "object" ? it.pacing_override : {}),
     };
     if (Object.keys(mergedPacing).length) {

@@ -4,7 +4,7 @@ import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
-import RecordWarmupModal from "./components/RecordWarmupModal";
+import RecordWarmupModal, { RECORD_WARMUP_DEFAULT_OPTIONS } from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import GuidePage from "./pages/GuidePage";
@@ -23,7 +23,7 @@ import {
   isFreezeToDeathCompilation,
   sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
-import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
+import { warmupApiPayloadToPersisted, warmupUiOptsToPersisted } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
 import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
@@ -1493,17 +1493,40 @@ export default function App() {
   }, []);
 
   const persistExperimentalPov = useCallback(async (enabled) => {
+    const en = !!enabled;
     try {
-      await API.put("config", { experimental: { pov_enabled: enabled } });
-      setExperimentalPovEnabled(!!enabled);
+      if (en) {
+        const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
+        const o = savedRecordWarmupDefaults;
+        if (o && typeof o === "object" && !Array.isArray(o)) {
+          for (const k of Object.keys(RECORD_WARMUP_DEFAULT_OPTIONS)) {
+            if (!Object.prototype.hasOwnProperty.call(o, k) || o[k] === undefined) continue;
+            const v = o[k];
+            if (k === "resolution_width" || k === "resolution_height") {
+              base[k] = v != null && v !== "" ? String(v) : "";
+            } else {
+              base[k] = v;
+            }
+          }
+        }
+        const nextPersisted = warmupUiOptsToPersisted({
+          ...base,
+          pov_radar_mode: 0,
+          pov_teamcounter_numeric: false,
+        });
+        await API.put("config", {
+          experimental: { pov_enabled: true },
+          default_record_warmup: nextPersisted,
+        });
+        setSavedRecordWarmupDefaults(nextPersisted);
+      } else {
+        await API.put("config", { experimental: { pov_enabled: false } });
+      }
+      setExperimentalPovEnabled(en);
     } catch {
       /* silent */
     }
-  }, []);
-
-  const patchSpecPlayerVerify = useCallback((partial) => {
-    setSpecPlayerVerify((prev) => ({ ...prev, ...partial }));
-  }, []);
+  }, [savedRecordWarmupDefaults]);
 
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
@@ -2042,8 +2065,6 @@ export default function App() {
     persistCs2RecordExtras,
     experimentalPovEnabled,
     persistExperimentalPov,
-    specPlayerVerify,
-    patchSpecPlayerVerify,
     hasDemos,
     parsing,
     handleUpload,

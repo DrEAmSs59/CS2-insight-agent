@@ -221,8 +221,6 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
       ? Math.max(4, clipData.duration_sec)
       : Math.max(6, killCount * 6 || 12);
   const core = Math.max(2, coreHint * 0.55);
-  const sum = pre + core + post;
-  const wp = (x) => `${Math.max(6, (x / sum) * 100)}%`;
 
   const highlightDots =
     !timelineSrc && killCount >= 1
@@ -243,20 +241,20 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
     <div className="mt-1.5 space-y-1">
       <div className="relative flex h-5 w-full overflow-hidden rounded-[3px] border border-white/[0.08] bg-black/40">
         <div
-          className="h-full bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
-          style={{ width: wp(pre) }}
+          className="h-full min-w-0 bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
+          style={{ flex: `${pre} 1 0%` }}
           title={`击杀段前预留 ${pre.toFixed(1)}s`}
         />
         <div
-          className="relative h-full bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
-          style={{ width: wp(core) }}
+          className="relative h-full min-w-0 bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
+          style={{ flex: `${core} 1 0%` }}
           title="击杀片段主体"
         >
           {highlightDots}
         </div>
         <div
-          className="h-full bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
-          style={{ width: wp(post) }}
+          className="h-full min-w-0 bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
+          style={{ flex: `${post} 1 0%` }}
           title={`击杀段后预留 ${post.toFixed(1)}s`}
         />
         <KillTickMarksOverlay clipData={clipData} />

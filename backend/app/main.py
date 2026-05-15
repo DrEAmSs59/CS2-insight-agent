@@ -1756,8 +1756,8 @@ class RecordWarmupOptions(BaseModel):
     hide_demo_playback_ui: bool = True
     hide_grenade_trajectory_pip: bool = True
     console_cmds: Optional[list[str]] = None
-    pov_radar_mode: int = Field(default=-1, ge=-1, le=0)
-    pov_teamcounter_numeric: bool = True
+    pov_radar_mode: int = Field(default=0, ge=-1, le=0)
+    pov_teamcounter_numeric: bool = False
 
     @model_validator(mode="after")
     def resolution_and_aspect_consistency(self) -> RecordWarmupOptions:

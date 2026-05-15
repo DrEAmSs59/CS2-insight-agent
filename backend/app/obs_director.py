@@ -501,7 +501,7 @@ def _pacing_pre_first_sec_effective(clip: dict) -> float:
                 return max(0.0, float(v))
             except (TypeError, ValueError):
                 pass
-    ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 5.5))
+    ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
     return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
@@ -532,21 +532,62 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
         source_segments: list[tuple[int, int]] = []
         if str(clip.get("compilation_kind") or "") == "all_kills" and source_records:
             source_override = clip.get("pacing_override") or {}
+            # clip_min_start_tick / clip_max_tick are defined later in the function but needed
+            # here because the compilation path returns early before reaching those definitions.
+            _comp_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
+            _comp_min_start = (
+                _comp_min_tick + max(0, int(0.35 * DEMO_TICK_RATE)) if _comp_min_tick > 0 else 0
+            )
+            _comp_max_tick_raw = clip.get("clip_max_tick")
+            _comp_max_tick = int(_comp_max_tick_raw) if _comp_max_tick_raw else 0
             raw_gap = source_override.get("max_gap_sec") if isinstance(source_override, dict) else None
             if raw_gap is not None and str(raw_gap).strip():
                 max_gap_ticks = max(1, int(float(raw_gap) * DEMO_TICK_RATE))
             else:
                 max_gap_ticks = _env_int("CS2_INSIGHT_SMART_MAX_GAP_TICKS", int(DEMO_TICK_RATE * 12.0))
+
+            # pacing_override.post_last_sec: trim each merged segment's end to last_kill + post_ticks.
+            # NOTE: pre_first_sec is intentionally NOT applied here.  The baked source_ticks start
+            # is further from the kill (typically ~5s) which provides the engine_burn seek buffer.
+            # Shrinking the start to kill-pre (e.g. kill-1.5s) leaves too little margin for
+            # engine_burn variance and causes the first kill to be missed.  Users control post
+            # trim here; seek robustness is provided by the baked source_ticks pre-roll.
+            def _parse_ovr_ticks(key: str) -> Optional[int]:
+                if not isinstance(source_override, dict):
+                    return None
+                raw = source_override.get(key)
+                if raw is None or not str(raw).strip():
+                    return None
+                try:
+                    return max(0, int(float(raw) * DEMO_TICK_RATE))
+                except (TypeError, ValueError):
+                    return None
+
+            _ovr_post_ticks = _parse_ovr_ticks("post_last_sec")
+
+            # Merge loop — track last kill per merged segment for post_last override.
+            # _seg_groups: [seg_s, seg_e, last_kt]
+            _seg_groups: list[list] = []
             cur_s = cur_e = cur_kt = cur_rn = 0
             for ss, ee, kt, rn in source_records:
-                if source_segments and rn == cur_rn and kt - cur_kt <= max_gap_ticks:
+                if _seg_groups and rn == cur_rn and kt - cur_kt <= max_gap_ticks:
                     cur_e = max(cur_e, ee)
-                    source_segments[-1] = (cur_s, cur_e)
+                    _seg_groups[-1][1] = cur_e
+                    _seg_groups[-1][2] = kt
                 else:
-                    cur_s, cur_e, cur_kt, cur_rn = ss, ee, kt, rn
-                    source_segments.append((cur_s, cur_e))
+                    cur_s, cur_e, cur_rn = ss, ee, rn
+                    _seg_groups.append([ss, ee, kt])
+                    cur_kt = kt
                     continue
                 cur_kt = kt
+
+            for seg_s, seg_e, last_kt in _seg_groups:
+                new_e = seg_e
+                if _ovr_post_ticks is not None:
+                    new_e = last_kt + _ovr_post_ticks
+                    if _comp_max_tick > 0:
+                        new_e = min(new_e, _comp_max_tick)
+                source_segments.append((seg_s, max(seg_s + 1, new_e)))
         else:
             source_segments = [(ss, ee) for ss, ee, _kt, _rn in source_records]
         if source_segments:
@@ -594,9 +635,9 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
     # pre_first_sec：每个击杀段首杀前预留
     # post_last_sec：每个击杀段末杀后预留，不是每次击杀后都追加
     # max_gap_sec：相邻击杀间隔超过该值时拆成新的击杀段
-    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 5.5)
+    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5)
     # 击杀段后预留（POST_LAST）：每段末杀后的缓冲；智能跳剪中段与末段相同。需足够长以保证 gototick 后击杀动画可见。
-    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 3.0)
+    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5)
     MAX_GAP = max(1, _get_override_ticks("max_gap_sec", "CS2_INSIGHT_SMART_MAX_GAP_TICKS", 12.0))
 
     # clip_min_tick = round_freeze_end_tick，防止 seg_start 穿越到上一回合黑屏区域
@@ -792,8 +833,8 @@ class RecordingWarmupExtras:
     # 若前端传入非空列表，则优先使用该顺序注入（须已含各 cvar）；否则由静态方法从布尔字段拼装
     console_cmds: Optional[tuple[str, ...]] = None
     # 实验性 POV：与 pov_tail_commands 对应（仅 pov_enabled 时注入末尾）
-    pov_radar_mode: int = -1  # cl_drawhud_force_radar：-1 隐藏，0 显示
-    pov_teamcounter_numeric: bool = True  # cl_teamcounter_playercount_instead_of_avatars
+    pov_radar_mode: int = 0  # cl_drawhud_force_radar：-1 隐藏，0 显示
+    pov_teamcounter_numeric: bool = False  # cl_teamcounter_playercount_instead_of_avatars
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -3049,10 +3090,10 @@ class OBSDirector:
 
         # CS2 Demo 关键帧对齐补偿：demo_gototick 会跳到目标 tick 前最近的关键帧（非精确 tick），
         # 若 pre_first_sec 比默认值小，seek 目标更靠近击杀帧，但仍落在同一个关键帧上，
-        # 导致录制起点固定在约 5.5s 前，与用户设定无关。
+        # 导致录制起点固定在约 1.5s 前，与用户设定无关。
         # 修复：demo_pause 后先 demo_resume，等待多余的预滚走完，再 StartRecord。
         # delay = max(0, calibrated_default_pre - target_pre_first)
-        _KEYFRAME_PRE_FIRST_SEC = self._env_float("CS2_INSIGHT_KEYFRAME_PRE_FIRST_SEC", "5.5")
+        _KEYFRAME_PRE_FIRST_SEC = self._env_float("CS2_INSIGHT_KEYFRAME_PRE_FIRST_SEC", "1.5")
         _target_pre_first_sec = _pacing_pre_first_sec_effective(clip)
         _apply_kf_delay = bool(
             has_kill_timeline or has_single_segment_override or has_death_timeline
@@ -3668,11 +3709,11 @@ class OBSDirector:
                 _is_fail_pov = _clip_cat == "fail"
                 _default_pov_pre = self._env_float(
                     "CS2_INSIGHT_FAIL_POV_PRE_SEC" if _is_fail_pov else "CS2_INSIGHT_VICTIM_POV_PRE_SEC",
-                    "3.0" if _is_fail_pov else "1.5",
+                    "1.5",
                 )
                 _default_pov_post = self._env_float(
                     "CS2_INSIGHT_FAIL_POV_POST_SEC" if _is_fail_pov else "CS2_INSIGHT_VICTIM_POV_POST_SEC",
-                    "1.5" if _is_fail_pov else "1.0",
+                    "1.5",
                 )
                 _pre_vic = float(_vpo.get("victim_pov_pre_sec", _default_pov_pre))
                 _post_vic = float(_vpo.get("victim_pov_post_sec", _default_pov_post))

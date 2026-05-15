@@ -210,10 +210,8 @@ export function PovSection({ item, updateItemPacing }) {
 
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
-  const vicPre =
-    po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? (isFail ? 3.0 : 1.5);
-  const vicPost =
-    po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? (isFail ? 1.5 : 1.0);
+  const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
+  const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
   const killPost = po.killer_pov_post_sec ?? gNum("killer_pov_post_sec") ?? vicPost;
 
@@ -290,9 +288,9 @@ export function PovSection({ item, updateItemPacing }) {
           <PacingSliderRow
             label="回看前停留 (秒) · 受害者视角"
             value={vicPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_pre_sec: n })}
@@ -302,7 +300,7 @@ export function PovSection({ item, updateItemPacing }) {
             value={vicPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_post_sec: n })}
@@ -315,9 +313,9 @@ export function PovSection({ item, updateItemPacing }) {
           <PacingSliderRow
             label="回看前停留 (秒) · 击杀者视角"
             value={killPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
             valueTextClass="text-amber-300"
             onChange={(n) => commit({ killer_pov_pre_sec: n })}
@@ -327,7 +325,7 @@ export function PovSection({ item, updateItemPacing }) {
             value={killPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
             valueTextClass="text-amber-300"
             onChange={(n) => commit({ killer_pov_post_sec: n })}

@@ -57,10 +57,10 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   aspect_ratio: "",
   resolution_width: "",
   resolution_height: "",
-  /** POV：cl_drawhud_force_radar，-1 隐藏，0 显示 */
-  pov_radar_mode: -1,
-  /** POV：true 正上方显示存活人数；false 显示双方十人头像 */
-  pov_teamcounter_numeric: true,
+  /** POV：cl_drawhud_force_radar，-1 隐藏，0 显示（与 POV 成片默认「开雷达」一致） */
+  pov_radar_mode: 0,
+  /** POV：true 正上方显示存活人数；false 显示双方十人头像（默认关存活人数条） */
+  pov_teamcounter_numeric: false,
 };
 
 export function SectionHeader({ en, zh }) {
