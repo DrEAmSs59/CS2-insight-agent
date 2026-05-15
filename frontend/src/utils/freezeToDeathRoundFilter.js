@@ -121,6 +121,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   const newSr = [];
   const newEr = [];
   const newKills = [];
+  const newDeathTicks = [];
   let firstFreezeLo = null;
 
   for (const w of filtered) {
@@ -141,25 +142,26 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     newTicks.push([Math.floor(startTick), Math.ceil(endTick)]);
     newSr.push(w.round);
     newEr.push(w.round);
-    const kt =
-      deathTick != null && Number.isFinite(deathTick)
-        ? Math.floor(deathTick)
-        : Math.max(startTick, Math.ceil(endTick) - 1);
-    newKills.push(kt);
+    if (deathTick != null && Number.isFinite(deathTick)) {
+      const dt = Math.floor(deathTick);
+      newKills.push(dt);
+      newDeathTicks.push(dt);
+    }
   }
 
   if (!newTicks.length) {
     return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
   }
 
-  let lastRealDeath = null;
-  for (let i = filtered.length - 1; i >= 0; i--) {
-    const d = filtered[i].death_tick;
-    if (d != null && Number.isFinite(d)) {
-      lastRealDeath = d;
-      break;
-    }
-  }
+  const lastRoundNum = picks[picks.length - 1];
+  const lastWin = filtered.find((w) => w.round === lastRoundNum);
+  const lastSelectedDeathTick =
+    lastWin != null &&
+    lastWin.death_tick != null &&
+    String(lastWin.death_tick).trim() !== "" &&
+    Number.isFinite(lastWin.death_tick)
+      ? Math.floor(lastWin.death_tick)
+      : null;
 
   const maxSegEnd = newTicks.reduce((m, [, e]) => Math.max(m, e), 0);
 
@@ -169,7 +171,9 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
       sourceTicks: newTicks,
       sourceRounds: newSr,
       sourceRoundEnds: newEr,
+      deathTicks: newDeathTicks,
       killTicks: newKills,
+      topLevelDeathTick: lastSelectedDeathTick,
     });
   }
 
@@ -179,13 +183,15 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     source_rounds: newSr,
     source_round_ends: newEr,
     kill_ticks: newKills,
+    death_ticks: newDeathTicks,
     start_tick: newTicks[0][0],
     end_tick: newTicks[newTicks.length - 1][1],
     round: newSr[0],
     freeze_to_death_round_filter: [...picks],
-    death_tick: lastRealDeath != null ? lastRealDeath : clip.death_tick,
+    death_tick: lastSelectedDeathTick,
     clip_min_tick: firstFreezeLo ?? clip.clip_min_tick,
     clip_max_tick: maxSegEnd > 0 ? maxSegEnd : clip.clip_max_tick,
+    fixed_segment_pacing: true,
     client_clip_uid: newClientClipUid(),
     freeze_to_death_round_windows: clip.freeze_to_death_round_windows,
   };
