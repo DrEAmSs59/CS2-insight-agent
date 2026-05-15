@@ -1,5 +1,7 @@
 /**
- * 将回合时间线事件/整回合转为与导播兼容的 clipData（整回合带 fixed_segment；单事件可走智能节奏）。
+ * 将回合时间线事件/整回合转为与导播兼容的 clipData。
+ * - 单事件（round_timeline_event）：与高光相同，由后端 `build_smart_jump_segments` + 队列 pacing 分段录制。
+ * - 整回合（round_timeline_round）：单独逻辑（fixed_segment_pacing + 固定 tick 窗），见 `buildTimelineRoundClipData`。
  */
 
 import { isTimelineSourceClip } from "./montageUtils";
