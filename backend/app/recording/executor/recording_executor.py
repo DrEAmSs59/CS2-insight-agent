@@ -97,17 +97,20 @@ class RecordingExecutor:
                         f"{segment.target_player_name} — GSI returned no steamid while paused"
                     )
 
+            # Pre-roll: if seek landed before segment start, let demo run to start_tick first
+            pre_roll_sec = max(0.0, (segment.start_tick - seek_tick) / plan.tick_rate)
+
             try:
                 if not obs_recording_started:
-                    logger.info("[RecordingV3] start_record segment %d", segment.segment_index)
+                    logger.info("[RecordingV3] start_record segment %d (pre_roll=%.2fs)", segment.segment_index, pre_roll_sec)
                     await demo_resume()
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(max(0.1, pre_roll_sec + 0.05))
                     await asyncio.to_thread(self._obs.start_record)
                     obs_recording_started = True
                 else:
-                    logger.info("[RecordingV3] resume_record segment %d", segment.segment_index)
+                    logger.info("[RecordingV3] resume_record segment %d (pre_roll=%.2fs)", segment.segment_index, pre_roll_sec)
                     await demo_resume()
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(max(0.1, pre_roll_sec + 0.05))
                     await asyncio.to_thread(self._obs.resume_record)
 
                 await _record_until_tick(segment, plan.tick_rate)

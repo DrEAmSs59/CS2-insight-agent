@@ -26,10 +26,22 @@ def postprocess_segments(
             "end_tick": end_tick,
         })
 
-        # Step 2: Apply FinalRoundGuard
-        segment = apply_final_round_guard(segment, req)
+        # Step 2: Apply FinalRoundGuard (returns tuple[segment, warnings])
+        segment, guard_warnings = apply_final_round_guard(segment, req)
+        warnings.extend(guard_warnings)
 
-        # Step 3 & 4: Validate minimum duration (zero or negative)
+        # Step 3: Disable victim segments with missing steamid64
+        if (
+            not segment.disabled
+            and segment.perspective == Perspective.victim
+            and not (segment.target_steamid64 or "").strip()
+        ):
+            segment = segment.model_copy(update={
+                "disabled": True,
+                "disabled_reason": "missing_victim_steamid64",
+            })
+
+        # Step 4: Validate minimum duration (zero or negative)
         if not segment.disabled and segment.end_tick - segment.start_tick <= 0:
             segment = segment.model_copy(update={
                 "disabled": True,
@@ -38,7 +50,7 @@ def postprocess_segments(
 
         processed.append(segment)
 
-    # Step 3: Filter disabled vs active
+    # Filter disabled vs active
     active: list[RecordingSegment] = []
     disabled: list[RecordingSegment] = []
 
@@ -48,7 +60,7 @@ def postprocess_segments(
         else:
             active.append(segment)
 
-    # Step 5: Re-number segment_index for active segments only
+    # Re-number segment_index for active segments only
     renumbered: list[RecordingSegment] = []
     for idx, segment in enumerate(active):
         segment = segment.model_copy(update={"segment_index": idx})

@@ -28,16 +28,26 @@ function buildTargetPlayer(name, steamid64) {
 }
 
 function buildDemoContext(clipData, queueItem, matchMeta) {
+  const finalRound = Number(matchMeta?.total_rounds) || 0;
+  const clipRound = Number(clipData.round) || 0;
+  const clipMaxTick = Number(clipData.clip_max_tick) || 0;
+
+  // clip_max_tick is safe-per-round upper bound; use as final_round_end_tick when on final round
+  const finalRoundEndTick = finalRound > 0 && clipRound === finalRound ? clipMaxTick : 0;
+
+  // demo_end_tick: use clip_max_tick as best available proxy (no true demo_end_tick in MatchMeta)
+  const demoEndTick = clipMaxTick || Number(clipData.end_tick) || 0;
+
   return {
     demo_path: queueItem.demoPath || "",
     demo_filename: queueItem.demoFilename || "",
     map_name: clipData.map_name || matchMeta?.map_name || "unknown",
     tick_rate: Number(clipData.tick_rate) || 64,
     first_tick: 0,
-    demo_end_tick: Number(clipData.clip_max_tick) || Number(clipData.end_tick) || 0,
-    final_round: Number(matchMeta?.total_rounds) || 0,
+    demo_end_tick: demoEndTick,
+    final_round: finalRound,
     final_round_start_tick: 0,
-    final_round_end_tick: 0,
+    final_round_end_tick: finalRoundEndTick,
   };
 }
 

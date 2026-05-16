@@ -5992,6 +5992,16 @@ class OBSDirector:
                     await self._run_cleanup_step("CS2 artifact cleanup after GSI timeout", self._cleanup_cs2_artifacts, timeout=8.0)
                     raise
 
+                # ── Inject warmup console commands ────────────────────────────
+                if warmup is not None:
+                    warmup_cmds = self._recording_warmup_console_lines(warmup)
+                    if warmup_cmds:
+                        logger.info("[RecordingV3] applying warmup console commands: %d", len(warmup_cmds))
+                        try:
+                            await asyncio.to_thread(inject_console_sequence, warmup_cmds)
+                        except Exception as _wce:
+                            logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
+
                 # ── Execute each DTO through build_plan + RecordingExecutor ───
                 executor = RecordingExecutor(obs_client)
                 for dto in demo_requests:

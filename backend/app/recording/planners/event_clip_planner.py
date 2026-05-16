@@ -90,32 +90,32 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
         segments.append(seg)
         seg_idx += 1
 
-        # Victim POV for single-kill groups
-        if opts.enable_victim_pov and len(group) == 1:
-            victim_event = group[0]
-            v_start = victim_event.tick - pre_ticks
-            v_end = victim_event.tick + post_ticks
-            v_start, v_end = _clamp(v_start, v_end, req)
+        # Victim POV: one segment per kill event regardless of group size
+        if opts.enable_victim_pov:
+            for victim_event in group:
+                v_start = victim_event.tick - pre_ticks
+                v_end = victim_event.tick + post_ticks
+                v_start, v_end = _clamp(v_start, v_end, req)
 
-            victim_seg = RecordingSegment(
-                segment_index=seg_idx,
-                source_type=SourceType.kill,
-                start_tick=v_start,
-                end_tick=v_end,
-                anchor_ticks=[victim_event.tick],
-                round=victim_event.round,
-                target_player_name=victim_event.victim.name,
-                target_steamid64=victim_event.victim.steamid64,
-                perspective=Perspective.victim,
-                is_final_round=_is_final_round(victim_event.round, req),
-                safe_seek_tick=v_start,
-                safe_end_tick=None,
-                disabled=False,
-                disabled_reason=None,
-                metadata={},
-            )
-            segments.append(victim_seg)
-            seg_idx += 1
+                victim_seg = RecordingSegment(
+                    segment_index=seg_idx,
+                    source_type=SourceType.kill,
+                    start_tick=v_start,
+                    end_tick=v_end,
+                    anchor_ticks=[victim_event.tick],
+                    round=victim_event.round,
+                    target_player_name=victim_event.victim.name,
+                    target_steamid64=victim_event.victim.steamid64,
+                    perspective=Perspective.victim,
+                    is_final_round=_is_final_round(victim_event.round, req),
+                    safe_seek_tick=v_start,
+                    safe_end_tick=None,
+                    disabled=False,
+                    disabled_reason=None,
+                    metadata={},
+                )
+                segments.append(victim_seg)
+                seg_idx += 1
 
     return segments
 

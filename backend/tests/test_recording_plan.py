@@ -411,31 +411,16 @@ if seg:
     check("13c: is_final_round=True", seg.is_final_round)
 
 
-# ── Test 14: Final round segment too short → disabled ─────────────────────
-print("\nTest 14: Final round segment too short → disabled")
+# ── Test 14: FinalRoundGuard — kill past safe_end → anchor-aware skips guard
+print("\nTest 14: FinalRoundGuard — kill past safe_end → guard skipped, segment active")
+# safe_end = 20_000 - 256 = 19_744; kill at 19_900 > safe_end → guard skipped
+# end_tick = min(19_900 + 128, 20_100) = 20_028 (clamped to demo_end_tick)
+# The OLD behavior (blind clamp) gave: end_tick=19_744, dur=36 < 51 → disabled
+# The NEW anchor-aware behavior: guard skipped → segment stays active
 final_end = 20_000
 demo14 = make_demo(final_round=5, final_round_start_tick=15_000,
                    final_round_end_tick=final_end, demo_end_tick=final_end + 100)
 guard_sec = 4.0
-guard_ticks = int(guard_sec * TICK_RATE)  # 256
-# Kill so close to safe_end that after clamping duration < min_duration
-# min_duration = 0.8s = 51 ticks
-# safe_end = 19744; kill_tick = 19740; start = 19740 - 192 = 19548
-# clamped end = 19744; duration = 19744 - 19548 = 196 ticks = 3.06s — still ok
-# Need kill even closer: kill at 19744 - 10 = 19734
-# start = 19734 - 192 = 19542; clamped end = 19744; dur = 202 → still ok
-# The only way to get short segment: start_tick > safe_end - min_ticks
-# safe_end=19744; pre=3s=192 ticks; kill at ~19740: start=19548; dur=196 → ok
-# Try: kill at 19_980 (past safe_end itself)
-# start = 19980 - 192 = 19788 > safe_end(19744) — seek_guard logic kicks in
-# Actually let's try kill at safe_end + 5 = 19749
-# start = 19749 - 192 = 19557
-# clamped end = min(19749+128, 19744) = 19744
-# duration = 19744 - 19557 = 187 → active
-# The segment is only disabled if end_tick <= start_tick after clamping, or duration < min_duration
-# min_duration_ticks = int(0.8 * 64) = 51
-# To get disabled: need start_tick >= safe_end (or very close)
-# kill at 19_900: start = 19_900 - 192 = 19_708; end clamp to 19744; dur = 36 < 51 → disabled!
 opts14 = RecordingOptions(final_round_guard_sec=guard_sec, highlight_pre_sec=3.0,
                           highlight_post_sec=2.0, final_round_min_duration_sec=0.8)
 kill_tick14 = 19_900
@@ -447,13 +432,21 @@ req14 = dto(
     events=[make_kill_event(kill_tick14, round_num=5)],
 )
 plan14 = build_plan(req14)
-check("14a: 0 active segments", len(plan14.segments) == 0, f"got {len(plan14.segments)}")
-check("14b: 1 disabled segment", len(plan14.disabled_segments) == 1,
+check("14a: 1 active segment (guard skipped)", len(plan14.segments) == 1,
+      f"got {len(plan14.segments)}")
+check("14b: 0 disabled segments", len(plan14.disabled_segments) == 0,
       f"got {len(plan14.disabled_segments)}")
-if plan14.disabled_segments:
-    check("14c: disabled_reason mentions too_close",
-          "too_close" in (plan14.disabled_segments[0].disabled_reason or ""),
-          f"got: {plan14.disabled_segments[0].disabled_reason}")
+if plan14.segments:
+    seg14 = plan14.segments[0]
+    check("14c: end_tick >= kill_tick (anchor preserved)",
+          seg14.end_tick >= kill_tick14,
+          f"got end_tick={seg14.end_tick}, kill_tick={kill_tick14}")
+    check("14d: end_tick <= demo_end_tick",
+          seg14.end_tick <= final_end + 100,
+          f"got end_tick={seg14.end_tick}")
+check("14e: guard-skipped warning emitted",
+      any("final_round_guard_skipped" in w for w in plan14.warnings),
+      f"warnings={plan14.warnings}")
 
 
 # ── Test 15: gototick fail → segment skipped (executor test — plan only) ──
@@ -481,6 +474,185 @@ check("16a: plan builds cleanly", len(plan16.segments) == 1)
 check("16b: target_steamid64 present", plan16.segments[0].target_steamid64 != "")
 
 
+# ── Test 17: FinalRoundGuard anchor-aware — real payload regression ────────
+# Real payload: kill_ticks=[365079, 365769], demo_end=365813, final_round=42,
+# guard=4s @ 64tps → guard_ticks=256, safe_end=365557 < 365769 (second kill)
+# Expected: end_tick >= 365769 (guard skipped), no cut before last anchor
+print("\nTest 17: FinalRoundGuard anchor-aware — real payload (kill_ticks=[365079, 365769])")
+demo17 = DemoContext(
+    demo_path="/demo/real.dem",
+    demo_filename="real.dem",
+    map_name="de_inferno",
+    tick_rate=64.0,
+    first_tick=0,
+    demo_end_tick=365813,
+    final_round=42,
+    final_round_start_tick=364000,
+    final_round_end_tick=0,  # not provided (frontend sends 0)
+)
+opts17 = RecordingOptions(final_round_guard_sec=4.0)  # 256 ticks
+req17 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demo17,
+    options=opts17,
+    events=[
+        make_kill_event(365079, round_num=42),
+        make_kill_event(365769, round_num=42),
+    ],
+)
+plan17 = build_plan(req17)
+check("17a: 1 active killer segment", len(plan17.segments) == 1)
+if plan17.segments:
+    seg17 = plan17.segments[0]
+    check("17b: end_tick >= last kill tick (guard skipped)",
+          seg17.end_tick >= 365769,
+          f"got end_tick={seg17.end_tick}, expected >= 365769")
+    check("17c: end_tick <= demo_end_tick",
+          seg17.end_tick <= 365813,
+          f"got end_tick={seg17.end_tick}")
+    check("17d: anchor_ticks includes both kills",
+          365079 in seg17.anchor_ticks and 365769 in seg17.anchor_ticks,
+          f"got anchor_ticks={seg17.anchor_ticks}")
+check("17e: guard-skipped warning emitted",
+      any("final_round_guard_skipped" in w for w in plan17.warnings),
+      f"warnings={plan17.warnings}")
+
+
+# ── Test 18: FinalRoundGuard — single kill inside safe window → normal clamp
+print("\nTest 18: FinalRoundGuard — anchor inside safe window → post truncated, anchor kept")
+demo18 = DemoContext(
+    demo_path="/demo/real.dem",
+    demo_filename="real.dem",
+    map_name="de_inferno",
+    tick_rate=64.0,
+    first_tick=0,
+    demo_end_tick=365813,
+    final_round=42,
+    final_round_start_tick=364000,
+    final_round_end_tick=0,
+)
+opts18 = RecordingOptions(final_round_guard_sec=4.0, highlight_post_sec=2.0)
+kill_tick_18 = 365000  # safe_end = 365813 - 256 = 365557 > 365000 → anchor safe
+req18 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demo18,
+    options=opts18,
+    events=[make_kill_event(kill_tick_18, round_num=42)],
+)
+plan18 = build_plan(req18)
+check("18a: 1 active segment", len(plan18.segments) == 1)
+if plan18.segments:
+    seg18 = plan18.segments[0]
+    safe_end_18 = 365813 - int(4.0 * 64)  # = 365557
+    check("18b: end_tick <= safe_end",
+          seg18.end_tick <= safe_end_18,
+          f"got end_tick={seg18.end_tick}, safe_end={safe_end_18}")
+    check("18c: end_tick >= kill tick (anchor preserved)",
+          seg18.end_tick >= kill_tick_18,
+          f"got end_tick={seg18.end_tick}, kill_tick={kill_tick_18}")
+
+
+# ── Test 19: Victim POV — multi-kill group generates per-kill victim segments
+print("\nTest 19: Victim POV per-kill for multi-kill group")
+ENEMY2 = TargetPlayer(name="Victim2", steamid64="76561198099999999")
+req19 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    options=RecordingOptions(enable_victim_pov=True),
+    events=[
+        make_kill_event(10_000, victim=ENEMY),
+        make_kill_event(10_200, victim=ENEMY2),
+    ],
+)
+plan19 = build_plan(req19)
+# Should have: 1 killer segment + 2 victim segments (one per kill)
+total19 = len(plan19.segments)
+killer19 = [s for s in plan19.segments if s.perspective == Perspective.killer]
+victim19 = [s for s in plan19.segments if s.perspective == Perspective.victim]
+check("19a: 1 killer segment", len(killer19) == 1, f"got {len(killer19)}")
+check("19b: 2 victim segments (one per kill)", len(victim19) == 2,
+      f"got {len(victim19)}: {[(s.target_player_name, s.target_steamid64) for s in victim19]}")
+
+
+# ── Test 20: Victim steamid64 empty → segment disabled
+print("\nTest 20: Victim segment disabled when steamid64 is empty")
+NO_ID_VICTIM = TargetPlayer(name="Unknown", steamid64="")
+req20 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    options=RecordingOptions(enable_victim_pov=True),
+    events=[make_kill_event(10_000, victim=NO_ID_VICTIM)],
+)
+plan20 = build_plan(req20)
+killer20 = [s for s in plan20.segments if s.perspective == Perspective.killer]
+victim20_active = [s for s in plan20.segments if s.perspective == Perspective.victim]
+victim20_disabled = [s for s in plan20.disabled_segments if s.perspective == Perspective.victim]
+check("20a: 1 active killer segment", len(killer20) == 1, f"got {len(killer20)}")
+check("20b: 0 active victim segments", len(victim20_active) == 0,
+      f"got {len(victim20_active)}")
+check("20c: 1 disabled victim segment", len(victim20_disabled) == 1,
+      f"got {len(victim20_disabled)}")
+if victim20_disabled:
+    check("20d: disabled_reason=missing_victim_steamid64",
+          victim20_disabled[0].disabled_reason == "missing_victim_steamid64",
+          f"got: {victim20_disabled[0].disabled_reason}")
+
+
+# ── Test 21: safe_seek_tick semantics — start_tick == seek_tick by default ─
+print("\nTest 21: safe_seek_tick == start_tick (no early seek for non-final-round)")
+req21 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    events=[make_kill_event(10_000)],
+)
+plan21 = build_plan(req21)
+check("21a: 1 segment", len(plan21.segments) == 1)
+if plan21.segments:
+    seg21 = plan21.segments[0]
+    check("21b: safe_seek_tick == start_tick",
+          seg21.safe_seek_tick == seg21.start_tick,
+          f"seek={seg21.safe_seek_tick}, start={seg21.start_tick}")
+
+
+# ── Test 22: safe_seek_tick for final-round segment within safe window ──────
+print("\nTest 22: safe_seek_tick for final-round segment — seek guard applies")
+demo22 = DemoContext(
+    demo_path="/demo/final.dem",
+    demo_filename="final.dem",
+    map_name="de_dust2",
+    tick_rate=64.0,
+    first_tick=0,
+    demo_end_tick=365813,
+    final_round=42,
+    final_round_start_tick=364000,
+    final_round_end_tick=0,
+)
+opts22 = RecordingOptions(
+    final_round_guard_sec=4.0,
+    final_round_seek_guard_sec=2.0,
+    highlight_pre_sec=3.0,
+    highlight_post_sec=2.0,
+)
+req22 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demo22,
+    options=opts22,
+    events=[make_kill_event(365000, round_num=42)],
+)
+plan22 = build_plan(req22)
+check("22a: 1 active segment", len(plan22.segments) == 1)
+if plan22.segments:
+    seg22 = plan22.segments[0]
+    # safe_end = 365813 - 256 = 365557; seek_guard = 128; latest_safe_seek = 365557 - 128 = 365429
+    # start_tick = 365000 - 192 = 364808; 364808 <= 365429 → safe_seek_tick = start_tick
+    check("22b: safe_seek_tick == start_tick (within seek guard)",
+          seg22.safe_seek_tick == seg22.start_tick,
+          f"seek={seg22.safe_seek_tick}, start={seg22.start_tick}")
+
+
 # ── Summary ────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 passed = sum(1 for s, *_ in results if s == "PASS")
@@ -490,5 +662,5 @@ if failed:
     print("\nFailed checks:")
     for s, name, detail in results:
         if s == "FAIL":
-            print(f"  ❌ {name}" + (f" — {detail}" if detail else ""))
+            print(f"  [FAIL] {name}" + (f" -- {detail}" if detail else ""))
 print("=" * 60)
