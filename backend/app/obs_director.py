@@ -2152,11 +2152,12 @@ class OBSDirector:
         child_env = os.environ.copy()
         child_env["SteamAppId"] = "730"
         child_env["SteamGameId"] = "730"
-        # Recording forces fullscreen for this CS2 process only. The user config
-        # snapshot/restore below keeps the player's original video settings untouched.
+        # 默认继承玩家当前的视频模式，不强制切到独占全屏；否则会把原本的
+        # 「全屏窗口 / 窗口化」录制会话硬改成 fullscreen，并可能被 CS2 持久化。
+        # 若调用方确实想强制独占全屏，可经 cs2_extra_launch_args 显式追加。
         argv: List[str] = [
             str(cs2),
-            "-console", "-novid", "-insecure", "-worldwide", "-fullscreen", "-allow_third_party_software",
+            "-console", "-novid", "-insecure", "-worldwide", "-allow_third_party_software",
             # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
             # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
             "+engine_no_focus_sleep", "0",

@@ -10,7 +10,7 @@ def test_appconfig_defaults():
     cfg = AppConfig()
     assert cfg.obs_transition_enabled is False
     assert cfg.obs_transition_name == "Fade"
-    assert cfg.obs_transition_duration_ms == 200
+    assert cfg.obs_transition_duration_ms == 100
     assert cfg.obs_game_scene_name == "CS2 Insight Recording"
     assert cfg.obs_black_scene_name == "CS2 Insight Black"
 

@@ -17,7 +17,7 @@
 | -------- | ---------------------------------------------------------------------------- |
 | Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand                   |
 | Desktop  | Electron 42（Windows 安装包 / `electron-updater` 自动更新）                        |
-| Backend  | Python 3.10+ + FastAPI + uvicorn                                              |
+| Backend  | Python 3.12 + FastAPI + uvicorn                                               |
 | 解析引擎     | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程）                            |
 | AI 网关    | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等）           |
 | 录制管线     | `RecordingRequestDTO` → `plan_builder` → `RecordingExecutor`；CS2 启停与批量队列由 `obs_director` 编排 |
@@ -104,6 +104,8 @@ cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000 or python -m uvicorn app.main:app --reload --port 8000
 ```
+
+实际发放版本内置的 Python 运行时为 `3.12`。
 
 ### 2. Frontend
 
