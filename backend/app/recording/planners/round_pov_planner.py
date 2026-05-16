@@ -28,10 +28,10 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                 "used round_start_tick + 15s freeze as fallback for start_tick"
             )
         else:
-            # Fallback 2: just round_start_tick
-            start_tick = round_info.round_start_tick
+            # Fallback 2: both freeze_end_tick and round_start_tick are None
+            start_tick = req.demo.first_tick
             warnings.append(
-                f"round {round_info.round}: freeze_end_tick missing and round_start_tick fallback used for start_tick"
+                f"round {round_info.round}: both freeze_end_tick and round_start_tick missing, using first_tick as start_tick fallback"
             )
 
         start_tick = max(start_tick, req.demo.first_tick)
