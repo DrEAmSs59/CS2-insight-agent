@@ -54,6 +54,21 @@ Then run `& "<InstallLocation>ISCC.exe" /DMyAppVersion=0.0.0 ./packaging/windows
 
 Output: `dist\CS2InsightAgent-<version>-Setup.exe` (for example `dist\CS2InsightAgent-0.0.0-Setup.exe`).
 
+## 检查更新与国内镜像（用户侧）
+
+应用默认 **`update_github_mirror: auto`**（可在设置页修改，或写入 `cs2-insight.config.json`）：
+
+| 值 | 行为 |
+| --- | --- |
+| `auto` | 内置镜像（`ghfast.top` 等）与 GitHub 直连**并发**，约 8 秒内谁先成功用谁；镜像仅走页面跳转，避免镜像 API 挂起 |
+| `on` | 仅通过镜像访问（适合 GitHub 完全打不开的网络） |
+| `off` | 仅直连 GitHub |
+| `https://…` | 自定义镜像前缀（与内置相同规则：`{前缀}/{完整 GitHub URL}`） |
+
+环境变量（优先级高于配置文件）：`CS2_INSIGHT_UPDATE_MIRROR` 或 `CS2_INSIGHT_GITHUB_MIRROR`；多镜像列表：`CS2_INSIGHT_UPDATE_MIRROR_PRESETS`（逗号分隔）。
+
+成功走镜像时，API 返回的下载链接与 Releases 页面链接也会自动包一层镜像，便于浏览器下载。
+
 ## GitHub API token (optional, local / dev)
 
 The in-app update check calls `api.github.com`. Without authentication, GitHub applies a low hourly limit and may return `403 rate limit exceeded`.

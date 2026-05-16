@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,11 +14,14 @@ if str(_BACKEND) not in sys.path:
 from app import update_info
 from app.update_info import (
     _github_api_token,
+    _parse_release_tag_from_url,
     build_update_payload,
+    mirror_wrap_url,
     normalize_release_tag,
     parse_semver_loose,
     pick_download_urls,
     resolve_local_version_info,
+    unwrap_github_url,
 )
 
 
@@ -80,7 +84,7 @@ def test_build_update_payload_upgrade():
             {"name": "CS2InsightAgent-2.0.0-windows-amd64.zip", "browser_download_url": "https://dl/zip"},
         ],
     }
-    with patch.object(update_info, "_fetch_latest_release_dict", return_value=payload):
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
         out = build_update_payload("1.0.0", "file", force_refresh=True)
     assert out["update_available"] is True
     assert out["show_latest_release"] is False
@@ -95,15 +99,129 @@ def test_build_update_payload_unknown_local_shows_latest():
         "body": "x",
         "assets": [],
     }
-    with patch.object(update_info, "_fetch_latest_release_dict", return_value=payload):
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
         out = build_update_payload("unknown", "unknown", force_refresh=True)
     assert out["update_available"] is False
     assert out["show_latest_release"] is True
 
 
+def test_mirror_wrap_and_unwrap():
+    orig = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/latest"
+    wrapped = mirror_wrap_url("https://ghfast.top", orig)
+    assert wrapped == "https://ghfast.top/https://github.com/DrEAmSs59/CS2-insight-agent/releases/latest"
+    assert unwrap_github_url(wrapped).startswith("https://github.com/")
+
+
+def test_auto_mode_uses_mirror_when_direct_fails(monkeypatch):
+    payload = {
+        "tag_name": "v2.0.0",
+        "html_url": "https://github.com/o/r/releases/tag/v2.0.0",
+        "body": "",
+        "assets": [],
+    }
+    monkeypatch.setenv("CS2_INSIGHT_UPDATE_MIRROR", "auto")
+
+    def fake_mirror(prefix: str) -> dict:
+        if prefix != "https://ghfast.top":
+            raise TimeoutError("other mirror down")
+        return payload
+
+    def fake_direct() -> dict:
+        raise TimeoutError("direct blocked")
+
+    with patch.object(update_info, "_fetch_mirror_release", side_effect=fake_mirror):
+        with patch.object(update_info, "_fetch_direct_release", side_effect=fake_direct):
+            out = build_update_payload("1.0.0", "file", force_refresh=True)
+    assert out["update_via_mirror"] == "https://ghfast.top"
+    assert out["latest_version"] == "2.0.0"
+
+
+def test_auto_mode_uses_direct_when_direct_is_fast(monkeypatch):
+    payload = {
+        "tag_name": "v2.1.0",
+        "html_url": "https://github.com/o/r/releases/tag/v2.1.0",
+        "body": "",
+        "assets": [],
+    }
+    monkeypatch.setenv("CS2_INSIGHT_UPDATE_MIRROR", "auto")
+
+    def fake_mirror(_prefix: str) -> dict:
+        raise TimeoutError("mirror slow")
+
+    def fake_direct() -> dict:
+        return payload
+
+    with patch.object(update_info, "_fetch_mirror_release", side_effect=fake_mirror):
+        with patch.object(update_info, "_fetch_direct_release", side_effect=fake_direct):
+            out = build_update_payload("1.0.0", "file", force_refresh=True)
+    assert out["update_via_mirror"] is None
+    assert out["latest_version"] == "2.1.0"
+
+
+def test_on_mode_uses_mirror_only(monkeypatch):
+    payload = {
+        "tag_name": "v2.0.0",
+        "html_url": "https://github.com/o/r/releases/tag/v2.0.0",
+        "body": "",
+        "assets": [],
+    }
+    monkeypatch.setenv("CS2_INSIGHT_UPDATE_MIRROR", "on")
+
+    with patch.object(update_info, "_fetch_mirror_release", return_value=payload):
+        with patch.object(update_info, "_fetch_direct_release", side_effect=AssertionError("direct should not run")):
+            out = build_update_payload("1.0.0", "file", force_refresh=True)
+    assert out["error"] is None
+    assert out["latest_version"] == "2.0.0"
+    assert out["update_via_mirror"] == "https://ghfast.top"
+    assert out["release_url"].startswith("https://ghfast.top/")
+
+
+def test_parse_release_tag_from_url():
+    url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/tag/v3.0.0"
+    assert _parse_release_tag_from_url(url) == "v3.0.0"
+
+
+def test_build_update_payload_rate_limit_falls_back_to_redirect():
+    payload = {
+        "tag_name": "v2.0.0",
+        "html_url": "https://github.com/o/r/releases/tag/v2.0.0",
+        "body": "",
+        "assets": [
+            {"name": "CS2InsightAgent-2.0.0-Setup.exe", "browser_download_url": "https://dl/setup"},
+            {"name": "CS2InsightAgent-2.0.0-windows-amd64.zip", "browser_download_url": "https://dl/zip"},
+        ],
+    }
+    err = urllib.error.HTTPError(
+        "https://api.github.com",
+        403,
+        "rate limit exceeded",
+        None,
+        None,
+    )
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
+        out = build_update_payload("1.0.0", "file", force_refresh=True)
+    assert out["error"] is None
+    assert out["latest_version"] == "2.0.0"
+    assert out["update_available"] is True
+
+
+def test_build_update_payload_non_semver_local_shows_latest():
+    payload = {
+        "tag_name": "v3.0.0",
+        "html_url": "https://github.com/o/r/releases/tag/v3.0.0",
+        "body": "notes",
+        "assets": [],
+    }
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
+        out = build_update_payload("0.0.0-ci-smoke-20260516", "file", force_refresh=True)
+    assert out["update_available"] is False
+    assert out["show_latest_release"] is True
+    assert out["latest_version"] == "3.0.0"
+
+
 def test_build_update_payload_no_upgrade_when_local_newer():
     payload = {"tag_name": "v1.0.0", "html_url": "https://x", "body": "", "assets": []}
-    with patch.object(update_info, "_fetch_latest_release_dict", return_value=payload):
+    with patch.object(update_info, "_fetch_latest_release_data", return_value=(payload, None)):
         out = build_update_payload("2.0.0", "file", force_refresh=True)
     assert out["update_available"] is False
     assert out["show_latest_release"] is False

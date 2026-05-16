@@ -397,6 +397,57 @@ export default function SettingsPage() {
 
               {/* 右列 */}
               <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/settings:min-h-0 @min-[52rem]/settings:flex-1 @min-[52rem]/settings:gap-4">
+            <Card title="检查更新" hint="自动模式会同时尝试镜像与直连，谁先返回用谁（约 8 秒内）。" fill>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+                    更新镜像
+                  </label>
+                  <select
+                    value={s.updateGithubMirror ?? "auto"}
+                    onChange={(e) => s.setUpdateGithubMirror(e.target.value)}
+                    onBlur={() => {
+                      const v =
+                        s.updateGithubMirror === "custom"
+                          ? (s.updateGithubMirrorCustom || "").trim()
+                          : (s.updateGithubMirror || "auto").trim();
+                      void s.handleSaveConfig({ update_github_mirror: v || "auto" });
+                    }}
+                    className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus:border-cs2-accent/50 focus:outline-none"
+                  >
+                    <option value="auto">自动（镜像与直连并发，推荐）</option>
+                    <option value="on">仅镜像（不尝试直连）</option>
+                    <option value="off">仅 GitHub 直连</option>
+                    <option value="custom">自定义镜像前缀</option>
+                  </select>
+                </div>
+                {s.updateGithubMirror === "custom" ? (
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+                      镜像前缀 URL
+                    </label>
+                    <input
+                      value={s.updateGithubMirrorCustom ?? ""}
+                      placeholder="https://ghfast.top"
+                      onChange={(e) => s.setUpdateGithubMirrorCustom(e.target.value)}
+                      onBlur={() => {
+                        const v = (s.updateGithubMirrorCustom || "").trim();
+                        if (v) void s.handleSaveConfig({ update_github_mirror: v });
+                      }}
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[12px] text-cs2-text-primary focus:border-cs2-accent/50 focus:outline-none"
+                    />
+                    <p className="mt-1 text-[11px] text-cs2-text-muted">
+                      格式：镜像站根地址 + 完整 GitHub 链接，例如 ghfast.top/https://github.com/...
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-cs2-text-muted">
+                    内置镜像：ghfast.top、mirror.ghproxy.com（社区服务，可能变动）。也可用环境变量 CS2_INSIGHT_UPDATE_MIRROR。
+                  </p>
+                )}
+              </div>
+            </Card>
+
             <Card title="FFmpeg 与合辑" hint="合辑导出与编码器；fps_max 作用于录制启动时的 CS2。" fill>
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
                 <div className="shrink-0">

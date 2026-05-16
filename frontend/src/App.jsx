@@ -130,6 +130,8 @@ export default function App() {
   const [specPlayerVerify, setSpecPlayerVerify] = useState(() => ({ ...DEFAULT_SPEC_PLAYER_VERIFY }));
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [updateGithubMirror, setUpdateGithubMirror] = useState("auto");
+  const [updateGithubMirrorCustom, setUpdateGithubMirrorCustom] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
   const [cs2FpsMax, setCs2FpsMax] = useState(240);
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
@@ -794,6 +796,16 @@ export default function App() {
         }
         if (data.cs2_path) setCs2Path(data.cs2_path);
         if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+        if (typeof data.update_github_mirror === "string") {
+          const m = data.update_github_mirror.trim();
+          if (m.startsWith("http://") || m.startsWith("https://")) {
+            setUpdateGithubMirror("custom");
+            setUpdateGithubMirrorCustom(m);
+          } else if (m) {
+            setUpdateGithubMirror(m);
+            setUpdateGithubMirrorCustom("");
+          }
+        }
         if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
           setMontageEncoder(data.montage_encoder.trim().toLowerCase());
         }
@@ -1956,6 +1968,7 @@ export default function App() {
     const defaults = {
       cs2_path: "",
       ffmpeg_path: "",
+      update_github_mirror: "auto",
       montage_encoder: "auto",
       cs2_fps_max: 240,
       ai_mode: false,
@@ -1969,6 +1982,8 @@ export default function App() {
       await API.put("config", defaults);
       setCs2Path("");
       setFfmpegPath("");
+      setUpdateGithubMirror("auto");
+      setUpdateGithubMirrorCustom("");
       setMontageEncoder("auto");
       setCs2FpsMax(240);
       setAiMode(false);
@@ -2013,6 +2028,7 @@ export default function App() {
     try {
       const { data } = await API.get("/app/update-info", {
         params: opts.force ? { force: "true" } : {},
+        timeout: 15000,
       });
       setUpdateInfo(data);
       if (data?.update_available) {
@@ -2076,6 +2092,10 @@ export default function App() {
     setCs2Path,
     ffmpegPath,
     setFfmpegPath,
+    updateGithubMirror,
+    setUpdateGithubMirror,
+    updateGithubMirrorCustom,
+    setUpdateGithubMirrorCustom,
     montageEncoder,
     setMontageEncoder,
     cs2FpsMax,

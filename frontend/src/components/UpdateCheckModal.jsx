@@ -20,6 +20,11 @@ export default function UpdateCheckModal({ open, info, onClose, title, manual })
               ) : null}
             </p>
           ) : null}
+          {info.update_via_mirror ? (
+            <p className="mt-1 text-[10px] text-zinc-500">
+              经镜像加速：{info.update_via_mirror.replace(/^https?:\/\//, "")}
+            </p>
+          ) : null}
         </div>
         <div className="max-h-[45vh] overflow-y-auto px-4 py-3">
           {err ? (
