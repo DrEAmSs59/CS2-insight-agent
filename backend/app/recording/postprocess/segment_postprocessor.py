@@ -51,8 +51,7 @@ def postprocess_segments(
     # Step 5: Re-number segment_index for active segments only
     renumbered: list[RecordingSegment] = []
     for idx, segment in enumerate(active):
-        if segment.segment_index != idx:
-            segment = segment.model_copy(update={"segment_index": idx})
+        segment = segment.model_copy(update={"segment_index": idx})
         renumbered.append(segment)
 
     return renumbered, disabled, warnings
