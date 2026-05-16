@@ -127,7 +127,6 @@ export default function App() {
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
-  const [cs2FpsMax, setCs2FpsMax] = useState(240);
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
   const [demoLibraryItems, setDemoLibraryItems] = useState([]);
@@ -793,7 +792,6 @@ export default function App() {
         if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
           setMontageEncoder(data.montage_encoder.trim().toLowerCase());
         }
-        if (typeof data.cs2_fps_max === "number") setCs2FpsMax(data.cs2_fps_max);
         if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
         if (Array.isArray(data.expected_parse_players)) {
           setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
@@ -1826,7 +1824,6 @@ export default function App() {
           cs2_path: cs2Path,
           ffmpeg_path: ffmpegPath,
           montage_encoder: montageEncoder,
-          cs2_fps_max: cs2FpsMax,
           expected_parse_players: arr,
         });
         setExpectedParsePlayersText(arr.join("\n"));
@@ -1836,7 +1833,7 @@ export default function App() {
         setProgressText(`保存失败: ${e.response?.data?.detail || e.message}`);
       }
     },
-    [cs2Path, ffmpegPath, montageEncoder, cs2FpsMax, persistLlmConfig, setExpectedParsePlayersText],
+    [cs2Path, ffmpegPath, montageEncoder, persistLlmConfig, setExpectedParsePlayersText],
   );
 
   const handleExportSettingsConfig = useCallback(async () => {
@@ -1872,10 +1869,6 @@ export default function App() {
       if (typeof raw.montage_encoder === "string" && raw.montage_encoder.trim()) {
         put.montage_encoder = raw.montage_encoder.trim().toLowerCase();
         setMontageEncoder(put.montage_encoder);
-      }
-      if (typeof raw.cs2_fps_max === "number") {
-        put.cs2_fps_max = raw.cs2_fps_max;
-        setCs2FpsMax(raw.cs2_fps_max);
       }
       if (typeof raw.ai_mode === "boolean") {
         put.ai_mode = raw.ai_mode;
@@ -1944,7 +1937,7 @@ export default function App() {
   const handleResetSettingsDefaults = useCallback(async () => {
     if (
       !window.confirm(
-        "将 CS2/FFmpeg 路径、合辑编码、fps_max、分析模式、关注名单与大模型接口/模型名恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
+        "将 CS2/FFmpeg 路径、合辑编码、分析模式、关注名单与大模型接口/模型名恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
       )
     ) {
       return;
@@ -1953,7 +1946,6 @@ export default function App() {
       cs2_path: "",
       ffmpeg_path: "",
       montage_encoder: "auto",
-      cs2_fps_max: 240,
       ai_mode: false,
       expected_parse_players: [],
       llm: {
@@ -1966,7 +1958,6 @@ export default function App() {
       setCs2Path("");
       setFfmpegPath("");
       setMontageEncoder("auto");
-      setCs2FpsMax(240);
       setAiMode(false);
       setExpectedParsePlayersText("");
       setLlmConfig({
@@ -2040,8 +2031,6 @@ export default function App() {
     setFfmpegPath,
     montageEncoder,
     setMontageEncoder,
-    cs2FpsMax,
-    setCs2FpsMax,
     demoWatchPaths,
     setDemoWatchPaths,
     handleSaveConfig,

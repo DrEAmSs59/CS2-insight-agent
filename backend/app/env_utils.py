@@ -349,8 +349,6 @@ class AppConfig(BaseModel):
     ai_mode: bool = False
     # 监听目录新入库时：按名单在 demo roster 中匹配（同一场可多名），展示名写成「A K/D/A · B K/D/A」作标记（不做高光解析）
     expected_parse_players: list[str] = Field(default_factory=list)
-    # 录制期间 CS2 的 fps_max（默认 240；0 表示不限制）
-    cs2_fps_max: int = 240
     # 前端录制队列「全局节奏」覆写（仅含用户改过的字段；空对象表示沿用内置默认）
     recording_global_pacing: dict[str, Any] = Field(default_factory=dict)
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）

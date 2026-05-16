@@ -13,7 +13,6 @@
   "cs2_path": "",
   "demo_directory": "",
   "ai_mode": false,
-  "cs2_fps_max": 240,
   "recording_global_pacing": {},
   "default_record_warmup": {},
   "cs2_extra_launch_args": "",

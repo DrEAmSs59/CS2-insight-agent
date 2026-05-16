@@ -22,6 +22,15 @@ function normalizePositiveIntRounds(arr, maxRounds = 64) {
 const POST_DEATH_AFTER_DEATH_SEC = 2;
 
 /**
+ * 与 demo_parser `_FREEZE_TO_DEATH_PRE_FREEZE_SEC` / `CS2_INSIGHT_FREEZE_TO_DEATH_PRE_SEC` 默认 8s 一致。
+ * 下回合 `start_tick` = 该回合 `freeze_end − pre`，仍在「下回合」时间线；有死亡回合再减 **一段 pre**：
+ * `end <= next_start − pre − 1`。
+ * **无死亡**回合在技术暂停 / 冻结期易出现 HUD 已切下回合而 tick 未到 `next_start`，再减 **一段 pre**：
+ * `end <= next_start − 2*pre − 1`（仅当存在 `next_start` 时；仅有 `next_freeze_end` 时用 `fe − 3*pre − 1`）。
+ */
+const NEXT_ROUND_PRE_FREEZE_SEC = 8;
+
+/**
  * 从解析结果片段上的 freeze_to_death_round_filter 还原勾选。
  * @param {number[]|null|undefined} filter
  * @param {number} [maxRounds] filter 为 null（整局合辑）时展开为 1…maxRounds，与 main 一致：用户可「全选后取消勾选」再入队
@@ -91,6 +100,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   const allWindows = wins
     .map((w) => ({
       round: parseInt(String(w.round), 10),
+      freeze_end_tick: parseInt(String(w.freeze_end_tick), 10),
       start_tick: parseInt(String(w.start_tick), 10),
       end_tick: parseInt(String(w.end_tick), 10),
       death_tick:
@@ -102,19 +112,27 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
       (w) =>
         Number.isFinite(w.round) &&
         w.round > 0 &&
+        Number.isFinite(w.freeze_end_tick) &&
         Number.isFinite(w.start_tick) &&
         Number.isFinite(w.end_tick) &&
         w.end_tick > w.start_tick
     )
     .sort((a, b) => a.round - b.round);
 
-  /** 下一真实回合的 start_tick（来自完整窗口，含未勾选回合），用于截断本段 end，避免吃进下一回合 */
+  /** 下一真实回合的 start_tick（`freeze_end(N+1) − pre`，含未勾选回合） */
   const nextStartByRound = new Map();
+  /** 下一真实回合的 freeze_end_tick（用于「freeze_end − 尾量」上界，比 start_tick 更贴近 HUD） */
+  const nextFreezeEndByRound = new Map();
   for (let i = 0; i < allWindows.length - 1; i += 1) {
     const cur = allWindows[i];
     const next = allWindows[i + 1];
-    if (cur && next && Number.isFinite(cur.round) && Number.isFinite(next.start_tick)) {
-      nextStartByRound.set(cur.round, next.start_tick);
+    if (cur && next && Number.isFinite(cur.round)) {
+      if (Number.isFinite(next.start_tick)) {
+        nextStartByRound.set(cur.round, next.start_tick);
+      }
+      if (Number.isFinite(next.freeze_end_tick)) {
+        nextFreezeEndByRound.set(cur.round, next.freeze_end_tick);
+      }
     }
   }
 
@@ -147,6 +165,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
 
   const tickRate = Number(clip.tick_rate ?? clip.tickRate ?? 64) || 64;
   const postDeathTicks = Math.round(POST_DEATH_AFTER_DEATH_SEC * tickRate);
+  const preFreezeTicks = Math.round(NEXT_ROUND_PRE_FREEZE_SEC * tickRate);
 
   const newTicks = [];
   const newSr = [];
@@ -164,9 +183,19 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     if (deathTick != null && Number.isFinite(deathTick)) {
       endTick = Math.min(endTick, deathTick + postDeathTicks);
     }
+    const hasDeath = deathTick != null && Number.isFinite(deathTick);
     const nextRoundStartTick = nextStartByRound.get(w.round);
+    const nextFe = nextFreezeEndByRound.get(w.round);
+    let crossRoundCap = null;
     if (Number.isFinite(nextRoundStartTick)) {
-      endTick = Math.min(endTick, nextRoundStartTick);
+      const preMul = hasDeath ? 1 : 2;
+      crossRoundCap = nextRoundStartTick - preMul * preFreezeTicks - 1;
+    } else if (Number.isFinite(nextFe)) {
+      const preMul = hasDeath ? 2 : 3;
+      crossRoundCap = nextFe - preMul * preFreezeTicks - 1;
+    }
+    if (crossRoundCap != null && crossRoundCap > startTick) {
+      endTick = Math.min(endTick, crossRoundCap);
     }
 
     if (!Number.isFinite(endTick)) continue;
@@ -174,7 +203,10 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
 
     if (firstFreezeLo === null) firstFreezeLo = w.freeze_end_tick;
 
-    newTicks.push([Math.floor(startTick), Math.ceil(endTick)]);
+    const s0 = Math.floor(startTick);
+    const e0 = Math.floor(endTick);
+    if (e0 <= s0) continue;
+    newTicks.push([s0, e0]);
     newSr.push(w.round);
     newEr.push(w.round);
     if (deathTick != null && Number.isFinite(deathTick)) {
@@ -204,6 +236,8 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     console.info("[freeze-to-death enqueue]", {
       pickedRounds: picks,
       nextStartByRound: Object.fromEntries(nextStartByRound),
+      nextFreezeEndByRound: Object.fromEntries(nextFreezeEndByRound),
+      preFreezeTicks,
       sourceTicks: newTicks,
       sourceRounds: newSr,
       sourceRoundEnds: newEr,

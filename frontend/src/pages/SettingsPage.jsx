@@ -126,12 +126,6 @@ export default function SettingsPage() {
       if (s.aiMode && (!v || !v.trim())) return "AI 模式下须填写模型名称";
       return null;
     },
-    fps_max: (v) => {
-      if (v === "" || v == null) return null;
-      const n = Number(v);
-      if (!Number.isFinite(n) || n < 0) return "须为 ≥ 0 的整数";
-      return null;
-    },
   });
 
   useEffect(() => {
@@ -397,7 +391,7 @@ export default function SettingsPage() {
 
               {/* 右列 */}
               <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/settings:min-h-0 @min-[52rem]/settings:flex-1 @min-[52rem]/settings:gap-4">
-            <Card title="FFmpeg 与合辑" hint="合辑导出与编码器；fps_max 作用于录制启动时的 CS2。" fill>
+            <Card title="FFmpeg 与合辑" hint="合辑导出与编码器选择。" fill>
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
                 <div className="shrink-0">
                   <PathFieldRow
@@ -426,24 +420,6 @@ export default function SettingsPage() {
                     <option value="libx264">x264 软件（CPU）</option>
                   </select>
                   <p className="mt-1 text-[11px] text-cs2-text-muted">失败时可改用 x264 软件编码。</p>
-                </div>
-                <div className="shrink-0">
-                  <SmallField label="录制帧率上限 fps_max（0=不限制）">
-                    <input
-                      type="number"
-                      min={0}
-                      max={9999}
-                      step={10}
-                      value={s.cs2FpsMax}
-                      onChange={(e) => s.setCs2FpsMax(Number(e.target.value))}
-                      onBlur={() => {
-                        const err = validate("fps_max", s.cs2FpsMax);
-                        if (!err) void s.handleSaveConfig({ cs2_fps_max: s.cs2FpsMax });
-                      }}
-                      className={`w-full rounded-md border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary focus:border-cs2-accent/50 focus:outline-none ${errors.fps_max ? "border-red-500/50" : "border-cs2-border"}`}
-                    />
-                    {errors.fps_max && <p className="mt-1 text-[11px] text-red-400">{errors.fps_max}</p>}
-                  </SmallField>
                 </div>
                 <div className="flex-1" aria-hidden />
               </div>
