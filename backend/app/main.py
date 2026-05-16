@@ -715,7 +715,6 @@ class ConfigPayload(BaseModel):
     demo_watch_paths: Optional[list[str]] = None
     ai_mode: Optional[bool] = None
     expected_parse_players: Optional[list[str]] = None
-    cs2_fps_max: Optional[int] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
@@ -892,9 +891,6 @@ async def update_config(payload: ConfigPayload):
             if len(cleaned) >= 50:
                 break
         cfg.expected_parse_players = cleaned
-    if payload.cs2_fps_max is not None:
-        v = int(payload.cs2_fps_max)
-        cfg.cs2_fps_max = max(0, min(v, 9999))
     if payload.ffmpeg_path is not None:
         cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
     if payload.montage_encoder is not None:
@@ -1014,7 +1010,6 @@ def setup_status():
         director = OBSDirector(
             cfg.obs,
             cfg.cs2_path,
-            cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
             spec_player_verify=cfg.spec_player_verify,
@@ -1044,7 +1039,6 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
     director = OBSDirector(
         obs_use,
         cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
         spec_player_verify=cfg.spec_player_verify,
@@ -1908,7 +1902,6 @@ async def start_recording(req: RecordRequest):
             obs_cfg,
             cfg.cs2_path,
             abort_event=abort_ev,
-            cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
             spec_player_verify=cfg.spec_player_verify,
@@ -2108,7 +2101,6 @@ async def start_batch_recording(req: BatchRecordRequest):
             obs_cfg,
             cfg.cs2_path,
             abort_event=abort_ev,
-            cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
             spec_player_verify=cfg.spec_player_verify,

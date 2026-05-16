@@ -53,8 +53,6 @@ export default function Sidebar({
   onFfmpegPathChange,
   montageEncoder = "auto",
   onMontageEncoderChange,
-  cs2FpsMax = 240,
-  onCs2FpsMaxChange,
   demoWatchPaths = [],
   onDemoWatchPathsChange,
   onSaveConfig,
@@ -267,21 +265,6 @@ export default function Sidebar({
                 <option value="h264_amf">AMD AMF</option>
                 <option value="libx264">x264 软件（CPU）</option>
               </select>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                录制帧率上限 (fps_max，0=不限制)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={9999}
-                step={10}
-                value={cs2FpsMax}
-                onChange={(e) => onCs2FpsMaxChange?.(Number(e.target.value))}
-                onBlur={() => onSaveConfig?.({ cs2_fps_max: cs2FpsMax })}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
-              />
             </div>
             <button
               type="button"

@@ -1144,8 +1144,8 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
     **入口统一在本函数**，但按 clip 形态分 **三套算法**（先匹配者先返回），与「是否都叫 pacing_override」无关：
 
     1. **合集 + ``source_ticks``**（``category == compilation`` 且 ``source_ticks`` 非空）
-       - **``freeze_to_death``**：仅信任前端/解析器写入的 ``source_ticks``，不因 ``kill_ticks`` /
-         ``death_tick`` / pacing 重算窗（见 ``_is_freeze_to_death_clip`` 早退）。
+       - **``freeze_to_death``** 且 ``fixed_segment_pacing``：仅信任 ``source_ticks`` 硬窗，
+         不因 ``kill_ticks`` / ``death_tick`` / pacing 重算（见 ``_is_freeze_to_death_clip`` 早退）。
        - **死亡类合集**（``_is_death_compilation``）：``_build_death_compilation_windows``，
          按死亡点 + 回合合并窗；pre/post 读 ``pacing_override`` / ``CS2_INSIGHT_SMART_*``。
        - **``compilation_kind == all_kills``**：``_build_all_kills_windows``，
@@ -1201,7 +1201,7 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
 
     raw_source_ticks = clip.get("source_ticks") or []
     if str(clip.get("category") or "").strip() == "compilation" and raw_source_ticks:
-        if _is_freeze_to_death_clip(clip):
+        if _is_freeze_to_death_clip(clip) and bool(clip.get("fixed_segment_pacing")):
             ftd_segments: list[tuple[int, int]] = []
             for item in raw_source_ticks:
                 try:
@@ -1221,7 +1221,7 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
                     e_i = int(ee)
                     if i + 1 < len(ftd_segments):
                         next_s = int(ftd_segments[i + 1][0])
-                        e_i = min(e_i, next_s)
+                        e_i = min(e_i, max(s_i + 1, next_s - 1))
                     if e_i > s_i:
                         fixed_ftd.append((s_i, e_i))
                 ftd_segments = fixed_ftd
@@ -1848,7 +1848,6 @@ class OBSDirector:
         cs2_path: str,
         on_state_change: Optional[Callable[[DirectorState, str], None]] = None,
         abort_event: Optional[asyncio.Event] = None,
-        cs2_fps_max: int = 240,
         *,
         cs2_extra_launch_args: str = "",
         record_inject_console_lines: str = "",
@@ -1856,7 +1855,6 @@ class OBSDirector:
     ):
         self.obs_config = obs_config
         self.cs2_path = cs2_path
-        self._cs2_fps_max: int = max(0, min(int(cs2_fps_max), 9999))
         self._extra_launch_argv = _parse_cs2_extra_launch_argv(cs2_extra_launch_args)
         self._extra_warmup_console_lines = _parse_record_inject_console_lines(record_inject_console_lines)
         self._spec_player_verify = spec_player_verify or SpecPlayerVerifyConfig()
@@ -2416,7 +2414,6 @@ class OBSDirector:
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
         # engine_no_focus_sleep 0 关闭 Source 2 失焦节流（默认 50ms/帧 ≈ 20fps）。
-        # fps_max 固定走启动项 ``+fps_max``，这里不再通过 cfg / console 重复设置。
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
             console_toggle_key = "`"
@@ -2481,8 +2478,6 @@ class OBSDirector:
             # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
             # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
             "+engine_no_focus_sleep", "0",
-            # fps_max 同样固定走启动项，避免录制期再经 cfg / console 改写。
-            "+fps_max", str(self._cs2_fps_max),
             # 关闭TrueView
             "+cl_demo_predict", "0",
         ]
@@ -3714,12 +3709,20 @@ class OBSDirector:
         parsed_slot: Optional[int] = None
         if demo_abs.is_file() and pname:
             calibrated_slot = self._calibrated_spec_slot_for_name(demo_abs, pname)
-            if calibrated_slot is None:
-                parsed_slot = self._parsed_spec_slot_for_name(demo_abs, seek_tick, pname)
+            parsed_slot = self._parsed_spec_slot_for_name(demo_abs, seek_tick, pname)
 
         spec_cmd: Optional[str] = None
         spec_source: Optional[str] = None
-        if calibrated_slot is not None:
+        # 段间 jump_cut：seek_tick 与开录首段可差数万；GSI 校准槽位是「单次」映射，沿用会指到错误玩家
+        # （典型：freeze_to_death 选非连续回合，第二段仍用首段槽位）。能解析时优先按当前 tick 的槽位。
+        if (
+            jump_cut_seek
+            and parsed_slot is not None
+            and int(parsed_slot) > 0
+        ):
+            spec_cmd = f"spec_player {int(parsed_slot)}"
+            spec_source = "parsed-jumpcut-seek"
+        elif calibrated_slot is not None:
             spec_cmd = f"spec_player {int(calibrated_slot)}"
             spec_source = "gsi-calibrated"
         elif parsed_slot is not None and int(parsed_slot) > 0:
@@ -3893,21 +3896,25 @@ class OBSDirector:
             except (IndexError, ValueError):
                 _initial_slot = 0
 
-            if _target_steam64 and _initial_slot > 0 and not jump_cut_seek:
-                # ★ 核心路径：GSI 验证 + +1 重试（参数见配置 spec_player_verify）
-                # jump_cut_seek=True 时 demo 处于暂停状态，spec_player 被 CS2 静默忽略，
-                # 玩家视角不会切换（仍是上一段的正确视角），跳过 GSI 验证。
+            if _target_steam64 and _initial_slot > 0:
+                # ★ 核心路径：GSI 验证 + slot+1 重试（参数见配置 spec_player_verify）
                 #
-                # stage2 已 demo_resume 时：若此处不暂停，GSI 轮询（每重试 per_retry_timeout 等）
-                # 期间 demo 在 1× 连续走秒，远超 engine_burn_ticks 估算 → 首段首杀相对 seek 漂移。
-                # （backend.log 常见：resume 与 spec_verify OK 间隔 3–6s，单独即 200–400 tick。）
-                ok_pause_before_spec4 = await asyncio.to_thread(
-                    _inj, ["demo_pause"], skip=True, close=False
-                )
-                if not ok_pause_before_spec4:
-                    logger.warning(
-                        "demo_pause before Stage4 spec_verify failed; demo may drift during GSI poll"
+                # jump_cut_seek：段间大跨度 gototick 后仍用解析槽位时，5E 等 demo 常与真实
+                # spec_player 差 1（见 backend.log：parsed=5 → verify 确认为 6）；若跳过验证
+                # 会整段跟错人。此时准备流程刻意保持暂停，切勿再发 ``demo_pause``（引擎里
+                # 常为**开关**，会误解除暂停 → 验证轮询期间 tick 狂飙）。
+                #
+                # 非 jump_cut：stage2 已 demo_resume 时，若此处不暂停，GSI 轮询期间 demo 在
+                # 1× 连续走秒，远超 engine_burn_ticks 估算 → 首段首杀相对 seek 漂移。
+                # 非 jump_cut：stage2 已 demo_resume 后须再 pause，否则 GSI 轮询期间 tick 推进。
+                if not jump_cut_seek:
+                    ok_pause_before_spec4 = await asyncio.to_thread(
+                        _inj, ["demo_pause"], skip=True, close=False
                     )
+                    if not ok_pause_before_spec4:
+                        logger.warning(
+                            "demo_pause before Stage4 spec_verify failed; demo may drift during GSI poll"
+                        )
                 _spv = self._spec_player_verify
                 _max_retries = max(1, int(_spv.max_retries))
                 _per_retry_t = float(_spv.per_retry_timeout_sec)
@@ -3933,8 +3940,14 @@ class OBSDirector:
                 else:
                     ok4 = True
                     logger.info(
-                        "Stage 4 spec_verify OK: mode=%s slot=%d (initial=%d) steam=%s source=%s demo=%s",
-                        mode, verified_slot, _initial_slot, _target_steam64, spec_source, demo_abs.name,
+                        "Stage 4 spec_verify OK: mode=%s slot=%d (initial=%d) steam=%s source=%s demo=%s jump_cut=%s",
+                        mode,
+                        verified_slot,
+                        _initial_slot,
+                        _target_steam64,
+                        spec_source,
+                        demo_abs.name,
+                        jump_cut_seek,
                     )
             else:
                 # 无 steam64 或无有效槽位时退化为单次注入（不验证）
@@ -4535,9 +4548,17 @@ class OBSDirector:
                             logger.warning("demo_resume after split StartRecord failed")
                         await asyncio.sleep(0.08)
 
+                _is_ftd_fixed = (
+                    str(clip.get("compilation_kind") or "").strip().lower() == "freeze_to_death"
+                    and bool(clip.get("fixed_segment_pacing"))
+                )
                 for si, (seg_start, seg_end) in enumerate(segments):
                     seg_dur = max(0.0, (seg_end - seg_start) / float(TICK_RATE))
-                    _seg_jc_extra = _jc_burn_sec_capped if len(segments) > 1 else 0.0
+                    _seg_jc_extra = (
+                        0.0
+                        if _is_ftd_fixed
+                        else (_jc_burn_sec_capped if len(segments) > 1 else 0.0)
+                    )
                     if si == 0:
                         # 首段与单段同理：StartRecord 前/刚开录时 demo 已先走 _rec_wall_trim 秒。
                         # 勿用 meta_record_start_tick 缩短本 sleep：engine_burn 为保守上界时 mst 常高于
@@ -4592,6 +4613,18 @@ class OBSDirector:
                             _is_timeline_event_clip(clip),
                             has_user_pacing_rec,
                         )
+                        logger.info(
+                            "[record-segment-sleep] clip_id=%s kind=%s fixed=%s seg_index=%s "
+                            "seg=%s seg_dur=%.3f jc_extra=%.3f final_sleep=%.3f",
+                            clip_id,
+                            clip.get("compilation_kind"),
+                            clip.get("fixed_segment_pacing"),
+                            si,
+                            (seg_start, seg_end),
+                            float(seg_dur),
+                            float(_seg_jc_extra),
+                            float(seg0),
+                        )
                         await self._sleep_abortable(seg0)
                         continue
                     if not jump_cut_active:
@@ -4640,7 +4673,9 @@ class OBSDirector:
                     # 段末可能已略过 seg_end 进入下一回合（观感像「到 R2 了」）。OBS 已 Pause 后先
                     # demo_gototick 钳回上一段结束 tick，再执行下一段大跨度跳转，避免锚点落在错误回合。
                     ftd_snap = (
-                        str(clip.get("compilation_kind") or "").strip() == "freeze_to_death" and si >= 1
+                        str(clip.get("compilation_kind") or "").strip() == "freeze_to_death"
+                        and bool(clip.get("fixed_segment_pacing"))
+                        and si >= 1
                     )
                     if ftd_snap:
                         snap_tick = max(0, int(segments[si - 1][1]))
@@ -4686,7 +4721,7 @@ class OBSDirector:
                             si, seg_start, _jc_burn_ticks, jc_seek_tick,
                         )
                         try:
-                            await self._prepare_clip_playback(
+                            prep_res = await self._prepare_clip_playback(
                                 demo_abs,
                                 jc_seek_tick,
                                 spectator_name,
@@ -4696,7 +4731,15 @@ class OBSDirector:
                                 jump_cut_seek=True,
                                 jump_cut_skip_leading_demo_pause=skip_leading_pause,
                             )
-                            # jump_cut_seek=True 时不触发 GSI 验证，不会返回 None
+                            # jump_cut 亦走 GSI spec_verify（见 _prepare_clip_playback）；失败时返回 None
+                            if prep_res is None:
+                                logger.error(
+                                    "prepare_clip_playback jump_cut returned None (spec_verify failed) "
+                                    "clip_id=%s seg=%d/%d; recording may continue on wrong POV",
+                                    clip_id,
+                                    si + 1,
+                                    len(segments),
+                                )
                         except Exception as prep_e:
                             logger.error("prepare_clip_playback between segments failed: %s", prep_e)
                         # demo_resume 必须在 _obs_resume() 之前完成：
@@ -4737,6 +4780,18 @@ class OBSDirector:
                         float(seg_sleep),
                         _extract_kill_ticks_for_segment(clip),
                         _pacing_post_last_sec_effective(clip),
+                    )
+                    logger.info(
+                        "[record-segment-sleep] clip_id=%s kind=%s fixed=%s seg_index=%s "
+                        "seg=%s seg_dur=%.3f jc_extra=%.3f final_sleep=%.3f",
+                        clip_id,
+                        clip.get("compilation_kind"),
+                        clip.get("fixed_segment_pacing"),
+                        si,
+                        (seg_start, seg_end),
+                        float(seg_dur),
+                        float(_seg_jc_extra),
+                        float(seg_sleep),
                     )
                     await self._sleep_abortable(seg_sleep)
 
@@ -4950,10 +5005,35 @@ class OBSDirector:
                         )
                         continue
                     # 同时裁剪 POV 段落的结束时间，防止录入结算界面画面。
-                    # 多留 0.3s 缓冲：sleep 结束 → _obs_pause 生效之间 OBS 仍在录，
+                    # 多留缓冲：sleep 结束 → _obs_pause 生效之间 OBS 仍在录，
                     # 若恰好卡在 clip_max tick 这 0.3s 就会录到结算界面首帧。
+                    # 末事件受害者（高光末杀 / 合集最后一次死亡等）：clip_max 已是末事件后窄缓冲，
+                    # 再减 POV margin 会吃掉尾帧；默认可不扣 margin（仍受 clip_max 硬顶）。
+                    _pov_clip_end_margin = _pov_clipmax_margin_ticks
+                    _relax_lk_victim_raw = os.environ.get(
+                        "CS2_INSIGHT_LASTKILL_VICTIM_POV_RELAX_CLIPMAX_MARGIN",
+                        os.environ.get(
+                            "CS2_INSIGHT_HIGHLIGHT_LASTKILL_VICTIM_POV_RELAX_CLIPMAX_MARGIN",
+                            "1",
+                        ),
+                    )
+                    _relax_lastkill_victim = (
+                        str(_relax_lk_victim_raw or "1").strip().lower() not in ("0", "false", "no")
+                    )
+                    if (
+                        _relax_lastkill_victim
+                        and _clip_max > 0
+                        and _pov_kind == "victim"
+                        and str(_clip_cat or "").strip() in ("highlight", "compilation")
+                    ):
+                        try:
+                            _last_kill_arr = _clip_kill_ticks_sorted(clip)
+                            if _last_kill_arr and int(_vtick) == int(_last_kill_arr[-1]):
+                                _pov_clip_end_margin = 0
+                        except Exception:
+                            pass
                     if _clip_max > 0:
-                        _vs_end = min(_vs_end, _clip_max - _pov_clipmax_margin_ticks)
+                        _vs_end = min(_vs_end, _clip_max - _pov_clip_end_margin)
                     # ★ 中间受害者抢镜兜底：当 killer 紧接着又杀人时，CS2 的 spectator 镜头
                     #   会被新的 player_death 事件夺到 killer 身上（与 freezecam 时长无关，
                     #   是事件驱动）。把 _vs_end clamp 到下一次击杀前 N 秒，让本段在

@@ -2047,21 +2047,38 @@ class DemoAnalyzer:
                     )
 
         _last_rnd_num = max(_round_end_evt_tick_map.keys()) if _round_end_evt_tick_map else None
+        # ``round_end`` 表 ``total_rounds_played`` 与记分表 ``_match_metrics_from_round_scores``
+        # 偶发错位（缺最后一行 / 序号偏差），仅用 ``max(round_end.keys)`` 会漏判决胜回合，
+        # 导致 ``clip_max_tick`` 未写 → 末段 / POV 滑进结算 UI。取二者较大作为「正赛最后一回合」序号。
+        _terminal_play_round: Optional[int] = None
+        try:
+            _lrn_i = int(_last_rnd_num) if _last_rnd_num is not None else 0
+        except (TypeError, ValueError):
+            _lrn_i = 0
+        try:
+            _done_i = int(_done_rounds) if _done_rounds else 0
+        except (TypeError, ValueError):
+            _done_i = 0
+        _tpr_i = max(_lrn_i, _done_i)
+        if _tpr_i > 0:
+            _terminal_play_round = _tpr_i
         # 最后一回合：结算界面在「最后击杀」帧同时出现，与 round_end 事件无关。
         # round_end 在击杀后数秒才 fire（比赛庆典动画），用 round_end_tick 做基准永远不准。
-        # 改为：用 clip 自身的最后击杀/死亡 tick 作为 clip_max_tick 上限（不加正缓冲）。
+        # 改为：用 clip 末事件 tick + 小缓冲（见下）作为 clip_max_tick 上限。
         # 正缓冲会让录制越过结算 tick，且 POV 段切换时 demo 可能滑入结算状态导致黑屏。
-        # CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC = 相对最后击杀 tick 的偏移（秒）。
-        # 默认 0.5：允许看到击杀后 0.5s 的画面；demo_pause 注入兜底保证不会长时间停留在结算界面。
-        # 如果仍然进入结算界面，可将此值调小（如 0.0 或 -0.3）；若 POV 截断太早则调大。
+        # CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC = 相对最后击杀/死亡 tick 的偏移（秒）。
+        # 默认 0.70：决胜回合主段与受害者 POV 死后留白略宽裕；仍远早于 round_end 庆典 tick。
+        # 若进结算 UI 可将此值调小；若末杀 POV/主段仍觉偏短则调大。
         _last_kill_buf_ticks = int(float(
-            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.45") or "0.45"
+            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
 
         logger.info(
-            "[clip_max_tick] round_end_evt_tick_map rounds=%s last_rnd=%s",
+            "[clip_max_tick] round_end_evt_tick_map rounds=%s last_rnd=%s terminal_round=%s done_rounds=%s",
             sorted(_round_end_evt_tick_map.keys()),
             _last_rnd_num,
+            _terminal_play_round,
+            _done_rounds,
         )
         for _c in clips:
             if _c.clip_max_tick is not None:
@@ -2074,7 +2091,70 @@ class DemoAnalyzer:
                         _c.clip_max_tick = int(_ld) + _last_kill_buf_ticks
                         if _c.end_tick > _c.clip_max_tick:
                             _c.end_tick = _c.clip_max_tick
-            elif _c.round == _last_rnd_num:
+                elif _terminal_play_round is not None:
+                    # 跨回合合集 ``clip.round`` 存首回合，不能仅用 ``_c.round == _terminal_play_round``。
+                    # 若 ``source_rounds`` 含决胜回合，末段 / POV 必须封顶在结算 UI 出现前，
+                    # 否则 ``demo_gototick`` 倒退无法恢复画面（与单回合 clip 最后一回合策略一致）。
+                    _rounds_src = getattr(_c, "source_rounds", None) or []
+                    _kts = getattr(_c, "kill_ticks", None) or []
+                    _last_match_evt: Optional[int] = None
+                    if isinstance(_rounds_src, list) and isinstance(_kts, list):
+                        try:
+                            _lrn = int(_terminal_play_round)
+                        except (TypeError, ValueError):
+                            _lrn = 0
+                        if _lrn > 0:
+                            for _i, _rn_raw in enumerate(_rounds_src):
+                                try:
+                                    _rni = int(_rn_raw)
+                                except (TypeError, ValueError):
+                                    continue
+                                if _rni != _lrn:
+                                    continue
+                                if _i >= len(_kts):
+                                    continue
+                                try:
+                                    _kti = int(_kts[_i])
+                                except (TypeError, ValueError):
+                                    continue
+                                if _kti > 0 and (
+                                    _last_match_evt is None or _kti > _last_match_evt
+                                ):
+                                    _last_match_evt = _kti
+                        # 回退：``round_end`` 推导的决胜回合号偏小（缺最后一行）时，
+                        # ``source_rounds`` 仍含更大回合号 → 按该最大回合扫末事件锚点。
+                        if _last_match_evt is None and _lrn > 0:
+                            try:
+                                _sr_max = max(
+                                    int(_rn_raw)
+                                    for _rn_raw in _rounds_src
+                                    if str(_rn_raw).strip() not in ("", "None")
+                                )
+                            except (TypeError, ValueError):
+                                _sr_max = 0
+                            if _sr_max > _lrn:
+                                for _i, _rn_raw in enumerate(_rounds_src):
+                                    try:
+                                        _rni = int(_rn_raw)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if _rni != _sr_max:
+                                        continue
+                                    if _i >= len(_kts):
+                                        continue
+                                    try:
+                                        _kti = int(_kts[_i])
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if _kti > 0 and (
+                                        _last_match_evt is None or _kti > _last_match_evt
+                                    ):
+                                        _last_match_evt = _kti
+                    if _last_match_evt is not None and _last_match_evt > 0:
+                        _c.clip_max_tick = int(_last_match_evt) + _last_kill_buf_ticks
+                        if _c.end_tick > _c.clip_max_tick:
+                            _c.end_tick = _c.clip_max_tick
+            elif _terminal_play_round is not None and _c.round == _terminal_play_round:
                 # 最后一回合：以该 clip 自身的最后击杀/死亡 tick 为基准
                 if _c.kill_ticks:
                     _last_evt_tick = max(_c.kill_ticks)
@@ -2085,7 +2165,9 @@ class DemoAnalyzer:
                     _re_t = _round_end_evt_tick_map.get(_c.round, 0)
                     _last_evt_tick = _re_t + _re_offset_last_ticks if _re_t else None
                 if _last_evt_tick:
-                    _c.clip_max_tick = _last_evt_tick + _last_kill_buf_ticks
+                    _c.clip_max_tick = int(_last_evt_tick) + int(_last_kill_buf_ticks)
+                    if _c.end_tick > _c.clip_max_tick:
+                        _c.end_tick = _c.clip_max_tick
             elif _c.round in _round_end_evt_tick_map:
                 # 非最后回合：round_end_tick + 宽松缓冲（不存在结算界面问题）
                 _round_end_tick = _round_end_evt_tick_map[_c.round]
@@ -2116,12 +2198,12 @@ class DemoAnalyzer:
                 if _c.end_tick > _c.clip_max_tick:
                     _c.end_tick = _c.clip_max_tick
             logger.info(
-                "[clip_max_tick] clip_id=%s round=%s last_evt_tick=%s clip_max_tick=%s (last_rnd=%s)",
+                "[clip_max_tick] clip_id=%s round=%s last_evt_tick=%s clip_max_tick=%s (terminal_rnd=%s)",
                 _c.clip_id,
                 _c.round,
                 max(_c.kill_ticks) if _c.kill_ticks else _c.death_tick,
                 _c.clip_max_tick,
-                _c.round == _last_rnd_num,
+                _terminal_play_round,
             )
 
         team_a_score, team_b_score, match_date, duration_mins, team_a_name, team_b_name = (
@@ -2417,7 +2499,7 @@ class DemoAnalyzer:
         )
 
         _last_compilation_event_buf_ticks = int(float(
-            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.45") or "0.45"
+            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
 
         def _segment_around_tick(

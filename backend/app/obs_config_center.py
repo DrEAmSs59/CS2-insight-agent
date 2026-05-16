@@ -1061,7 +1061,6 @@ def apply_recommended(
     director = OBSDirector(
         obs_cfg,
         cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
         spec_player_verify=cfg.spec_player_verify,
@@ -1187,7 +1186,6 @@ def import_cs2obs_bytes(
     director = OBSDirector(
         obs_cfg,
         cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
         spec_player_verify=cfg.spec_player_verify,
