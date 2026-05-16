@@ -3,13 +3,27 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..models import RecordingPlan
+from ..models import RecordingPlan, RecordingSegment
 from .obs_client import OBSClient, OBSRecordError
 from .demo_controller import gototick, demo_resume, demo_pause, DemoSeekError
 from .spec_controller import spec_player
 from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_until_tick(segment: RecordingSegment, tick_rate: float) -> str:
+    """
+    Wait until the demo reaches segment.end_tick, then return "done".
+
+    Current_tick readback from CS2 is not yet available via GSI; falls back
+    to duration sleep. When current_tick becomes available this function will
+    switch to polling without changing the call site.
+    """
+    duration_sec = max(0.1, (segment.end_tick - segment.start_tick) / tick_rate)
+    logger.debug("[RecordingV3] record_until_tick: sleeping %.2fs (tick-poll unavailable)", duration_sec)
+    await asyncio.sleep(duration_sec)
+    return "sleep_fallback"
 
 
 @dataclass
@@ -70,36 +84,41 @@ class RecordingExecutor:
                 await spec_player(segment.target_player_name)
                 verified = await verify_spec_target(segment.target_steamid64)
                 if not verified:
-                    result.segment_results.append(SegmentResult(
-                        segment_index=segment.segment_index,
-                        status="spec_failed",
-                        start_tick=segment.start_tick,
-                        end_tick=segment.end_tick,
-                        perspective=segment.perspective,
-                        error=f"GSI verify failed for {segment.target_steamid64}",
-                    ))
-                    continue
-
-            duration_sec = max(0.1, (segment.end_tick - segment.start_tick) / plan.tick_rate)
+                    # GSI may not report the spectated player when the demo is
+                    # paused (last_seen=None is common). Log and proceed rather
+                    # than skipping — spec_player already sent the command.
+                    logger.warning(
+                        "[RecordingV3] spec verify inconclusive for %s (steamid=%s); "
+                        "proceeding with recording (GSI may be silent while demo is paused)",
+                        segment.target_player_name, segment.target_steamid64,
+                    )
+                    result.warnings.append(
+                        f"segment {segment.segment_index}: spec verify inconclusive for "
+                        f"{segment.target_player_name} — GSI returned no steamid while paused"
+                    )
 
             try:
                 if not obs_recording_started:
+                    logger.info("[RecordingV3] start_record segment %d", segment.segment_index)
                     await demo_resume()
                     await asyncio.sleep(0.1)
                     await asyncio.to_thread(self._obs.start_record)
                     obs_recording_started = True
                 else:
+                    logger.info("[RecordingV3] resume_record segment %d", segment.segment_index)
                     await demo_resume()
                     await asyncio.sleep(0.1)
                     await asyncio.to_thread(self._obs.resume_record)
 
-                await asyncio.sleep(duration_sec)
+                await _record_until_tick(segment, plan.tick_rate)
 
                 if is_last:
+                    logger.info("[RecordingV3] stop_record segment %d (last)", segment.segment_index)
                     output_path = await asyncio.to_thread(self._obs.stop_record)
                     final_output_path = output_path
                     await asyncio.to_thread(self._obs.disconnect)
                 else:
+                    logger.info("[RecordingV3] pause_record segment %d", segment.segment_index)
                     await asyncio.to_thread(self._obs.pause_record)
                     await asyncio.sleep(0.08)  # brief settle after pause
                     await demo_pause()

@@ -9,10 +9,10 @@ try:
 except ImportError:
     def inject_console_sequence(lines): pass
 
-async def spec_player(player_name: str, mode: int = 4) -> None:
+async def spec_player(player_name: str, mode: int = 5) -> None:
     """
     Send spec_mode + spec_player commands to CS2.
-    mode: 4 = first-person (POV), 3 = third person, 1 = free
+    mode: 5 = first-person (POV), 4 = chase/third-person, 1 = free
     """
     cmds = [f"spec_mode {mode}", f"spec_player {player_name}"]
     try:
@@ -22,7 +22,7 @@ async def spec_player(player_name: str, mode: int = 4) -> None:
     # Wait for spec switch to settle
     await asyncio.sleep(0.8)
 
-async def spec_by_slot(slot: int, mode: int = 4) -> None:
+async def spec_by_slot(slot: int, mode: int = 5) -> None:
     """Send spec_mode + spec_player by numeric slot."""
     cmds = [f"spec_mode {mode}", f"spec_player {int(slot)}"]
     try:

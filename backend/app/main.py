@@ -1988,6 +1988,9 @@ def _resolve_spectators_for_record(
 
 @app.post("/api/record/batch")
 async def start_batch_recording(req: BatchRecordRequest):
+    logger.warning(
+        "[LegacyRecordBatch] /api/record/batch called — this endpoint is legacy and should not be used by new UI."
+    )
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
     obs_cfg = merge_obs_for_connection(req.obs, cfg.obs)

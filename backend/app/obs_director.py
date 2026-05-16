@@ -5895,3 +5895,178 @@ class OBSDirector:
             self._set_state(DirectorState.COMPLETED)
 
         return all_results
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RecordingV3: build_plan → RecordingExecutor pipeline
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def execute_plan_queue(
+        self,
+        requests: "list",
+        warmup: "Optional[RecordingWarmupExtras]" = None,
+    ) -> "list[dict]":
+        """
+        [RecordingV3] Execute a list of RecordingRequestDTOs using the new
+        build_plan → RecordingExecutor pipeline. CS2 launch/GSI/cleanup are
+        handled by the same battle-tested OBSDirector infrastructure as the
+        legacy pipeline; only the per-segment recording loop is new.
+        """
+        from .recording.plan_builder import build_plan
+        from .recording.executor.recording_executor import RecordingExecutor
+        from .recording.executor.obs_client import OBSClient, OBSConnectionError
+        from .recording.normalizer import NormalizationError
+
+        logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
+
+        all_results: list[dict] = []
+        if not requests:
+            return all_results
+
+        # Group requests by demo path so each unique demo = one CS2 session.
+        demo_groups: dict[str, list] = {}
+        demo_abs_map: dict[str, Path] = {}
+        for dto in requests:
+            key = dto.demo.demo_path or dto.demo.demo_filename
+            demo_groups.setdefault(key, []).append(dto)
+            if key not in demo_abs_map:
+                demo_abs_map[key] = Path(dto.demo.demo_path or dto.demo.demo_filename)
+
+        # Connect OBS via the new OBSClient (separate from director's legacy ws).
+        obs_client = OBSClient(self.obs_config)
+        try:
+            await asyncio.to_thread(obs_client.connect)
+        except OBSConnectionError as e:
+            logger.error("[RecordingV3] OBS connection failed: %s", e)
+            for dto in requests:
+                all_results.append({
+                    "request_id": dto.request_id,
+                    "success": False,
+                    "error": f"OBS connection failed: {e}",
+                    "segment_results": [],
+                    "warnings": [],
+                })
+            return all_results
+
+        try:
+            batch_aborted = False
+            for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
+                if batch_aborted:
+                    break
+
+                demo_abs = demo_abs_map[demo_key]
+                demo_name = demo_abs.name
+                logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
+                            job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
+
+                # ── CS2 launch ────────────────────────────────────────────────
+                try:
+                    self._launch_cs2(demo_abs, warmup)
+                except CS2AlreadyRunningError:
+                    raise
+                except CS2NotReadyError:
+                    raise
+                except Exception as e:
+                    logger.error("[RecordingV3] CS2 launch failed for %s: %s", demo_name, e)
+                    for dto in demo_requests:
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": f"CS2 launch failed: {e}", "segment_results": [], "warnings": [],
+                        })
+                    await self._run_cleanup_step("CS2 shutdown after launch failure", self._kill_cs2, timeout=30.0)
+                    await self._run_cleanup_step("CS2 artifact cleanup", self._cleanup_cs2_artifacts, timeout=8.0)
+                    continue
+
+                # ── Wait for GSI ready ────────────────────────────────────────
+                try:
+                    self._set_state(DirectorState.LOADING_DEMO, str(demo_abs))
+                    await self._await_gsi_startup_gate()
+                    await self._sleep_abortable(8.0)
+                    await self._await_cs2_window(40.0)
+                    if job_idx > 0:
+                        settle = self._env_float("CS2_INSIGHT_BATCH_NEW_DEMO_SETTLE_SEC", "9.0")
+                        if settle > 0:
+                            await self._sleep_abortable(settle)
+                except CS2NotReadyError:
+                    logger.error("[RecordingV3] GSI not ready for %s; aborting", demo_name)
+                    await self._run_cleanup_step("CS2 shutdown after GSI timeout", self._kill_cs2, timeout=30.0)
+                    await self._run_cleanup_step("CS2 artifact cleanup after GSI timeout", self._cleanup_cs2_artifacts, timeout=8.0)
+                    raise
+
+                # ── Execute each DTO through build_plan + RecordingExecutor ───
+                executor = RecordingExecutor(obs_client)
+                for dto in demo_requests:
+                    if self._abort_requested():
+                        logger.info("[RecordingV3] Abort requested, skipping remaining requests")
+                        batch_aborted = True
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": "aborted", "segment_results": [], "warnings": [],
+                        })
+                        continue
+
+                    logger.info("[RecordingV3] build plan: request_id=%s type=%s",
+                                dto.request_id, dto.request_type.value)
+                    try:
+                        plan = build_plan(dto)
+                    except NormalizationError as e:
+                        logger.warning("[RecordingV3] Normalization failed: %s", e)
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": str(e), "segment_results": [], "warnings": [],
+                        })
+                        continue
+                    except Exception as e:
+                        logger.error("[RecordingV3] build_plan error: %s", e)
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": str(e), "segment_results": [], "warnings": [],
+                        })
+                        continue
+
+                    logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
+                    try:
+                        result = await executor.execute(plan)
+                    except Exception as e:
+                        logger.error("[RecordingV3] executor error: %s", e)
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": str(e), "segment_results": [], "warnings": [],
+                        })
+                        continue
+
+                    all_results.append({
+                        "request_id": result.request_id,
+                        "success": result.success,
+                        "output_path": result.output_path,
+                        "error": result.error,
+                        "warnings": result.warnings,
+                        "segment_results": [
+                            {
+                                "segment_index": s.segment_index,
+                                "status": s.status,
+                                "output_path": s.output_path,
+                                "error": s.error,
+                            }
+                            for s in result.segment_results
+                        ],
+                    })
+
+                # ── Kill CS2 after this demo group ────────────────────────────
+                if not batch_aborted:
+                    await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
+                    await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
+
+        except (CS2AlreadyRunningError, CS2NotReadyError):
+            raise
+        except Exception as e:
+            self._set_state(DirectorState.ERROR, str(e))
+            raise
+        finally:
+            try:
+                await asyncio.to_thread(obs_client.disconnect)
+            except Exception:
+                pass
+            self._set_state(DirectorState.COMPLETED)
+
+        logger.info("[RecordingV3] execute_plan_queue done: %d results", len(all_results))
+        return all_results

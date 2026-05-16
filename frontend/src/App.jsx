@@ -27,6 +27,7 @@ import {
 import { warmupApiPayloadToPersisted, warmupUiOptsToPersisted } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
 import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
+import { buildDtoFromQueueItem } from "./recording/buildDtoFromQueueItem";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
 
@@ -1556,18 +1557,44 @@ export default function App() {
         setBatchRecording(true);
         setProgressText("正在执行批量 OBS 导播…");
         try {
-          const groups = buildBatchGroupsFromQueue(queue, useRecordingQueue.getState().globalPacing);
-          const { data } = await API.post("/record/batch", { groups, warmup, obs: obsConfig });
-          const results = data.results ?? [];
-          const ok = results.filter((r) => r.status === "recorded").length;
-          const aborted = results.filter((r) => r.status === "aborted").length;
-          if (aborted > 0) {
+          // Build a demoFilename → matchMeta lookup from all parsed matches.
+          const demoMetaMap = {};
+          for (const pm of parsedMatches || []) {
+            if (!pm?.demo_filename) continue;
+            const firstPlayer = Object.keys(pm.players || {})[0];
+            const meta = pm.players?.[firstPlayer]?.match_meta ?? null;
+            if (meta) demoMetaMap[pm.demo_filename] = meta;
+          }
+
+          // Convert each queue item to a RecordingRequestDTO via factory.
+          const requests = [];
+          for (const item of queue) {
+            const meta = demoMetaMap[item.demoFilename] ?? null;
+            const dto = buildDtoFromQueueItem(item, meta);
+            if (dto) requests.push(dto);
+          }
+
+          if (!requests.length) {
+            setProgressText("队列中没有可转换的录制请求。");
+            return;
+          }
+
+          const { data } = await API.post("/recording/queue", {
+            requests,
+            warmup,
+            obs: obsConfig,
+          });
+
+          const results = Array.isArray(data) ? data : [];
+          const ok = results.filter((r) => r.success).length;
+          const failed = results.length - ok;
+          if (failed > 0) {
             setProgressText(
-              `批量录制已结束：成功 ${ok}，中止 ${aborted}，其余 ${results.length - ok - aborted} 条；共 ${results.length} 个片段。`,
+              `批量录制已结束：成功 ${ok}，失败 ${failed}；共 ${results.length} 个请求。`,
               { autoDismissMs: 3000 },
             );
           } else {
-            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个片段。`, {
+            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个请求。`, {
               autoDismissMs: 3000,
             });
           }
@@ -1592,6 +1619,7 @@ export default function App() {
       clearQueue,
       obsConfig,
       globalPacing,
+      parsedMatches,
       persistWarmupDefaults,
       refreshConfigBackupStatus,
     ]
