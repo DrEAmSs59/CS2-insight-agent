@@ -21,9 +21,9 @@ export const CLIP_CATEGORY_CONFIG = {
   },
   meme_death: {
     icon: Clapperboard,
-    color: "text-fuchsia-400",
-    bgColor: "bg-fuchsia-500/10",
-    borderColor: "border-fuchsia-500/35",
+    color: "text-cs2-fuchsia-on-surface",
+    bgColor: "bg-cs2-fuchsia-surface",
+    borderColor: "border-cs2-fuchsia-surface",
     label: "坐牢集锦",
   },
   compilation: {
@@ -51,10 +51,10 @@ export function AiScoreBadge({ score }) {
   if (n > 85) {
     return (
       <div
-        className="pointer-events-none select-none rounded-md border border-amber-400/50 bg-gradient-to-br from-amber-500/25 via-orange-500/15 to-amber-600/10 px-2 py-1 shadow-[0_0_18px_rgba(251,191,36,0.35),0_0_36px_rgba(249,115,22,0.12)]"
+        className="pointer-events-none select-none rounded-md border border-amber-400/50 bg-gradient-to-br from-amber-500/25 via-orange-500/15 to-amber-600/10 px-2 py-1 shadow-lg"
         aria-label={`AI 评分 ${rounded} 分`}
       >
-        <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-amber-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
+        <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-cs2-amber-on-surface drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
           🏆 {rounded} 分
         </span>
       </div>
@@ -64,10 +64,10 @@ export function AiScoreBadge({ score }) {
   if (n >= 40) {
     return (
       <div
-        className="pointer-events-none select-none rounded-md border border-emerald-500/25 bg-emerald-950/30 px-2 py-1"
+        className="pointer-events-none select-none rounded-md border border-cs2-emerald-surface bg-cs2-emerald-surface px-2 py-1"
         aria-label={`AI 评分 ${rounded} 分`}
       >
-        <span className="whitespace-nowrap font-mono text-[11px] font-bold tabular-nums text-emerald-300/95">
+        <span className="whitespace-nowrap font-mono text-[11px] font-bold tabular-nums text-cs2-emerald-on-surface">
           {rounded} 分
         </span>
       </div>
@@ -76,10 +76,10 @@ export function AiScoreBadge({ score }) {
 
   return (
     <div
-      className="pointer-events-none select-none rounded-md border border-rose-500/45 bg-gradient-to-br from-rose-950/70 via-fuchsia-950/50 to-red-950/40 px-2 py-1 shadow-[0_0_14px_rgba(244,63,94,0.25)]"
+      className="pointer-events-none select-none rounded-md border border-cs2-rose-surface bg-gradient-to-br from-cs2-rose-surface via-cs2-fuchsia-surface to-cs2-red-surface px-2 py-1 shadow-lg"
       aria-label={`AI 评分 ${rounded} 分`}
     >
-      <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-rose-200 drop-shadow-[0_0_6px_rgba(244,63,94,0.5)]">
+      <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-cs2-rose-on-surface drop-shadow-[0_0_6px_rgba(244,63,94,0.5)]">
         🤡 {rounded} 分
       </span>
     </div>
@@ -144,12 +144,12 @@ export default function ClipCard({
       }}
       className={`group relative rounded-xl border transition-all duration-200 bg-cs2-bg-card ${
         inQueue
-          ? "cursor-not-allowed border-white/[0.06] opacity-[0.72]"
+          ? "cursor-not-allowed border-cs2-border opacity-[0.72]"
           : ftdEnqueueBlocked
             ? "cursor-not-allowed border-amber-500/20 opacity-[0.85]"
             : `cursor-pointer hover:shadow-lg ${
                 selected
-                  ? "border-cs2-orange shadow-lg shadow-cs2-orange/10"
+                  ? "border-cs2-accent shadow-lg shadow-cs2-accent/10"
                   : "border-cs2-border hover:border-cs2-border"
               }`
       }`}
@@ -164,18 +164,18 @@ export default function ClipCard({
       <div
         className={`absolute right-3 top-3 z-10 flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-md px-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${
           inQueue
-            ? "border border-zinc-600/80 bg-zinc-800/90 text-zinc-400"
+            ? "border border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary"
             : selected
-              ? "bg-cs2-orange"
-              : "border border-cs2-border bg-cs2-bg-input group-hover:border-cs2-orange/40"
+              ? "bg-cs2-accent"
+              : "border border-cs2-border bg-cs2-bg-input group-hover:border-cs2-accent/40"
         }`}
       >
         {inQueue ? (
           "队列"
         ) : ftdEnqueueBlocked ? (
-          <span className="px-0.5 text-[8px] font-bold leading-none text-amber-500/90">—</span>
+          <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
         ) : selected ? (
-          <Check className="h-3 w-3 text-black" />
+          <Check className="h-3 w-3 text-cs2-text-on-accent" />
         ) : null}
       </div>
 
@@ -191,13 +191,13 @@ export default function ClipCard({
           <div className="min-w-0 flex-1 pr-6 sm:pr-8">
             {clip.category !== "compilation" && (
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs font-bold text-cs2-orange">第 {clip.round} 回合</span>
+                <span className="font-mono text-xs font-bold text-cs2-accent">第 {clip.round} 回合</span>
                 {clip.round_won != null && (
                   <span
                     className={`rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${
                       clip.round_won
-                        ? "bg-emerald-500/20 text-emerald-400"
-                        : "bg-rose-500/20 text-rose-400"
+                        ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface"
+                        : "bg-cs2-rose-surface text-cs2-rose-on-surface"
                     }`}
                     title={clip.round_won ? "本回合：本方赢" : "本回合：本方输"}
                   >
@@ -209,13 +209,13 @@ export default function ClipCard({
                     className="inline-flex items-center gap-0.5 rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums"
                     title="本回合开局时比分（本方 : 对方）"
                   >
-                    <span className="text-emerald-400">{clip.score_own}</span>
+                    <span className="text-cs2-emerald-on-surface">{clip.score_own}</span>
                     <span className="text-cs2-text-secondary">:</span>
-                    <span className="text-rose-400">{clip.score_opp}</span>
+                    <span className="text-cs2-rose-on-surface">{clip.score_opp}</span>
                   </span>
                 )}
                 {clip.kill_count > 0 && !killCountInTags && (
-                  <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-white">
+                  <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-cs2-text-primary">
                     {clip.kill_count} 杀
                   </span>
                 )}
@@ -225,14 +225,14 @@ export default function ClipCard({
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 {Array.isArray(clip.source_ticks) && clip.source_ticks.length > 0 && (
                   <span
-                    className="rounded bg-cs2-bg-input px-2 py-0.5 font-mono text-[10px] font-bold text-white"
+                    className="rounded bg-cs2-bg-input px-2 py-0.5 font-mono text-[10px] font-bold text-cs2-text-primary"
                     title="合集包含的子片段数（每段对应一次击杀或死亡）"
                   >
                     {clip.source_ticks.length} 段
                   </span>
                 )}
                 {clip.kill_count > 0 && (
-                  <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-white">
+                  <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-cs2-text-primary">
                     {clip.kill_count} 杀
                   </span>
                 )}
@@ -265,18 +265,18 @@ export default function ClipCard({
                   </span>
                 ))}
               {showKillerBadge && (
-                <span className="rounded border border-rose-500/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-bold tracking-wide text-rose-300/85">
+                <span className="rounded border border-cs2-rose-surface bg-cs2-rose-surface px-2 py-0.5 text-[10px] font-bold tracking-wide text-cs2-rose-on-surface">
                   💀 击杀者: {clip.killer_name}
                 </span>
               )}
               {showVictimsBadge && (
-                <span className="rounded border border-emerald-500/20 bg-emerald-950/35 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-400/90">
+                <span className="rounded border border-cs2-emerald-surface bg-cs2-emerald-surface px-2 py-0.5 text-[10px] font-bold tracking-wide text-cs2-emerald-on-surface">
                   🎯 击杀: {victimsList.join(", ")}
                 </span>
               )}
             </div>
 
-            <div className="font-mono text-[10px] text-cs2-text-secondary">
+            <div className="font-mono text-[11px] text-cs2-text-secondary">
               帧 {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}
             </div>
 
@@ -299,17 +299,17 @@ export default function ClipCard({
         </div>
 
         {showAiUi && aiCommentary ? (
-          <div className="relative mt-4 min-w-0 overflow-hidden rounded-lg bg-zinc-950/75 pl-3.5 pr-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ring-1 ring-white/[0.06]">
+          <div className="relative mt-4 min-w-0 overflow-hidden rounded-lg bg-cs2-bg-elevated pl-3.5 pr-3 py-2.5 ring-1 ring-cs2-border-subtle">
             <div
-              className="pointer-events-none absolute bottom-1 left-0 top-1 w-[3px] rounded-full bg-gradient-to-b from-cs2-orange via-fuchsia-500/80 to-cyan-500/40 opacity-90"
+              className="pointer-events-none absolute bottom-1 left-0 top-1 w-[3px] rounded-full bg-gradient-to-b from-cs2-accent via-cs2-fuchsia-on-surface/80 to-cs2-cyan-on-surface/40 opacity-90"
               aria-hidden
             />
-            <p className="min-w-0 break-words pl-2 text-[13px] leading-relaxed text-zinc-200">
+            <p className="min-w-0 break-words pl-2 text-[13px] leading-relaxed text-cs2-text-primary">
               <span className="mr-1.5 inline-block select-none not-italic" aria-hidden>
                 🎙️
               </span>
-              <span className="font-semibold not-italic text-zinc-500">AI 锐评：</span>
-              <span className="italic text-zinc-100/95">{aiCommentary}</span>
+              <span className="font-semibold not-italic text-cs2-text-muted">AI 锐评：</span>
+              <span className="italic text-cs2-text-primary/95">{aiCommentary}</span>
             </p>
           </div>
         ) : null}

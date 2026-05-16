@@ -39,8 +39,8 @@ export default function DemoUpload({ onUpload }) {
       onDrop={handleDrop}
       className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 cursor-pointer py-14 sm:py-16 ${
         dragOver
-          ? "border-cs2-orange bg-cs2-orange/5 shadow-[0_0_30px_rgba(255,140,0,0.1)]"
-          : "border-cs2-border hover:border-cs2-orange/40 bg-cs2-bg-card"
+          ? "border-cs2-accent bg-cs2-accent/5 shadow-[0_0_30px_rgba(255,140,0,0.1)]"
+          : "border-cs2-border hover:border-cs2-accent/40 bg-cs2-bg-card"
       }`}
     >
       <input
@@ -53,11 +53,11 @@ export default function DemoUpload({ onUpload }) {
 
       <div
         className={`mb-4 flex h-16 w-16 items-center justify-center rounded-xl transition-colors ${
-          dragOver ? "bg-cs2-orange/20" : "bg-cs2-bg-input"
+          dragOver ? "bg-cs2-accent/20" : "bg-cs2-bg-input"
         }`}
       >
         {dragOver ? (
-          <FileCode2 className="h-8 w-8 text-cs2-orange" />
+          <FileCode2 className="h-8 w-8 text-cs2-accent" />
         ) : (
           <Upload className="h-8 w-8 text-cs2-text-secondary" />
         )}
@@ -65,7 +65,7 @@ export default function DemoUpload({ onUpload }) {
 
       <p className="mb-1 text-sm font-semibold">
         {dragOver ? (
-          <span className="text-cs2-orange">松开即可上传</span>
+          <span className="text-cs2-accent">松开即可上传</span>
         ) : (
           "拖拽一个或多个 .dem 到此处"
         )}

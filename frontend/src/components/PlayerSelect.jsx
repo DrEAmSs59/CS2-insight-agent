@@ -34,7 +34,7 @@ function normalizePlayer(p) {
 }
 
 const MEME_BADGE_CLASS =
-  "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-sm font-black tracking-tight text-white " +
+  "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-sm font-black tracking-tight text-cs2-text-primary " +
   "bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-600 " +
   "shadow-[0_0_14px_rgba(236,72,153,0.85),0_0_28px_rgba(168,85,247,0.45)]";
 
@@ -52,8 +52,8 @@ function PlayerRow({ player, selected, onSelect }) {
         "flex w-full flex-row items-center justify-between gap-3 rounded-md py-2 px-3 text-left transition-colors duration-150",
         "border-l-4",
         isSelected
-          ? "border-l-cs2-orange bg-cs2-orange/10"
-          : "border-l-transparent bg-[#161616] hover:bg-[#1c1c1c]",
+          ? "border-l-cs2-orange bg-cs2-accent/10"
+          : "border-l-transparent bg-cs2-bg-sidebar hover:bg-cs2-bg-elevated",
       ].join(" ")}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -62,19 +62,19 @@ function PlayerRow({ player, selected, onSelect }) {
           className={[
             "flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-colors",
             isSelected
-              ? "border-cs2-orange bg-cs2-orange"
-              : "border-zinc-600 bg-transparent",
+              ? "border-cs2-accent bg-cs2-accent"
+              : "border-cs2-border bg-transparent",
           ].join(" ")}
         >
           {isSelected && (
-            <svg className="h-2.5 w-2.5 text-black" viewBox="0 0 10 10" fill="none">
+            <svg className="h-2.5 w-2.5 text-cs2-text-on-accent" viewBox="0 0 10 10" fill="none">
               <path d="M1.5 5L4 7.5L8.5 2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
         </span>
         <span
           className={`truncate text-base font-bold tracking-tight ${
-            isSelected ? "text-cs2-orange" : "text-white"
+            isSelected ? "text-cs2-accent" : "text-cs2-text-primary"
           }`}
         >
           {name}
@@ -89,7 +89,7 @@ function PlayerRow({ player, selected, onSelect }) {
           </span>
         )}
       </div>
-      <span className="shrink-0 font-mono text-xs text-gray-400 tabular-nums sm:text-sm">
+      <span className="shrink-0 font-mono text-xs text-cs2-text-muted tabular-nums sm:text-sm">
         K: {kills} / D: {deaths} / A: {assists}
       </span>
     </button>
@@ -98,13 +98,13 @@ function PlayerRow({ player, selected, onSelect }) {
 
 function TeamBlock({ title, players, selected, onSelect }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-[#121212]/90 p-2">
-      <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+    <div className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3">
+      <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-cs2-text-secondary">
         {title}
       </h3>
       <div className="flex flex-col gap-0.5">
         {players.length === 0 ? (
-          <p className="py-2 text-center text-[10px] text-zinc-600">暂无</p>
+          <p className="py-2 text-center text-[10px] text-cs2-text-muted">暂无</p>
         ) : (
           players.map((p) => (
             <PlayerRow key={p.name} player={p} selected={selected} onSelect={onSelect} />
@@ -137,16 +137,16 @@ export default function PlayerSelect({ players, selected, onSelect, onAnalyze, d
   return (
     <div className="bg-cs2-bg-card rounded-xl border border-cs2-border p-4">
       <div className="mb-2 flex items-center gap-2">
-        <Crosshair className="h-4 w-4 shrink-0 text-cs2-orange" />
+        <Crosshair className="h-4 w-4 shrink-0 text-cs2-accent" />
         <h2 className="text-sm font-bold uppercase tracking-wide">本场目标玩家</h2>
         {selectedArr.length > 0 && (
-          <span className="ml-auto text-[11px] text-zinc-500">
-            已选 <span className="font-bold text-cs2-orange">{selectedArr.length}</span> 人
+          <span className="ml-auto text-[11px] text-cs2-text-muted">
+            已选 <span className="font-bold text-cs2-accent">{selectedArr.length}</span> 人
           </span>
         )}
       </div>
-      <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
-        可多选玩家同时解析；仅在<strong className="text-zinc-400">当前这一场</strong>
+      <p className="mb-3 text-[12px] leading-relaxed text-cs2-text-muted">
+        可多选玩家同时解析；仅在<strong className="text-cs2-text-secondary">当前这一场</strong>
         Demo 内生效，切换场次后请重新选择。解析进行中也可切换场次；正在解析的那一场会暂时锁定本按钮。
       </p>
 
@@ -156,8 +156,8 @@ export default function PlayerSelect({ players, selected, onSelect, onAnalyze, d
       </div>
 
       {unknown.length > 0 && (
-        <div className="mb-3 rounded-lg border border-dashed border-zinc-700/50 bg-zinc-950/40 p-2">
-          <p className="mb-1 px-1 text-[10px] font-semibold text-zinc-500">未识别队伍</p>
+        <div className="mb-3 rounded-lg border border-dashed border-cs2-border bg-cs2-bg-card p-2">
+          <p className="mb-1 px-1 text-[10px] font-semibold text-cs2-text-muted">未识别队伍</p>
           <div className="flex flex-col gap-0.5">
             {unknown.map((p) => (
               <PlayerRow key={p.name} player={p} selected={selectedArr} onSelect={onSelect} />
@@ -170,7 +170,7 @@ export default function PlayerSelect({ players, selected, onSelect, onAnalyze, d
         type="button"
         onClick={onAnalyze}
         disabled={!selectedArr.length || disabled}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-orange py-2.5 text-sm font-bold uppercase tracking-wider text-black shadow-lg shadow-cs2-orange/20 transition-colors hover:bg-cs2-orange-light disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent py-2.5 text-sm font-bold uppercase tracking-wider text-cs2-text-on-accent shadow-md shadow-cs2-accent/25 transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
       >
         {selectedArr.length > 1 ? (
           <CheckSquare className="h-4 w-4" />

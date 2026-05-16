@@ -73,10 +73,10 @@ export default function ClipList({
     <div className="space-y-4">
       {!suppressSummaryHeader && (
         <div className="flex items-center gap-2">
-          <Film className="h-4 w-4 text-cs2-orange" />
+          <Film className="h-4 w-4 text-cs2-accent" />
           <h2 className="text-sm font-bold uppercase tracking-wide">检测到的片段</h2>
-          <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
-            共 <span className="text-zinc-300">{regularClips.length}</span> 条 · {highlights.length} 高光 ·{" "}
+          <span className="ml-auto text-right text-[12px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
+            共 <span className="text-cs2-text-secondary">{regularClips.length}</span> 条 · {highlights.length} 高光 ·{" "}
             {fails.length} 下饭{compilations.length > 0 ? ` · ${compilations.length} 合集` : ""}
           </span>
         </div>
@@ -84,7 +84,7 @@ export default function ClipList({
 
       {/* ── 玩家 Tab 栏（仅多玩家时显示） ── */}
       {showTabs && (
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-white/8 bg-cs2-bg-card/60 p-1.5">
+        <div className="flex flex-wrap gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-card p-2">
           {playerTabs.map((name) => {
             const pd = parsedPlayers[name];
             const cnt = (pd?.clips ?? []).filter((c) => c.category !== "meme_death").length;
@@ -97,8 +97,8 @@ export default function ClipList({
                 className={[
                   "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all duration-150",
                   isActive
-                    ? "bg-cs2-orange text-black shadow-md shadow-cs2-orange/30"
-                    : "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200",
+                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/30"
+                    : "bg-cs2-bg-hover text-cs2-text-secondary hover:bg-cs2-bg-active hover:text-cs2-text-primary",
                 ].join(" ")}
               >
                 <User className="h-3 w-3 shrink-0" />
@@ -106,7 +106,7 @@ export default function ClipList({
                 <span
                   className={[
                     "rounded px-1 font-mono text-[10px] tabular-nums",
-                    isActive ? "bg-black/20 text-black/80" : "bg-white/8 text-zinc-500",
+                    isActive ? "bg-cs2-bg-input/30 text-cs2-text-on-accent/80" : "bg-cs2-bg-active text-cs2-text-muted",
                   ].join(" ")}
                 >
                   {cnt}
@@ -119,7 +119,7 @@ export default function ClipList({
 
       {/* ── 片段卡片列表 ── */}
       {regularClips.length > 0 ? (
-        <div className="grid gap-3">
+        <div className="grid gap-4">
           {regularClips.map((clip) => (
             <ClipCard
               key={clip.client_clip_uid || clip.clip_id}
@@ -138,7 +138,7 @@ export default function ClipList({
         </div>
       ) : (
         showTabs && (
-          <div className="rounded-lg border border-dashed border-white/10 py-10 text-center text-[13px] text-zinc-600">
+          <div className="rounded-lg border border-dashed border-cs2-border py-10 text-center text-[13px] text-cs2-text-muted">
             该玩家暂无片段
           </div>
         )

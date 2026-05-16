@@ -35,7 +35,7 @@ export default function MemeDeathMontageCard({
       className={[
         "relative overflow-hidden rounded-2xl border-2 p-5 md:p-6",
         "border-red-500/70 shadow-[0_0_24px_rgba(239,68,68,0.45),0_0_48px_rgba(190,24,93,0.2),inset_0_1px_0_rgba(255,255,255,0.06)]",
-        "bg-gradient-to-br from-rose-950/50 via-red-950/40 to-fuchsia-950/35",
+        "bg-gradient-to-br from-cs2-rose-surface via-cs2-red-surface to-fuchsia-950/35",
       ].join(" ")}
     >
       <div
@@ -48,15 +48,15 @@ export default function MemeDeathMontageCard({
 
       <div className="relative flex flex-row items-start justify-between gap-3 md:gap-5">
         <div className="min-w-0 flex-1 pr-2">
-          <div className="mb-2 flex items-center gap-2 text-red-300/90">
+          <div className="mb-2 flex items-center gap-2 text-cs2-red-on-surface/90">
             <Skull className="h-5 w-5 shrink-0" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-200/70">
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cs2-red-on-surface">
               打包录制
             </span>
           </div>
-          <h3 className="text-xl font-black leading-tight tracking-tight text-white drop-shadow-[0_0_12px_rgba(0,0,0,0.5)] md:text-2xl lg:text-3xl">
+          <h3 className="text-xl font-black leading-tight tracking-tight text-cs2-text-primary drop-shadow-[0_0_12px_rgba(0,0,0,0.5)] md:text-2xl lg:text-3xl">
             👨‍🔬 节目效果专属：研发全过程{" "}
-            <span className="whitespace-nowrap text-red-200">
+            <span className="whitespace-nowrap text-cs2-red-on-surface">
               (本局共 {totalDeathsInMatch} 次死亡)
             </span>
           </h3>
@@ -65,7 +65,7 @@ export default function MemeDeathMontageCard({
               {badges.map((tag) => (
                 <span
                   key={tag}
-                  className="rounded-md border border-fuchsia-400/35 bg-fuchsia-950/40 px-2 py-0.5 text-[10px] font-bold tracking-wide text-fuchsia-100/95"
+                  className="rounded-md border border-fuchsia-400/35 bg-cs2-fuchsia-surface px-2 py-0.5 text-[10px] font-bold tracking-wide text-fuchsia-100/95"
                 >
                   {tag}
                 </span>
@@ -73,17 +73,17 @@ export default function MemeDeathMontageCard({
             </div>
           )}
           {montageComment ? (
-            <div className="relative mt-4 min-w-0 overflow-hidden rounded-lg bg-black/35 pl-3.5 pr-3 py-2.5 ring-1 ring-white/[0.08]">
+            <div className="relative mt-4 min-w-0 overflow-hidden rounded-lg bg-cs2-bg-input/60 pl-3.5 pr-3 py-2.5 ring-1 ring-white/[0.08]">
               <div
                 className="pointer-events-none absolute bottom-1 left-0 top-1 w-[3px] rounded-full bg-gradient-to-b from-red-400 via-fuchsia-500/80 to-amber-500/50 opacity-90"
                 aria-hidden
               />
-              <p className="min-w-0 break-words pl-2 text-[13px] leading-relaxed text-zinc-100">
+              <p className="min-w-0 break-words pl-2 text-[13px] leading-relaxed text-cs2-text-primary">
                 <span className="mr-1.5 inline-block select-none not-italic" aria-hidden>
                   🎙️
                 </span>
-                <span className="font-semibold not-italic text-zinc-500">AI 锐评（整局梗战绩）：</span>
-                <span className="italic text-zinc-100/95">{montageComment}</span>
+                <span className="font-semibold not-italic text-cs2-text-muted">AI 锐评（整局梗战绩）：</span>
+                <span className="italic text-cs2-text-primary/95">{montageComment}</span>
               </p>
             </div>
           ) : null}
@@ -96,13 +96,13 @@ export default function MemeDeathMontageCard({
         )}
 
         <label
-          className={`relative flex shrink-0 select-none flex-col items-center gap-2 rounded-xl border border-red-400/40 bg-black/25 px-3 py-3 backdrop-blur-sm sm:px-4 ${
+          className={`relative flex shrink-0 select-none flex-col items-center gap-2 rounded-xl border border-red-400/40 bg-cs2-bg-input/40 px-3 py-3 backdrop-blur-sm sm:px-4 ${
             bundleDisabled
               ? "cursor-not-allowed opacity-45"
-              : "cursor-pointer transition-colors hover:border-red-400/70 hover:bg-black/35"
+              : "cursor-pointer transition-colors hover:border-red-400/70 hover:bg-cs2-bg-input/60"
           }`}
         >
-          <span className="max-w-[4.5rem] text-center text-[10px] font-bold uppercase leading-tight tracking-wider text-red-200/90">
+          <span className="max-w-[4.5rem] text-center text-[10px] font-bold uppercase leading-tight tracking-wider text-cs2-red-on-surface">
             {bundleDisabled ? "已在队列" : "全选本合集"}
           </span>
           <input
@@ -111,7 +111,7 @@ export default function MemeDeathMontageCard({
             checked={allSelected}
             disabled={bundleDisabled}
             onChange={(e) => onBundleToggle(e.target.checked)}
-            className="h-6 w-6 cursor-pointer rounded border-2 border-red-400/60 bg-zinc-900 text-red-500 accent-red-500 focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-6 w-6 cursor-pointer rounded border-2 border-red-400/60 bg-zinc-900 text-cs2-red-on-surface accent-red-500 focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </label>
       </div>

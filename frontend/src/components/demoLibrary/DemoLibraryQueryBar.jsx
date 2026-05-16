@@ -27,15 +27,15 @@ export default function DemoLibraryQueryBar({
   hasQuickOrAdvancedFilters,
 }) {
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] pb-2">
+    <div className="flex shrink-0 flex-col gap-2 border-b border-cs2-border pb-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[min(100%,14rem)] flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" />
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />
           <input
             type="search"
             enterKeyHint="search"
             placeholder="文件名 / 展示名"
-            className="w-full rounded-md border border-white/10 bg-cs2-bg-input py-1.5 pl-8 pr-2 font-mono text-[11px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-cs2-orange/40"
+            className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-1.5 pl-8 pr-2 font-mono text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted focus:border-cs2-accent/40"
             value={librarySearchInput}
             onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={(e) => {
@@ -49,7 +49,7 @@ export default function DemoLibraryQueryBar({
         </div>
 
         <select
-          className="rounded-md border border-white/10 bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-cs2-orange/40"
+          className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
           value={libraryAdvFilters.mapName}
           onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, mapName: e.target.value }))}
           aria-label="地图"
@@ -63,7 +63,7 @@ export default function DemoLibraryQueryBar({
         </select>
 
         <select
-          className="rounded-md border border-white/10 bg-cs2-bg-input px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-cs2-orange/40"
+          className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
           value={libraryAdvFilters.status}
           onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, status: e.target.value }))}
           aria-label="状态"
@@ -76,27 +76,27 @@ export default function DemoLibraryQueryBar({
           ))}
         </select>
 
-        <div className="flex items-center gap-1 rounded-md border border-white/10 bg-cs2-bg-input px-1 py-0.5">
-          <Calendar className="h-3 w-3 shrink-0 text-zinc-600" aria-hidden />
+        <div className="flex items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input px-1 py-0.5">
+          <Calendar className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
           <input
             type="date"
-            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[10px] text-zinc-300 outline-none"
+            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateFrom}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateFrom: e.target.value }))}
           />
-          <span className="text-zinc-600">—</span>
+          <span className="text-cs2-text-muted">—</span>
           <input
             type="date"
-            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[10px] text-zinc-300 outline-none"
+            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateTo}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateTo: e.target.value }))}
           />
         </div>
 
         <div className="flex items-center gap-1">
-          <ArrowUpDown className="h-3.5 w-3.5 text-zinc-600" aria-hidden />
+          <ArrowUpDown className="h-3.5 w-3.5 text-cs2-text-muted" aria-hidden />
           <select
-            className="rounded-md border border-white/10 bg-cs2-bg-input px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-cs2-orange/40"
+            className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
             value={sortKey}
             onChange={(e) => {
               const k = e.target.value;
@@ -113,7 +113,7 @@ export default function DemoLibraryQueryBar({
           </select>
           <button
             type="button"
-            className="rounded-md border border-white/10 px-2 py-1.5 font-mono text-[10px] font-semibold text-zinc-400 hover:border-cs2-orange/35 hover:text-zinc-200"
+            className="rounded-md border border-cs2-border px-2 py-1.5 font-mono text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
             title={sortDir === "asc" ? "升序" : "降序"}
             onClick={() => onSortDirChange(sortDir === "asc" ? "desc" : "asc")}
           >
@@ -124,10 +124,10 @@ export default function DemoLibraryQueryBar({
         <button
           type="button"
           onClick={onToggleAdvanced}
-          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] font-semibold transition-colors ${
             advancedOpen
-              ? "border-cs2-orange/45 bg-cs2-orange/10 text-cs2-orange"
-              : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-cs2-orange/35 hover:text-zinc-200"
+              ? "border-cs2-accent/45 bg-cs2-accent/10 text-cs2-accent"
+              : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
           }`}
         >
           <Filter className="h-3.5 w-3.5" />
@@ -139,7 +139,7 @@ export default function DemoLibraryQueryBar({
           <button
             type="button"
             onClick={onClearQuickFilters}
-            className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-500 hover:border-white/20 hover:text-zinc-300"
+            className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-muted hover:border-cs2-border hover:text-cs2-text-secondary"
           >
             <X className="h-3.5 w-3.5" />
             清空筛选

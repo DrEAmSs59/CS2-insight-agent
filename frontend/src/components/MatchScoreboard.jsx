@@ -19,8 +19,8 @@ export default function MatchScoreboard({ matchMeta }) {
   return (
     <div
       className={[
-        "relative overflow-hidden rounded-xl border border-white/[0.08]",
-        "bg-cs2-bg-card shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(255,255,255,0.03)_inset]",
+        "relative overflow-hidden rounded-xl border border-cs2-border",
+        "bg-cs2-bg-card shadow-lg",
       ].join(" ")}
     >
       {/* 顶栏电竞渐变条 */}
@@ -31,7 +31,7 @@ export default function MatchScoreboard({ matchMeta }) {
 
       <div className="px-4 pb-2.5 pt-2 sm:px-6 sm:pb-3 sm:pt-2.5">
         <div className="mb-0.5 flex items-center justify-center gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">
+          <span className="text-[10px] font-black uppercase tracking-[0.25em] text-cs2-text-muted">
             Match Scoreboard
           </span>
         </div>
@@ -63,7 +63,7 @@ export default function MatchScoreboard({ matchMeta }) {
             </span>
             <span
               className={[
-                "select-none text-3xl font-black text-zinc-600 sm:text-4xl",
+                "select-none text-3xl font-black text-cs2-text-muted sm:text-4xl",
                 "drop-shadow-[0_0_12px_rgba(255,255,255,0.08)]",
               ].join(" ")}
             >
@@ -94,15 +94,15 @@ export default function MatchScoreboard({ matchMeta }) {
         </div>
 
         {/* 元数据（无可靠真实开赛时间，不展示日期） */}
-        <div className="mt-2.5 flex flex-col gap-1.5 border-t border-white/[0.06] pt-2 font-mono text-xs text-cs2-text-secondary sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-1">
+        <div className="mt-2.5 flex flex-col gap-1.5 border-t border-cs2-border pt-2 font-mono text-xs text-cs2-text-secondary sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-1">
           <span className="tabular-nums">
-            🎯 回合: <span className="text-zinc-300">{totalRounds}</span>
+            🎯 回合: <span className="text-cs2-text-secondary">{totalRounds}</span>
           </span>
           <span className="tabular-nums">
-            ⏱️ 时长: <span className="text-zinc-400">{durationMins}</span> 分钟
+            ⏱️ 时长: <span className="text-cs2-text-secondary">{durationMins}</span> 分钟
           </span>
           <span className="min-w-0 truncate sm:max-w-none">
-            🗺️ 地图: <span className="text-zinc-300">{mapName}</span>
+            🗺️ 地图: <span className="text-cs2-text-secondary">{mapName}</span>
           </span>
         </div>
       </div>

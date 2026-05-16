@@ -107,15 +107,15 @@ export default function RoundTimelineItem({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="group/round grid w-full grid-cols-[56px_1fr] items-center gap-x-3 rounded-xl border border-white/[0.08] bg-[rgb(22,22,22)]/95 py-2 pl-0 pr-2 text-left transition-colors hover:border-[rgba(255,140,0,0.35)] max-[1279px]:grid-cols-[44px_1fr]"
+        className="group/round grid w-full grid-cols-[56px_1fr] items-center gap-x-3 rounded-xl border border-cs2-border bg-cs2-bg-card/95 py-2 pl-0 pr-2 text-left transition-colors hover:border-cs2-accent/35 max-[1279px]:grid-cols-[44px_1fr]"
       >
         <TimelineNode result={res} targetKills={tk} targetDeaths={td} glow={hovered} />
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-zinc-200">
+          <p className="text-[13px] font-semibold text-cs2-text-primary">
             第 {Number.isFinite(rn) ? rn : "?"} 回合
-            <span className="ml-2 text-[12px] font-normal text-zinc-500">{collapsedSummary}</span>
+            <span className="ml-2 text-[12px] font-normal text-cs2-text-muted">{collapsedSummary}</span>
           </p>
-          <p className="mt-0.5 text-[11px] text-zinc-600">点击展开</p>
+          <p className="mt-0.5 text-[12px] text-cs2-text-muted">点击展开</p>
         </div>
       </button>
     );
@@ -123,7 +123,7 @@ export default function RoundTimelineItem({
 
   return (
     <div
-      className="group/round grid w-full grid-cols-[56px_minmax(0,1fr)_280px] gap-x-3 rounded-xl border border-white/[0.08] bg-[rgb(22,22,22)]/95 py-2 pl-0 pr-2 transition-[border-color,box-shadow] duration-150 hover:border-[rgba(255,140,0,0.42)] hover:shadow-[0_0_0_1px_rgba(255,140,0,0.12)] max-[1279px]:grid-cols-[44px_minmax(0,1fr)]"
+      className="group/round grid w-full grid-cols-[56px_minmax(0,1fr)_280px] gap-x-3 rounded-xl border border-cs2-border bg-cs2-bg-card/95 py-2 pl-0 pr-2 transition-[border-color,box-shadow] duration-150 hover:border-cs2-accent/42 hover:shadow-[0_0_0_1px_rgba(255,140,0,0.12)] max-[1279px]:grid-cols-[44px_minmax(0,1fr)]"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -131,26 +131,26 @@ export default function RoundTimelineItem({
         <TimelineNode result={res} targetKills={tk} targetDeaths={td} glow={hovered} />
       </div>
 
-      <div className="min-w-0 border-r border-white/[0.05] pr-3 max-[1279px]:col-span-1 max-[1279px]:border-r-0 max-[1279px]:pr-0">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 gap-y-1 text-[11px] text-zinc-400">
+      <div className="min-w-0 border-r border-cs2-border pr-3 max-[1279px]:col-span-1 max-[1279px]:border-r-0 max-[1279px]:pr-0">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 gap-y-1 text-[12px] text-cs2-text-secondary">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-bold text-zinc-100">第 {Number.isFinite(rn) ? rn : "?"} 回合</span>
+            <span className="font-bold text-cs2-text-primary">第 {Number.isFinite(rn) ? rn : "?"} 回合</span>
             <span
               className={
                 res === "win"
                   ? "rounded border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-emerald-400"
                   : res === "loss"
                     ? "rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0 text-[10px] font-semibold text-rose-400"
-                    : "rounded border border-white/10 px-1.5 py-0 text-[10px] font-semibold text-zinc-500"
+                    : "rounded border border-cs2-border px-1.5 py-0 text-[10px] font-semibold text-cs2-text-muted"
               }
             >
               {outcomeZh}
             </span>
-            {side ? <span className="font-mono text-[10px] text-zinc-500">{side}</span> : null}
-            <span className="font-mono text-[10px] text-zinc-400">{scoreText}</span>
+            {side ? <span className="font-mono text-[10px] text-cs2-text-muted">{side}</span> : null}
+            <span className="font-mono text-[10px] text-cs2-text-secondary">{scoreText}</span>
           </div>
           {st != null && en != null ? (
-            <span className="shrink-0 font-mono text-[10px] text-zinc-600">
+            <span className="shrink-0 font-mono text-[10px] text-cs2-text-muted">
               tick {st} → {en}
             </span>
           ) : null}
@@ -160,7 +160,7 @@ export default function RoundTimelineItem({
           {events.map((ev) => (
             <div
               key={String(ev?.id || `${ev?.tick}-${ev?.type}`)}
-              className="rounded-md transition-colors duration-150 group-hover/round:bg-white/[0.04]"
+              className="rounded-md transition-colors duration-150 group-hover/round:bg-cs2-bg-hover"
             >
               <KillfeedEventRow
                 event={ev}
@@ -180,14 +180,14 @@ export default function RoundTimelineItem({
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-500 hover:text-zinc-300"
+          className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-cs2-text-muted hover:text-cs2-text-secondary"
         >
           <ChevronDown className="h-3.5 w-3.5 rotate-180" />
           收起本回合
         </button>
       </div>
 
-      <div className="min-w-0 max-[1279px]:col-span-2 max-[1279px]:mt-3 max-[1279px]:border-t max-[1279px]:border-white/[0.06] max-[1279px]:pt-3">
+      <div className="min-w-0 max-[1279px]:col-span-2 max-[1279px]:mt-3 max-[1279px]:border-t max-[1279px]:border-cs2-border max-[1279px]:pt-3">
         <RoundSummaryPanel
           kills={tk}
           deaths={td}

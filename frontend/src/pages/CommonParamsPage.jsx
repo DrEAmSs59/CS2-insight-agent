@@ -1,5 +1,6 @@
 import CommonParamsModal from "../components/CommonParamsModal";
 import { useAppShell } from "../context/AppShellContext";
+import PageContainer from "../components/PageContainer";
 
 export default function CommonParamsPage() {
   const s = useAppShell();

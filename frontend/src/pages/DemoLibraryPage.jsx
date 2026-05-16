@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import axios from "axios";
 import { LayoutGrid, List } from "lucide-react";
+import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import DemoAdvancedFilters from "../components/demoLibrary/DemoAdvancedFilters";
@@ -228,7 +229,7 @@ export default function DemoLibraryPage() {
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden px-4 py-3 sm:px-5">
+    <PageContainer className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
         onScan={() => void s.handleScanDemos()}
@@ -263,12 +264,12 @@ export default function DemoLibraryPage() {
         <DemoAdvancedFilters libraryAdvFilters={s.libraryAdvFilters} setLibraryAdvFilters={s.setLibraryAdvFilters} />
       ) : null}
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-white/[0.07] bg-cs2-bg-card/80">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
         <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
           {s.libraryLoading ? (
-            <div className="flex h-32 items-center justify-center text-zinc-500 text-sm">加载中...</div>
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">加载中...</div>
           ) : filteredRows.length === 0 ? (
-            <div className="flex h-32 items-center justify-center text-zinc-500 text-sm">{emptyMessage || "暂无 Demo"}</div>
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{emptyMessage || "暂无 Demo"}</div>
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredRows.map((it) => (
@@ -318,7 +319,7 @@ export default function DemoLibraryPage() {
           )}
         </div>
 
-        <div className="flex shrink-0 justify-end border-t border-white/[0.06] px-2 py-1.5">
+        <div className="flex shrink-0 justify-end border-t border-cs2-border px-2 py-1.5">
           <DemoPagination
             libraryPage={s.libraryPage}
             libraryTotalPages={s.libraryTotalPages}
@@ -343,41 +344,41 @@ export default function DemoLibraryPage() {
 
       {s.libraryDeletePrompt ? (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-page/85 px-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="library-delete-title"
           onClick={() => s.setLibraryDeletePrompt(null)}
         >
           <div
-            className="w-full max-w-md rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
+            className="w-full max-w-md rounded-lg border border-cs2-border bg-cs2-bg-card p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-zinc-300">
+            <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
               从 Demo 库删除
             </h4>
-            <p className="mb-3 font-mono text-[11px] text-zinc-400">{s.libraryDeletePrompt.label}</p>
-            <p className="mb-3 text-[10px] leading-relaxed text-cs2-text-secondary">
+            <p className="mb-3 font-mono text-[12px] text-cs2-text-secondary">{s.libraryDeletePrompt.label}</p>
+            <p className="mb-3 text-[11px] leading-relaxed text-cs2-text-secondary">
               仅移除本地库中的记录与解析缓存，不会删除磁盘上的 .dem 文件。请选择删除之后再次扫描时的行为：
             </p>
             <div className="flex flex-col gap-2">
               <button
                 type="button"
-                className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-emerald-200/95 hover:bg-emerald-500/20"
+                className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-cs2-emerald-on-surface hover:bg-emerald-500/20"
                 onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "reimport")}
               >
                 删除后再次扫描仍入库
-                <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
+                <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
                   下次扫描会重新加入库中，入库时间为扫描时刻。
                 </span>
               </button>
               <button
                 type="button"
-                className="rounded border border-white/15 px-3 py-2 text-left text-[11px] leading-snug text-zinc-300 hover:bg-white/[0.06]"
+                className="rounded border border-cs2-border px-3 py-2 text-left text-[11px] leading-snug text-cs2-text-secondary hover:bg-cs2-bg-input/50"
                 onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "skip")}
               >
                 删除后再次扫描不再入库
-                <span className="mt-0.5 block text-[10px] font-normal text-zinc-500">
+                <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
                   之后目录监听与手动扫描都会跳过该路径；仅改文件名或移动文件可视为新路径再入库。
                 </span>
               </button>
@@ -385,7 +386,7 @@ export default function DemoLibraryPage() {
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
-                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
                 onClick={() => s.setLibraryDeletePrompt(null)}
               >
                 取消
@@ -405,25 +406,25 @@ export default function DemoLibraryPage() {
 
       {s.libraryRename ? (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-page/85 px-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="library-rename-title"
           onClick={() => s.setLibraryRename(null)}
         >
           <div
-            className="w-full max-w-sm rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
+            className="w-full max-w-sm rounded-lg border border-cs2-border bg-cs2-bg-card p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h4 id="library-rename-title" className="mb-2 text-xs font-semibold text-zinc-300">
+            <h4 id="library-rename-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
               Demo 展示名
             </h4>
-            <p className="mb-2 text-[10px] leading-relaxed text-cs2-text-secondary">
+            <p className="mb-2 text-[11px] leading-relaxed text-cs2-text-secondary">
               仅保存在本地库中，不修改磁盘上的 .dem 文件名。留空并保存则恢复为文件名显示。
             </p>
             <input
               type="text"
-              className="mb-3 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-cs2-orange/50"
+              className="mb-3 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/50"
               value={s.libraryRename.draft}
               onChange={(e) => s.setLibraryRename((prev) => (prev ? { ...prev, draft: e.target.value } : null))}
               maxLength={512}
@@ -432,14 +433,14 @@ export default function DemoLibraryPage() {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
                 onClick={() => s.setLibraryRename(null)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded border border-cs2-orange/50 bg-cs2-orange/15 px-2 py-1 text-[11px] font-semibold text-cs2-orange hover:bg-cs2-orange/25"
+                className="rounded border border-cs2-accent/50 bg-cs2-accent/15 px-2 py-1 text-[11px] font-semibold text-cs2-accent hover:bg-cs2-accent/25"
                 onClick={() => void s.handleSaveLibraryRename()}
               >
                 保存
@@ -465,6 +466,6 @@ export default function DemoLibraryPage() {
         onIngest={handleBatchIngest}
         onUpload={s.handleUpload}
       />
-    </div>
+    </PageContainer>
   );
 }
