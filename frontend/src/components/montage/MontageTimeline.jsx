@@ -28,13 +28,13 @@ export default function MontageTimeline({
   }, 0);
 
   return (
-    <div className="flex h-full min-h-[200px] flex-col rounded-lg border border-white/10 bg-black/25">
-      <div className="border-b border-white/10 px-3 py-2">
-        <p className="text-[11px] font-semibold text-zinc-200">
+    <div className="flex h-full min-h-[200px] flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/40">
+      <div className="border-b border-cs2-border px-3 py-2">
+        <p className="text-[12px] font-semibold text-cs2-text-primary">
           当前合辑：{clips.length} 个片段 · 预计 {formatMontageEstimate(knownDur, clips.length)}
         </p>
         {unknownDurationHint ? (
-          <p className="mt-1 text-[10px] text-amber-200/80">{unknownDurationHint}</p>
+          <p className="mt-1 text-[11px] text-cs2-amber-on-surface">{unknownDurationHint}</p>
         ) : null}
         <div className="mt-2 flex flex-wrap gap-1.5">
           {SORT_OPTIONS.map((s) => (
@@ -42,7 +42,7 @@ export default function MontageTimeline({
               key={s.id}
               type="button"
               onClick={() => onSort?.(s.id)}
-              className="rounded border border-white/10 bg-black/40 px-2 py-1 text-[10px] text-zinc-400 hover:border-cs2-orange/35 hover:text-zinc-200"
+              className="rounded border border-cs2-border bg-cs2-bg-input/70 px-2 py-1 text-[10px] text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
             >
               {s.label}
             </button>
@@ -51,8 +51,8 @@ export default function MontageTimeline({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {clips.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-white/15 bg-black/30 px-3 py-8 text-center text-[11px] leading-relaxed text-zinc-500">
-            <p className="font-medium text-zinc-400">还没有加入片段</p>
+          <div className="rounded-lg border border-dashed border-cs2-border bg-cs2-bg-input/50 px-3 py-8 text-center text-[12px] leading-relaxed text-cs2-text-muted">
+            <p className="font-medium text-cs2-text-secondary">还没有加入片段</p>
             <p className="mt-2">从左侧素材库选择高光、下饭或梗死亡片段加入合辑。</p>
           </div>
         ) : (
@@ -69,10 +69,10 @@ export default function MontageTimeline({
               return (
                 <li
                   key={clip.id}
-                  className="rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-[11px]"
+                  className="rounded-lg border border-cs2-border bg-cs2-bg-input/70 px-3 py-2 text-[12px]"
                 >
                   <div className="flex items-start gap-2">
-                    <span className="w-6 shrink-0 font-mono text-[10px] text-zinc-500">{String(idx + 1).padStart(2, "0")}</span>
+                    <span className="w-6 shrink-0 font-mono text-[10px] text-cs2-text-muted">{String(idx + 1).padStart(2, "0")}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
@@ -80,14 +80,14 @@ export default function MontageTimeline({
                         >
                           {tag}
                         </span>
-                        <span className="text-zinc-400">{line2}</span>
+                        <span className="text-cs2-text-secondary">{line2}</span>
                       </div>
-                      <p className="mt-1 text-zinc-200">{title}</p>
+                      <p className="mt-1 text-cs2-text-primary">{title}</p>
                     </div>
                     <div className="flex shrink-0 flex-col gap-0.5">
                       <button
                         type="button"
-                        className="rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-white"
+                        className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
                         onClick={() => onMoveUp?.(clip.id)}
                         aria-label="上移"
                       >
@@ -95,7 +95,7 @@ export default function MontageTimeline({
                       </button>
                       <button
                         type="button"
-                        className="rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-white"
+                        className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
                         onClick={() => onMoveDown?.(clip.id)}
                         aria-label="下移"
                       >
@@ -103,7 +103,7 @@ export default function MontageTimeline({
                       </button>
                       <button
                         type="button"
-                        className="rounded p-1 text-zinc-500 hover:bg-red-400/80 hover:text-white"
+                        className="rounded p-1 text-cs2-text-muted hover:bg-red-400/80 hover:text-cs2-text-primary"
                         onClick={() => onRemove?.(clip.id)}
                         aria-label="移除"
                       >

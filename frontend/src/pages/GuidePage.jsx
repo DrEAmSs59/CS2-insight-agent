@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import PageContainer from "../components/PageContainer";
 import {
   BookOpen,
   Clapperboard,
@@ -23,9 +24,9 @@ import {
 // ─── Setup checklist ────────────────────────────────────────────
 
 function StatusDot({ ok, loading }) {
-  if (loading) return <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />;
-  if (ok) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
-  return <XCircle className="h-4 w-4 text-red-400" />;
+  if (loading) return <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />;
+  if (ok) return <CheckCircle2 className="h-4 w-4 text-cs2-text-success" />;
+  return <XCircle className="h-4 w-4 text-cs2-text-error" />;
 }
 
 const SETUP_ITEMS = [
@@ -102,13 +103,13 @@ function SetupChecklist() {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+        <h2 className="text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
           配置核查清单
         </h2>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:opacity-50"
+          className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-secondary disabled:opacity-50"
         >
           <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
           刷新
@@ -116,7 +117,7 @@ function SetupChecklist() {
       </div>
 
       {allRequired && !loading && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-300">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-cs2-emerald-surface bg-cs2-emerald-surface px-3 py-2 text-[12px] text-cs2-emerald-on-surface">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           必需配置已全部就绪，可以开始录制了！
         </div>
@@ -130,10 +131,10 @@ function SetupChecklist() {
               key={key}
               className={`rounded-xl border px-4 py-3 transition-colors ${
                 ok
-                  ? "border-emerald-500/20 bg-emerald-500/5"
+                  ? "border-cs2-emerald-surface bg-cs2-emerald-surface"
                   : required
-                  ? "border-red-500/20 bg-red-500/5"
-                  : "border-white/8 bg-cs2-bg-card/70"
+                  ? "border-cs2-rose-surface bg-cs2-rose-surface"
+                  : "border-cs2-border bg-cs2-bg-card"
               }`}
             >
               <div className="flex items-start gap-3">
@@ -142,22 +143,22 @@ function SetupChecklist() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-semibold text-white">{label}</span>
+                    <span className="text-[13px] font-semibold text-cs2-text-primary">{label}</span>
                     <span
-                      className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                      className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
                         required
-                          ? "bg-cs2-orange/20 text-cs2-orange"
-                          : "bg-zinc-700/60 text-zinc-400"
+                          ? "bg-cs2-accent/20 text-cs2-accent"
+                          : "bg-cs2-bg-input text-cs2-text-secondary"
                       }`}
                     >
                       {required ? "必需" : "可选"}
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{desc}</p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">{desc}</p>
                   {!ok && (
                     <Link
                       to={to}
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-cs2-orange hover:underline"
+                      className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-cs2-accent hover:underline"
                     >
                       前往 {linkLabel} 配置
                       <ArrowRight className="h-3 w-3" />
@@ -185,18 +186,18 @@ const STEPS = [
 function QuickStart() {
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         快速上手
       </h2>
       <div className="flex flex-wrap gap-2">
         {STEPS.map(({ step, text }, i) => (
           <div key={step} className="flex items-center gap-2">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-orange/20 font-mono text-[11px] font-bold text-cs2-orange">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-accent/20 font-mono text-[11px] font-bold text-cs2-accent">
               {step}
             </div>
-            <span className="text-[12px] text-zinc-300">{text}</span>
+            <span className="text-[12px] text-cs2-text-secondary">{text}</span>
             {i < STEPS.length - 1 && (
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
             )}
           </div>
         ))}
@@ -221,7 +222,7 @@ const NAV_CARDS = [
 function FeatureCards() {
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         功能入口
       </h2>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -229,14 +230,14 @@ function FeatureCards() {
           <Link
             key={to}
             to={to}
-            className="group flex items-center gap-3 rounded-xl border border-white/8 bg-cs2-bg-card/80 px-3 py-3 transition-colors hover:border-cs2-orange/30 hover:bg-cs2-bg-card"
+            className="group flex items-center gap-3 rounded-xl border border-cs2-border bg-cs2-bg-card px-4 py-3 transition-colors hover:border-cs2-accent/30 hover:bg-cs2-bg-hover"
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-orange/12 text-cs2-orange transition-colors group-hover:bg-cs2-orange/22">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent/12 text-cs2-accent transition-colors group-hover:bg-cs2-accent/22">
               <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-[12px] font-bold text-white">{label}</p>
-              <p className="truncate text-[11px] text-zinc-500">{desc}</p>
+              <p className="text-[12px] font-bold text-cs2-text-primary">{label}</p>
+              <p className="truncate text-[12px] text-cs2-text-muted">{desc}</p>
             </div>
           </Link>
         ))}
@@ -360,35 +361,35 @@ function FaqAccordion() {
 
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         常见问题 FAQ
       </h2>
-      <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-cs2-bg-card/60">
+      <div className="divide-y divide-cs2-border-subtle rounded-xl border border-cs2-border bg-cs2-bg-card">
         {FAQ_ITEMS.map(({ q, a }, i) => {
           const open = openIdx === i;
           return (
             <div key={i}>
               <button
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/[0.03]"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-cs2-bg-hover"
                 onClick={() => setOpenIdx(open ? null : i)}
               >
-                <span className="text-[12px] font-semibold text-zinc-200">{q}</span>
+                <span className="text-[12px] font-semibold text-cs2-text-primary">{q}</span>
                 {open ? (
-                  <ChevronUp className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <ChevronUp className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
                 ) : (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
                 )}
               </button>
               {open && (
-                <div className="border-t border-white/6 px-4 py-3">
+                <div className="border-t border-cs2-border-subtle px-4 py-3">
                   {Array.isArray(a) ? (
-                    <ul className="list-inside list-disc space-y-1.5 text-[12px] leading-relaxed text-zinc-400 marker:text-zinc-600">
+                    <ul className="list-inside list-disc space-y-1.5 text-[12px] leading-relaxed text-cs2-text-secondary marker:text-cs2-text-muted">
                       {a.map((line, j) => (
                         <li key={j}>{line}</li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-[12px] leading-relaxed text-zinc-400">{a}</p>
+                    <p className="text-[12px] leading-relaxed text-cs2-text-secondary">{a}</p>
                   )}
                 </div>
               )}
@@ -404,27 +405,29 @@ function FaqAccordion() {
 
 export default function GuidePage() {
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto px-4 py-4 sm:px-5">
-      {/* header */}
-      <div className="mb-5 shrink-0 border-b border-white/10 pb-4">
-        <div className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-cs2-orange" />
-          <h1 className="text-xl font-bold text-white">上手指南</h1>
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto">
+      <PageContainer>
+        {/* header */}
+        <div className="mb-5 shrink-0 border-b border-cs2-border pb-4">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-5 w-5 text-cs2-accent" />
+            <h1 className="text-xl font-bold text-cs2-text-primary">上手指南</h1>
+          </div>
+          <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-cs2-text-muted">
+            第一次使用？按照下方清单完成配置，然后拖入 Demo 开始解析录制。
+          </p>
         </div>
-        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
-          第一次使用？按照下方清单完成配置，然后拖入 Demo 开始解析录制。
-        </p>
-      </div>
 
-      <div className="flex flex-col gap-7">
-        <QuickStart />
-        <SetupChecklist />
-        <FeatureCards />
-        <FaqAccordion />
-      </div>
+        <div className="flex flex-col gap-7">
+          <QuickStart />
+          <SetupChecklist />
+          <FeatureCards />
+          <FaqAccordion />
+        </div>
 
-      {/* footer padding */}
-      <div className="h-6 shrink-0" />
+        {/* footer padding */}
+        <div className="h-6 shrink-0" />
+      </PageContainer>
     </div>
   );
 }

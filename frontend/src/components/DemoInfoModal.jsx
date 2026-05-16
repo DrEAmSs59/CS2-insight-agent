@@ -294,44 +294,44 @@ export default function DemoInfoModal({
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-md"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="flex h-full max-h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-cs2-bg-card shadow-2xl">
+      <div className="flex h-full max-h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-cs2-border px-6 py-4">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 mb-1">
+            <div className="flex items-center gap-2 text-xs font-medium text-cs2-text-muted mb-1">
               <span className="truncate max-w-[200px]">{demoData?.filename || "Demo 解析"}</span>
               {matchMeta.map_name && <span>• {matchMeta.map_name}</span>}
             </div>
-            <h2 className="text-lg font-black text-white uppercase tracking-tight truncate">
-              {matchMeta.team_a_name || "Team A"} <span className="text-cs2-orange mx-1">vs</span> {matchMeta.team_b_name || "Team B"}
+            <h2 className="text-lg font-black text-cs2-text-primary uppercase tracking-tight truncate">
+              {matchMeta.team_a_name || "Team A"} <span className="text-cs2-accent mx-1">vs</span> {matchMeta.team_b_name || "Team B"}
             </h2>
           </div>
           
           <div className="flex items-center gap-6 ml-4">
             {matchMeta.team_a_score != null && (
-              <div className="flex items-center gap-3 bg-black/30 rounded-lg px-4 py-2 border border-white/5">
-                <span className="text-2xl font-black text-cs2-orange tabular-nums">{matchMeta.team_a_score}</span>
-                <div className="h-4 w-[1px] bg-white/10" />
-                <span className="text-2xl font-black text-cs2-orange tabular-nums">{matchMeta.team_b_score}</span>
+              <div className="flex items-center gap-3 bg-cs2-bg-input/50 rounded-lg px-4 py-2 border border-cs2-border">
+                <span className="text-2xl font-black text-cs2-accent tabular-nums">{matchMeta.team_a_score}</span>
+                <div className="h-4 w-[1px] bg-cs2-border" />
+                <span className="text-2xl font-black text-cs2-accent tabular-nums">{matchMeta.team_b_score}</span>
               </div>
             )}
-            <button onClick={onClose} className="rounded-full p-2 text-zinc-500 hover:bg-white/10 hover:text-white transition-colors">
+            <button onClick={onClose} className="rounded-full p-2 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary transition-colors">
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
         {/* Content area */}
-        <div className="flex-1 overflow-y-auto bg-cs2-bg-dark/30 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto bg-cs2-bg-page/30 custom-scrollbar">
           {loading ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 py-20">
-              <Loader2 className="h-10 w-10 animate-spin text-cs2-orange" />
-              <p className="text-sm font-medium text-zinc-400">正在读取 Demo 玩家信息...</p>
+              <Loader2 className="h-10 w-10 animate-spin text-cs2-accent" />
+              <p className="text-sm font-medium text-cs2-text-secondary">正在读取 Demo 玩家信息...</p>
             </div>
           ) : (
             <div className="p-6 space-y-6">
@@ -339,17 +339,17 @@ export default function DemoInfoModal({
               <div className="grid grid-cols-1 gap-6">
                 {matchMeta.map_name && <MatchScoreboard matchMeta={matchMeta} />}
                 
-                <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <div className="flex items-center gap-2 border-b border-cs2-border pb-2">
                    <button 
                      onClick={() => setTab("parse")}
-                     className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all ${tab === "parse" ? "bg-cs2-orange text-black" : "text-zinc-500 hover:text-zinc-300"}`}
+                     className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all ${tab === "parse" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
                      1. 选择玩家解析
                    </button>
                    <button 
                      onClick={() => setTab("clips")}
                      disabled={!parsedPlayerNames.length}
-                     className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "clips" ? "bg-cs2-orange text-black" : "text-zinc-500 hover:text-zinc-300"}`}
+                     className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "clips" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
                      2. 检视高光片段 {parsedPlayerNames.length > 0 && `(${selectableTotal})`}
                    </button>
@@ -396,7 +396,7 @@ export default function DemoInfoModal({
         </div>
 
         {/* Footer actions */}
-        <div className="border-t border-white/10 bg-cs2-bg-card p-4">
+        <div className="border-t border-cs2-border bg-cs2-bg-card p-4">
           <div className="flex flex-col gap-3">
              {tab === "clips" && parsedPlayerNames.length > 0 && (
                <ActionBar
@@ -415,10 +415,10 @@ export default function DemoInfoModal({
              )}
              
              {progressText && (
-               <div className={`flex items-center gap-2 rounded-lg bg-black/40 px-4 py-2 text-[11px] border ${
+               <div className={`flex items-center gap-2 rounded-lg bg-cs2-bg-input/70 px-4 py-2 text-[12px] border ${
                  progressText.includes("队列") || progressText.includes("完成") || progressText.includes("成功")
-                   ? "text-emerald-400 border-emerald-500/20"
-                   : "text-cs2-orange border-cs2-orange/20 animate-pulse"
+                   ? "text-cs2-text-success border-cs2-emerald-surface"
+                   : "text-cs2-accent border-cs2-accent/20 animate-pulse"
                }`}>
                  {progressText.includes("队列") || progressText.includes("完成") || progressText.includes("成功") ? (
                    <CheckCircle2 className="h-3.5 w-3.5" />

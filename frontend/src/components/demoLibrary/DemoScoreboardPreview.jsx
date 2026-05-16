@@ -65,43 +65,43 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
   const hasRoster = teams.playersCount > 0 && !loading;
 
   return (
-    <div className="border-l-2 border-cs2-orange/35 bg-[#0d0d10]/95 py-2 pl-3 pr-2 shadow-inner">
+    <div className="border-l-2 border-cs2-accent/35 bg-cs2-bg-page/95 py-2 pl-3 pr-2 shadow-inner">
       <div className="flex max-h-[240px] min-h-[180px] flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-white/[0.06] pb-2 text-[10px] text-zinc-500">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-cs2-border pb-2 text-[11px] text-cs2-text-muted">
           <span>
-            <span className="text-zinc-600">地图</span>{" "}
-            <span className="font-mono text-zinc-300">{header.map}</span>
+            <span className="text-cs2-text-muted">地图</span>{" "}
+            <span className="font-mono text-cs2-text-secondary">{header.map}</span>
           </span>
           <span>
-            <span className="text-zinc-600">比分</span>{" "}
-            <span className="font-mono font-semibold text-cs2-orange">{header.score}</span>
+            <span className="text-cs2-text-muted">比分</span>{" "}
+            <span className="font-mono font-semibold text-cs2-accent">{header.score}</span>
           </span>
           <span>
-            <span className="text-zinc-600">回合</span>{" "}
-            <span className="font-mono text-zinc-300">{header.rounds}</span>
+            <span className="text-cs2-text-muted">回合</span>{" "}
+            <span className="font-mono text-cs2-text-secondary">{header.rounds}</span>
           </span>
           <span>
-            <span className="text-zinc-600">时长</span>{" "}
-            <span className="font-mono text-zinc-300">{header.duration}</span>
+            <span className="text-cs2-text-muted">时长</span>{" "}
+            <span className="font-mono text-cs2-text-secondary">{header.duration}</span>
           </span>
           <span>
-            <span className="text-zinc-600">入库</span>{" "}
-            <span className="font-mono text-zinc-300">{header.date}</span>
+            <span className="text-cs2-text-muted">入库</span>{" "}
+            <span className="font-mono text-cs2-text-secondary">{header.date}</span>
           </span>
           <span>
-            <span className="text-zinc-600">状态</span>{" "}
-            <span className="rounded border border-white/10 bg-white/[0.04] px-1 py-0.5 font-semibold text-zinc-300">
+            <span className="text-cs2-text-muted">状态</span>{" "}
+            <span className="rounded border border-cs2-border bg-cs2-bg-hover px-1 py-0.5 font-semibold text-cs2-text-secondary">
               {header.statusLabel}
             </span>
           </span>
         </div>
 
         {loading ? (
-          <div className="flex flex-1 items-center justify-center py-6 text-[11px] text-zinc-500">加载比分板…</div>
+          <div className="flex flex-1 items-center justify-center py-6 text-[12px] text-cs2-text-muted">加载比分板…</div>
         ) : null}
 
         {!loading && !hasRoster ? (
-          <div className="flex flex-1 items-center justify-center py-6 text-center text-[11px] leading-relaxed text-zinc-500">
+          <div className="flex flex-1 items-center justify-center py-6 text-center text-[12px] leading-relaxed text-cs2-text-muted">
             暂无比分板数据，请先解析该 Demo
           </div>
         ) : null}

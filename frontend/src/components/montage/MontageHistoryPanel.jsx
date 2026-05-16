@@ -92,7 +92,7 @@ function InlineRename({ current, onSave, onCancel }) {
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") onCancel(); }}
       onClick={(e) => e.stopPropagation()}
-      className="w-full rounded border border-cs2-orange/70 bg-black/50 px-2 py-0.5 text-[13px] font-semibold text-white outline-none focus:border-cs2-orange"
+      className="w-full rounded border border-cs2-accent/70 bg-cs2-bg-input/80 px-2 py-0.5 text-[13px] font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent"
       maxLength={120}
     />
   );
@@ -107,23 +107,23 @@ function ClipPill({ clip }) {
   const player = clip.player_name;
   const dur = clip.duration_sec ? `${clip.duration_sec.toFixed(1)}s` : null;
   const colorMap = {
-    highlight: "bg-cs2-orange/15 text-cs2-orange border-cs2-orange/30",
+    highlight: "bg-cs2-accent/15 text-cs2-accent border-cs2-accent/30",
     fail: "bg-blue-500/10 text-blue-300 border-blue-500/20",
     meme_death: "bg-purple-500/10 text-purple-300 border-purple-500/20",
     compilation: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
   };
-  const cls = colorMap[category] ?? "bg-white/[0.05] text-zinc-400 border-white/10";
+  const cls = colorMap[category] ?? "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border";
 
   return (
     <div className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] ${cls}`}>
       <span className="font-semibold">{categoryLabel(category)}</span>
-      <span className="text-zinc-500">·</span>
+      <span className="text-cs2-text-muted">·</span>
       <span>{map}</span>
-      {kills != null && <><span className="text-zinc-500">·</span><span>{kills}K</span></>}
-      {player && <><span className="text-zinc-500">·</span><span className="max-w-[64px] truncate opacity-70">{player}</span></>}
-      {dur && <><span className="text-zinc-500">·</span><span className="opacity-60">{dur}</span></>}
+      {kills != null && <><span className="text-cs2-text-muted">·</span><span>{kills}K</span></>}
+      {player && <><span className="text-cs2-text-muted">·</span><span className="max-w-[64px] truncate opacity-70">{player}</span></>}
+      {dur && <><span className="text-cs2-text-muted">·</span><span className="opacity-60">{dur}</span></>}
       {tags.slice(0, 2).map((t) => (
-        <span key={t} className="ml-0.5 rounded bg-white/[0.06] px-1 text-[9px] text-zinc-500">{t}</span>
+        <span key={t} className="ml-0.5 rounded bg-cs2-bg-input/50 px-1 text-[9px] text-cs2-text-muted">{t}</span>
       ))}
     </div>
   );
@@ -148,12 +148,12 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
     <div
       className={`rounded-xl border transition-colors ${
         selected
-          ? "border-cs2-orange/40 bg-cs2-orange/5"
+          ? "border-cs2-accent/40 bg-cs2-accent/5"
           : ok
-            ? "border-white/[0.07] bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.035]"
+            ? "border-cs2-border bg-cs2-bg-hover hover:border-cs2-border hover:bg-cs2-bg-hover"
             : isErr
-              ? "border-red-500/20 bg-red-950/10"
-              : "border-white/[0.05] bg-white/[0.015]"
+              ? "border-red-500/20 bg-cs2-red-surface"
+              : "border-cs2-border bg-cs2-bg-hover"
       }`}
     >
       {/* 头部 */}
@@ -170,7 +170,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
         {/* 状态图标 */}
         <div className="mt-0.5 shrink-0">
           {running ? (
-            <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
+            <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />
           ) : ok ? (
             <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           ) : (
@@ -188,21 +188,21 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
             />
           ) : (
             <p
-              className="cursor-text truncate text-[13px] font-semibold text-zinc-100"
+              className="cursor-text truncate text-[13px] font-semibold text-cs2-text-primary"
               title="双击重命名"
               onDoubleClick={() => setRenaming(true)}
             >
               {displayName}
             </p>
           )}
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-cs2-text-muted">
             <span className="flex items-center gap-1">
               <Clock className="h-2.5 w-2.5" />
               {formatDateTime(item.created_at)}
             </span>
             {clips.length > 0 && <span>{clips.length} 段</span>}
             {themeLabel && (
-              <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-400">{themeLabel}</span>
+              <span className="rounded bg-cs2-bg-input/50 px-1.5 py-0.5 text-cs2-text-secondary">{themeLabel}</span>
             )}
             {hasBgm && (
               <span className="flex items-center gap-0.5">
@@ -217,7 +217,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
             )}
           </div>
           {tSummary && (
-            <p className="mt-0.5 text-[10px] text-zinc-600">转场：{tSummary}</p>
+            <p className="mt-0.5 text-[11px] text-cs2-text-muted">转场：{tSummary}</p>
           )}
         </div>
 
@@ -228,7 +228,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
               type="button"
               title="打开文件夹"
               onClick={() => onOpenFolder(dirname(item.output_path))}
-              className="rounded p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              className="rounded p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
             >
               <FolderOpen className="h-3.5 w-3.5" />
             </button>
@@ -237,7 +237,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
             type="button"
             title="删除"
             onClick={() => onDelete([item.id])}
-            className="rounded p-1.5 text-zinc-600 hover:bg-red-500/10 hover:text-red-400"
+            className="rounded p-1.5 text-cs2-text-muted hover:bg-red-500/10 hover:text-red-400"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -246,7 +246,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
 
       {/* 片段时间线 */}
       {clips.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-t border-white/[0.04] px-4 py-2">
+        <div className="flex flex-wrap gap-1.5 border-t border-cs2-border px-4 py-2">
           {clips.map((clip, i) => (
             <ClipPill key={clip.id ?? i} clip={clip} />
           ))}
@@ -260,33 +260,33 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
 function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#18181c] p-5 shadow-2xl">
-        <h3 className="mb-2 text-[14px] font-bold text-white">确认删除</h3>
-        <p className="mb-1 text-[12px] text-zinc-300">
-          将删除 <span className="font-semibold text-cs2-orange">{count}</span> 条历史记录。
+      <div className="w-full max-w-sm rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-2xl">
+        <h3 className="mb-2 text-[14px] font-bold text-cs2-text-primary">确认删除</h3>
+        <p className="mb-1 text-[12px] text-cs2-text-secondary">
+          将删除 <span className="font-semibold text-cs2-accent">{count}</span> 条历史记录。
         </p>
-        <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mb-4 text-[12px] leading-relaxed text-cs2-text-muted">
           同时勾选「删除磁盘文件」将把对应的 .mp4 文件从硬盘中删除，<span className="text-red-400">此操作不可恢复</span>。
         </p>
         <div className="flex gap-3">
           <button
             type="button"
             onClick={() => onConfirm(false)}
-            className="flex-1 rounded-lg border border-white/10 py-2 text-[12px] font-semibold text-zinc-300 hover:bg-white/[0.06]"
+            className="flex-1 rounded-lg border border-cs2-border py-2 text-[12px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-input/50"
           >
             仅删除记录
           </button>
           <button
             type="button"
             onClick={() => onConfirm(true)}
-            className="flex-1 rounded-lg bg-red-600 py-2 text-[12px] font-semibold text-white hover:bg-red-500"
+            className="flex-1 rounded-lg bg-red-600 py-2 text-[12px] font-semibold text-cs2-text-primary hover:bg-red-500"
           >
             同时删除文件
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-white/10 px-4 py-2 text-[12px] text-zinc-500 hover:text-zinc-300"
+            className="rounded-lg border border-cs2-border px-4 py-2 text-[12px] text-cs2-text-muted hover:text-cs2-text-secondary"
           >
             取消
           </button>
@@ -392,36 +392,36 @@ export default function MontageHistoryPanel({ open, onClose }) {
       {/* Dialog */}
       <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6">
         <div
-          className="flex h-full max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111114] shadow-2xl"
+          className="flex h-full max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           {/* 头部 */}
-          <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-6 py-4">
-            <Film className="h-5 w-5 shrink-0 text-cs2-orange" />
+          <header className="flex shrink-0 items-center gap-3 border-b border-cs2-border px-6 py-4">
+            <Film className="h-5 w-5 shrink-0 text-cs2-accent" />
             <div className="flex-1">
-              <h2 className="text-[15px] font-bold text-white">合集历史</h2>
-              <p className="text-[11px] text-zinc-500">共 {total} 条记录 · 双击名称可重命名</p>
+              <h2 className="text-[15px] font-bold text-cs2-text-primary">合集历史</h2>
+              <p className="text-[12px] text-cs2-text-muted">共 {total} 条记录 · 双击名称可重命名</p>
             </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />}
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />}
             <button
               type="button"
               onClick={() => load(page)}
               title="刷新"
-              className="rounded-lg p-2 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
             >
               <RefreshCw className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-2 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+              className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
             >
               <X className="h-4 w-4" />
             </button>
           </header>
 
           {/* 批量操作栏 */}
-          <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.04] px-6 py-2">
+          <div className="flex shrink-0 items-center gap-3 border-b border-cs2-border px-6 py-2">
             <input
               type="checkbox"
               checked={allSelected}
@@ -429,14 +429,14 @@ export default function MontageHistoryPanel({ open, onClose }) {
               onChange={toggleSelectAll}
               className="h-3.5 w-3.5 accent-cs2-orange"
             />
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-[12px] text-cs2-text-muted">
               {someSelected ? `已选 ${selectedIds.size} 条` : "全选"}
             </span>
             {someSelected && (
               <button
                 type="button"
                 onClick={() => requestDelete([...selectedIds])}
-                className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-1.5 text-[11px] font-semibold text-red-300 hover:bg-red-900/40"
+                className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-cs2-red-surface px-3 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:bg-red-900/40"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 删除选中 ({selectedIds.size})
@@ -447,11 +447,11 @@ export default function MontageHistoryPanel({ open, onClose }) {
           {/* 列表 */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
             {loading && items.length === 0 ? (
-              <div className="flex h-40 items-center justify-center text-zinc-600">
+              <div className="flex h-40 items-center justify-center text-cs2-text-muted">
                 <Loader2 className="h-6 w-6 animate-spin" />
               </div>
             ) : items.length === 0 ? (
-              <div className="flex h-40 flex-col items-center justify-center gap-3 text-zinc-600">
+              <div className="flex h-40 flex-col items-center justify-center gap-3 text-cs2-text-muted">
                 <Film className="h-8 w-8 opacity-30" />
                 <span className="text-[12px]">暂无导出记录</span>
               </div>
@@ -474,23 +474,23 @@ export default function MontageHistoryPanel({ open, onClose }) {
 
           {/* 翻页 */}
           {totalPages > 1 && (
-            <div className="flex shrink-0 items-center justify-center gap-4 border-t border-white/[0.06] px-6 py-3">
+            <div className="flex shrink-0 items-center justify-center gap-4 border-t border-cs2-border px-6 py-3">
               <button
                 type="button"
                 disabled={page === 0}
                 onClick={() => load(page - 1)}
-                className="rounded-lg p-1.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-30"
+                className="rounded-lg p-1.5 text-cs2-text-muted hover:text-cs2-text-secondary disabled:opacity-30"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-[12px] text-cs2-text-muted">
                 第 {page + 1} 页 / 共 {totalPages} 页
               </span>
               <button
                 type="button"
                 disabled={page >= totalPages - 1}
                 onClick={() => load(page + 1)}
-                className="rounded-lg p-1.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-30"
+                className="rounded-lg p-1.5 text-cs2-text-muted hover:text-cs2-text-secondary disabled:opacity-30"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>

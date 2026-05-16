@@ -25,14 +25,14 @@ export default function AnalysisPage() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
       {s.hasDemos && (
-        <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-cs2-bg-dark/90 px-4 py-2.5 backdrop-blur-md sm:px-5">
-          <p className="min-w-0 truncate text-[11px] text-zinc-500">
-            <span className="font-mono text-zinc-400">{s.uploadedDemos.length}</span> 个 Demo 已导入
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cs2-border bg-cs2-bg-page/90 px-5 py-3 backdrop-blur-md sm:px-6">
+          <p className="min-w-0 truncate text-[11px] text-cs2-text-muted">
+            <span className="font-mono text-cs2-text-secondary">{s.uploadedDemos.length}</span> 个 Demo 已导入
           </p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Link
               to="/library"
-              className="rounded-md border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-cs2-orange/45 hover:text-white"
+              className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"
             >
               Demo 库
             </Link>
@@ -40,7 +40,7 @@ export default function AnalysisPage() {
               type="button"
               onClick={s.handleResetDemo}
               disabled={s.anyDemoParsing || s.batchRecording}
-              className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-40"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               更换 Demo
@@ -49,30 +49,31 @@ export default function AnalysisPage() {
         </header>
       )}
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-3 sm:px-5 sm:pt-4">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-6 pt-3 sm:px-6 sm:pt-4">
+        <div className="mx-auto w-full max-w-[1200px] space-y-5">
         {!s.hasDemos && !s.parsing && <DemoUpload onUpload={s.handleUpload} />}
         {!s.hasDemos && s.parsing && (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-white/10 bg-cs2-bg-card py-16 text-center">
-            <Loader2 className="h-9 w-9 animate-spin text-cs2-orange" aria-hidden />
-            <p className="mt-4 text-sm font-medium text-zinc-300">正在处理 Demo…</p>
+          <div className="flex flex-col items-center justify-center rounded-xl border border-cs2-border bg-cs2-bg-card py-16 text-center">
+            <Loader2 className="h-9 w-9 animate-spin text-cs2-accent" aria-hidden />
+            <p className="mt-4 text-sm font-medium text-cs2-text-secondary">正在处理 Demo…</p>
           </div>
         )}
 
         {s.hasDemos && (
           <div className="space-y-3">
-            <div className="rounded-lg border border-white/10 bg-cs2-bg-card px-3 py-3">
+            <div className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-3">
               <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-cs2-text-secondary">
-                <span className="shrink-0 font-semibold text-zinc-400">当前场次</span>
-                <span className="truncate font-mono text-zinc-300" title={s.currentFilename}>
+                <span className="shrink-0 font-semibold text-cs2-text-secondary">当前场次</span>
+                <span className="truncate font-mono text-cs2-text-secondary" title={s.currentFilename}>
                   {s.currentFilename}
                 </span>
                 {s.currentParsed && (
-                  <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-emerald-400/90">
+                  <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-cs2-emerald-on-surface">
                     已解析
                   </span>
                 )}
                 {s.uploadedDemos.length > 1 && (
-                  <span className="rounded border border-white/10 px-1.5 py-0 text-[10px] text-zinc-500">
+                  <span className="rounded border border-cs2-border px-1.5 py-0 text-[10px] text-cs2-text-muted">
                     共 {s.uploadedDemos.length} 个文件
                   </span>
                 )}
@@ -110,7 +111,7 @@ export default function AnalysisPage() {
 
         {s.hasDemos &&
           (s.analysisInlineProgress != null || s.parsingByIndex[s.currentMatchIndex]) && (
-            <div className="rounded-lg border border-white/10 bg-cs2-bg-card/90 px-3 py-2">
+            <div className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2">
               <ProgressBar
                 text={
                   s.analysisInlineProgress?.text ??
@@ -128,22 +129,22 @@ export default function AnalysisPage() {
         {showResultsBlock && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Film className="h-4 w-4 text-cs2-orange" />
-              <h2 className="text-sm font-bold uppercase tracking-wide text-zinc-200">解析结果</h2>
+              <Film className="h-4 w-4 text-cs2-accent" />
+              <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-primary">解析结果</h2>
               <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
                 {analysisViewMode === "clips" ? (
                   <>
-                    共 <span className="text-zinc-300">{s.clips.filter((c) => c.category !== "meme_death").length}</span>{" "}
+                    共 <span className="text-cs2-text-secondary">{s.clips.filter((c) => c.category !== "meme_death").length}</span>{" "}
                     条片段
                   </>
                 ) : (
                   <>
                     共{" "}
-                    <span className="text-zinc-300">
+                    <span className="text-cs2-text-secondary">
                       {s.roundTimeline?.length ?? s.timeline?.summary?.round_count ?? timelineRounds}
                     </span>{" "}
                     回合 ·{" "}
-                    <span className="text-emerald-400/90">
+                    <span className="text-cs2-emerald-on-surface">
                       {s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.kills) || 0), 0) ||
                         s.timeline?.summary?.kill_count ||
                         0}
@@ -160,15 +161,15 @@ export default function AnalysisPage() {
               </span>
             </div>
 
-            <div className="inline-flex rounded-lg border border-white/10 bg-cs2-bg-card/60 p-0.5">
+            <div className="inline-flex rounded-lg border border-cs2-border bg-cs2-bg-card p-0.5">
               <button
                 type="button"
                 onClick={() => setAnalysisViewMode("clips")}
                 className={[
                   "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
                   analysisViewMode === "clips"
-                    ? "bg-cs2-orange text-black shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-200",
+                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                    : "text-cs2-text-muted hover:text-cs2-text-primary",
                 ].join(" ")}
               >
                 片段卡片
@@ -181,8 +182,8 @@ export default function AnalysisPage() {
                 className={[
                   "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
                   analysisViewMode === "timeline"
-                    ? "bg-cs2-orange text-black shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-200",
+                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                    : "text-cs2-text-muted hover:text-cs2-text-primary",
                   !hasTimeline ? "cursor-not-allowed opacity-40" : "",
                 ].join(" ")}
               >
@@ -215,7 +216,7 @@ export default function AnalysisPage() {
             ) : (
               <div className="space-y-4">
                 {showPlayerTabs && (
-                  <div className="flex flex-wrap gap-1.5 rounded-lg border border-white/8 bg-cs2-bg-card/60 p-1.5">
+                  <div className="flex flex-wrap gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-card p-1.5">
                     {s.parsedPlayerNames.map((name) => {
                       const pd = s.currentParsed?.players?.[name];
                       const cnt = (pd?.clips ?? []).filter((c) => c.category !== "meme_death").length;
@@ -230,8 +231,8 @@ export default function AnalysisPage() {
                           className={[
                             "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all duration-150",
                             isActive
-                              ? "bg-cs2-orange text-black shadow-md shadow-cs2-orange/30"
-                              : "bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200",
+                              ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/30"
+                              : "bg-cs2-bg-hover text-cs2-text-secondary hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary",
                           ].join(" ")}
                         >
                           <User className="h-3 w-3 shrink-0" />
@@ -239,7 +240,7 @@ export default function AnalysisPage() {
                           <span
                             className={[
                               "rounded px-1 font-mono text-[10px] tabular-nums",
-                              isActive ? "bg-black/20 text-black/80" : "bg-white/8 text-zinc-500",
+                              isActive ? "bg-cs2-bg-card text-cs2-text-on-accent/80" : "bg-cs2-bg-active text-cs2-text-muted",
                             ].join(" ")}
                           >
                             {cnt}
@@ -264,6 +265,7 @@ export default function AnalysisPage() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {s.clips.length > 0 && (

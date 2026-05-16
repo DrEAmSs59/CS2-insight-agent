@@ -33,7 +33,7 @@ function queueRowIconShellClass(timeline, cat) {
   const base =
     "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border shadow-inner ";
   if (timeline) {
-    return base + "border-cyan-500/35 bg-gradient-to-br from-cyan-950/55 to-black/50 text-cyan-200";
+    return base + "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface";
   }
   switch (cat) {
     case "highlight":
@@ -41,18 +41,18 @@ function queueRowIconShellClass(timeline, cat) {
     case "fail":
       return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
     case "meme_death":
-      return base + "border-fuchsia-500/35 bg-fuchsia-950/40 text-fuchsia-200";
+      return base + "border-fuchsia-500/35 bg-cs2-fuchsia-surface text-cs2-fuchsia-on-surface";
     case "compilation":
       return base + "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
     default:
-      return base + "border-white/12 bg-black/35 text-zinc-200";
+      return base + "border-cs2-border bg-cs2-bg-input/60 text-cs2-text-primary";
   }
 }
 
 function queueRowCatTagClass(timeline, cat) {
-  const base = "rounded border px-1.5 py-0 text-[9px] font-semibold ";
+  const base = "rounded border px-1.5 py-0.5 text-[10px] font-semibold ";
   if (timeline) {
-    return base + "border-cyan-500/30 bg-cyan-500/10 text-cyan-200/95";
+    return base + "border-cyan-500/30 bg-cyan-500/10 text-cs2-cyan-on-surface";
   }
   switch (cat) {
     case "highlight":
@@ -60,11 +60,11 @@ function queueRowCatTagClass(timeline, cat) {
     case "fail":
       return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
     case "meme_death":
-      return base + "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200/95";
+      return base + "border-fuchsia-500/30 bg-fuchsia-500/10 text-cs2-fuchsia-on-surface/95";
     case "compilation":
       return base + "border-cs2-compilation/30 bg-cs2-compilation/10 text-cs2-compilation";
     default:
-      return base + "border-white/12 bg-white/[0.04] text-zinc-400";
+      return base + "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary";
   }
 }
 
@@ -140,8 +140,8 @@ export default function QueueWorkspaceRow({
       className={[
         "group flex w-full items-stretch gap-0.5 rounded-lg border px-1.5 py-2 text-left transition-colors sm:gap-1 sm:px-2",
         selected
-          ? "border-cs2-orange/55 bg-cs2-orange/[0.07] shadow-[inset_0_0_0_1px_rgba(225,116,57,0.12)]"
-          : "border-white/[0.06] bg-black/20 hover:border-white/15 hover:bg-white/[0.03]",
+          ? "border-cs2-accent/55 bg-cs2-accent/[0.07] shadow-[inset_0_0_0_1px_rgba(225,116,57,0.12)]"
+          : "border-cs2-border bg-cs2-bg-input/30 hover:border-cs2-border hover:bg-cs2-bg-hover",
       ].join(" ")}
     >
       {dragReorderEnabled ? (
@@ -156,7 +156,7 @@ export default function QueueWorkspaceRow({
           onDragEnd={() => onReorderDragEnd?.()}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
-          className="flex w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-zinc-600 active:cursor-grabbing hover:bg-white/[0.05] hover:text-zinc-400"
+          className="flex w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-cs2-text-muted active:cursor-grabbing hover:bg-cs2-bg-hover hover:text-cs2-text-secondary"
           title="拖动排序"
           aria-label="拖动调整顺序"
         >
@@ -174,55 +174,55 @@ export default function QueueWorkspaceRow({
             onSelect();
           }
         }}
-        className="flex min-w-0 flex-1 gap-2 outline-none focus-visible:ring-2 focus-visible:ring-cs2-orange/45"
+        className="flex min-w-0 flex-1 gap-2 outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/45"
       >
       <div className={queueRowIconShellClass(timeline, cat)}>
         <Icon className="h-5 w-5" aria-hidden />
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="flex items-center gap-1 font-mono text-[10px] tabular-nums text-zinc-500">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="flex items-center gap-1 font-mono text-[12px] tabular-nums text-cs2-text-muted">
             #{priorityIndex}
             <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
           </span>
-          <span className="truncate text-[11px] font-semibold text-zinc-200">{title}</span>
+          <span className="truncate text-[13px] font-semibold text-cs2-text-primary">{title}</span>
           <span className={queueRowCatTagClass(timeline, cat)}>
             {catBadgeZh}
           </span>
         </div>
-        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-snug">
-          <span className="font-mono text-zinc-400" title="Demo 文件">
-            Demo <span className="text-zinc-300">{demoLabel}</span>
+        <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[12px] leading-snug">
+          <span className="font-mono text-cs2-text-secondary" title="Demo 文件">
+            Demo <span className="text-cs2-text-secondary">{demoLabel}</span>
           </span>
-          <span className="text-zinc-700">·</span>
-          <span className="text-zinc-400">
-            玩家 <span className="font-semibold text-zinc-200">{playerLabel}</span>
+          <span className="text-cs2-text-muted">·</span>
+          <span className="text-cs2-text-secondary">
+            玩家 <span className="font-semibold text-cs2-text-primary">{playerLabel}</span>
           </span>
         </div>
         {queueSummary ? (
-          <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-cyan-100/85">{queueSummary}</p>
+          <p className="mt-1.5 line-clamp-2 text-[12px] leading-snug text-cs2-text-secondary">{queueSummary}</p>
         ) : null}
         {!timeline && combatSummary ? (
           <p
-            className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-400"
+            className="mt-1 line-clamp-2 text-[12px] leading-snug text-cs2-text-secondary"
             title={combatSummary}
           >
             {combatSummary}
           </p>
         ) : null}
         {timeline ? (
-          <p className="mt-1 font-mono text-[10px] leading-snug text-zinc-400">{timelineMetaLine}</p>
+          <p className="mt-1.5 font-mono text-[12px] leading-snug text-cs2-text-secondary">{timelineMetaLine}</p>
         ) : (
-          <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-zinc-500">
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[12px] text-cs2-text-muted">
             <span title="地图">{mapName}</span>
             <span title="回合 / 比分">{roundLabel}</span>
             <span>{kills > 0 ? `${kills} 杀` : "—"}</span>
-            <span className="text-zinc-600">~{estSec}s</span>
+            <span className="text-cs2-text-muted">~{estSec}s</span>
           </div>
         )}
         {!timeline && tags.length > 0 ? (
-          <p className="mt-0.5 truncate text-[9px] text-zinc-600">{tags.join(" · ")}</p>
+          <p className="mt-1 text-[11px] text-cs2-text-muted">{tags.join(" · ")}</p>
         ) : null}
         {showTimeline ? (
           <QueueMiniTimeline
@@ -234,17 +234,17 @@ export default function QueueWorkspaceRow({
       </div>
 
       <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5">
-        <span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0 text-[9px] font-semibold text-emerald-400/90">
+        <span className="rounded border border-cs2-emerald-surface bg-cs2-emerald-surface px-1.5 py-0.5 text-[10px] font-semibold text-cs2-emerald-on-surface">
           待录
         </span>
-        <span className="font-mono text-[9px] text-zinc-600">P{priorityIndex}</span>
+        <span className="font-mono text-[10px] text-cs2-text-muted">P{priorityIndex}</span>
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
           }}
-          className="rounded p-1 text-zinc-600 opacity-60 transition-opacity hover:bg-red-500/15 hover:text-red-400 group-hover:opacity-100"
+          className="rounded p-1 text-cs2-text-muted opacity-60 transition-opacity hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface group-hover:opacity-100"
           aria-label="移除"
         >
           <Trash2 className="h-3.5 w-3.5" />

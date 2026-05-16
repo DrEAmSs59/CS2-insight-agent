@@ -41,18 +41,18 @@ export default function RoundTimelineView({
     <div className="space-y-4">
       {!suppressSummaryHeader && (
         <div className="flex flex-wrap items-center gap-2">
-          <Film className="h-4 w-4 text-cs2-orange" />
+          <Film className="h-4 w-4 text-cs2-accent" />
           <h2 className="text-sm font-bold uppercase tracking-wide">回合时间线</h2>
           <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
-            共 <span className="text-zinc-300">{rc}</span> 回合 ·{" "}
-            <span className="text-emerald-400/90">{kc}</span> 击杀 ·{" "}
-            <span className="text-rose-400/90">{dc}</span> 死亡
+            共 <span className="text-cs2-text-secondary">{rc}</span> 回合 ·{" "}
+            <span className="text-cs2-emerald-on-surface">{kc}</span> 击杀 ·{" "}
+            <span className="text-cs2-rose-on-surface">{dc}</span> 死亡
           </span>
         </div>
       )}
 
       {rounds.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-white/10 py-10 text-center text-[13px] text-zinc-600">
+        <div className="rounded-lg border border-dashed border-cs2-border py-10 text-center text-[13px] text-cs2-text-muted">
           暂无时间线数据（请重新解析该 Demo）
         </div>
       ) : (

@@ -25,16 +25,16 @@ export default function DemoTeamMiniTable({
   };
 
   return (
-    <div className="flex min-h-0 flex-col rounded border border-white/[0.06] bg-black/30">
-      <div className="flex items-baseline justify-between gap-2 border-b border-white/[0.06] px-2 py-1">
-        <span className="text-[11px] font-bold text-zinc-200">{label}</span>
-        <span className="font-mono text-[11px] font-semibold tabular-nums text-cs2-orange">
+    <div className="flex min-h-0 flex-col rounded border border-cs2-border bg-cs2-bg-input/50">
+      <div className="flex items-baseline justify-between gap-2 border-b border-cs2-border px-2 py-1">
+        <span className="text-[12px] font-bold text-cs2-text-primary">{label}</span>
+        <span className="font-mono text-[12px] font-semibold tabular-nums text-cs2-accent">
           {score != null ? score : "—"}
         </span>
       </div>
       <div className="min-h-0 overflow-y-auto">
-        <table className="w-full border-collapse text-[10px]">
-          <thead className="sticky top-0 bg-black/55 text-[9px] uppercase tracking-wide text-zinc-600">
+        <table className="w-full border-collapse text-[11px]">
+          <thead className="sticky top-0 bg-cs2-bg-page/85 text-[9px] uppercase tracking-wide text-cs2-text-muted">
             <tr>
               <th className="px-1 py-0.5 text-left font-semibold">选手</th>
               <th className="w-7 px-1 py-0.5 text-right font-semibold">K</th>

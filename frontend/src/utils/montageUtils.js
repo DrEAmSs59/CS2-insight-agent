@@ -53,20 +53,20 @@ export function isClipPacingAndPovLocked(clip) {
  * @param {Record<string, unknown>} clip
  */
 export function queueBlockBadgeClass(clip) {
-  if (!clip || typeof clip !== "object") return "border-white/15 bg-zinc-900/80 text-zinc-100";
+  if (!clip || typeof clip !== "object") return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
   if (isTimelineSourceClip(clip)) {
-    return "border-cyan-500/45 bg-cyan-950/55 text-cyan-100";
+    return "border-cyan-500/45 bg-cs2-cyan-surface text-cyan-100";
   }
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "fail") return "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
   if (cat === "meme_death") return "border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-300";
   if (cat === "compilation") return "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
   if (cat === "highlight") return "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
-  return "border-white/15 bg-zinc-900/80 text-zinc-100";
+  return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
 }
 
 export const MONTAGE_NEUTRAL_TYPE_BADGE_CLASS =
-  "bg-zinc-500/15 text-zinc-400 ring-1 ring-white/10";
+  "bg-zinc-500/15 text-cs2-text-secondary ring-1 ring-white/10";
 
 /** @param {string} tag `normalizeClipType` 返回值 */
 export function montageTypeTagBadgeClass(tag) {
@@ -77,7 +77,7 @@ export function montageTypeTagBadgeClass(tag) {
     case "下饭":
       return "bg-cs2-fail/10 text-cs2-fail ring-1 ring-cs2-fail/35";
     case "梗死亡":
-      return "bg-fuchsia-500/15 text-fuchsia-200 ring-1 ring-fuchsia-500/40";
+      return "bg-fuchsia-500/15 text-cs2-fuchsia-on-surface ring-1 ring-fuchsia-500/40";
     case "合集":
       return "bg-cs2-compilation/10 text-cs2-compilation ring-1 ring-cs2-compilation/40";
     case "时间线":

@@ -1,36 +1,259 @@
 @import "tailwindcss";
 
-@theme {
-  --color-cs2-orange: #FF8C00;
-  --color-cs2-orange-light: #FFA500;
-  --color-cs2-bg-dark: #111111;
-  --color-cs2-bg-card: #1A1A1A;
-  --color-cs2-bg-sidebar: #161616;
-  --color-cs2-bg-input: #222222;
-  --color-cs2-border: #2A2A2A;
-  --color-cs2-text-secondary: #888888;
-  --color-cs2-highlight: #4ADE80;
-  --color-cs2-fail: #F87171;
-  --color-cs2-compilation: #F59E0B;
+/* ===== 深色主题（默认） ===== */
+:root {
+  /* 背景层次 */
+  --cs2-bg-page: #111111;
+  --cs2-bg-card: #1A1A1A;
+  --cs2-bg-sidebar: #161616;
+  --cs2-bg-input: #222222;
+  --cs2-bg-elevated: #2a2a2a;
 
+  /* 交互状态 */
+  --cs2-bg-hover: rgba(255,255,255,0.05);
+  --cs2-bg-active: rgba(255,255,255,0.08);
+  --cs2-bg-overlay: rgba(0,0,0,0.60);
+  --cs2-bg-skeleton: rgba(255,255,255,0.04);
+
+  /* 边框 */
+  --cs2-border: #2A2A2A;
+  --cs2-border-subtle: rgba(255,255,255,0.06);
+  --cs2-border-focus: var(--cs2-accent);
+  --cs2-border-error: #ef4444;
+
+  /* 文字 */
+  --cs2-text-primary: #ffffff;
+  --cs2-text-secondary: #a1a1aa;
+  --cs2-text-muted: #71717a;
+  --cs2-text-on-accent: #000000;
+  --cs2-text-inverse: #000000;
+  --cs2-text-error: #fca5a5;
+  --cs2-text-success: #86efac;
+
+  /* 品牌色 */
+  --cs2-accent: #FF8C00;
+  --cs2-accent-light: #FFA500;
+  --cs2-accent-soft: rgba(255,140,0,0.10);
+
+  /* 语义色 */
+  --cs2-highlight: #4ADE80;
+  --cs2-fail: #F87171;
+  --cs2-compilation: #F59E0B;
+
+  /* 表面层次 */
+  --cs2-surface-0: var(--cs2-bg-page);
+  --cs2-surface-1: var(--cs2-bg-card);
+  --cs2-surface-2: var(--cs2-bg-elevated);
+  --cs2-surface-3: #333333;
+
+  /* 滚动条 */
+  --cs2-scrollbar-track: #111111;
+  --cs2-scrollbar-thumb: #333333;
+  --cs2-scrollbar-thumb-hover: #555555;
+
+  /* 状态色 surface（badge/tag 背景） */
+  --cs2-rose-surface: rgba(248,113,113,0.12);
+  --cs2-emerald-surface: rgba(74,222,128,0.12);
+  --cs2-amber-surface: rgba(245,158,11,0.12);
+  --cs2-cyan-surface: rgba(34,211,238,0.12);
+  --cs2-fuchsia-surface: rgba(232,121,249,0.12);
+  --cs2-violet-surface: rgba(167,139,250,0.12);
+  --cs2-red-surface: rgba(248,113,113,0.12);
+
+  /* 状态色 on-surface（badge/tag 文字） */
+  --cs2-rose-on-surface: #fca5a5;
+  --cs2-emerald-on-surface: #86efac;
+  --cs2-amber-on-surface: #fcd34d;
+  --cs2-cyan-on-surface: #a5f3fc;
+  --cs2-fuchsia-on-surface: #f0abfc;
+  --cs2-violet-on-surface: #c4b5fd;
+  --cs2-red-on-surface: #fca5a5;
+
+  /* 阴影 */
+  --cs2-shadow: rgba(0,0,0,0.20);
+  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.15);
+  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.20);
+  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.30);
+  --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,0.20);
+
+  /* 动画 */
+  --cs2-transition-fast: 150ms ease;
+  --cs2-transition-normal: 200ms ease;
+}
+
+/* ===== 浅色主题 ===== */
+.light {
+  /* 背景层次 */
+  --cs2-bg-page: #f4f4f5;
+  --cs2-bg-card: #ffffff;
+  --cs2-bg-sidebar: #e8e8ec;
+  --cs2-bg-input: #f0f0f2;
+  --cs2-bg-elevated: #ffffff;
+
+  /* 交互状态 */
+  --cs2-bg-hover: rgba(0,0,0,0.04);
+  --cs2-bg-active: rgba(0,0,0,0.07);
+  --cs2-bg-overlay: rgba(0,0,0,0.40);
+  --cs2-bg-skeleton: rgba(0,0,0,0.04);
+
+  /* 边框 */
+  --cs2-border: #d4d4d8;
+  --cs2-border-subtle: rgba(0,0,0,0.08);
+  --cs2-border-focus: var(--cs2-accent);
+  --cs2-border-error: #dc2626;
+
+  /* 文字 */
+  --cs2-text-primary: #18181b;
+  --cs2-text-secondary: #52525b;
+  --cs2-text-muted: #a1a1aa;
+  --cs2-text-on-accent: #ffffff;
+  --cs2-text-inverse: #ffffff;
+  --cs2-text-error: #b91c1c;
+  --cs2-text-success: #15803d;
+
+  /* 品牌色 */
+  --cs2-accent: #c2410c;
+  --cs2-accent-light: #ea580c;
+  --cs2-accent-soft: rgba(194,65,12,0.08);
+
+  /* 语义色 */
+  --cs2-highlight: #15803d;
+  --cs2-fail: #b91c1c;
+  --cs2-compilation: #b45309;
+
+  /* 表面层次 */
+  --cs2-surface-0: var(--cs2-bg-page);
+  --cs2-surface-1: var(--cs2-bg-card);
+  --cs2-surface-2: var(--cs2-bg-elevated);
+  --cs2-surface-3: #e4e4e7;
+
+  /* 滚动条 */
+  --cs2-scrollbar-track: #f4f4f5;
+  --cs2-scrollbar-thumb: #c4c4c8;
+  --cs2-scrollbar-thumb-hover: #a1a1aa;
+
+  /* 状态色 surface */
+  --cs2-rose-surface: rgba(220,38,38,0.08);
+  --cs2-emerald-surface: rgba(22,163,74,0.08);
+  --cs2-amber-surface: rgba(217,119,6,0.08);
+  --cs2-cyan-surface: rgba(8,145,178,0.08);
+  --cs2-fuchsia-surface: rgba(192,38,211,0.08);
+  --cs2-violet-surface: rgba(124,58,237,0.08);
+  --cs2-red-surface: rgba(220,38,38,0.08);
+
+  /* 状态色 on-surface */
+  --cs2-rose-on-surface: #b91c1c;
+  --cs2-emerald-on-surface: #15803d;
+  --cs2-amber-on-surface: #b45309;
+  --cs2-cyan-on-surface: #0e7490;
+  --cs2-fuchsia-on-surface: #a21caf;
+  --cs2-violet-on-surface: #7c3aed;
+  --cs2-red-on-surface: #b91c1c;
+
+  /* 阴影 */
+  --cs2-shadow: rgba(0,0,0,0.08);
+  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+  --cs2-shadow-glow-accent: 0 0 16px rgba(194,65,12,0.15);
+}
+
+/* ===== Tailwind 主题注册 ===== */
+@theme {
+  /* 背景 */
+  --color-cs2-bg-page: var(--cs2-bg-page);
+  --color-cs2-bg-card: var(--cs2-bg-card);
+  --color-cs2-bg-sidebar: var(--cs2-bg-sidebar);
+  --color-cs2-bg-input: var(--cs2-bg-input);
+  --color-cs2-bg-elevated: var(--cs2-bg-elevated);
+  --color-cs2-bg-hover: var(--cs2-bg-hover);
+  --color-cs2-bg-active: var(--cs2-bg-active);
+  --color-cs2-bg-overlay: var(--cs2-bg-overlay);
+
+  /* 边框 */
+  --color-cs2-border: var(--cs2-border);
+  --color-cs2-border-subtle: var(--cs2-border-subtle);
+  --color-cs2-border-focus: var(--cs2-border-focus);
+  --color-cs2-border-error: var(--cs2-border-error);
+
+  /* 文字 */
+  --color-cs2-text-primary: var(--cs2-text-primary);
+  --color-cs2-text-secondary: var(--cs2-text-secondary);
+  --color-cs2-text-muted: var(--cs2-text-muted);
+  --color-cs2-text-on-accent: var(--cs2-text-on-accent);
+  --color-cs2-text-error: var(--cs2-text-error);
+  --color-cs2-text-success: var(--cs2-text-success);
+
+  /* 品牌色 */
+  --color-cs2-accent: var(--cs2-accent);
+  --color-cs2-accent-light: var(--cs2-accent-light);
+  --color-cs2-accent-soft: var(--cs2-accent-soft);
+
+  /* 语义色 */
+  --color-cs2-highlight: var(--cs2-highlight);
+  --color-cs2-fail: var(--cs2-fail);
+  --color-cs2-compilation: var(--cs2-compilation);
+
+  /* 表面层次 */
+  --color-cs2-surface-3: var(--cs2-surface-3);
+
+  /* 状态色 surface */
+  --color-cs2-rose-surface: var(--cs2-rose-surface);
+  --color-cs2-emerald-surface: var(--cs2-emerald-surface);
+  --color-cs2-amber-surface: var(--cs2-amber-surface);
+  --color-cs2-cyan-surface: var(--cs2-cyan-surface);
+  --color-cs2-fuchsia-surface: var(--cs2-fuchsia-surface);
+  --color-cs2-violet-surface: var(--cs2-violet-surface);
+  --color-cs2-red-surface: var(--cs2-red-surface);
+
+  /* 状态色 on-surface */
+  --color-cs2-rose-on-surface: var(--cs2-rose-on-surface);
+  --color-cs2-emerald-on-surface: var(--cs2-emerald-on-surface);
+  --color-cs2-amber-on-surface: var(--cs2-amber-on-surface);
+  --color-cs2-cyan-on-surface: var(--cs2-cyan-on-surface);
+  --color-cs2-fuchsia-on-surface: var(--cs2-fuchsia-on-surface);
+  --color-cs2-violet-on-surface: var(--cs2-violet-on-surface);
+  --color-cs2-red-on-surface: var(--cs2-red-on-surface);
+
+  /* 阴影 */
+  --color-cs2-shadow: var(--cs2-shadow);
+
+  /* 旧兼容 token（渐进移除） */
+  --color-cs2-orange: var(--cs2-accent);
+  --color-cs2-orange-light: var(--cs2-accent-light);
+  --color-cs2-bg-dark: var(--cs2-bg-page);
+
+  /* 字体 */
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 
+/* ===== 主题切换过渡 ===== */
+html {
+  transition: background-color var(--cs2-transition-normal),
+              color var(--cs2-transition-normal);
+}
+
+/* ===== 滚动条 ===== */
 ::-webkit-scrollbar {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #111111;
+  background: var(--cs2-scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--cs2-scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: var(--cs2-scrollbar-thumb-hover);
 }
 
 body {
   font-family: var(--font-sans);
+}
+
+/* 浅色模式下击杀图标反色（SVG 为白色填充） */
+.light .killfeed-icon-strip img {
+  filter: invert(1);
 }

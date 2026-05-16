@@ -35,18 +35,18 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
   const rowClass = [
     "death-notice-row group relative inline-flex max-w-[760px] flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border px-2.5 py-1.5 text-[13px] leading-tight",
     isAssistOnly
-      ? "border-white/[0.06] bg-black/40 text-zinc-500"
+      ? "border-cs2-border bg-cs2-bg-input/70 text-cs2-text-muted"
       : isKill
-        ? "border-emerald-400/35 bg-gradient-to-r from-emerald-950/45 to-[rgb(10,10,10)]/90"
+        ? "border-emerald-400/35 bg-gradient-to-r from-cs2-emerald-surface to-cs2-bg-card"
         : isDeath
-          ? "border-rose-400/38 bg-gradient-to-r from-rose-950/40 to-[rgb(10,10,10)]/90"
-          : "border-white/10 bg-[rgb(8,8,8)]/85",
+          ? "border-rose-400/38 bg-gradient-to-r from-cs2-rose-surface to-cs2-bg-card"
+          : "border-cs2-border bg-[rgb(8,8,8)]/85",
   ].join(" ");
 
   if (isAssistOnly) {
     return (
       <div className={rowClass}>
-        <span className="font-mono text-[11px] text-zinc-600">[{timeText}]</span>
+        <span className="font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         <span className="text-[12px]">{String(event?.assist_note || "助攻")}</span>
       </div>
     );
@@ -54,25 +54,25 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
 
   return (
     <div className={rowClass}>
-      <span className="shrink-0 font-mono text-[11px] text-zinc-500">[{timeText}]</span>
+      <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
       <span
         className={[
           "shrink-0 text-[13px] font-bold tracking-tight",
-          atkHighlight ? "text-cs2-orange" : "text-[#e8c56a]",
+          atkHighlight ? "text-cs2-accent" : "text-[#e8c56a]",
         ].join(" ")}
       >
         {atk}
       </span>
       <KillfeedIconStrip event={event} weaponName={weapon} weaponKey={weaponKey} />
       <span
-        className={["shrink-0 text-[13px] font-bold tracking-tight", vicHighlight ? "text-cs2-orange" : "text-[#b8d9f6]"].join(
+        className={["shrink-0 text-[13px] font-bold tracking-tight", vicHighlight ? "text-cs2-accent" : "text-[#b8d9f6]"].join(
           " ",
         )}
       >
         {vic}
       </span>
       {assistName ? (
-        <span className="w-full basis-full pl-[3.25rem] text-[10px] text-zinc-500 sm:pl-0">
+        <span className="w-full basis-full pl-[3.25rem] text-[11px] text-cs2-text-muted sm:pl-0">
           助攻：{assistName}
         </span>
       ) : null}
@@ -81,7 +81,7 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
           type="button"
           onClick={onEnqueue}
           disabled={queued}
-          className="death-notice-action ml-auto shrink-0 rounded border border-cs2-orange/40 bg-cs2-orange/15 px-2 py-0.5 text-[11px] font-semibold text-cs2-orange opacity-100 transition-opacity duration-150 disabled:opacity-40 sm:opacity-0 sm:group-hover:opacity-100"
+          className="death-notice-action ml-auto shrink-0 rounded border border-cs2-accent/40 bg-cs2-accent/15 px-2 py-0.5 text-[12px] font-semibold text-cs2-accent opacity-100 transition-opacity duration-150 disabled:opacity-40 sm:opacity-0 sm:group-hover:opacity-100"
         >
           {queued ? "已入队" : "加入录制"}
         </button>

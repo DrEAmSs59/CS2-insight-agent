@@ -50,9 +50,9 @@ function roundsLabel(it) {
 function SortChevron({ active, dir }) {
   if (!active) return <span className="inline-block w-3 shrink-0" aria-hidden />;
   return dir === "asc" ? (
-    <ChevronUp className="h-3 w-3 shrink-0 text-cs2-orange" aria-hidden />
+    <ChevronUp className="h-3 w-3 shrink-0 text-cs2-accent" aria-hidden />
   ) : (
-    <ChevronDown className="h-3 w-3 shrink-0 text-cs2-orange" aria-hidden />
+    <ChevronDown className="h-3 w-3 shrink-0 text-cs2-accent" aria-hidden />
   );
 }
 
@@ -65,15 +65,15 @@ function DemoRowCheckbox({ checked, onToggle, title }) {
         className={[
           "flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[3px]",
           "border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[border-color,background-color,box-shadow] duration-150",
-          "border-white/[0.14] bg-[#161618] group-hover/chk:border-white/[0.22] group-hover/chk:bg-zinc-800/85",
+          "border-cs2-border bg-cs2-bg-card group-hover/chk:border-cs2-border group-hover/chk:bg-zinc-800/85",
           checked
-            ? "border-cs2-orange/55 bg-cs2-orange/14 shadow-[0_0_12px_rgba(225,116,57,0.22),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            ? "border-cs2-accent/55 bg-cs2-accent/14 shadow-[0_0_12px_rgba(225,116,57,0.22),inset_0_1px_0_rgba(255,255,255,0.06)]"
             : "",
         ].join(" ")}
       >
         <Check
           className={[
-            "h-2.5 w-2.5 stroke-[3] text-cs2-orange transition-opacity duration-150",
+            "h-2.5 w-2.5 stroke-[3] text-cs2-accent transition-opacity duration-150",
             checked ? "opacity-100" : "opacity-0",
           ].join(" ")}
           aria-hidden
@@ -103,18 +103,18 @@ export default function DemoTable({
   onAnalyze,
 }) {
   const iconBtn =
-    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-zinc-500 transition-colors duration-150 hover:bg-white/[0.06] hover:text-zinc-200 active:bg-white/[0.09]";
+    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-cs2-text-muted transition-colors duration-150 hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary active:bg-cs2-bg-active";
   const iconBtnDanger =
-    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-zinc-500 transition-colors duration-150 hover:bg-red-500/12 hover:text-red-400 active:bg-red-500/18";
+    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-cs2-text-muted transition-colors duration-150 hover:bg-red-500/12 hover:text-red-400 active:bg-red-500/18";
 
   const thBtn =
-    "group inline-flex w-full items-center gap-0.5 text-left font-semibold text-zinc-500 hover:text-zinc-300";
+    "group inline-flex w-full items-center gap-0.5 text-left font-semibold text-cs2-text-muted hover:text-cs2-text-secondary";
 
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-      <table className="w-full min-w-[880px] border-collapse text-left text-[11px] text-zinc-300">
+      <table className="w-full min-w-[880px] border-collapse text-left text-[12px] text-cs2-text-secondary">
         <thead className="sticky top-0 z-[1] bg-cs2-bg-card/95 backdrop-blur-[2px]">
-          <tr className="border-b border-white/[0.06]">
+          <tr className="border-b border-cs2-border">
             <th className="w-[8.75rem] min-w-[8rem] px-2 py-2">
               <span className="sr-only">展开预览与选择</span>
             </th>
@@ -130,7 +130,7 @@ export default function DemoTable({
                 <SortChevron active={sortKey === "map"} dir={sortDir} />
               </button>
             </th>
-            <th className="min-w-[3.5rem] px-2 py-2 text-zinc-500">比分</th>
+            <th className="min-w-[3.5rem] px-2 py-2 text-cs2-text-muted">比分</th>
             <th className="min-w-[3.5rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("rounds")}>
                 回合
@@ -161,21 +161,21 @@ export default function DemoTable({
                 <SortChevron active={sortKey === "library"} dir={sortDir} />
               </button>
             </th>
-            <th className="min-w-[7rem] px-2 py-2 text-zinc-500">标签</th>
-            <th className="min-w-[10rem] px-2 py-2 text-right text-zinc-500">操作</th>
+            <th className="min-w-[7rem] px-2 py-2 text-cs2-text-muted">标签</th>
+            <th className="min-w-[10rem] px-2 py-2 text-right text-cs2-text-muted">操作</th>
           </tr>
         </thead>
         <tbody>
           {libraryLoading && rows.length === 0 ? (
             <tr>
-              <td colSpan={COL_SPAN} className="px-3 py-10 text-center text-[11px] text-zinc-500">
+              <td colSpan={COL_SPAN} className="px-3 py-10 text-center text-[12px] text-cs2-text-muted">
                 加载中…
               </td>
             </tr>
           ) : null}
           {!libraryLoading && rows.length === 0 && emptyHint ? (
             <tr>
-              <td colSpan={COL_SPAN} className="px-3 py-12 text-center text-[11px] leading-relaxed text-zinc-500">
+              <td colSpan={COL_SPAN} className="px-3 py-12 text-center text-[12px] leading-relaxed text-cs2-text-muted">
                 {emptyHint}
               </td>
             </tr>
@@ -195,9 +195,9 @@ export default function DemoTable({
               <Fragment key={id}>
                 <tr
                   className={[
-                    "group/row cursor-pointer border-b border-white/[0.04] transition-[background-color,border-color] duration-150 last:border-b-0",
+                    "group/row cursor-pointer border-b border-cs2-border transition-[background-color,border-color] duration-150 last:border-b-0",
                     expanded ? "border-b-0" : "",
-                    checked ? "bg-cs2-orange/[0.055]" : "hover:bg-white/[0.035]",
+                    checked ? "bg-cs2-accent/[0.055]" : "hover:bg-cs2-bg-hover",
                   ].join(" ")}
                   onClick={() => onAnalyze?.(it)}
                 >
@@ -217,10 +217,10 @@ export default function DemoTable({
                         className={[
                           "flex min-w-0 flex-1 items-center gap-1 rounded px-0.5 py-0.5 text-left",
                           "-ml-0.5 outline-none transition-colors duration-150",
-                          "focus-visible:ring-2 focus-visible:ring-cs2-orange/35 focus-visible:ring-offset-2 focus-visible:ring-offset-cs2-bg-card",
+                          "focus-visible:ring-2 focus-visible:ring-cs2-accent/35 focus-visible:ring-offset-2 focus-visible:ring-offset-cs2-bg-card",
                           expanded
-                            ? "text-cs2-orange"
-                            : "text-zinc-600 group-hover/row:text-zinc-400",
+                            ? "text-cs2-accent"
+                            : "text-cs2-text-muted group-hover/row:text-cs2-text-secondary",
                         ].join(" ")}
                         aria-expanded={expanded}
                         title={expanded ? "收起比分预览" : "展开比分预览"}
@@ -228,14 +228,14 @@ export default function DemoTable({
                         <ChevronRight
                           className={[
                             "h-3.5 w-3.5 shrink-0 transition-transform duration-150 ease-out",
-                            expanded ? "rotate-90 text-cs2-orange" : "rotate-0 text-zinc-500 opacity-[0.35] group-hover/row:opacity-100",
+                            expanded ? "rotate-90 text-cs2-accent" : "rotate-0 text-cs2-text-muted opacity-[0.35] group-hover/row:opacity-100",
                           ].join(" ")}
                           aria-hidden
                         />
                         <span
                           className={[
                             "select-none text-[10px] font-medium tracking-tight",
-                            expanded ? "text-cs2-orange" : "text-zinc-600 opacity-75 group-hover/row:text-cs2-orange group-hover/row:opacity-100",
+                            expanded ? "text-cs2-accent" : "text-cs2-text-muted opacity-75 group-hover/row:text-cs2-accent group-hover/row:opacity-100",
                           ].join(" ")}
                         >
                           比分预览
@@ -250,13 +250,13 @@ export default function DemoTable({
                     <div className="flex min-h-[40px] items-start gap-1.5">
                       <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
                         <span
-                          className="truncate font-medium text-zinc-200 transition-colors duration-150 group-hover/row:text-zinc-50"
+                          className="truncate font-medium text-cs2-text-primary transition-colors duration-150 group-hover/row:text-zinc-50"
                           title={title}
                         >
                           {title}
                         </span>
                         <span
-                          className="truncate font-mono text-[10px] leading-tight text-zinc-600 transition-colors group-hover/row:text-zinc-500"
+                          className="truncate font-mono text-[11px] leading-tight text-cs2-text-muted transition-colors group-hover/row:text-cs2-text-muted"
                           title={pathStr || subLine}
                         >
                           {subLine}
@@ -264,31 +264,31 @@ export default function DemoTable({
                       </div>
                       {previewLikely ? (
                         <span title="可预览比分数据" className="opacity-70 transition-opacity group-hover/row:opacity-100">
-                          <Eye className="mt-0.5 h-3 w-3 shrink-0 text-cs2-orange/75" aria-hidden />
+                          <Eye className="mt-0.5 h-3 w-3 shrink-0 text-cs2-accent/75" aria-hidden />
                         </span>
                       ) : (
                         <span title="需解析并索引玩家数据后可预览" className="opacity-50">
-                          <EyeOff className="mt-0.5 h-3 w-3 shrink-0 text-zinc-600" aria-hidden />
+                          <EyeOff className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
                         </span>
                       )}
                     </div>
                   </td>
-                  <td className="max-w-[10rem] truncate align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="max-w-[10rem] truncate align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {mapLabel(it)}
                   </td>
-                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {formatScoreLine(it.team_a_score, it.team_b_score)}
                   </td>
-                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {roundsLabel(it)}
                   </td>
-                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {formatDurationMinutesPlain(it.duration_mins)}
                   </td>
-                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {formatLibraryAddedAt(it.added_at)}
                   </td>
-                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[10px] text-zinc-400 transition-colors group-hover/row:text-zinc-300">
+                  <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {formatFileSize(it.file_size)}
                   </td>
                   <td className="align-middle px-2 py-2">
@@ -299,7 +299,7 @@ export default function DemoTable({
                       {deriveTags(it).map((t, ti) => (
                         <span
                           key={`${id}-t-${ti}-${t}`}
-                          className="max-w-full truncate rounded border border-white/[0.06] bg-black/20 px-1 py-0.5 font-mono text-[9px] text-zinc-500"
+                          className="max-w-full truncate rounded border border-cs2-border bg-cs2-bg-input/30 px-1 py-0.5 font-mono text-[9px] text-cs2-text-muted"
                           title={t}
                         >
                           {t}
@@ -322,7 +322,7 @@ export default function DemoTable({
                   </td>
                 </tr>
                 {expanded ? (
-                  <tr className="border-b border-white/[0.05] bg-black/[0.22]">
+                  <tr className="border-b border-cs2-border bg-cs2-bg-input/50">
                     <td colSpan={COL_SPAN} className="p-0 align-top">
                       <DemoScoreboardPreview
                         demoItem={it}

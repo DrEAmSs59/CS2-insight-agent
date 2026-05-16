@@ -33,38 +33,38 @@ export default function RoundSummaryPanel({
   const overflow = extraTags.length - shown.length;
 
   return (
-    <aside className="flex w-full min-w-0 flex-col gap-3 border-l border-white/[0.06] pl-4 max-[1279px]:border-l-0 max-[1279px]:pl-0">
+    <aside className="flex w-full min-w-0 flex-col gap-3 border-l border-cs2-border pl-4 max-[1279px]:border-l-0 max-[1279px]:pl-0">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">本回合</p>
-        <p className="mt-1 text-sm font-bold text-zinc-100">
+        <p className="text-[12px] font-semibold uppercase tracking-wide text-cs2-text-muted">本回合</p>
+        <p className="mt-1 text-sm font-bold text-cs2-text-primary">
           K <span className="text-emerald-400/95">{kills}</span>
-          <span className="mx-1 text-zinc-600">/</span>D{" "}
+          <span className="mx-1 text-cs2-text-muted">/</span>D{" "}
           <span className="text-rose-400/95">{deaths}</span>
-          <span className="mx-1 text-zinc-600">/</span>A{" "}
+          <span className="mx-1 text-cs2-text-muted">/</span>A{" "}
           <span className="text-violet-300/95">{assists}</span>
         </p>
         {headshots > 0 ? (
-          <p className="mt-1 text-[12px] text-zinc-500">
-            爆头 <span className="font-semibold text-zinc-300">{headshots}</span>
+          <p className="mt-1 text-[12px] text-cs2-text-muted">
+            爆头 <span className="font-semibold text-cs2-text-secondary">{headshots}</span>
           </p>
         ) : null}
       </div>
 
       {shown.length ? (
         <div>
-          <p className="text-[11px] font-semibold text-zinc-500">标签</p>
+          <p className="text-[12px] font-semibold text-cs2-text-muted">标签</p>
           <div className="mt-1 flex flex-wrap gap-1">
             {shown.map((t, i) => (
               <span
                 key={`${t}-${i}`}
-                className="max-w-full truncate rounded border border-cs2-orange/25 bg-cs2-orange/10 px-1.5 py-0.5 text-[10px] font-medium text-cs2-orange/95"
+                className="max-w-full truncate rounded border border-cs2-accent/25 bg-cs2-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-cs2-accent/95"
                 title={t}
               >
                 {t}
               </span>
             ))}
             {overflow > 0 ? (
-              <span className="rounded border border-white/12 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400">
+              <span className="rounded border border-cs2-border bg-cs2-bg-hover px-1.5 py-0.5 text-[10px] font-semibold text-cs2-text-secondary">
                 +{overflow}
               </span>
             ) : null}
@@ -77,7 +77,7 @@ export default function RoundSummaryPanel({
           type="button"
           onClick={onAddRound}
           disabled={!onAddRound || roundQueued}
-          className="w-full rounded-md border border-white/14 bg-white/[0.06] py-2 text-[12px] font-semibold text-zinc-100 transition-colors hover:border-cs2-orange/50 hover:text-white disabled:opacity-35"
+          className="w-full rounded-md border border-cs2-border bg-cs2-bg-input/50 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-35"
         >
           {roundQueued ? "整回合已入队" : "加入本回合"}
         </button>
@@ -96,7 +96,7 @@ export default function RoundSummaryPanel({
             type="button"
             onClick={onAddDeaths}
             disabled={!onAddDeaths}
-            className="w-full rounded-md border border-rose-500/30 bg-rose-500/10 py-2 text-[12px] font-semibold text-rose-300/95 hover:border-rose-400/55 disabled:opacity-35"
+            className="w-full rounded-md border border-rose-500/30 bg-rose-500/10 py-2 text-[12px] font-semibold text-cs2-rose-on-surface/95 hover:border-rose-400/55 disabled:opacity-35"
           >
             只录死亡
           </button>

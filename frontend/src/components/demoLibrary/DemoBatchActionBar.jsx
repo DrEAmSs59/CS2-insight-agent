@@ -18,29 +18,29 @@ export default function DemoBatchActionBar({
 
   const btn =
 
-    "rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-cs2-orange/40 hover:text-white";
+    "rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/40 hover:text-cs2-text-primary";
 
 
 
   const btnPrimary =
 
-    "rounded-md border border-cs2-orange/45 bg-cs2-orange/10 px-2.5 py-1.5 text-[11px] font-bold text-cs2-orange hover:border-cs2-orange/70";
+    "rounded-md border border-cs2-accent/45 bg-cs2-accent/10 px-2.5 py-1.5 text-[12px] font-bold text-cs2-accent hover:border-cs2-accent/70";
 
 
 
   const btnDanger =
 
-    "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-red-300 hover:border-red-500/55";
+    "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-red-500/55";
 
 
 
   return (
 
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/[0.06] bg-cs2-bg-card/90 px-3 py-2 backdrop-blur-[1px]">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-cs2-border bg-cs2-bg-card/90 px-3 py-2 backdrop-blur-[1px]">
 
-      <span className="text-[11px] font-semibold tabular-nums text-zinc-400">
+      <span className="text-[12px] font-semibold tabular-nums text-cs2-text-secondary">
 
-        已选择 <span className="text-cs2-orange">{count}</span> 个
+        已选择 <span className="text-cs2-accent">{count}</span> 个
 
       </span>
 
