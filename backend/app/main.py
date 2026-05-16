@@ -73,6 +73,7 @@ from .obs_director import (
     RecordingWarmupExtras,
     _RECORDING_RESULT_CLIP_META_KEYS,
 )
+from .recording.api import router as recording_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
@@ -281,6 +282,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(recording_router)
 
 
 @app.middleware("http")
