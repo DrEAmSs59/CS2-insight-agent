@@ -99,6 +99,9 @@ class RecordingOptions(BaseModel):
     final_round_seek_guard_sec: float = 2.0
     final_round_min_duration_sec: float = 0.8
     final_round_demo_exit_guard_sec: float = 1.5
+    obs_transition_enabled: Optional[bool] = None
+    obs_transition_name: Optional[str] = None
+    obs_transition_duration_ms: Optional[int] = None
 
 
 class SourceRef(BaseModel):
