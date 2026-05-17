@@ -305,10 +305,11 @@ export default function RecordWarmupModal({
                   }}
                   className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
                 />
-                <span className="text-sm text-cs2-text-primary">
-                  启用黑场渐入渐出
-                </span>
+                <span className="text-sm text-cs2-text-primary">启用黑场渐入渐出</span>
               </label>
+              <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
+                切换视角之间的转场效果。
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
                 <select
                   value={obsTransName ?? ""}
@@ -334,7 +335,6 @@ export default function RecordWarmupModal({
                   disabled={obsTransEnabled !== true}
                   className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                 />
-                <span className="text-xs text-cs2-text-muted">ms（默认 200）</span>
               </div>
             </div>
           </section>

@@ -544,6 +544,52 @@ export default function CommonParamsModal({
             </div>
             <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
               <WorkflowSection
+                title="OBS 转场"
+                subtitle="切换视角之间的转场效果。"
+                defaultOpen
+              >
+                <div className="space-y-4">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={obsTransEnabled}
+                      onChange={(e) => setObsTransEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
+                    />
+                    <span className="text-sm text-cs2-text-primary">启用黑场渐入渐出</span>
+                  </label>
+
+                  <label className="block text-xs font-medium text-cs2-text-secondary">
+                    转场样式
+                    <select
+                      value={obsTransName}
+                      onChange={(e) => setObsTransName(e.target.value)}
+                      disabled={!obsTransEnabled}
+                      className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
+                    >
+                      <option value="Fade">淡入淡出</option>
+                      <option value="Cut">直切</option>
+                      <option value="Swipe">滑动</option>
+                    </select>
+                  </label>
+
+                  <label className="block text-xs font-medium text-cs2-text-secondary">
+                    时长（ms）
+                    <input
+                      type="number"
+                      min={0}
+                      max={2000}
+                      step={50}
+                      value={obsTransDurationMs}
+                      onChange={(e) => setObsTransDurationMs(Number(e.target.value))}
+                      disabled={!obsTransEnabled}
+                      className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
+                    />
+                  </label>
+                </div>
+              </WorkflowSection>
+
+              <WorkflowSection
                 title="观战画面与调试"
                 subtitle="HUD / UI、Demo 调试条与 X 光；决定采集画面与预热注入内容。"
                 defaultOpen
@@ -753,53 +799,6 @@ export default function CommonParamsModal({
                   1280×1024）。
                 </p>
               )}
-            </div>
-          </WorkflowSection>
-
-          <WorkflowSection
-            title="OBS 转场效果"
-            subtitle="片段开始 / 结束时录入黑场渐入渐出，让成片段落过渡更自然。"
-            defaultOpen={false}
-          >
-            <div className="space-y-4">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={obsTransEnabled}
-                  onChange={(e) => setObsTransEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
-                />
-                <span className="text-sm text-cs2-text-primary">启用渐入渐出</span>
-              </label>
-
-              <label className="block text-xs font-medium text-cs2-text-secondary">
-                转场样式
-                <select
-                  value={obsTransName}
-                  onChange={(e) => setObsTransName(e.target.value)}
-                  disabled={!obsTransEnabled}
-                  className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
-                >
-                  <option value="Fade">淡入淡出</option>
-                  <option value="Cut">直切</option>
-                  <option value="Swipe">滑动</option>
-                </select>
-              </label>
-
-              <label className="block text-xs font-medium text-cs2-text-secondary">
-                时长（ms）
-                <input
-                  type="number"
-                  min={0}
-                  max={2000}
-                  step={50}
-                  value={obsTransDurationMs}
-                  onChange={(e) => setObsTransDurationMs(Number(e.target.value))}
-                  disabled={!obsTransEnabled}
-                  className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
-                />
-                <span className="mt-0.5 block text-[11px] text-cs2-text-muted">默认 200 ms；0 为瞬切，可按需加大</span>
-              </label>
             </div>
           </WorkflowSection>
 
