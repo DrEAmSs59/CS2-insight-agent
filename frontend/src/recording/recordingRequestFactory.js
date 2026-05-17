@@ -25,6 +25,9 @@ export const DEFAULT_RECORDING_OPTIONS = {
   final_round_seek_guard_sec: 2.0,
   final_round_min_duration_sec: 0.8,
   final_round_demo_exit_guard_sec: 1.5,
+  obs_transition_enabled: null,
+  obs_transition_name: null,
+  obs_transition_duration_ms: null,
 };
 
 function buildTargetPlayer(name, steamid64) {
