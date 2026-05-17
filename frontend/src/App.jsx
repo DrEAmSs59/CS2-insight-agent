@@ -1577,7 +1577,7 @@ export default function App() {
           const requests = [];
           for (const item of queue) {
             const meta = demoMetaMap[item.demoFilename] ?? null;
-            const dto = buildDtoFromQueueItem(item, meta);
+            const dto = buildDtoFromQueueItem(item, meta, globalPacing);
             if (dto) requests.push(dto);
           }
 

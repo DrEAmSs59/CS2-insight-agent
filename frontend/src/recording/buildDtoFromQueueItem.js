@@ -9,14 +9,13 @@ import {
   buildRoundCompilationRecordingRequest,
   buildTimelineRoundRecordingRequest,
 } from "./recordingRequestFactory";
+import { stripGlobalPacingMetaKeys } from "../stores/recordingQueueStore";
 
 /**
- * Map old pacing_override fields (legacy recording UI) to new RecordingOptions.
- * Fields that don't have a 1-to-1 mapping are spread across multiple option keys
- * that share the same semantic (e.g. pre_first_sec applies to both highlight and
- * kill_compilation pre-roll).
+ * Map pacing_override fields to RecordingOptions keys.
+ * item.pacing_override takes priority over globalPacing.
  *
- * @param {import("../stores/recordingQueueStore").PacingOverride|undefined} pacing
+ * @param {import("../stores/recordingQueueStore").PacingOverride} pacing
  * @returns {Partial<typeof DEFAULT_RECORDING_OPTIONS>}
  */
 function pacingOverrideToOptions(pacing) {
@@ -38,8 +37,15 @@ function pacingOverrideToOptions(pacing) {
     opts.kill_compilation_jump_cut_threshold_sec = pacing.max_gap_sec;
   }
   if (pacing.victim_pov === true) opts.enable_victim_pov = true;
-  if (pacing.victim_pov_pre_sec != null) opts.death_pre_sec = pacing.victim_pov_pre_sec;
-  if (pacing.victim_pov_post_sec != null) opts.death_post_sec = pacing.victim_pov_post_sec;
+
+  // Victim POV independent timing — maps to dedicated backend fields.
+  if (pacing.victim_pov_pre_sec != null) opts.victim_pov_pre_sec = pacing.victim_pov_pre_sec;
+  if (pacing.victim_pov_post_sec != null) opts.victim_pov_post_sec = pacing.victim_pov_post_sec;
+
+  // Killer POV for fail clips — maps to enable_fail_killer_pov + timing fields.
+  if (pacing.killer_pov === true) opts.enable_fail_killer_pov = true;
+  if (pacing.killer_pov_pre_sec != null) opts.fail_killer_pre_sec = pacing.killer_pov_pre_sec;
+  if (pacing.killer_pov_post_sec != null) opts.fail_killer_post_sec = pacing.killer_pov_post_sec;
 
   return opts;
 }
@@ -52,13 +58,19 @@ function pacingOverrideToOptions(pacing) {
  *
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {object|null} matchMeta  — match_meta for this demo (may be null)
+ * @param {object} [globalPacing]  — store-level global pacing (lower priority than per-item)
  * @returns {object|null}  RecordingRequestDTO or null if unsupported
  */
-export function buildDtoFromQueueItem(item, matchMeta) {
+export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
   const { clipData } = item;
   if (!clipData || typeof clipData !== "object") return null;
 
-  const options = pacingOverrideToOptions(item.pacing_override);
+  // Merge: global pacing (stripped of meta-only keys) < item pacing_override
+  const mergedPacing = {
+    ...stripGlobalPacingMetaKeys(globalPacing || {}),
+    ...(item.pacing_override || {}),
+  };
+  const options = pacingOverrideToOptions(mergedPacing);
   const args = [clipData, item, matchMeta, options];
 
   const ts = String(clipData.timeline_source || "").trim();

@@ -84,6 +84,9 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         "final_round_guard_sec",
         "final_round_seek_guard_sec",
         "final_round_min_duration_sec",
+        "victim_pov_post_sec",
+        "fail_killer_pre_sec",
+        "fail_killer_post_sec",
     ]:
         value = getattr(dto.options, option_name)
         if value < 0:
@@ -101,6 +104,9 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
             warnings.append(
                 f"round {round_info.round}: next_round_freeze_start_tick missing, will use fallback"
             )
+
+    if dto.options.victim_pov_pre_sec is not None and dto.options.victim_pov_pre_sec < 0:
+        raise NormalizationError("options.victim_pov_pre_sec must be >= 0 if set")
 
     if (
         dto.options.enable_victim_pov

@@ -15,6 +15,12 @@ export const DEFAULT_RECORDING_OPTIONS = {
   round_freeze_preroll_sec: 3.0,
   round_death_post_sec: 2.0,
   enable_victim_pov: false,
+  // victim_pov_pre_sec: null means "use highlight_pre_sec" on the backend
+  victim_pov_pre_sec: null,
+  victim_pov_post_sec: 1.5,
+  enable_fail_killer_pov: false,
+  fail_killer_pre_sec: 3.0,
+  fail_killer_post_sec: 2.0,
   final_round_guard_sec: 4.0,
   final_round_seek_guard_sec: 2.0,
   final_round_min_duration_sec: 0.8,
@@ -106,6 +112,11 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
+  const killerName = clipData.killer_name || "";
+  // Resolve killer steamid64 from killer_steamid64 field (if present) or roster map
+  const killerSteamId =
+    String(clipData.killer_steamid64 || nameToSteamId[killerName] || "");
   return {
     request_id: newRequestId(),
     request_type: "fail",
@@ -117,7 +128,7 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
         event_type: "death",
         tick: clipData.death_tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(clipData.killer_name || "", ""),
+        killer: buildTargetPlayer(killerName, killerSteamId),
         victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
         target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
         perspective: "victim",

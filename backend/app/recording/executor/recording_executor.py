@@ -271,29 +271,38 @@ class RecordingExecutor:
                     else:
                         spec_elapsed = time.monotonic() - spec_t0
 
-                # ── 3. Pause demo BEFORE calling OBS ────────────────────────
+                # ── 3. Wait for demo to reach start_tick, then pause ────────
+                # After spec_player/verify, the demo is still playing.
+                # If spec took less than pre_roll_sec, sleep the remainder so
+                # the demo reaches start_tick before we pause (preserving the
+                # full highlight_pre_sec recording window without overhead).
                 # OBS is paused/stopped — console is safe here.
-                # This ensures the demo does not overshoot end_tick while OBS starts.
-                await demo_pause()
+                remaining_wait = max(0.0, pre_roll_sec - spec_elapsed)
+                if remaining_wait > 0.05:
+                    logger.debug(
+                        "[RecordingV3] waiting %.2fs for demo to reach start_tick "
+                        "(pre_roll=%.2fs spec_elapsed=%.2fs)",
+                        remaining_wait, pre_roll_sec, spec_elapsed,
+                    )
+                    await asyncio.sleep(remaining_wait)
 
-                # overhead_sec: net ticks already consumed vs. start_tick.
-                overhead_sec = spec_elapsed - pre_roll_sec
+                await demo_pause()
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
                 if not obs_recording_started:
                     logger.info(
-                        "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
-                        segment.segment_index, spec_elapsed, pre_roll_sec, overhead_sec,
+                        "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
+                        segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     result.recording_started_at = time.time()
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
                 else:
                     logger.info(
-                        "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
-                        segment.segment_index, spec_elapsed, pre_roll_sec, overhead_sec,
+                        "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
+                        segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     await self._ctrl.resume_record_safe()
 
@@ -334,8 +343,10 @@ class RecordingExecutor:
                     continue
 
                 # ── 6. Wait until end_tick ────────────────────────────────
+                # Duration is always the full (end_tick - start_tick) window;
+                # spec overhead is absorbed by the prepare-seek buffer.
                 tick_result = await _record_until_tick(
-                    segment, plan.tick_rate, self._abort_event, overhead_sec=overhead_sec,
+                    segment, plan.tick_rate, self._abort_event, overhead_sec=0.0,
                 )
 
                 if tick_result == "aborted":

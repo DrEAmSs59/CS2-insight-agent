@@ -89,6 +89,11 @@ class RecordingOptions(BaseModel):
     round_freeze_preroll_sec: float = 3.0
     round_death_post_sec: float = 2.0
     enable_victim_pov: bool = False
+    victim_pov_pre_sec: Optional[float] = None   # None = use highlight_pre_sec
+    victim_pov_post_sec: float = 1.5
+    enable_fail_killer_pov: bool = False
+    fail_killer_pre_sec: float = 3.0
+    fail_killer_post_sec: float = 2.0
     final_round_guard_sec: float = 4.0
     final_round_seek_guard_sec: float = 2.0
     final_round_min_duration_sec: float = 0.8
