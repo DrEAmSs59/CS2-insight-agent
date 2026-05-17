@@ -118,6 +118,9 @@ export default function App() {
   const [configBackupStatus, setConfigBackupStatus] = useState(null);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
+  const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
+  const [obsTransitionName, setObsTransitionName] = useState("Fade");
+  const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(350);
   const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
   const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
@@ -804,6 +807,15 @@ export default function App() {
         ) {
           setSavedRecordWarmupDefaults(data.default_record_warmup);
         }
+        if (typeof data.obs_transition_enabled === "boolean") {
+          setObsTransitionEnabled(data.obs_transition_enabled);
+        }
+        if (typeof data.obs_transition_name === "string") {
+          setObsTransitionName(data.obs_transition_name);
+        }
+        if (typeof data.obs_transition_duration_ms === "number") {
+          setObsTransitionDurationMs(data.obs_transition_duration_ms);
+        }
         if (typeof data.cs2_extra_launch_args === "string") {
           setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
         }
@@ -1487,6 +1499,17 @@ export default function App() {
     }
   }, []);
 
+  const persistObsTransition = useCallback(async (opts) => {
+    if (opts.obs_transition_enabled !== undefined) setObsTransitionEnabled(!!opts.obs_transition_enabled);
+    if (opts.obs_transition_name !== undefined) setObsTransitionName(opts.obs_transition_name);
+    if (opts.obs_transition_duration_ms !== undefined) setObsTransitionDurationMs(Number(opts.obs_transition_duration_ms));
+    try {
+      await API.put("config", opts);
+    } catch {
+      /* silent */
+    }
+  }, []);
+
   const persistWarmupDefaults = useCallback(async (obj) => {
     setSavedRecordWarmupDefaults(obj);
     try {
@@ -2099,6 +2122,10 @@ export default function App() {
     recordInjectConsoleLines,
     setRecordInjectConsoleLines,
     persistCs2RecordExtras,
+    obsTransitionEnabled,
+    obsTransitionName,
+    obsTransitionDurationMs,
+    persistObsTransition,
     experimentalPovEnabled,
     persistExperimentalPov,
     hasDemos,
