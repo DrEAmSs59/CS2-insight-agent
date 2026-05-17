@@ -5,11 +5,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Non-Windows: inject_console_sequence is a no-op
+# Non-Windows: stubs
 try:
-    from ...win_cs2_console import inject_console_sequence
+    from ...win_cs2_console import inject_console_sequence, send_cs2_vk_tap
 except ImportError:
     def inject_console_sequence(lines): pass
+    def send_cs2_vk_tap(vk: int) -> bool: return False
+
+# Numpad keys bound during V3 recording warmup (bind KP_5 demo_pause / bind KP_6 demo_resume).
+# These let us pause/resume the demo WITHOUT opening the console (which would appear in OBS capture).
+_VK_NUMPAD5 = 0x65  # KP_5 → demo_pause
+_VK_NUMPAD6 = 0x66  # KP_6 → demo_resume
 
 class DemoSeekError(Exception):
     pass
@@ -46,3 +52,33 @@ async def demo_pause() -> None:
         await asyncio.to_thread(inject_console_sequence, ["demo_pause"])
     except Exception as e:
         logger.warning("demo_pause failed: %s", e)
+
+
+async def demo_pause_silent() -> None:
+    """Send KP_5 key tap to pause demo without opening the console.
+
+    Requires that the V3 recording warmup has injected: bind KP_5 demo_pause
+    Use this instead of demo_pause() when OBS is actively recording.
+    """
+    try:
+        ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD5)
+        if not ok:
+            logger.warning("demo_pause_silent: VK tap failed, falling back to console")
+            await asyncio.to_thread(inject_console_sequence, ["demo_pause"])
+    except Exception as e:
+        logger.warning("demo_pause_silent failed: %s", e)
+
+
+async def demo_resume_silent() -> None:
+    """Send KP_6 key tap to resume demo without opening the console.
+
+    Requires that the V3 recording warmup has injected: bind KP_6 demo_resume
+    Use this instead of demo_resume() when OBS is actively recording.
+    """
+    try:
+        ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD6)
+        if not ok:
+            logger.warning("demo_resume_silent: VK tap failed, falling back to console")
+            await asyncio.to_thread(inject_console_sequence, ["demo_resume"])
+    except Exception as e:
+        logger.warning("demo_resume_silent failed: %s", e)

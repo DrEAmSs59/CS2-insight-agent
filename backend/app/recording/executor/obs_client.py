@@ -27,9 +27,11 @@ class OBSRecordError(Exception):
 
 
 class OBSClient:
-    def __init__(self, config: OBSConfig, handshake_timeout_sec: float = 4.0):
+    def __init__(self, config: OBSConfig, handshake_timeout_sec: float = 4.0,
+                 command_timeout_sec: float = 5.0):
         self._config = config
         self._handshake_timeout_sec = max(0.5, float(handshake_timeout_sec))
+        self._command_timeout_sec = max(1.0, float(command_timeout_sec))
         self._ws: Optional[obsws] = None
 
     # ------------------------------------------------------------------
@@ -56,6 +58,7 @@ class OBSClient:
                 port=port,
                 password=password,
                 handshake_timeout_sec=self._handshake_timeout_sec,
+                command_timeout_sec=self._command_timeout_sec,
             )
             client.connect()
             self._ws = client
@@ -79,6 +82,10 @@ class OBSClient:
 
     def is_connected(self) -> bool:
         return self._ws is not None
+
+    @property
+    def config(self) -> OBSConfig:
+        return self._config
 
     # ------------------------------------------------------------------
     # Recording control
@@ -173,7 +180,7 @@ class OBSClient:
 
 class _BoundedHandshakeOBSWS(obsws):
     """obsws subclass that passes a timeout to WebSocket.connect() to avoid
-    blocking indefinitely when OBS is not running."""
+    blocking indefinitely when OBS is not running, and sets per-call command timeout."""
 
     def __init__(
         self,
@@ -182,9 +189,11 @@ class _BoundedHandshakeOBSWS(obsws):
         password: str = "",
         *,
         handshake_timeout_sec: float = 4.0,
+        command_timeout_sec: float = 5.0,
     ):
         self._handshake_timeout_sec = handshake_timeout_sec
-        super().__init__(host, port, password)
+        # obsws `timeout` controls how long call() waits for a response (seconds).
+        super().__init__(host, port, password, timeout=max(1, int(command_timeout_sec)))
 
     def connect(self):
         try:

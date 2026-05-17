@@ -5898,11 +5898,35 @@ class OBSDirector:
 
         return all_results
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # RecordingV3: build_plan → RecordingExecutor pipeline
-    # ──────────────────────────────────────────────────────────────────────────
 
-    async def execute_plan_queue(
+def _v3_clip_dict_for_rename(dto: "Any") -> dict:
+    """Build a minimal clip-like dict from a RecordingRequestDTO for use with
+    _build_clip_recording_stem so V3 recordings get the same naming as the legacy pipeline."""
+    events = getattr(dto, "events", None) or []
+    target = getattr(dto, "target_player", None)
+    player_name = (target.name if target else None) or ""
+    if not player_name and events:
+        first = events[0]
+        killer = getattr(first, "killer", None)
+        player_name = (killer.name if killer else None) or ""
+
+    kill_events = [e for e in events if getattr(getattr(e, "event_type", None), "value", None) == "kill"]
+    kill_count = len(kill_events)
+    round_no = events[0].round if events else None
+    request_type = getattr(getattr(dto, "request_type", None), "value", None) or "clip"
+    request_id = str(getattr(dto, "request_id", None) or "")
+    demo = getattr(dto, "demo", None)
+    map_name = (demo.map_name if demo else None) or ""
+
+    return {
+        "killer_name": player_name,
+        "target_player": player_name,
+        "category": request_type,
+        "round": round_no,
+        "kill_count": kill_count,
+        "clip_id": request_id[:12] if request_id else "clip",
+        "map_name": map_name,
+    }
         self,
         requests: "list",
         warmup: "Optional[RecordingWarmupExtras]" = None,
@@ -6003,8 +6027,14 @@ class OBSDirector:
                     raise
 
                 # ── Inject warmup console commands (+ POV HUD commands if enabled)
+                # Order: generic warmup first, then V3 demo-control key bindings,
+                # then POV HUD forced commands last (so POV overrides any conflicting warmup cvars).
+                # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
+                # can send a keypress instead of opening the console during recording.
+                _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
                 if warmup is not None:
                     warmup_cmds = self._recording_warmup_console_lines(warmup)
+                    warmup_cmds = [*warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
                     if self._pov_enabled:
                         pov_cmds = [
                             *POV_CORE_FORCED_COMMANDS,
@@ -6013,15 +6043,23 @@ class OBSDirector:
                                 radar_mode=warmup.pov_radar_mode,
                             ),
                         ]
-                        for _cmd in pov_cmds:
-                            logger.info("[RecordingV3][POV] inject command: %s", _cmd)
                         warmup_cmds = [*warmup_cmds, *pov_cmds]
                     if warmup_cmds:
                         logger.info("[RecordingV3] applying warmup console commands: %d", len(warmup_cmds))
+                        if self._pov_enabled:
+                            logger.info("[RecordingV3][POV] applying POV HUD commands after warmup")
+                            for _cmd in pov_cmds:
+                                logger.info("[RecordingV3][POV] inject command: %s", _cmd)
                         try:
                             await asyncio.to_thread(inject_console_sequence, warmup_cmds)
                         except Exception as _wce:
                             logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
+                else:
+                    # No warmup object — still inject the demo control key bindings.
+                    try:
+                        await asyncio.to_thread(inject_console_sequence, list(_V3_DEMO_KEY_BINDINGS))
+                    except Exception as _wce:
+                        logger.warning("[RecordingV3] demo key bindings inject failed: %s", _wce)
 
                 # ── Connect OBS right before recording (fresh connection avoids dead recv thread)
                 if obs_client.is_connected():
@@ -6084,10 +6122,27 @@ class OBSDirector:
                         })
                         continue
 
+                    # ── Rename output file using legacy naming convention ──────
+                    final_output_path = result.output_path
+                    rename_meta: dict = {}
+                    if result.output_path:
+                        _clip_dict = _v3_clip_dict_for_rename(dto)
+                        _player = dto.target_player.name if dto.target_player.name else None
+                        rename_meta = await self._rename_recording_output(
+                            Path(result.output_path), _clip_dict, demo_abs, _player,
+                        )
+                        if rename_meta.get("output_path"):
+                            final_output_path = rename_meta["output_path"]
+                            logger.info("[RecordingV3] renamed output: %s", final_output_path)
+                        elif rename_meta.get("rename_error"):
+                            logger.warning("[RecordingV3] rename failed: %s", rename_meta["rename_error"])
+
                     all_results.append({
                         "request_id": result.request_id,
                         "success": result.success,
-                        "output_path": result.output_path,
+                        "output_path": final_output_path,
+                        "original_output_path": rename_meta.get("original_output_path") or result.output_path,
+                        "output_filename": rename_meta.get("output_filename"),
                         "error": result.error,
                         "warnings": result.warnings,
                         "segment_results": [
@@ -6112,15 +6167,14 @@ class OBSDirector:
             self._set_state(DirectorState.ERROR, str(e))
             raise
         finally:
-            # Stop OBS recording if still active (e.g. StartRecord timed out but OBS recorded anyway)
-            if obs_client.is_connected():
-                try:
-                    status = await asyncio.to_thread(obs_client.get_record_status)
-                    if status.get("outputActive"):
-                        logger.warning("[RecordingV3] OBS still recording in finally; stopping now")
-                        await asyncio.to_thread(obs_client.stop_record)
-                except Exception as _obs_stop_e:
-                    logger.warning("[RecordingV3] finally stop_record check failed: %s", _obs_stop_e)
+            # Force-stop OBS via a fresh connection in case the hot client's recv
+            # thread is dead or StartRecord/ResumeRecord left OBS in an unknown state.
+            from .recording.executor.obs_recording_controller import OBSRecordingController
+            _final_ctrl = OBSRecordingController(obs_client.config, obs_client)
+            try:
+                await _final_ctrl.force_stop_recording()
+            except Exception as _fse:
+                logger.warning("[RecordingV3] finally force_stop_recording failed: %s", _fse)
             try:
                 await asyncio.to_thread(obs_client.disconnect)
             except Exception:

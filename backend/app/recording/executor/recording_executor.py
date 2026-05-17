@@ -6,7 +6,8 @@ from typing import Optional
 
 from ..models import RecordingPlan, RecordingSegment, Perspective
 from .obs_client import OBSClient, OBSRecordError
-from .demo_controller import gototick, demo_resume, demo_pause, DemoSeekError
+from .obs_recording_controller import OBSRecordingController, OBSControlError
+from .demo_controller import gototick, demo_resume, demo_pause, demo_pause_silent, demo_resume_silent, DemoSeekError
 from .spec_controller import spec_player
 from .gsi_verifier import verify_spec_target
 
@@ -24,8 +25,10 @@ async def _record_until_tick(
     Wait until the demo reaches segment.end_tick, then return "done".
     Checks abort_event every second so the recording can be interrupted mid-sleep.
 
-    overhead_sec: time already elapsed (spec switch + preroll) since demo_resume.
-    The demo has been running during that overhead, so the recording window shrinks by that amount.
+    overhead_sec: net ticks already consumed relative to start_tick.
+      = spec_elapsed - pre_roll_sec
+      Positive → demo is ahead of start_tick → recording window shrinks.
+      Negative → demo is behind start_tick → recording window grows.
     """
     base_duration = (segment.end_tick - segment.start_tick) / tick_rate
     duration_sec = max(0.1, base_duration - overhead_sec)
@@ -37,11 +40,14 @@ async def _record_until_tick(
     chunk = 1.0
     while elapsed < duration_sec:
         if abort_event and abort_event.is_set():
-            logger.info("[RecordingV3] record_until_tick: abort signalled at %.2fs / %.2fs", elapsed, duration_sec)
+            logger.info(
+                "[RecordingV3] record_until_tick: abort signalled at %.2fs / %.2fs",
+                elapsed, duration_sec,
+            )
             return "aborted"
         await asyncio.sleep(min(chunk, duration_sec - elapsed))
         elapsed += chunk
-    return "sleep_fallback"
+    return "done"
 
 
 @dataclass
@@ -69,6 +75,8 @@ class RecordingExecutor:
     def __init__(self, obs_client: OBSClient, abort_event: Optional[asyncio.Event] = None):
         self._obs = obs_client
         self._abort_event = abort_event
+        # Controller is created per-execute call so it always holds the current client.
+        self._ctrl: Optional[OBSRecordingController] = None
 
     def _is_aborted(self) -> bool:
         return self._abort_event is not None and self._abort_event.is_set()
@@ -76,6 +84,9 @@ class RecordingExecutor:
     async def execute(self, plan: RecordingPlan) -> ExecutionResult:
         result = ExecutionResult(request_id=plan.request_id)
         active_segments = [s for s in plan.segments if not s.disabled]
+
+        # Lazy-create controller using the client provided at construction time.
+        self._ctrl = OBSRecordingController(self._obs.config, self._obs)
 
         logger.info(
             "[RecordingV3] execute: %d active segment(s) for request %s",
@@ -104,6 +115,7 @@ class RecordingExecutor:
 
             is_last = (i == len(active_segments) - 1)
 
+            # ── 1. Seek ──────────────────────────────────────────────────────
             seek_tick = segment.safe_seek_tick
             try:
                 await gototick(seek_tick)
@@ -118,95 +130,108 @@ class RecordingExecutor:
                 ))
                 continue
 
-            # Pre-roll: ticks from seek_tick to segment start_tick that run before OBS starts
+            # Pre-roll duration: ticks between safe_seek_tick and start_tick.
             pre_roll_sec = max(0.0, (segment.start_tick - seek_tick) / plan.tick_rate)
 
             try:
-                # Resume demo first — spec_player only takes effect while demo is running
+                # ── 2. Resume demo so spec_player and GSI work ──────────────
                 await demo_resume()
 
                 spec_elapsed = 0.0
-                if segment.target_steamid64:
+                if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
                     await spec_player(segment.target_player_name)
-                    verified = await verify_spec_target(segment.target_steamid64)
-                    spec_elapsed = time.monotonic() - spec_t0
 
-                    if verified is False:
-                        # GSI confirmed we are on the wrong player — abort this recording
-                        logger.error(
-                            "[RecordingV3] spec verify confirmed WRONG PLAYER for %s (steamid=%s); aborting recording",
-                            segment.target_player_name, segment.target_steamid64,
-                        )
-                        await demo_pause()
-                        result.segment_results.append(SegmentResult(
-                            segment_index=segment.segment_index,
-                            status="spec_failed",
-                            start_tick=segment.start_tick,
-                            end_tick=segment.end_tick,
-                            perspective=segment.perspective,
-                            error=f"spec confirm: wrong player spectated for {segment.target_player_name}",
-                        ))
-                        result.error = (
-                            f"spec verify failed for {segment.target_player_name} — "
-                            "recording aborted to avoid capturing wrong POV"
-                        )
-                        if obs_recording_started:
-                            try:
-                                final_output_path = await asyncio.to_thread(self._obs.stop_record)
-                            except Exception:
-                                pass
-                        result.output_path = final_output_path
-                        result.success = any(r.status == "ok" for r in result.segment_results)
-                        result.warnings.extend(plan.warnings)
-                        return result
+                    if segment.target_steamid64:
+                        verified = await verify_spec_target(segment.target_steamid64)
+                        spec_elapsed = time.monotonic() - spec_t0
 
-                    elif verified is None:
-                        # GSI still silent after demo resumed — unusual; proceed with warning
-                        logger.warning(
-                            "[RecordingV3] spec verify inconclusive for %s (steamid=%s); "
-                            "GSI silent even while demo running — proceeding",
-                            segment.target_player_name, segment.target_steamid64,
-                        )
-                        result.warnings.append(
-                            f"segment {segment.segment_index}: spec verify inconclusive for "
-                            f"{segment.target_player_name} — GSI silent while running"
-                        )
+                        if verified is False:
+                            logger.error(
+                                "[RecordingV3] spec verify confirmed WRONG PLAYER for %s (steamid=%s); aborting recording",
+                                segment.target_player_name, segment.target_steamid64,
+                            )
+                            await demo_pause()
+                            result.segment_results.append(SegmentResult(
+                                segment_index=segment.segment_index,
+                                status="spec_failed",
+                                start_tick=segment.start_tick,
+                                end_tick=segment.end_tick,
+                                perspective=segment.perspective,
+                                error=f"spec confirm: wrong player spectated for {segment.target_player_name}",
+                            ))
+                            result.error = (
+                                f"spec verify failed for {segment.target_player_name} — "
+                                "recording aborted to avoid capturing wrong POV"
+                            )
+                            if obs_recording_started:
+                                await self._ctrl.stop_record_safe()
+                            result.output_path = final_output_path
+                            result.success = any(r.status == "ok" for r in result.segment_results)
+                            result.warnings.extend(plan.warnings)
+                            return result
 
-                # Remaining pre-roll: account for time spent on spec switch + verify
-                remaining_preroll = max(0.05, pre_roll_sec + 0.05 - spec_elapsed)
+                        elif verified is None:
+                            logger.warning(
+                                "[RecordingV3] spec verify inconclusive for %s (steamid=%s); "
+                                "GSI silent while running — proceeding",
+                                segment.target_player_name, segment.target_steamid64,
+                            )
+                            result.warnings.append(
+                                f"segment {segment.segment_index}: spec verify inconclusive for "
+                                f"{segment.target_player_name} — GSI silent while running"
+                            )
+                            spec_elapsed = time.monotonic() - spec_t0
+                    else:
+                        spec_elapsed = time.monotonic() - spec_t0
 
+                # ── 3. Pause demo BEFORE calling OBS ────────────────────────
+                # This ensures demo does not overshoot end_tick while waiting
+                # up to 5s for OBS to respond / recover.
+                await demo_pause()
+
+                # overhead_sec: net ticks already consumed vs. start_tick.
+                # Positive → demo is past start_tick. Negative → demo is before.
+                overhead_sec = spec_elapsed - pre_roll_sec
+
+                # ── 4. Start or Resume OBS recording ────────────────────────
                 if not obs_recording_started:
                     logger.info(
-                        "[RecordingV3] start_record segment %d (pre_roll=%.2fs spec_elapsed=%.2fs)",
-                        segment.segment_index, pre_roll_sec, spec_elapsed,
+                        "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
+                        segment.segment_index, spec_elapsed, pre_roll_sec, overhead_sec,
                     )
-                    await asyncio.sleep(remaining_preroll)
-                    await asyncio.to_thread(self._obs.start_record)
+                    await self._ctrl.start_record_safe()
                     obs_recording_started = True
                 else:
                     logger.info(
-                        "[RecordingV3] resume_record segment %d (pre_roll=%.2fs spec_elapsed=%.2fs)",
-                        segment.segment_index, pre_roll_sec, spec_elapsed,
+                        "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
+                        segment.segment_index, spec_elapsed, pre_roll_sec, overhead_sec,
                     )
-                    await asyncio.sleep(remaining_preroll)
-                    await asyncio.to_thread(self._obs.resume_record)
+                    await self._ctrl.resume_record_safe()
 
-                # overhead_sec: demo has been running since demo_resume (during spec switch + preroll)
-                overhead_sec = spec_elapsed + remaining_preroll
+                # ── 5. Resume demo AFTER OBS confirmed active ─────────────
+                # Use silent key tap (KP_6) — OBS is now recording and console must not appear.
+                await demo_resume_silent()
+
+                # ── 6. Wait until end_tick ────────────────────────────────
                 tick_result = await _record_until_tick(
-                    segment, plan.tick_rate, self._abort_event, overhead_sec=overhead_sec
+                    segment, plan.tick_rate, self._abort_event, overhead_sec=overhead_sec,
                 )
+
                 if tick_result == "aborted":
                     logger.info("[RecordingV3] recording aborted during segment %d", segment.segment_index)
+                    logger.info("[RecordingV3][ABORT] abort requested")
+
+                    # ── Abort: pause demo first (OBS is recording — use silent), then force-stop OBS ──
+                    await demo_pause_silent()
+                    logger.info("[RecordingV3][ABORT] demo_pause sent")
+
+                    final_output_path = None
                     if is_last:
-                        output_path = await asyncio.to_thread(self._obs.stop_record)
-                        final_output_path = output_path
+                        final_output_path = await self._ctrl.stop_record_safe()
                     else:
-                        await asyncio.gather(
-                            asyncio.to_thread(self._obs.pause_record),
-                            demo_pause(),
-                        )
+                        await self._ctrl.force_stop_recording()
+
                     result.segment_results.append(SegmentResult(
                         segment_index=segment.segment_index,
                         status="skipped",
@@ -217,21 +242,33 @@ class RecordingExecutor:
                     ))
                     break
 
+                # ── 7. Pause demo BEFORE calling OBS pause/stop ──────────
+                # OBS is still recording at this point — use silent key tap (KP_5).
+                await demo_pause_silent()
+
                 if is_last:
                     logger.info("[RecordingV3] stop_record segment %d (last)", segment.segment_index)
-                    output_path = await asyncio.to_thread(self._obs.stop_record)
-                    final_output_path = output_path
+                    final_output_path = await self._ctrl.stop_record_safe()
                     await asyncio.to_thread(self._obs.disconnect)
                 else:
                     logger.info("[RecordingV3] pause_record segment %d", segment.segment_index)
-                    # Parallelize OBS pause and demo pause to minimize demo overshoot
-                    # on final-round segments where end_tick is close to demo_end_tick
-                    await asyncio.gather(
-                        asyncio.to_thread(self._obs.pause_record),
-                        demo_pause(),
-                    )
+                    await self._ctrl.pause_record_safe()
 
-            except (OBSRecordError, Exception) as e:
+            except OBSControlError as e:
+                logger.error("Segment %d OBS control error: %s", segment.segment_index, e)
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="skipped",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    error=str(e),
+                ))
+                # OBSControlError means OBS didn't start. Demo is paused from step 3.
+                # No OBS to stop here.
+                continue
+
+            except Exception as e:
                 logger.error("Segment %d record error: %s", segment.segment_index, e)
                 result.segment_results.append(SegmentResult(
                     segment_index=segment.segment_index,
@@ -241,19 +278,16 @@ class RecordingExecutor:
                     perspective=segment.perspective,
                     error=str(e),
                 ))
+                # Use force_stop to handle any ambiguous OBS state.
                 if obs_recording_started:
                     try:
-                        await asyncio.to_thread(self._obs.stop_record)
+                        final_output_path = await self._ctrl.stop_record_safe()
                     except Exception:
                         pass
                     obs_recording_started = False
                 else:
-                    # start_record may have timed out but OBS still started — check and stop
                     try:
-                        status = await asyncio.to_thread(self._obs.get_record_status)
-                        if status.get("outputActive"):
-                            logger.warning("[RecordingV3] OBS recording detected after start_record error; stopping")
-                            final_output_path = await asyncio.to_thread(self._obs.stop_record)
+                        await self._ctrl.force_stop_recording()
                     except Exception:
                         pass
                 continue
@@ -267,13 +301,10 @@ class RecordingExecutor:
                 output_path=final_output_path if is_last else None,
             ))
 
-        # Post-loop cleanup: stop OBS if it was started but never stopped (e.g. last segment was spec_failed)
+        # Post-loop: force-stop if OBS was started but never stopped cleanly.
         if obs_recording_started and final_output_path is None:
-            logger.warning("[RecordingV3] OBS still recording after all segments processed; stopping now")
-            try:
-                final_output_path = await asyncio.to_thread(self._obs.stop_record)
-            except Exception as e:
-                logger.error("[RecordingV3] post-loop stop_record failed: %s", e)
+            logger.warning("[RecordingV3] OBS still recording after all segments; force stopping")
+            await self._ctrl.force_stop_recording()
 
         result.output_path = final_output_path
         result.success = any(r.status == "ok" for r in result.segment_results)
