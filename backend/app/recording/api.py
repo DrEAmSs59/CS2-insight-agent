@@ -47,13 +47,25 @@ _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND: dict[str, str] = {
     RequestType.timeline_round: "round",
 }
 
+# Request-type → compilation_kind (only for compilation types)
+_REQUEST_TYPE_TO_COMPILATION_KIND: dict[str, str] = {
+    RequestType.kill_compilation: "all_kills",
+    RequestType.death_compilation: "all_deaths",
+    RequestType.round_compilation: "rounds",
+}
 
-def _build_v3_clip_meta(dto: RecordingRequestDTO, result: dict) -> dict:
-    """Build clip_meta dict from a V3 DTO + execution result for montage workbench display."""
+
+def build_v3_recorded_clip_meta(
+    dto: RecordingRequestDTO,
+    plan: "Optional[RecordingPlan]",
+    result: dict,
+) -> dict:
+    """Build clip_meta for recorded_clips from a V3 DTO + plan + execution result."""
     request_type = str(dto.request_type or "")
     source_type = str(dto.source_type or "")
     category = _REQUEST_TYPE_TO_CATEGORY.get(request_type, "highlight")
     timeline_record_kind = _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND.get(request_type)
+    compilation_kind = _REQUEST_TYPE_TO_COMPILATION_KIND.get(request_type)
 
     events = dto.events or []
     rounds = sorted({e.round for e in events if e.round}) if events else []
@@ -85,7 +97,25 @@ def _build_v3_clip_meta(dto: RecordingRequestDTO, result: dict) -> dict:
     else:
         timeline_source = None
 
-    planned_segments: list = result.get("planned_segments") or []
+    # planned_segments: prefer live plan object, fall back to pre-serialized data in result dict
+    if plan is not None:
+        planned_segments: list = [
+            {
+                "segment_index": s.segment_index,
+                "kind": str(s.source_type.value if hasattr(s.source_type, "value") else s.source_type),
+                "source_type": str(s.source_type.value if hasattr(s.source_type, "value") else s.source_type),
+                "perspective": str(s.perspective.value if hasattr(s.perspective, "value") else s.perspective),
+                "demo_start_tick": s.start_tick,
+                "demo_end_tick": s.end_tick,
+                "target_player_name": s.target_player_name,
+                "target_steamid64": s.target_steamid64,
+                "round": s.round,
+                "anchor_ticks": s.anchor_ticks,
+            }
+            for s in plan.segments
+        ]
+    else:
+        planned_segments = result.get("planned_segments") or []
 
     meta: dict = {
         "recording_origin": "recording_v3",
@@ -110,6 +140,7 @@ def _build_v3_clip_meta(dto: RecordingRequestDTO, result: dict) -> dict:
         "timeline_event_id": timeline_event_id,
         "timeline_source": timeline_source,
         "timeline_record_kind": timeline_record_kind,
+        "compilation_kind": compilation_kind,
         "planned_segments": planned_segments,
         # Execution summary
         "segment_results": result.get("segment_results", []),
@@ -169,7 +200,8 @@ async def _persist_v3_results(
             except (TypeError, ValueError):
                 dur_f = None
 
-        clip_meta = _build_v3_clip_meta(dto, r)
+        # plan is None here — planned_segments arrive pre-serialized in result dict from execute_plan_queue
+        clip_meta = build_v3_recorded_clip_meta(dto, None, r)
 
         try:
             await db.insert_recorded_clip(
@@ -183,8 +215,15 @@ async def _persist_v3_results(
                 clip_meta=clip_meta,
             )
             logger.info(
-                "[RecordingV3] persisted recorded_clip clip_id=%s output=%s",
+                "[RecordingV3][DB] persisted clip_id=%s output=%s",
                 clip_id, output_path,
+            )
+            logger.info(
+                "[RecordingV3][DB] meta request_type=%s workbench_clip_kind=%s category=%s planned_segments=%d",
+                clip_meta.get("recording_request_type", ""),
+                clip_meta.get("workbench_clip_kind", ""),
+                clip_meta.get("category", ""),
+                len(clip_meta.get("planned_segments") or []),
             )
         except Exception:
             logger.exception(

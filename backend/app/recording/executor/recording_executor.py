@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..models import RecordingPlan, RecordingSegment
+from ..models import RecordingPlan, RecordingSegment, SourceType
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .demo_controller import (
@@ -20,6 +20,30 @@ logger = logging.getLogger(__name__)
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
 PREPARE_PREROLL_SEC: float = 5.0
+
+# Poll interval for the round-segment tick watcher.
+_TICK_WATCHER_POLL_SEC: float = 0.1
+# Log the tick watcher status every N polls (0.1s * 50 = 5s).
+_TICK_WATCHER_LOG_EVERY: int = 50
+
+
+def _get_gsi_current_round() -> Optional[int]:
+    """Return the current round number from the latest GSI payload, or None."""
+    try:
+        from ...gsi_ready import gsi_status
+        status = gsi_status()
+        payload = status.get("last_payload") if isinstance(status, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            return None
+        map_obj = payload.get("map")
+        if not isinstance(map_obj, dict):
+            return None
+        val = map_obj.get("round")
+        if val is None:
+            return None
+        return int(val)
+    except Exception:
+        return None
 
 
 async def _record_until_tick(
@@ -56,6 +80,102 @@ async def _record_until_tick(
         await asyncio.sleep(min(chunk, duration_sec - elapsed))
         elapsed += chunk
     return "done"
+
+
+async def _record_until_tick_round_segment(
+    segment: RecordingSegment,
+    tick_rate: float,
+    abort_event: Optional[asyncio.Event],
+    warnings: list[str],
+) -> str:
+    """
+    Round-segment tick watcher: stops OBS as soon as the estimated demo tick
+    reaches segment.end_tick, or immediately when GSI reports the round has
+    advanced beyond the target round.
+
+    Primary tick source: wall-clock elapsed × tick_rate (estimated current tick).
+    Secondary guard: GSI map.round — fires when the demo enters the next round,
+    which is earlier than end_tick for non-last rounds clamped to next_round_start.
+
+    If GSI data is unavailable throughout, a warning is appended but recording
+    proceeds via the wall-clock estimate (not a silent fallback — the warning
+    is visible in ExecutionResult.warnings).
+    """
+    target_round: Optional[int] = segment.round
+    end_tick = segment.end_tick
+    start_tick = segment.start_tick
+    seg_idx = segment.segment_index
+
+    base_duration = max(0.1, (end_tick - start_tick) / tick_rate)
+    # Hard deadline: full duration + 10 s grace so a stalled GSI can't block forever.
+    hard_deadline = time.monotonic() + base_duration + 10.0
+
+    gsi_seen = False
+    gsi_unavailable_warned = False
+    poll_count = 0
+    t0 = time.monotonic()
+
+    logger.info(
+        "[RecordingV3][TickWatcher] segment=%d start=%d end=%d duration=%.2fs round=%s",
+        seg_idx, start_tick, end_tick, base_duration, target_round,
+    )
+
+    while True:
+        if abort_event and abort_event.is_set():
+            logger.info(
+                "[RecordingV3][TickWatcher] segment=%d abort signalled", seg_idx,
+            )
+            return "aborted"
+
+        await asyncio.sleep(_TICK_WATCHER_POLL_SEC)
+        poll_count += 1
+        elapsed = time.monotonic() - t0
+        estimated_tick = start_tick + int(elapsed * tick_rate)
+
+        if poll_count % _TICK_WATCHER_LOG_EVERY == 0:
+            logger.info(
+                "[RecordingV3][TickWatcher] segment=%d current_tick=%d target_end=%d elapsed=%.1fs",
+                seg_idx, estimated_tick, end_tick, elapsed,
+            )
+
+        # GSI round guard: fire as soon as the demo has entered a later round.
+        gsi_round = _get_gsi_current_round()
+        if gsi_round is not None:
+            gsi_seen = True
+            if target_round is not None and gsi_round > target_round:
+                logger.info(
+                    "[RecordingV3][TickWatcher] segment=%d GSI round advanced to %d > target %d "
+                    "at estimated_tick=%d; stopping OBS",
+                    seg_idx, gsi_round, target_round, estimated_tick,
+                )
+                return "done"
+        else:
+            if not gsi_seen and not gsi_unavailable_warned and elapsed > 5.0:
+                # GSI has been silent for 5 s since recording started.
+                msg = (
+                    f"segment {seg_idx}: round_segment_requires_current_tick — "
+                    "GSI silent; using wall-clock tick estimate (may drift during freeze/pause)"
+                )
+                warnings.append(msg)
+                logger.warning("[RecordingV3][TickWatcher] %s", msg)
+                gsi_unavailable_warned = True
+
+        # Wall-clock tick estimate: primary stop condition.
+        if estimated_tick >= end_tick:
+            logger.info(
+                "[RecordingV3][TickWatcher] segment=%d current_tick=%d target_end=%d; "
+                "reached end_tick; stopping OBS",
+                seg_idx, estimated_tick, end_tick,
+            )
+            return "done"
+
+        # Hard deadline guard.
+        if time.monotonic() >= hard_deadline:
+            logger.warning(
+                "[RecordingV3][TickWatcher] segment=%d hard deadline exceeded; stopping OBS",
+                seg_idx,
+            )
+            return "done"
 
 
 @dataclass
@@ -363,11 +483,17 @@ class RecordingExecutor:
                     continue
 
                 # ── 6. Wait until end_tick ────────────────────────────────
-                # Duration is always the full (end_tick - start_tick) window;
-                # spec overhead is absorbed by the prepare-seek buffer.
-                tick_result = await _record_until_tick(
-                    segment, plan.tick_rate, self._abort_event, overhead_sec=0.0,
-                )
+                # Round segments use the tick watcher (100ms poll + GSI round guard)
+                # so they stop at the precise round boundary rather than relying on
+                # a coarse 1-second wall-clock sleep.
+                if segment.source_type == SourceType.round:
+                    tick_result = await _record_until_tick_round_segment(
+                        segment, plan.tick_rate, self._abort_event, result.warnings,
+                    )
+                else:
+                    tick_result = await _record_until_tick(
+                        segment, plan.tick_rate, self._abort_event, overhead_sec=0.0,
+                    )
 
                 if tick_result == "aborted":
                     logger.info("[RecordingV3] recording aborted during segment %d", segment.segment_index)
