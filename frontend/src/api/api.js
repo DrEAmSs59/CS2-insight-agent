@@ -1,8 +1,15 @@
 import axios from "axios";
 
-// 立即同步检测环境：如果当前是通过自定义协议加载的，则必须使用绝对路径请求后端
-const IS_ELECTRON_APP = window.location.protocol === "app:";
+// 同步检测环境：
+// 1. 检查协议是否为自定义的 app:
+// 2. 检查 User Agent 是否包含 Electron (兜底方案)
+const IS_ELECTRON_APP = 
+  window.location.protocol === "app:" || 
+  navigator.userAgent.toLowerCase().includes("electron");
+
 export const API_BASE_URL = IS_ELECTRON_APP ? "http://127.0.0.1:19871" : "";
+
+console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
 
 const API = axios.create({ 
   baseURL: `${API_BASE_URL}/api` 
