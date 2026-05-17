@@ -259,7 +259,7 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2673,7 +2673,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.0.2"}
 
 
 @app.get("/")

@@ -430,7 +430,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between rounded-lg bg-black/20 p-3 border border-white/5">
                   <div>
                     <p className="text-[11px] font-semibold text-zinc-300">当前版本</p>
-                    <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">v2.0.0 {!isPackaged && "(DEV)"}</p>
+                    <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">v{__APP_VERSION__} {!isPackaged && "(DEV)"}</p>
                   </div>
                   <button
                     type="button"

@@ -22,7 +22,7 @@ from .obs_director import OBSDirector
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "V2.0.0"
+APP_VERSION = "2.0.2"
 DEFAULT_PROJECT_PROFILE = "未命名"  # 解析失败时的兜底目录名；正常由 resolve_default_project_profile_for_obs() 解析
 BUNDLED_OBS_BASIC_INI_NAME = "basic.ini"
 BACKUP_SUBDIR = ".obs_config_backups"
