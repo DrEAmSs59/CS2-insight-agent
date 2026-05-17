@@ -103,6 +103,8 @@ class Clip:
     kill_ticks: list[int] = field(default_factory=list)
     # 与 victims 等长；每次击杀对应受害者的 steamid64（来自 player_death user_steamid），供受害者 POV 分段
     victim_steamid64s: list[str] = field(default_factory=list)
+    # 击杀目标玩家的凶手 steamid64（来自 player_death attacker_steamid），供下饭 killer POV 分段
+    killer_steamid64: Optional[str] = None
     # 本回合开局比分（目标方 round 胜场 : 对方），来自 round_freeze_end 刻度与 team_num
     score_own: Optional[int] = None
     score_opp: Optional[int] = None
@@ -1199,6 +1201,7 @@ class DemoAnalyzer:
                     "weapon": weapon,
                     "headshot": headshot,
                     "attacker": attacker,
+                    "attacker_steamid": str(row.get("attacker_steamid") or ""),
                     "attacker_team": attacker_team,
                     "victim_team": victim_team,
                     "attackerblind": attackerblind,
@@ -2960,6 +2963,7 @@ class DemoAnalyzer:
                     tick=death["tick"],
                     tags=backstab_tags,
                     killer_name=DemoAnalyzer._fail_killer_display_name(death, target_player),
+                    killer_steamid64=death.get("attacker_steamid"),
                     death_core=True,
                     score_own=so,
                     score_opp=se,
@@ -3027,6 +3031,7 @@ class DemoAnalyzer:
                     tick=death["tick"],
                     tags=unique_tags,
                     killer_name=DemoAnalyzer._fail_killer_display_name(death, target_player),
+                    killer_steamid64=death.get("attacker_steamid"),
                     death_core=True,
                     score_own=so,
                     score_opp=se,
@@ -4703,6 +4708,7 @@ class DemoAnalyzer:
         tags: list[str],
         end_tick_override: int | None = None,
         killer_name: Optional[str] = None,
+        killer_steamid64: Optional[str] = None,
         victims: Optional[list[str]] = None,
         *,
         death_core: bool = False,
@@ -4728,6 +4734,7 @@ class DemoAnalyzer:
             end_tick=end,
             context_tags=_dedup_context_tags(tags),
             killer_name=killer_name,
+            killer_steamid64=killer_steamid64 or None,
             victims=list(victims) if victims else [],
             score_own=score_own,
             score_opp=score_opp,

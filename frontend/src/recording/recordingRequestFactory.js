@@ -58,6 +58,27 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
   };
 }
 
+/**
+ * Resolve a killer player's steamid64 from multiple possible fields in clipData,
+ * falling back to the roster map in matchMeta.
+ *
+ * @param {string} killerName
+ * @param {object} clipData
+ * @param {object|null} matchMeta
+ * @returns {string}
+ */
+function resolveKillerSteamId(killerName, clipData, matchMeta) {
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
+  return String(
+    clipData.killer_steamid64 ||
+    clipData.killer_steam_id ||
+    clipData.killer_steamid ||
+    clipData.killers_steamid64s?.[0] ||
+    nameToSteamId[killerName] ||
+    ""
+  );
+}
+
 function buildSourceRef(clipData, queueItem) {
   return {
     original_clip_id: clipData.clip_id || null,
@@ -112,11 +133,8 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
-  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   const killerName = clipData.killer_name || "";
-  // Resolve killer steamid64 from killer_steamid64 field (if present) or roster map
-  const killerSteamId =
-    String(clipData.killer_steamid64 || nameToSteamId[killerName] || "");
+  const killerSteamId = resolveKillerSteamId(killerName, clipData, matchMeta);
   return {
     request_id: newRequestId(),
     request_type: "fail",
@@ -171,6 +189,8 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const killerName = clipData.killer_name || "";
+  const killerSteamId = resolveKillerSteamId(killerName, clipData, matchMeta);
   return {
     request_id: newRequestId(),
     request_type: "timeline_death",
@@ -182,7 +202,7 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
         event_type: "death",
         tick: clipData.death_tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(clipData.killer_name || "", ""),
+        killer: buildTargetPlayer(killerName, killerSteamId),
         victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
         target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
         perspective: "victim",
@@ -224,6 +244,7 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   // kill_ticks holds death ticks for death compilation clips
   return {
     request_id: newRequestId(),
@@ -232,15 +253,21 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
     demo,
     target_player: targetPlayer,
     events:
-      clipData.kill_ticks?.map((tick, i) => ({
-        event_type: "death",
-        tick,
-        round: clipData.source_rounds?.[i] ?? clipData.round,
-        killer: buildTargetPlayer(clipData.killers?.[i] || clipData.killer_name || "", ""),
-        victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        perspective: "victim",
-      })) || [],
+      clipData.kill_ticks?.map((tick, i) => {
+        const kName = clipData.killers?.[i] || clipData.killer_name || "";
+        const kSteamId = String(
+          clipData.killers_steamid64s?.[i] || nameToSteamId[kName] || ""
+        );
+        return {
+          event_type: "death",
+          tick,
+          round: clipData.source_rounds?.[i] ?? clipData.round,
+          killer: buildTargetPlayer(kName, kSteamId),
+          victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          perspective: "victim",
+        };
+      }) || [],
     rounds: [],
     options: mergedOptions,
     source_ref: buildSourceRef(clipData, queueItem),
