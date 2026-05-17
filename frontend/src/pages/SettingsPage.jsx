@@ -311,7 +311,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(false)}
-                  className={`relative flex min-h-[5.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[7.5rem] sm:min-h-[8rem] ${
+                  className={`relative flex min-h-[4rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[5rem] sm:min-h-[5rem] ${
                     !s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
@@ -329,7 +329,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(true)}
-                  className={`relative flex min-h-[5.5rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[7.5rem] sm:min-h-[8rem] ${
+                  className={`relative flex min-h-[4rem] flex-1 flex-col rounded-lg border p-3 text-left transition-all @min-[36rem]/settings:min-h-[5rem] sm:min-h-[5rem] ${
                     s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
