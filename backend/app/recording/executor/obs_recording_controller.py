@@ -133,7 +133,9 @@ class OBSRecordingController:
 
     async def start_record_safe(self) -> str:
         """
-        Send StartRecord. On timeout, recover via fresh GetRecordStatus.
+        Send StartRecord. On normal response, return immediately without waiting for
+        GetRecordStatus — the caller must call demo_resume_silent_strict() right after.
+        On timeout/error, recover via fresh GetRecordStatus.
 
         Returns "ok" or "ok_recovered".
         Raises OBSControlError when OBS is confirmed NOT recording after recovery.
@@ -141,12 +143,9 @@ class OBSRecordingController:
         logger.info("[RecordingV3][OBS] StartRecord request sent")
         try:
             await self._call(self._client.start_record)
-            # Belt-and-suspenders: confirm outputActive
-            status = await self._call(self._client.get_record_status, timeout=OBS_STATUS_TIMEOUT_SEC)
-            logger.info(
-                "[RecordingV3][OBS] StartRecord response ok; outputActive=%s",
-                status.get("outputActive"),
-            )
+            # Hot path: return immediately so demo_resume_silent_strict() can fire
+            # without a 3-5s GetRecordStatus delay being recorded by OBS.
+            logger.info("[RecordingV3][OBS] StartRecord response ok")
             return "ok"
         except (OBSRecordError, asyncio.TimeoutError) as exc:
             logger.warning(
@@ -170,7 +169,9 @@ class OBSRecordingController:
 
     async def resume_record_safe(self) -> str:
         """
-        Send ResumeRecord. On timeout, recover via fresh GetRecordStatus.
+        Send ResumeRecord. On normal response, return immediately without waiting for
+        GetRecordStatus — the caller must call demo_resume_silent_strict() right after.
+        On timeout/error, recover via fresh GetRecordStatus.
 
         Returns "ok" or "ok_recovered".
         Raises OBSControlError when recovery fails or OBS is confirmed not recording.
@@ -178,13 +179,9 @@ class OBSRecordingController:
         logger.info("[RecordingV3][OBS] ResumeRecord request sent")
         try:
             await self._call(self._client.resume_record)
-            status = await self._call(self._client.get_record_status, timeout=OBS_STATUS_TIMEOUT_SEC)
-            active = status.get("outputActive", False)
-            paused = status.get("outputPaused", False)
-            logger.info(
-                "[RecordingV3][OBS] ResumeRecord response ok; outputActive=%s outputPaused=%s",
-                active, paused,
-            )
+            # Hot path: return immediately so demo_resume_silent_strict() can fire
+            # without a 3-5s GetRecordStatus delay being recorded by OBS.
+            logger.info("[RecordingV3][OBS] ResumeRecord response ok")
             return "ok"
         except (OBSRecordError, asyncio.TimeoutError) as exc:
             logger.warning(
@@ -304,6 +301,17 @@ class OBSRecordingController:
 
         logger.error("[RecordingV3][OBS] StopRecord failed after %d retries", OBS_STOP_RETRIES)
         return None
+
+    async def get_record_status_safe(self) -> dict:
+        """
+        Fetch current OBS record status using a fresh connection.
+        Returns the status dict, or {} on failure (never raises).
+        """
+        try:
+            return await self._fresh_status()
+        except Exception as e:
+            logger.warning("[RecordingV3][OBS] get_record_status_safe failed: %s", e)
+            return {}
 
     async def force_stop_recording(self) -> bool:
         """

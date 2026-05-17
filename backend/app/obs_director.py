@@ -5898,35 +5898,7 @@ class OBSDirector:
 
         return all_results
 
-
-def _v3_clip_dict_for_rename(dto: "Any") -> dict:
-    """Build a minimal clip-like dict from a RecordingRequestDTO for use with
-    _build_clip_recording_stem so V3 recordings get the same naming as the legacy pipeline."""
-    events = getattr(dto, "events", None) or []
-    target = getattr(dto, "target_player", None)
-    player_name = (target.name if target else None) or ""
-    if not player_name and events:
-        first = events[0]
-        killer = getattr(first, "killer", None)
-        player_name = (killer.name if killer else None) or ""
-
-    kill_events = [e for e in events if getattr(getattr(e, "event_type", None), "value", None) == "kill"]
-    kill_count = len(kill_events)
-    round_no = events[0].round if events else None
-    request_type = getattr(getattr(dto, "request_type", None), "value", None) or "clip"
-    request_id = str(getattr(dto, "request_id", None) or "")
-    demo = getattr(dto, "demo", None)
-    map_name = (demo.map_name if demo else None) or ""
-
-    return {
-        "killer_name": player_name,
-        "target_player": player_name,
-        "category": request_type,
-        "round": round_no,
-        "kill_count": kill_count,
-        "clip_id": request_id[:12] if request_id else "clip",
-        "map_name": map_name,
-    }
+    async def execute_plan_queue(
         self,
         requests: "list",
         warmup: "Optional[RecordingWarmupExtras]" = None,
@@ -6112,6 +6084,7 @@ def _v3_clip_dict_for_rename(dto: "Any") -> dict:
                         continue
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
+                    recording_started_at = time.time()
                     try:
                         result = await executor.execute(plan)
                     except Exception as e:
@@ -6123,26 +6096,61 @@ def _v3_clip_dict_for_rename(dto: "Any") -> dict:
                         continue
 
                     # ── Rename output file using legacy naming convention ──────
+                    # Prefer the path returned by executor; if None (e.g. StopRecord did not
+                    # echo outputPath), scan the OBS output directory for the newest video
+                    # file written since recording_started_at.
                     final_output_path = result.output_path
                     rename_meta: dict = {}
+                    rename_status: str = "skipped"
+
+                    _clip_dict = _v3_clip_dict_for_rename(dto)
+                    _player = dto.target_player.name if dto.target_player.name else None
+
+                    resolved_path: Optional[Path] = None
                     if result.output_path:
-                        _clip_dict = _v3_clip_dict_for_rename(dto)
-                        _player = dto.target_player.name if dto.target_player.name else None
+                        resolved_path = Path(result.output_path)
+                        rename_status = "from_executor"
+                    else:
+                        # Fallback: scan OBS output directory for the newest video since
+                        # recording started.  Give OBS up to 3s to flush the file.
+                        for _scan_attempt in range(3):
+                            resolved_path = self._locate_recent_recording_output(recording_started_at)
+                            if resolved_path:
+                                break
+                            await asyncio.sleep(1.0)
+                        if resolved_path:
+                            logger.info(
+                                "[RecordingV3] output_path from executor is None; "
+                                "resolved via OBS directory scan: %s", resolved_path,
+                            )
+                            rename_status = "from_scan"
+                        else:
+                            logger.warning(
+                                "[RecordingV3] output_path from executor is None and "
+                                "OBS directory scan found nothing"
+                            )
+                            rename_status = "not_found"
+
+                    if resolved_path:
                         rename_meta = await self._rename_recording_output(
-                            Path(result.output_path), _clip_dict, demo_abs, _player,
+                            resolved_path, _clip_dict, demo_abs, _player,
                         )
                         if rename_meta.get("output_path"):
                             final_output_path = rename_meta["output_path"]
                             logger.info("[RecordingV3] renamed output: %s", final_output_path)
                         elif rename_meta.get("rename_error"):
                             logger.warning("[RecordingV3] rename failed: %s", rename_meta["rename_error"])
+                            rename_status = "rename_error"
 
                     all_results.append({
                         "request_id": result.request_id,
                         "success": result.success,
                         "output_path": final_output_path,
                         "original_output_path": rename_meta.get("original_output_path") or result.output_path,
+                        "resolved_output_path": str(resolved_path) if resolved_path else None,
                         "output_filename": rename_meta.get("output_filename"),
+                        "rename_status": rename_status,
+                        "rename_error": rename_meta.get("rename_error"),
                         "error": result.error,
                         "warnings": result.warnings,
                         "segment_results": [
@@ -6190,3 +6198,33 @@ def _v3_clip_dict_for_rename(dto: "Any") -> dict:
 
         logger.info("[RecordingV3] execute_plan_queue done: %d results", len(all_results))
         return all_results
+
+
+def _v3_clip_dict_for_rename(dto: "Any") -> dict:
+    """Build a minimal clip-like dict from a RecordingRequestDTO for use with
+    _build_clip_recording_stem so V3 recordings get the same naming as the legacy pipeline."""
+    events = getattr(dto, "events", None) or []
+    target = getattr(dto, "target_player", None)
+    player_name = (target.name if target else None) or ""
+    if not player_name and events:
+        first = events[0]
+        killer = getattr(first, "killer", None)
+        player_name = (killer.name if killer else None) or ""
+
+    kill_events = [e for e in events if getattr(getattr(e, "event_type", None), "value", None) == "kill"]
+    kill_count = len(kill_events)
+    round_no = events[0].round if events else None
+    request_type = getattr(getattr(dto, "request_type", None), "value", None) or "clip"
+    request_id = str(getattr(dto, "request_id", None) or "")
+    demo = getattr(dto, "demo", None)
+    map_name = (demo.map_name if demo else None) or ""
+
+    return {
+        "killer_name": player_name,
+        "target_player": player_name,
+        "category": request_type,
+        "round": round_no,
+        "kill_count": kill_count,
+        "clip_id": request_id[:12] if request_id else "clip",
+        "map_name": map_name,
+    }

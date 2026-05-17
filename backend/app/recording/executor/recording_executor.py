@@ -4,10 +4,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..models import RecordingPlan, RecordingSegment, Perspective
-from .obs_client import OBSClient, OBSRecordError
+from ..models import RecordingPlan, RecordingSegment
+from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
-from .demo_controller import gototick, demo_resume, demo_pause, demo_pause_silent, demo_resume_silent, DemoSeekError
+from .demo_controller import (
+    gototick, demo_resume, demo_pause,
+    demo_pause_silent_strict, demo_resume_silent_strict,
+    DemoSeekError,
+)
 from .spec_controller import spec_player
 from .gsi_verifier import verify_spec_target
 
@@ -53,7 +57,7 @@ async def _record_until_tick(
 @dataclass
 class SegmentResult:
     segment_index: int
-    status: str  # "ok" | "seek_failed" | "spec_failed" | "skipped"
+    status: str  # "ok" | "seek_failed" | "spec_failed" | "skipped" | "silent_resume_failed"
     start_tick: int
     end_tick: int
     perspective: str
@@ -81,12 +85,65 @@ class RecordingExecutor:
     def _is_aborted(self) -> bool:
         return self._abort_event is not None and self._abort_event.is_set()
 
+    async def _stop_obs_and_console_pause(self, is_last: bool) -> Optional[str]:
+        """
+        End-of-segment boundary: concurrently send demo_pause_silent_strict + OBS
+        PauseRecord/StopRecord, then fall back to console demo_pause if the key tap
+        failed (safe because OBS is confirmed paused/stopped at that point).
+
+        Returns:
+          - outputPath (str or None) when is_last=True
+          - None when is_last=False (pause case)
+        Populates self._obs_force_stopped when PauseRecord fell back to StopRecord.
+        """
+        if is_last:
+            silent_result, obs_result = await asyncio.gather(
+                demo_pause_silent_strict(),
+                self._ctrl.stop_record_safe(),
+                return_exceptions=True,
+            )
+            output_path: Optional[str] = None
+            if isinstance(obs_result, Exception):
+                logger.error("[RecordingV3] stop_record_safe raised: %s", obs_result)
+            else:
+                output_path = obs_result
+
+        else:
+            silent_result, pause_result = await asyncio.gather(
+                demo_pause_silent_strict(),
+                self._ctrl.pause_record_safe(),
+                return_exceptions=True,
+            )
+            if isinstance(pause_result, Exception):
+                logger.error("[RecordingV3] pause_record_safe raised: %s", pause_result)
+                pause_result = "error"
+
+            if pause_result == "fallback_stopped":
+                # PauseRecord fell back to StopRecord — no more segments can resume.
+                self._obs_force_stopped = True
+                logger.warning(
+                    "[RecordingV3] PauseRecord fell back to StopRecord; "
+                    "no further segments can be resumed in this output file"
+                )
+            output_path = None
+
+        # Console fallback for demo pause — only AFTER OBS is confirmed paused/stopped.
+        if isinstance(silent_result, Exception) or not silent_result:
+            logger.warning(
+                "[RecordingV3] demo_pause_silent_strict failed; using console demo_pause "
+                "(OBS is now paused/stopped — safe to use console)"
+            )
+            await demo_pause()
+
+        return output_path if is_last else None
+
     async def execute(self, plan: RecordingPlan) -> ExecutionResult:
         result = ExecutionResult(request_id=plan.request_id)
         active_segments = [s for s in plan.segments if not s.disabled]
 
         # Lazy-create controller using the client provided at construction time.
         self._ctrl = OBSRecordingController(self._obs.config, self._obs)
+        self._obs_force_stopped = False  # set True when pause_record_safe fallback-stops
 
         logger.info(
             "[RecordingV3] execute: %d active segment(s) for request %s",
@@ -113,9 +170,21 @@ class RecordingExecutor:
                 logger.info("[RecordingV3] abort signalled before segment %d; stopping", segment.segment_index)
                 break
 
+            # If a mid-sequence fallback StopRecord occurred, no further segments can resume.
+            if self._obs_force_stopped:
+                logger.warning(
+                    "[RecordingV3] skipping segment %d: OBS was force-stopped mid-sequence",
+                    segment.segment_index,
+                )
+                result.warnings.append(
+                    f"segment {segment.segment_index}: skipped — OBS force-stopped mid-sequence"
+                )
+                break
+
             is_last = (i == len(active_segments) - 1)
 
             # ── 1. Seek ──────────────────────────────────────────────────────
+            # OBS is paused/stopped at this point — console commands are safe.
             seek_tick = segment.safe_seek_tick
             try:
                 await gototick(seek_tick)
@@ -135,6 +204,7 @@ class RecordingExecutor:
 
             try:
                 # ── 2. Resume demo so spec_player and GSI work ──────────────
+                # OBS is paused/stopped — console is safe here.
                 await demo_resume()
 
                 spec_elapsed = 0.0
@@ -186,15 +256,16 @@ class RecordingExecutor:
                         spec_elapsed = time.monotonic() - spec_t0
 
                 # ── 3. Pause demo BEFORE calling OBS ────────────────────────
-                # This ensures demo does not overshoot end_tick while waiting
-                # up to 5s for OBS to respond / recover.
+                # OBS is paused/stopped — console is safe here.
+                # This ensures the demo does not overshoot end_tick while OBS starts.
                 await demo_pause()
 
                 # overhead_sec: net ticks already consumed vs. start_tick.
-                # Positive → demo is past start_tick. Negative → demo is before.
                 overhead_sec = spec_elapsed - pre_roll_sec
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
+                # Hot path: StartRecord/ResumeRecord returns immediately on success.
+                # DO NOT call GetRecordStatus here — that delay would be recorded.
                 if not obs_recording_started:
                     logger.info(
                         "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
@@ -209,9 +280,41 @@ class RecordingExecutor:
                     )
                     await self._ctrl.resume_record_safe()
 
-                # ── 5. Resume demo AFTER OBS confirmed active ─────────────
-                # Use silent key tap (KP_6) — OBS is now recording and console must not appear.
-                await demo_resume_silent()
+                # ── 5. Resume demo IMMEDIATELY after OBS start/resume ────────
+                # Strict: no console fallback — OBS is now recording.
+                # If the key tap fails, abort this segment without console pollution.
+                resume_ok = await demo_resume_silent_strict()
+                if not resume_ok:
+                    logger.error(
+                        "[RecordingV3] demo_resume_silent_strict FAILED for segment %d; "
+                        "aborting segment to avoid blank recording",
+                        segment.segment_index,
+                    )
+                    # OBS is recording a frozen frame — pause/stop it immediately.
+                    if is_last:
+                        final_output_path = await self._ctrl.stop_record_safe()
+                        await asyncio.to_thread(self._obs.disconnect)
+                    else:
+                        pause_r = await self._ctrl.pause_record_safe()
+                        if pause_r == "fallback_stopped":
+                            self._obs_force_stopped = True
+                    # After OBS is paused/stopped, console is safe again.
+                    await demo_pause()
+                    result.segment_results.append(SegmentResult(
+                        segment_index=segment.segment_index,
+                        status="silent_resume_failed",
+                        start_tick=segment.start_tick,
+                        end_tick=segment.end_tick,
+                        perspective=segment.perspective,
+                        error="demo_resume_silent_strict failed — KP_6 tap not delivered",
+                    ))
+                    result.warnings.append(
+                        f"segment {segment.segment_index}: silent_resume_failed — "
+                        "KP_6 tap not delivered; segment skipped to avoid blank footage"
+                    )
+                    if self._obs_force_stopped:
+                        break
+                    continue
 
                 # ── 6. Wait until end_tick ────────────────────────────────
                 tick_result = await _record_until_tick(
@@ -222,16 +325,17 @@ class RecordingExecutor:
                     logger.info("[RecordingV3] recording aborted during segment %d", segment.segment_index)
                     logger.info("[RecordingV3][ABORT] abort requested")
 
-                    # ── Abort: pause demo first (OBS is recording — use silent), then force-stop OBS ──
-                    await demo_pause_silent()
-                    logger.info("[RecordingV3][ABORT] demo_pause sent")
-
+                    # Concurrent: silent pause + OBS stop (OBS is recording — no console).
+                    # Console fallback happens after OBS confirms stopped (inside helper).
                     final_output_path = None
                     if is_last:
-                        final_output_path = await self._ctrl.stop_record_safe()
+                        final_output_path = await self._stop_obs_and_console_pause(is_last=True)
+                        await asyncio.to_thread(self._obs.disconnect)
                     else:
+                        await self._stop_obs_and_console_pause(is_last=False)
                         await self._ctrl.force_stop_recording()
 
+                    logger.info("[RecordingV3][ABORT] demo_pause sent and OBS stopped")
                     result.segment_results.append(SegmentResult(
                         segment_index=segment.segment_index,
                         status="skipped",
@@ -242,17 +346,24 @@ class RecordingExecutor:
                     ))
                     break
 
-                # ── 7. Pause demo BEFORE calling OBS pause/stop ──────────
-                # OBS is still recording at this point — use silent key tap (KP_5).
-                await demo_pause_silent()
-
+                # ── 7. End of segment: concurrent demo_pause_silent_strict + OBS ──
+                # Both fire at the same time to minimise the window between
+                # demo pausing and OBS pausing/stopping.
+                # Console fallback (if key tap fails) happens AFTER OBS confirms paused/stopped.
+                logger.info(
+                    "[RecordingV3] end_segment %d (%s)",
+                    segment.segment_index, "stop" if is_last else "pause",
+                )
+                obs_stop_path = await self._stop_obs_and_console_pause(is_last=is_last)
                 if is_last:
-                    logger.info("[RecordingV3] stop_record segment %d (last)", segment.segment_index)
-                    final_output_path = await self._ctrl.stop_record_safe()
+                    final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
-                else:
-                    logger.info("[RecordingV3] pause_record segment %d", segment.segment_index)
-                    await self._ctrl.pause_record_safe()
+
+                # ── 5b. OBS pause confirmation before next segment's console ─
+                # After pause_record_safe returns "ok" or "ok_recovered", OBS is
+                # confirmed paused. If it returned "fallback_stopped", the next
+                # segment loop iteration will see self._obs_force_stopped=True and break.
+                # Either way, gototick/spec_player console calls are safe from here.
 
             except OBSControlError as e:
                 logger.error("Segment %d OBS control error: %s", segment.segment_index, e)
@@ -302,7 +413,7 @@ class RecordingExecutor:
             ))
 
         # Post-loop: force-stop if OBS was started but never stopped cleanly.
-        if obs_recording_started and final_output_path is None:
+        if obs_recording_started and final_output_path is None and not self._obs_force_stopped:
             logger.warning("[RecordingV3] OBS still recording after all segments; force stopping")
             await self._ctrl.force_stop_recording()
 

@@ -59,6 +59,7 @@ async def demo_pause_silent() -> None:
 
     Requires that the V3 recording warmup has injected: bind KP_5 demo_pause
     Use this instead of demo_pause() when OBS is actively recording.
+    Falls back to console if the key tap fails (only safe when OBS is NOT recording).
     """
     try:
         ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD5)
@@ -74,6 +75,7 @@ async def demo_resume_silent() -> None:
 
     Requires that the V3 recording warmup has injected: bind KP_6 demo_resume
     Use this instead of demo_resume() when OBS is actively recording.
+    Falls back to console if the key tap fails (only safe when OBS is NOT recording).
     """
     try:
         ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD6)
@@ -82,3 +84,37 @@ async def demo_resume_silent() -> None:
             await asyncio.to_thread(inject_console_sequence, ["demo_resume"])
     except Exception as e:
         logger.warning("demo_resume_silent failed: %s", e)
+
+
+async def demo_pause_silent_strict() -> bool:
+    """Send KP_5 key tap to pause demo. No console fallback — safe while OBS is recording.
+
+    Returns True if the tap was dispatched successfully, False otherwise.
+    NEVER falls back to inject_console_sequence: the console opening would be captured by OBS.
+    Use console fallback (demo_pause) only AFTER OBS has confirmed paused/stopped.
+    """
+    try:
+        ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD5)
+        if not ok:
+            logger.warning("demo_pause_silent_strict: VK tap failed; no console fallback (OBS may be active)")
+        return bool(ok)
+    except Exception as e:
+        logger.warning("demo_pause_silent_strict failed: %s; no console fallback", e)
+        return False
+
+
+async def demo_resume_silent_strict() -> bool:
+    """Send KP_6 key tap to resume demo. No console fallback — safe while OBS is recording.
+
+    Returns True if the tap was dispatched successfully, False otherwise.
+    NEVER falls back to inject_console_sequence: the console opening would be captured by OBS.
+    If this returns False, the caller must pause/stop OBS before falling back to console.
+    """
+    try:
+        ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD6)
+        if not ok:
+            logger.warning("demo_resume_silent_strict: VK tap failed; no console fallback (OBS may be active)")
+        return bool(ok)
+    except Exception as e:
+        logger.warning("demo_resume_silent_strict failed: %s; no console fallback", e)
+        return False
