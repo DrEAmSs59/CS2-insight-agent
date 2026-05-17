@@ -143,6 +143,9 @@ export default function RecordWarmupModal({
     }
     setOpts(base);
     setResolutionError("");
+    setObsTransEnabled(null);
+    setObsTransName(null);
+    setObsTransDurationMs(null);
   }, [open, defaultOverrides]);
 
   useEffect(() => {
