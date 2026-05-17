@@ -38,14 +38,14 @@ let backendProcess;
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const initWidth = Math.min(1440, Math.floor(width * 0.8));
+  const initWidth = Math.min(1600, Math.floor(width * 0.8));
   const initHeight = Math.min(900, Math.floor(height * 0.8));
 
   mainWindow = new BrowserWindow({
     width: initWidth,
     height: initHeight,
-    minWidth: 1024,
-    minHeight: 768,
+    minWidth: 1440,
+    minHeight: 900,
     frame: false, // 移除原生菜单和标题栏
     titleBarStyle: 'hidden',
     icon: path.join(__dirname, 'public/cs2-insight-logo.png'), // 使用提供的图标
@@ -73,7 +73,7 @@ function createWindow() {
       log.error('加载应用界面失败:', err);
     });
     // 生产环境白屏问题已修复，关闭默认开启的开发者工具
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
   }
 
   // 加载生命周期监听

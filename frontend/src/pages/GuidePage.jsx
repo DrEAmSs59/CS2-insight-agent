@@ -176,9 +176,9 @@ function SetupChecklist() {
 // ─── Quick‑start steps ──────────────────────────────────────────
 
 const STEPS = [
-  { step: "1", text: "双击启动.bat 打开程序" },
-  { step: "2", text: "OBS 开启 WebSocket → OBS 配置中心填写连接信息" },
-  { step: "3", text: "Demo 库 / 解析分析 页面上传或选择录像" },
+  { step: "1", text: "完成 OBS、Demo库 配置" },
+  { step: "2", text: "进入 Demo 库扫描 Demo 或手动加入 Demo" },
+  { step: "3", text: "选择 Demo 解析分析" },
   { step: "4", text: "选玩家 → 解析 → 勾选片段 → 一键录制" },
 ];
 

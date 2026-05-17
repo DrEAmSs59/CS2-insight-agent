@@ -1,7 +1,7 @@
 {
   "name": "cs2-insight-agent",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.2",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
@@ -60,7 +60,7 @@
     ],
     "publish": {
       "provider": "generic",
-      "url": "https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev"
+      "url": "https://cs2-demo-agent.trswnca.cc"
     },
     "win": {
       "target": "nsis",
