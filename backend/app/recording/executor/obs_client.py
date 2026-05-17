@@ -192,6 +192,164 @@ class OBSClient:
             return None
 
     # ------------------------------------------------------------------
+    # Scene & transition control
+    # ------------------------------------------------------------------
+
+    def get_scene_names(self) -> list[str]:
+        """GetSceneList → sorted list of scene names."""
+        self._require_connected()
+        try:
+            resp = self._ws.call(obs_requests.GetSceneList())
+            scenes = (getattr(resp, "datain", None) or {}).get("scenes") or []
+            return [str(s.get("sceneName") or "") for s in scenes if isinstance(s, dict)]
+        except Exception as exc:
+            raise OBSRecordError(f"GetSceneList failed: {exc}") from exc
+
+    def create_scene(self, scene_name: str) -> None:
+        """CreateScene. Silently succeeds if the scene already exists."""
+        self._require_connected()
+        try:
+            self._ws.call(obs_requests.CreateScene(sceneName=scene_name))
+        except Exception as exc:
+            raise OBSRecordError(f"CreateScene({scene_name!r}) failed: {exc}") from exc
+
+    def set_current_program_scene(self, scene_name: str) -> None:
+        """SetCurrentProgramScene — triggers the current OBS transition."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "SetCurrentProgramScene", None)
+            if req is None:
+                raise OBSRecordError("SetCurrentProgramScene not available in obs-websocket-py")
+            self._ws.call(req(sceneName=scene_name))
+        except OBSRecordError:
+            raise
+        except Exception as exc:
+            raise OBSRecordError(f"SetCurrentProgramScene({scene_name!r}) failed: {exc}") from exc
+
+    def set_current_scene_transition(self, name: str, duration_ms: int) -> None:
+        """SetCurrentSceneTransition — sets the global OBS transition."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "SetCurrentSceneTransition", None)
+            if req is None:
+                raise OBSRecordError("SetCurrentSceneTransition not available in obs-websocket-py")
+            self._ws.call(req(transitionName=name, transitionDuration=duration_ms))
+        except OBSRecordError:
+            raise
+        except Exception as exc:
+            raise OBSRecordError(
+                f"SetCurrentSceneTransition({name!r}, {duration_ms}ms) failed: {exc}"
+            ) from exc
+
+    def get_scene_transition_list(self) -> list[str]:
+        """GetSceneTransitionList → list of available transition names."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "GetSceneTransitionList", None)
+            if req is None:
+                return []
+            resp = self._ws.call(req())
+            transitions = (getattr(resp, "datain", None) or {}).get("transitions") or []
+            return [str(t.get("transitionName") or "") for t in transitions if isinstance(t, dict)]
+        except Exception as exc:
+            logger.warning("GetSceneTransitionList failed: %s", exc)
+            return []
+
+    def scene_has_source(self, scene_name: str, source_name: str) -> bool:
+        """Return True if scene already contains a source with source_name."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "GetSceneItemList", None)
+            if req is None:
+                return False
+            resp = self._ws.call(req(sceneName=scene_name))
+            items = (getattr(resp, "datain", None) or {}).get("sceneItems") or []
+            return any(
+                isinstance(it, dict) and str(it.get("sourceName") or "") == source_name
+                for it in items
+            )
+        except Exception:
+            return False
+
+    def add_color_source_to_scene(
+        self, scene_name: str, source_name: str, color: int = 0xFF000000
+    ) -> None:
+        """Create a Color Source in scene_name. color is ARGB int (default opaque black)."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "CreateInput", None)
+            if req is None:
+                raise OBSRecordError("CreateInput not available in obs-websocket-py")
+            self._ws.call(
+                req(
+                    sceneName=scene_name,
+                    inputName=source_name,
+                    inputKind="color_source_v3",
+                    inputSettings={"color": color, "width": 1920, "height": 1080},
+                    sceneItemEnabled=True,
+                )
+            )
+        except OBSRecordError:
+            raise
+        except Exception as exc:
+            raise OBSRecordError(
+                f"add_color_source_to_scene({scene_name!r}) failed: {exc}"
+            ) from exc
+
+    def ensure_game_capture_in_scene(
+        self, scene_name: str, capture_name: str, capture_kind: str = "game_capture"
+    ) -> None:
+        """Create a Game Capture input and link it to scene_name.
+
+        Migrated from obs_director._obs_ensure_managed_game_capture.
+        Raises OBSRecordError on failure.
+        """
+        self._require_connected()
+        if self.scene_has_source(scene_name, capture_name):
+            return  # already present — nothing to do
+
+        # Check if the input already exists globally (just not in this scene).
+        input_exists = False
+        try:
+            req = getattr(obs_requests, "GetInputList", None)
+            if req is not None:
+                resp = self._ws.call(req())
+                inputs = (getattr(resp, "datain", None) or {}).get("inputs") or []
+                input_exists = any(
+                    isinstance(it, dict) and str(it.get("inputName") or "") == capture_name
+                    for it in inputs
+                )
+        except Exception as exc:
+            logger.warning("OBSClient: GetInputList failed: %s", exc)
+
+        try:
+            if input_exists:
+                req = getattr(obs_requests, "CreateSceneItem", None)
+                if req is None:
+                    raise OBSRecordError("CreateSceneItem not available")
+                self._ws.call(req(sceneName=scene_name, sourceName=capture_name))
+            else:
+                req = getattr(obs_requests, "CreateInput", None)
+                if req is None:
+                    raise OBSRecordError("CreateInput not available")
+                self._ws.call(
+                    req(
+                        sceneName=scene_name,
+                        inputName=capture_name,
+                        inputKind=capture_kind,
+                        inputSettings={},
+                        sceneItemEnabled=True,
+                    )
+                )
+            logger.info("OBSClient: game capture %r linked to scene %r", capture_name, scene_name)
+        except OBSRecordError:
+            raise
+        except Exception as exc:
+            raise OBSRecordError(
+                f"ensure_game_capture_in_scene({scene_name!r}) failed: {exc}"
+            ) from exc
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
