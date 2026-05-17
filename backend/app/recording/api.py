@@ -10,6 +10,7 @@ from .normalizer import NormalizationError
 from ..env_utils import OBSConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
+from .executor.obs_fade_controller import OBSFadeController, FadeConfig
 from .services.result_writer import write_result
 from ..montage_db import MontageDB
 
@@ -57,6 +58,25 @@ _REQUEST_TYPE_TO_COMPILATION_KIND: dict[str, str] = {
     "death_compilation": "all_deaths",
     "round_compilation": "rounds",
 }
+
+
+def _resolve_fade_config(options: "RecordingOptions", cfg: "AppConfig") -> FadeConfig:
+    """Merge per-request RecordingOptions fade overrides with AppConfig global defaults."""
+    return FadeConfig(
+        enabled=(
+            options.obs_transition_enabled
+            if options.obs_transition_enabled is not None
+            else cfg.obs_transition_enabled
+        ),
+        transition_name=options.obs_transition_name or cfg.obs_transition_name,
+        duration_ms=(
+            options.obs_transition_duration_ms
+            if options.obs_transition_duration_ms is not None
+            else cfg.obs_transition_duration_ms
+        ),
+        game_scene_name=cfg.obs_game_scene_name,
+        black_scene_name=cfg.obs_black_scene_name,
+    )
 
 
 def build_v3_recorded_clip_meta(
@@ -154,6 +174,10 @@ def build_v3_recorded_clip_meta(
         # Execution summary
         "segment_results": result.get("segment_results", []),
         "warnings": result.get("warnings", []),
+        # Display fields for the montage workbench material pool
+        "pov_hud_enabled": result.get("pov_hud_enabled", False),
+        "recording_perspective": result.get("recording_perspective"),
+        "victim_pov_segments": result.get("victim_pov_segments", []),
     }
     if death_tick is not None:
         meta["death_tick"] = death_tick
@@ -336,7 +360,11 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
     except OBSConnectionError as e:
         raise HTTPException(status_code=503, detail=f"OBS connection failed: {e}")
 
-    executor = RecordingExecutor(obs_client)
+    fade_config = _resolve_fade_config(dto.options, config)
+    fade_ctrl = OBSFadeController(obs_cfg, fade_config)
+    await fade_ctrl.setup()
+
+    executor = RecordingExecutor(obs_client, fade_controller=fade_ctrl)
     result = await executor.execute(plan)
 
     try:
