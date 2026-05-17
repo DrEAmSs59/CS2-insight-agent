@@ -506,6 +506,21 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
   return [...clipsInOrder];
 }
 
+/**
+ * Return a concise round label string for display badges and fact lines.
+ * Compilation clips with multiple source_rounds show "R4·5·9".
+ * Single-round clips show "R4". Returns null if no round info.
+ */
+export function getClipRoundLabel(clip) {
+  if (!clip || typeof clip !== "object") return null;
+  const srcRounds = Array.isArray(clip.source_rounds)
+    ? clip.source_rounds.map(Number).filter(Number.isFinite)
+    : [];
+  if (srcRounds.length > 1) return `R${srcRounds.join("·")}`;
+  const r = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
+  return r != null ? `R${r}` : null;
+}
+
 /** 素材池第二行：Demo、回合、击杀/死亡对象、武器 */
 export function getMontageClipFactLine(clip) {
   if (!clip || typeof clip !== "object") return "";
@@ -513,7 +528,15 @@ export function getMontageClipFactLine(clip) {
     (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
     (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
     "";
-  const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? `第${clip.round}回合` : "";
+  // For compilation clips spanning multiple rounds, show all rounds ("第4·5·9回合").
+  const srcRounds = Array.isArray(clip.source_rounds)
+    ? clip.source_rounds.map(Number).filter(Number.isFinite)
+    : [];
+  const rnd = srcRounds.length > 1
+    ? `第${srcRounds.join("·")}回合`
+    : clip.round != null && Number.isFinite(Number(clip.round))
+      ? `第${clip.round}回合`
+      : "";
   const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
   const cat = String(clip.category || "").toLowerCase();
   const victims = Array.isArray(clip.victims) ? clip.victims.map((v) => String(v || "").trim()).filter(Boolean) : [];

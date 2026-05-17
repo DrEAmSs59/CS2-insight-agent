@@ -841,29 +841,32 @@ class DemoAnalyzer:
         self,
         target_player: str,
         match_start_tick: int = 0,
-    ) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int]]:
+    ) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int]]:
         """
         解析 round_freeze_end，在冻结结束 tick 上汇总 Team 2 / Team 3 存活玩家 current_equip_value，
-        并记录目标玩家在该回合所属 team_num。
+        并记录目标玩家在该回合所属 team_num。同时解析 round_start 事件，
+        通过时间段匹配得出每回合冻结开始的真实 tick。
 
-        返回三元组:
-            economy_map            {round_num: {2: equip, 3: equip}}
-            target_team_map        {round_num: team_num}
-            round_freeze_end_ticks {round_num: freeze_end_tick}  ← 用于 clip_min_tick
+        返回四元组:
+            economy_map               {round_num: {2: equip, 3: equip}}
+            target_team_map           {round_num: team_num}
+            round_freeze_end_ticks    {round_num: freeze_end_tick}
+            round_freeze_start_ticks  {round_num: freeze_start_tick}  ← 真实回合开始 tick
         """
         economy_map: dict[int, dict[int, int]] = {}
         target_team_map: dict[int, int] = {}
         round_freeze_end_ticks: dict[int, int] = {}
+        round_freeze_start_ticks: dict[int, int] = {}
         fr = self._safe_parse_event("round_freeze_end", other=list(_EXTRA_EVENT_FIELDS))
         if fr.shape[0] == 0 or "tick" not in fr.columns:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         if match_start_tick > 0:
             fr = fr.loc[pd.to_numeric(fr["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
         if fr.shape[0] == 0:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         trc = "total_rounds_played" if "total_rounds_played" in fr.columns else None
         if trc is None:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         tick_to_round: dict[int, int] = {}
         for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
@@ -876,9 +879,33 @@ class DemoAnalyzer:
             if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
                 round_freeze_end_ticks[rn_here] = tick
 
+        # Build round_freeze_start_ticks from round_start events using temporal matching.
+        # For each round N, find the round_start event tick that falls between the
+        # previous round's freeze_end and this round's freeze_end.  This gives the
+        # true demo tick at which the freeze/buy phase of round N began.
+        try:
+            rs_df = self._safe_parse_event("round_start")
+            if not rs_df.empty and "tick" in rs_df.columns:
+                rs_ticks = sorted(
+                    pd.to_numeric(rs_df["tick"], errors="coerce").dropna().astype(int).tolist()
+                )
+                if match_start_tick > 0:
+                    rs_ticks = [t for t in rs_ticks if t >= match_start_tick]
+                for rnd in sorted(round_freeze_end_ticks.keys()):
+                    fe = round_freeze_end_ticks[rnd]
+                    prev_fe = round_freeze_end_ticks.get(
+                        rnd - 1,
+                        match_start_tick if match_start_tick > 0 else 0,
+                    )
+                    candidates = [t for t in rs_ticks if prev_fe < t < fe]
+                    if candidates:
+                        round_freeze_start_ticks[rnd] = min(candidates)
+        except Exception:
+            pass
+
         ticks = sorted(tick_to_round.keys())
         if not ticks:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         try:
             raw = self.parser.parse_ticks(
@@ -887,9 +914,9 @@ class DemoAnalyzer:
             )
             pdf = _to_pandas_df(raw)
         except Exception:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         if pdf.empty or "tick" not in pdf.columns:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         tp = str(target_player or "").strip().lower()
         name_col = "name" if "name" in pdf.columns else None
@@ -940,7 +967,7 @@ class DemoAnalyzer:
                             pass
                         break
 
-        return economy_map, target_team_map, round_freeze_end_ticks
+        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
     def _build_round_scores(self, match_start_tick: int = 0) -> dict[int, dict[int, int]]:
         """
@@ -1065,9 +1092,12 @@ class DemoAnalyzer:
         match_start_tick = _get_match_start_tick(self.parser)
 
         # ── 每回合冻结结束瞬间：两队存活装备总价 + 目标所在阵营 ──
-        round_economy_map, round_target_team_map, round_freeze_end_ticks = self._build_round_economy(
-            target_player, match_start_tick,
-        )
+        (
+            round_economy_map,
+            round_target_team_map,
+            round_freeze_end_ticks,
+            round_freeze_start_ticks,
+        ) = self._build_round_economy(target_player, match_start_tick)
         # 以玩家队伍身份累计：own / opp 不随换边混淆，用于比分显示与赛点标签
         round_team_score_map = self._build_round_scores_team_based(
             round_target_team_map, match_start_tick,
@@ -1974,6 +2004,7 @@ class DemoAnalyzer:
             round_result_map,
             round_freeze_end_ticks,
             freeze_to_death_rounds=freeze_to_death_rounds,
+            round_freeze_start_ticks=round_freeze_start_ticks,
             map_name=map_name,
             demo_max_tick=_demo_max_tick,
         )
@@ -2494,6 +2525,7 @@ class DemoAnalyzer:
         round_freeze_end_ticks: dict[int, int],
         *,
         freeze_to_death_rounds: Optional[list[int]] = None,
+        round_freeze_start_ticks: Optional[dict[int, int]] = None,
         map_name: str,
         demo_max_tick: int = 0,
     ) -> list[Clip]:
@@ -2808,6 +2840,10 @@ class DemoAnalyzer:
                         "death_tick": int(dt)
                         if dt is not None and int(dt) > 0
                         else None,
+                        # True round start tick from the demo's round_start event.
+                        # Populated via temporal matching in _build_round_economy;
+                        # None when round_start events are unavailable.
+                        "round_start_tick": (round_freeze_start_ticks or {}).get(rnd),
                     }
                 )
 

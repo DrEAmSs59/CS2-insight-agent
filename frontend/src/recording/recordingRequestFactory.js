@@ -108,7 +108,9 @@ function deriveNextRoundFreezeEnd(round, clipData) {
 function deriveNextRoundStartTick(round, clipData) {
   const windows = clipData.freeze_to_death_round_windows || [];
   const next = windows.find((w) => Number(w.round) === Number(round) + 1);
-  return next ? (next.start_tick ?? null) : null;
+  // Use the real round_start_tick from the demo's round_start event (added by demo_parser).
+  // Fall back to start_tick (freeze_end - 8s) only when round_start_tick is unavailable.
+  return next ? (next.round_start_tick ?? next.start_tick ?? null) : null;
 }
 
 export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
@@ -341,7 +343,9 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
           );
           return {
             round: w.round,
-            round_start_tick: w.start_tick,
+            // round_start_tick: real freeze-phase start from the demo's round_start event.
+            // Falls back to start_tick (freeze_end - 8s) for older parsed data.
+            round_start_tick: w.round_start_tick ?? w.start_tick,
             round_end_tick: roundEndTick,
             freeze_start_tick: null,
             freeze_end_tick: w.freeze_end_tick ?? null,

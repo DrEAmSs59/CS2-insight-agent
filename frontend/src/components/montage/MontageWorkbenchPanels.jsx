@@ -18,6 +18,7 @@ import {
 import { AiScoreBadge } from "../ClipCard";
 import {
   getClipDurationSeconds,
+  getClipRoundLabel,
   getClipTitle,
   getMontageBlockShortLabel,
   getMontageClipFactLine,
@@ -532,6 +533,9 @@ export function MontageOrchestrationTimeline({
               const dragging = dragId === clip.id;
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = getMontageBlockShortLabel(clip);
+              const suppressMontageAi = variant === "timeline" || variant === "compilation";
+              const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip);
+              const outBase = pathBasenameQuick(clip?.output_path);
               return (
                 <li key={clip.id} className="flex flex-col">
                   <div
@@ -570,24 +574,31 @@ export function MontageOrchestrationTimeline({
                         </span>
                       </div>
 
-                      {/* 辅助合并行描述：地图、比分、视角及武器降噪排布 */}
+                      {/* 摘要行：武器、地图、回合、比分（详情拆到下方，避免 truncate + 仅靠 hover） */}
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
                         {weapon ? <span className="font-medium text-cs2-text-secondary">{weapon}</span> : null}
                         {weapon && (mapName || rnd != null) ? <span>•</span> : null}
-                        {mapName ? <span className="truncate max-w-[140px]">{mapName}</span> : null}
-                        {rnd != null ? <span className="font-mono text-cs2-text-secondary">R{rnd}</span> : null}
+                        {mapName ? <span className="break-words text-cs2-text-secondary">{mapName}</span> : null}
+                        {getClipRoundLabel(clip) != null ? (
+                          <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
+                        ) : null}
                         {scorePair ? (
                           <span className="font-mono font-semibold text-cs2-text-primary">
                             {scorePair.left}:{scorePair.right}
                           </span>
                         ) : null}
-                        {factLine ? <span className="truncate max-w-[200px] italic text-cs2-text-muted ml-auto" title={factLine}>{factLine}</span> : null}
                       </div>
+
+                      {factLine ? (
+                        <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-secondary break-words">
+                          {factLine}
+                        </p>
+                      ) : null}
 
                       {/* 次级状态微标区 */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {victimSegCount > 0 ? (
-                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
+                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface">
                             受害者视角 ×{victimSegCount}
                           </span>
                         ) : null}
@@ -597,7 +608,6 @@ export function MontageOrchestrationTimeline({
                               ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
                               : "bg-cs2-bg-input text-cs2-text-muted"
                           }`}
-                          title={perspectiveZh}
                         >
                           {perspectivePrimary}
                         </span>
@@ -605,6 +615,29 @@ export function MontageOrchestrationTimeline({
                           <span className="rounded bg-cs2-cyan-surface px-2 py-0.5 text-xs font-bold text-cs2-cyan-on-surface">HUD</span>
                         ) : null}
                       </div>
+                      {povTip ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          {povTip}
+                        </p>
+                      ) : null}
+                      {perspectiveZh !== perspectivePrimary ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          录制视角：{perspectiveZh}
+                        </p>
+                      ) : null}
+                      {aiLine ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed italic text-cs2-text-muted break-words">
+                          {aiLine}
+                        </p>
+                      ) : null}
+                      {outBase ? (
+                        <p
+                          className="mt-1.5 font-mono text-[10px] text-cs2-text-muted/90 break-all"
+                          title={String(clip.output_path || "")}
+                        >
+                          {outBase}
+                        </p>
+                      ) : null}
 
                       {/* 标签列表 */}
                       {tags.length ? (
@@ -779,7 +812,9 @@ export function MontageMaterialPoolCard({
             {weaponShow ? <span className="font-medium text-cs2-text-secondary">{weaponShow}</span> : null}
             {weaponShow && (mapName || rnd != null) ? <span>•</span> : null}
             {mapName ? <span className="truncate max-w-[120px]">{mapName}</span> : null}
-            {rnd != null ? <span className="font-mono text-cs2-text-secondary">R{rnd}</span> : null}
+            {getClipRoundLabel(clip) != null ? (
+              <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
+            ) : null}
             {scorePair ? (
               <span className="font-mono font-semibold text-cs2-text-primary">
                 {scorePair.left}:{scorePair.right}

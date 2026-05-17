@@ -48,7 +48,10 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
             # Case A: player alive this round.
-            # Priority: reliable round_end_tick → next_round_start_tick → next_round_freeze_start_tick → demo_end
+            # Stop at next_round_start_tick — the demo tick when the next round's freeze
+            # phase begins (= the moment the round-over/scoreboard screen appears).
+            # Priority: reliable round_end_tick → next_round_start_tick
+            #            → next_round_freeze_start_tick → demo_end
             if reliable_round_end:
                 end_tick = round_info.round_end_tick  # type: ignore[assignment]
                 end_reason = "round_end"
@@ -62,7 +65,8 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                 end_tick = req.demo.demo_end_tick
                 end_reason = "fallback_demo_end"
 
-            # Always clamp to next_round_start_tick to avoid recording into the next round.
+            # Clamp to next_round_start_tick to avoid recording into the next round's
+            # freeze / buy phase.
             if round_info.next_round_start_tick is not None:
                 if end_tick > round_info.next_round_start_tick:
                     end_tick = round_info.next_round_start_tick
@@ -115,6 +119,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                 "freeze_end_tick": round_info.freeze_end_tick,
                 "next_round_start_tick": round_info.next_round_start_tick,
                 "next_round_freeze_start_tick": round_info.next_round_freeze_start_tick,
+                "next_round_freeze_end_tick": round_info.next_round_freeze_end_tick,
                 "target_death_tick": round_info.target_death_tick,
                 "end_reason": end_reason,
             },

@@ -28,30 +28,34 @@ def _get_montage_db() -> MontageDB:
     return _montage_db
 
 
-# Request-type → category used by montage workbench filters.
+def _enum_value(v) -> str:
+    """Return the plain string value of an enum member, or str(v) for plain strings."""
+    return v.value if hasattr(v, "value") else str(v)
+
+
+# All mapping dicts use plain string keys so they remain correct regardless of
+# how Python serialises str-Enum members (behaviour changed in Python 3.11).
 _REQUEST_TYPE_TO_CATEGORY: dict[str, str] = {
-    RequestType.highlight: "highlight",
-    RequestType.fail: "fail",
-    RequestType.timeline_kill: "timeline",
-    RequestType.timeline_death: "timeline",
-    RequestType.kill_compilation: "compilation",
-    RequestType.death_compilation: "compilation",
-    RequestType.round_compilation: "compilation",
-    RequestType.timeline_round: "timeline_round",
+    "highlight": "highlight",
+    "fail": "fail",
+    "timeline_kill": "timeline",
+    "timeline_death": "timeline",
+    "kill_compilation": "compilation",
+    "death_compilation": "compilation",
+    "round_compilation": "compilation",
+    "timeline_round": "timeline_round",
 }
 
-# Request-type → timeline_record_kind (only for timeline types)
 _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND: dict[str, str] = {
-    RequestType.timeline_kill: "kill",
-    RequestType.timeline_death: "death",
-    RequestType.timeline_round: "round",
+    "timeline_kill": "kill",
+    "timeline_death": "death",
+    "timeline_round": "round",
 }
 
-# Request-type → compilation_kind (only for compilation types)
 _REQUEST_TYPE_TO_COMPILATION_KIND: dict[str, str] = {
-    RequestType.kill_compilation: "all_kills",
-    RequestType.death_compilation: "all_deaths",
-    RequestType.round_compilation: "rounds",
+    "kill_compilation": "all_kills",
+    "death_compilation": "all_deaths",
+    "round_compilation": "rounds",
 }
 
 
@@ -61,15 +65,20 @@ def build_v3_recorded_clip_meta(
     result: dict,
 ) -> dict:
     """Build clip_meta for recorded_clips from a V3 DTO + plan + execution result."""
-    request_type = str(dto.request_type or "")
-    source_type = str(dto.source_type or "")
+    request_type = _enum_value(dto.request_type) if dto.request_type else ""
+    source_type = _enum_value(dto.source_type) if dto.source_type else ""
     category = _REQUEST_TYPE_TO_CATEGORY.get(request_type, "highlight")
     timeline_record_kind = _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND.get(request_type)
     compilation_kind = _REQUEST_TYPE_TO_COMPILATION_KIND.get(request_type)
 
     events = dto.events or []
-    rounds = sorted({e.round for e in events if e.round}) if events else []
-    first_round = rounds[0] if rounds else None
+    # For round-based request types, source_rounds come from dto.rounds (events is empty).
+    # For event-based types, derive from the events list.
+    if dto.rounds:
+        source_rounds = sorted(r.round for r in dto.rounds if r.round is not None)
+    else:
+        source_rounds = sorted({e.round for e in events if e.round})
+    first_round = source_rounds[0] if source_rounds else None
 
     kill_events = [e for e in events if str(getattr(e.event_type, "value", e.event_type)) == "kill"]
     death_events = [e for e in events if str(getattr(e.event_type, "value", e.event_type)) == "death"]
@@ -126,7 +135,7 @@ def build_v3_recorded_clip_meta(
         "request_type": request_type,
         "map_name": dto.demo.map_name if dto.demo else "unknown",
         "round": first_round,
-        "source_rounds": rounds,
+        "source_rounds": source_rounds,
         "kill_count": kill_count,
         "kill_ticks": kill_ticks,
         "context_tags": [],
@@ -219,11 +228,13 @@ async def _persist_v3_results(
                 clip_id, output_path,
             )
             logger.info(
-                "[RecordingV3][DB] meta request_type=%s workbench_clip_kind=%s category=%s planned_segments=%d",
+                "[RecordingV3][DB] meta request_type=%s workbench_clip_kind=%s category=%s "
+                "planned_segments=%d source_rounds=%s",
                 clip_meta.get("recording_request_type", ""),
                 clip_meta.get("workbench_clip_kind", ""),
                 clip_meta.get("category", ""),
                 len(clip_meta.get("planned_segments") or []),
+                clip_meta.get("source_rounds", []),
             )
         except Exception:
             logger.exception(

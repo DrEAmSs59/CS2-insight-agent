@@ -46,6 +46,28 @@ def _get_gsi_current_round() -> Optional[int]:
         return None
 
 
+def _get_gsi_round_phase() -> Optional[str]:
+    """Return the current round phase string from the latest GSI payload, or None.
+
+    Possible values: "live", "over", "freezetime", "warmup", etc.
+    "over" means the round has just ended; "freezetime" means the next round's
+    buy-phase is active — both are reliable signals that the current round is done.
+    """
+    try:
+        from ...gsi_ready import gsi_status
+        status = gsi_status()
+        payload = status.get("last_payload") if isinstance(status, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            return None
+        round_obj = payload.get("round")
+        if not isinstance(round_obj, dict):
+            return None
+        phase = round_obj.get("phase")
+        return str(phase).lower() if phase is not None else None
+    except Exception:
+        return None
+
+
 async def _record_until_tick(
     segment: RecordingSegment,
     tick_rate: float,
@@ -89,35 +111,59 @@ async def _record_until_tick_round_segment(
     warnings: list[str],
 ) -> str:
     """
-    Round-segment tick watcher: stops OBS as soon as the estimated demo tick
-    reaches segment.end_tick, or immediately when GSI reports the round has
-    advanced beyond the target round.
+    Round-segment tick watcher: stops OBS as soon as the demo reaches segment.end_tick.
 
-    Primary tick source: wall-clock elapsed × tick_rate (estimated current tick).
-    Secondary guard: GSI map.round — fires when the demo enters the next round,
-    which is earlier than end_tick for non-last rounds clamped to next_round_start.
+    Stop conditions (first to fire wins):
+      1. GSI round.phase == "over" or "freezetime" — round has definitively ended.
+      2. GSI map.round > target_round — demo entered the next round.
+      3. Wall-clock estimated tick >= effective_end_tick.
+      4. Hard deadline (full duration + 10 s grace).
 
-    If GSI data is unavailable throughout, a warning is appended but recording
-    proceeds via the wall-clock estimate (not a silent fallback — the warning
-    is visible in ExecutionResult.warnings).
+    effective_end_tick: for alive-round segments (no target_death_tick in metadata)
+    the wall-clock bound is additionally capped at next_round_start_tick from
+    segment metadata, so a mis-planned end_tick can never cause the executor to
+    record into the next round.
     """
     target_round: Optional[int] = segment.round
     end_tick = segment.end_tick
     start_tick = segment.start_tick
     seg_idx = segment.segment_index
+    meta = segment.metadata or {}
 
-    base_duration = max(0.1, (end_tick - start_tick) / tick_rate)
+    # Defensive cap for alive-round segments: never let the wall-clock estimate
+    # run past next_round_start_tick (when the next round's freeze phase begins).
+    # This is the same boundary the planner targets for alive rounds.
+    meta_death_tick = meta.get("target_death_tick")
+    meta_next_round_start = meta.get("next_round_start_tick")
+    if meta_death_tick is None and meta_next_round_start is not None:
+        effective_end_tick = min(end_tick, int(meta_next_round_start))
+        if effective_end_tick != end_tick:
+            logger.info(
+                "[RecordingV3][TickWatcher] segment=%d capping end_tick %d → %d "
+                "(next_round_start_tick from metadata)",
+                seg_idx, end_tick, effective_end_tick,
+            )
+    else:
+        effective_end_tick = end_tick
+
+    base_duration = max(0.1, (effective_end_tick - start_tick) / tick_rate)
     # Hard deadline: full duration + 10 s grace so a stalled GSI can't block forever.
     hard_deadline = time.monotonic() + base_duration + 10.0
 
     gsi_seen = False
     gsi_unavailable_warned = False
+    # Phase guard: only fires AFTER the round goes "live" for the first time.
+    # This prevents a false stop during the pre-roll freeze window that starts
+    # before freeze_end_tick — at that point GSI still reports "freezetime" for
+    # the target round, which must not be misread as "the round just ended".
+    phase_guard_armed = False
     poll_count = 0
     t0 = time.monotonic()
 
     logger.info(
-        "[RecordingV3][TickWatcher] segment=%d start=%d end=%d duration=%.2fs round=%s",
-        seg_idx, start_tick, end_tick, base_duration, target_round,
+        "[RecordingV3][TickWatcher] segment=%d start=%d end=%d effective_end=%d "
+        "duration=%.2fs round=%s",
+        seg_idx, start_tick, end_tick, effective_end_tick, base_duration, target_round,
     )
 
     while True:
@@ -134,9 +180,38 @@ async def _record_until_tick_round_segment(
 
         if poll_count % _TICK_WATCHER_LOG_EVERY == 0:
             logger.info(
-                "[RecordingV3][TickWatcher] segment=%d current_tick=%d target_end=%d elapsed=%.1fs",
-                seg_idx, estimated_tick, end_tick, elapsed,
+                "[RecordingV3][TickWatcher] segment=%d current_tick=%d target_end=%d elapsed=%.1fs phase_armed=%s",
+                seg_idx, estimated_tick, effective_end_tick, elapsed, phase_guard_armed,
             )
+
+        # GSI phase guard — two-phase approach:
+        #   1. Arm once we see "live" (round is in active play).
+        #   2. Fire on a phase that signals the recording window has closed:
+        #      - Alive rounds (no target_death_tick): only stop on "freezetime",
+        #        which corresponds to next_round_start_tick.  "over" fires too
+        #        early (round-end scoreboard) and must be skipped so the round-end
+        #        screen is included in the clip.
+        #      - Death rounds: stop on either "over" or "freezetime" (existing
+        #        behaviour) since the window ends shortly after the player dies.
+        # This prevents a false stop when the demo seeked into the pre-roll freeze
+        # window and GSI still reports "freezetime" for the current round.
+        gsi_phase = _get_gsi_round_phase()
+        if gsi_phase == "live" and not phase_guard_armed:
+            phase_guard_armed = True
+            logger.info(
+                "[RecordingV3][TickWatcher] segment=%d phase guard armed at estimated_tick=%d",
+                seg_idx, estimated_tick,
+            )
+        elif phase_guard_armed:
+            is_alive_round = meta_death_tick is None
+            stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
+            if gsi_phase in stop_phases:
+                logger.info(
+                    "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
+                    "stopping OBS (alive_round=%s)",
+                    seg_idx, gsi_phase, estimated_tick, is_alive_round,
+                )
+                return "done"
 
         # GSI round guard: fire as soon as the demo has entered a later round.
         gsi_round = _get_gsi_current_round()
@@ -160,12 +235,12 @@ async def _record_until_tick_round_segment(
                 logger.warning("[RecordingV3][TickWatcher] %s", msg)
                 gsi_unavailable_warned = True
 
-        # Wall-clock tick estimate: primary stop condition.
-        if estimated_tick >= end_tick:
+        # Wall-clock tick estimate: stop when estimated demo tick reaches effective end.
+        if estimated_tick >= effective_end_tick:
             logger.info(
                 "[RecordingV3][TickWatcher] segment=%d current_tick=%d target_end=%d; "
                 "reached end_tick; stopping OBS",
-                seg_idx, estimated_tick, end_tick,
+                seg_idx, estimated_tick, effective_end_tick,
             )
             return "done"
 
@@ -426,6 +501,10 @@ class RecordingExecutor:
                     await asyncio.sleep(remaining_wait)
 
                 await demo_pause()
+                # Wait for CS2 to fully close the console (hideconsole animation).
+                # demo_pause() injects via the developer console; without this gap
+                # OBS captures the closing console animation at the start of each clip.
+                await asyncio.sleep(0.35)
                 logger.info("[RecordingV3] reached effective start_tick; starting OBS")
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
