@@ -80,6 +80,15 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
     ...(item.pacing_override || {}),
   };
   const options = pacingOverrideToOptions(mergedPacing);
+
+  // Per-item obs_transition overrides (null = use AppConfig global default).
+  if (item.obs_transition_enabled !== undefined)
+    options.obs_transition_enabled = item.obs_transition_enabled ?? null;
+  if (item.obs_transition_name !== undefined)
+    options.obs_transition_name = item.obs_transition_name ?? null;
+  if (item.obs_transition_duration_ms !== undefined)
+    options.obs_transition_duration_ms = item.obs_transition_duration_ms ?? null;
+
   const args = [clipData, item, matchMeta, options];
 
   const ts = String(clipData.timeline_source || "").trim();

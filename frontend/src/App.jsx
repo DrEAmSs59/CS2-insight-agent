@@ -1597,11 +1597,22 @@ export default function App() {
           }
 
           // Convert each queue item to a RecordingRequestDTO via factory.
+          const obsTransOpts = {};
+          if (warmup.obs_transition_enabled !== undefined && warmup.obs_transition_enabled !== null)
+            obsTransOpts.obs_transition_enabled = warmup.obs_transition_enabled;
+          if (warmup.obs_transition_name !== undefined && warmup.obs_transition_name !== null)
+            obsTransOpts.obs_transition_name = warmup.obs_transition_name;
+          if (warmup.obs_transition_duration_ms !== undefined && warmup.obs_transition_duration_ms !== null)
+            obsTransOpts.obs_transition_duration_ms = warmup.obs_transition_duration_ms;
+
           const requests = [];
           for (const item of queue) {
             const meta = demoMetaMap[item.demoFilename] ?? null;
             const dto = buildDtoFromQueueItem(item, meta, globalPacing);
-            if (dto) requests.push(dto);
+            if (dto) {
+              dto.options = { ...dto.options, ...obsTransOpts };
+              requests.push(dto);
+            }
           }
 
           if (!requests.length) {
@@ -1659,6 +1670,7 @@ export default function App() {
       parsedMatches,
       persistWarmupDefaults,
       refreshConfigBackupStatus,
+      experimentalPovEnabled,
     ]
   );
 
