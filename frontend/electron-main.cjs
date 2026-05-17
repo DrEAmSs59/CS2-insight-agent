@@ -73,7 +73,7 @@ function createWindow() {
       log.error('加载应用界面失败:', err);
     });
     // 生产环境白屏问题已修复，关闭默认开启的开发者工具
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
   }
 
   // 加载生命周期监听
