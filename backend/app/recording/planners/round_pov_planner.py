@@ -16,88 +16,55 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
     round_freeze_preroll_ticks = sec_to_ticks(opts.round_freeze_preroll_sec, tick_rate)
     default_freeze_ticks = int(15 * tick_rate)
 
-    # Pre-compute which round numbers are included so we can detect consecutive pairs.
-    planned_round_numbers = {ri.round for ri in req.rounds}
+    # Sorted round numbers for last-round detection.
+    sorted_round_numbers = sorted(ri.round for ri in req.rounds)
+    last_selected_round = sorted_round_numbers[-1] if sorted_round_numbers else None
 
     for segment_index, round_info in enumerate(req.rounds):
         # --- Compute start_tick ---
         if round_info.freeze_end_tick is not None:
             start_tick = round_info.freeze_end_tick - round_freeze_preroll_ticks
         elif round_info.round_start_tick is not None:
-            # Fallback 1: round_start_tick + default freeze duration
+            # Fallback: round_start_tick + estimated freeze duration
             start_tick = round_info.round_start_tick + default_freeze_ticks - round_freeze_preroll_ticks
             warnings.append(
                 f"round {round_info.round}: freeze_end_tick missing; "
                 "used round_start_tick + 15s freeze as fallback for start_tick"
             )
         else:
-            # Fallback 2: both freeze_end_tick and round_start_tick are None
             start_tick = req.demo.first_tick
             warnings.append(
-                f"round {round_info.round}: both freeze_end_tick and round_start_tick missing, using first_tick as start_tick fallback"
+                f"round {round_info.round}: both freeze_end_tick and round_start_tick missing, "
+                "using first_tick as start_tick fallback"
             )
 
         start_tick = max(start_tick, req.demo.first_tick)
 
-        # --- Compute ceiling tick (next round freeze end or fallbacks) ---
-        def _get_ceiling(ri: RoundInfo) -> tuple[int, list[str]]:
-            """Return (ceiling_tick, extra_warnings)."""
-            ceiling_warnings: list[str] = []
-            if ri.next_round_freeze_start_tick is not None:
-                return ri.next_round_freeze_start_tick, ceiling_warnings
-            if ri.next_round_start_tick is not None:
-                ceiling_warnings.append(
-                    f"round {ri.round}: next_round_freeze_start_tick missing; "
-                    "used next_round_start_tick as ceiling fallback"
-                )
-                return ri.next_round_start_tick, ceiling_warnings
-            if ri.round_end_tick is not None:
-                ceiling_warnings.append(
-                    f"round {ri.round}: next_round_freeze_start_tick and next_round_start_tick missing; "
-                    "used round_end_tick as ceiling fallback"
-                )
-                return ri.round_end_tick, ceiling_warnings
-            # Final fallback
-            ceiling_warnings.append(
-                f"round {ri.round}: all ceiling tick fields missing; "
-                "used demo_end_tick as ceiling fallback"
-            )
-            return req.demo.demo_end_tick, ceiling_warnings
+        is_last_selected = round_info.round == last_selected_round
+        end_reason: str
 
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
             # Case A: player did not die this round.
-            next_consecutive_in_plan = (round_info.round + 1) in planned_round_numbers
+            # Base end is the round boundary.
+            end_tick = round_info.round_end_tick
+            end_reason = "round_end"
 
-            if next_consecutive_in_plan and round_info.next_round_freeze_start_tick is not None:
-                # The immediately following round is also being recorded — end exactly
-                # where that round's clip begins (freeze_end - preroll) for a seamless
-                # handoff. next_round_freeze_start_tick holds the next round's freeze_end_tick.
-                end_tick = round_info.next_round_freeze_start_tick - round_freeze_preroll_ticks
-            else:
-                # Last selected round (or non-consecutive gap): end at the round boundary
-                # and cap at next_round_start_tick so we don't record into the next
-                # round's freeze screen.
-                if round_info.round_end_tick is not None:
-                    end_tick = round_info.round_end_tick
-                else:
-                    ceiling_tick, ceiling_warnings = _get_ceiling(round_info)
-                    warnings.extend(ceiling_warnings)
-                    end_tick = ceiling_tick
-                    warnings.append(
-                        f"round {round_info.round}: round_end_tick missing; "
-                        "used ceiling tick as end_tick fallback"
-                    )
-                if round_info.next_round_start_tick is not None:
-                    end_tick = min(end_tick, round_info.next_round_start_tick)
+            # For non-last selected rounds, cap at next_round_start_tick to avoid
+            # recording into the next round's freeze screen.
+            if not is_last_selected and round_info.next_round_start_tick is not None:
+                if end_tick > round_info.next_round_start_tick:
+                    end_tick = round_info.next_round_start_tick
+                    end_reason = "round_end_clamped_to_next_round_start"
         else:
-            # Case B: player died this round
+            # Case B: player died this round.
             death_post_ticks = sec_to_ticks(opts.round_death_post_sec, tick_rate)
             end_tick = round_info.target_death_tick + death_post_ticks
-            # Clamp to ceiling
-            ceiling_tick, ceiling_warnings = _get_ceiling(round_info)
-            warnings.extend(ceiling_warnings)
-            end_tick = min(end_tick, ceiling_tick)
+            end_reason = "target_death_post"
+            # Clamp to round_end_tick to avoid spilling into the next round's freeze.
+            if end_tick > round_info.round_end_tick:
+                end_tick = round_info.round_end_tick
+                end_reason = "target_death_post_clamped_to_round_end"
 
         # Final clamp to demo_end_tick
         end_tick = min(end_tick, req.demo.demo_end_tick)
@@ -119,7 +86,15 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
             safe_end_tick=None,
             disabled=False,
             disabled_reason=None,
-            metadata={},
+            metadata={
+                "round_start_tick": round_info.round_start_tick,
+                "round_end_tick": round_info.round_end_tick,
+                "freeze_end_tick": round_info.freeze_end_tick,
+                "next_round_start_tick": round_info.next_round_start_tick,
+                "next_round_freeze_start_tick": round_info.next_round_freeze_start_tick,
+                "target_death_tick": round_info.target_death_tick,
+                "end_reason": end_reason,
+            },
         )
         segments.append(segment)
 

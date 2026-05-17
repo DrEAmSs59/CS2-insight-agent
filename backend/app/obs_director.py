@@ -6232,6 +6232,21 @@ class OBSDirector:
                             }
                             for s in result.segment_results
                         ],
+                        "planned_segments": [
+                            {
+                                "segment_index": s.segment_index,
+                                "kind": str(s.source_type.value if hasattr(s.source_type, "value") else s.source_type),
+                                "source_type": str(s.source_type.value if hasattr(s.source_type, "value") else s.source_type),
+                                "perspective": str(s.perspective.value if hasattr(s.perspective, "value") else s.perspective),
+                                "demo_start_tick": s.start_tick,
+                                "demo_end_tick": s.end_tick,
+                                "target_player_name": s.target_player_name,
+                                "target_steamid64": s.target_steamid64,
+                                "round": s.round,
+                                "anchor_ticks": s.anchor_ticks,
+                            }
+                            for s in plan.segments
+                        ],
                     })
 
                 # ── Kill CS2 after this demo group ────────────────────────────

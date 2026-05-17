@@ -31,54 +31,92 @@ def _get_montage_db() -> MontageDB:
 # Request-type → category used by montage workbench filters.
 _REQUEST_TYPE_TO_CATEGORY: dict[str, str] = {
     RequestType.highlight: "highlight",
-    RequestType.timeline_kill: "highlight",
     RequestType.fail: "fail",
-    RequestType.timeline_death: "fail",
+    RequestType.timeline_kill: "timeline",
+    RequestType.timeline_death: "timeline",
     RequestType.kill_compilation: "compilation",
     RequestType.death_compilation: "compilation",
     RequestType.round_compilation: "compilation",
-    RequestType.timeline_round: "highlight",
+    RequestType.timeline_round: "timeline_round",
+}
+
+# Request-type → timeline_record_kind (only for timeline types)
+_REQUEST_TYPE_TO_TIMELINE_RECORD_KIND: dict[str, str] = {
+    RequestType.timeline_kill: "kill",
+    RequestType.timeline_death: "death",
+    RequestType.timeline_round: "round",
 }
 
 
 def _build_v3_clip_meta(dto: RecordingRequestDTO, result: dict) -> dict:
     """Build clip_meta dict from a V3 DTO + execution result for montage workbench display."""
     request_type = str(dto.request_type or "")
+    source_type = str(dto.source_type or "")
     category = _REQUEST_TYPE_TO_CATEGORY.get(request_type, "highlight")
+    timeline_record_kind = _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND.get(request_type)
 
     events = dto.events or []
     rounds = sorted({e.round for e in events if e.round}) if events else []
     first_round = rounds[0] if rounds else None
 
-    # Kill count = number of kill-type events
-    kill_count = sum(1 for e in events if str(e.event_type or "") == "kill")
+    kill_events = [e for e in events if str(getattr(e.event_type, "value", e.event_type)) == "kill"]
+    death_events = [e for e in events if str(getattr(e.event_type, "value", e.event_type)) == "death"]
+    kill_count = len(kill_events)
+    kill_ticks = [e.tick for e in kill_events]
+    death_tick = death_events[0].tick if death_events else None
 
-    # Victims / killers from events
-    victims = list({e.victim.name for e in events if e.victim and e.victim.name})
+    victims = list({e.victim.name for e in kill_events if e.victim and e.victim.name})
     killers = list({e.killer.name for e in events if e.killer and e.killer.name})
+
+    killer_name: Optional[str] = None
+    if request_type in ("fail", "timeline_death"):
+        killer_name = killers[0] if killers else None
+
+    target_player_name = (dto.target_player.name if dto.target_player else None)
+    target_steamid64 = (dto.target_player.steamid64 if dto.target_player else None)
 
     source_ref = dto.source_ref
     timeline_event_id = (source_ref.timeline_event_id if source_ref else None) or None
-    timeline_source = "round_timeline_event" if timeline_event_id else None
+    # Always set timeline_source for timeline request types regardless of timeline_event_id
+    if timeline_record_kind:
+        timeline_source: Optional[str] = "round_timeline_event"
+    elif timeline_event_id:
+        timeline_source = "round_timeline_event"
+    else:
+        timeline_source = None
+
+    planned_segments: list = result.get("planned_segments") or []
 
     meta: dict = {
+        "recording_origin": "recording_v3",
+        "recording_request_type": request_type,
+        "recording_source_type": source_type,
+        "workbench_clip_kind": request_type,
         "category": category,
         "request_type": request_type,
         "map_name": dto.demo.map_name if dto.demo else "unknown",
         "round": first_round,
         "source_rounds": rounds,
         "kill_count": kill_count,
+        "kill_ticks": kill_ticks,
         "context_tags": [],
         "victims": victims,
         "killers": killers,
-        "target_steam_id": dto.target_player.steamid64 if dto.target_player else None,
+        "killer_name": killer_name,
+        "target_player": target_player_name,
+        "target_steam_id": target_steamid64,
+        "steamid": target_steamid64,
         "demo_path": dto.demo.demo_path if dto.demo else None,
         "timeline_event_id": timeline_event_id,
         "timeline_source": timeline_source,
+        "timeline_record_kind": timeline_record_kind,
+        "planned_segments": planned_segments,
         # Execution summary
         "segment_results": result.get("segment_results", []),
         "warnings": result.get("warnings", []),
     }
+    if death_tick is not None:
+        meta["death_tick"] = death_tick
     return {k: v for k, v in meta.items() if v is not None}
 
 
