@@ -169,6 +169,28 @@ class OBSClient:
             logger.warning("OBSClient: could not retrieve output path: %s", exc)
             return None
 
+    def get_record_directory(self) -> Optional[str]:
+        """Return the OBS recording output directory path, or None if unavailable."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "GetRecordDirectory", None)
+            if req is None:
+                logger.debug("OBSClient: GetRecordDirectory not available in obswebsocket")
+                return None
+            response = self._ws.call(req())
+            datain = getattr(response, "datain", None) or {}
+            raw = (
+                datain.get("recordDirectory")
+                or datain.get("record_directory")
+                or datain.get("record-directory")
+            )
+            if raw:
+                logger.debug("OBSClient: OBS record directory: %s", raw)
+            return str(raw) if raw else None
+        except Exception as exc:
+            logger.warning("OBSClient: get_record_directory failed: %s", exc)
+            return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

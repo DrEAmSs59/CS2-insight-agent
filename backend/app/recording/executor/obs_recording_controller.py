@@ -220,17 +220,16 @@ class OBSRecordingController:
         Send PauseRecord. Demo must already be paused before calling this.
         Falls back to StopRecord if PauseRecord cannot be recovered.
 
+        Hot path: returns immediately after PauseRecord responds — no GetRecordStatus delay.
+        GetRecordStatus is only used in the timeout/recovery path.
+
         Returns "ok", "ok_recovered", or "fallback_stopped".
         Never raises — errors are logged, worst case is "fallback_stopped".
         """
         logger.info("[RecordingV3][OBS] PauseRecord request sent")
         try:
             await self._call(self._client.pause_record)
-            status = await self._call(self._client.get_record_status, timeout=OBS_STATUS_TIMEOUT_SEC)
-            logger.info(
-                "[RecordingV3][OBS] PauseRecord response ok; outputPaused=%s",
-                status.get("outputPaused"),
-            )
+            logger.info("[RecordingV3][OBS] PauseRecord response ok")
             return "ok"
         except (OBSRecordError, asyncio.TimeoutError) as exc:
             logger.warning(

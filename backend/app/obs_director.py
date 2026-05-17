@@ -6084,7 +6084,7 @@ class OBSDirector:
                         continue
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
-                    recording_started_at = time.time()
+                    _pre_execute_wall = time.time()
                     try:
                         result = await executor.execute(plan)
                     except Exception as e:
@@ -6096,38 +6096,101 @@ class OBSDirector:
                         continue
 
                     # ── Rename output file using legacy naming convention ──────
-                    # Prefer the path returned by executor; if None (e.g. StopRecord did not
-                    # echo outputPath), scan the OBS output directory for the newest video
-                    # file written since recording_started_at.
-                    final_output_path = result.output_path
-                    rename_meta: dict = {}
-                    rename_status: str = "skipped"
-
+                    # recording_started_at from executor (set just before StartRecord) is
+                    # more accurate than _pre_execute_wall (which includes CS2 wait etc.).
+                    _started_at = result.recording_started_at or _pre_execute_wall
+                    _stopped_at = result.recording_stopped_at
                     _clip_dict = _v3_clip_dict_for_rename(dto)
                     _player = dto.target_player.name if dto.target_player.name else None
 
+                    final_output_path = result.output_path
+                    rename_meta: dict = {}
+                    rename_status: str = "skipped"
                     resolved_path: Optional[Path] = None
+
                     if result.output_path:
                         resolved_path = Path(result.output_path)
                         rename_status = "from_executor"
                     else:
-                        # Fallback: scan OBS output directory for the newest video since
-                        # recording started.  Give OBS up to 3s to flush the file.
-                        for _scan_attempt in range(3):
-                            resolved_path = self._locate_recent_recording_output(recording_started_at)
-                            if resolved_path:
-                                break
-                            await asyncio.sleep(1.0)
-                        if resolved_path:
+                        # Fallback: scan the OBS record directory for the newest video
+                        # written since recording started.
+                        # Use obs_record_directory from executor (fetched via GetRecordDirectory
+                        # on the live V3 OBSClient), NOT self._obs_record_directory_path()
+                        # which needs the legacy self._ws connection (not available in V3).
+                        _obs_dir: Optional[Path] = None
+                        if result.obs_record_directory:
+                            _obs_dir = Path(result.obs_record_directory)
+                        if _obs_dir is None or not _obs_dir.is_dir():
+                            # Last-resort: try legacy path (works if self._ws is live)
+                            _obs_dir = self._obs_record_directory_path()
+
+                        if _obs_dir and _obs_dir.is_dir():
                             logger.info(
-                                "[RecordingV3] output_path from executor is None; "
-                                "resolved via OBS directory scan: %s", resolved_path,
+                                "[RecordingV3] scanning OBS dir for output (started_at=%.1f, stopped_at=%s): %s",
+                                _started_at,
+                                f"{_stopped_at:.1f}" if _stopped_at else "N/A",
+                                _obs_dir,
                             )
-                            rename_status = "from_scan"
+                            # Give OBS up to 6s to close/finalize the output file.
+                            _cutoff = _started_at - 3.0
+                            for _scan_attempt in range(6):
+                                _candidates: list[tuple[float, Path]] = []
+                                try:
+                                    for _p in _obs_dir.iterdir():
+                                        if not _p.is_file() or _p.suffix.lower() not in _RECORDING_VIDEO_EXTENSIONS:
+                                            continue
+                                        try:
+                                            _st = _p.stat()
+                                        except OSError:
+                                            continue
+                                        if _st.st_mtime >= _cutoff:
+                                            _candidates.append((_st.st_mtime, _p))
+                                except OSError as _scan_e:
+                                    logger.warning("[RecordingV3] dir scan error: %s", _scan_e)
+                                    break
+
+                                if _candidates:
+                                    _candidates.sort(key=lambda x: x[0], reverse=True)
+                                    _candidate = _candidates[0][1]
+                                    # Wait for file size to stabilize (OBS finalizing).
+                                    try:
+                                        _sz1 = _candidate.stat().st_size
+                                        await asyncio.sleep(1.5)
+                                        _sz2 = _candidate.stat().st_size
+                                    except OSError:
+                                        _sz1, _sz2 = -1, -2  # force retry
+                                    if _sz1 == _sz2 and _sz2 > 0:
+                                        resolved_path = _candidate
+                                        logger.info(
+                                            "[RecordingV3] resolved output via scan (attempt %d): %s (size=%d)",
+                                            _scan_attempt + 1, resolved_path, _sz2,
+                                        )
+                                        break
+                                    else:
+                                        logger.debug(
+                                            "[RecordingV3] file still growing (sz %d→%d), retry %d",
+                                            _sz1, _sz2, _scan_attempt + 1,
+                                        )
+                                else:
+                                    logger.debug("[RecordingV3] scan attempt %d: no candidates yet", _scan_attempt + 1)
+
+                                await asyncio.sleep(1.0)
+
+                            if resolved_path:
+                                rename_status = "from_scan"
+                            else:
+                                logger.warning(
+                                    "[RecordingV3] scan found nothing in %s "
+                                    "(cutoff=%.1f, %d candidate dir(s))",
+                                    _obs_dir, _cutoff,
+                                    len(_candidates) if "_candidates" in dir() else 0,
+                                )
+                                rename_status = "not_found"
                         else:
                             logger.warning(
-                                "[RecordingV3] output_path from executor is None and "
-                                "OBS directory scan found nothing"
+                                "[RecordingV3] OBS record directory not available; "
+                                "obs_record_directory=%r, legacy fallback=%r",
+                                result.obs_record_directory, _obs_dir,
                             )
                             rename_status = "not_found"
 
@@ -6137,20 +6200,27 @@ class OBSDirector:
                         )
                         if rename_meta.get("output_path"):
                             final_output_path = rename_meta["output_path"]
+                            rename_status = "renamed"
                             logger.info("[RecordingV3] renamed output: %s", final_output_path)
                         elif rename_meta.get("rename_error"):
                             logger.warning("[RecordingV3] rename failed: %s", rename_meta["rename_error"])
                             rename_status = "rename_error"
+                            final_output_path = str(resolved_path)
 
                     all_results.append({
                         "request_id": result.request_id,
                         "success": result.success,
                         "output_path": final_output_path,
-                        "original_output_path": rename_meta.get("original_output_path") or result.output_path,
+                        "original_output_path": rename_meta.get("original_output_path") or (
+                            str(resolved_path) if resolved_path else result.output_path
+                        ),
                         "resolved_output_path": str(resolved_path) if resolved_path else None,
                         "output_filename": rename_meta.get("output_filename"),
                         "rename_status": rename_status,
                         "rename_error": rename_meta.get("rename_error"),
+                        "recording_started_at": _started_at,
+                        "recording_stopped_at": _stopped_at,
+                        "obs_record_directory": result.obs_record_directory,
                         "error": result.error,
                         "warnings": result.warnings,
                         "segment_results": [

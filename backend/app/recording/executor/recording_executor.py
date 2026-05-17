@@ -73,6 +73,10 @@ class ExecutionResult:
     warnings: list[str] = field(default_factory=list)
     success: bool = False
     error: Optional[str] = None
+    # Timing and OBS output info — used by obs_director for post-recording rename
+    recording_started_at: Optional[float] = None   # wall time just before first StartRecord
+    recording_stopped_at: Optional[float] = None   # wall time just after last StopRecord
+    obs_record_directory: Optional[str] = None     # OBS output directory (from GetRecordDirectory)
 
 
 class RecordingExecutor:
@@ -144,6 +148,18 @@ class RecordingExecutor:
         # Lazy-create controller using the client provided at construction time.
         self._ctrl = OBSRecordingController(self._obs.config, self._obs)
         self._obs_force_stopped = False  # set True when pause_record_safe fallback-stops
+
+        # Fetch OBS record directory now, while obs_client is connected.
+        # This is used by obs_director for file scan / rename after recording ends.
+        try:
+            obs_dir = await asyncio.to_thread(self._obs.get_record_directory)
+            if obs_dir:
+                result.obs_record_directory = obs_dir
+                logger.info("[RecordingV3] OBS record directory: %s", obs_dir)
+            else:
+                logger.warning("[RecordingV3] OBS record directory not available (GetRecordDirectory returned None)")
+        except Exception as _dir_e:
+            logger.warning("[RecordingV3] get_record_directory failed: %s", _dir_e)
 
         logger.info(
             "[RecordingV3] execute: %d active segment(s) for request %s",
@@ -271,6 +287,7 @@ class RecordingExecutor:
                         "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs overhead=%.2fs)",
                         segment.segment_index, spec_elapsed, pre_roll_sec, overhead_sec,
                     )
+                    result.recording_started_at = time.time()
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
                 else:
@@ -356,6 +373,7 @@ class RecordingExecutor:
                 )
                 obs_stop_path = await self._stop_obs_and_console_pause(is_last=is_last)
                 if is_last:
+                    result.recording_stopped_at = time.time()
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
 
