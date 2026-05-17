@@ -54,7 +54,7 @@ def test_recording_options_override():
 
 
 def _import_resolve():
-    """Import _resolve_fade_config from api.py."""
+    """Import _resolve_fade_config lazily to avoid side-effects at module import time."""
     import app.recording.api as api_mod
     return api_mod._resolve_fade_config
 

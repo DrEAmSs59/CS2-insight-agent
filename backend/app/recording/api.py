@@ -4,10 +4,10 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .models import RecordingRequestDTO, RecordingPlan, RequestType
+from .models import RecordingRequestDTO, RecordingPlan, RequestType, RecordingOptions
 from .plan_builder import build_plan
 from .normalizer import NormalizationError
-from ..env_utils import OBSConfig, load_config, ensure_cs2_path, resolve_config_path
+from ..env_utils import OBSConfig, AppConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
 from .executor.obs_fade_controller import OBSFadeController, FadeConfig
@@ -60,7 +60,7 @@ _REQUEST_TYPE_TO_COMPILATION_KIND: dict[str, str] = {
 }
 
 
-def _resolve_fade_config(options: "RecordingOptions", cfg: "AppConfig") -> FadeConfig:
+def _resolve_fade_config(options: RecordingOptions, cfg: AppConfig) -> FadeConfig:
     """Merge per-request RecordingOptions fade overrides with AppConfig global defaults."""
     return FadeConfig(
         enabled=(
@@ -68,7 +68,11 @@ def _resolve_fade_config(options: "RecordingOptions", cfg: "AppConfig") -> FadeC
             if options.obs_transition_enabled is not None
             else cfg.obs_transition_enabled
         ),
-        transition_name=options.obs_transition_name or cfg.obs_transition_name,
+        transition_name=(
+            options.obs_transition_name
+            if options.obs_transition_name is not None
+            else cfg.obs_transition_name
+        ),
         duration_ms=(
             options.obs_transition_duration_ms
             if options.obs_transition_duration_ms is not None
@@ -362,7 +366,8 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
 
     fade_config = _resolve_fade_config(dto.options, config)
     fade_ctrl = OBSFadeController(obs_cfg, fade_config)
-    await fade_ctrl.setup()
+    if not await fade_ctrl.setup():
+        logger.warning("OBS fade transition setup failed or disabled; recording in hard-cut mode")
 
     executor = RecordingExecutor(obs_client, fade_controller=fade_ctrl)
     result = await executor.execute(plan)
