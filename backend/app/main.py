@@ -2129,10 +2129,16 @@ async def start_batch_recording(req: BatchRecordRequest):
 def record_abort():
     """请求中止当前进行中的单次或批量 OBS 录制（异步收尾，接口立即返回）。"""
     global _recording_abort_event
-    if _recording_abort_event is None:
-        return {"status": "idle", "message": "当前没有进行中的录制"}
-    _recording_abort_event.set()
-    return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    from .recording.api import get_queue_abort_event
+    # Check old flow first, then V3 queue flow
+    if _recording_abort_event is not None:
+        _recording_abort_event.set()
+        return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    v3_ev = get_queue_abort_event()
+    if v3_ev is not None:
+        v3_ev.set()
+        return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    return {"status": "idle", "message": "当前没有进行中的录制"}
 
 
 @app.get("/api/config-backup/status")

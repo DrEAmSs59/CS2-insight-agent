@@ -1558,12 +1558,19 @@ export default function App() {
         setProgressText("正在执行批量 OBS 导播…");
         try {
           // Build a demoFilename → matchMeta lookup from all parsed matches.
+          // Also collect a name→steamid map from ALL parsed players so victim
+          // segments get their steamid64 for spec_player verification.
           const demoMetaMap = {};
           for (const pm of parsedMatches || []) {
             if (!pm?.demo_filename) continue;
+            const nameToSteamId = {};
+            for (const [pname, pdata] of Object.entries(pm.players || {})) {
+              const sid = pdata.match_meta?.target_steam_id;
+              if (sid) nameToSteamId[String(pname)] = String(sid);
+            }
             const firstPlayer = Object.keys(pm.players || {})[0];
             const meta = pm.players?.[firstPlayer]?.match_meta ?? null;
-            if (meta) demoMetaMap[pm.demo_filename] = meta;
+            if (meta) demoMetaMap[pm.demo_filename] = { ...meta, nameToSteamId };
           }
 
           // Convert each queue item to a RecordingRequestDTO via factory.
@@ -1583,6 +1590,13 @@ export default function App() {
             requests,
             warmup,
             obs: obsConfig,
+            pov_hud: experimentalPovEnabled
+              ? {
+                  enabled: true,
+                  radar_mode: warmup?.pov_radar_mode ?? 0,
+                  teamcounter_numeric: !!warmup?.pov_teamcounter_numeric,
+                }
+              : null,
           });
 
           const results = Array.isArray(data) ? data : [];

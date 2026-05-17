@@ -15,14 +15,76 @@ from .services.result_writer import write_result
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
 
-@router.post("/plan", response_model=RecordingPlan)
-async def create_recording_plan(dto: RecordingRequestDTO) -> RecordingPlan:
+# Module-level abort event for the V3 queue; set when a queue is running, cleared in finally.
+_queue_abort_event: Optional[asyncio.Event] = None
+
+
+def get_queue_abort_event() -> Optional[asyncio.Event]:
+    """Return the current V3 queue abort event, or None if idle."""
+    return _queue_abort_event
+
+@router.post("/plan", response_model=dict)
+async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
     try:
-        return build_plan(dto)
+        plan = build_plan(dto)
     except NormalizationError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Compute per-segment debug metadata for UI display
+    def _seg_debug(s):
+        meta: dict = dict(s.metadata)
+        meta["anchor_preserved"] = (
+            s.is_final_round
+            and bool(s.anchor_ticks)
+            and any("guard_skipped" in w or "anchor_preserved" in w for w in plan.warnings
+                    if f"segment {s.segment_index}:" in w)
+        )
+        meta["demo_exit_guard_applied"] = (
+            s.is_final_round and s.safe_end_tick is not None
+        )
+        meta["target_steamid64_missing"] = not bool(s.target_steamid64)
+        return {
+            "segment_index": s.segment_index,
+            "source_type": s.source_type,
+            "perspective": s.perspective,
+            "start_tick": s.start_tick,
+            "end_tick": s.end_tick,
+            "anchor_ticks": s.anchor_ticks,
+            "safe_seek_tick": s.safe_seek_tick,
+            "safe_end_tick": s.safe_end_tick,
+            "round": s.round,
+            "is_final_round": s.is_final_round,
+            "target_player_name": s.target_player_name,
+            "target_steamid64": s.target_steamid64,
+            "disabled": s.disabled,
+            "disabled_reason": s.disabled_reason,
+            **meta,
+        }
+
+    return {
+        "request_id": plan.request_id,
+        "request_type": plan.request_type,
+        "demo_path": plan.demo_path,
+        "tick_rate": plan.tick_rate,
+        "estimated_duration_sec": plan.estimated_duration_sec,
+        "warnings": plan.warnings,
+        "active_segments": [_seg_debug(s) for s in plan.segments],
+        "disabled_segments": [_seg_debug(s) for s in plan.disabled_segments],
+        "summary": {
+            "active_count": len(plan.segments),
+            "disabled_count": len(plan.disabled_segments),
+            "final_round_segments": sum(1 for s in plan.segments if s.is_final_round),
+            "victim_segments_disabled_no_steamid": sum(
+                1 for s in plan.disabled_segments
+                if s.disabled_reason == "missing_victim_steamid64"
+            ),
+            "guard_skipped_warnings": sum(
+                1 for w in plan.warnings if "guard_skipped" in w
+            ),
+        },
+    }
 
 
 @router.post("/execute", response_model=dict)
@@ -76,6 +138,7 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO]
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
+    pov_hud: Optional[dict] = None  # {enabled: bool, radar_mode: int, teamcounter_numeric: bool}
 
 
 @router.post("/queue", response_model=list[dict])
@@ -164,6 +227,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         resolved_requests.append(dto.model_copy(update={"demo": updated_demo}))
 
     # Build warmup extras from request warmup dict.
+    # Merge pov_hud fields into warmup_extras so execute_plan_queue sees them.
     warmup_extras = None
     if req.warmup:
         try:
@@ -171,9 +235,32 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)
 
+    if req.pov_hud and req.pov_hud.get("enabled"):
+        pov_hud_cfg = req.pov_hud
+        if warmup_extras is None:
+            warmup_extras = RecordingWarmupExtras()
+        # Patch warmup extras with POV HUD settings
+        import dataclasses
+        warmup_extras = dataclasses.replace(
+            warmup_extras,
+            pov_hud_enabled=True,
+            pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
+            pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
+        )
+        logger.info("[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s",
+                    warmup_extras.pov_radar_mode, warmup_extras.pov_teamcounter_numeric)
+
+    global _queue_abort_event
+    if _queue_abort_event is not None:
+        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
+
+    abort_ev = asyncio.Event()
+    _queue_abort_event = abort_ev
+
     director = OBSDirector(
         obs_cfg,
         cfg.cs2_path,
+        abort_event=abort_ev,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
         spec_player_verify=cfg.spec_player_verify,
@@ -188,5 +275,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     except Exception as e:
         logger.exception("[RecordingV3] execute_plan_queue failed")
         raise HTTPException(500, f"录制失败: {e}") from e
+    finally:
+        _queue_abort_event = None
 
     return results

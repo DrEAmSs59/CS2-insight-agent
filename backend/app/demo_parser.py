@@ -101,6 +101,8 @@ class Clip:
     killers: list[str] = field(default_factory=list)
     # 高光多杀：本片段内目标玩家每次击杀的 tick（升序），供导播智能跳跃剪辑分段
     kill_ticks: list[int] = field(default_factory=list)
+    # 与 victims 等长；每次击杀对应受害者的 steamid64（来自 player_death user_steamid），供受害者 POV 分段
+    victim_steamid64s: list[str] = field(default_factory=list)
     # 本回合开局比分（目标方 round 胜场 : 对方），来自 round_freeze_end 刻度与 team_num
     score_own: Optional[int] = None
     score_opp: Optional[int] = None
@@ -1235,6 +1237,7 @@ class DemoAnalyzer:
                     "noscope": noscope,
                     "tags": per_kill_tags,
                     "victim": victim,
+                    "victim_steamid": str(row.get("user_steamid") or ""),
                     "thrusmoke": thrusmoke,
                     "penetrated": penetrated,
                     "shots_to_kill": shots_to_kill,
@@ -1675,6 +1678,7 @@ class DemoAnalyzer:
             # =================================
 
             victims_list = [str(k.get("victim") or "") for k in kills_sorted]
+            victim_steamids_list = [str(k.get("victim_steamid") or "") for k in kills_sorted]
             kill_ticks_sorted = sorted({_int(k["tick"]) for k in kills_sorted})
             so, se = DemoAnalyzer._round_start_scores_for_target(
                 rnd, round_team_score_map,
@@ -1714,6 +1718,7 @@ class DemoAnalyzer:
                 end_tick=_clip_end_tick,
                 context_tags=_dedup_context_tags(tags),
                 victims=victims_list,
+                victim_steamid64s=victim_steamids_list,
                 kill_ticks=kill_ticks_sorted,
                 score_own=so,
                 score_opp=se,

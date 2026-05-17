@@ -30,16 +30,18 @@ def postprocess_segments(
         segment, guard_warnings = apply_final_round_guard(segment, req)
         warnings.extend(guard_warnings)
 
-        # Step 3: Disable victim segments with missing steamid64
+        # Step 3: Warn but do NOT disable victim segments with missing steamid64.
+        # spec_player works by player name; verification is skipped when steamid64 is empty,
+        # but the perspective switch still happens.
         if (
             not segment.disabled
             and segment.perspective == Perspective.victim
             and not (segment.target_steamid64 or "").strip()
         ):
-            segment = segment.model_copy(update={
-                "disabled": True,
-                "disabled_reason": "missing_victim_steamid64",
-            })
+            warnings.append(
+                f"segment {segment.segment_index}: victim segment missing steamid64 for "
+                f"{segment.target_player_name!r} — will spectate by name without verification"
+            )
 
         # Step 4: Validate minimum duration (zero or negative)
         if not segment.disabled and segment.end_tick - segment.start_tick <= 0:

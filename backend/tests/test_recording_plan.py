@@ -474,11 +474,12 @@ check("16a: plan builds cleanly", len(plan16.segments) == 1)
 check("16b: target_steamid64 present", plan16.segments[0].target_steamid64 != "")
 
 
-# ── Test 17: FinalRoundGuard anchor-aware — real payload regression ────────
+# ── Test 17: FinalRoundGuard anchor-aware + demo_exit_guard — real payload ─
 # Real payload: kill_ticks=[365079, 365769], demo_end=365813, final_round=42,
 # guard=4s @ 64tps → guard_ticks=256, safe_end=365557 < 365769 (second kill)
-# Expected: end_tick >= 365769 (guard skipped), no cut before last anchor
-print("\nTest 17: FinalRoundGuard anchor-aware — real payload (kill_ticks=[365079, 365769])")
+# demo_exit_guard=0.3s → 19 ticks → latest_recordable = 365813 - 19 = 365794
+# Expected: end_tick >= 365769 AND end_tick < 365813 (never reach demo_end)
+print("\nTest 17: FinalRoundGuard anchor-aware + demo_exit_guard (kill_ticks=[365079, 365769])")
 demo17 = DemoContext(
     demo_path="/demo/real.dem",
     demo_filename="real.dem",
@@ -490,7 +491,8 @@ demo17 = DemoContext(
     final_round_start_tick=364000,
     final_round_end_tick=0,  # not provided (frontend sends 0)
 )
-opts17 = RecordingOptions(final_round_guard_sec=4.0)  # 256 ticks
+opts17 = RecordingOptions(final_round_guard_sec=4.0, final_round_demo_exit_guard_sec=0.3)
+# exit_guard_ticks = int(0.3 * 64) = 19; latest_recordable = 365813 - 19 = 365794
 req17 = dto(
     request_type=RequestType.highlight,
     source_type=SourceType.kill,
@@ -505,16 +507,20 @@ plan17 = build_plan(req17)
 check("17a: 1 active killer segment", len(plan17.segments) == 1)
 if plan17.segments:
     seg17 = plan17.segments[0]
+    latest_recordable17 = 365813 - int(0.3 * 64)  # = 365794
     check("17b: end_tick >= last kill tick (guard skipped)",
           seg17.end_tick >= 365769,
           f"got end_tick={seg17.end_tick}, expected >= 365769")
-    check("17c: end_tick <= demo_end_tick",
-          seg17.end_tick <= 365813,
-          f"got end_tick={seg17.end_tick}")
-    check("17d: anchor_ticks includes both kills",
+    check("17c: end_tick < demo_end_tick (demo_exit_guard applied)",
+          seg17.end_tick < 365813,
+          f"got end_tick={seg17.end_tick}, must be < 365813")
+    check("17d: end_tick <= latest_recordable",
+          seg17.end_tick <= latest_recordable17,
+          f"got end_tick={seg17.end_tick}, latest_recordable={latest_recordable17}")
+    check("17e: anchor_ticks includes both kills",
           365079 in seg17.anchor_ticks and 365769 in seg17.anchor_ticks,
           f"got anchor_ticks={seg17.anchor_ticks}")
-check("17e: guard-skipped warning emitted",
+check("17f: guard-skipped warning emitted",
       any("final_round_guard_skipped" in w for w in plan17.warnings),
       f"warnings={plan17.warnings}")
 
@@ -576,8 +582,8 @@ check("19b: 2 victim segments (one per kill)", len(victim19) == 2,
       f"got {len(victim19)}: {[(s.target_player_name, s.target_steamid64) for s in victim19]}")
 
 
-# ── Test 20: Victim steamid64 empty → segment disabled
-print("\nTest 20: Victim segment disabled when steamid64 is empty")
+# ── Test 20: Victim steamid64 empty → segment stays active (warn, no disable)
+print("\nTest 20: Victim segment stays active when steamid64 is empty (warn, no disable)")
 NO_ID_VICTIM = TargetPlayer(name="Unknown", steamid64="")
 req20 = dto(
     request_type=RequestType.highlight,
@@ -590,14 +596,16 @@ killer20 = [s for s in plan20.segments if s.perspective == Perspective.killer]
 victim20_active = [s for s in plan20.segments if s.perspective == Perspective.victim]
 victim20_disabled = [s for s in plan20.disabled_segments if s.perspective == Perspective.victim]
 check("20a: 1 active killer segment", len(killer20) == 1, f"got {len(killer20)}")
-check("20b: 0 active victim segments", len(victim20_active) == 0,
+check("20b: 1 active victim segment (kept despite missing steamid64)", len(victim20_active) == 1,
       f"got {len(victim20_active)}")
-check("20c: 1 disabled victim segment", len(victim20_disabled) == 1,
+check("20c: 0 disabled victim segments", len(victim20_disabled) == 0,
       f"got {len(victim20_disabled)}")
-if victim20_disabled:
-    check("20d: disabled_reason=missing_victim_steamid64",
-          victim20_disabled[0].disabled_reason == "missing_victim_steamid64",
-          f"got: {victim20_disabled[0].disabled_reason}")
+if victim20_active:
+    check("20d: victim segment target_steamid64 is empty",
+          victim20_active[0].target_steamid64 == "",
+          f"got: {victim20_active[0].target_steamid64!r}")
+warn20 = [w for w in plan20.warnings if "missing steamid64" in w]
+check("20e: warning emitted for missing steamid64", len(warn20) >= 1, f"got warnings: {plan20.warnings}")
 
 
 # ── Test 21: safe_seek_tick semantics — start_tick == seek_tick by default ─
@@ -651,6 +659,44 @@ if plan22.segments:
     check("22b: safe_seek_tick == start_tick (within seek guard)",
           seg22.safe_seek_tick == seg22.start_tick,
           f"seek={seg22.safe_seek_tick}, start={seg22.start_tick}")
+
+
+# ── Test 23: anchor_too_close_to_demo_end edge case ────────────────────────
+print("\nTest 23: anchor within demo_exit_guard zone → end_tick = max_anchor + 1")
+demo23 = DemoContext(
+    demo_path="/demo/edge.dem",
+    demo_filename="edge.dem",
+    map_name="de_dust2",
+    tick_rate=64.0,
+    first_tick=0,
+    demo_end_tick=365813,
+    final_round=42,
+    final_round_start_tick=364000,
+    final_round_end_tick=0,
+)
+# kill at 365800: exit_guard=0.3s → latest_recordable=365794; max_anchor=365800 > 365794
+# → anchor_too_close_to_demo_end path: end_tick = min(365812, 365801) = 365801
+opts23 = RecordingOptions(final_round_guard_sec=4.0, final_round_demo_exit_guard_sec=0.3)
+kill_tick23 = 365800
+req23 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demo23,
+    options=opts23,
+    events=[make_kill_event(kill_tick23, round_num=42)],
+)
+plan23 = build_plan(req23)
+check("23a: 1 active segment (anchor_too_close path)", len(plan23.segments) == 1,
+      f"got {len(plan23.segments)}")
+if plan23.segments:
+    seg23 = plan23.segments[0]
+    check("23b: end_tick >= kill_tick", seg23.end_tick >= kill_tick23,
+          f"got end_tick={seg23.end_tick}, kill_tick={kill_tick23}")
+    check("23c: end_tick < demo_end_tick", seg23.end_tick < 365813,
+          f"got end_tick={seg23.end_tick}")
+check("23d: anchor_too_close warning emitted",
+      any("anchor_too_close_to_demo_end" in w or "guard_skipped" in w for w in plan23.warnings),
+      f"warnings={plan23.warnings}")
 
 
 # ── Summary ────────────────────────────────────────────────────────────────

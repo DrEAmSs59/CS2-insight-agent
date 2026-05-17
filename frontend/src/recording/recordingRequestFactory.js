@@ -18,6 +18,7 @@ export const DEFAULT_RECORDING_OPTIONS = {
   final_round_guard_sec: 4.0,
   final_round_seek_guard_sec: 2.0,
   final_round_min_duration_sec: 0.8,
+  final_round_demo_exit_guard_sec: 1.5,
 };
 
 function buildTargetPlayer(name, steamid64) {
@@ -74,21 +75,27 @@ export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, o
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   return {
     request_id: newRequestId(),
     request_type: "highlight",
     source_type: "kill",
     demo,
     target_player: targetPlayer,
-    events: (clipData.kill_ticks || []).map((killTick, i) => ({
-      event_type: "kill",
-      tick: killTick,
-      round: clipData.round,
-      killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-      victim: buildTargetPlayer(clipData.victims?.[i] || "", ""),
-      target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-      perspective: "killer",
-    })),
+    events: (clipData.kill_ticks || []).map((killTick, i) => {
+      const victimName = clipData.victims?.[i] || "";
+      // victim_steamid64s is populated from player_death user_steamid in demo_parser; fall back to nameToSteamId roster map
+      const victimSteamId = clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
+      return {
+        event_type: "kill",
+        tick: killTick,
+        round: clipData.round,
+        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        victim: buildTargetPlayer(victimName, victimSteamId),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        perspective: "killer",
+      };
+    }),
     rounds: [],
     options: mergedOptions,
     source_ref: buildSourceRef(clipData, queueItem),

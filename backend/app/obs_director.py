@@ -1783,6 +1783,8 @@ class RecordingWarmupExtras:
     # 实验性 POV：与 pov_tail_commands 对应（仅 pov_enabled 时注入末尾）
     pov_radar_mode: int = 0  # cl_drawhud_force_radar：-1 隐藏，0 显示
     pov_teamcounter_numeric: bool = False  # cl_teamcounter_playercount_instead_of_avatars
+    # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
+    pov_hud_enabled: bool = False
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -5915,6 +5917,8 @@ class OBSDirector:
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.normalizer import NormalizationError
+        from .pov_hud_manager import PovHudManager, PovHudError
+        from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -5931,23 +5935,29 @@ class OBSDirector:
             if key not in demo_abs_map:
                 demo_abs_map[key] = Path(dto.demo.demo_path or dto.demo.demo_filename)
 
-        # Connect OBS via the new OBSClient (separate from director's legacy ws).
+        # OBSClient is created here but connected lazily (right before the executor starts)
+        # so the WebSocket receive thread does not die during the ~60s CS2 warmup window.
         obs_client = OBSClient(self.obs_config)
-        try:
-            await asyncio.to_thread(obs_client.connect)
-        except OBSConnectionError as e:
-            logger.error("[RecordingV3] OBS connection failed: %s", e)
-            for dto in requests:
-                all_results.append({
-                    "request_id": dto.request_id,
-                    "success": False,
-                    "error": f"OBS connection failed: {e}",
-                    "segment_results": [],
-                    "warnings": [],
-                })
-            return all_results
+
+        pov_mgr_v3: "Optional[PovHudManager]" = None
+        pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
 
         try:
+            # ── POV HUD install (before first CS2 launch) ─────────────────────
+            if pov_on_v3:
+                try:
+                    from .env_utils import load_config as _load_cfg
+                    _app_cfg = _load_cfg()
+                    pov_mgr_v3 = PovHudManager(_app_cfg)
+                    # Install with empty map; will be updated per-demo if needed
+                    logger.info("[RecordingV3][POV] install pov.vpk")
+                    pov_mgr_v3.install("")
+                    logger.info("[RecordingV3][POV] patch gameinfo.gi")
+                    self._pov_enabled = True
+                except PovHudError as _pov_e:
+                    logger.error("[RecordingV3][POV] install failed: %s; continuing without POV HUD", _pov_e)
+                    pov_on_v3 = False
+
             batch_aborted = False
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
                 if batch_aborted:
@@ -5992,9 +6002,20 @@ class OBSDirector:
                     await self._run_cleanup_step("CS2 artifact cleanup after GSI timeout", self._cleanup_cs2_artifacts, timeout=8.0)
                     raise
 
-                # ── Inject warmup console commands ────────────────────────────
+                # ── Inject warmup console commands (+ POV HUD commands if enabled)
                 if warmup is not None:
                     warmup_cmds = self._recording_warmup_console_lines(warmup)
+                    if self._pov_enabled:
+                        pov_cmds = [
+                            *POV_CORE_FORCED_COMMANDS,
+                            *pov_tail_commands(
+                                teamcounter_numeric=warmup.pov_teamcounter_numeric,
+                                radar_mode=warmup.pov_radar_mode,
+                            ),
+                        ]
+                        for _cmd in pov_cmds:
+                            logger.info("[RecordingV3][POV] inject command: %s", _cmd)
+                        warmup_cmds = [*warmup_cmds, *pov_cmds]
                     if warmup_cmds:
                         logger.info("[RecordingV3] applying warmup console commands: %d", len(warmup_cmds))
                         try:
@@ -6002,8 +6023,27 @@ class OBSDirector:
                         except Exception as _wce:
                             logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
 
+                # ── Connect OBS right before recording (fresh connection avoids dead recv thread)
+                if obs_client.is_connected():
+                    try:
+                        await asyncio.to_thread(obs_client.disconnect)
+                    except Exception:
+                        pass
+                try:
+                    await asyncio.to_thread(obs_client.connect)
+                except OBSConnectionError as e:
+                    logger.error("[RecordingV3] OBS connect failed for %s: %s", demo_name, e)
+                    for dto in demo_requests:
+                        all_results.append({
+                            "request_id": dto.request_id, "success": False,
+                            "error": f"OBS connection failed: {e}", "segment_results": [], "warnings": [],
+                        })
+                    await self._run_cleanup_step("CS2 shutdown after OBS failure", self._kill_cs2, timeout=30.0)
+                    await self._run_cleanup_step("CS2 artifact cleanup after OBS failure", self._cleanup_cs2_artifacts, timeout=8.0)
+                    continue
+
                 # ── Execute each DTO through build_plan + RecordingExecutor ───
-                executor = RecordingExecutor(obs_client)
+                executor = RecordingExecutor(obs_client, abort_event=self._abort_event)
                 for dto in demo_requests:
                     if self._abort_requested():
                         logger.info("[RecordingV3] Abort requested, skipping remaining requests")
@@ -6072,10 +6112,26 @@ class OBSDirector:
             self._set_state(DirectorState.ERROR, str(e))
             raise
         finally:
+            # Stop OBS recording if still active (e.g. StartRecord timed out but OBS recorded anyway)
+            if obs_client.is_connected():
+                try:
+                    status = await asyncio.to_thread(obs_client.get_record_status)
+                    if status.get("outputActive"):
+                        logger.warning("[RecordingV3] OBS still recording in finally; stopping now")
+                        await asyncio.to_thread(obs_client.stop_record)
+                except Exception as _obs_stop_e:
+                    logger.warning("[RecordingV3] finally stop_record check failed: %s", _obs_stop_e)
             try:
                 await asyncio.to_thread(obs_client.disconnect)
             except Exception:
                 pass
+            if pov_mgr_v3 is not None:
+                try:
+                    logger.info("[RecordingV3][POV] restore gameinfo.gi")
+                    pov_mgr_v3.restore()
+                except Exception as _pov_restore_e:
+                    logger.error("[RecordingV3][POV] restore failed: %s", _pov_restore_e)
+            self._pov_enabled = False
             self._set_state(DirectorState.COMPLETED)
 
         logger.info("[RecordingV3] execute_plan_queue done: %d results", len(all_results))
