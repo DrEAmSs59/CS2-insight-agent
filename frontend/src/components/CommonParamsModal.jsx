@@ -113,7 +113,7 @@ export default function CommonParamsModal({
   onPersistCs2RecordExtras,
   obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
-  obsTransitionDurationMs: initObsTransitionDurationMs = 350,
+  obsTransitionDurationMs: initObsTransitionDurationMs = 200,
   onPersistObsTransition,
 }) {
   const isPage = variant === "page";
@@ -780,9 +780,9 @@ export default function CommonParamsModal({
                   disabled={!obsTransEnabled}
                   className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
                 >
-                  <option value="Fade">Fade（淡入淡出）</option>
-                  <option value="Cut">Cut（硬切，无渐变）</option>
-                  <option value="Swipe">Swipe（横推）</option>
+                  <option value="Fade">淡入淡出</option>
+                  <option value="Cut">直切</option>
+                  <option value="Swipe">滑动</option>
                 </select>
               </label>
 
@@ -798,7 +798,7 @@ export default function CommonParamsModal({
                   disabled={!obsTransEnabled}
                   className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
                 />
-                <span className="mt-0.5 block text-[11px] text-cs2-text-muted">建议 250–500 ms；0 = 瞬切</span>
+                <span className="mt-0.5 block text-[11px] text-cs2-text-muted">默认 200 ms；0 为瞬切，可按需加大</span>
               </label>
             </div>
           </WorkflowSection>

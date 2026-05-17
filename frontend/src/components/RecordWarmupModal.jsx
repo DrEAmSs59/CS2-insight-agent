@@ -63,6 +63,13 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   pov_teamcounter_numeric: false,
 };
 
+/** 录制预热弹窗每次打开时的 OBS 转场推荐默认值；勾选关闭则提交 null 沿用服务器全局配置 */
+export const RECORD_WARMUP_DEFAULT_OBS_TRANSITION = {
+  enabled: true,
+  name: "Fade",
+  durationMs: 200,
+};
+
 export function SectionHeader({ en, zh }) {
   return (
     <div className="mb-2 flex items-end gap-2 px-0.5">
@@ -143,9 +150,9 @@ export default function RecordWarmupModal({
     }
     setOpts(base);
     setResolutionError("");
-    setObsTransEnabled(null);
-    setObsTransName(null);
-    setObsTransDurationMs(null);
+    setObsTransEnabled(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.enabled);
+    setObsTransName(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.name);
+    setObsTransDurationMs(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs);
   }, [open, defaultOverrides]);
 
   useEffect(() => {
@@ -277,6 +284,61 @@ export default function RecordWarmupModal({
 
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
           <div className="min-w-0 space-y-4">
+          <section aria-labelledby="sec-obs-fade">
+            <SectionHeader en="OBS Transition" zh="OBS 转场" />
+            <div id="sec-obs-fade" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={obsTransEnabled === true}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (!checked) {
+                      setObsTransEnabled(null);
+                      return;
+                    }
+                    setObsTransEnabled(true);
+                    if (obsTransDurationMs == null || obsTransDurationMs === "") {
+                      setObsTransDurationMs(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs);
+                    }
+                    if (!obsTransName) setObsTransName(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.name);
+                  }}
+                  className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
+                />
+                <span className="text-sm text-cs2-text-primary">
+                  启用黑场渐入渐出
+                </span>
+              </label>
+              <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
+                <select
+                  value={obsTransName ?? ""}
+                  onChange={(e) => setObsTransName(e.target.value || null)}
+                  disabled={obsTransEnabled !== true}
+                  className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-sm text-cs2-text-primary disabled:opacity-40"
+                >
+                  <option value="Fade">淡入淡出</option>
+                  <option value="Cut">直切</option>
+                  <option value="Swipe">滑动</option>
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  step={50}
+                  placeholder="200"
+                  value={obsTransDurationMs ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setObsTransDurationMs(v === "" ? null : Number(v));
+                  }}
+                  disabled={obsTransEnabled !== true}
+                  className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
+                />
+                <span className="text-xs text-cs2-text-muted">ms（默认 200）</span>
+              </div>
+            </div>
+          </section>
+
           <section aria-labelledby="sec-visuals">
             <SectionHeader en="Visuals & HUD" zh="视觉与 UI" />
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">录制画面效果</p>
@@ -387,58 +449,6 @@ export default function RecordWarmupModal({
                   成片预期：手臂与枪械模型更贴近画面边缘，竞技剪辑常见「拉伸持枪」观感。
                 </p>
               ) : null}
-            </div>
-          </section>
-
-          <section aria-labelledby="sec-obs-fade">
-            <SectionHeader en="OBS Transition" zh="OBS 转场" />
-            <div id="sec-obs-fade" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={obsTransEnabled ?? false}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setObsTransEnabled(checked ? true : null);
-                    if (checked && obsTransDurationMs === null) setObsTransDurationMs(350);
-                  }}
-                  className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
-                />
-                <span className="text-sm text-cs2-text-primary">
-                  启用渐入渐出
-                  {obsTransEnabled === null && (
-                    <span className="ml-1.5 text-[11px] text-cs2-text-muted">（沿用全局）</span>
-                  )}
-                </span>
-              </label>
-              <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
-                <select
-                  value={obsTransName ?? ""}
-                  onChange={(e) => setObsTransName(e.target.value || null)}
-                  disabled={!obsTransEnabled}
-                  className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-sm text-cs2-text-primary disabled:opacity-40"
-                >
-                  <option value="">（沿用全局）</option>
-                  <option value="Fade">Fade</option>
-                  <option value="Cut">Cut</option>
-                  <option value="Swipe">Swipe</option>
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  max={2000}
-                  step={50}
-                  placeholder="350"
-                  value={obsTransDurationMs ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setObsTransDurationMs(v === "" ? null : Number(v));
-                  }}
-                  disabled={!obsTransEnabled}
-                  className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
-                />
-                <span className="text-xs text-cs2-text-muted">ms</span>
-              </div>
             </div>
           </section>
           </div>

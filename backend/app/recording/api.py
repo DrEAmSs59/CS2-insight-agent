@@ -517,6 +517,13 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     abort_ev = asyncio.Event()
     _queue_abort_event = abort_ev
 
+    # Build fade controller from the first request's options merged with AppConfig.
+    first_options = resolved_requests[0].options if resolved_requests else RecordingOptions()
+    fade_config = _resolve_fade_config(first_options, cfg)
+    fade_ctrl = OBSFadeController(obs_cfg, fade_config)
+    if not await fade_ctrl.setup():
+        logger.warning("[RecordingV3] OBS fade transition setup failed or disabled; recording in hard-cut mode")
+
     director = OBSDirector(
         obs_cfg,
         cfg.cs2_path,
@@ -527,7 +534,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     )
 
     try:
-        results = await director.execute_plan_queue(resolved_requests, warmup=warmup_extras)
+        results = await director.execute_plan_queue(resolved_requests, warmup=warmup_extras, fade_controller=fade_ctrl)
     except CS2AlreadyRunningError as e:
         raise HTTPException(409, str(e)) from e
     except CS2NotReadyError as e:

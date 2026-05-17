@@ -535,6 +535,12 @@ class RecordingExecutor:
                             logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
+
+                    # ── 5a. Resume demo BEFORE fade-in (StartRecord) ─────────
+                    # OBS is now recording the black scene.  Fire demo_resume
+                    # here so the game is already live when the fade-in plays —
+                    # this prevents a frozen game frame at the top of the clip.
+                    resume_ok = await demo_resume_silent_strict()
                     if self._fade is not None:
                         ok = await self._fade.fade_to_game()
                         if not ok:
@@ -545,15 +551,21 @@ class RecordingExecutor:
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     await self._ctrl.resume_record_safe()
+
+                    # ── 5b. Resume demo BEFORE fade-in (ResumeRecord) ────────
+                    # The demo starts playing while OBS still records the black
+                    # scene; by the time the game fades in it is already live.
+                    resume_ok = await demo_resume_silent_strict()
                     if self._fade is not None:
+                        # Always attempt the fade regardless of resume_ok so OBS
+                        # doesn't stay locked on the black scene.
                         ok = await self._fade.fade_to_game()
                         if not ok:
                             logger.warning("[RecordingV3] fade_to_game after ResumeRecord failed; hard-cut")
 
-                # ── 5. Resume demo IMMEDIATELY after OBS start/resume ────────
+                # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.
                 # If the key tap fails, abort this segment without console pollution.
-                resume_ok = await demo_resume_silent_strict()
                 if not resume_ok:
                     logger.error(
                         "[RecordingV3] demo_resume_silent_strict FAILED for segment %d; "

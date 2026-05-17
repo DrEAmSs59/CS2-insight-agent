@@ -5902,6 +5902,7 @@ class OBSDirector:
         self,
         requests: "list",
         warmup: "Optional[RecordingWarmupExtras]" = None,
+        fade_controller=None,
     ) -> "list[dict]":
         """
         [RecordingV3] Execute a list of RecordingRequestDTOs using the new
@@ -6053,7 +6054,7 @@ class OBSDirector:
                     continue
 
                 # ── Execute each DTO through build_plan + RecordingExecutor ───
-                executor = RecordingExecutor(obs_client, abort_event=self._abort_event)
+                executor = RecordingExecutor(obs_client, abort_event=self._abort_event, fade_controller=fade_controller)
                 for dto in demo_requests:
                     if self._abort_requested():
                         logger.info("[RecordingV3] Abort requested, skipping remaining requests")
@@ -6207,6 +6208,15 @@ class OBSDirector:
                             rename_status = "rename_error"
                             final_output_path = str(resolved_path)
 
+                    _victim_segs_v3 = [
+                        {
+                            "player_name": s.target_player_name,
+                            "perspective_type": "victim",
+                        }
+                        for s in plan.segments
+                        if str(getattr(s.perspective, "value", s.perspective)) == "victim"
+                        and not s.disabled
+                    ]
                     all_results.append({
                         "request_id": result.request_id,
                         "success": result.success,
@@ -6223,6 +6233,13 @@ class OBSDirector:
                         "obs_record_directory": result.obs_record_directory,
                         "error": result.error,
                         "warnings": result.warnings,
+                        "pov_hud_enabled": pov_on_v3,
+                        "recording_perspective": (
+                            "pov_hud" if pov_on_v3
+                            else "player_follow" if (dto.target_player and dto.target_player.name)
+                            else "spectator"
+                        ),
+                        "victim_pov_segments": _victim_segs_v3,
                         "segment_results": [
                             {
                                 "segment_index": s.segment_index,

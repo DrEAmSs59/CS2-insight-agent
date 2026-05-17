@@ -521,13 +521,14 @@ export function getClipRoundLabel(clip) {
   return r != null ? `R${r}` : null;
 }
 
-/** 素材池第二行：Demo、回合、击杀/死亡对象、武器 */
-export function getMontageClipFactLine(clip) {
+/** 回合、击杀/死亡对象、武器摘要行；includeDemoName=false 时省略 Demo 文件名（素材池用）。 */
+export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
   if (!clip || typeof clip !== "object") return "";
-  const demo =
-    (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
-    (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
-    "";
+  const demo = includeDemoName
+    ? (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
+      (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
+      ""
+    : "";
   // For compilation clips spanning multiple rounds, show all rounds ("第4·5·9回合").
   const srcRounds = Array.isArray(clip.source_rounds)
     ? clip.source_rounds.map(Number).filter(Number.isFinite)

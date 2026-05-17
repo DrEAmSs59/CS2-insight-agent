@@ -10,7 +10,7 @@ def test_appconfig_defaults():
     cfg = AppConfig()
     assert cfg.obs_transition_enabled is False
     assert cfg.obs_transition_name == "Fade"
-    assert cfg.obs_transition_duration_ms == 350
+    assert cfg.obs_transition_duration_ms == 200
     assert cfg.obs_game_scene_name == "CS2 Insight Recording"
     assert cfg.obs_black_scene_name == "CS2 Insight Black"
 
@@ -75,7 +75,7 @@ def test_resolve_uses_appconfig_when_options_are_none():
 def test_resolve_options_override_appconfig():
     resolve = _import_resolve()
     cfg = AppConfig(obs_transition_enabled=False, obs_transition_name="Fade",
-                    obs_transition_duration_ms=350)
+                    obs_transition_duration_ms=600)
     opts = RecordingOptions(obs_transition_enabled=True,
                             obs_transition_name="Cut",
                             obs_transition_duration_ms=100)
@@ -88,7 +88,7 @@ def test_resolve_options_override_appconfig():
 def test_resolve_partial_override():
     resolve = _import_resolve()
     cfg = AppConfig(obs_transition_enabled=True, obs_transition_name="Fade",
-                    obs_transition_duration_ms=350)
+                    obs_transition_duration_ms=480)
     opts = RecordingOptions(obs_transition_duration_ms=200)  # only duration overridden
     fc = resolve(opts, cfg)
     assert fc.enabled is True       # from AppConfig

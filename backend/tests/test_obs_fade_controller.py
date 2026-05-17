@@ -11,7 +11,7 @@ from app.recording.executor.obs_client import OBSRecordError
 from app.env_utils import OBSConfig
 
 
-def _make_config(enabled=True, name="Fade", duration_ms=350,
+def _make_config(enabled=True, name="Fade", duration_ms=200,
                  game="CS2 Insight Recording", black="CS2 Insight Black"):
     return FadeConfig(
         enabled=enabled,

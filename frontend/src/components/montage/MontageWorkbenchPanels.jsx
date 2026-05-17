@@ -760,7 +760,7 @@ export function MontageMaterialPoolCard({
   const playerName = clip.player_name?.trim() || "未知玩家";
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
-  const factLine = getMontageClipFactLine(clip);
+  const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
   const killBadge = getMontageBlockShortLabel(clip);
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = variant === "timeline" || variant === "compilation";
@@ -779,22 +779,21 @@ export function MontageMaterialPoolCard({
       onDragStart={(e) => onDragStart(e, clip.id)}
       onDragEnd={onDragEnd}
       onClick={(e) => onClickMulti(e, clip.id)}
-      className={`group relative min-h-[110px] shrink-0 overflow-hidden rounded-xl bg-cs2-surface-1 p-3.5 transition-all cursor-grab border ${
+      className={`group flex min-h-[110px] shrink-0 gap-2.5 rounded-xl bg-cs2-surface-1 p-3.5 transition-all cursor-grab border ${
         selected
           ? "border-cs2-accent shadow-glow-accent bg-cs2-surface-2"
           : "border-cs2-border-subtle hover:border-cs2-border-focus hover:bg-cs2-surface-2"
       }`}
     >
-      {/* 左侧状态标识竖条 */}
       <div
-        className={`absolute left-0 top-2 bottom-2 w-1 rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
+        className={`w-1 shrink-0 self-stretch rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
         aria-hidden
       />
 
-      <div className="pl-1.5 flex flex-col justify-between h-full min-w-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div>
-          {/* 首行核心信息区 */}
-          <div className="flex items-center justify-between gap-2">
+          {/* 首行：左信息 + 右 AI / 删除（同高对齐，左右留白一致） */}
+          <div className="flex items-center gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${VARIANT_RING[variant] || VARIANT_RING.neutral}`}>
                 {killBadge}
@@ -804,10 +803,23 @@ export function MontageMaterialPoolCard({
                 {dur != null ? `${dur.toFixed(1)}s` : "?s"}
               </span>
             </div>
-            {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
+            <div className="flex shrink-0 items-center gap-1">
+              {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
+              <button
+                type="button"
+                title="删除素材"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(clip);
+                }}
+                className="rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          {/* 次级合并说明行：地图、回合、武器及特殊视角数量等低频上下文整合降噪 */}
+          {/* 次级合并说明行：地图、回合、武器 */}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
             {weaponShow ? <span className="font-medium text-cs2-text-secondary">{weaponShow}</span> : null}
             {weaponShow && (mapName || rnd != null) ? <span>•</span> : null}
@@ -820,9 +832,32 @@ export function MontageMaterialPoolCard({
                 {scorePair.left}:{scorePair.right}
               </span>
             ) : null}
+          </div>
+
+          {/* 事实摘要行：击杀数 + 被击杀玩家（截断防撑高） */}
+          {factLine ? (
+            <p className="mt-1.5 truncate text-[11px] text-cs2-text-secondary" title={factLine}>
+              {factLine}
+            </p>
+          ) : null}
+
+          {/* 视角徽标行 */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                perspectivePrimary !== "观战视角"
+                  ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+                  : "bg-cs2-bg-input text-cs2-text-muted"
+              }`}
+            >
+              {perspectivePrimary}
+            </span>
+            {clip.pov_hud_enabled === true ? (
+              <span className="rounded bg-cs2-cyan-surface px-1.5 py-0.5 text-[11px] font-bold text-cs2-cyan-on-surface">HUD</span>
+            ) : null}
             {victimSegCount > 0 ? (
-              <span className="ml-auto rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
-                POV ×{victimSegCount}
+              <span className="rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
+                受害者视角 ×{victimSegCount}
               </span>
             ) : null}
           </div>
@@ -870,18 +905,6 @@ export function MontageMaterialPoolCard({
           </div>
         </div>
       </div>
-
-      <button
-        type="button"
-        title="删除素材"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(clip);
-        }}
-        className="absolute bottom-2 right-2 rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
     </li>
   );
 }

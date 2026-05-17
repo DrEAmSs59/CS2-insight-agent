@@ -120,7 +120,7 @@ export default function App() {
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
-  const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(350);
+  const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(200);
   const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
   const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);

@@ -359,7 +359,7 @@ class AppConfig(BaseModel):
     record_inject_console_lines: str = ""
     obs_transition_enabled: bool = False
     obs_transition_name: str = "Fade"
-    obs_transition_duration_ms: int = 350
+    obs_transition_duration_ms: int = 200
     obs_game_scene_name: str = "CS2 Insight Recording"
     obs_black_scene_name: str = "CS2 Insight Black"
 
