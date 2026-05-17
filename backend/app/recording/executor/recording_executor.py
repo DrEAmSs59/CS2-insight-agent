@@ -7,6 +7,7 @@ from typing import Optional
 from ..models import RecordingPlan, RecordingSegment, SourceType
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
+from .obs_fade_controller import OBSFadeController
 from .demo_controller import (
     gototick, demo_resume, demo_pause,
     demo_pause_silent_strict, demo_resume_silent_strict,
@@ -279,9 +280,15 @@ class ExecutionResult:
 
 
 class RecordingExecutor:
-    def __init__(self, obs_client: OBSClient, abort_event: Optional[asyncio.Event] = None):
+    def __init__(
+        self,
+        obs_client: OBSClient,
+        abort_event: Optional[asyncio.Event] = None,
+        fade_controller: Optional[OBSFadeController] = None,
+    ):
         self._obs = obs_client
         self._abort_event = abort_event
+        self._fade: Optional[OBSFadeController] = fade_controller
         # Controller is created per-execute call so it always holds the current client.
         self._ctrl: Optional[OBSRecordingController] = None
 
@@ -299,6 +306,12 @@ class RecordingExecutor:
           - None when is_last=False (pause case)
         Populates self._obs_force_stopped when PauseRecord fell back to StopRecord.
         """
+        # Fade to black before OBS pause/stop — the transition is recorded as fade-out.
+        if self._fade is not None:
+            ok = await self._fade.fade_to_black()
+            if not ok:
+                logger.warning("[RecordingV3] fade_to_black failed at segment boundary; hard-cut")
+
         if is_last:
             silent_result, obs_result = await asyncio.gather(
                 demo_pause_silent_strict(),
@@ -516,14 +529,26 @@ class RecordingExecutor:
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     result.recording_started_at = time.time()
+                    if self._fade is not None:
+                        ok = await self._fade.fade_to_black()
+                        if not ok:
+                            logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
+                    if self._fade is not None:
+                        ok = await self._fade.fade_to_game()
+                        if not ok:
+                            logger.warning("[RecordingV3] fade_to_game after StartRecord failed; hard-cut")
                 else:
                     logger.info(
                         "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     await self._ctrl.resume_record_safe()
+                    if self._fade is not None:
+                        ok = await self._fade.fade_to_game()
+                        if not ok:
+                            logger.warning("[RecordingV3] fade_to_game after ResumeRecord failed; hard-cut")
 
                 # ── 5. Resume demo IMMEDIATELY after OBS start/resume ────────
                 # Strict: no console fallback — OBS is now recording.
