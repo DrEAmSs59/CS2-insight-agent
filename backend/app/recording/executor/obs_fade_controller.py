@@ -12,8 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
-
 from ...env_utils import OBSConfig
 from .obs_client import OBSClient, OBSRecordError
 
@@ -21,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 _BLACK_COLOR_SOURCE_NAME = "CS2 Insight Black Source"
 _GAME_CAPTURE_INPUT_NAME = "CS2 Insight Game Capture"
-_GAME_CAPTURE_KIND = "game_capture"
 
 
 @dataclass

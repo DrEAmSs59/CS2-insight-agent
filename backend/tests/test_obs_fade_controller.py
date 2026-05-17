@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 from app.recording.executor.obs_fade_controller import OBSFadeController, FadeConfig
+from app.recording.executor.obs_client import OBSRecordError
 from app.env_utils import OBSConfig
 
 
@@ -26,7 +27,7 @@ def _make_obs_config():
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ def test_setup_fallback_on_exception():
     ctrl = OBSFadeController(_make_obs_config(), cfg)
 
     mock_client = MagicMock()
-    mock_client.get_scene_names.side_effect = RuntimeError("OBS unavailable")
+    mock_client.get_scene_names.side_effect = OBSRecordError("OBS unavailable")
 
     with patch.object(ctrl, "_new_client", return_value=mock_client):
         result = _run(ctrl.setup())
@@ -119,7 +120,7 @@ def test_fade_to_black_calls_obs_and_sleeps():
 
     async def run():
         with patch.object(ctrl, "_new_client", return_value=mock_client):
-            with patch("asyncio.sleep") as mock_sleep:
+            with patch("app.recording.executor.obs_fade_controller.asyncio.sleep") as mock_sleep:
                 result = await ctrl.fade_to_black()
                 mock_sleep.assert_called_once_with(0.1)
         return result
