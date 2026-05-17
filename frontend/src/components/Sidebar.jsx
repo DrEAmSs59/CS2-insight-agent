@@ -1,5 +1,5 @@
-import { useState } from "react";
-import axios from "axios";
+import { useState, useEffect } from "react";
+import API from "../api/api";
 import {
   Settings,
   Wifi,
@@ -15,6 +15,7 @@ import {
   FolderOpen,
   ScanSearch,
   Users,
+  RefreshCw,
 } from "lucide-react";
 
 function llmBaseUrlLooksLocal(baseUrl) {
@@ -75,6 +76,36 @@ export default function Sidebar({
   const [showApiKey, setShowApiKey] = useState(false);
   const [watchOpen, setWatchOpen] = useState(true);
   const [watchPathInput, setWatchPathInput] = useState("");
+  const [systemOpen, setSystemOpen] = useState(true);
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [isPackaged, setIsPackaged] = useState(false);
+
+  useEffect(() => {
+    if (window.electron?.isPackaged) {
+      window.electron.isPackaged().then(setIsPackaged);
+    }
+
+    if (window.electron?.onUpdateStatus) {
+      window.electron.onUpdateStatus((status) => {
+        setUpdateStatus(status);
+        if (status.status === "not-available" || status.status === "error") {
+          setTimeout(() => setUpdateStatus(null), 5000);
+        }
+      });
+    }
+  }, []);
+
+  const handleCheckUpdates = () => {
+    if (!isPackaged) {
+      setUpdateStatus({ status: "error", message: "开发模式下不支持检查更新" });
+      setTimeout(() => setUpdateStatus(null), 3000);
+      return;
+    }
+    if (window.electron?.checkForUpdates) {
+      setUpdateStatus({ status: "checking", message: "正在检查更新..." });
+      window.electron.checkForUpdates();
+    }
+  };
 
   const handleDetectCs2 = async () => {
     if (!onDetectCs2) return;
@@ -90,7 +121,7 @@ export default function Sidebar({
     setObsTesting(true);
     setObsTestResult(null);
     try {
-      const { data } = await axios.post("/api/obs/test", obsConfig);
+      const { data } = await API.post("/obs/test", obsConfig);
       setObsTestResult(data);
       if (data?.ok) {
         await onPersistObs?.();
@@ -157,6 +188,74 @@ export default function Sidebar({
             AI 洞察
           </button>
         </div>
+      </div>
+
+      {/* 系统与更新 (在正式版显示，在开发模式下也显示供调试) */}
+      <div className="border-b border-cs2-border">
+        <button
+          type="button"
+          onClick={() => setSystemOpen(!systemOpen)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-3.5 w-3.5 text-cs2-text-secondary" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">
+              系统与更新 {!isPackaged && <span className="text-[9px] text-cs2-orange ml-1">(DEV)</span>}
+            </span>
+          </div>
+          {systemOpen ? (
+            <ChevronUp className="h-3.5 w-3.5 text-cs2-text-secondary" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-cs2-text-secondary" />
+          )}
+        </button>
+        {systemOpen && (
+          <div className="px-4 pb-4 space-y-3">
+            {updateStatus && (
+              <div
+                className={`text-[10px] px-3 py-2 rounded border font-mono ${
+                  updateStatus.status === "error"
+                    ? "bg-cs2-fail/10 border-cs2-fail/20 text-cs2-fail"
+                    : updateStatus.status === "available"
+                    ? "bg-cs2-orange/10 border-cs2-orange/20 text-cs2-orange"
+                    : "bg-cs2-highlight/10 border-cs2-highlight/20 text-cs2-highlight"
+                }`}
+              >
+                <div className="flex justify-between items-center mb-1">
+                  <span>{updateStatus.message}</span>
+                  {updateStatus.status === "downloading" && (
+                    <span>{Math.round(updateStatus.progress?.percent || 0)}%</span>
+                  )}
+                </div>
+                {updateStatus.status === "downloading" && (
+                  <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-cs2-highlight transition-all duration-300"
+                      style={{ width: `${updateStatus.progress?.percent || 0}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleCheckUpdates}
+              disabled={
+                updateStatus?.status === "checking" || updateStatus?.status === "downloading"
+              }
+              className="flex w-full items-center justify-center gap-2 py-2 rounded-md text-[11px] font-semibold bg-cs2-bg-input border border-cs2-border hover:border-cs2-orange/50 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  updateStatus?.status === "checking" || updateStatus?.status === "downloading"
+                    ? "animate-spin"
+                    : ""
+                }`}
+              />
+              检查版本更新
+            </button>
+          </div>
+        )}
       </div>
 
       {/* OBS Config */}

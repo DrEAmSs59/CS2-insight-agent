@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import axios from "axios";
+import API from "../../api/api";
 import {
   AlertCircle,
   CheckCircle2,
@@ -14,8 +14,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-
-const API = axios.create({ baseURL: "/api" });
 
 /* ─── 工具函数 ─── */
 function formatDateTime(iso) {

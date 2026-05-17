@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import axios from "axios";
+import API from "../api/api";
 import {
   X,
   Loader2,
@@ -17,8 +17,6 @@ import MatchScoreboard from "./MatchScoreboard";
 import PlayerSelect from "./PlayerSelect";
 import ClipList from "./ClipList";
 import ActionBar from "./ActionBar";
-
-const API = axios.create({ baseURL: "/api" });
 
 /**
  * @param {{

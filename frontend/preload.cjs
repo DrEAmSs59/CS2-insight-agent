@@ -6,5 +6,8 @@ contextBridge.exposeInMainWorld('electron', {
   unmaximize: () => ipcRenderer.send('window-unmaximize'),
   close: () => ipcRenderer.send('window-close'),
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
-  onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized))
+  isPackaged: () => ipcRenderer.invoke('is-packaged'),
+  onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),
+  checkForUpdates: () => ipcRenderer.send('check-for-updates'),
+  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, status) => callback(status))
 });

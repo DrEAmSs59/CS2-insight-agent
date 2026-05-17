@@ -28,15 +28,23 @@ import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/
 import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
+import API, { API_BASE_URL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
-
-const API = axios.create({ baseURL: "/api" });
 
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [backendReady, setBackendReady] = useState(false);
   const [aiMode, setAiMode] = useState(false);
+  
+  // 修正 isPackaged 检测：同步判断
+  const [isPackaged, setIsPackaged] = useState(false);
+  useEffect(() => {
+    if (window.electron?.isPackaged) {
+      window.electron.isPackaged().then(setIsPackaged);
+    }
+  }, []);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
@@ -417,7 +425,7 @@ export default function App() {
     const connect = () => {
       if (cancelled) return;
       try {
-        es = new EventSource("/api/demos/stream");
+        es = new EventSource(`${API_BASE_URL}/api/demos/stream`);
       } catch {
         return;
       }
@@ -731,73 +739,80 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await API.get("config");
-        if (cancelled) return;
-        if (data.obs) {
-          const rawPw = data.obs.password ?? "";
-          const masked = typeof rawPw === "string" && rawPw.startsWith("****");
-          setObsHasSavedPassword(masked);
-          setObsPasswordEditing(false);
-          setObsConfig({
-            ...data.obs,
-            password: "",
-          });
-        }
-        if (data.llm) {
-          const rawKey = data.llm.api_key ?? "";
-          const masked = typeof rawKey === "string" && rawKey.startsWith("****");
-          setLlmKeySavedOnServer(masked);
-          setLlmConfig({
-            ...data.llm,
-            api_key: masked ? "" : rawKey,
-          });
-        }
-        if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
-        if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
-          setExperimentalPovEnabled(data.experimental.pov_enabled);
-        }
-        if (data.cs2_path) setCs2Path(data.cs2_path);
-        if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
-        if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
-          setMontageEncoder(data.montage_encoder.trim().toLowerCase());
-        }
-        if (typeof data.cs2_fps_max === "number") setCs2FpsMax(data.cs2_fps_max);
-        if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
-        if (Array.isArray(data.expected_parse_players)) {
-          setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
-        }
-        if (
-          data.default_record_warmup &&
-          typeof data.default_record_warmup === "object" &&
-          !Array.isArray(data.default_record_warmup)
-        ) {
-          setSavedRecordWarmupDefaults(data.default_record_warmup);
-        }
-        if (typeof data.cs2_extra_launch_args === "string") {
-          setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
-        }
-        if (typeof data.record_inject_console_lines === "string") {
-          setRecordInjectConsoleLines(data.record_inject_console_lines);
-        }
-        if (
-          data.recording_global_pacing &&
-          typeof data.recording_global_pacing === "object" &&
-          !Array.isArray(data.recording_global_pacing)
-        ) {
-          useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
-        }
-        if (!cancelled) {
+    const initialize = async () => {
+      // 轮询直到后端就绪
+      while (!cancelled) {
+        try {
+          const { data } = await API.get("config");
+          if (cancelled) return;
+          if (data.obs) {
+            const rawPw = data.obs.password ?? "";
+            const masked = typeof rawPw === "string" && rawPw.startsWith("****");
+            setObsHasSavedPassword(masked);
+            setObsPasswordEditing(false);
+            setObsConfig({
+              ...data.obs,
+              password: "",
+            });
+          }
+          if (data.llm) {
+            const rawKey = data.llm.api_key ?? "";
+            const masked = typeof rawKey === "string" && rawKey.startsWith("****");
+            setLlmKeySavedOnServer(masked);
+            setLlmConfig({
+              ...data.llm,
+              api_key: masked ? "" : rawKey,
+            });
+          }
+          if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
+          if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
+            setExperimentalPovEnabled(data.experimental.pov_enabled);
+          }
+          if (data.cs2_path) setCs2Path(data.cs2_path);
+          if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+          if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
+            setMontageEncoder(data.montage_encoder.trim().toLowerCase());
+          }
+          if (typeof data.cs2_fps_max === "number") setCs2FpsMax(data.cs2_fps_max);
+          if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
+          if (Array.isArray(data.expected_parse_players)) {
+            setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
+          }
+          if (
+            data.default_record_warmup &&
+            typeof data.default_record_warmup === "object" &&
+            !Array.isArray(data.default_record_warmup)
+          ) {
+            setSavedRecordWarmupDefaults(data.default_record_warmup);
+          }
+          if (typeof data.cs2_extra_launch_args === "string") {
+            setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
+          }
+          if (typeof data.record_inject_console_lines === "string") {
+            setRecordInjectConsoleLines(data.record_inject_console_lines);
+          }
+          if (
+            data.recording_global_pacing &&
+            typeof data.recording_global_pacing === "object" &&
+            !Array.isArray(data.recording_global_pacing)
+          ) {
+            useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
+          }
+          
           obsConfigHydratedRef.current = true;
           queueMicrotask(() => {
             pacingPersistReadyRef.current = true;
           });
+          setBackendReady(true);
+          break; // 成功后跳出循环
+        } catch (e) {
+          // 后端尚未启动或连接失败，等待后重试
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-      } catch {
-        /* ignore */
       }
-    })();
+    };
+
+    initialize();
     return () => {
       cancelled = true;
     };
@@ -2092,7 +2107,28 @@ export default function App() {
             </div>
           )}
           <SidebarNav queueLength={queue.length} disabled={batchRecording} />
-          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
+            {!backendReady ? (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
+                  <div className="relative">
+                    <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
+                    <div className="absolute inset-0 animate-ping rounded-full bg-cs2-orange/20" />
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <h2 className="text-xl font-bold tracking-tight text-white">等待后端连接...</h2>
+                    <p className="text-sm text-zinc-400">正在启动本地分析引擎，请稍候</p>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                      Attempting to connect: 127.0.0.1:19871
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="min-h-0 flex-1 overflow-hidden">
               <Routes>
                 <Route path="/" element={<GuidePage />} />

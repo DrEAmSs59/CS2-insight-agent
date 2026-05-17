@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import axios from "axios";
+import API from "../api/api";
 import { useMontageStore } from "../stores/montageStore";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import { Loader2 } from "lucide-react";
@@ -21,8 +21,6 @@ import {
   getMontageTimelineVariant,
   isTimelineSourceClip,
 } from "../utils/montageUtils";
-
-const API = axios.create({ baseURL: "/api" });
 
 const FILTER_TABS = [
   { id: "all", label: "全部" },

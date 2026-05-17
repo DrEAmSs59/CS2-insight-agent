@@ -1,4 +1,4 @@
-import axios from "axios";
+import API from "../../api/api";
 import { memo, useEffect, useMemo, useState } from "react";
 import DemoTeamMiniTable from "./DemoTeamMiniTable";
 import {
@@ -7,8 +7,6 @@ import {
   scoreboardHasOptionalAdr,
   scoreboardHasOptionalRating,
 } from "../../utils/demoScoreboardModel";
-
-const API = axios.create({ baseURL: "/api" });
 
 /**
  * @param {object} props

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import axios from "axios";
+import API from "../api/api";
 import { useAppShell } from "../context/AppShellContext";
 import {
   Brain,
@@ -8,9 +8,8 @@ import {
   EyeOff,
   Check,
   Server,
+  RefreshCw,
 } from "lucide-react";
-
-const API = axios.create({ baseURL: "/api" });
 
 function llmBaseUrlLooksLocal(baseUrl) {
   try {
@@ -140,6 +139,36 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [players, setPlayers] = useState(() => parsePlayerLines(s.expectedParsePlayersText));
   const [playerDraft, setPlayerDraft] = useState("");
+
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [isPackaged, setIsPackaged] = useState(false);
+
+  useEffect(() => {
+    if (window.electron?.isPackaged) {
+      window.electron.isPackaged().then(setIsPackaged);
+    }
+
+    if (window.electron?.onUpdateStatus) {
+      window.electron.onUpdateStatus((status) => {
+        setUpdateStatus(status);
+        if (status.status === "not-available" || status.status === "error") {
+          setTimeout(() => setUpdateStatus(null), 5000);
+        }
+      });
+    }
+  }, []);
+
+  const handleCheckUpdates = () => {
+    if (!isPackaged) {
+      setUpdateStatus({ status: "error", message: "开发模式下不支持检查更新" });
+      setTimeout(() => setUpdateStatus(null), 3000);
+      return;
+    }
+    if (window.electron?.checkForUpdates) {
+      setUpdateStatus({ status: "checking", message: "正在检查更新..." });
+      window.electron.checkForUpdates();
+    }
+  };
 
   useEffect(() => {
     setPlayers(parsePlayerLines(s.expectedParsePlayersText));
@@ -393,6 +422,53 @@ export default function SettingsPage() {
                   ＋ 添加玩家
                 </SecondaryButton>
               </div>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard title="系统与更新" hint="管理软件版本与自动更新。">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg bg-black/20 p-3 border border-white/5">
+                  <div>
+                    <p className="text-[11px] font-semibold text-zinc-300">当前版本</p>
+                    <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">v2.0.0 {!isPackaged && "(DEV)"}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCheckUpdates}
+                    disabled={updateStatus?.status === "checking" || updateStatus?.status === "downloading"}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-[11px] font-bold transition-all border ${
+                      updateStatus?.status === 'available'
+                        ? 'bg-cs2-orange border-cs2-orange text-black'
+                        : 'bg-cs2-bg-input border-cs2-border text-white hover:border-cs2-orange/50'
+                    } disabled:opacity-50`}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${updateStatus?.status === "checking" || updateStatus?.status === "downloading" ? "animate-spin" : ""}`} />
+                    {updateStatus?.status === 'available' ? '立即更新' : '检查更新'}
+                  </button>
+                </div>
+
+                {updateStatus && (
+                  <div className={`text-[10px] px-3 py-2 rounded border font-mono ${
+                    updateStatus.status === 'error' ? 'bg-cs2-fail/10 border-cs2-fail/20 text-cs2-fail' :
+                    updateStatus.status === 'available' ? 'bg-cs2-orange/10 border-cs2-orange/20 text-cs2-orange' :
+                    'bg-cs2-highlight/10 border-cs2-highlight/20 text-cs2-highlight'
+                  }`}>
+                    <div className="flex justify-between items-center mb-1">
+                      <span>{updateStatus.message}</span>
+                      {updateStatus.status === 'downloading' && (
+                        <span>{Math.round(updateStatus.progress?.percent || 0)}%</span>
+                      )}
+                    </div>
+                    {updateStatus.status === 'downloading' && (
+                      <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-cs2-highlight transition-all duration-300" 
+                          style={{ width: `${updateStatus.progress?.percent || 0}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </SettingsCard>
 
