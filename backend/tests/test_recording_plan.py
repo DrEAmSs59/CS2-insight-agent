@@ -272,7 +272,11 @@ check("7c: end_tick from last", plan.segments[0].end_tick == exp_end,
       f"got {plan.segments[0].end_tick}")
 
 
-# ── Test 8: Round compilation — player alive → next_round_freeze_start ────
+# ── Test 8: Round compilation — player alive → reliable round_end_tick ────
+# next_round_freeze_start_tick=35_000 > next_round_start_tick=30_100 and freeze_end=null
+# → normalizer rewrites: next_round_freeze_end=35_000, next_round_freeze_start=null
+# round_end_tick=30_000 is reliable (< next_round_start=30_100, not derived from freeze_end-5s)
+# Planner Case A: end = round_end_tick=30_000; min(30_000, 30_100) = 30_000
 print("\nTest 8: Round compilation — player alive (no death tick)")
 next_freeze = 35_000
 r = make_round(round_num=5, freeze_end_tick=10_000, round_end_tick=30_000,
@@ -288,8 +292,11 @@ exp_start = 10_000 - int(opts.round_freeze_preroll_sec * TICK_RATE)
 check("8a: 1 segment", len(plan.segments) == 1, f"got {len(plan.segments)}")
 check("8b: start = freeze_end - preroll", plan.segments[0].start_tick == exp_start,
       f"got {plan.segments[0].start_tick}, want {exp_start}")
-check("8c: end = next_round_freeze_start", plan.segments[0].end_tick == next_freeze,
-      f"got {plan.segments[0].end_tick}, want {next_freeze}")
+check("8c: end = round_end_tick (reliable, < next_round_start)", plan.segments[0].end_tick == 30_000,
+      f"got {plan.segments[0].end_tick}, want 30_000")
+check("8d: next_freeze_start rewrite warning emitted",
+      any("round_metadata_next_freeze_start_rewritten_to_freeze_end" in w for w in plan.warnings),
+      f"warnings={plan.warnings}")
 
 
 # ── Test 9: Round compilation — player died → death_tick + post ───────────
@@ -311,6 +318,9 @@ check("9b: end = death_tick + post", plan.segments[0].end_tick == exp_end,
 
 
 # ── Test 10: Timeline round — equivalent to single round_compilation ───────
+# Same normalizer rewrite as test 8: next_round_freeze_start_tick=35_000 rewrites to
+# next_round_freeze_end=35_000; round_end_tick=30_000 is reliable.
+# end = min(round_end_tick=30_000, next_round_start=30_100) = 30_000
 print("\nTest 10: Timeline round")
 next_freeze = 35_000
 r = make_round(round_num=5, freeze_end_tick=10_000, round_end_tick=30_000,
@@ -325,7 +335,8 @@ opts = req.options
 exp_start = 10_000 - int(opts.round_freeze_preroll_sec * TICK_RATE)
 check("10a: 1 segment", len(plan.segments) == 1, f"got {len(plan.segments)}")
 check("10b: start = freeze_end - preroll", plan.segments[0].start_tick == exp_start)
-check("10c: end = next_round_freeze_start", plan.segments[0].end_tick == next_freeze)
+check("10c: end = round_end_tick (reliable, < next_round_start)", plan.segments[0].end_tick == 30_000,
+      f"got {plan.segments[0].end_tick}, want 30_000")
 
 
 # ── Test 11: Killer + victim POV → 2 separate segments ────────────────────

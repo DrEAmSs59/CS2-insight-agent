@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from .models import (
@@ -11,6 +12,8 @@ from .models import (
     RecordingOptions,
     SourceRef,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class NormalizationError(Exception):
@@ -94,16 +97,73 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
                 f"options.{option_name} must be >= 0, got {value}"
             )
 
+    normalized_rounds: list[RoundInfo] = []
     for round_info in dto.rounds:
         if round_info.freeze_end_tick is None:
             warnings.append(
                 f"round {round_info.round}: freeze_end_tick missing, will use fallback"
             )
 
-        if round_info.next_round_freeze_start_tick is None:
+        nxt_freeze_start = round_info.next_round_freeze_start_tick
+        nxt_freeze_end = round_info.next_round_freeze_end_tick
+        nxt_start = round_info.next_round_start_tick
+        round_end = round_info.round_end_tick
+        tick_rate = dto.demo.tick_rate
+        round_end_reliable = True
+
+        # Defensive rewrite: next_round_freeze_start_tick was filled with freeze_end_tick
+        # when it is larger than next_round_start_tick and freeze_end is absent.
+        if (
+            nxt_freeze_start is not None
+            and nxt_freeze_end is None
+            and nxt_start is not None
+            and nxt_freeze_start > nxt_start
+        ):
+            nxt_freeze_end = nxt_freeze_start
+            nxt_freeze_start = None
             warnings.append(
-                f"round {round_info.round}: next_round_freeze_start_tick missing, will use fallback"
+                f"round {round_info.round}: round_metadata_next_freeze_start_rewritten_to_freeze_end"
             )
+
+        # Detect unreliable round_end_tick (derived from recording window arithmetic)
+        round_end_unreliable_reason: str | None = None
+        if round_end is not None and round_info.target_death_tick is None:
+            derived_5s = int(5 * tick_rate)
+            if nxt_freeze_end is not None and round_end == nxt_freeze_end - derived_5s:
+                round_end_reliable = False
+                round_end_unreliable_reason = "derived_from_next_freeze_end_minus_5s"
+                warnings.append(
+                    f"round {round_info.round}: round_end_tick_unreliable_derived_from_next_freeze"
+                )
+            elif nxt_start is not None and round_end > nxt_start:
+                round_end_reliable = False
+                round_end_unreliable_reason = "after_next_round_start"
+                warnings.append(
+                    f"round {round_info.round}: round_end_tick_after_next_round_start"
+                )
+
+        logger.info(
+            "[RecordingV3][RoundNormalize] round=%d next_freeze_start=%s next_freeze_end=%s "
+            "round_end_reliable=%s%s",
+            round_info.round,
+            nxt_freeze_start,
+            nxt_freeze_end,
+            round_end_reliable,
+            f" reason={round_end_unreliable_reason}" if round_end_unreliable_reason else "",
+        )
+
+        normalized_rounds.append(RoundInfo(
+            round=round_info.round,
+            round_start_tick=round_info.round_start_tick,
+            round_end_tick=round_end,
+            freeze_start_tick=round_info.freeze_start_tick,
+            freeze_end_tick=round_info.freeze_end_tick,
+            next_round_start_tick=nxt_start,
+            next_round_freeze_start_tick=nxt_freeze_start,
+            next_round_freeze_end_tick=nxt_freeze_end,
+            target_death_tick=round_info.target_death_tick,
+            round_end_tick_reliable=round_end_reliable,
+        ))
 
     if dto.options.victim_pov_pre_sec is not None and dto.options.victim_pov_pre_sec < 0:
         raise NormalizationError("options.victim_pov_pre_sec must be >= 0 if set")
@@ -123,7 +183,7 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         demo=dto.demo,
         target_player=dto.target_player,
         events=dto.events,
-        rounds=dto.rounds,
+        rounds=normalized_rounds,
         options=dto.options,
         source_ref=dto.source_ref,
         warnings=warnings,

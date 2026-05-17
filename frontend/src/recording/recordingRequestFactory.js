@@ -95,6 +95,13 @@ function newRequestId() {
 function deriveNextRoundFreezeStart(round, clipData) {
   const windows = clipData.freeze_to_death_round_windows || [];
   const next = windows.find((w) => Number(w.round) === Number(round) + 1);
+  // Use the actual freeze_start_tick of the next round, NOT freeze_end_tick.
+  return next ? (next.freeze_start_tick ?? null) : null;
+}
+
+function deriveNextRoundFreezeEnd(round, clipData) {
+  const windows = clipData.freeze_to_death_round_windows || [];
+  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
   return next ? (next.freeze_end_tick ?? null) : null;
 }
 
@@ -320,17 +327,30 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
       // filterSet is already computed above for demo_end_tick — reuse it here.
       return (clipData.freeze_to_death_round_windows || [])
         .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
-        .map((w) => ({
-          round: w.round,
-          round_start_tick: w.start_tick,
-          round_end_tick: w.end_tick,
-          freeze_start_tick: null,
-          freeze_end_tick: w.freeze_end_tick ?? null,
-          next_round_start_tick: deriveNextRoundStartTick(w.round, clipData),
-          next_round_freeze_start_tick: deriveNextRoundFreezeStart(w.round, clipData),
-          next_round_freeze_end_tick: null,
-          target_death_tick: w.death_tick ?? null,
-        }));
+        .map((w) => {
+          const nextStart = deriveNextRoundStartTick(w.round, clipData);
+          const nextFreezeStart = deriveNextRoundFreezeStart(w.round, clipData);
+          const nextFreezeEnd = deriveNextRoundFreezeEnd(w.round, clipData);
+          // round_end_tick must be the parser's real round-end tick, never a derived
+          // recording-window value (e.g. next_freeze_end - 5 s). Use null if unavailable
+          // so the backend Planner falls back to next_round_start_tick.
+          const roundEndTick = w.round_end_tick ?? null;
+          console.log(
+            `[RecordingV3][RoundDTO] round=${w.round} raw round_end=${roundEndTick} ` +
+            `next_start=${nextStart} next_freeze_start=${nextFreezeStart} next_freeze_end=${nextFreezeEnd}`
+          );
+          return {
+            round: w.round,
+            round_start_tick: w.start_tick,
+            round_end_tick: roundEndTick,
+            freeze_start_tick: null,
+            freeze_end_tick: w.freeze_end_tick ?? null,
+            next_round_start_tick: nextStart,
+            next_round_freeze_start_tick: nextFreezeStart,
+            next_round_freeze_end_tick: nextFreezeEnd,
+            target_death_tick: w.death_tick ?? null,
+          };
+        });
     })(),
     options: mergedOptions,
     source_ref: buildSourceRef(clipData, queueItem),

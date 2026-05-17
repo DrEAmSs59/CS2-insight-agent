@@ -63,13 +63,14 @@ class EventInfo(BaseModel):
 class RoundInfo(BaseModel):
     round: int
     round_start_tick: int
-    round_end_tick: int
+    round_end_tick: Optional[int] = None
     freeze_start_tick: Optional[int] = None
     freeze_end_tick: Optional[int] = None
     next_round_start_tick: Optional[int] = None
     next_round_freeze_start_tick: Optional[int] = None
     next_round_freeze_end_tick: Optional[int] = None
     target_death_tick: Optional[int] = None
+    round_end_tick_reliable: bool = True
 
 
 class RecordingOptions(BaseModel):
