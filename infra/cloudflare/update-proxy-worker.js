@@ -1,13 +1,13 @@
 /**
- * Cloudflare Worker: 真·增量更新代理 (支持 multipart/byteranges)
+ * Cloudflare Worker: 智能增量更新代理 (支持大规模 Block 合并)
  * 
- * 作用：
- * 1. 拦截 Electron 发出的多段 Range 请求 (R2 原生不支持，会报 400)。
- * 2. 自动拆分请求，分别从 R2 获取各段数据。
- * 3. 按照 RFC 7233 标准拼装响应，实现真正的差量下载（仅 1.3MB 而非 235MB）。
+ * 核心优化：
+ * 解决 Cloudflare Worker 50 次子请求限制。当 Electron 索要数百个块时，
+ * 该脚本会自动将邻近的块合并为单个请求，确保不报 500 错误，并实现极速差量下载。
  */
 
 const R2_ORIGIN = "https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev";
+const MAX_SUB_REQUESTS = 40; // 预留 10 个名额给其他开销
 
 export default {
   async fetch(request, env) {
@@ -15,51 +15,84 @@ export default {
     const r2Url = `${R2_ORIGIN}${url.pathname}${url.search}`;
     const rangeHeader = request.headers.get("Range");
 
-    // 逻辑 1：普通请求或单段 Range 请求，直接透传给 R2
     if (!rangeHeader || !rangeHeader.includes(",")) {
       return fetch(r2Url, request);
     }
 
-    // 逻辑 2：处理多段 Range 请求 (True Delta Update)
-    console.log(`[Worker] Handling Multi-Range: ${rangeHeader}`);
-
     try {
-      // 解析 Range 头，例如 "bytes=0-100, 200-300"
-      const ranges = rangeHeader.replace("bytes=", "").split(",").map(r => r.trim());
-      const boundary = `insight_agent_${Math.random().toString(36).slice(2)}`;
+      // 1. 解析原始请求的所有 Range 块
+      let rawRanges = rangeHeader.replace("bytes=", "").split(",").map(r => {
+        const [start, end] = r.trim().split("-").map(Number);
+        return { start, end };
+      });
+
+      // 2. 智能合并算法：将几百个碎块压缩到 40 个以内的请求
+      // 我们通过允许下载少量“间隙数据”来换取请求次数的减少
+      rawRanges.sort((a, b) => a.start - b.start);
       
-      // 这里的逻辑：由于 Cloudflare Worker 免费版有 50 个并发请求限制，
-      // 如果 ranges 太多（比如你日志里的 66 个），我们需要分批或提示。
-      // 但对于大部分更新，直接并行 fetch 效果最好。
-      
-      const parts = await Promise.all(ranges.map(async (range) => {
-        const resp = await fetch(r2Url, {
-          headers: { "Range": `bytes=${range}` }
-        });
+      let mergedRanges = [];
+      if (rawRanges.length > 0) {
+        let current = { ...rawRanges[0] };
         
+        // 计算合并阈值：如果碎块太多，加大合并力度
+        const gapThreshold = rawRanges.length > MAX_SUB_REQUESTS ? 1024 * 512 : 1024 * 64; 
+
+        for (let i = 1; i < rawRanges.length; i++) {
+          const next = rawRanges[i];
+          // 如果两个块之间的间隙小于阈值，或者合并后总数依然太多，则强行合并
+          if ((next.start - current.end <= gapThreshold) || 
+              (rawRanges.length - i + mergedRanges.length > MAX_SUB_REQUESTS)) {
+            current.end = Math.max(current.end, next.end);
+          } else {
+            mergedRanges.push(current);
+            current = { ...next };
+          }
+        }
+        mergedRanges.push(current);
+      }
+
+      // 如果合并后依然超过限制（极端情况），进行二次强力压缩
+      while (mergedRanges.length > MAX_SUB_REQUESTS) {
+        let minGapIndex = -1;
+        let minGap = Infinity;
+        for (let i = 0; i < mergedRanges.length - 1; i++) {
+          let gap = mergedRanges[i+1].start - mergedRanges[i].end;
+          if (gap < minGap) { minGap = gap; minGapIndex = i; }
+        }
+        mergedRanges[minGapIndex].end = mergedRanges[minGapIndex+1].end;
+        mergedRanges.splice(minGapIndex + 1, 1);
+      }
+
+      console.log(`[Worker] Compressed ${rawRanges.length} blocks into ${mergedRanges.length} requests.`);
+
+      // 3. 并行获取合并后的数据块
+      const boundary = `insight_agent_${Math.random().toString(36).slice(2)}`;
+      const parts = await Promise.all(mergedRanges.map(async (r) => {
+        const resp = await fetch(r2Url, {
+          headers: { "Range": `bytes=${r.start}-${r.end}` }
+        });
         if (!resp.ok) throw new Error(`R2 Fetch failed: ${resp.status}`);
         
-        const contentRange = resp.headers.get("Content-Range") || `bytes ${range}/*`;
         const buffer = await resp.arrayBuffer();
-        
-        // 构造 multipart 每一段的头部
+        const data = new Uint8Array(buffer);
+
+        // 4. 从合并后的数据中，精准切出原始请求需要的碎片（可选优化，目前直接返回合并段更稳）
+        // 这里我们按照 RFC 标准返回合并后的段落
         let part = `--${boundary}\r\n`;
         part += `Content-Type: application/octet-stream\r\n`;
-        part += `Content-Range: ${contentRange}\r\n\r\n`;
+        part += `Content-Range: bytes ${r.start}-${r.end}/*\r\n\r\n`;
         
         return {
           header: new TextEncoder().encode(part),
-          data: new Uint8Array(buffer),
+          data: data,
           footer: new TextEncoder().encode("\r\n")
         };
       }));
 
-      // 合并所有数据
+      // 5. 拼装最终响应
       const finalFooter = new TextEncoder().encode(`--${boundary}--\r\n`);
       let totalSize = finalFooter.byteLength;
-      for (const p of parts) {
-        totalSize += p.header.byteLength + p.data.byteLength + p.footer.byteLength;
-      }
+      for (const p of parts) totalSize += p.header.byteLength + p.data.byteLength + p.footer.byteLength;
 
       const combined = new Uint8Array(totalSize);
       let offset = 0;
@@ -75,15 +108,13 @@ export default {
         statusText: "Partial Content",
         headers: {
           "Content-Type": `multipart/byteranges; boundary=${boundary}`,
-          "Cache-Control": "public, max-age=3600"
+          "Cache-Control": "no-store"
         }
       });
 
     } catch (err) {
       console.error("[Worker Error]", err);
-      // 如果差量拼装失败，保底方案：返回全量（至少保证更新能成功）
-      const fallback = await fetch(r2Url);
-      return fallback;
+      return fetch(r2Url); // 保底方案：返回全量
     }
   }
 };
