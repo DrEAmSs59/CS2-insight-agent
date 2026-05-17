@@ -94,8 +94,14 @@ function newRequestId() {
 
 function deriveNextRoundFreezeStart(round, clipData) {
   const windows = clipData.freeze_to_death_round_windows || [];
-  const next = windows.find((w) => w.round === round + 1);
+  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
   return next ? (next.freeze_end_tick ?? null) : null;
+}
+
+function deriveNextRoundStartTick(round, clipData) {
+  const windows = clipData.freeze_to_death_round_windows || [];
+  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
+  return next ? (next.start_tick ?? null) : null;
 }
 
 export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
@@ -162,6 +168,10 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
+  const victimName = clipData.victims?.[0] || "";
+  const victimSteamId =
+    clipData.victim_steamid64s?.[0] || nameToSteamId[victimName] || "";
   return {
     request_id: newRequestId(),
     request_type: "timeline_kill",
@@ -174,7 +184,7 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
         tick: clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
         killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        victim: buildTargetPlayer(clipData.victims?.[0] || "", ""),
+        victim: buildTargetPlayer(victimName, victimSteamId),
         target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
         perspective: "killer",
       },
@@ -218,6 +228,7 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   return {
     request_id: newRequestId(),
     request_type: "kill_compilation",
@@ -225,15 +236,20 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
     demo,
     target_player: targetPlayer,
     events:
-      clipData.kill_ticks?.map((tick, i) => ({
-        event_type: "kill",
-        tick,
-        round: clipData.source_rounds?.[i] ?? clipData.round,
-        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        victim: buildTargetPlayer(clipData.victims?.[i] || "", ""),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        perspective: "killer",
-      })) || [],
+      clipData.kill_ticks?.map((tick, i) => {
+        const victimName = clipData.victims?.[i] || "";
+        const victimSteamId =
+          clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
+        return {
+          event_type: "kill",
+          tick,
+          round: clipData.source_rounds?.[i] ?? clipData.round,
+          killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          victim: buildTargetPlayer(victimName, victimSteamId),
+          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          perspective: "killer",
+        };
+      }) || [],
     rounds: [],
     options: mergedOptions,
     source_ref: buildSourceRef(clipData, queueItem),
@@ -276,7 +292,20 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
 
 export function buildRoundCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
-  const demo = buildDemoContext(clipData, queueItem, matchMeta);
+
+  // demo_end_tick: use the max round_end_tick across selected windows so the backend
+  // planner can end at the actual round boundary. clip_max_tick is the frontend's
+  // crossRoundCap which can land inside a technical timeout, causing extra footage.
+  const filter = clipData.freeze_to_death_round_filter;
+  const filterSet =
+    Array.isArray(filter) && filter.length > 0 ? new Set(filter.map(Number)) : null;
+  const maxRoundEndTick = (clipData.freeze_to_death_round_windows || [])
+    .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
+    .reduce((mx, w) => Math.max(mx, Number(w.end_tick) || 0), 0);
+
+  const baseDemo = buildDemoContext(clipData, queueItem, matchMeta);
+  const demo = maxRoundEndTick > 0 ? { ...baseDemo, demo_end_tick: maxRoundEndTick } : baseDemo;
+
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
   return {
     request_id: newRequestId(),
@@ -285,17 +314,24 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
     demo,
     target_player: targetPlayer,
     events: [],
-    rounds: (clipData.freeze_to_death_round_windows || []).map((w) => ({
-      round: w.round,
-      round_start_tick: w.start_tick,
-      round_end_tick: w.end_tick,
-      freeze_start_tick: null,
-      freeze_end_tick: w.freeze_end_tick ?? null,
-      next_round_start_tick: null,
-      next_round_freeze_start_tick: deriveNextRoundFreezeStart(w.round, clipData),
-      next_round_freeze_end_tick: null,
-      target_death_tick: w.death_tick ?? null,
-    })),
+    rounds: (() => {
+      // freeze_to_death_round_windows keeps ALL rounds so deriveNextRoundFreezeStart can
+      // look up consecutive rounds (e.g. round 6 when user only selected 4, 5, 9).
+      // filterSet is already computed above for demo_end_tick — reuse it here.
+      return (clipData.freeze_to_death_round_windows || [])
+        .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
+        .map((w) => ({
+          round: w.round,
+          round_start_tick: w.start_tick,
+          round_end_tick: w.end_tick,
+          freeze_start_tick: null,
+          freeze_end_tick: w.freeze_end_tick ?? null,
+          next_round_start_tick: deriveNextRoundStartTick(w.round, clipData),
+          next_round_freeze_start_tick: deriveNextRoundFreezeStart(w.round, clipData),
+          next_round_freeze_end_tick: null,
+          target_death_tick: w.death_tick ?? null,
+        }));
+    })(),
     options: mergedOptions,
     source_ref: buildSourceRef(clipData, queueItem),
   };

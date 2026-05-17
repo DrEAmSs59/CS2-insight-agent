@@ -114,6 +114,9 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
             v_start = victim_event.tick - vic_pre_ticks
             v_end = victim_event.tick + vic_post_ticks
             v_start, v_end = _clamp(v_start, v_end, req)
+            victim_steamid64 = (victim_event.victim.steamid64 or "").strip()
+            victim_disabled = not victim_steamid64
+            victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
 
             victim_seg = RecordingSegment(
                 segment_index=seg_idx,
@@ -123,13 +126,13 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
                 anchor_ticks=[victim_event.tick],
                 round=victim_event.round,
                 target_player_name=victim_event.victim.name,
-                target_steamid64=victim_event.victim.steamid64,
+                target_steamid64=victim_steamid64,
                 perspective=Perspective.victim,
                 is_final_round=_is_final_round(victim_event.round, req),
                 safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
                 safe_end_tick=None,
-                disabled=False,
-                disabled_reason=None,
+                disabled=victim_disabled,
+                disabled_reason=victim_disabled_reason,
                 metadata={},
             )
             segments.append(victim_seg)
@@ -233,6 +236,12 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
     pre_ticks = sec_to_ticks(opts.timeline_kill_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.timeline_kill_post_sec, tick_rate)
 
+    # Victim POV independent timing — fall back to timeline_kill timing if not set.
+    vic_pre_sec = opts.victim_pov_pre_sec if opts.victim_pov_pre_sec is not None else opts.timeline_kill_pre_sec
+    vic_post_sec = opts.victim_pov_post_sec
+    vic_pre_ticks = sec_to_ticks(vic_pre_sec, tick_rate)
+    vic_post_ticks = sec_to_ticks(vic_post_sec, tick_rate)
+
     event = req.events[0]
     start_tick = event.tick - pre_ticks
     end_tick = event.tick + post_ticks
@@ -255,7 +264,39 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled_reason=None,
         metadata={},
     )
-    return [seg]
+    segments = [seg]
+
+    # ── Optional victim POV segment ──────────────────────────────────────────
+    if opts.enable_victim_pov:
+        victim = event.victim
+        victim_steamid64 = (victim.steamid64 or "").strip() if victim else ""
+        victim_disabled = not victim_steamid64
+        victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
+
+        v_start = event.tick - vic_pre_ticks
+        v_end = event.tick + vic_post_ticks
+        v_start, v_end = _clamp(v_start, v_end, req)
+
+        victim_seg = RecordingSegment(
+            segment_index=1,
+            source_type=SourceType.kill,
+            start_tick=v_start,
+            end_tick=v_end,
+            anchor_ticks=[event.tick],
+            round=event.round,
+            target_player_name=victim.name if victim else "",
+            target_steamid64=victim_steamid64,
+            perspective=Perspective.victim,
+            is_final_round=_is_final_round(event.round, req),
+            safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
+            safe_end_tick=None,
+            disabled=victim_disabled,
+            disabled_reason=victim_disabled_reason,
+            metadata={},
+        )
+        segments.append(victim_seg)
+
+    return segments
 
 
 def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
@@ -263,8 +304,10 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
 
-    pre_ticks = sec_to_ticks(opts.death_pre_sec, tick_rate)
-    post_ticks = sec_to_ticks(opts.death_post_sec, tick_rate)
+    # Use fail_killer timing for the victim clip so both perspectives share the same
+    # duration — the killer_pov timing is what the user configures for timeline_death.
+    pre_ticks = sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
+    post_ticks = sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
 
     event = req.events[0]
     start_tick = event.tick - pre_ticks
@@ -288,4 +331,36 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled_reason=None,
         metadata={},
     )
-    return [seg]
+    segments = [seg]
+
+    # ── Optional killer POV segment ──────────────────────────────────────────
+    if opts.enable_fail_killer_pov:
+        killer = event.killer
+        killer_steamid64 = (killer.steamid64 or "").strip() if killer else ""
+        killer_disabled = not killer_steamid64
+        killer_disabled_reason = "missing_killer_steamid64" if killer_disabled else None
+
+        k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
+        k_end = event.tick + sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
+        k_start, k_end = _clamp(k_start, k_end, req)
+
+        killer_seg = RecordingSegment(
+            segment_index=1,
+            source_type=SourceType.death,
+            start_tick=k_start,
+            end_tick=k_end,
+            anchor_ticks=[event.tick],
+            round=event.round,
+            target_player_name=killer.name if killer else "",
+            target_steamid64=killer_steamid64,
+            perspective=Perspective.killer,
+            is_final_round=_is_final_round(event.round, req),
+            safe_seek_tick=_prepare_seek_tick(k_start, tick_rate, first_tick),
+            safe_end_tick=None,
+            disabled=killer_disabled,
+            disabled_reason=killer_disabled_reason,
+            metadata={},
+        )
+        segments.append(killer_seg)
+
+    return segments

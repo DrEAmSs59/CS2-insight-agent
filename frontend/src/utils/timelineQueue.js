@@ -64,7 +64,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
         ? Number(event.round)
         : 0;
   const atk = String(event?.attacker_name || "").trim();
+  const atkSid = String(event?.attacker_steamid || "").trim();
   const vic = String(event?.victim_name || "").trim();
+  const vicSid = String(event?.victim_steamid || "").trim();
   const wpn = String(event?.weapon_name || event?.weapon || "").trim();
   let queueSummaryLine = "";
   if (isKill) {
@@ -94,7 +96,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     kill_ticks: isKill && Number.isFinite(tick) ? [tick] : [],
     death_tick: isDeath && Number.isFinite(tick) ? tick : null,
     killer_name: isDeath ? atk || null : null,
+    killer_steamid64: isDeath ? atkSid || null : null,
     victims: isKill && vic ? [vic] : [],
+    victim_steamid64s: isKill && vic ? [vicSid] : [],
     timeline_source: "round_timeline_event",
     timeline_event_id: String(event?.id || ""),
     _timeline_target: targetPlayer || null,

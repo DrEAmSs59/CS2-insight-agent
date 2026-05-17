@@ -17,6 +17,10 @@ from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
 
+# Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
+# overhead without consuming the user-configured highlight_pre_sec recording window.
+PREPARE_PREROLL_SEC: float = 5.0
+
 
 async def _record_until_tick(
     segment: RecordingSegment,
@@ -201,7 +205,25 @@ class RecordingExecutor:
 
             # ── 1. Seek ──────────────────────────────────────────────────────
             # OBS is paused/stopped at this point — console commands are safe.
-            seek_tick = segment.safe_seek_tick
+            #
+            # prepare_seek_tick: always 5 s before start_tick so that spec_player /
+            # GSI-verify run in the prepare window, not the recording window.
+            #
+            # Exception: if the planner / FinalRoundGuard already set a specific
+            # safe_seek_tick that is earlier than start_tick, that value already
+            # encodes timing intent (e.g. locked to round freeze-end) — use it.
+            prepare_ticks = int(PREPARE_PREROLL_SEC * plan.tick_rate)
+            if segment.safe_seek_tick < segment.start_tick:
+                seek_tick = segment.safe_seek_tick
+            else:
+                seek_tick = max(0, segment.start_tick - prepare_ticks)
+
+            logger.info(
+                "[RecordingV3] prepare_seek segment %d  prepare_tick=%d  start_tick=%d  preroll=%.2fs",
+                segment.segment_index, seek_tick, segment.start_tick,
+                (segment.start_tick - seek_tick) / plan.tick_rate,
+            )
+
             try:
                 await gototick(seek_tick)
             except DemoSeekError as e:
@@ -215,7 +237,7 @@ class RecordingExecutor:
                 ))
                 continue
 
-            # Pre-roll duration: ticks between safe_seek_tick and start_tick.
+            # Pre-roll duration: ticks between seek_tick and start_tick.
             pre_roll_sec = max(0.0, (segment.start_tick - seek_tick) / plan.tick_rate)
 
             try:
@@ -272,21 +294,19 @@ class RecordingExecutor:
                         spec_elapsed = time.monotonic() - spec_t0
 
                 # ── 3. Wait for demo to reach start_tick, then pause ────────
-                # After spec_player/verify, the demo is still playing.
-                # If spec took less than pre_roll_sec, sleep the remainder so
-                # the demo reaches start_tick before we pause (preserving the
-                # full highlight_pre_sec recording window without overhead).
-                # OBS is paused/stopped — console is safe here.
+                # spec_player / GSI-verify run while the demo is playing inside
+                # the 5 s prepare window.  Sleep the remaining time so the demo
+                # reaches start_tick before OBS begins recording.
                 remaining_wait = max(0.0, pre_roll_sec - spec_elapsed)
+                logger.info(
+                    "[RecordingV3] spec_elapsed=%.2fs  remaining_to_start=%.2fs",
+                    spec_elapsed, remaining_wait,
+                )
                 if remaining_wait > 0.05:
-                    logger.debug(
-                        "[RecordingV3] waiting %.2fs for demo to reach start_tick "
-                        "(pre_roll=%.2fs spec_elapsed=%.2fs)",
-                        remaining_wait, pre_roll_sec, spec_elapsed,
-                    )
                     await asyncio.sleep(remaining_wait)
 
                 await demo_pause()
+                logger.info("[RecordingV3] reached effective start_tick; starting OBS")
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.

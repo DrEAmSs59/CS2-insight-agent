@@ -16,6 +16,9 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
     round_freeze_preroll_ticks = sec_to_ticks(opts.round_freeze_preroll_sec, tick_rate)
     default_freeze_ticks = int(15 * tick_rate)
 
+    # Pre-compute which round numbers are included so we can detect consecutive pairs.
+    planned_round_numbers = {ri.round for ri in req.rounds}
+
     for segment_index, round_info in enumerate(req.rounds):
         # --- Compute start_tick ---
         if round_info.freeze_end_tick is not None:
@@ -36,7 +39,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
 
         start_tick = max(start_tick, req.demo.first_tick)
 
-        # --- Compute ceiling tick (next round freeze start or fallbacks) ---
+        # --- Compute ceiling tick (next round freeze end or fallbacks) ---
         def _get_ceiling(ri: RoundInfo) -> tuple[int, list[str]]:
             """Return (ceiling_tick, extra_warnings)."""
             ceiling_warnings: list[str] = []
@@ -63,10 +66,30 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
 
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
-            # Case A: player did not die this round
-            ceiling_tick, ceiling_warnings = _get_ceiling(round_info)
-            warnings.extend(ceiling_warnings)
-            end_tick = ceiling_tick
+            # Case A: player did not die this round.
+            next_consecutive_in_plan = (round_info.round + 1) in planned_round_numbers
+
+            if next_consecutive_in_plan and round_info.next_round_freeze_start_tick is not None:
+                # The immediately following round is also being recorded — end exactly
+                # where that round's clip begins (freeze_end - preroll) for a seamless
+                # handoff. next_round_freeze_start_tick holds the next round's freeze_end_tick.
+                end_tick = round_info.next_round_freeze_start_tick - round_freeze_preroll_ticks
+            else:
+                # Last selected round (or non-consecutive gap): end at the round boundary
+                # and cap at next_round_start_tick so we don't record into the next
+                # round's freeze screen.
+                if round_info.round_end_tick is not None:
+                    end_tick = round_info.round_end_tick
+                else:
+                    ceiling_tick, ceiling_warnings = _get_ceiling(round_info)
+                    warnings.extend(ceiling_warnings)
+                    end_tick = ceiling_tick
+                    warnings.append(
+                        f"round {round_info.round}: round_end_tick missing; "
+                        "used ceiling tick as end_tick fallback"
+                    )
+                if round_info.next_round_start_tick is not None:
+                    end_tick = min(end_tick, round_info.next_round_start_tick)
         else:
             # Case B: player died this round
             death_post_ticks = sec_to_ticks(opts.round_death_post_sec, tick_rate)

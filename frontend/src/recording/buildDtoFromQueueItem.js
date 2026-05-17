@@ -43,9 +43,18 @@ function pacingOverrideToOptions(pacing) {
   if (pacing.victim_pov_post_sec != null) opts.victim_pov_post_sec = pacing.victim_pov_post_sec;
 
   // Killer POV for fail clips — maps to enable_fail_killer_pov + timing fields.
-  if (pacing.killer_pov === true) opts.enable_fail_killer_pov = true;
-  if (pacing.killer_pov_pre_sec != null) opts.fail_killer_pre_sec = pacing.killer_pov_pre_sec;
-  if (pacing.killer_pov_post_sec != null) opts.fail_killer_post_sec = pacing.killer_pov_post_sec;
+  if (pacing.killer_pov === true) {
+    opts.enable_fail_killer_pov = true;
+    // Mirror the UI fallback chain: killer_pov_pre/post_sec → victim_pov_pre/post_sec → 1.5
+    // so that clips match what the drawer preview shows when the user hasn't dragged the slider.
+    const resolvedVicPre = pacing.victim_pov_pre_sec ?? 1.5;
+    const resolvedVicPost = pacing.victim_pov_post_sec ?? 1.5;
+    opts.fail_killer_pre_sec = pacing.killer_pov_pre_sec ?? resolvedVicPre;
+    opts.fail_killer_post_sec = pacing.killer_pov_post_sec ?? resolvedVicPost;
+  } else {
+    if (pacing.killer_pov_pre_sec != null) opts.fail_killer_pre_sec = pacing.killer_pov_pre_sec;
+    if (pacing.killer_pov_post_sec != null) opts.fail_killer_post_sec = pacing.killer_pov_post_sec;
+  }
 
   return opts;
 }

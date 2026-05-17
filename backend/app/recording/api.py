@@ -4,16 +4,155 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .models import RecordingRequestDTO, RecordingPlan
+from .models import RecordingRequestDTO, RecordingPlan, RequestType
 from .plan_builder import build_plan
 from .normalizer import NormalizationError
-from ..env_utils import OBSConfig, load_config, ensure_cs2_path
+from ..env_utils import OBSConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
 from .services.result_writer import write_result
+from ..montage_db import MontageDB
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
+
+# ── Lazy singleton for the shared cs2-insight.db ────────────────────────────
+_montage_db: Optional[MontageDB] = None
+
+
+def _get_montage_db() -> MontageDB:
+    global _montage_db
+    if _montage_db is None:
+        db_path = resolve_config_path().parent / "cs2-insight.db"
+        _montage_db = MontageDB(db_path)
+    return _montage_db
+
+
+# Request-type → category used by montage workbench filters.
+_REQUEST_TYPE_TO_CATEGORY: dict[str, str] = {
+    RequestType.highlight: "highlight",
+    RequestType.timeline_kill: "highlight",
+    RequestType.fail: "fail",
+    RequestType.timeline_death: "fail",
+    RequestType.kill_compilation: "compilation",
+    RequestType.death_compilation: "compilation",
+    RequestType.round_compilation: "compilation",
+    RequestType.timeline_round: "highlight",
+}
+
+
+def _build_v3_clip_meta(dto: RecordingRequestDTO, result: dict) -> dict:
+    """Build clip_meta dict from a V3 DTO + execution result for montage workbench display."""
+    request_type = str(dto.request_type or "")
+    category = _REQUEST_TYPE_TO_CATEGORY.get(request_type, "highlight")
+
+    events = dto.events or []
+    rounds = sorted({e.round for e in events if e.round}) if events else []
+    first_round = rounds[0] if rounds else None
+
+    # Kill count = number of kill-type events
+    kill_count = sum(1 for e in events if str(e.event_type or "") == "kill")
+
+    # Victims / killers from events
+    victims = list({e.victim.name for e in events if e.victim and e.victim.name})
+    killers = list({e.killer.name for e in events if e.killer and e.killer.name})
+
+    source_ref = dto.source_ref
+    timeline_event_id = (source_ref.timeline_event_id if source_ref else None) or None
+    timeline_source = "round_timeline_event" if timeline_event_id else None
+
+    meta: dict = {
+        "category": category,
+        "request_type": request_type,
+        "map_name": dto.demo.map_name if dto.demo else "unknown",
+        "round": first_round,
+        "source_rounds": rounds,
+        "kill_count": kill_count,
+        "context_tags": [],
+        "victims": victims,
+        "killers": killers,
+        "target_steam_id": dto.target_player.steamid64 if dto.target_player else None,
+        "demo_path": dto.demo.demo_path if dto.demo else None,
+        "timeline_event_id": timeline_event_id,
+        "timeline_source": timeline_source,
+        # Execution summary
+        "segment_results": result.get("segment_results", []),
+        "warnings": result.get("warnings", []),
+    }
+    return {k: v for k, v in meta.items() if v is not None}
+
+
+async def _persist_v3_results(
+    resolved_requests: list[RecordingRequestDTO],
+    results: list[dict],
+) -> None:
+    """Persist successful V3 recording results into recorded_clips for the montage workbench."""
+    db = _get_montage_db()
+    # Ensure the schema exists (noop if already initialized by main.py's MontageDB instance).
+    await db.init_tables()
+
+    dto_by_id = {dto.request_id: dto for dto in resolved_requests}
+
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        if not r.get("success"):
+            continue
+        output_path = (r.get("output_path") or "").strip()
+        if not output_path:
+            continue
+
+        dto = dto_by_id.get(r.get("request_id") or "")
+        if dto is None:
+            logger.warning("[RecordingV3] persist: no DTO found for request_id=%s", r.get("request_id"))
+            continue
+
+        demo_path = (dto.demo.demo_path if dto.demo else "") or ""
+        if not demo_path:
+            continue
+
+        clip_id = (
+            (dto.source_ref.original_clip_id if dto.source_ref else None)
+            or dto.request_id
+            or ""
+        )
+        demo_filename = (dto.demo.demo_filename if dto.demo else None) or None
+        player_name = (dto.target_player.name if dto.target_player else None) or None
+
+        # Compute duration from timing fields when available.
+        dur_f: Optional[float] = None
+        started = r.get("recording_started_at")
+        stopped = r.get("recording_stopped_at")
+        if started is not None and stopped is not None:
+            try:
+                dur_f = float(stopped) - float(started)
+                if dur_f <= 0:
+                    dur_f = None
+            except (TypeError, ValueError):
+                dur_f = None
+
+        clip_meta = _build_v3_clip_meta(dto, r)
+
+        try:
+            await db.insert_recorded_clip(
+                clip_id=clip_id,
+                demo_path=demo_path,
+                demo_filename=demo_filename,
+                player_name=player_name,
+                output_path=output_path,
+                duration_sec=dur_f,
+                status="ready",
+                clip_meta=clip_meta,
+            )
+            logger.info(
+                "[RecordingV3] persisted recorded_clip clip_id=%s output=%s",
+                clip_id, output_path,
+            )
+        except Exception:
+            logger.exception(
+                "[RecordingV3] recorded_clips insert failed clip_id=%s path=%s",
+                clip_id, output_path,
+            )
 
 # Module-level abort event for the V3 queue; set when a queue is running, cleared in finally.
 _queue_abort_event: Optional[asyncio.Event] = None
@@ -277,5 +416,11 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         raise HTTPException(500, f"录制失败: {e}") from e
     finally:
         _queue_abort_event = None
+
+    # Persist successful recordings to recorded_clips for the montage workbench.
+    try:
+        await _persist_v3_results(resolved_requests, results)
+    except Exception:
+        logger.exception("[RecordingV3] _persist_v3_results failed (non-fatal)")
 
     return results

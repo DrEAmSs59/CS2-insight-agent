@@ -99,6 +99,8 @@ class Clip:
     killer_name: Optional[str] = None
     victims: list[str] = field(default_factory=list)
     killers: list[str] = field(default_factory=list)
+    # 与 killers 等长；每次死亡对应击杀者的 steamid64（来自 player_death attacker_steamid），供 killer POV 分段
+    killers_steamid64s: list[str] = field(default_factory=list)
     # 高光多杀：本片段内目标玩家每次击杀的 tick（升序），供导播智能跳跃剪辑分段
     kill_ticks: list[int] = field(default_factory=list)
     # 与 victims 等长；每次击杀对应受害者的 steamid64（来自 player_death user_steamid），供受害者 POV 分段
@@ -2524,11 +2526,12 @@ class DemoAnalyzer:
                 max(tick + 1, end_tick),
             ]
 
-        all_target_kills: list[tuple[int, int, str]] = []
+        all_target_kills: list[tuple[int, int, str, str]] = []
         for rnd, kills in round_kills.items():
             for k in kills:
                 kt = _int(k.get("tick"))
                 victim = str(k.get("victim") or "").strip()
+                victim_steamid = str(k.get("victim_steamid") or "").strip()
                 if kt <= 0 or not victim:
                     continue
                 if DemoAnalyzer._is_post_match_round(
@@ -2538,14 +2541,15 @@ class DemoAnalyzer:
                     final_scoreline=_final_line,
                 ):
                     continue
-                all_target_kills.append((rnd, kt, victim))
+                all_target_kills.append((rnd, kt, victim, victim_steamid))
         all_target_kills.sort(key=lambda item: (item[1], item[0], item[2]))
 
-        all_target_deaths: list[tuple[int, int, str]] = []
+        all_target_deaths: list[tuple[int, int, str, str]] = []
         for d in death_records:
             rn = _int(d.get("round"))
             dt = _int(d.get("tick"))
             attacker = str(d.get("attacker") or "").strip()
+            attacker_steamid = str(d.get("attacker_steamid") or "").strip()
             if rn <= 0 or dt <= 0 or not attacker or attacker == target_player:
                 continue
             if DemoAnalyzer._is_post_match_round(
@@ -2555,7 +2559,7 @@ class DemoAnalyzer:
                 final_scoreline=_final_line,
             ):
                 continue
-            all_target_deaths.append((rn, dt, attacker))
+            all_target_deaths.append((rn, dt, attacker, attacker_steamid))
         all_target_deaths.sort(key=lambda item: (item[1], item[0], item[2]))
 
         # —— 🥩 亲儿子喂饭 ——
@@ -2663,13 +2667,14 @@ class DemoAnalyzer:
             ))
 
         if all_target_kills:
-            first_rnd, first_t, _ = all_target_kills[0]
-            _last_rnd, last_t, _ = all_target_kills[-1]
+            first_rnd, first_t, _, _ = all_target_kills[0]
+            _last_rnd, last_t, _, _ = all_target_kills[-1]
             source_ticks = [
                 _segment_around_tick(kt, round_num=rn)
-                for rn, kt, _ in all_target_kills
+                for rn, kt, _, _ in all_target_kills
             ]
-            victims = [victim for _, _, victim in all_target_kills]
+            victims = [victim for _, _, victim, _ in all_target_kills]
+            victim_steamids = [vsid for _, _, _, vsid in all_target_kills]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
                 map_name=map_name,
@@ -2682,22 +2687,24 @@ class DemoAnalyzer:
                 context_tags=["🎬 全部击杀", f"🎯 {target_player} × {len(all_target_kills)}"],
                 killers=[target_player] * len(all_target_kills),
                 victims=victims,
-                kill_ticks=[kt for _, kt, _ in all_target_kills],
+                victim_steamid64s=victim_steamids,
+                kill_ticks=[kt for _, kt, _, _ in all_target_kills],
                 round_won=round_result_map.get(first_rnd),
                 clip_min_tick=round_freeze_end_ticks.get(first_rnd),
                 source_ticks=source_ticks,
-                source_rounds=[rn for rn, _, _ in all_target_kills],
+                source_rounds=[rn for rn, _, _, _ in all_target_kills],
                 compilation_kind="all_kills",
             ))
 
         if all_target_deaths:
-            first_rnd, first_t, _ = all_target_deaths[0]
-            _last_rnd, last_t, _ = all_target_deaths[-1]
+            first_rnd, first_t, _, _ = all_target_deaths[0]
+            _last_rnd, last_t, _, _ = all_target_deaths[-1]
             source_ticks = [
                 _segment_around_tick(dt, round_num=rn, lead_seconds=float(_DEATH_CLIP_LEAD_SECONDS))
-                for rn, dt, _ in all_target_deaths
+                for rn, dt, _, _ in all_target_deaths
             ]
-            killers = [attacker for _, _, attacker in all_target_deaths]
+            killers = [attacker for _, _, attacker, _ in all_target_deaths]
+            killer_steamids = [asid for _, _, _, asid in all_target_deaths]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
                 map_name=map_name,
@@ -2710,12 +2717,13 @@ class DemoAnalyzer:
                 context_tags=["💀 全部死亡", f"☠️ {target_player} × {len(all_target_deaths)}"],
                 killer_name=None,
                 killers=killers,
+                killers_steamid64s=killer_steamids,
                 victims=[target_player] * len(all_target_deaths),
-                kill_ticks=[dt for _, dt, _ in all_target_deaths],
+                kill_ticks=[dt for _, dt, _, _ in all_target_deaths],
                 round_won=round_result_map.get(first_rnd),
                 clip_min_tick=round_freeze_end_ticks.get(first_rnd),
                 source_ticks=source_ticks,
-                source_rounds=[rn for rn, _, _ in all_target_deaths],
+                source_rounds=[rn for rn, _, _, _ in all_target_deaths],
                 compilation_kind="all_deaths",
             ))
 
