@@ -68,11 +68,11 @@ python -m app.run_server
 
 ### API 路由（[main.py](backend/app/main.py)）
 
-所有路由在单文件 `main.py` 中定义（~51KB）。关键端点：
+所有路由在单文件 `main.py` 中定义；录制 V3 另见 [recording/api.py](backend/app/recording/api.py)（`app.include_router` 挂载）。关键端点：
 - `POST /api/demo/parse` — 单玩家解析
 - `POST /api/demo/parse-batch` — 跨 demo 批量解析
-- `POST /api/record/start` — 单 demo 录制
-- `POST /api/record/batch` — 跨 demo 批量录制
+- `POST /api/recording/queue` — V3 录制队列（前端批量 OBS 录制；`RecordingExecutor` / `execute_plan_queue`）
+- `POST /api/recording/abort` — 中止当前 V3 录制队列
 - `POST /api/gsi/cs2` — CS2 GSI HTTP sink（录制就绪门控）
 - `GET /api/demos/stream` — Demo 库 SSE 实时推送
 

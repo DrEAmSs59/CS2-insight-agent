@@ -296,6 +296,12 @@ def _parse_transition_for_edge(transitions: dict[str, Any], clip_row_id: int) ->
     return t, max(0.0, d)
 
 
+def _is_hard_cut(t_type: str, t_dur: float, fps: float = 60.0) -> bool:
+    """低于 1 帧时长或 type=none → 硬切，调用方直接 concat 而不走 xfade。"""
+    min_xfade = max(1.0 / max(fps, 24.0), 0.02)
+    return t_dur < min_xfade or t_type == "none"
+
+
 def _clamp_xfade_duration(
     trans_type: str,
     requested: float,
@@ -303,17 +309,12 @@ def _clamp_xfade_duration(
     dur_b: float,
     fps: float,
 ) -> float:
-    """保证 offset>0 且 duration 不超过相邻片段。"""
+    """保证 xfade offset>0 且 duration 不超过相邻片段（仅在非硬切时调用）。"""
     frame = max(1.0 / max(fps, 24.0), 0.02)
-    if trans_type in ("none", "cut") and requested <= 1e-6:
-        return frame
     cap = min(float(dur_a), float(dur_b)) * 0.48 - 1e-4
     if cap < frame:
         return frame
-    if trans_type == "none":
-        return frame
-    base = requested if requested > 1e-6 else 0.25
-    return max(frame, min(base, cap, 1.5))
+    return max(frame, min(requested, cap, 1.5))
 
 
 def _montage_xfade_chain_to_ts(
@@ -351,7 +352,7 @@ def _montage_xfade_chain_to_ts(
         tid = int(clip_row_ids[i - 1])
         t_type, t_req = _parse_transition_for_edge(transitions, tid)
         td = _clamp_xfade_duration(t_type, t_req, out_len, durs[i], fps)
-        if t_type in ("cut", "fade", "none"):
+        if t_type in ("cut", "fade"):
             xname = "fade"
         else:
             xname = _xfade_transition_name(t_type)
@@ -535,7 +536,7 @@ def compose_montage(
 
         intro_n = 1 if intro_path is not None else 0
         n_clips = len(clip_paths)
-        use_xfade = bool(
+        has_transitions = bool(
             transitions is not None
             and isinstance(transitions, dict)
             and clip_row_ids is not None
@@ -543,23 +544,49 @@ def compose_montage(
             and n_clips >= 2
         )
 
-        if use_xfade:
+        if has_transitions:
+            # 按硬切边界（duration=0 或 type=none）拆成若干组；
+            # 组内片段用 xfade 连接，组间直接 concat——这样 0s 转场就是真正的硬切。
             clip_norm = normed[intro_n : intro_n + n_clips]
-            chain_ts = Path(tmpdir) / "clips_xfade_chain.ts"
-            _montage_xfade_chain_to_ts(
-                ffmpeg_bin=ffmpeg_bin,
-                ffprobe=ffprobe,
-                clip_ts_paths=clip_norm,
-                clip_row_ids=[int(x) for x in clip_row_ids],
-                transitions=transitions,
-                fps=fps,
-                out_ts=chain_ts,
-                video_encode_quality=video_encode_quality,
-            )
+            ids = [int(x) for x in clip_row_ids]
+
+            grp_clips: list[Path] = [clip_norm[0]]
+            grp_ids: list[int] = [ids[0]]
+            groups: list[tuple[list[Path], list[int]]] = []
+
+            for i in range(1, n_clips):
+                t_type, t_dur = _parse_transition_for_edge(transitions, ids[i - 1])
+                if _is_hard_cut(t_type, t_dur, fps):
+                    groups.append((grp_clips, grp_ids))
+                    grp_clips = [clip_norm[i]]
+                    grp_ids = [ids[i]]
+                else:
+                    grp_clips.append(clip_norm[i])
+                    grp_ids.append(ids[i])
+            groups.append((grp_clips, grp_ids))
+
+            processed: list[Path] = []
+            for gi, (g_clips, g_ids) in enumerate(groups):
+                if len(g_clips) == 1:
+                    processed.append(g_clips[0])
+                else:
+                    grp_ts = Path(tmpdir) / f"clips_xfade_g{gi:03d}.ts"
+                    _montage_xfade_chain_to_ts(
+                        ffmpeg_bin=ffmpeg_bin,
+                        ffprobe=ffprobe,
+                        clip_ts_paths=g_clips,
+                        clip_row_ids=g_ids,
+                        transitions=transitions,
+                        fps=fps,
+                        out_ts=grp_ts,
+                        video_encode_quality=video_encode_quality,
+                    )
+                    processed.append(grp_ts)
+
             concat_paths: list[Path] = []
             if intro_path is not None:
                 concat_paths.append(normed[0])
-            concat_paths.append(chain_ts)
+            concat_paths.extend(processed)
             if outro_path is not None:
                 concat_paths.append(normed[-1])
         else:

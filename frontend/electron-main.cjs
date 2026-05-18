@@ -36,6 +36,17 @@ log.info('App starting...');
 let mainWindow;
 let backendProcess;
 
+function resolveWindowIconPath() {
+  const icoPath = path.join(__dirname, 'build', 'icon.ico');
+  const pngPath = path.join(__dirname, 'public', 'cs2-insight-logo.png');
+  try {
+    if (fs.existsSync(icoPath)) return icoPath;
+  } catch (e) {
+    // ignore
+  }
+  return pngPath;
+}
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const initWidth = Math.min(1600, Math.floor(width * 0.8));
@@ -48,7 +59,7 @@ function createWindow() {
     minHeight: 900,
     frame: false, // 移除原生菜单和标题栏
     titleBarStyle: 'hidden',
-    icon: path.join(__dirname, 'public/cs2-insight-logo.png'), // 使用提供的图标
+    icon: resolveWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -110,6 +121,51 @@ function killBackend() {
   }
 }
 
+function migrateLegacyWritableLayout(userDataPath, dataRoot) {
+  // 旧版把配置/库/日志直接堆在 userData 根下；现统一迁入 userData/data，与 resources/data（只读随包）区分
+  try {
+    fs.mkdirSync(dataRoot, { recursive: true });
+  } catch (e) {
+    log.warn('[Backend] mkdir dataRoot failed:', e);
+  }
+  const moveIfAbsent = (from, to) => {
+    try {
+      if (fs.existsSync(from) && !fs.existsSync(to)) {
+        fs.renameSync(from, to);
+        log.info('[Backend] Migrated %s -> %s', from, to);
+      }
+    } catch (e) {
+      log.warn('[Backend] Migrate skipped %s -> %s : %s', from, to, e?.message || e);
+    }
+  };
+  moveIfAbsent(
+    path.join(userDataPath, 'cs2-insight.config.json'),
+    path.join(dataRoot, 'cs2-insight.config.json'),
+  );
+  for (const suf of ['', '-wal', '-shm']) {
+    const name = `cs2-insight.db${suf}`;
+    moveIfAbsent(path.join(userDataPath, name), path.join(dataRoot, name));
+  }
+  const legacyLogs = path.join(userDataPath, 'logs');
+  const newLogs = path.join(dataRoot, 'logs');
+  try {
+    if (fs.existsSync(legacyLogs) && !fs.existsSync(newLogs)) {
+      fs.renameSync(legacyLogs, newLogs);
+      log.info('[Backend] Migrated logs directory -> %s', newLogs);
+    }
+  } catch (e) {
+    log.warn('[Backend] Migrate logs dir failed:', e);
+  }
+  moveIfAbsent(
+    path.join(userDataPath, '.cs2_config_backup'),
+    path.join(dataRoot, '.cs2_config_backup'),
+  );
+  moveIfAbsent(
+    path.join(userDataPath, '.obs_config_backups'),
+    path.join(dataRoot, '.obs_config_backups'),
+  );
+}
+
 function startBackend() {
   const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
   
@@ -146,14 +202,26 @@ function startBackend() {
   }
 
   const userDataPath = app.getPath('userData');
-  const configPath = path.join(userDataPath, 'cs2-insight.config.json');
-  const logsPath = path.join(userDataPath, 'logs');
+  const dataRoot = path.join(userDataPath, 'data');
+  migrateLegacyWritableLayout(userDataPath, dataRoot);
+
+  const configPath = path.join(dataRoot, 'cs2-insight.config.json');
+  const logsPath = path.join(dataRoot, 'logs');
   const bundleDataDir = finalBaseDir ? path.join(finalBaseDir, 'data') : '';
 
   try {
+    fs.mkdirSync(dataRoot, { recursive: true });
     fs.mkdirSync(logsPath, { recursive: true });
   } catch (e) {
-    log.warn('[Backend] mkdir logs:', e);
+    log.warn('[Backend] mkdir data/logs:', e);
+  }
+
+  log.info('[Backend] Electron userData:', userDataPath);
+  log.info('[Backend] Writable data root (config/db/logs/backups):', dataRoot);
+  log.info('[Backend] Config file:', configPath);
+  log.info('[Backend] Backend logs dir:', logsPath);
+  if (bundleDataDir) {
+    log.info('[Backend] Bundled read-only data (examples/basic.ini):', bundleDataDir);
   }
 
   if (pythonExe && runServerPy) {
@@ -168,7 +236,7 @@ function startBackend() {
       PYTHONFAULTHANDLER: '1',
       CS2_INSIGHT_CONFIG: configPath,
       CS2_INSIGHT_LOG_DIR: logsPath,
-      CS2_INSIGHT_DATA_DIR: userDataPath,
+      CS2_INSIGHT_DATA_DIR: dataRoot,
     };
     if (bundleDataDir) {
       spawnEnv.CS2_INSIGHT_BUNDLE_DATA_DIR = bundleDataDir;

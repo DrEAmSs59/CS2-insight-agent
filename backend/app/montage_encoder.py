@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 MontageEncoderTier = Literal["quality", "fast"]
 
@@ -23,22 +26,15 @@ _hw_probe_cache: dict[tuple[str, str], bool] = {}
 
 
 def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
-    """单帧 lavfi 探测用参数（与成片不必一致，但求各编码器能接受）。"""
+    """单帧 lavfi 探测用参数——只求编码器能打开，不指定 preset 以兼容新旧版 FFmpeg。"""
     if codec == "libx264":
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "35", "-pix_fmt", "yuv420p"]
     if codec == "h264_nvenc":
-        return ["-c:v", "h264_nvenc", "-preset", "p7", "-pix_fmt", "yuv420p"]
+        # 不传 -preset：p1-p7 是 FFmpeg 4.4+ 才有的新格式，旧版 FFmpeg 会因 Invalid option 失败；
+        # 探测只需确认编码器能初始化，无需关心预设质量。
+        return ["-c:v", "h264_nvenc", "-pix_fmt", "yuv420p"]
     if codec == "h264_qsv":
-        return [
-            "-c:v",
-            "h264_qsv",
-            "-preset",
-            "veryfast",
-            "-global_quality",
-            "28",
-            "-pix_fmt",
-            "yuv420p",
-        ]
+        return ["-c:v", "h264_qsv", "-global_quality", "28", "-pix_fmt", "yuv420p"]
     if codec == "h264_amf":
         return [
             "-c:v",
@@ -88,7 +84,18 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         ok = proc.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
+        if not ok:
+            logger.warning(
+                "硬件编码器探测失败 codec=%s returncode=%d\nstderr: %s",
+                codec,
+                proc.returncode,
+                (proc.stderr or "").strip()[:500],
+            )
+    except subprocess.TimeoutExpired:
+        logger.warning("硬件编码器探测超时 codec=%s", codec)
+        ok = False
+    except OSError as e:
+        logger.warning("硬件编码器探测异常 codec=%s: %s", codec, e)
         ok = False
     _hw_probe_cache[key] = ok
     return ok

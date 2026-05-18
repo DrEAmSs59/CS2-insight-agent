@@ -39,8 +39,8 @@ _DB_BASENAME = "cs2-insight.db"
 def get_data_dir() -> Path:
     """可写应用数据目录：OBS / 玩家配置备份、库边文件等（与正式配置文件同盘根树）。
 
-    默认：仓库根下 ``data/``。Electron 安装版通过环境变量 ``CS2_INSIGHT_DATA_DIR`` 指到
-    ``%APPDATA%/…/cs2-insight-agent``，避免写入 Program Files 下的 ``resources``。
+    默认：仓库根下 ``data/``。Electron 安装版通过 ``CS2_INSIGHT_DATA_DIR`` 指向
+    ``%APPDATA%/<应用>/data``（与配置文件、SQLite、logs 同级），避免写入 ``Program Files`` 下的 ``resources``。
     """
     override = os.environ.get("CS2_INSIGHT_DATA_DIR", "").strip()
     if override:

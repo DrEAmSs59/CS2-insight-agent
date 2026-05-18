@@ -2970,6 +2970,10 @@ class OBSDirector:
                     deadline2 = time.monotonic() + 4.0
                     while time.monotonic() < deadline2 and is_cs2_running():
                         time.sleep(0.15)
+
+                # hwnd / 进程均已消失，但 Windows 内核还可能短暂持有 cfg 文件句柄
+                # （CS2 exit autosave、Steam Cloud 初始上传），等待释放再恢复。
+                time.sleep(1.5)
             else:
                 logger.info("Skip CS2 shutdown: no recorder-owned CS2 process")
         elif self._cs2_process:

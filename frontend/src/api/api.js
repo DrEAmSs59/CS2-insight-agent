@@ -20,4 +20,21 @@ const API = axios.create({
   baseURL: `${API_BASE_URL}/api` 
 });
 
+/** axios 尚未收到 HTTP 响应时的典型错误：安装版启动瞬间后端未监听会导致 ECONNREFUSED。 */
+export function isTransientAxiosNetworkError(error) {
+  if (error && error.response) return false;
+  const c = error?.code;
+  if (
+    c === "ECONNREFUSED" ||
+    c === "ECONNRESET" ||
+    c === "ETIMEDOUT" ||
+    c === "ECONNABORTED" ||
+    c === "ERR_NETWORK"
+  ) {
+    return true;
+  }
+  const msg = String(error?.message || "");
+  return msg.includes("Network Error");
+}
+
 export default API;

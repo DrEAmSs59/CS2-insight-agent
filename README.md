@@ -176,9 +176,10 @@ Electron打包位置：`frontend/dist_electron/`
 | POST   | `/api/demos/{id}/parse`     | 重新解析                 |
 | POST   | `/api/demos/{id}/analyze`   | 直接对库内 Demo 出片段       |
 | GET    | `/api/demos/{id}/players`   | 库内 Demo 玩家名册         |
-| POST   | `/api/record/start`         | 启动单 Demo 录制          |
-| POST   | `/api/record/batch`         | 启动跨 Demo / 跨玩家批量录制   |
-| POST   | `/api/record/abort`         | 中止当前录制               |
+| POST   | `/api/recording/queue`      | V3 批量录制队列（前端「录制队列」；`requests` + `warmup` + `obs`） |
+| POST   | `/api/recording/plan`       | V3 预览录制计划（调试）           |
+| POST   | `/api/recording/execute`    | V3 单请求执行（调试）             |
+| POST   | `/api/recording/abort`      | 中止当前 V3 录制队列               |
 | POST   | `/api/gsi/cs2`              | CS2 GSI Sink（录制就绪门控） |
 | GET    | `/api/gsi/status`           | 查看最近 GSI 状态          |
 

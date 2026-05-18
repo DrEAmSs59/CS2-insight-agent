@@ -196,7 +196,18 @@ def _atomic_write_bytes(target: Path, data: bytes) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".cs2insight.tmp")
     tmp.write_bytes(data)
-    os.replace(tmp, target)
+    # Windows 上目标文件可能被 AV / Steam Cloud / CS2 exit autosave 短暂锁定，
+    # 重试最多 4 次（等待 0.3 / 0.6 / 1.2 / 2.4 s），覆盖绝大多数瞬时锁场景。
+    last_err: Optional[OSError] = None
+    for attempt in range(5):
+        try:
+            os.replace(tmp, target)
+            return
+        except OSError as e:
+            last_err = e
+            if attempt < 4:
+                time.sleep(0.3 * (2 ** attempt))
+    raise last_err  # type: ignore[misc]
 
 
 def restore_latest_user_config_backup(*, skip_cs2_running_check: bool = False) -> dict[str, Any]:
@@ -255,11 +266,16 @@ def restore_latest_user_config_backup(*, skip_cs2_running_check: bool = False) -
         except OSError as e:
             failed.append({"original": str(original), "error": str(e)})
 
+    # recording_state 必须先清，无论恢复是否完整——否则下次录制会拒绝写新备份，
+    # 形成"旧 manifest → 恢复失败 → 拒绝备份"死循环。
+    if status_was == "recording":
+        try:
+            write_recording_state("recorded")
+        except OSError as e:
+            logger.warning("write_recording_state(recorded) failed: %s", e)
+
     if failed:
         return {"ok": False, "restored": restored, "failed": failed}
-
-    if status_was == "recording":
-        write_recording_state("recorded")
 
     return {"ok": True, "restored": restored, "failed": []}
 

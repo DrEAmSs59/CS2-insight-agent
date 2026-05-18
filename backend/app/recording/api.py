@@ -279,6 +279,17 @@ def get_queue_abort_event() -> Optional[asyncio.Event]:
     """Return the current V3 queue abort event, or None if idle."""
     return _queue_abort_event
 
+
+@router.post("/abort", response_model=dict)
+def recording_abort():
+    """请求中止当前进行中的 V3 录制队列（异步收尾，接口立即返回）。"""
+    qev = get_queue_abort_event()
+    if qev is not None:
+        qev.set()
+        return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    return {"status": "idle", "message": "当前没有进行中的录制"}
+
+
 @router.post("/plan", response_model=dict)
 async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
     try:
