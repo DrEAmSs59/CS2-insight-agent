@@ -76,6 +76,19 @@ def _extract_dems_from_zip_sync(zip_path: Path) -> list[Path]:
             base = _safe_zip_member_name(m)
             if not base:
                 continue
+            
+            # 优化：如果同名文件已存在且大小一致，跳过解压
+            info = zf.getinfo(m)
+            existing_target = dest_dir / base
+            if existing_target.is_file():
+                try:
+                    if existing_target.stat().st_size == info.file_size:
+                        logger.info("Demo 已解压（同名且大小一致），跳过: %s", existing_target)
+                        out.append(existing_target.resolve())
+                        continue
+                except OSError:
+                    pass
+
             target = _pick_extract_path(dest_dir, base, zip_path)
             with zf.open(m, "r") as src, target.open("wb") as dst:
                 dst.write(src.read())
@@ -101,6 +114,19 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
             base = _safe_zip_member_name(m)
             if not base:
                 continue
+            
+            # 优化：如果同名文件已存在且大小一致，跳过解压（即使 MD5 去重开启，已在磁盘的文件也无需重写）
+            info = zf.getinfo(m)
+            existing_target = dest_dir / base
+            if existing_target.is_file():
+                try:
+                    if existing_target.stat().st_size == info.file_size:
+                        logger.info("Demo 物理文件已存在且匹配，跳过重复解压: %s", existing_target)
+                        out.append(existing_target.resolve())
+                        continue
+                except OSError:
+                    pass
+
             target = _pick_extract_path(dest_dir, base, zip_path)
             h = hashlib.md5()
             try:

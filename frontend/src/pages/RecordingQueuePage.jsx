@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
-import axios from "axios";
+import API from "../api/api";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import {
@@ -67,7 +67,7 @@ export default function RecordingQueuePage() {
     let cancelled = false;
     const run = async () => {
       try {
-        const { data } = await axios.post("/api/obs/test", s.obsConfig);
+        const { data } = await API.post("/obs/test", s.obsConfig);
         if (cancelled || gen !== obsProbeGen.current) return;
         setObsConnected(Boolean(data?.ok));
       } catch {

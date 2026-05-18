@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import axios from "axios";
+import API from "../api/api";
 import { Loader2, Shield, Upload, Wifi, WifiOff, X } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
@@ -58,7 +58,7 @@ export default function ObsConfigCenterPage() {
     setObsTesting(true);
     setObsTestResult(null);
     try {
-      const { data } = await axios.post("/api/obs/test", obsConfigRef.current);
+      const { data } = await API.post("/obs/test", obsConfigRef.current);
       if (data?.ok) {
         await persistObsConfig?.();
         await refreshSilent();

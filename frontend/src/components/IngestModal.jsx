@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import axios from "axios";
+import API from "../api/api";
 import {
   X,
   Search,
@@ -12,8 +12,6 @@ import {
   HardDrive,
   Upload,
 } from "lucide-react";
-
-const API = axios.create({ baseURL: "/api" });
 
 const SOURCE_LABELS = {
   "Faceit": "Faceit",
