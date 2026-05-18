@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import useSessionState from "./hooks/useSessionState";
-import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
@@ -32,8 +31,7 @@ import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
 
 import CustomTitleBar from "./components/CustomTitleBar";
-
-const API = axios.create({ baseURL: "/api" });
+import API, { getDemosStreamUrl } from "./api/api";
 
 const DEFAULT_SPEC_PLAYER_VERIFY = Object.freeze({
   demo_timescale: 0.05,
@@ -433,7 +431,7 @@ export default function App() {
     const connect = () => {
       if (cancelled) return;
       try {
-        es = new EventSource("/api/demos/stream");
+        es = new EventSource(getDemosStreamUrl());
       } catch {
         return;
       }
@@ -2240,7 +2238,9 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-page">
+      <div className="relative flex h-screen flex-col overflow-hidden bg-cs2-bg-page">
+        <CustomTitleBar />
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {libraryLoadingOverlay && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-[1px]">
             <div className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 shadow-2xl">
@@ -2321,6 +2321,7 @@ export default function App() {
           message={recordingBlockedMessage}
           onClose={() => setRecordingBlockedMessage("")}
         />
+        </div>
       </div>
     </AppShellProvider>
   );

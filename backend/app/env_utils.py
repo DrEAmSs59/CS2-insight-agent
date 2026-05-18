@@ -37,13 +37,32 @@ _DB_BASENAME = "cs2-insight.db"
 
 
 def get_data_dir() -> Path:
-    """持久化数据目录：配置、SQLite、玩家配置备份、日志等。"""
-    return _REPO_ROOT / _DATA_SUBDIR
+    """可写应用数据目录：OBS / 玩家配置备份、库边文件等（与正式配置文件同盘根树）。
+
+    默认：仓库根下 ``data/``。Electron 安装版通过环境变量 ``CS2_INSIGHT_DATA_DIR`` 指到
+    ``%APPDATA%/…/cs2-insight-agent``，避免写入 Program Files 下的 ``resources``。
+    """
+    override = os.environ.get("CS2_INSIGHT_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (_REPO_ROOT / _DATA_SUBDIR).resolve()
+
+
+def get_bundle_data_dir() -> Path:
+    """只读随包资源：``cs2-insight.config.example.json``、``basic.ini`` 等。
+
+    开发/便携包：与 ``get_data_dir()`` 相同。Electron 安装版由 ``CS2_INSIGHT_BUNDLE_DATA_DIR``
+    指向 ``resources/data``（安装目录下只读副本）。
+    """
+    override = os.environ.get("CS2_INSIGHT_BUNDLE_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return get_data_dir()
 
 
 def resolve_example_config_path() -> Path:
-    """随仓库提供的示例配置（默认 ``data/cs2-insight.config.example.json``）。"""
-    return get_data_dir() / _DEFAULT_EXAMPLE_FILENAME
+    """随应用提供的示例配置（默认 ``data/cs2-insight.config.example.json``）。"""
+    return get_bundle_data_dir() / _DEFAULT_EXAMPLE_FILENAME
 
 
 def migrate_legacy_app_data() -> None:

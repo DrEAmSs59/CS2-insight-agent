@@ -9,6 +9,11 @@ const IS_ELECTRON_APP =
 
 export const API_BASE_URL = IS_ELECTRON_APP ? "http://127.0.0.1:19871" : "";
 
+/** Electron 下须用绝对 URL；浏览器 dev 用相对路径走 Vite 代理 */
+export function getDemosStreamUrl() {
+  return API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";
+}
+
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
 
 const API = axios.create({ 

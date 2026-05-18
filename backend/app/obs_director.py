@@ -40,7 +40,7 @@ from .cs2_config_backup import (
     restore_latest_user_config_backup,
     write_persistent_backup_from_snap,
 )
-from .env_utils import OBSConfig, SpecPlayerVerifyConfig
+from .env_utils import OBSConfig, SpecPlayerVerifyConfig, _steam_install_from_registry as _get_steam_install_root
 from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_payload_after
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
@@ -2751,18 +2751,31 @@ class OBSDirector:
                 dirs.append(install_cfg)
         except IndexError:
             pass
-        # game/bin/win64/cs2.exe → parents[6] = Steam 根
+        # game/bin/win64/cs2.exe → parents[6] = Steam 根（仅在默认库时正确）
+        # 额外通过注册表获取真正的 Steam 安装目录，覆盖 CS2 装在副库盘的情况。
+        steam_root_candidates: list[Path] = []
         try:
-            steam_root = cs2.parents[6]
+            steam_root_candidates.append(cs2.parents[6])
         except IndexError:
-            steam_root = None
-        if steam_root is not None:
+            pass
+        reg_root = _get_steam_install_root()
+        if reg_root is not None and reg_root not in steam_root_candidates:
+            steam_root_candidates.append(reg_root)
+        seen_userdata: set[str] = set()
+        for steam_root in steam_root_candidates:
             userdata = steam_root / "userdata"
+            try:
+                ud_str = str(userdata.resolve())
+            except OSError:
+                ud_str = str(userdata)
+            if ud_str in seen_userdata:
+                continue
+            seen_userdata.add(ud_str)
             if userdata.is_dir():
                 try:
                     for uid in userdata.iterdir():
                         candidate = uid / "730" / "local" / "cfg"
-                        if candidate.is_dir():
+                        if candidate.is_dir() and candidate not in dirs:
                             dirs.append(candidate)
                 except OSError as e:
                     logger.warning("iter userdata failed: %s", e)
@@ -2903,7 +2916,12 @@ class OBSDirector:
         if patched:
             logger.info("Patched %d video config file(s) for %dx%d recording", patched, width, height)
         else:
-            logger.debug("No video config files found in snapshot to patch for resolution")
+            logger.warning(
+                "No video.txt / cs2_video.txt found in snapshot to patch for %dx%d "
+                "(snapshot keys: %s)",
+                width, height,
+                [p.name for p in self._user_config_snapshot],
+            )
 
     def _kill_cs2(self) -> None:
         """强杀整棵 CS2 进程树并等待窗口真正消失。

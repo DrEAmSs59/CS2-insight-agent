@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from obswebsocket import obsws, requests as obs_requests
 
-from .env_utils import get_data_dir
+from .env_utils import get_data_dir, get_bundle_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ def _parse_simple_output(ini_path: Path) -> dict[str, str]:
 
 def _bundled_obs_basic_ini_path() -> Path:
     """随应用提供的 OBS 预设模板路径：``data/basic.ini`` → 一键推荐预设时写入玩家本机 Profile。"""
-    return get_data_dir() / BUNDLED_OBS_BASIC_INI_NAME
+    return get_bundle_data_dir() / BUNDLED_OBS_BASIC_INI_NAME
 
 
 def _parse_basic_ini_video_dims(ini_path: Path) -> tuple[int, int, int, int, int]:

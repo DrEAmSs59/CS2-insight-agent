@@ -24,7 +24,7 @@ export default function CustomTitleBar() {
       style={{ height: '50px', WebkitAppRegion: 'drag' }}
     >
       <div className="flex items-center px-4">
-        <img src="/cs2-insight-logo.png" alt="Logo" className="w-6 h-6 mr-2" />
+        <img src={`${import.meta.env.BASE_URL}cs2-insight-logo.png`} alt="Logo" className="w-6 h-6 mr-2" />
         <span className="font-semibold text-sm">CS2 Insight Agent</span>
       </div>
       

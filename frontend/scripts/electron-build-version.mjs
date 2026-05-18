@@ -26,6 +26,8 @@ function run(args) {
 }
 
 run(["npm", "run", "build"]);
+run(["npm", "run", "electron:stage-python"]);
+run(["node", "scripts/check-electron-bundle-prereqs.mjs"]);
 run(["npm", "run", "electron:clean"]);
 run([
   "npm",

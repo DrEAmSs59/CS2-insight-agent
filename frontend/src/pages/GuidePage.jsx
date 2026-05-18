@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import PageContainer from "../components/PageContainer";
+import API from "../api/api";
 import {
   BookOpen,
   Clapperboard,
@@ -73,7 +73,7 @@ function SetupChecklist() {
   const fetchStatus = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const { data } = await axios.get("/api/status/setup");
+      const { data } = await API.get("/status/setup");
       setStatus(data);
     } catch {
       setStatus(null);

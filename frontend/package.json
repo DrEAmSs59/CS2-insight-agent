@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on tcp:5173 && electron .\"",
     "electron:clean": "node scripts/clean-dist-electron.mjs",
-    "electron:build": "npm run build && npm run electron:clean && npm exec electron-builder --",
+    "electron:copy-python": "node scripts/copy-python-for-bundle.mjs",
+    "electron:stage-python": "node scripts/run-electron-stage-python.mjs",
+    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:clean && npm exec electron-builder --",
     "electron:build:ver": "node scripts/electron-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs"
   },
@@ -61,6 +63,20 @@
         "to": "pov",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": [
+          "**/*",
+          "!**/.cs2_config_backup/**",
+          "!**/.obs_config_backups/**",
+          "!**/logs/**",
+          "!**/cs2-insight.config.json",
+          "!**/cs2-insight.db",
+          "!**/cs2-insight.db-wal",
+          "!**/cs2-insight.db-shm"
         ]
       }
     ],

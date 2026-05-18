@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import axios from "axios";
 import { useAppShell } from "../context/AppShellContext";
 import {
   Brain,
@@ -14,8 +13,7 @@ import Card from "../components/ui/Card";
 import FormField from "../components/ui/FormField";
 import PageContainer from "../components/PageContainer";
 import { useFieldValidation } from "../hooks/useFieldValidation";
-
-const API = axios.create({ baseURL: "/api" });
+import API from "../api/api";
 
 function llmBaseUrlLooksLocal(baseUrl) {
   try {

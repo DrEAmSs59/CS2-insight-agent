@@ -47,7 +47,7 @@ debug_parse_demo.py
 /scripts/*
 !/scripts/github-bootstrap.ps1
 build_portable.bat
-package_portable.ps1
+!build_electron.bat
 rebuild_frontend.ps1
 dev.sh
 

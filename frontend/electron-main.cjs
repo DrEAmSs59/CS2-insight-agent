@@ -148,27 +148,42 @@ function startBackend() {
   const userDataPath = app.getPath('userData');
   const configPath = path.join(userDataPath, 'cs2-insight.config.json');
   const logsPath = path.join(userDataPath, 'logs');
+  const bundleDataDir = finalBaseDir ? path.join(finalBaseDir, 'data') : '';
+
+  try {
+    fs.mkdirSync(logsPath, { recursive: true });
+  } catch (e) {
+    log.warn('[Backend] mkdir logs:', e);
+  }
 
   if (pythonExe && runServerPy) {
+    if (bundleDataDir && !fs.existsSync(bundleDataDir)) {
+      log.warn(`[Backend] Missing bundled data dir: ${bundleDataDir} (example config / basic.ini)`);
+    }
     log.info(`[Backend] Starting from: ${pythonExe}`);
+    const spawnEnv = {
+      ...process.env,
+      CS2_INSIGHT_PORT: '19871',
+      PYTHONUNBUFFERED: '1',
+      PYTHONFAULTHANDLER: '1',
+      CS2_INSIGHT_CONFIG: configPath,
+      CS2_INSIGHT_LOG_DIR: logsPath,
+      CS2_INSIGHT_DATA_DIR: userDataPath,
+    };
+    if (bundleDataDir) {
+      spawnEnv.CS2_INSIGHT_BUNDLE_DATA_DIR = bundleDataDir;
+    }
     backendProcess = spawn(pythonExe, [runServerPy], {
       cwd: path.join(finalBaseDir, 'backend'),
-      env: {
-        ...process.env,
-        CS2_INSIGHT_PORT: '19871',
-        PYTHONUNBUFFERED: '1',
-        PYTHONFAULTHANDLER: '1',
-        CS2_INSIGHT_CONFIG: configPath,
-        CS2_INSIGHT_LOG_DIR: logsPath,
-      },
+      env: spawnEnv,
     });
 
     backendProcess.stdout.on('data', (data) => {
-      console.log(`后端 stdout: ${data}`);
+      log.info(`[Backend] ${data.toString().trimEnd()}`);
     });
 
     backendProcess.stderr.on('data', (data) => {
-      console.error(`后端 stderr: ${data}`);
+      log.error(`[Backend] ${data.toString().trimEnd()}`);
     });
 
     backendProcess.on('close', (code) => {

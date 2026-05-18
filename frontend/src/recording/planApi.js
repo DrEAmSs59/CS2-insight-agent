@@ -1,4 +1,4 @@
-import axios from "axios";
+import API from "../api/api";
 
 /**
  * Calls POST /api/recording/plan with a RecordingRequestDTO.
@@ -8,6 +8,6 @@ import axios from "axios";
  * @returns {Promise<import("./types.js").RecordingPlan>}
  */
 export async function fetchRecordingPlan(dto) {
-  const response = await axios.post("/api/recording/plan", dto);
+  const response = await API.post("/recording/plan", dto);
   return response.data;
 }
