@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import logging
 from typing import Optional
 
@@ -491,7 +492,9 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     warmup_extras = None
     if req.warmup:
         try:
-            warmup_extras = RecordingWarmupExtras(**req.warmup)
+            _valid_keys = {f.name for f in dataclasses.fields(RecordingWarmupExtras)}
+            _filtered = {k: v for k, v in req.warmup.items() if k in _valid_keys}
+            warmup_extras = RecordingWarmupExtras(**_filtered)
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)
 
@@ -500,7 +503,6 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
         # Patch warmup extras with POV HUD settings
-        import dataclasses
         warmup_extras = dataclasses.replace(
             warmup_extras,
             pov_hud_enabled=True,

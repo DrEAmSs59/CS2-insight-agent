@@ -12,7 +12,8 @@
     "electron:clean": "node scripts/clean-dist-electron.mjs",
     "electron:copy-python": "node scripts/copy-python-for-bundle.mjs",
     "electron:stage-python": "node scripts/run-electron-stage-python.mjs",
-    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:clean && npm exec electron-builder --",
+    "electron:icons": "node scripts/generate-windows-icon.mjs",
+    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:icons && npm run electron:clean && npm exec electron-builder --",
     "electron:build:ver": "node scripts/electron-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs"
   },
@@ -86,7 +87,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/cs2-insight-logo.png",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
     },
@@ -96,7 +97,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     }
   },
   "dependencies": {
@@ -119,6 +123,8 @@
     "electron": "^42.0.1",
     "electron-builder": "^26.8.1",
     "mime-types": "3.0.2",
+    "pngjs": "^7.0.0",
+    "png-to-ico": "^3.0.1",
     "tailwindcss": "^4.0.0",
     "vite": "^6.0.0",
     "wait-on": "^9.0.10"
