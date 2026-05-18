@@ -3060,107 +3060,6 @@ class OBSDirector:
                     return Path(str(raw))
         return None
 
-    def _obs_record_directory_path(self) -> Optional[Path]:
-        if not self._ws:
-            return None
-        try:
-            req = getattr(obs_requests, "GetRecordDirectory", None)
-            if req is None:
-                return None
-            resp = self._ws.call(req())
-            datain = getattr(resp, "datain", None)
-            raw = None
-            if isinstance(datain, dict):
-                raw = datain.get("recordDirectory") or datain.get("record_directory") or datain.get("record-directory")
-            if not raw:
-                getter = getattr(resp, "getRecordDirectory", None)
-                if callable(getter):
-                    raw = getter()
-            return Path(str(raw)) if raw else None
-        except Exception as e:
-            logger.debug("GetRecordDirectory failed: %s", e)
-            return None
-
-    def _obs_snapshot_record_dir_video_paths(self) -> set[str]:
-        """录制开始前 OBS 输出目录中已有视频路径集合，用于 StopRecord 后兜底匹配新文件。"""
-        record_dir = self._obs_record_directory_path()
-        if not record_dir or not record_dir.is_dir():
-            return set()
-        out: set[str] = set()
-        try:
-            for p in record_dir.iterdir():
-                if not p.is_file() or p.suffix.lower() not in _RECORDING_VIDEO_EXTENSIONS:
-                    continue
-                try:
-                    out.add(str(p.resolve()))
-                except OSError:
-                    out.add(str(p))
-        except OSError as e:
-            logger.debug("Snapshot OBS record dir failed: %s", e)
-        return out
-
-    def _pick_new_recording_path_after_snapshot(
-        self,
-        before_paths: set[str],
-        started_at_wall: Optional[float],
-    ) -> Optional[Path]:
-        if started_at_wall is None:
-            return None
-        record_dir = self._obs_record_directory_path()
-        if not record_dir or not record_dir.is_dir():
-            return None
-        cutoff = float(started_at_wall) - 2.0
-        candidates: list[tuple[float, Path]] = []
-        try:
-            for p in record_dir.iterdir():
-                if not p.is_file() or p.suffix.lower() not in _RECORDING_VIDEO_EXTENSIONS:
-                    continue
-                try:
-                    key = str(p.resolve())
-                except OSError:
-                    key = str(p)
-                if key in before_paths:
-                    continue
-                try:
-                    st = p.stat()
-                except OSError:
-                    continue
-                if st.st_mtime >= cutoff:
-                    candidates.append((st.st_mtime, p))
-        except OSError as e:
-            logger.debug("Pick new recording file failed: %s", e)
-            return None
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
-
-    def _locate_recent_recording_output(self, started_at_wall: Optional[float]) -> Optional[Path]:
-        if started_at_wall is None:
-            return None
-        record_dir = self._obs_record_directory_path()
-        if not record_dir or not record_dir.is_dir():
-            return None
-        candidates: list[tuple[float, Path]] = []
-        cutoff = float(started_at_wall) - 5.0
-        try:
-            for p in record_dir.iterdir():
-                if not p.is_file() or p.suffix.lower() not in _RECORDING_VIDEO_EXTENSIONS:
-                    continue
-                try:
-                    st = p.stat()
-                except OSError:
-                    continue
-                if st.st_mtime >= cutoff:
-                    candidates.append((st.st_mtime, p))
-        except OSError as e:
-            logger.debug("Could not scan OBS record directory %s: %s", record_dir, e)
-            return None
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
-
     def _build_clip_recording_stem(self, clip: dict, demo_abs: Path, spectator_name: Optional[str]) -> str:
         player = (
             spectator_name
@@ -3255,52 +3154,6 @@ class OBSDirector:
                 else:
                     logger.warning("Could not rename OBS recording %s after 5 attempts: %s", original, e)
                     return {"original_output_path": original, "rename_error": str(e)}
-
-    async def _finalize_obs_recording_rename(
-        self,
-        stop_path: Optional[Path],
-        clip: dict,
-        demo_abs: Path,
-        spectator_name: Optional[str],
-        record_started_at_wall: Optional[float],
-        pre_record_video_paths: Optional[set[str]] = None,
-    ) -> dict:
-        """StopRecord 后对 OBS 输出文件改名：无固定前置等待；最多 5 次尝试，间隔 0.5s，成功即返回。
-
-        WebSocket 已给出 ``outputPath`` 时各轮只尝试该路径（避免录制目录内误选其它成片）；
-        仅当 StopRecord 未返回路径时先按录制前目录快照匹配新文件，再按 mtime 扫描兜底。
-        """
-        interval = 0.5
-        max_attempts = 5
-        clip_ref = str(clip.get("clip_id") or "")
-        for attempt in range(1, max_attempts + 1):
-            self._check_abort()
-            path: Optional[Path]
-            if stop_path is not None:
-                try:
-                    path = stop_path.expanduser()
-                except OSError:
-                    path = None
-            else:
-                path = None
-                if pre_record_video_paths is not None:
-                    path = self._pick_new_recording_path_after_snapshot(
-                        pre_record_video_paths,
-                        record_started_at_wall,
-                    )
-                if path is None:
-                    path = self._locate_recent_recording_output(record_started_at_wall)
-            result = await self._rename_recording_output(path, clip, demo_abs, spectator_name)
-            if result.get("output_path") and not result.get("rename_error"):
-                return result
-            if attempt < max_attempts:
-                await self._sleep_abortable(interval)
-        logger.warning(
-            "OBS output rename skipped after %d attempts (clip_id=%s)",
-            max_attempts,
-            clip_ref,
-        )
-        return {}
 
     def _append_config_warmup_console_lines(self, lines: list[str]) -> list[str]:
         if not self._extra_warmup_console_lines:
@@ -5825,15 +5678,10 @@ class OBSDirector:
                         # Fallback: scan the OBS record directory for the newest video
                         # written since recording started.
                         # Use obs_record_directory from executor (fetched via GetRecordDirectory
-                        # on the live V3 OBSClient), NOT self._obs_record_directory_path()
-                        # which needs the legacy self._ws connection (not available in V3).
+                        # on the live V3 OBSClient).
                         _obs_dir: Optional[Path] = None
                         if result.obs_record_directory:
                             _obs_dir = Path(result.obs_record_directory)
-                        if _obs_dir is None or not _obs_dir.is_dir():
-                            # Last-resort: try legacy path (works if self._ws is live)
-                            _obs_dir = self._obs_record_directory_path()
-
                         if _obs_dir and _obs_dir.is_dir():
                             logger.info(
                                 "[RecordingV3] scanning OBS dir for output (started_at=%.1f, stopped_at=%s): %s",
