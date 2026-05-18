@@ -433,8 +433,6 @@ _RECORDING_KEYBIND_RESET_LINES: tuple[str, ...] = (
     'bind "d" "+moveright"',
     "unbind alt",
 )
-_OBS_RECORDING_SCENE_NAME = "CS2 Insight Recording"
-_OBS_GAME_CAPTURE_INPUT_NAME = "CS2 Insight Game Capture"
 _RECORDING_VIDEO_EXTENSIONS = {".mkv", ".mp4", ".mov", ".flv", ".ts", ".m2ts", ".avi"}
 
 
@@ -1868,8 +1866,6 @@ class OBSDirector:
         self._copied_cfg: Optional[Path] = None
         self._copied_gsi_cfg: Optional[Path] = None
         self._obs_cursor_restore: list[tuple[str, bool]] = []
-        self._obs_managed_scene_ready = False
-        self._obs_managed_input_ready = False
         self._spec_calibration_by_demo: dict[str, dict[str, int]] = {}
         self._spec_parse_fallback_offset_by_demo: dict[str, int] = {}
         self._demo_steam_by_name_cache: dict[str, dict[str, str]] = {}
@@ -2032,9 +2028,6 @@ class OBSDirector:
             return {"ok": False, "error": _friendly_obs_websocket_test_error(e)}
         finally:
             self._ws = prev_ws
-
-    def _obs_scene_has_source(self, scene_name: str, source_name: str) -> bool:
-        return self._obs_find_scene_item_id(scene_name, source_name) is not None
 
     def _obs_find_scene_item_id(self, scene_name: str, source_name: str) -> Optional[int]:
         if not self._ws:
