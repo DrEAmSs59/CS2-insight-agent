@@ -1056,13 +1056,9 @@ def apply_recommended(
     bw, bh, ow, oh, fps_v = _parse_basic_ini_video_dims(basic_ini)
 
     restart_obs_required = True
-    ws: Optional[obsws] = None
-    try:
-        _ws = obsws(obs_cfg.host, obs_cfg.port, obs_cfg.password)
-        _ws.connect()
-        ws = _ws
-    except Exception as e:
-        logger.info("apply_recommended: WebSocket 未连接，仅完成磁盘预设写入: %s", e)
+    ws: Optional[obsws] = _ws_connect(obs_cfg)
+    if ws is None:
+        logger.info("apply_recommended: WebSocket 未连接，仅完成磁盘预设写入（无法连接 OBS）")
 
     try:
         if ws is not None:
@@ -1100,11 +1096,7 @@ def apply_recommended(
         logger.warning("apply_recommended: WebSocket 同步异常（磁盘已写入）: %s", e, exc_info=True)
         changed.append("websocket_sync_failed")
     finally:
-        if ws is not None:
-            try:
-                ws.disconnect()
-            except Exception:
-                pass
+        _ws_disconnect(ws)
 
     if bundled_used:
         restart_obs_required = True
@@ -1183,12 +1175,9 @@ def import_cs2obs_bytes(
 
     changed = ["set_video", "set_recording_encoder_policy"]
     restart_obs_required = True
-    try:
-        _ws = obsws(obs_cfg.host, obs_cfg.port, obs_cfg.password)
-        _ws.connect()
-        ws = _ws
-    except Exception as e:
-        raise ValueError(f"无法连接 OBS WebSocket: {e}") from e
+    ws = _ws_connect(obs_cfg)
+    if ws is None:
+        raise ValueError("无法连接 OBS WebSocket")
     try:
         if _obs_is_recording(ws):
             raise ValueError("OBS 正在录制中，请停止录制后再修改配置。")
@@ -1214,10 +1203,7 @@ def import_cs2obs_bytes(
         if _apply_scale_inner_transform(ws, sn, cn, bwv, bhv):
             changed.append("fixed_capture_source_transform")
     finally:
-        try:
-            ws.disconnect()
-        except Exception:
-            pass
+        _ws_disconnect(ws)
 
     return {
         "ok": True,
