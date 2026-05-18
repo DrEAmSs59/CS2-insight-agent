@@ -17,13 +17,19 @@ class TestMontageEncoder(unittest.TestCase):
         import app.montage_encoder as me
 
         me._encoder_check_cache.clear()
+        me._hw_probe_cache.clear()
 
     def test_auto_prefers_nvenc(self):
         import app.montage_encoder as me
 
         fake = " V..... h264_nvenc\n V..... libx264\n"
-        with patch.object(me.subprocess, "run") as m_run:
-            m_run.return_value = MagicMock(stdout=fake, stderr="", returncode=0)
+
+        def side_effect(cmd, **kwargs):
+            if "-encoders" in cmd:
+                return MagicMock(stdout=fake, stderr="", returncode=0)
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with patch.object(me.subprocess, "run", side_effect=side_effect):
             from app.montage_encoder import resolve_h264_codec_name
 
             c = resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "auto")
@@ -39,6 +45,31 @@ class TestMontageEncoder(unittest.TestCase):
 
             c = resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "auto")
             self.assertEqual(c, "libx264")
+
+    def test_auto_nvenc_listed_but_runtime_fails_uses_next(self):
+        import app.montage_encoder as me
+
+        fake = " V..... h264_nvenc\n V..... h264_qsv\n V..... libx264\n"
+        calls = {"probe_nvenc": False, "probe_qsv": False}
+
+        def side_effect(cmd, **kwargs):
+            if "-encoders" in cmd:
+                return MagicMock(stdout=fake, stderr="", returncode=0)
+            if "h264_nvenc" in cmd:
+                calls["probe_nvenc"] = True
+                return MagicMock(stdout="", stderr="nvenc no gpu", returncode=1)
+            if "h264_qsv" in cmd:
+                calls["probe_qsv"] = True
+                return MagicMock(stdout="", stderr="", returncode=0)
+            return MagicMock(stdout="", stderr="unexpected", returncode=1)
+
+        with patch.object(me.subprocess, "run", side_effect=side_effect):
+            from app.montage_encoder import resolve_h264_codec_name
+
+            c = resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "auto")
+            self.assertEqual(c, "h264_qsv")
+            self.assertTrue(calls["probe_nvenc"])
+            self.assertTrue(calls["probe_qsv"])
 
     def test_explicit_missing_hw_raises(self):
         import app.montage_encoder as me

@@ -16,15 +16,15 @@ export function RecordingHudCard({
   return (
     <div
       title={disabled ? disabledReason : undefined}
-      className={`flex flex-col rounded-lg border border-white/[0.07] bg-black/30 p-3 ${
+      className={`flex flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/50 p-4 ${
         disabled ? "opacity-45" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-zinc-100">{title}</p>
-          <code className="mt-0.5 block font-mono text-[10px] text-cs2-orange/90">{code}</code>
-          <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">{description}</p>
+          <p className="text-[13px] font-semibold text-cs2-text-primary">{title}</p>
+          <code className="mt-0.5 block font-mono text-[10px] text-cs2-accent/90">{code}</code>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted">{description}</p>
         </div>
         <input
           type="checkbox"
@@ -34,16 +34,16 @@ export function RecordingHudCard({
             if (disabled) return;
             onChange(e.target.checked);
           }}
-          className="mt-1 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+          className="mt-1 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-accent disabled:opacity-50"
         />
       </div>
       {checked && !disabled && outcomeOn ? (
-        <p className="mt-3 border-t border-white/[0.06] pt-2.5 text-[10px] leading-relaxed text-emerald-400/95">
+        <p className="mt-3 border-t border-cs2-border pt-2.5 text-[11px] leading-relaxed text-emerald-400/95">
           成片预期：{outcomeOn}
         </p>
       ) : null}
       {disabled ? (
-        <p className="mt-2 text-[10px] leading-relaxed text-amber-200/80">{disabledReason}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{disabledReason}</p>
       ) : null}
     </div>
   );

@@ -53,20 +53,20 @@ export function isClipPacingAndPovLocked(clip) {
  * @param {Record<string, unknown>} clip
  */
 export function queueBlockBadgeClass(clip) {
-  if (!clip || typeof clip !== "object") return "border-white/15 bg-zinc-900/80 text-zinc-100";
+  if (!clip || typeof clip !== "object") return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
   if (isTimelineSourceClip(clip)) {
-    return "border-cyan-500/45 bg-cyan-950/55 text-cyan-100";
+    return "border-cyan-500/45 bg-cs2-cyan-surface text-cyan-100";
   }
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "fail") return "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
   if (cat === "meme_death") return "border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-300";
   if (cat === "compilation") return "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
   if (cat === "highlight") return "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
-  return "border-white/15 bg-zinc-900/80 text-zinc-100";
+  return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
 }
 
 export const MONTAGE_NEUTRAL_TYPE_BADGE_CLASS =
-  "bg-zinc-500/15 text-zinc-400 ring-1 ring-white/10";
+  "bg-zinc-500/15 text-cs2-text-secondary ring-1 ring-white/10";
 
 /** @param {string} tag `normalizeClipType` 返回值 */
 export function montageTypeTagBadgeClass(tag) {
@@ -77,20 +77,46 @@ export function montageTypeTagBadgeClass(tag) {
     case "下饭":
       return "bg-cs2-fail/10 text-cs2-fail ring-1 ring-cs2-fail/35";
     case "梗死亡":
-      return "bg-fuchsia-500/15 text-fuchsia-200 ring-1 ring-fuchsia-500/40";
+      return "bg-fuchsia-500/15 text-cs2-fuchsia-on-surface ring-1 ring-fuchsia-500/40";
     case "合集":
+    case "击杀合集":
+    case "死亡合集":
+    case "回合合集":
       return "bg-cs2-compilation/10 text-cs2-compilation ring-1 ring-cs2-compilation/40";
     case "时间线":
+    case "时间线击杀":
+    case "时间线死亡":
+    case "时间线整回合":
       return "bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-500/35";
     default:
       return MONTAGE_NEUTRAL_TYPE_BADGE_CLASS;
   }
 }
 
-/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 时间线 | 普通片段 */
+/** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 击杀合集 | 死亡合集 | 回合合集 | 时间线 | 时间线击杀 | 时间线死亡 | 时间线整回合 | 普通片段 */
 export function normalizeClipType(clip) {
   if (!clip || typeof clip !== "object") return "普通片段";
-  if (isTimelineSourceClip(clip)) return "时间线";
+
+  // workbench_clip_kind / recording_request_type take priority for V3 clips
+  const wck = String(clip.workbench_clip_kind || clip.recording_request_type || "").trim();
+  if (wck === "timeline_kill") return "时间线击杀";
+  if (wck === "timeline_death") return "时间线死亡";
+  if (wck === "timeline_round") return "时间线整回合";
+  if (wck === "kill_compilation") return "击杀合集";
+  if (wck === "death_compilation") return "死亡合集";
+  if (wck === "round_compilation") return "回合合集";
+  if (wck === "highlight") return "高光";
+  if (wck === "fail") return "下饭";
+
+  // Legacy: timeline_source/timeline_record_kind
+  if (isTimelineSourceClip(clip)) {
+    const kind = String(clip.timeline_record_kind || "").trim();
+    if (kind === "kill") return "时间线击杀";
+    if (kind === "death") return "时间线死亡";
+    if (kind === "round") return "时间线整回合";
+    return "时间线";
+  }
+
   const cat = String(clip.category || "").trim().toLowerCase();
   if (cat === "highlight") return "高光";
   if (cat === "fail") return "下饭";
@@ -385,7 +411,7 @@ function compareTimeline(a, b) {
 }
 
 function typeRankForFunnyFirst(t) {
-  const order = ["下饭", "梗死亡", "普通片段", "时间线", "高光", "击杀"];
+  const order = ["下饭", "梗死亡", "普通片段", "时间线", "时间线击杀", "时间线死亡", "时间线整回合", "高光", "击杀", "合集", "击杀合集", "死亡合集", "回合合集"];
   const i = order.indexOf(t);
   return i >= 0 ? i : 99;
 }
@@ -457,8 +483,9 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
     return [...indexed].sort((a, b) => {
       const ta = normalizeClipType(a.c);
       const tb = normalizeClipType(b.c);
-      const la = ta === "高光" ? 2 : ta === "时间线" ? 1 : 0;
-      const lb = tb === "高光" ? 2 : tb === "时间线" ? 1 : 0;
+      const _isTimeline = (t) => t === "时间线" || t === "时间线击杀" || t === "时间线死亡" || t === "时间线整回合";
+      const la = ta === "高光" ? 2 : _isTimeline(ta) ? 1 : 0;
+      const lb = tb === "高光" ? 2 : _isTimeline(tb) ? 1 : 0;
       if (la !== lb) return la - lb;
       return a.i - b.i;
     }).map((x) => x.c);
@@ -468,8 +495,9 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
     return [...indexed].sort((a, b) => {
       const ta = normalizeClipType(a.c);
       const tb = normalizeClipType(b.c);
-      const ha = ta === "高光" ? 2 : ta === "时间线" ? 1 : 0;
-      const hb = tb === "高光" ? 2 : tb === "时间线" ? 1 : 0;
+      const _isTimeline = (t) => t === "时间线" || t === "时间线击杀" || t === "时间线死亡" || t === "时间线整回合";
+      const ha = ta === "高光" ? 2 : _isTimeline(ta) ? 1 : 0;
+      const hb = tb === "高光" ? 2 : _isTimeline(tb) ? 1 : 0;
       if (ha !== hb) return hb - ha;
       return a.i - b.i;
     }).map((x) => x.c);
@@ -478,14 +506,38 @@ export function sortClipsByStrategy(clipsInOrder, strategy) {
   return [...clipsInOrder];
 }
 
-/** 素材池第二行：Demo、回合、击杀/死亡对象、武器 */
-export function getMontageClipFactLine(clip) {
+/**
+ * Return a concise round label string for display badges and fact lines.
+ * Compilation clips with multiple source_rounds show "R4·5·9".
+ * Single-round clips show "R4". Returns null if no round info.
+ */
+export function getClipRoundLabel(clip) {
+  if (!clip || typeof clip !== "object") return null;
+  const srcRounds = Array.isArray(clip.source_rounds)
+    ? clip.source_rounds.map(Number).filter(Number.isFinite)
+    : [];
+  if (srcRounds.length > 1) return `R${srcRounds.join("·")}`;
+  const r = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
+  return r != null ? `R${r}` : null;
+}
+
+/** 回合、击杀/死亡对象、武器摘要行；includeDemoName=false 时省略 Demo 文件名（素材池用）。 */
+export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
   if (!clip || typeof clip !== "object") return "";
-  const demo =
-    (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
-    (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
-    "";
-  const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? `第${clip.round}回合` : "";
+  const demo = includeDemoName
+    ? (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
+      (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
+      ""
+    : "";
+  // For compilation clips spanning multiple rounds, show all rounds ("第4·5·9回合").
+  const srcRounds = Array.isArray(clip.source_rounds)
+    ? clip.source_rounds.map(Number).filter(Number.isFinite)
+    : [];
+  const rnd = srcRounds.length > 1
+    ? `第${srcRounds.join("·")}回合`
+    : clip.round != null && Number.isFinite(Number(clip.round))
+      ? `第${clip.round}回合`
+      : "";
   const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
   const cat = String(clip.category || "").toLowerCase();
   const victims = Array.isArray(clip.victims) ? clip.victims.map((v) => String(v || "").trim()).filter(Boolean) : [];
@@ -644,6 +696,7 @@ export function getRecordedClipPerspectiveZh(clip) {
   if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
   else if (matchesVictim) legacy = "受害者视角";
   else if (matchesKiller) legacy = "击杀者视角";
+  else if (Array.isArray(clip.planned_segments) && clip.planned_segments.length > 1) legacy = "含受害者视角";
   else if (Array.isArray(clip.record_segments) && clip.record_segments.length > 1) legacy = "含受害者视角";
   else if ((cat === "highlight" || cat === "compilation") && hasVictimNames) legacy = "含受害者视角";
   else if (pn) legacy = "玩家视角";
@@ -711,9 +764,9 @@ export function clipMatchesFilter(clip, filterKey, orderedIdSet) {
   if (filterKey === "高光") return t === "高光";
   if (filterKey === "下饭") return t === "下饭";
   if (filterKey === "梗死亡") return t === "梗死亡";
-  if (filterKey === "合集") return t === "合集";
+  if (filterKey === "合集") return t === "合集" || t === "击杀合集" || t === "死亡合集" || t === "回合合集";
   if (filterKey === "击杀") return t === "击杀";
   if (filterKey === "普通片段") return t === "普通片段";
-  if (filterKey === "时间线") return t === "时间线";
+  if (filterKey === "时间线") return t === "时间线" || t === "时间线击杀" || t === "时间线死亡" || t === "时间线整回合";
   return true;
 }

@@ -62,13 +62,13 @@ function PacingSliderRow({
   max,
   step,
   accent = "accent-cs2-orange",
-  valueTextClass = "text-cs2-orange",
+  valueTextClass = "text-cs2-accent",
   onChange,
 }) {
   const clamp = (n) => Math.min(max, Math.max(min, n));
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[11px] text-zinc-400">{label}</span>
+      <span className="text-[11px] text-cs2-text-secondary">{label}</span>
       <div className="flex items-center gap-2">
         <input
           type="range"
@@ -89,11 +89,11 @@ function PacingSliderRow({
             const n = parseFloat(e.target.value);
             if (Number.isFinite(n)) onChange(clamp(n));
           }}
-          className={`w-14 shrink-0 rounded border border-white/10 bg-black/40 px-1 py-0.5 text-right font-mono text-[11px] font-semibold ${valueTextClass}`}
+          className={`w-14 shrink-0 rounded border border-cs2-border bg-cs2-bg-input/70 px-1 py-0.5 text-right font-mono text-[11px] font-semibold ${valueTextClass}`}
         />
       </div>
       {hint ? (
-        <p className="text-[9px] font-normal leading-snug text-zinc-600">{hint}</p>
+        <p className="text-[10px] font-normal leading-snug text-cs2-text-muted">{hint}</p>
       ) : null}
     </div>
   );
@@ -110,8 +110,6 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
   const pre = po.pre_first_sec ?? gNum("pre_first_sec") ?? DEFAULT_PACING.pre_first_sec;
   const post = po.post_last_sec ?? gNum("post_last_sec") ?? DEFAULT_PACING.post_last_sec;
   const gap = po.max_gap_sec ?? gNum("max_gap_sec") ?? DEFAULT_PACING.max_gap_sec;
-  const postMid = po.post_mid_sec ?? gNum("post_mid_sec") ?? DEFAULT_PACING.post_mid_sec;
-  const preCont = po.pre_cont_sec ?? gNum("pre_cont_sec") ?? DEFAULT_PACING.pre_cont_sec;
 
   const commit = (partial) => {
     const next = { ...partial };
@@ -123,14 +121,14 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
   };
 
   return (
-    <div className="space-y-3 rounded border border-white/[0.06] bg-black/30 p-2">
-      <div className="border-b border-white/[0.06] pb-2">
-        <p className="mb-2 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+    <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
+      <div className="border-b border-cs2-border pb-2">
+        <p className="mb-2 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
           <Settings className="h-3 w-3" /> 基础参数
         </p>
         <div className="space-y-3">
           <PacingSliderRow
-            label="开场预留 (秒)"
+            label="击杀段前预留 (秒)"
             value={pre}
             min={0}
             max={20}
@@ -138,7 +136,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ pre_first_sec: n })}
           />
           <PacingSliderRow
-            label="结尾留白 (秒)"
+            label="击杀段后预留 (秒)"
             value={post}
             min={0}
             max={10}
@@ -146,7 +144,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ post_last_sec: n })}
           />
           <PacingSliderRow
-            label="防跳剪阈值 (秒)"
+            label="跳剪间隔阈值 (秒)"
             value={gap}
             min={2}
             max={70}
@@ -155,32 +153,6 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
           />
         </div>
       </div>
-
-      <details className="group rounded border border-white/[0.08] bg-black/20 [&_summary::-webkit-details-marker]:hidden">
-        <summary className="cursor-pointer list-none px-2 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:text-cs2-orange">
-          <span className="select-none">🔽 展开专业跳剪参数 (Pro)</span>
-        </summary>
-        <div className="space-y-3 border-t border-white/[0.06] px-2 pb-2 pt-2">
-          <PacingSliderRow
-            label="中间击杀后停顿 (秒)"
-            hint="触发闪切前的保留时间(适合保留切刀)"
-            value={postMid}
-            min={0}
-            max={10}
-            step={0.1}
-            onChange={(n) => commit({ post_mid_sec: n })}
-          />
-          <PacingSliderRow
-            label="跳跃后切入缓冲 (秒)"
-            hint="闪切后距离下次开枪的时间"
-            value={preCont}
-            min={0}
-            max={10}
-            step={0.1}
-            onChange={(n) => commit({ pre_cont_sec: n })}
-          />
-        </div>
-      </details>
     </div>
   );
 }
@@ -196,17 +168,17 @@ export function PovSection({ item, updateItemPacing }) {
   if (isClipPacingAndPovLocked(item.clipData)) {
     const wholeRound = isRoundTimelineRoundClip(item.clipData);
     return (
-      <p className="rounded border border-amber-500/15 bg-amber-950/15 px-2 py-1.5 text-[10px] leading-relaxed text-zinc-500">
+      <p className="rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
         {wholeRound ? (
           <>
-            当前为<strong className="font-semibold text-zinc-300">整回合时间线</strong>
+            当前为<strong className="font-semibold text-cs2-text-secondary">整回合时间线</strong>
             （固定 tick 窗口），
-            <span className="text-zinc-400">不支持剪辑节奏微调与追加受害者 / 击杀者回看视角</span>。
+            <span className="text-cs2-text-secondary">不支持剪辑节奏微调与追加受害者 / 击杀者回看视角</span>。
           </>
         ) : (
           <>
-            当前为<strong className="font-semibold text-zinc-300">回合死亡合集</strong>（多回合勾选合辑），
-            <span className="text-zinc-400">不支持剪辑节奏微调与追加回看视角</span>。
+            当前为<strong className="font-semibold text-cs2-text-secondary">回合死亡合集</strong>（多回合勾选合辑），
+            <span className="text-cs2-text-secondary">不支持剪辑节奏微调与追加回看视角</span>。
           </>
         )}
       </p>
@@ -238,10 +210,8 @@ export function PovSection({ item, updateItemPacing }) {
 
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
-  const vicPre =
-    po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? (isFail ? 3.0 : 1.5);
-  const vicPost =
-    po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? (isFail ? 1.5 : 1.0);
+  const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
+  const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
   const killPost = po.killer_pov_post_sec ?? gNum("killer_pov_post_sec") ?? vicPost;
 
@@ -259,8 +229,8 @@ export function PovSection({ item, updateItemPacing }) {
             onClick={() => commit({ victim_pov: !povEnabled })}
             className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               povEnabled
-                ? "border-cyan-500/40 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-950/60"
-                : "border-white/10 bg-white/[0.04] text-zinc-400 hover:border-cyan-500/30 hover:text-cyan-400"
+                ? "border-cyan-500/40 bg-cs2-cyan-surface text-cyan-300 hover:bg-cs2-cyan-surface"
+                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cyan-500/30 hover:text-cyan-400"
             }`}
           >
             {povEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
@@ -268,7 +238,7 @@ export function PovSection({ item, updateItemPacing }) {
             {victimsPreview ? (
               <span
                 className={`ml-1 truncate text-[9px] font-normal ${
-                  povEnabled ? "text-cyan-200/70" : "text-zinc-500"
+                  povEnabled ? "text-cs2-cyan-on-surface" : "text-cs2-text-muted"
                 }`}
                 title={victimsPreview}
               >
@@ -276,7 +246,7 @@ export function PovSection({ item, updateItemPacing }) {
               </span>
             ) : null}
             {povEnabled && (
-              <span className="ml-auto font-mono text-[9px] text-cyan-400/70">
+              <span className="ml-auto font-mono text-[9px] text-cs2-cyan-on-surface/70">
                 -{vicPre.toFixed(1)}s / +{vicPost.toFixed(1)}s
               </span>
             )}
@@ -288,8 +258,8 @@ export function PovSection({ item, updateItemPacing }) {
             onClick={() => commit({ killer_pov: !killerPovEnabled })}
             className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               killerPovEnabled
-                ? "border-amber-500/40 bg-amber-950/35 text-amber-300 hover:bg-amber-950/55"
-                : "border-white/10 bg-white/[0.04] text-zinc-400 hover:border-amber-500/30 hover:text-amber-300"
+                ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
+                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-amber-surface hover:text-cs2-amber-on-surface"
             }`}
           >
             {killerPovEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
@@ -297,7 +267,7 @@ export function PovSection({ item, updateItemPacing }) {
             {killersPreview ? (
               <span
                 className={`ml-1 truncate text-[9px] font-normal ${
-                  killerPovEnabled ? "text-amber-200/70" : "text-zinc-500"
+                  killerPovEnabled ? "text-cs2-amber-on-surface" : "text-cs2-text-muted"
                 }`}
                 title={killersPreview}
               >
@@ -305,7 +275,7 @@ export function PovSection({ item, updateItemPacing }) {
               </span>
             ) : null}
             {killerPovEnabled && (
-              <span className="ml-auto font-mono text-[9px] text-amber-400/70">
+              <span className="ml-auto font-mono text-[9px] text-cs2-amber-on-surface/70">
                 -{killPre.toFixed(1)}s / +{killPost.toFixed(1)}s
               </span>
             )}
@@ -314,13 +284,13 @@ export function PovSection({ item, updateItemPacing }) {
       </div>
 
       {povEnabled && canVictimPov && (
-        <div className="space-y-2 rounded border border-cyan-500/10 bg-cyan-950/10 p-2">
+        <div className="space-y-2 rounded border border-cyan-500/10 bg-cs2-cyan-surface p-2">
           <PacingSliderRow
-            label="击杀前预留 (秒) · 受害者视角"
+            label="回看前停留 (秒) · 受害者视角"
             value={vicPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_pre_sec: n })}
@@ -330,7 +300,7 @@ export function PovSection({ item, updateItemPacing }) {
             value={vicPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_post_sec: n })}
@@ -339,15 +309,15 @@ export function PovSection({ item, updateItemPacing }) {
       )}
 
       {killerPovEnabled && canKillerPov && (
-        <div className="space-y-2 rounded border border-amber-500/15 bg-amber-950/10 p-2">
+        <div className="space-y-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface p-2">
           <PacingSliderRow
-            label="击杀前预留 (秒) · 击杀者视角"
+            label="回看前停留 (秒) · 击杀者视角"
             value={killPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
-            valueTextClass="text-amber-300"
+            valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_pre_sec: n })}
           />
           <PacingSliderRow
@@ -355,9 +325,9 @@ export function PovSection({ item, updateItemPacing }) {
             value={killPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
-            valueTextClass="text-amber-300"
+            valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_post_sec: n })}
           />
         </div>
@@ -448,20 +418,20 @@ export function GlobalPacingPanel({
   };
 
   return (
-    <div className="border-b border-white/[0.06] bg-black/20 px-3 py-2">
+    <div className="border-b border-cs2-border bg-cs2-bg-input/30 px-3 py-2">
       <div className="mb-2 flex min-w-0 flex-nowrap items-baseline gap-x-2 overflow-x-auto">
-        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-zinc-200">
-          <Settings className="h-3.5 w-3.5 text-zinc-500" />
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-cs2-text-primary">
+          <Settings className="h-3.5 w-3.5 text-cs2-text-muted" />
           全局节奏设置
         </span>
-        <span className="min-w-0 whitespace-nowrap text-[11px] text-zinc-500">
+        <span className="min-w-0 whitespace-nowrap text-[11px] text-cs2-text-muted">
           （对所有片段生效，单独设置优先）
         </span>
       </div>
 
-      <div className="space-y-3 rounded border border-white/[0.06] bg-black/30 p-2">
+      <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
         <PacingSliderRow
-          label="开场预留 (秒)"
+          label="击杀段前预留 (秒)"
           value={pre}
           min={0}
           max={20}
@@ -469,7 +439,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ pre_first_sec: n })}
         />
         <PacingSliderRow
-          label="结尾留白 (秒)"
+          label="击杀段后预留 (秒)"
           value={post}
           min={0}
           max={10}
@@ -477,7 +447,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ post_last_sec: n })}
         />
         <PacingSliderRow
-          label="防跳剪阈值 (秒)"
+          label="跳剪间隔阈值 (秒)"
           value={gap}
           min={2}
           max={70}
@@ -486,8 +456,8 @@ export function GlobalPacingPanel({
         />
       </div>
 
-      <div className="mt-2 rounded border border-white/[0.04] bg-black/20 p-2">
-        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+      <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-input/30 p-2">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
           批量视角设置
         </p>
         <div className="grid min-w-0 grid-cols-2 gap-2">
@@ -505,8 +475,8 @@ export function GlobalPacingPanel({
             className={
               "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
               (allVictimPovOn
-                ? "border-zinc-500/40 bg-zinc-900/40 text-zinc-200 hover:border-zinc-400/55 hover:bg-zinc-900/60"
-                : "border-cyan-500/35 bg-cyan-950/30 text-cyan-200 hover:border-cyan-400/60 hover:bg-cyan-950/50")
+                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
+                : "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface hover:border-cs2-cyan-on-surface/60 hover:bg-cs2-cyan-surface")
             }
           >
             {allVictimPovOn ? (
@@ -519,7 +489,7 @@ export function GlobalPacingPanel({
               <span
                 className={
                   "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allVictimPovOn ? "text-zinc-400/90" : "text-cyan-400/80")
+                  (allVictimPovOn ? "text-cs2-text-secondary/90" : "text-cs2-cyan-on-surface/80")
                 }
               >
                 ({victimPovEligible})
@@ -540,8 +510,8 @@ export function GlobalPacingPanel({
             className={
               "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
               (allKillerPovOn
-                ? "border-zinc-500/40 bg-zinc-900/40 text-zinc-200 hover:border-zinc-400/55 hover:bg-zinc-900/60"
-                : "border-amber-500/35 bg-amber-950/25 text-amber-200 hover:border-amber-400/60 hover:bg-amber-950/45")
+                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
+                : "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:border-cs2-amber-on-surface/60 hover:bg-cs2-amber-surface")
             }
           >
             {allKillerPovOn ? (
@@ -554,7 +524,7 @@ export function GlobalPacingPanel({
               <span
                 className={
                   "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allKillerPovOn ? "text-zinc-400/90" : "text-amber-300/80")
+                  (allKillerPovOn ? "text-cs2-text-secondary/90" : "text-cs2-amber-on-surface/80")
                 }
               >
                 ({killerPovEligible})
@@ -567,7 +537,7 @@ export function GlobalPacingPanel({
       <button
         type="button"
         onClick={resetGlobalPacing}
-        className="mt-2 flex items-center gap-1 text-[9px] text-zinc-600 hover:text-zinc-400"
+        className="mt-2 flex items-center gap-1 text-[10px] text-cs2-text-muted hover:text-cs2-text-secondary"
       >
         <RotateCcw className="h-2.5 w-2.5" /> 恢复后端默认值
       </button>
@@ -609,7 +579,7 @@ function QueueItemCard({
 
   return (
     <li
-      className="flex flex-col px-3 py-2 text-[11px] text-zinc-300"
+      className="flex flex-col px-3 py-2 text-[11px] text-cs2-text-secondary"
       title={item.clipId || undefined}
     >
       {/* 标题行：徽章 + 玩家名 + AI 分数 */}
@@ -621,7 +591,7 @@ function QueueItemCard({
             {killBadge}
           </span>
         ) : null}
-        <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-white">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-cs2-text-primary">
           {playerName}
         </span>
         <div className="ml-auto shrink-0">
@@ -632,26 +602,26 @@ function QueueItemCard({
       {/* 比分 / 地图行 */}
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
         {isFreezeToDeathCompilation(cd) && ftdRoundBadge ? (
-          <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+          <span className="rounded border border-cs2-border bg-cs2-bg-input/50 px-1.5 py-px font-mono text-[10px] text-cs2-text-secondary">
             {ftdRoundBadge}
           </span>
         ) : round != null ? (
-          <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-[10px] text-zinc-300">
+          <span className="rounded border border-cs2-border bg-cs2-bg-input/50 px-1.5 py-px font-mono text-[10px] text-cs2-text-secondary">
             R{round}
           </span>
         ) : null}
         {hasScorePair ? (
           <>
-            <span className="rounded bg-sky-500/15 px-1.5 py-px font-mono text-[10px] font-semibold text-sky-200">
+            <span className="rounded bg-cs2-cyan-surface px-1.5 py-px font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
               CT {own}
             </span>
-            <span className="rounded bg-amber-500/15 px-1.5 py-px font-mono text-[10px] font-semibold text-amber-200">
+            <span className="rounded bg-cs2-amber-surface px-1.5 py-px font-mono text-[10px] font-semibold text-cs2-amber-on-surface">
               T {opp}
             </span>
           </>
         ) : null}
         {mapName ? (
-          <span className="truncate text-[10px] text-zinc-500" title={mapName}>
+          <span className="truncate text-[10px] text-cs2-text-muted" title={mapName}>
             {mapName}
           </span>
         ) : null}
@@ -671,23 +641,23 @@ function QueueItemCard({
         </p>
       ) : null}
       {!tl && combatSummary ? (
-        <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-zinc-400" title={combatSummary}>
+        <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-cs2-text-secondary" title={combatSummary}>
           {combatSummary}
         </p>
       ) : null}
       {!queueSummary && showLegacyTags ? (
-        <p className="mt-0.5 truncate text-[10px] text-zinc-600">
+        <p className="mt-0.5 truncate text-[10px] text-cs2-text-muted">
           {cd.context_tags.join(" · ")}
         </p>
       ) : null}
       {tl ? (
-        <p className="mt-0.5 font-mono text-[10px] leading-snug text-zinc-400">
+        <p className="mt-0.5 font-mono text-[10px] leading-snug text-cs2-text-secondary">
           {timelineQueueMetaOneLiner(cd, estimateItemRecordSeconds(item, globalPacing))}
         </p>
       ) : null}
       {Array.isArray(item.freezeToDeathQueueRounds) &&
       item.freezeToDeathQueueRounds.length > 0 ? (
-        <p className="mt-0.5 font-mono text-[10px] text-amber-400/85">
+        <p className="mt-0.5 font-mono text-[10px] text-cs2-amber-on-surface/85">
           回合合集含回合：{item.freezeToDeathQueueRounds.join("、")}
         </p>
       ) : null}
@@ -695,10 +665,10 @@ function QueueItemCard({
       {/* 可展开区：节奏微调 */}
       {pacingExpanded ? (
         isClipPacingAndPovLocked(cd) ? (
-          <p className="mt-2 rounded border border-amber-500/20 bg-amber-950/20 px-2 py-1.5 text-[10px] text-amber-200/90">
+          <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
-              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局预留不生效。"
-              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局预留不生效。"}
+              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"
+              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"}
           </p>
         ) : (
           <div className="mt-2">
@@ -715,14 +685,14 @@ function QueueItemCard({
       ) : null}
 
       {/* 操作栏 */}
-      <div className="mt-2 flex items-center gap-1.5 border-t border-white/[0.06] pt-2">
+      <div className="mt-2 flex items-center gap-1.5 border-t border-cs2-border pt-2">
         <button
           type="button"
           onClick={onTogglePacing}
           className={`flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
             pacingExpanded
-              ? "border-cs2-orange/55 bg-cs2-orange/15 text-cs2-orange"
-              : "border-cs2-orange/30 bg-cs2-orange/6 text-cs2-orange/90 hover:bg-cs2-orange/10"
+              ? "border-cs2-accent/55 bg-cs2-accent/15 text-cs2-accent"
+              : "border-cs2-accent/30 bg-cs2-accent/6 text-cs2-accent/90 hover:bg-cs2-accent/10"
           }`}
         >
           <Settings className="h-3 w-3" />
@@ -733,8 +703,8 @@ function QueueItemCard({
           onClick={onTogglePov}
           className={`flex min-w-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
             povExpanded
-              ? "border-sky-500/55 bg-sky-500/15 text-sky-200"
-              : "border-sky-500/30 bg-sky-500/5 text-sky-300/90 hover:bg-sky-500/10"
+              ? "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+              : "border-cs2-cyan-surface/50 bg-cs2-cyan-surface/30 text-cs2-cyan-on-surface/90 hover:bg-cs2-cyan-surface"
           }`}
         >
           <Eye className="h-3 w-3 shrink-0" />
@@ -751,7 +721,7 @@ function QueueItemCard({
         <button
           type="button"
           onClick={() => onRemove(item.id)}
-          className="ml-auto flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-semibold text-rose-300/90 transition-colors hover:bg-rose-500/15"
+          className="ml-auto flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-semibold text-cs2-rose-on-surface/90 transition-colors hover:bg-rose-500/15"
           aria-label="从队列移除"
         >
           <Trash2 className="h-3 w-3" />
@@ -782,12 +752,12 @@ export function RecordingQueuePanel({
   const toggleKillerPovForAllEligibleInQueue = useRecordingQueue((s) => s.toggleKillerPovForAllEligibleInQueue);
 
   return (
-    <div className="flex h-full min-h-0 w-full max-w-3xl flex-col border border-white/10 bg-cs2-bg-sidebar shadow-xl lg:max-w-none lg:border-l lg:border-y-0 lg:border-r-0">
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 id="queue-drawer-title" className="flex items-center gap-2 text-sm font-bold text-white">
-            <Package className="h-4 w-4 text-cs2-orange" />
+    <div className="flex h-full min-h-0 w-full max-w-3xl flex-col border border-cs2-border bg-cs2-bg-sidebar shadow-xl lg:max-w-none lg:border-l lg:border-y-0 lg:border-r-0">
+        <div className="flex items-center justify-between border-b border-cs2-border px-4 py-3">
+          <h2 id="queue-drawer-title" className="flex items-center gap-2 text-sm font-bold text-cs2-text-primary">
+            <Package className="h-4 w-4 text-cs2-accent" />
             待录制队列
-            <span className="rounded bg-cs2-orange/20 px-2 py-0.5 font-mono text-xs text-cs2-orange">
+            <span className="rounded bg-cs2-accent/20 px-2 py-0.5 font-mono text-xs text-cs2-accent">
               {queue.length}
             </span>
           </h2>
@@ -805,7 +775,7 @@ export function RecordingQueuePanel({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {queue.length === 0 ? (
-            <p className="px-2 py-8 text-center text-sm text-zinc-500">
+            <p className="px-2 py-8 text-center text-sm text-cs2-text-muted">
               暂无片段。在片段列表中勾选后点击「加入录制队列」。
             </p>
           ) : (
@@ -813,13 +783,13 @@ export function RecordingQueuePanel({
               {grouped.map(([demoKey, items]) => (
                 <div
                   key={demoKey}
-                  className="overflow-hidden rounded-lg border border-white/[0.06] bg-black/25"
+                  className="overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-input/40"
                 >
-                  <div className="border-b border-white/[0.06] bg-white/[0.03] px-3 py-2">
-                    <p className="truncate font-mono text-[11px] font-semibold text-cs2-orange/90" title={demoKey}>
+                  <div className="border-b border-cs2-border bg-cs2-bg-hover px-3 py-2">
+                    <p className="truncate font-mono text-[11px] font-semibold text-cs2-accent/90" title={demoKey}>
                       {demoKey}
                     </p>
-                    <p className="text-[10px] text-zinc-500">{items.length} 个片段</p>
+                    <p className="text-[10px] text-cs2-text-muted">{items.length} 个片段</p>
                   </div>
                   <ul className="divide-y divide-white/[0.04]">
                     {items.map((it) => (
@@ -846,12 +816,12 @@ export function RecordingQueuePanel({
           )}
         </div>
 
-        <div className="border-t border-white/10 bg-black/20 p-4 space-y-2">
+        <div className="border-t border-cs2-border bg-cs2-bg-input/30 p-4 space-y-2">
           {queue.length > 0 && (
             <button
               type="button"
               onClick={onClear}
-              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:text-red-300"
+              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-red-surface hover:text-cs2-red-on-surface"
             >
               清空队列
             </button>
@@ -860,7 +830,7 @@ export function RecordingQueuePanel({
             type="button"
             disabled={queue.length === 0 || batchRecording}
             onClick={onStartBatch}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-orange py-3.5 text-sm font-extrabold uppercase tracking-widest text-black shadow-lg shadow-cs2-orange/25 transition-all hover:bg-cs2-orange-light disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent py-3.5 text-sm font-extrabold uppercase tracking-widest text-cs2-text-on-accent shadow-lg shadow-cs2-accent/25 transition-all hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Rocket className="h-4 w-4" />
             开始批量录制
@@ -869,7 +839,7 @@ export function RecordingQueuePanel({
             <button
               type="button"
               onClick={() => void onAbortBatch()}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/50 bg-red-500/10 py-3 text-sm font-bold text-red-300 transition-all hover:border-red-400 hover:bg-red-500/20"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-red-surface bg-cs2-red-surface py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-cs2-red-on-surface/60 hover:bg-cs2-red-surface"
             >
               <OctagonX className="h-4 w-4 shrink-0" />
               中止录制
@@ -883,9 +853,9 @@ export function RecordingQueuePanel({
 export default function RecordingQueueDrawer({ open, onClose, ...rest }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[90] flex justify-end bg-black/50 backdrop-blur-[2px]" role="presentation">
+    <div className="fixed inset-0 z-[90] flex justify-end bg-cs2-bg-input/80 backdrop-blur-[2px]" role="presentation">
       <button type="button" className="h-full min-w-0 flex-1 cursor-default" aria-label="关闭抽屉背景" onClick={onClose} />
-      <aside className="flex h-full w-full max-w-md flex-col border-l border-white/10 bg-cs2-bg-sidebar shadow-2xl" role="dialog">
+      <aside className="flex h-full w-full max-w-md flex-col border-l border-cs2-border bg-cs2-bg-sidebar shadow-2xl" role="dialog">
         <RecordingQueuePanel {...rest} />
       </aside>
     </div>

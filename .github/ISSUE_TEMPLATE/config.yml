@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: README / 使用说明
+    url: https://github.com/DrEAmSs59/CS2-insight-agent#readme
+    about: 安装、配置与基础使用请先查看仓库 README（fork 后请把此链接改成你的仓库主页）。

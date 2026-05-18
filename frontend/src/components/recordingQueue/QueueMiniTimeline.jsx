@@ -33,7 +33,7 @@ function KillTickMarksOverlay({ clipData }) {
           <span
             key={`k-${kt}-${i}`}
             title={`击杀 tick ${kt}`}
-            className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-white/80 shadow-[0_0_5px_rgba(255,255,255,0.45)]"
+            className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-cs2-text-primary shadow-[0_0_5px_rgba(255,255,255,0.45)]"
             style={{ left: `${p}%` }}
           />
         );
@@ -72,7 +72,7 @@ function DeathTickOverlay({ clipData }) {
   }
   for (const kt of killTicks) {
     if (deathTick != null && kt === deathTick) continue;
-    marks.push({ tick: kt, cls: "bg-cs2-orange", title: "击杀" });
+    marks.push({ tick: kt, cls: "bg-cs2-accent", title: "击杀" });
   }
   if (!marks.length) return null;
 
@@ -182,7 +182,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
       const { blocks, segmentCount } = built;
       return (
         <div className="mt-1.5 space-y-1">
-          <div className="relative flex h-5 w-full overflow-hidden rounded-[3px] border border-white/[0.08] bg-black/40">
+          <div className="relative flex h-5 w-full overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input/70">
             {blocks.map((b) => (
               <div
                 key={b.key}
@@ -190,21 +190,21 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
                 style={{ width: `${b.pct}%` }}
                 title={
                   b.type === "pre"
-                    ? `预热 ${pre.toFixed(1)}s`
+                    ? `击杀段前预留 ${pre.toFixed(1)}s`
                     : b.type === "post"
-                      ? `结尾 ${post.toFixed(1)}s`
+                      ? `击杀段后预留 ${post.toFixed(1)}s`
                       : "击杀窗口（tick 跨度）"
                 }
               />
             ))}
             <DeathTickOverlay clipData={clipData} />
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">
-            <span className="text-zinc-500">
-              ×{segmentCount} 段（每段：预热 {pre.toFixed(1)}s · 击杀窗口 · 结尾 {post.toFixed(1)}s）
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-cs2-text-muted">
+            <span className="text-cs2-text-muted">
+              ×{segmentCount} 段（每段：击杀段前 {pre.toFixed(1)}s · 击杀窗口 · 击杀段后 {post.toFixed(1)}s）
             </span>
             {extraParts.map((t) => (
-              <span key={t} className="text-zinc-500">
+              <span key={t} className="text-cs2-text-muted">
                 · {t}
               </span>
             ))}
@@ -221,8 +221,6 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
       ? Math.max(4, clipData.duration_sec)
       : Math.max(6, killCount * 6 || 12);
   const core = Math.max(2, coreHint * 0.55);
-  const sum = pre + core + post;
-  const wp = (x) => `${Math.max(6, (x / sum) * 100)}%`;
 
   const highlightDots =
     !timelineSrc && killCount >= 1
@@ -232,7 +230,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
           return (
             <span
               key={i}
-              className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-white/85 shadow-[0_0_6px_rgba(225,116,57,0.9)]"
+              className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-cs2-text-primary shadow-[0_0_6px_rgba(225,116,57,0.9)]"
               style={{ left: `${leftPct}%` }}
             />
           );
@@ -241,41 +239,41 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
 
   return (
     <div className="mt-1.5 space-y-1">
-      <div className="relative flex h-5 w-full overflow-hidden rounded-[3px] border border-white/[0.08] bg-black/40">
+      <div className="relative flex h-5 w-full overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input/70">
         <div
-          className="h-full bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
-          style={{ width: wp(pre) }}
-          title={`预热 / 预留 ${pre.toFixed(1)}s`}
+          className="h-full min-w-0 bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
+          style={{ flex: `${pre} 1 0%` }}
+          title={`击杀段前预留 ${pre.toFixed(1)}s`}
         />
         <div
-          className="relative h-full bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
-          style={{ width: wp(core) }}
+          className="relative h-full min-w-0 bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
+          style={{ flex: `${core} 1 0%` }}
           title="击杀片段主体"
         >
           {highlightDots}
         </div>
         <div
-          className="h-full bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
-          style={{ width: wp(post) }}
-          title={`收尾 ${post.toFixed(1)}s`}
+          className="h-full min-w-0 bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
+          style={{ flex: `${post} 1 0%` }}
+          title={`击杀段后预留 ${post.toFixed(1)}s`}
         />
         <KillTickMarksOverlay clipData={clipData} />
         <DeathTickOverlay clipData={clipData} />
       </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-cs2-text-muted">
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 预热 {pre.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段前 {pre.toFixed(1)}s
         </span>
-        <span className="text-zinc-700">·</span>
+        <span className="text-cs2-text-muted">·</span>
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-cs2-orange/90" /> 片段 ~{core.toFixed(0)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-cs2-accent/90" /> 片段 ~{core.toFixed(0)}s
         </span>
-        <span className="text-zinc-700">·</span>
+        <span className="text-cs2-text-muted">·</span>
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 结尾 {post.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段后 {post.toFixed(1)}s
         </span>
         {extraParts.map((t) => (
-          <span key={t} className="text-zinc-500">
+          <span key={t} className="text-cs2-text-muted">
             · {t}
           </span>
         ))}

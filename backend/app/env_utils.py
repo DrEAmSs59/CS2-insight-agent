@@ -319,15 +319,29 @@ class ExperimentalConfig(BaseModel):
     pov_enabled: bool = False
 
 
+class SpecPlayerVerifyConfig(BaseModel):
+    """录制期 spec_player 注入后，用 GSI 校验当前观战 Steam64 是否为目标玩家；重试期间用慢放倍率避免 demo 空转。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    demo_timescale: float = Field(default=0.05, ge=0.01, le=1.0)
+    max_retries: int = Field(default=4, ge=1, le=16)
+    per_retry_timeout_sec: float = Field(default=0.6, ge=0.05, le=5.0)
+    settle_sec: float = Field(default=0.12, ge=0.0, le=2.0)
+    # None = 按倒退 seek 距离自适应；有值 = 叠在 CS2_INSIGHT_GOTO_DELAY_JUMP_CUT 上的额外 gototick 等待（秒）
+    pov_goto_delay_extra_sec: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     obs: OBSConfig = Field(default_factory=OBSConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
+    spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
-    # 合辑 H.264：auto=NVENC→QSV→AMF→libx264；亦可指定编码器名
+    # 合辑 H.264：auto=按 NVENC→QSV→AMF→libx264 顺序，对硬件编码器做单帧实测后再选用；亦可指定编码器名
     montage_encoder: str = "auto"
     cs2_path: str = ""
     demo_directory: str = ""
@@ -335,8 +349,6 @@ class AppConfig(BaseModel):
     ai_mode: bool = False
     # 监听目录新入库时：按名单在 demo roster 中匹配（同一场可多名），展示名写成「A K/D/A · B K/D/A」作标记（不做高光解析）
     expected_parse_players: list[str] = Field(default_factory=list)
-    # 录制期间 CS2 的 fps_max（默认 240；0 表示不限制）
-    cs2_fps_max: int = 240
     # 前端录制队列「全局节奏」覆写（仅含用户改过的字段；空对象表示沿用内置默认）
     recording_global_pacing: dict[str, Any] = Field(default_factory=dict)
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
@@ -345,6 +357,11 @@ class AppConfig(BaseModel):
     cs2_extra_launch_args: str = ""
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
     record_inject_console_lines: str = ""
+    obs_transition_enabled: bool = False
+    obs_transition_name: str = "Fade"
+    obs_transition_duration_ms: int = 200
+    obs_game_scene_name: str = "CS2 Insight Recording"
+    obs_black_scene_name: str = "CS2 Insight Black"
 
 
 def _parse_config_json_file(path: Path) -> dict:

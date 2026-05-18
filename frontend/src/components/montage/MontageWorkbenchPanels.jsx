@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -13,10 +13,12 @@ import {
   Waves,
   X,
   Zap,
+  ArrowUpDown,
 } from "lucide-react";
 import { AiScoreBadge } from "../ClipCard";
 import {
   getClipDurationSeconds,
+  getClipRoundLabel,
   getClipTitle,
   getMontageBlockShortLabel,
   getMontageClipFactLine,
@@ -40,46 +42,93 @@ function montageAiExplainText(clip) {
 }
 
 const VARIANT_BAR = {
-  ace: "bg-rose-500",
-  multikill: "bg-amber-500",
-  pov: "bg-sky-500",
-  fail: "bg-red-500",
-  compilation: "bg-amber-500",
-  highlight: "bg-emerald-500",
-  timeline: "bg-cyan-500",
-  neutral: "bg-zinc-600",
+  ace: "bg-cs2-rose-on-surface",
+  multikill: "bg-cs2-amber-on-surface",
+  pov: "bg-cs2-cyan-on-surface",
+  fail: "bg-cs2-fail",
+  compilation: "bg-cs2-amber-on-surface",
+  highlight: "bg-cs2-highlight",
+  timeline: "bg-cs2-cyan-on-surface",
+  neutral: "bg-cs2-text-muted",
 };
 
 const VARIANT_RING = {
-  ace: "border-rose-500/45 bg-gradient-to-br from-rose-950/60 to-zinc-950/90 text-rose-50",
-  multikill: "border-amber-500/40 bg-gradient-to-br from-amber-950/50 to-zinc-950/90 text-amber-50",
-  pov: "border-sky-500/35 bg-gradient-to-br from-sky-950/40 to-zinc-950/90 text-sky-50",
-  fail: "border-red-500/45 bg-gradient-to-br from-red-950/55 to-zinc-950/90 text-red-50",
-  compilation: "border-amber-500/45 bg-gradient-to-br from-amber-950/55 to-zinc-950/90 text-amber-50",
-  highlight: "border-emerald-500/40 bg-gradient-to-br from-emerald-950/45 to-zinc-950/90 text-emerald-50",
-  timeline: "border-cyan-500/45 bg-gradient-to-br from-cyan-950/50 to-zinc-950/90 text-cyan-50",
-  neutral: "border-white/12 bg-zinc-900/90 text-zinc-200",
+  ace: "border-cs2-rose-surface bg-gradient-to-br from-cs2-rose-surface to-cs2-bg-card text-cs2-rose-on-surface",
+  multikill: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
+  pov: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
+  fail: "border-cs2-red-surface bg-gradient-to-br from-cs2-red-surface to-cs2-bg-card text-cs2-red-on-surface",
+  compilation: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
+  highlight: "border-cs2-emerald-surface bg-gradient-to-br from-cs2-emerald-surface to-cs2-bg-card text-cs2-emerald-on-surface",
+  timeline: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
+  neutral: "border-cs2-border bg-cs2-bg-elevated text-cs2-text-primary",
 };
 
 export function CollapsibleSection({ title, hint, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-white/[0.06] last:border-b-0">
+    <div className="border-b border-cs2-border last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 py-2.5 text-left"
+        className="flex w-full items-center justify-between gap-2 py-3 text-left transition-colors hover:text-cs2-text-primary group"
       >
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold tracking-wide text-zinc-200">{title}</div>
-          {hint ? <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">{hint}</p> : null}
+          <div className="text-xs font-bold tracking-wide text-cs2-text-primary group-hover:text-cs2-accent transition-colors">{title}</div>
+          {hint ? <p className="mt-0.5 text-xs text-cs2-text-muted">{hint}</p> : null}
         </div>
         <ChevronDown
-          className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-4 w-4 shrink-0 text-cs2-text-muted transition-transform ${open ? "rotate-180" : ""}`}
           aria-hidden
         />
       </button>
-      {open ? <div className="space-y-2 pb-3">{children}</div> : null}
+      {open ? <div className="space-y-3 pb-3">{children}</div> : null}
+    </div>
+  );
+}
+
+function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const items = [
+    { label: "自动排序", icon: Zap, desc: "高光片段优先", fn: onAutoSort },
+    { label: "时间线顺序", icon: History, desc: "按回合与 tick 升序", fn: onTimelineSort },
+    { label: "节奏优先", icon: Waves, desc: "高光与下饭交错", fn: onRhythmSort },
+    { label: "随机", icon: Shuffle, desc: "随机打乱", fn: onRandomSort },
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <ToolbarMiniButton onClick={() => setOpen((v) => !v)} title="排序方式">
+        <ArrowUpDown className="h-3.5 w-3.5" />
+        排序
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </ToolbarMiniButton>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 min-w-[180px] rounded-xl border border-cs2-border bg-cs2-bg-card p-1.5 shadow-xl">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => { item.fn(); setOpen(false); }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs text-cs2-text-secondary transition-colors hover:bg-cs2-surface-2 hover:text-cs2-text-primary"
+            >
+              <item.icon className="h-4 w-4 shrink-0 text-cs2-text-muted" />
+              <div>
+                <div className="font-semibold text-cs2-text-primary">{item.label}</div>
+                <div className="text-[11px] text-cs2-text-muted mt-0.5">{item.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -99,38 +148,28 @@ export function MontageWorkbenchToolbar({
   onHistory,
 }) {
   return (
-    <header className={`flex h-[48px] shrink-0 items-center gap-2 border-b px-3 sm:px-4 ${isPage ? "border-white/[0.06] rounded-t-lg" : "border-white/10 bg-black/50"}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <Clapperboard className="h-4 w-4 shrink-0 text-cs2-orange" aria-hidden />
+    <header className={`flex h-14 shrink-0 items-center gap-3 border-b px-4 ${isPage ? "border-cs2-border rounded-t-lg" : "border-cs2-border bg-cs2-surface-1"}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <Clapperboard className="h-4 w-4 shrink-0 text-cs2-accent" aria-hidden />
         <div className="min-w-0">
-          <h2 id="montage-title" className="truncate text-[13px] font-bold text-white">
+          <h2 id="montage-title" className="truncate text-sm font-bold text-cs2-text-primary">
             {montageTitle}
           </h2>
-          <p className="truncate text-[10px] text-zinc-500">
-            <span className="text-zinc-400">{subtitle}</span>
-            <span className="mx-1.5 text-zinc-700">·</span>
+          <p className="truncate text-xs text-cs2-text-muted mt-0.5">
+            <span className="text-cs2-text-secondary">{subtitle}</span>
+            <span className="mx-1.5 text-cs2-text-muted">·</span>
             <span>{autosaveLabel}</span>
           </p>
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-        <ToolbarMiniButton onClick={onAutoSort} title="高光片段优先排序当前时间线">
-          <Zap className="h-3.5 w-3.5" />
-          自动排序
-        </ToolbarMiniButton>
-        <ToolbarMiniButton onClick={onTimelineSort} title="按 Demo 回合与 tick 升序（时间线片段建议）">
-          <History className="h-3.5 w-3.5" />
-          时间线顺序
-        </ToolbarMiniButton>
-        <ToolbarMiniButton onClick={onRhythmSort} title="高光与下饭交错">
-          <Waves className="h-3.5 w-3.5" />
-          节奏优先
-        </ToolbarMiniButton>
-        <ToolbarMiniButton onClick={onRandomSort} title="随机打乱当前顺序">
-          <Shuffle className="h-3.5 w-3.5" />
-          随机
-        </ToolbarMiniButton>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <SortDropdown
+          onAutoSort={onAutoSort}
+          onTimelineSort={onTimelineSort}
+          onRhythmSort={onRhythmSort}
+          onRandomSort={onRandomSort}
+        />
         <ToolbarMiniButton onClick={onHistory} title="查看历史合集记录">
           <History className="h-3.5 w-3.5" />
           历史
@@ -143,7 +182,7 @@ export function MontageWorkbenchToolbar({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+            className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-colors"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />
@@ -158,7 +197,7 @@ function ToolbarMiniButton({ children, className = "", ...props }) {
   return (
     <button
       type="button"
-      className={`inline-flex h-8 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium text-zinc-300 hover:border-white/18 hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-35 ${className}`}
+      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:bg-cs2-surface-2 hover:text-cs2-text-primary transition-all disabled:cursor-not-allowed disabled:opacity-35 ${className}`}
       {...props}
     >
       {children}
@@ -205,17 +244,17 @@ function MontageTransitionEdgeEditor({
   const durMs = eff.type === "none" ? 0 : Math.round(Math.min(1.5, eff.duration) * 1000);
 
   return (
-    <div className="mx-2 mb-2 ml-7 rounded-lg border border-cs2-orange/30 bg-black/50 px-3 py-2.5 shadow-inner">
-      <p className="text-[10px] text-zinc-500">
-        衔接至下一段：
-        <span className="font-medium text-zinc-300" title={nextClip?.output_path}>
+    <div className="mx-2 mb-2 ml-7 rounded-xl border border-cs2-accent/40 bg-cs2-surface-2 p-3.5 shadow-inner transition-all">
+      <p className="text-xs text-cs2-text-muted flex items-center gap-1.5">
+        <span>衔接至下一段：</span>
+        <span className="font-bold text-cs2-text-primary truncate max-w-[240px]" title={nextClip?.output_path}>
           {pathBasenameQuick(nextClip?.output_path) || getClipTitle(nextClip)}
         </span>
       </p>
-      <p className="mt-1 font-mono text-[11px] font-semibold text-cs2-orange">
-        {formatTransitionLine?.(transitionByClipId, sourceClipId) || "默认"}
+      <p className="mt-1.5 font-mono text-xs font-bold text-cs2-accent">
+        {formatTransitionLine?.(transitionByClipId, sourceClipId) || "默认快切"}
       </p>
-      <div className="mt-2 flex flex-wrap gap-1">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {transitionTypeOptions.map((opt) => {
           const tid = opt.id;
           const active = eff.type === tid;
@@ -227,10 +266,10 @@ function MontageTransitionEdgeEditor({
                 if (tid === "none") patchTransition(sourceClipId, { type: "none", duration: 0 });
                 else patchTransition(sourceClipId, { type: tid });
               }}
-              className={`rounded border px-2 py-0.5 text-[9px] font-semibold ${
+              className={`rounded-lg border px-3 py-1 text-xs font-semibold transition-all ${
                 active
-                  ? "border-cs2-orange/60 bg-cs2-orange/20 text-cs2-orange"
-                  : "border-white/10 bg-black/40 text-zinc-400 hover:border-white/25"
+                  ? "border-cs2-accent bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                  : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary"
               }`}
             >
               {opt.label}
@@ -238,10 +277,10 @@ function MontageTransitionEdgeEditor({
           );
         })}
       </div>
-      <div className="mt-2">
-        <div className="flex items-center justify-between gap-2 text-[10px] text-zinc-500">
-          <span>本条时长</span>
-          <span className="font-mono text-cs2-orange">{durMs} ms</span>
+      <div className="mt-3.5">
+        <div className="flex items-center justify-between gap-2 text-xs text-cs2-text-muted">
+          <span>转场衔接时长</span>
+          <span className="font-mono font-bold text-cs2-accent">{durMs} ms</span>
         </div>
         <input
           type="range"
@@ -255,11 +294,11 @@ function MontageTransitionEdgeEditor({
               duration: Math.min(1.5, Number(e.target.value) / 1000),
             })
           }
-          className="mt-1 h-1.5 w-full accent-cs2-orange disabled:opacity-35"
+          className="mt-1.5 h-2 w-full rounded-lg bg-cs2-bg-input accent-cs2-accent cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
         />
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] text-zinc-500">精确秒</span>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-cs2-text-muted">精确设置 (秒)</span>
         <input
           type="text"
           inputMode="decimal"
@@ -273,8 +312,8 @@ function MontageTransitionEdgeEditor({
               applyDurSeconds();
             }
           }}
-          className="w-20 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200 outline-none focus:border-cs2-orange/45 disabled:opacity-40"
-          placeholder="秒"
+          className="w-24 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent disabled:opacity-40 transition-all"
+          placeholder="0.25"
         />
       </div>
     </div>
@@ -357,109 +396,94 @@ export function MontageOrchestrationTimeline({
   }, [clips, transitionByClipId, formatTransitionLine]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-white/15 bg-gradient-to-b from-[#16161f] via-[#12121a] to-[#0d0d12] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-black/25 px-3 py-2">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-surface-1 shadow-lg">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cs2-border-subtle p-4">
         <div>
-          <p className="text-[12px] font-bold tracking-wide text-zinc-100">合集结构</p>
-          <p className="text-[10px] text-zinc-500">拖拽排序 · Ctrl 多选 · 点两条片段之间的「转场」可单独改衔接</p>
+          <p className="text-sm font-bold tracking-wide text-cs2-text-primary">合集编排主线</p>
+          <p className="text-xs text-cs2-text-muted mt-0.5">拖拽排序 · Ctrl 多选 · 点击连线专属配置独立转场</p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onClearTimeline}
             disabled={!timelineClipCount}
-            className="rounded-md px-2 py-1 text-[10px] font-medium text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300 disabled:opacity-30"
+            className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all disabled:opacity-30"
           >
-            清空
+            清空主线
           </button>
           {multiCount > 0 ? (
             <>
               <button
                 type="button"
                 onClick={onBulkMoveUp}
-                title="连续选中时整体上移一格"
-                className="inline-flex items-center gap-0.5 rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] font-medium text-zinc-300 hover:border-cs2-orange/35"
+                title="整体上移一格"
+                className="inline-flex items-center gap-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus transition-all"
               >
-                <ArrowUp className="h-3 w-3" />
+                <ArrowUp className="h-3.5 w-3.5" />
                 上移
               </button>
               <button
                 type="button"
                 onClick={onBulkMoveDown}
-                title="连续选中时整体下移一格"
-                className="inline-flex items-center gap-0.5 rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] font-medium text-zinc-300 hover:border-cs2-orange/35"
+                title="整体下移一格"
+                className="inline-flex items-center gap-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus transition-all"
               >
-                <ArrowDown className="h-3 w-3" />
+                <ArrowDown className="h-3.5 w-3.5" />
                 下移
               </button>
+              <button
+                type="button"
+                onClick={onBulkRemove}
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-600 transition-all shadow-sm"
+              >
+                批量移除 ({multiCount})
+              </button>
             </>
-          ) : null}
-          {multiCount > 0 ? (
-            <button
-              type="button"
-              onClick={onBulkRemove}
-              className="rounded-md border border-red-500/35 bg-red-950/25 px-2 py-1 text-[10px] font-semibold text-red-200 hover:bg-red-950/40"
-            >
-              移除 ({multiCount})
-            </button>
           ) : null}
         </div>
       </div>
       {timelineClipCount >= 2 ? (
-        <div className="shrink-0 space-y-2 border-b border-white/10 bg-black/30 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[10px] font-semibold text-zinc-500">全局类型</span>
-            <div className="flex flex-wrap gap-1">
-              {transitionTypeOptions.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => onApplyGlobalTransitionType(opt.id)}
-                  className="rounded border border-white/10 bg-black/40 px-2 py-0.5 text-[9px] font-medium text-zinc-300 hover:border-cs2-orange/40"
-                >
-                  {opt.label}
-                </button>
-              ))}
+        <div className="shrink-0 border-b border-cs2-border-subtle bg-cs2-surface-2/60 px-4 py-2">
+          <CollapsibleSection title="全局转场一键设定" hint="整体切换风格与节奏" defaultOpen={false}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
+              <span className="text-xs font-bold text-cs2-text-muted w-16">基础类型</span>
+              <div className="flex flex-wrap gap-1.5">
+                {transitionTypeOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onApplyGlobalTransitionType(opt.id)}
+                    className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-text-primary transition-all"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1">
-            <button
-              type="button"
-              onClick={() => onApplyGlobalDurationToAll()}
-              className="rounded border border-white/12 bg-white/[0.04] px-2 py-1 text-[9px] font-semibold text-zinc-300 hover:border-cs2-orange/35"
-            >
-              统一时长
-            </button>
-            <button
-              type="button"
-              onClick={onApplyRandomTransitions}
-              className="rounded border border-white/12 bg-white/[0.04] px-2 py-1 text-[9px] font-semibold text-zinc-300 hover:border-cs2-orange/35"
-            >
-              随机
-            </button>
-            <button
-              type="button"
-              onClick={onApplyKillTypeTransitions}
-              className="rounded border border-white/12 bg-white/[0.04] px-2 py-1 text-[9px] font-semibold text-zinc-300 hover:border-cs2-orange/35"
-            >
-              按击杀
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[10px] font-semibold text-zinc-600">模板</span>
-            <div className="flex flex-wrap gap-1">
-              {globalTransitionTemplates.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  onClick={() => onApplyGlobalTemplate(tpl.id, tpl.label)}
-                  className="rounded border border-white/10 bg-black/35 px-2 py-0.5 text-[9px] text-zinc-300 hover:border-cs2-orange/40"
-                >
-                  {tpl.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
+              <span className="text-xs font-bold text-cs2-text-muted w-16">节奏生成</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button type="button" onClick={() => onApplyGlobalDurationToAll()} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">统一时长</button>
+                <button type="button" onClick={onApplyRandomTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">全随机打乱</button>
+                <button type="button" onClick={onApplyKillTypeTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">智能分析击杀节奏</button>
+              </div>
             </div>
-          </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
+              <span className="text-xs font-bold text-cs2-text-muted w-16">风格模板</span>
+              <div className="flex flex-wrap gap-1.5">
+                {globalTransitionTemplates.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => onApplyGlobalTemplate(tpl.id, tpl.label)}
+                    className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </CollapsibleSection>
         </div>
       ) : null}
       <div
@@ -477,14 +501,14 @@ export function MontageOrchestrationTimeline({
         }}
       >
         {clips.length === 0 ? (
-          <div className="flex min-h-[200px] flex-col items-center justify-center rounded-lg border border-dashed border-white/15 bg-black/20 px-4 py-10 text-center">
-            <p className="text-[12px] font-medium text-zinc-400">尚未编排片段</p>
-            <p className="mt-1 max-w-sm text-[11px] leading-relaxed text-zinc-600">
-              从左侧素材池挑选并拖入，或使用顶部排序整理已有顺序。
+          <div className="flex min-h-[220px] flex-col items-center justify-center rounded-xl border border-dashed border-cs2-border-subtle bg-cs2-surface-1 p-8 text-center">
+            <p className="text-sm font-bold text-cs2-text-secondary">时间线空闲中</p>
+            <p className="mt-2 max-w-md text-xs leading-relaxed text-cs2-text-muted">
+              从左侧素材池点选多条素材进行批量导入，或直接将卡片拖拽进入下方区域排布您的合辑结构。
             </p>
           </div>
         ) : (
-          <ul className="flex flex-col gap-0">
+          <ul className="flex flex-col gap-1.5">
             {rows.map(
               ({
                 clip,
@@ -509,6 +533,9 @@ export function MontageOrchestrationTimeline({
               const dragging = dragId === clip.id;
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = getMontageBlockShortLabel(clip);
+              const suppressMontageAi = variant === "timeline" || variant === "compilation";
+              const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip);
+              const outBase = pathBasenameQuick(clip?.output_path);
               return (
                 <li key={clip.id} className="flex flex-col">
                   <div
@@ -526,86 +553,99 @@ export function MontageOrchestrationTimeline({
                         onRowPointerDown(e, clip.id);
                       }
                     }}
-                    className={`relative flex cursor-grab gap-2 rounded-lg border px-3 py-3 text-left shadow-md shadow-black/50 transition-[border,box-shadow,background] active:cursor-grabbing ${
+                    className={`relative flex cursor-grab gap-2.5 rounded-xl border p-3.5 text-left transition-all active:cursor-grabbing ${
                       inMulti
-                        ? "border-cs2-orange/50 bg-cs2-orange/[0.09] ring-1 ring-cs2-orange/35"
-                        : "border-white/12 bg-zinc-900/85 hover:border-white/20"
-                    } ${active ? "ring-2 ring-cs2-orange/45" : ""} ${dragging ? "opacity-50" : ""}`}
+                        ? "border-cs2-accent bg-cs2-surface-2 shadow-glow-accent"
+                        : "border-cs2-border-subtle bg-cs2-surface-1 hover:border-cs2-border-focus hover:bg-cs2-surface-2"
+                    } ${active ? "ring-2 ring-cs2-accent" : ""} ${dragging ? "opacity-40 scale-[0.99]" : ""}`}
                   >
-                    <div className={`absolute inset-y-2 left-0 w-1 rounded-full ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`} />
-                    <GripVertical className="mt-1 h-5 w-5 shrink-0 text-zinc-500" aria-hidden />
+                    {/* 左侧类型高亮竖条 */}
+                    <div className={`absolute left-0 top-3 bottom-3 w-1.5 rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`} />
+                    <GripVertical className="mt-1 h-4 w-4 shrink-0 text-cs2-text-muted cursor-grab" aria-hidden />
+                    
                     <div className="min-w-0 flex-1 pl-1">
-                      <div className="font-mono text-[10px] text-zinc-600">#{rowIndex}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                        <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${vCls}`}>{killBadge}</span>
-                        <span className="truncate text-[13px] font-bold text-white">{clip.player_name || "未知玩家"}</span>
+                      {/* 首行核心标题区 */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-semibold text-cs2-text-muted shrink-0">#{rowIndex}</span>
+                        <span className={`rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wider shrink-0 ${vCls}`}>{killBadge}</span>
+                        <span className="truncate text-sm font-bold text-cs2-text-primary">{clip.player_name || "未知玩家"}</span>
+                        <span className="ml-auto font-mono text-xs font-bold text-cs2-accent bg-cs2-accent-soft px-2 py-0.5 rounded-md shrink-0">
+                          {dur != null ? `${dur.toFixed(1)}s` : "?s"}
+                        </span>
                       </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-400">
-                        {rnd != null ? (
-                          <span className="rounded border border-white/[0.08] bg-black/30 px-1.5 py-px font-mono text-zinc-300">
-                            R{rnd}
-                          </span>
+
+                      {/* 摘要行：武器、地图、回合、比分（详情拆到下方，避免 truncate + 仅靠 hover） */}
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
+                        {weapon ? <span className="font-medium text-cs2-text-secondary">{weapon}</span> : null}
+                        {weapon && (mapName || rnd != null) ? <span>•</span> : null}
+                        {mapName ? <span className="break-words text-cs2-text-secondary">{mapName}</span> : null}
+                        {getClipRoundLabel(clip) != null ? (
+                          <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
                         ) : null}
                         {scorePair ? (
-                          <span className="rounded-md bg-white/[0.07] px-1.5 py-px font-mono font-semibold text-zinc-200">
+                          <span className="font-mono font-semibold text-cs2-text-primary">
                             {scorePair.left}:{scorePair.right}
                           </span>
                         ) : null}
-                        {mapName ? (
-                          <span className="truncate text-zinc-500" title={mapName}>
-                            {mapName}
-                          </span>
-                        ) : null}
                       </div>
-                      <div className="mt-2 border-t border-white/[0.06] bg-white/[0.02] px-1 py-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="rounded-md border border-white/10 bg-black/40 px-2 py-0.5 font-mono text-[10px] tabular-nums text-zinc-200">
-                            {dur != null ? `${dur.toFixed(1)}s` : "时长 ?"}
-                          </span>
-                          {factLine ? (
-                            <p className="min-w-0 flex-1 truncate text-right font-mono text-[10px] leading-snug text-zinc-500" title={factLine}>
-                              {factLine}
-                            </p>
-                          ) : (
-                            <span className="text-[10px] text-zinc-600">—</span>
-                          )}
-                        </div>
-                      </div>
+
+                      {factLine ? (
+                        <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-secondary break-words">
+                          {factLine}
+                        </p>
+                      ) : null}
+
+                      {/* 次级状态微标区 */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {victimSegCount > 0 ? (
-                          <span
-                            className="max-w-[11rem] truncate rounded-md bg-violet-500/15 px-1.5 py-px text-[10px] font-semibold text-violet-100"
-                            title={povTip || undefined}
-                          >
-                            含 {victimSegCount} 段受害者视角
+                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface">
+                            受害者视角 ×{victimSegCount}
                           </span>
                         ) : null}
                         <span
-                          className={`max-w-[14rem] truncate rounded-md px-1.5 py-px text-[10px] font-semibold ${
+                          className={`rounded px-2 py-0.5 text-xs font-medium ${
                             perspectivePrimary !== "观战视角"
-                              ? "bg-sky-500/15 text-sky-200"
-                              : "bg-zinc-800 text-zinc-600"
+                              ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+                              : "bg-cs2-bg-input text-cs2-text-muted"
                           }`}
-                          title={perspectiveZh}
                         >
                           {perspectivePrimary}
                         </span>
                         {clip.pov_hud_enabled === true ? (
-                          <span className="rounded-md bg-sky-500/15 px-1.5 py-px text-[10px] font-bold text-sky-200">HUD</span>
+                          <span className="rounded bg-cs2-cyan-surface px-2 py-0.5 text-xs font-bold text-cs2-cyan-on-surface">HUD</span>
                         ) : null}
                       </div>
-                      {weapon ? (
-                        <p className="mt-1.5 text-[10px] text-zinc-500">
-                          <span className="text-zinc-600">武器</span>{" "}
-                          <span className="font-medium text-zinc-300">{weapon}</span>
+                      {povTip ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          {povTip}
                         </p>
                       ) : null}
+                      {perspectiveZh !== perspectivePrimary ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          录制视角：{perspectiveZh}
+                        </p>
+                      ) : null}
+                      {aiLine ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed italic text-cs2-text-muted break-words">
+                          {aiLine}
+                        </p>
+                      ) : null}
+                      {outBase ? (
+                        <p
+                          className="mt-1.5 font-mono text-[10px] text-cs2-text-muted/90 break-all"
+                          title={String(clip.output_path || "")}
+                        >
+                          {outBase}
+                        </p>
+                      ) : null}
+
+                      {/* 标签列表 */}
                       {tags.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {tags.map((t) => (
                             <span
                               key={t}
-                              className="rounded-md border border-white/[0.07] bg-black/35 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400"
+                              className="rounded-md bg-cs2-bg-input px-2 py-0.5 text-xs font-medium text-cs2-text-secondary"
                             >
                               {t}
                             </span>
@@ -613,36 +653,39 @@ export function MontageOrchestrationTimeline({
                         </div>
                       ) : null}
                     </div>
+
                     <button
                       type="button"
                       onClick={(ev) => {
                         ev.stopPropagation();
                         onRemoveOne(clip.id);
                       }}
-                      className="shrink-0 self-start rounded-md p-2 text-zinc-500 hover:bg-red-500/15 hover:text-red-300"
+                      className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
                       aria-label="从时间线移除"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
+
+                  {/* 两单行之间的转场配置纽带连线区 */}
                   {next ? (
                     <>
-                      <div className="relative flex justify-center py-1">
-                        <div className="absolute inset-y-0 left-5 w-px bg-gradient-to-b from-cs2-orange/45 via-cs2-orange/15 to-cs2-orange/45" />
+                      <div className="relative flex justify-center py-2">
+                        <div className="absolute inset-y-0 left-6 w-0.5 bg-gradient-to-b from-cs2-accent via-cs2-accent-soft to-cs2-accent" />
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             onTransitionEdgeFocusChange?.(transitionEdgeSourceId === clip.id ? null : clip.id);
                           }}
-                          className={`relative z-[1] flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium shadow-sm transition-[border,box-shadow,background] ${
+                          className={`relative z-[1] flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold transition-all shadow-sm ${
                             transitionEdgeSourceId === clip.id
-                              ? "border-cs2-orange/70 bg-cs2-orange/15 text-cs2-orange ring-2 ring-cs2-orange/40"
-                              : "border-cs2-orange/25 bg-[#1a1410] text-cs2-orange/95 hover:border-cs2-orange/45"
+                              ? "border-cs2-accent bg-cs2-accent text-cs2-text-on-accent shadow-glow-accent scale-105"
+                              : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-text-primary"
                           }`}
                         >
-                          <span className="text-cs2-orange/60">转场</span>
-                          <span>{trLine || "默认"}</span>
+                          <span className="text-[11px] uppercase tracking-wider font-semibold opacity-75">衔接转场</span>
+                          <span>{trLine || "快切"}</span>
                         </button>
                       </div>
                       {transitionEdgeSourceId === clip.id ? (
@@ -717,7 +760,7 @@ export function MontageMaterialPoolCard({
   const playerName = clip.player_name?.trim() || "未知玩家";
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
-  const factLine = getMontageClipFactLine(clip);
+  const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
   const killBadge = getMontageBlockShortLabel(clip);
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = variant === "timeline" || variant === "compilation";
@@ -736,100 +779,106 @@ export function MontageMaterialPoolCard({
       onDragStart={(e) => onDragStart(e, clip.id)}
       onDragEnd={onDragEnd}
       onClick={(e) => onClickMulti(e, clip.id)}
-      className={`group relative min-h-[118px] shrink-0 overflow-hidden rounded-lg border bg-zinc-950/80 transition-colors ${
-        selected ? "border-cs2-orange/55 ring-1 ring-cs2-orange/25" : "border-white/[0.06] hover:border-white/14"
+      className={`group flex min-h-[110px] shrink-0 gap-2.5 rounded-xl bg-cs2-surface-1 p-3.5 transition-all cursor-grab border ${
+        selected
+          ? "border-cs2-accent shadow-glow-accent bg-cs2-surface-2"
+          : "border-cs2-border-subtle hover:border-cs2-border-focus hover:bg-cs2-surface-2"
       }`}
     >
       <div
-        className={`absolute inset-x-0 top-0 h-1 opacity-[0.72] ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
+        className={`w-1 shrink-0 self-stretch rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
         aria-hidden
       />
-      <div className="p-2.5 pt-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-mono text-[10px] font-semibold text-zinc-500">#{index}</span>
-            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${VARIANT_RING[variant] || VARIANT_RING.neutral}`}>
-              {killBadge}
-            </span>
-            <span className="truncate text-[13px] font-bold leading-snug text-white">{playerName}</span>
-          </div>
-          {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
-        </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-          <span className="flex min-w-0 items-center gap-1.5 font-medium text-zinc-200">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${mapNameAccentDotClass(mapName)}`} aria-hidden />
-            <span className="truncate">{mapName || "—"}</span>
-          </span>
-          {rnd != null ? (
-            <span className="rounded border border-white/[0.08] bg-black/35 px-1.5 py-px font-mono text-[10px] text-zinc-300">
-              R{rnd}
-            </span>
-          ) : null}
-          {scorePair ? (
-            <span className="rounded-md bg-white/[0.07] px-1.5 py-px font-mono text-[10px] font-semibold text-zinc-200">
-              {scorePair.left}:{scorePair.right}
-            </span>
-          ) : null}
-        </div>
-
-        {demoLabel ? (
-          <p className="mt-1 truncate text-[10px] text-zinc-600" title={factLine || demoLabel}>
-            <span className="mr-1 text-zinc-700">来源</span>
-            <span className="font-mono text-zinc-500">{demoLabel}</span>
-          </p>
-        ) : factLine ? (
-          <p className="mt-1 line-clamp-1 font-mono text-[10px] text-zinc-600" title={factLine}>
-            {factLine}
-          </p>
-        ) : null}
-        {demoLabel && factLine ? (
-          <p className="mt-0.5 line-clamp-1 font-mono text-[10px] text-zinc-600" title={factLine}>
-            {factLine.replace(/^[^·]*·\s*/, "")}
-          </p>
-        ) : null}
-
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {weaponShow ? (
-            <span className="max-w-[160px] truncate rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-zinc-200" title={weaponPrimary}>
-              {weaponShow}
-            </span>
-          ) : null}
-          {victimSegCount > 0 ? (
-            <span
-              className="max-w-[11rem] truncate rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-100"
-              title={povTip || undefined}
-            >
-              含 {victimSegCount} 段受害者视角
-            </span>
-          ) : null}
-          <span
-            className={`max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-              perspectivePrimary !== "观战视角" ? "bg-sky-500/15 text-sky-200" : "bg-zinc-800 text-zinc-500"
-            }`}
-            title={perspectiveZh}
-          >
-            {perspectivePrimary}
-          </span>
-          {clip.pov_hud_enabled === true ? (
-            <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-bold text-sky-200">HUD</span>
-          ) : null}
-        </div>
-
-        {tags.length ? (
-          <div className="mt-2 flex min-w-0 flex-wrap gap-1">
-            {tags.map((t) => (
-              <span
-                key={t}
-                className="truncate rounded-md border border-white/[0.06] bg-black/35 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-400"
-              >
-                {t}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div>
+          {/* 首行：左信息 + 右 AI / 删除（同高对齐，左右留白一致） */}
+          <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${VARIANT_RING[variant] || VARIANT_RING.neutral}`}>
+                {killBadge}
               </span>
-            ))}
+              <span className="truncate text-sm font-bold text-cs2-text-primary">{playerName}</span>
+              <span className="shrink-0 font-mono text-xs font-semibold text-cs2-accent bg-cs2-accent-soft px-2 py-0.5 rounded-md">
+                {dur != null ? `${dur.toFixed(1)}s` : "?s"}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
+              <button
+                type="button"
+                title="删除素材"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(clip);
+                }}
+                className="rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-        ) : null}
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-2">
+          {/* 次级合并说明行：地图、回合、武器 */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
+            {weaponShow ? <span className="font-medium text-cs2-text-secondary">{weaponShow}</span> : null}
+            {weaponShow && (mapName || rnd != null) ? <span>•</span> : null}
+            {mapName ? <span className="truncate max-w-[120px]">{mapName}</span> : null}
+            {getClipRoundLabel(clip) != null ? (
+              <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
+            ) : null}
+            {scorePair ? (
+              <span className="font-mono font-semibold text-cs2-text-primary">
+                {scorePair.left}:{scorePair.right}
+              </span>
+            ) : null}
+          </div>
+
+          {/* 事实摘要行：击杀数 + 被击杀玩家（截断防撑高） */}
+          {factLine ? (
+            <p className="mt-1.5 truncate text-[11px] text-cs2-text-secondary" title={factLine}>
+              {factLine}
+            </p>
+          ) : null}
+
+          {/* 视角徽标行 */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                perspectivePrimary !== "观战视角"
+                  ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+                  : "bg-cs2-bg-input text-cs2-text-muted"
+              }`}
+            >
+              {perspectivePrimary}
+            </span>
+            {clip.pov_hud_enabled === true ? (
+              <span className="rounded bg-cs2-cyan-surface px-1.5 py-0.5 text-[11px] font-bold text-cs2-cyan-on-surface">HUD</span>
+            ) : null}
+            {victimSegCount > 0 ? (
+              <span className="rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
+                受害者视角 ×{victimSegCount}
+              </span>
+            ) : null}
+          </div>
+
+          {/* 标签列表 */}
+          {tags.length ? (
+            <div className="mt-2 flex min-w-0 flex-wrap gap-1">
+              {tags.map((t) => (
+                <span
+                  key={t}
+                  className="truncate rounded-md bg-cs2-bg-input px-2 py-0.5 text-[11px] font-medium text-cs2-text-secondary"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {/* 底部操作区与辅助解说摘要 */}
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-cs2-border-subtle pt-2.5">
           <button
             type="button"
             onClick={(e) => {
@@ -837,40 +886,25 @@ export function MontageMaterialPoolCard({
               onAdd(clip.id);
             }}
             disabled={added}
-            className={`rounded-md border px-2.5 py-1 text-[10px] font-bold transition-colors ${
+            className={`rounded-lg px-3 py-1 text-xs font-bold transition-all ${
               added
-                ? "cursor-default border-emerald-500/25 bg-emerald-950/30 text-emerald-400/90"
-                : "border-cs2-orange/45 bg-cs2-orange/14 text-cs2-orange hover:bg-cs2-orange/22"
+                ? "cursor-default bg-cs2-bg-skeleton text-cs2-text-muted"
+                : "bg-cs2-accent text-cs2-text-on-accent hover:bg-cs2-accent-light hover:shadow-glow-accent"
             }`}
           >
-            {added ? "已在编排" : "加入编排"}
+            {added ? "已添加" : "加入"}
           </button>
           <div className="min-w-0 flex-1 text-right">
             {aiExplain ? (
-              <p className="line-clamp-2 text-[9px] leading-snug text-zinc-500" title={aiExplain}>
+              <p className="truncate text-[11px] text-cs2-text-muted" title={aiExplain}>
                 {aiExplain}
               </p>
             ) : (
-              <span className="text-[9px] text-zinc-600">—</span>
+              <span className="font-mono text-xs text-cs2-text-muted">#{index}</span>
             )}
           </div>
         </div>
-        {selected ? (
-          <p className="mt-1.5 text-center text-[9px] font-medium text-cs2-orange">已选中 · 点列表上方「批量加入编排」</p>
-        ) : null}
       </div>
-
-      <button
-        type="button"
-        title="删除素材"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(clip);
-        }}
-        className="absolute bottom-1.5 right-1.5 rounded p-1 text-zinc-600 opacity-0 transition-opacity hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
     </li>
   );
 }

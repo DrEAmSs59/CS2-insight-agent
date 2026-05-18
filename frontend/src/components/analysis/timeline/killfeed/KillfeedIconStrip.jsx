@@ -64,7 +64,7 @@ export default function KillfeedIconStrip({ event, weaponName = "", weaponKey = 
   if (event?.is_wallbang) parts.push(<HudChainImg key="wb" chain={["penetrate"]} title="穿墙" />);
 
   return (
-    <span className="inline-flex items-center gap-0.5 rounded border border-white/[0.07] bg-black/50 px-1 py-0.5">
+    <span className="killfeed-icon-strip inline-flex items-center gap-0.5 rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1">
       {parts}
     </span>
   );

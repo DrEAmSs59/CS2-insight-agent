@@ -2,11 +2,9 @@ import { create } from "zustand";
 
 /**
  * @typedef {Object} PacingOverride
- * @property {number} [pre_first_sec]   首杀前预滚（秒）
- * @property {number} [post_last_sec]   末杀后留白（秒）
- * @property {number} [max_gap_sec]     智能分段最大击杀间隔（秒）
- * @property {number} [post_mid_sec]    中间击杀后停顿（秒），闪切前保留
- * @property {number} [pre_cont_sec]    跳跃后切入缓冲（秒），闪切后至下次开枪
+ * @property {number} [pre_first_sec]   击杀段前预留（秒），每段首杀前回拨
+ * @property {number} [post_last_sec]   击杀段后预留（秒），每段末杀后收束（含智能跳剪中段；非每个击杀各加一段尾垫）
+ * @property {number} [max_gap_sec]     跳剪间隔阈值（秒），超过则拆成新击杀段
  * @property {boolean} [victim_pov]     是否追加 POV（高光→受害者、失误→击杀者）
  * @property {number} [victim_pov_pre_sec]
  * @property {number} [victim_pov_post_sec]
@@ -16,14 +14,12 @@ import { create } from "zustand";
 
 /**
  * 全局节奏默认值，与后端 build_smart_jump_segments 的硬编码默认值保持一致：
- *   PRE_FIRST = 5.5s  POST_LAST = 3.0s  MAX_GAP = 12s  POST_MID = 1.5s  PRE_CONT = 5.0s
+ *   PRE_FIRST = 2s  POST_LAST = 1s  MAX_GAP = 12s；续段预滚同 PRE_FIRST；中段末杀后留白同 POST_LAST
  */
 export const BACKEND_DEFAULT_PACING = {
-  pre_first_sec: 5.5,
-  post_last_sec: 3.0,
+  pre_first_sec: 2,
+  post_last_sec: 1,
   max_gap_sec: 12,
-  post_mid_sec: 2,
-  pre_cont_sec: 5.0,
 };
 
 /**
@@ -168,7 +164,7 @@ export const useRecordingQueue = create((set, get) => ({
 
   /**
    * 合并单片段剪辑节奏；可传部分字段。支持的键：
-   * pre_first_sec, post_last_sec, max_gap_sec, post_mid_sec, pre_cont_sec
+   * pre_first_sec, post_last_sec, max_gap_sec
    * @param {string} id
    * @param {PacingOverride} pacingConfig
    */
@@ -201,7 +197,7 @@ export const useRecordingQueue = create((set, get) => ({
   },
 
   /**
-   * 重置「智能分段」数值（开场预留 / 结尾留白 / 防跳剪阈值），保留入队默认开关与 POV 时序默认值。
+   * 重置「智能分段」数值（击杀段前预留 / 击杀段后预留 / 跳剪间隔阈值），保留入队默认开关与 POV 时序默认值。
    */
   resetGlobalPacing() {
     set((s) => {

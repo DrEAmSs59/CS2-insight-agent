@@ -53,8 +53,6 @@ export default function Sidebar({
   onFfmpegPathChange,
   montageEncoder = "auto",
   onMontageEncoderChange,
-  cs2FpsMax = 240,
-  onCs2FpsMaxChange,
   demoWatchPaths = [],
   onDemoWatchPathsChange,
   onSaveConfig,
@@ -116,8 +114,8 @@ export default function Sidebar({
       {/* Logo */}
       <div className="px-4 py-5 border-b border-cs2-border">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded bg-cs2-orange/20 flex items-center justify-center">
-            <Monitor className="w-4 h-4 text-cs2-orange" />
+          <div className="w-8 h-8 rounded bg-cs2-accent/20 flex items-center justify-center">
+            <Monitor className="w-4 h-4 text-cs2-accent" />
           </div>
           <div>
             <div className="text-sm font-bold tracking-wide">CS2 洞察</div>
@@ -131,14 +129,14 @@ export default function Sidebar({
         <div className="text-[10px] font-semibold text-cs2-text-secondary tracking-widest uppercase mb-3">
           分析模式
         </div>
-        <div className="grid grid-cols-2 gap-1 bg-cs2-bg-dark rounded-lg p-1">
+        <div className="grid grid-cols-2 gap-1 bg-cs2-bg-page rounded-lg p-1">
           <button
             type="button"
             onClick={() => void onAiModeChange(false)}
             className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-semibold transition-all ${
               !aiMode
-                ? "bg-cs2-orange text-black shadow-lg shadow-cs2-orange/20"
-                : "text-cs2-text-secondary hover:text-white"
+                ? "bg-cs2-accent text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20"
+                : "text-cs2-text-secondary hover:text-cs2-text-primary"
             }`}
           >
             <Zap className="w-3.5 h-3.5" />
@@ -149,8 +147,8 @@ export default function Sidebar({
             onClick={() => void onAiModeChange(true)}
             className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-semibold transition-all ${
               aiMode
-                ? "bg-cs2-orange text-black shadow-lg shadow-cs2-orange/20"
-                : "text-cs2-text-secondary hover:text-white"
+                ? "bg-cs2-accent text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20"
+                : "text-cs2-text-secondary hover:text-cs2-text-primary"
             }`}
           >
             <Brain className="w-3.5 h-3.5" />
@@ -193,13 +191,13 @@ export default function Sidebar({
                 onFocus={() => onObsPasswordFocus?.()}
                 onBlur={() => onObsPasswordBlur?.()}
                 autoComplete="new-password"
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
               />
             </div>
             <button
               onClick={testObs}
               disabled={obsTesting}
-              className="w-full py-2 rounded-md text-xs font-semibold bg-cs2-bg-input border border-cs2-border hover:border-cs2-orange/50 transition-colors disabled:opacity-50"
+              className="w-full py-2 rounded-md text-xs font-semibold bg-cs2-bg-input border border-cs2-border hover:border-cs2-accent/50 transition-colors disabled:opacity-50"
             >
               {obsTesting ? "测试中..." : "测试连接"}
             </button>
@@ -259,7 +257,7 @@ export default function Sidebar({
                 value={montageEncoder ?? "auto"}
                 onChange={(e) => onMontageEncoderChange?.(e.target.value)}
                 onBlur={() => onSaveConfig?.({ montage_encoder: montageEncoder ?? "auto" })}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white transition-colors focus:border-cs2-orange/50 focus:outline-none"
+                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
               >
                 <option value="auto">自动（优先 NVENC → QSV → AMF，否则 x264）</option>
                 <option value="h264_nvenc">NVIDIA NVENC</option>
@@ -268,33 +266,18 @@ export default function Sidebar({
                 <option value="libx264">x264 软件（CPU）</option>
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                录制帧率上限 (fps_max，0=不限制)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={9999}
-                step={10}
-                value={cs2FpsMax}
-                onChange={(e) => onCs2FpsMaxChange?.(Number(e.target.value))}
-                onBlur={() => onSaveConfig?.({ cs2_fps_max: cs2FpsMax })}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
-              />
-            </div>
             <button
               type="button"
               onClick={handleDetectCs2}
               disabled={detectingCs2}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
             >
               <ScanSearch className="h-3.5 w-3.5" />
               {detectingCs2 ? "探测中…" : "自动探测"}
             </button>
             <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
               一键录制会启动本机 CS2 播放 Demo。若探测失败，请从 Steam 库右键 CS2 → 管理 → 浏览本地文件，找到
-              <span className="font-mono text-zinc-500"> game\bin\win64\cs2.exe </span>
+              <span className="font-mono text-cs2-text-muted"> game\bin\win64\cs2.exe </span>
               并粘贴完整路径。
             </p>
           </div>
@@ -327,11 +310,11 @@ export default function Sidebar({
                 value={watchPathInput}
                 onChange={(e) => setWatchPathInput(e.target.value)}
                 placeholder="D:\\SteamLibrary\\...\\csgo"
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
               />
               <button
                 type="button"
-                className="rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-xs font-semibold hover:border-cs2-orange/50"
+                className="rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-xs font-semibold hover:border-cs2-accent/50"
                 onClick={() => {
                   const p = watchPathInput.trim();
                   if (!p) return;
@@ -348,9 +331,9 @@ export default function Sidebar({
               {(demoWatchPaths || []).map((p) => (
                 <div
                   key={p}
-                  className="flex items-center justify-between rounded border border-white/10 bg-cs2-bg-input/60 px-2 py-1"
+                  className="flex items-center justify-between rounded border border-cs2-border bg-cs2-bg-input/60 px-2 py-1"
                 >
-                  <span className="truncate font-mono text-[10px] text-zinc-300">{p}</span>
+                  <span className="truncate font-mono text-[10px] text-cs2-text-secondary">{p}</span>
                   <button
                     type="button"
                     className="text-[10px] text-cs2-fail hover:opacity-80"
@@ -369,7 +352,7 @@ export default function Sidebar({
               type="button"
               disabled={demoLibraryLoading}
               onClick={() => void onScanDemos?.()}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
             >
               <ScanSearch className={`h-3.5 w-3.5 ${demoLibraryLoading ? "animate-spin" : ""}`} />
               扫描现有 Demo
@@ -399,20 +382,20 @@ export default function Sidebar({
         {expectedPlayersOpen && (
           <div className="space-y-2 px-4 pb-4">
             <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
-              每行一个游戏内昵称，<strong className="text-zinc-400">可写多行多名</strong>。
-              <strong className="text-zinc-400">不会</strong>自动拆高光；要出片段请在库里选中后自行点解析。
+              每行一个游戏内昵称，<strong className="text-cs2-text-secondary">可写多行多名</strong>。
+              <strong className="text-cs2-text-secondary">不会</strong>自动拆高光；要出片段请在库里选中后自行点解析。
             </p>
             <textarea
               rows={5}
               value={expectedParsePlayersText}
               onChange={(e) => onExpectedParsePlayersTextChange?.(e.target.value)}
               placeholder={"PlayerOne\nPlayerTwo"}
-              className="w-full resize-y rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[11px] text-white placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+              className="w-full resize-y rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[11px] text-cs2-text-primary placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
               spellCheck={false}
             />
             <button
               type="button"
-              className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-orange/50"
+              className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50"
               onClick={() => void onSaveExpectedParsePlayers?.()}
             >
               保存名单
@@ -459,9 +442,9 @@ export default function Sidebar({
               />
 
               {isLocal && (
-                <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-md bg-cs2-orange/10 border border-cs2-orange/20">
-                  <Server className="w-3 h-3 text-cs2-orange shrink-0" />
-                  <span className="text-[10px] text-cs2-orange">
+                <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-md bg-cs2-accent/10 border border-cs2-accent/20">
+                  <Server className="w-3 h-3 text-cs2-accent shrink-0" />
+                  <span className="text-[10px] text-cs2-accent">
                     检测到本机地址：可不填 API 密钥（后端使用占位密钥调用兼容接口）。
                   </span>
                 </div>
@@ -473,7 +456,7 @@ export default function Sidebar({
                     API 密钥
                   </label>
                   {llmKeySavedOnServer && !llmConfig.api_key?.trim() && (
-                    <p className="mb-1.5 text-[10px] leading-relaxed text-emerald-500/90">
+                    <p className="mb-1.5 text-[10px] leading-relaxed text-cs2-emerald-on-surface/90">
                       密钥已在服务器保存（刷新不显示明文）。若要更换，输入新密钥后失焦即可覆盖。
                     </p>
                   )}
@@ -488,12 +471,12 @@ export default function Sidebar({
                       }
                       onChange={(e) => onLlmConfigChange({ ...llmConfig, api_key: e.target.value })}
                       onBlur={schedulePersistLlm}
-                      className="w-full bg-cs2-bg-input border border-cs2-border rounded-md px-3 py-2 pr-9 text-xs text-white placeholder-cs2-text-secondary/50 focus:outline-none focus:border-cs2-orange/50 transition-colors font-mono"
+                      className="w-full bg-cs2-bg-input border border-cs2-border rounded-md px-3 py-2 pr-9 text-xs text-cs2-text-primary placeholder-cs2-text-secondary/50 focus:outline-none focus:border-cs2-accent/50 transition-colors font-mono"
                     />
                     <button
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary hover:text-white transition-colors"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary hover:text-cs2-text-primary transition-colors"
                     >
                       {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
@@ -526,7 +509,7 @@ function Input({ label, value, type = "text", placeholder, onChange, onBlur }) {
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+        className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
       />
     </div>
   );

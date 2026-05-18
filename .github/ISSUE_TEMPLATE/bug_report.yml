@@ -1,0 +1,77 @@
+name: Bug 报告
+description: 报告可复现的缺陷或异常行为
+title: "[Bug]: "
+labels:
+  - type: bug
+  - status: needs-repro
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量提供可复现信息；维护者会用 `status: needs-repro` / `status: confirmed` 等标签跟进。
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: 检索
+      options:
+        - label: 我已搜索现有 Issues，未发现重复
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: 现象摘要
+      description: 一句话说明「实际发生了什么」。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 编号步骤、涉及的操作路径或接口。
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: OS、应用版本、相关配置路径（可打码敏感信息）。
+      value: |
+        - OS:
+        - 应用版本 / 分支:
+        - 是否仅 Windows 录制相关:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 粘贴 `data/logs` 片段、界面截图或 Demo 文件名等（自动按纯文本处理即可）。
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: 可能模块（可选）
+      multiple: true
+      options:
+        - OBS
+        - demo-parser
+        - recorder
+        - radar
+        - UI
+        - settings
+        - release
+        - installer
+        - 不确定
+    validations:
+      required: false

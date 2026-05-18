@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
-from .radar.radar_composer import RadarOverlaySkip, apply_radar_overlay_to_clip
 
 logger = logging.getLogger(__name__)
 
@@ -404,8 +403,6 @@ def compose_montage(
     output_path: Path,
     transitions: Optional[dict[str, Any]] = None,
     clip_row_ids: Optional[list[int]] = None,
-    radar_overlay: Optional[dict[str, Any]] = None,
-    clip_rows: Optional[list[dict[str, Any]]] = None,
     bgm_volume: Optional[float] = None,
     bgm_start_sec: Optional[float] = None,
     intro_image_duration: Optional[float] = None,
@@ -433,32 +430,6 @@ def compose_montage(
     tmpdir = tempfile.mkdtemp(prefix="cs2_montage_", dir=str(output_path.parent))
     try:
         working_clip_paths = list(clip_paths)
-        if radar_overlay and radar_overlay.get("enabled"):
-            if not clip_rows or len(clip_rows) != len(clip_paths):
-                raise MontageComposerError("启用雷达覆盖需要完整的片段元数据")
-            radar_stage = Path(tmpdir) / "radar_stage"
-            radar_stage.mkdir(parents=True, exist_ok=True)
-            radar_clip_paths: list[Path] = []
-            for idx, clip_path in enumerate(working_clip_paths):
-                try:
-                    radar_clip_paths.append(
-                        apply_radar_overlay_to_clip(
-                            ffmpeg_bin=ffmpeg_bin,
-                            ffprobe=ffprobe,
-                            clip_path=clip_path,
-                            clip_row=clip_rows[idx],
-                            tmpdir=radar_stage,
-                            index=idx,
-                            video_encode_quality=video_encode_quality,
-                        ),
-                    )
-                except RadarOverlaySkip as exc:
-                    logger.warning("跳过片段雷达覆盖 clip=%s reason=%s", clip_path, exc)
-                    radar_clip_paths.append(clip_path)
-                except Exception:
-                    logger.exception("片段雷达覆盖失败 clip=%s", clip_path)
-                    radar_clip_paths.append(clip_path)
-            working_clip_paths = radar_clip_paths
 
         # 以首段为主分辨率 / 帧率
         ref = probe_video_audio_summary(working_clip_paths[0], ffprobe)

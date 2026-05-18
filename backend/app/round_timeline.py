@@ -452,7 +452,9 @@ def build_round_timeline(
                         "tick": int(tick),
                         "time_text": time_text,
                         "attacker_name": attacker,
+                        "attacker_steamid": attacker_sid,
                         "victim_name": victim,
+                        "victim_steamid": victim_sid,
                         "assister_name": (assister or None) if (assist_col and assister) else None,
                         "weapon_name": weapon_name,
                         "weapon_key": weapon or None,
@@ -470,6 +472,7 @@ def build_round_timeline(
                 )
             elif typ == "death":
                 killer = attacker if attacker and attacker != victim else ""
+                killer_sid = attacker_sid if attacker and attacker != victim else ""
                 killfeed_by_round[eff_rn].append(
                     {
                         "id": eid,
@@ -478,7 +481,9 @@ def build_round_timeline(
                         "tick": int(tick),
                         "time_text": time_text,
                         "attacker_name": killer,
+                        "attacker_steamid": killer_sid,
                         "victim_name": victim,
+                        "victim_steamid": victim_sid,
                         "assister_name": (assister or None) if (assist_col and assister) else None,
                         "weapon_name": weapon_name,
                         "weapon_key": weapon or None,

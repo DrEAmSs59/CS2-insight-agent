@@ -268,7 +268,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [projectId, setProjectId] = useState(null);
   const [draftName, setDraftName] = useState("");
   const [selectedThemeId, setSelectedThemeId] = useState("custom");
-  const [radarOverlayEnabled, setRadarOverlayEnabled] = useState(false);
   const [bgmVolume, setBgmVolume] = useState(70);
   const [filterKey, setFilterKey] = useState("all");
   const [searchQ, setSearchQ] = useState("");
@@ -278,6 +277,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [transitionByClipId, setTransitionByClipId] = useState({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteClipPrompt, setDeleteClipPrompt] = useState(null);
+  const [batchDeleteLibraryPrompt, setBatchDeleteLibraryPrompt] = useState(null);
   const [librarySelectedIds, setLibrarySelectedIds] = useState(() => new Set());
   const [selectedTimelineClipId, setSelectedTimelineClipId] = useState(null);
   const [timelineMultiSelectedIds, setTimelineMultiSelectedIds] = useState(() => new Set());
@@ -339,6 +339,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   useEffect(() => {
     if (!open && !isPage) {
       setDeleteClipPrompt(null);
+      setBatchDeleteLibraryPrompt(null);
     }
   }, [open, isPage]);
 
@@ -384,7 +385,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroDuration,
     outputFilename,
     outputDir,
-    radarOverlayEnabled,
     selectedThemeId,
     draftName,
     bgmVolume,
@@ -399,16 +399,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
   const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
-
-  // 雷达叠层：仅当时间轴含 POV HUD 录制片段（入库 pov_hud_enabled）时才允许开启
-  const hasPovClips = useMemo(
-    () => orderedClips.some((c) => c?.pov_hud_enabled === true),
-    [orderedClips],
-  );
-
-  useEffect(() => {
-    if (!hasPovClips && radarOverlayEnabled) setRadarOverlayEnabled(false);
-  }, [hasPovClips, radarOverlayEnabled]);
 
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
@@ -495,6 +485,18 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         return next;
       });
       setItems((prev) => prev.filter((x) => x.id !== clip.id));
+      setLibrarySelectedIds((prev) => {
+        if (!prev.has(clip.id)) return prev;
+        const next = new Set(prev);
+        next.delete(clip.id);
+        return next;
+      });
+      setTimelineMultiSelectedIds((prev) => {
+        if (!prev.has(clip.id)) return prev;
+        const next = new Set(prev);
+        next.delete(clip.id);
+        return next;
+      });
       setDeleteClipPrompt(null);
       showToast("已删除片段");
     } catch (e) {
@@ -502,6 +504,55 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       showToast(typeof detail === "string" ? detail : e.message || "删除失败");
     }
   }, [deleteClipPrompt, showToast]);
+
+  const openBatchDeleteLibraryPrompt = useCallback(() => {
+    const clips = items.filter((c) => librarySelectedIds.has(c.id));
+    if (!clips.length) {
+      showToast("没有可删除的选中项");
+      return;
+    }
+    setDeleteClipPrompt(null);
+    setBatchDeleteLibraryPrompt(clips);
+  }, [items, librarySelectedIds, showToast]);
+
+  const confirmBatchDeleteLibraryClips = useCallback(async () => {
+    const clips = batchDeleteLibraryPrompt;
+    if (!clips?.length) return;
+    const ids = clips.map((c) => c.id);
+    try {
+      const { data } = await API.post("/recorded-clips/batch-delete", { ids });
+      const deletedList = Array.isArray(data?.deleted) ? data.deleted : [];
+      const deletedIds = new Set(deletedList.map((d) => d.id));
+      const notFound = Array.isArray(data?.not_found) ? data.not_found : [];
+      setOrderedIds((prev) => prev.filter((id) => !deletedIds.has(id)));
+      setTransitionByClipId((prev) => {
+        const next = { ...prev };
+        for (const id of deletedIds) delete next[String(id)];
+        return next;
+      });
+      setItems((prev) => prev.filter((x) => !deletedIds.has(x.id)));
+      setLibrarySelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of deletedIds) next.delete(id);
+        return next;
+      });
+      setTimelineMultiSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of deletedIds) next.delete(id);
+        return next;
+      });
+      setBatchDeleteLibraryPrompt(null);
+      const n = deletedIds.size;
+      if (notFound.length) {
+        showToast(`已删除 ${n} 条；另有 ${notFound.length} 条已不存在或已删`);
+      } else {
+        showToast(`已删除 ${n} 条素材`);
+      }
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      showToast(typeof detail === "string" ? detail : e.message || "批量删除失败");
+    }
+  }, [batchDeleteLibraryPrompt, showToast]);
 
   const handleSort = useCallback(
     (strategy) => {
@@ -663,9 +714,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         outro_image_duration: outroDuration !== 3 ? outroDuration : undefined,
         output_filename: ensureMp4Filename(outputFilename.trim()) || "montage_export.mp4",
         transitions: transitionsPayload,
-        radar_overlay: {
-          enabled: radarOverlayEnabled,
-        },
         theme_id: selectedThemeId,
         bgm_volume: bgmVolume / 100,
       });
@@ -679,10 +727,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       const bv = data?.body?.bgm_volume;
       if (bv != null && Number.isFinite(Number(bv))) {
         setBgmVolume(Math.round(Number(bv) * 100));
-      }
-      const ro = data?.body?.radar_overlay;
-      if (ro && typeof ro === "object") {
-        setRadarOverlayEnabled(Boolean(ro.enabled));
       }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
@@ -705,7 +749,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroDuration,
     showToast,
     transitionsPayload,
-    radarOverlayEnabled,
     selectedThemeId,
     bgmVolume,
   ]);
@@ -737,9 +780,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         ...(outroPath.trim() ? { outro_image_duration: outroDuration } : {}),
         output_path: outPath,
         theme_id: selectedThemeId,
-        radar_overlay: {
-          enabled: radarOverlayEnabled,
-        },
       });
       setLastExport({ ok: true, ...data });
       showToast("合辑导出完成");
@@ -766,7 +806,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     effectiveOutputDir,
     outputFilename,
     selectedThemeId,
-    radarOverlayEnabled,
     bgmVolume,
     showToast,
   ]);
@@ -975,10 +1014,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     setSelectedTimelineClipId(null);
   }, []);
 
+  const selectAllFilteredLibrary = useCallback(() => {
+    if (filteredLibrary.length === 0) return;
+    setLibrarySelectedIds(new Set(filteredLibrary.map((c) => c.id)));
+    setSelectedTimelineClipId(null);
+  }, [filteredLibrary]);
+
   const addSelectionToTimeline = useCallback(() => {
     const ids = librarySelectedIds.size > 0 ? [...librarySelectedIds] : [];
     if (!ids.length) {
-      showToast("先按住 Ctrl（⌘）点击选中多条素材，再点「批量加入编排」");
+      showToast("请先选中多条素材（Ctrl / ⌘ 点选，或点「全选当前列表」），再点「批量加入编排」");
       return;
     }
     let added = 0;
@@ -999,8 +1044,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const exportDirForButton = exportOk ? dirnamePath(lastExport.output_path) : "";
 
   const shellClass = isPage
-    ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-white/[0.08]"
-    : "flex h-full w-[min(1680px,99vw)] flex-col border-l border-white/10 bg-cs2-bg-card shadow-2xl";
+    ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-cs2-border"
+    : "flex h-full w-[min(1680px,99vw)] flex-col border-l border-cs2-border bg-cs2-bg-card shadow-2xl";
 
   const inner = (
     <>
@@ -1022,7 +1067,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         <MontageHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
 
         {toast ? (
-          <div className="border-b border-emerald-500/30 bg-emerald-950/40 px-4 py-2 text-center text-[11px] text-emerald-200">
+          <div className="border-b border-emerald-500/30 bg-cs2-emerald-surface px-4 py-2.5 text-center text-xs font-medium text-cs2-emerald-on-surface">
             {toast}
           </div>
         ) : null}
@@ -1030,50 +1075,39 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)_minmax(380px,440px)]">
             {/* 左侧素材池 */}
-            <aside className="flex min-h-0 flex-col border-white/10 bg-black/20 xl:border-r">
-              <div className="shrink-0 border-b border-white/10 px-3 py-2">
+            <aside className="flex min-h-0 flex-col border-cs2-border bg-cs2-bg-card xl:border-r">
+              <div className="shrink-0 border-b border-cs2-border p-4">
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">素材池</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-cs2-text-muted">素材池</p>
                   {librarySelectedIds.size > 0 ? (
-                    <span className="rounded-full border border-cs2-orange/40 bg-cs2-orange/12 px-2 py-0.5 text-[10px] font-bold text-cs2-orange">
+                    <span className="rounded-md border border-cs2-accent/40 bg-cs2-accent/12 px-2 py-0.5 text-xs font-bold text-cs2-accent">
                       已选 {librarySelectedIds.size}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-zinc-600">多选</span>
+                    <span className="text-xs text-cs2-text-muted font-medium">多选就绪</span>
                   )}
                 </div>
-                <p className="mt-1.5 rounded-md border border-white/[0.06] bg-black/25 px-2 py-1.5 text-[10px] leading-snug text-zinc-400">
-                  <span className="font-semibold text-zinc-300">批量编排：</span>
-                  按住键盘 <kbd className="rounded border border-white/15 bg-black/40 px-1 font-mono text-[9px]">Ctrl</kbd>{" "}
-                  或 <kbd className="rounded border border-white/15 bg-black/40 px-1 font-mono text-[9px]">⌘</kbd>{" "}
-                  不放，依次点击多条素材；再点下方橙色「批量加入编排」。
+                <p className="mt-2.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-3 text-xs leading-relaxed text-cs2-text-secondary">
+                  <span className="font-bold text-cs2-text-primary">批量编排：</span>
+                  按住 <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">Ctrl</kbd>{" "}
+                  或 <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">⌘</kbd>{" "}
+                  点击多条素材；也可点下方「全选当前列表」后批量操作。
                 </p>
-                <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-zinc-500">
-                  <div className="rounded border border-white/[0.06] bg-black/30 px-1.5 py-1 text-center">
-                    <div className="font-mono text-zinc-300">{libraryPoolStats.count}</div>
-                    <div className="text-[9px] text-zinc-600">条</div>
-                  </div>
-                  <div className="rounded border border-white/[0.06] bg-black/30 px-1.5 py-1 text-center">
-                    <div className="font-mono text-zinc-300">{libraryPoolStats.totalLabel}</div>
-                    <div className="text-[9px] text-zinc-600">总时长</div>
-                  </div>
-                  <div className="rounded border border-white/[0.06] bg-black/30 px-1.5 py-1 text-center">
-                    <div className="font-mono text-zinc-300">{libraryPoolStats.avgLabel}</div>
-                    <div className="text-[9px] text-zinc-600">均值</div>
-                  </div>
-                </div>
+                <p className="mt-2.5 font-mono text-xs text-cs2-text-muted">
+                  {libraryPoolStats.count} 条素材 · 总计 {libraryPoolStats.totalLabel} · 平均 {libraryPoolStats.avgLabel}
+                </p>
               </div>
-              <div className="shrink-0 space-y-2 border-b border-white/10 px-3 py-2">
-                <div className="flex flex-wrap gap-1">
+              <div className="shrink-0 space-y-3 border-b border-cs2-border p-3.5">
+                <div className="flex flex-wrap gap-1.5">
                   {FILTER_TABS.map((f) => (
                     <button
                       key={f.id}
                       type="button"
                       onClick={() => setFilterKey(f.id)}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
                         filterKey === f.id
-                          ? "border-cs2-orange/50 bg-cs2-orange/15 text-cs2-orange"
-                          : "border-white/10 bg-black/30 text-zinc-400 hover:border-white/20"
+                          ? "border-cs2-accent bg-cs2-accent-soft text-cs2-accent font-bold shadow-sm"
+                          : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary"
                       }`}
                     >
                       {f.label}
@@ -1084,39 +1118,57 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                   value={searchQ}
                   onChange={(e) => setSearchQ(e.target.value)}
                   placeholder="搜索玩家 / 地图 / 文件名…"
-                  className="w-full rounded border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-zinc-200 placeholder:text-zinc-600"
+                  className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3.5 py-2 text-xs text-cs2-text-primary placeholder:text-cs2-text-muted outline-none focus:border-cs2-accent"
                 />
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex flex-col gap-2">
                   <button
                     type="button"
-                    onClick={addFilteredToSequence}
+                    onClick={selectAllFilteredLibrary}
                     disabled={filteredLibrary.length === 0}
-                    className="rounded-md border border-white/12 bg-white/[0.04] py-1.5 text-[10px] font-semibold text-zinc-300 hover:border-cs2-orange/35 disabled:opacity-35"
+                    className="w-full rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-border-focus hover:bg-cs2-surface-2 transition-all disabled:opacity-35"
                   >
-                    筛选全部加入编排
+                    全选当前列表 ({filteredLibrary.length})
                   </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={addFilteredToSequence}
+                      disabled={filteredLibrary.length === 0}
+                      className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/40 hover:bg-cs2-surface-2 transition-all disabled:opacity-35"
+                    >
+                      筛选全入编排
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addSelectionToTimeline}
+                      disabled={librarySelectedIds.size === 0}
+                      className="rounded-lg border border-cs2-accent/40 bg-cs2-accent-soft py-2 text-xs font-semibold text-cs2-accent hover:bg-cs2-accent/20 transition-all disabled:opacity-35"
+                    >
+                      批量加入编排 ({librarySelectedIds.size})
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={addSelectionToTimeline}
+                    onClick={openBatchDeleteLibraryPrompt}
                     disabled={librarySelectedIds.size === 0}
-                    className="rounded-md border border-cs2-orange/35 bg-cs2-orange/10 py-1.5 text-[10px] font-semibold text-cs2-orange hover:bg-cs2-orange/18 disabled:opacity-35"
+                    className="rounded-lg border border-rose-500/20 bg-rose-500/10 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-35"
                   >
-                    批量加入编排 ({librarySelectedIds.size})
+                    批量删除选中 ({librarySelectedIds.size})
                   </button>
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-2">
                 {loading ? (
-                  <div className="flex items-center gap-2 py-10 text-xs text-zinc-400">
+                  <div className="flex items-center gap-2 py-10 text-xs text-cs2-text-secondary">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     加载中…
                   </div>
                 ) : items.length === 0 ? (
-                  <p className="rounded-lg border border-white/10 bg-black/30 px-3 py-6 text-[11px] text-zinc-500">
+                  <p className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-6 text-xs leading-relaxed text-cs2-text-muted text-center">
                     暂无入库片段。完成 OBS 录制成功后会自动出现在此列表。
                   </p>
                 ) : filteredLibrary.length === 0 ? (
-                  <p className="text-[11px] text-zinc-500">没有符合筛选或搜索条件的片段。</p>
+                  <p className="text-xs text-cs2-text-muted p-4 text-center">没有符合筛选或搜索条件的片段。</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {filteredLibrary.map((clip, idx) => (
@@ -1127,7 +1179,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                         added={orderedIdSet.has(clip.id)}
                         selected={librarySelectedIds.has(clip.id)}
                         onAdd={addToSequence}
-                        onDelete={setDeleteClipPrompt}
+                        onDelete={(c) => {
+                          setBatchDeleteLibraryPrompt(null);
+                          setDeleteClipPrompt(c);
+                        }}
                         onDragStart={onDragStart}
                         onDragEnd={onDragEnd}
                         onClickMulti={onLibraryCardMultiClick}
@@ -1139,9 +1194,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </aside>
 
             {/* 中间：合集结构（编排主线） */}
-            <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden border-white/10 bg-[#0a0a0f] px-3 py-3 xl:border-r">
+            <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden border-cs2-border bg-cs2-bg-page px-3 py-3 xl:border-r">
               {unknownDurationHint ? (
-                <p className="shrink-0 text-[10px] text-amber-200/80">{unknownDurationHint}</p>
+                <p className="shrink-0 text-xs font-medium text-cs2-amber-on-surface bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">{unknownDurationHint}</p>
               ) : null}
               <MontageOrchestrationTimeline
                 clips={orderedClips}
@@ -1177,7 +1232,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </section>
 
             {/* 右侧：合辑成片控制台 */}
-            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-white/10 xl:border-l xl:bg-black/15">
+            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-cs2-border xl:border-l xl:bg-cs2-bg-card">
               <MontageStyleConsole
                 bgmPath={bgmPath}
                 onBgmPathChange={setBgmPath}
@@ -1198,9 +1253,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onOutroDurationChange={setOutroDuration}
                 onMediaDropHint={showToast}
                 onFilePick={pickFile}
-                radarOverlayEnabled={radarOverlayEnabled}
-                onRadarOverlayEnabledChange={setRadarOverlayEnabled}
-                hasPovClips={hasPovClips}
                 clipCount={orderedIds.length}
                 durationText={durationText}
                 resolutionLabel="跟随源素材 · MP4"
@@ -1234,44 +1286,89 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       </div>
       {deleteClipPrompt ? (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="montage-delete-clip-title"
           onClick={() => setDeleteClipPrompt(null)}
         >
           <div
-            className="w-full max-w-md rounded-lg border border-white/15 bg-cs2-bg-card p-4 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h4 id="montage-delete-clip-title" className="mb-2 text-xs font-semibold text-zinc-200">
+            <h4 id="montage-delete-clip-title" className="mb-3 text-sm font-bold text-cs2-text-primary">
               从素材库删除
             </h4>
-            <p className="mb-1 font-mono text-[11px] text-zinc-300">
+            <p className="mb-1.5 font-mono text-xs font-semibold text-cs2-text-secondary bg-cs2-surface-1 p-2 rounded-md truncate">
               {clipBasename(deleteClipPrompt) || getClipTitle(deleteClipPrompt)}
             </p>
-            <p className="mb-3 text-[10px] leading-relaxed text-cs2-text-secondary">
+            <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
               将同时删除磁盘上的录像文件，且不可恢复。若该片段已加入合辑时间线，也会从时间线中移除。
             </p>
             {deleteClipPrompt.output_path ? (
-              <p className="mb-3 break-all font-mono text-[10px] text-zinc-500" title={String(deleteClipPrompt.output_path)}>
+              <p className="mb-4 break-all font-mono text-xs text-cs2-text-muted bg-cs2-bg-input p-2 rounded max-h-20 overflow-y-auto" title={String(deleteClipPrompt.output_path)}>
                 {String(deleteClipPrompt.output_path)}
               </p>
             ) : null}
-            <div className="mt-2 flex flex-wrap justify-end gap-2">
+            <div className="mt-4 flex flex-wrap justify-end gap-2.5">
               <button
                 type="button"
-                className="rounded border border-cs2-border px-3 py-1.5 text-[11px] text-zinc-400 hover:border-white/25 hover:text-zinc-200"
+                className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
                 onClick={() => setDeleteClipPrompt(null)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded border border-red-500/45 bg-red-950/40 px-3 py-1.5 text-[11px] font-semibold text-red-200 hover:bg-red-950/60"
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 shadow-sm transition-all"
                 onClick={() => void confirmDeleteLibraryClip()}
               >
                 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {batchDeleteLibraryPrompt?.length ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="montage-batch-delete-title"
+          onClick={() => setBatchDeleteLibraryPrompt(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="montage-batch-delete-title" className="mb-3 text-sm font-bold text-cs2-text-primary">
+              批量从素材库删除
+            </h4>
+            <p className="mb-3 text-xs leading-relaxed text-cs2-text-secondary">
+              将删除 <span className="font-bold text-cs2-accent">{batchDeleteLibraryPrompt.length}</span>{" "}
+              条素材，并同时删除磁盘上的录像文件，且不可恢复。已在合辑时间线中的片段也会一并移除。
+            </p>
+            <ul className="mb-4 max-h-40 overflow-y-auto rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-2 font-mono text-xs text-cs2-text-secondary space-y-1">
+              {batchDeleteLibraryPrompt.map((c) => (
+                <li key={c.id} className="truncate py-0.5 hover:text-cs2-text-primary transition-colors" title={clipBasename(c) || getClipTitle(c)}>
+                  {clipBasename(c) || getClipTitle(c)}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4 flex flex-wrap justify-end gap-2.5">
+              <button
+                type="button"
+                className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
+                onClick={() => setBatchDeleteLibraryPrompt(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 shadow-sm transition-all"
+                onClick={() => void confirmBatchDeleteLibraryClips()}
+              >
+                确认删除全部
               </button>
             </div>
           </div>
@@ -1290,7 +1387,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   return (
     <div
-      className="fixed inset-0 z-[110] flex justify-end bg-black/55 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[110] flex justify-end bg-black/60 backdrop-blur-[1px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="montage-title"

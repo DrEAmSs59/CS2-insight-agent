@@ -1,5 +1,7 @@
 /**
- * 将回合时间线事件/整回合转为与导播兼容的 clipData（整回合带 fixed_segment；单事件可走智能节奏）。
+ * 将回合时间线事件/整回合转为与导播兼容的 clipData。
+ * - 单事件（round_timeline_event）：与高光相同，由后端 `build_smart_jump_segments` + 队列 pacing 分段录制。
+ * - 整回合（round_timeline_round）：单独逻辑（fixed_segment_pacing + 固定 tick 窗），见 `buildTimelineRoundClipData`。
  */
 
 import { isTimelineSourceClip } from "./montageUtils";
@@ -62,7 +64,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
         ? Number(event.round)
         : 0;
   const atk = String(event?.attacker_name || "").trim();
+  const atkSid = String(event?.attacker_steamid || "").trim();
   const vic = String(event?.victim_name || "").trim();
+  const vicSid = String(event?.victim_steamid || "").trim();
   const wpn = String(event?.weapon_name || event?.weapon || "").trim();
   let queueSummaryLine = "";
   if (isKill) {
@@ -92,7 +96,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     kill_ticks: isKill && Number.isFinite(tick) ? [tick] : [],
     death_tick: isDeath && Number.isFinite(tick) ? tick : null,
     killer_name: isDeath ? atk || null : null,
+    killer_steamid64: isDeath ? atkSid || null : null,
     victims: isKill && vic ? [vic] : [],
+    victim_steamid64s: isKill && vic ? [vicSid] : [],
     timeline_source: "round_timeline_event",
     timeline_event_id: String(event?.id || ""),
     _timeline_target: targetPlayer || null,

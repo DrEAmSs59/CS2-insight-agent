@@ -43,7 +43,9 @@ debug_demoparser2.py
 debug_parse_demo.py
 .cursor/
 .claude/
-/scripts/
+# Root scripts/ is for ad-hoc local scripts; tracked exceptions below.
+/scripts/*
+!/scripts/github-bootstrap.ps1
 build_portable.bat
 package_portable.ps1
 rebuild_frontend.ps1

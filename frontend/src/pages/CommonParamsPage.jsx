@@ -1,5 +1,6 @@
 import CommonParamsModal from "../components/CommonParamsModal";
 import { useAppShell } from "../context/AppShellContext";
+import PageContainer from "../components/PageContainer";
 
 export default function CommonParamsPage() {
   const s = useAppShell();
@@ -18,6 +19,10 @@ export default function CommonParamsPage() {
       recordInjectConsoleLines={s.recordInjectConsoleLines}
       onRecordInjectConsoleLinesChange={s.setRecordInjectConsoleLines}
       onPersistCs2RecordExtras={s.persistCs2RecordExtras}
+      obsTransitionEnabled={s.obsTransitionEnabled}
+      obsTransitionName={s.obsTransitionName}
+      obsTransitionDurationMs={s.obsTransitionDurationMs}
+      onPersistObsTransition={s.persistObsTransition}
     />
   );
 }

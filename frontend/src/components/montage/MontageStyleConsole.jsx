@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Copy,
   CheckCircle2,
@@ -6,7 +7,6 @@ import {
   Music,
   Film,
   Trash2,
-  ScanEye,
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
@@ -16,15 +16,6 @@ function pathBasename(path) {
   if (!s) return "";
   const parts = s.split(/[/\\]/);
   return parts[parts.length - 1] || s;
-}
-
-function StyleBlockTitle({ title, subtitle }) {
-  return (
-    <div className="border-b border-cs2-orange/25 pb-2">
-      <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-cs2-orange">{title}</h3>
-      {subtitle ? <p className="mt-0.5 text-[10px] leading-snug text-zinc-600">{subtitle}</p> : null}
-    </div>
-  );
 }
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"]);
@@ -52,7 +43,7 @@ function MediaVideoSlotCard({
   const isImg = filled && isImagePath(path);
   return (
     <div
-      className={`rounded-lg border bg-black/35 p-2 ${filled ? "border-white/12" : "border-dashed border-white/15"}`}
+      className={`rounded-xl border p-3 transition-all ${filled ? "border-cs2-border bg-cs2-surface-1" : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"}`}
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -71,20 +62,20 @@ function MediaVideoSlotCard({
         onVideoDrop?.(f.name, null);
       }}
     >
-      <div className="flex items-center gap-1.5">
-        <Film className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        <p className="text-[10px] font-semibold text-zinc-300">{label}</p>
+      <div className="flex items-center gap-2">
+        <Film className="h-4 w-4 shrink-0 text-cs2-text-muted" aria-hidden />
+        <p className="text-xs font-bold text-cs2-text-secondary">{label}</p>
         {filled ? (
-          <p className="ml-auto max-w-[10rem] truncate font-mono text-[10px] text-zinc-400" title={path}>
+          <p className="ml-auto max-w-[12rem] truncate font-mono text-xs text-cs2-text-secondary" title={path}>
             {base || path}
           </p>
         ) : (
-          <p className="ml-1 text-[10px] text-zinc-600">拖入视频 / 图片或粘贴路径</p>
+          <p className="ml-1 text-xs text-cs2-text-muted">拖入视频 / 图片或粘贴路径</p>
         )}
       </div>
       {isImg ? (
-        <div className="mt-1.5 flex items-center gap-2">
-          <p className="text-[10px] text-violet-300/80">图片渐入渐出 · 时长</p>
+        <div className="mt-2.5 flex items-center gap-2">
+          <p className="text-xs text-violet-300 font-medium">图片渐入渐出时长</p>
           <input
             type="number"
             min={1}
@@ -95,35 +86,35 @@ function MediaVideoSlotCard({
               const v = parseFloat(e.target.value);
               if (Number.isFinite(v) && v >= 1) onImageDurationChange?.(v);
             }}
-            className="w-16 rounded border border-white/10 bg-black/50 px-2 py-0.5 font-mono text-[10px] text-zinc-200 outline-none focus:border-violet-400/50"
+            className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400"
           />
-          <span className="text-[10px] text-zinc-600">秒</span>
+          <span className="text-xs text-cs2-text-muted">秒</span>
         </div>
       ) : null}
-      <div className="mt-1.5 flex gap-2">
+      <div className="mt-2.5 flex gap-2">
         <input
           value={path}
           onChange={(e) => onPathChange(e.target.value)}
           placeholder={placeholder}
-          className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200 placeholder:text-zinc-600"
+          className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary placeholder:text-cs2-text-muted outline-none focus:border-cs2-accent transition-all"
         />
         {onBrowse ? (
           <button
             type="button"
             onClick={onBrowse}
             title="浏览文件"
-            className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-400 hover:border-white/25 hover:text-zinc-200"
+            className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
           >
-            <FolderOpen className="h-3 w-3" />
+            <FolderOpen className="h-3.5 w-3.5" />
           </button>
         ) : null}
         {filled ? (
           <button
             type="button"
             onClick={onClear}
-            className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-500 hover:border-red-500/35 hover:text-red-300"
+            className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-rose-500/30 hover:text-rose-400 transition-all"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         ) : null}
       </div>
@@ -133,13 +124,13 @@ function MediaVideoSlotCard({
 
 function ExportCheckRow({ ok, optional, label }) {
   const dot =
-    ok === true ? "bg-emerald-400" : optional ? "bg-amber-400/90" : "bg-zinc-500";
+    ok === true ? "bg-emerald-400" : optional ? "bg-amber-400" : "bg-zinc-500";
   const text = ok === true ? "已完成" : optional ? "可选 · 未填" : "必填 · 未填";
   return (
-    <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+    <div className="flex items-center gap-2.5 text-xs text-cs2-text-secondary py-0.5">
       <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={text} />
-      <span className="text-zinc-300">{label}</span>
-      <span className="ml-auto font-medium text-zinc-500">{text}</span>
+      <span className="text-cs2-text-secondary font-medium">{label}</span>
+      <span className="ml-auto text-cs2-text-muted">{text}</span>
     </div>
   );
 }
@@ -165,10 +156,6 @@ export function MontageStyleConsole({
   onOutroDurationChange,
   onMediaDropHint,
   onFilePick,
-  // overlay
-  radarOverlayEnabled,
-  onRadarOverlayEnabledChange,
-  hasPovClips = false,
   // export footer
   clipCount,
   durationText,
@@ -205,72 +192,93 @@ export function MontageStyleConsole({
   const readyTag =
     exportReady !== undefined && exportReady !== null ? Boolean(exportReady) : dirOk && nameOk && Number(clipCount) > 0;
 
+  const [activeTab, setActiveTab] = useState("media");
+  const tabItems = [
+    { id: "media", label: "媒体资源" },
+    { id: "export", label: "导出设置" },
+  ];
+
   return (
-    <aside className="flex min-h-0 w-full min-w-0 flex-col border-white/10 bg-gradient-to-b from-zinc-950/80 to-black/40 xl:border-l">
-      <div className="shrink-0 border-b border-white/10 px-3 py-2.5">
-        <p className="text-[12px] font-bold text-white">合辑成片控制台</p>
-        <p className="mt-0.5 text-[10px] text-zinc-500">BGM、片头片尾与雷达覆盖；转场在中间「合集结构」里点衔接处编辑</p>
+    <aside className="flex min-h-0 w-full min-w-0 flex-col border-cs2-border bg-cs2-surface-1 xl:border-l">
+      <div className="shrink-0 border-b border-cs2-border-subtle p-4">
+        <p className="text-sm font-bold text-cs2-text-primary tracking-wide">合辑成片控制台</p>
+        <div className="mt-3 flex gap-1.5">
+          {tabItems.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                activeTab === t.id
+                  ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                  : "text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-5">
           {exportingBanner ? (
-            <div className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-100">
-              正在导出合辑，请不要关闭程序…
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-amber-300">
+              正在高效导出合辑，请保持程序平稳运行…
             </div>
           ) : null}
           {!exportingBanner && exportOk ? (
-            <div className="relative rounded-lg border border-emerald-500/35 bg-emerald-950/25 p-3 pr-9 text-[11px] text-emerald-100">
-              <div className="flex items-center gap-2 font-semibold text-emerald-200">
+            <div className="relative rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-200">
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
-                导出完成
+                合辑成片导出圆满完成
               </div>
               <button
                 type="button"
                 onClick={() => onDismissExportSuccess?.()}
-                className="absolute right-2 top-2 rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-300"
+                className="absolute right-3 top-3 rounded-lg p-1 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
                 aria-label="关闭"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
-              <p className="mt-2 text-[10px] text-zinc-400">输出路径</p>
-              <p className="mt-1 break-all font-mono text-[10px] text-zinc-200">{lastExport.output_path}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <p className="mt-3 text-xs text-cs2-text-muted">生成输出路径</p>
+              <p className="mt-1 break-all font-mono text-xs font-semibold text-cs2-text-primary p-2 bg-cs2-surface-2 rounded-lg select-all border border-cs2-border-subtle">{lastExport.output_path}</p>
+              <div className="mt-3.5 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => void onCopyText(lastExport.output_path)}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-900/30 px-2.5 py-1.5 text-[10px] font-medium hover:bg-emerald-900/50"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 transition-all shadow-sm"
                 >
                   <Copy className="h-3.5 w-3.5" />
-                  复制路径
+                  复制文件路径
                 </button>
                 {exportDirForButton ? (
                   <button
                     type="button"
                     onClick={() => void onCopyText(exportDirForButton)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-black/30 px-2.5 py-1.5 text-[10px] font-medium text-zinc-200 hover:border-cs2-orange/40"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-bold text-cs2-text-primary hover:border-cs2-border-focus transition-all"
                     title="复制上级文件夹路径"
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
-                    复制文件夹路径
+                    复制上级目录
                   </button>
                 ) : null}
               </div>
             </div>
           ) : null}
           {!exportingBanner && lastExport && !lastExport.ok ? (
-            <div className="rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-2 text-[11px] text-red-100">
-              导出失败：{String(lastExport.err)}
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-300">
+              导出异常：{String(lastExport.err)}
             </div>
           ) : null}
 
-          <CollapsibleSection
+          {activeTab === "media" && (<CollapsibleSection
             title="媒体资源"
             hint="BGM、片头与片尾（均可选）"
-            defaultOpen={bgmFilled || introFilled || outroFilled}
+            defaultOpen
           >
             <div
-              className={`rounded-lg border p-2 ${bgmPath.trim() ? "border-violet-500/25 bg-violet-950/15" : "border-dashed border-white/15 bg-black/30"}`}
+              className={`rounded-xl border p-3 transition-all ${bgmPath.trim() ? "border-violet-500/40 bg-violet-500/[0.08]" : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -286,21 +294,21 @@ export function MontageStyleConsole({
                 onMediaDropHint?.(`已识别「${f.name}」· 请粘贴完整路径到下方`);
               }}
             >
-              <div className="flex items-center gap-1.5">
-                <Music className="h-3.5 w-3.5 shrink-0 text-violet-300" aria-hidden />
-                <p className="text-[10px] font-semibold text-zinc-300">背景音乐</p>
+              <div className="flex items-center gap-2">
+                <Music className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
+                <p className="text-xs font-bold text-cs2-text-secondary">背景音乐混流</p>
                 {bgmPath.trim() ? (
-                  <p className="ml-auto max-w-[12rem] truncate font-mono text-[10px] text-zinc-400" title={bgmPath}>
+                  <p className="ml-auto max-w-[14rem] truncate font-mono text-xs text-cs2-text-secondary" title={bgmPath}>
                     {pathBasename(bgmPath)}
                   </p>
                 ) : (
-                  <p className="ml-1 text-[10px] text-zinc-600">拖入音频或粘贴路径 · 导出时混音</p>
+                  <p className="ml-1 text-xs text-cs2-text-muted">拖入音频或直接填入绝对路径</p>
                 )}
               </div>
-              <div className="mt-2">
-                <div className="flex items-center justify-between gap-2 text-[10px] text-zinc-500">
-                  <span>音量</span>
-                  <span className="font-mono text-zinc-400">{bgmVolume}%</span>
+              <div className="mt-3">
+                <div className="flex items-center justify-between gap-2 text-xs text-cs2-text-muted">
+                  <span>混音音量占比</span>
+                  <span className="font-mono font-bold text-violet-400">{bgmVolume}%</span>
                 </div>
                 <input
                   type="range"
@@ -308,11 +316,11 @@ export function MontageStyleConsole({
                   max={100}
                   value={bgmVolume}
                   onChange={(e) => onBgmVolumeChange(Number(e.target.value))}
-                  className="mt-1 h-1.5 w-full accent-violet-400"
+                  className="mt-1.5 h-2 w-full rounded-lg bg-cs2-bg-input accent-violet-400 cursor-pointer"
                 />
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-[10px] text-zinc-500">从第</span>
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-xs text-cs2-text-muted">起始播放秒数</span>
                 <input
                   type="number"
                   min={0}
@@ -322,41 +330,41 @@ export function MontageStyleConsole({
                     const v = parseFloat(e.target.value);
                     onBgmStartSecChange?.(Number.isFinite(v) && v >= 0 ? v : 0);
                   }}
-                  className="w-16 rounded border border-white/10 bg-black/50 px-2 py-0.5 font-mono text-[10px] text-zinc-200 outline-none focus:border-violet-400/50"
+                  className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400 transition-all"
                 />
-                <span className="text-[10px] text-zinc-500">秒开始</span>
+                <span className="text-xs text-cs2-text-muted">秒</span>
               </div>
-              <div className="mt-1.5 flex gap-2">
+              <div className="mt-2.5 flex gap-2">
                 <input
                   value={bgmPath}
                   onChange={(e) => onBgmPathChange(e.target.value)}
                   placeholder="例如 D:\Music\bgm.mp3"
-                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-1 font-mono text-[10px] text-zinc-200"
+                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 {onFilePick ? (
                   <button
                     type="button"
                     onClick={() => onFilePick("audio", onBgmPathChange)}
                     title="浏览音频文件"
-                    className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-400 hover:border-white/25 hover:text-zinc-200"
+                    className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
                   >
-                    <FolderOpen className="h-3 w-3" />
+                    <FolderOpen className="h-3.5 w-3.5" />
                   </button>
                 ) : null}
                 {bgmPath.trim() ? (
                   <button
                     type="button"
                     onClick={onBgmClear}
-                    className="inline-flex shrink-0 items-center rounded border border-white/12 px-2 py-1 text-[10px] text-zinc-500 hover:text-red-300"
+                    className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-rose-500/30 hover:text-rose-400 transition-all"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 ) : null}
               </div>
             </div>
 
             <MediaVideoSlotCard
-              label="片头"
+              label="片头专属插槽"
               path={introPath}
               onPathChange={onIntroPathChange}
               onClear={onIntroClear}
@@ -370,7 +378,7 @@ export function MontageStyleConsole({
               onImageDurationChange={onIntroDurationChange}
             />
             <MediaVideoSlotCard
-              label="片尾"
+              label="片尾专属插槽"
               path={outroPath}
               onPathChange={onOutroPathChange}
               onClear={onOutroClear}
@@ -383,130 +391,98 @@ export function MontageStyleConsole({
               imageDuration={outroDuration}
               onImageDurationChange={onOutroDurationChange}
             />
-          </CollapsibleSection>
+          </CollapsibleSection>)}
 
-          <section className="space-y-2.5">
-            <StyleBlockTitle title="画面覆盖" subtitle="仅展示已接入能力" />
-            <div
-              className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${
-                hasPovClips
-                  ? "border-white/[0.07] bg-black/35"
-                  : "border-white/[0.04] bg-black/20 opacity-50"
-              }`}
-              title={hasPovClips ? "" : "需要至少一个 POV HUD 录制的片段（pov_hud_enabled）才能启用雷达覆盖"}
-            >
-              <div className="flex items-center gap-2">
-                <ScanEye className={`h-4 w-4 ${hasPovClips ? "text-sky-300" : "text-zinc-600"}`} aria-hidden />
-                <div>
-                  <p className="text-[11px] font-medium text-zinc-200">回放小地图 / 雷达叠层</p>
-                  <p className="text-[9px] text-zinc-600">
-                    {hasPovClips ? "从 Demo 解析位置，颜色与游戏一致" : "需含 POV HUD 录制片段"}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={!hasPovClips}
-                onClick={() => hasPovClips && onRadarOverlayEnabledChange(!radarOverlayEnabled)}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                  !hasPovClips
-                    ? "cursor-not-allowed border border-white/10 bg-zinc-900 text-zinc-600"
-                    : radarOverlayEnabled
-                    ? "bg-cs2-orange text-black"
-                    : "border border-white/12 bg-zinc-900 text-zinc-400"
-                }`}
-              >
-                {radarOverlayEnabled && hasPovClips ? "开" : "关"}
-              </button>
-            </div>
-          </section>
-
-          <CollapsibleSection
+          {activeTab === "export" && (<CollapsibleSection
             title={
               <span className="inline-flex flex-wrap items-center gap-2">
-                <span>导出设置</span>
+                <span>渲染成片设定</span>
                 <span
-                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  className={`rounded-md px-2 py-0.5 text-xs font-bold tracking-wide ${
                     readyTag
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                      : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+                      ? "bg-emerald-500/10 text-emerald-300"
+                      : "bg-amber-500/10 text-amber-300"
                   }`}
                 >
-                  {readyTag ? "就绪" : "未完成"}
+                  {readyTag ? "配置就绪" : "信息待补全"}
                 </span>
               </span>
             }
-            hint="成片文件名、目录与配置检查"
+            hint="输出文件名、保存目录与渲染自检"
             defaultOpen
           >
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-white/[0.07] bg-black/35 px-2.5 py-2">
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500">已编排</p>
-                <p className="mt-0.5 font-mono text-[15px] font-bold tabular-nums text-white">{Number(clipCount) || 0}</p>
-                <p className="text-[9px] text-zinc-600">段</p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
+                <p className="text-xs font-bold text-cs2-text-muted">已加入队列</p>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="font-mono text-base font-bold text-cs2-text-primary">{Number(clipCount) || 0}</span>
+                  <span className="text-xs text-cs2-text-muted">段片段</span>
+                </div>
               </div>
-              <div className="rounded-lg border border-white/[0.07] bg-black/35 px-2.5 py-2">
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500">预计总时长</p>
-                <p className="mt-0.5 font-mono text-[14px] font-bold tabular-nums text-cs2-orange">{durationText}</p>
-                <p className="text-[9px] text-zinc-600">编排内合计</p>
+              <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
+                <p className="text-xs font-bold text-cs2-text-muted">总计时间长</p>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="font-mono text-base font-bold text-cs2-accent">{durationText}</span>
+                  <span className="text-xs text-cs2-text-muted">原片估计</span>
+                </div>
               </div>
             </div>
 
-            <label className="mt-3 block space-y-1">
-              <span className="text-[10px] text-zinc-500">视频名称</span>
+            <label className="mt-4 block space-y-1.5">
+              <span className="text-xs font-bold text-cs2-text-muted">目标成片文件名</span>
               <input
                 value={outputFilename}
                 onChange={(e) => onOutputFilenameChange(e.target.value)}
                 placeholder={defaultFilenamePlaceholder}
-                className="w-full rounded border border-white/10 bg-black/50 px-2 py-1.5 font-mono text-[11px] text-zinc-200"
+                className="w-full rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
               />
             </label>
 
-            <div className="mt-3 space-y-1">
-              <span className="text-[11px] font-medium text-zinc-300">输出目录</span>
+            <div className="mt-4 space-y-1.5">
+              <span className="text-xs font-bold text-cs2-text-secondary">独立保存目录</span>
               <div className="flex gap-2">
                 <input
                   value={outputDir}
                   onChange={(e) => onOutputDirChange(e.target.value)}
-                  placeholder="留空则用片段目录下的 exports/montage"
-                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/50 px-2 py-2 font-mono text-[11px] text-zinc-200"
+                  placeholder="留空自动归档至 exports/montage"
+                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 {outputDir ? (
                   <button
                     type="button"
                     onClick={onOutputDirClear}
-                    className="shrink-0 rounded border border-white/10 px-2 py-2 text-zinc-500 hover:text-zinc-300"
+                    className="shrink-0 rounded-lg border border-cs2-border-subtle px-3 py-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-all"
                   >
                     ✕
                   </button>
                 ) : null}
               </div>
               {effectiveOutputDirHint ? (
-                <p className="text-[10px] text-zinc-600">
-                  将导出至：
-                  <span className="break-all font-mono text-zinc-500">{effectiveOutputDirHint}</span>
+                <p className="text-xs text-cs2-text-muted mt-1 bg-cs2-surface-1/60 p-2 rounded-lg border border-cs2-border-subtle">
+                  <span>目标位置：</span>
+                  <span className="break-all font-mono text-cs2-text-secondary select-all">{effectiveOutputDirHint}</span>
                 </p>
               ) : null}
             </div>
 
-            <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/40 px-2.5 py-2">
-              <p className="text-[10px] font-semibold text-zinc-400">配置检查</p>
-              <div className="mt-2 space-y-1.5">
-                <ExportCheckRow ok={dirOk} optional={false} label="输出目录" />
-                <ExportCheckRow ok={nameOk} optional={false} label="视频名称" />
-                <ExportCheckRow ok={bgmFilled} optional label="背景音乐" />
-                <ExportCheckRow ok={introFilled} optional label="片头（视频 / 图片）" />
-                <ExportCheckRow ok={outroFilled} optional label="片尾（视频 / 图片）" />
+            <div className="mt-4 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+              <p className="text-xs font-bold text-cs2-text-primary border-b border-cs2-border-subtle pb-2 mb-2">渲染环境与依赖自检</p>
+              <div className="space-y-1">
+                <ExportCheckRow ok={dirOk} optional={false} label="有效输出路径分配" />
+                <ExportCheckRow ok={nameOk} optional={false} label="安全文件名验证" />
+                <ExportCheckRow ok={bgmFilled} optional label="定制背景音乐混流" />
+                <ExportCheckRow ok={introFilled} optional label="前置片头包装挂载" />
+                <ExportCheckRow ok={outroFilled} optional label="收尾片尾包装挂载" />
               </div>
             </div>
 
-            <div className="mt-3 space-y-1">
-              <span className="text-[11px] font-medium text-zinc-300">草稿名称（可选）</span>
+            <div className="mt-4 space-y-1.5">
+              <span className="text-xs font-bold text-cs2-text-secondary">保存草稿别名 (可选)</span>
               <input
                 value={draftName}
                 onChange={(e) => onDraftNameChange(e.target.value)}
                 placeholder={draftNamePlaceholder}
-                className="w-full rounded border border-white/10 bg-black/50 px-2 py-2 text-[11px] text-zinc-200"
+                className="w-full rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
               />
             </div>
 
@@ -514,58 +490,59 @@ export function MontageStyleConsole({
               type="button"
               disabled={savingDraft}
               onClick={() => onSaveDraft?.()}
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.04] px-3 py-2 text-[11px] font-semibold text-zinc-300 hover:border-white/20 disabled:opacity-45"
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2.5 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-45"
             >
-              保存草稿
+              保存至编排草稿箱
             </button>
 
             <button
               type="button"
               disabled={exporting}
               onClick={onExport}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-orange/50 bg-cs2-orange/15 px-3 py-2.5 text-[12px] font-bold text-cs2-orange shadow-sm hover:bg-cs2-orange/22 disabled:opacity-45"
+              className="mt-2.5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-3 text-sm font-bold text-cs2-text-on-accent shadow-glow-accent hover:opacity-95 transition-all disabled:opacity-45"
             >
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              开始导出
+              启动合辑引擎流式导出
             </button>
 
-            <div className="mt-3 space-y-1">
-              <span className="text-[10px] font-medium text-zinc-500">完整输出路径</span>
+            <div className="mt-4 space-y-1.5">
+              <span className="text-xs font-bold text-cs2-text-muted">综合成片绝对路径预览</span>
               <div className="flex gap-2">
                 <input
                   readOnly
                   value={fullOutputPathPreview || ""}
-                  placeholder="填写目录与文件名后显示"
-                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/60 px-2 py-2 font-mono text-[10px] text-zinc-300"
+                  placeholder="完成路径及文件名配置后实时生成"
+                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-2 px-3 py-2 font-mono text-xs text-cs2-text-muted select-all outline-none"
                 />
                 <button
                   type="button"
                   disabled={!fullOutputPathPreview}
                   onClick={() => fullOutputPathPreview && onCopyText?.(fullOutputPathPreview)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-white/12 bg-black/40 px-2.5 py-2 text-[10px] font-medium text-zinc-300 hover:border-cs2-orange/35 disabled:opacity-35"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-2 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-35"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   复制
                 </button>
               </div>
             </div>
-          </CollapsibleSection>
+          </CollapsibleSection>)}
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-white/10 bg-black/55 px-3 py-2.5 backdrop-blur-sm">
-        <div className="flex flex-wrap items-end justify-between gap-2">
+      <div className="shrink-0 border-t border-cs2-border-subtle bg-cs2-surface-1 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">总时长</p>
-            <p className="font-mono text-[13px] font-bold tabular-nums text-white">{durationText}</p>
-            <p className="mt-0.5 text-[10px] text-zinc-600">{clipCount} 片段</p>
+            <p className="text-xs font-bold text-cs2-text-muted">合集预估总时长</p>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="font-mono text-sm font-bold text-cs2-text-primary">{durationText}</span>
+              <span className="text-xs text-cs2-text-muted font-medium">({clipCount} 个切片节点)</span>
+            </div>
           </div>
           <div className="text-right">
-            <p className="text-[10px] text-zinc-500">分辨率</p>
-            <p className="text-[11px] font-medium text-zinc-300">{resolutionLabel}</p>
+            <p className="text-xs font-bold text-cs2-text-muted">输出画质标准</p>
+            <p className="text-xs font-bold text-cs2-text-secondary mt-0.5">{resolutionLabel}</p>
           </div>
         </div>
-        <p className="mt-2 text-[9px] leading-snug text-zinc-600">导出与成片路径请在上方「导出设置」中操作。</p>
       </div>
     </aside>
   );

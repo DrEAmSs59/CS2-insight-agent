@@ -17,12 +17,11 @@ from typing import Any, Optional
 
 from obswebsocket import obsws, requests as obs_requests
 
-from .env_utils import get_data_dir, load_config
-from .obs_director import OBSDirector
+from .env_utils import get_data_dir
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "V2.0.0"
+APP_VERSION = "V2.0.1"
 DEFAULT_PROJECT_PROFILE = "未命名"  # 解析失败时的兜底目录名；正常由 resolve_default_project_profile_for_obs() 解析
 BUNDLED_OBS_BASIC_INI_NAME = "basic.ini"
 BACKUP_SUBDIR = ".obs_config_backups"
@@ -1003,7 +1002,6 @@ def apply_recommended(
 
     pp = _effective_project_profile(obs_root, project_profile)
 
-    cfg = load_config()
     backup_id = ""
     if create_backup:
         backup_id, _ = _create_backup(obs_root, reason="apply_recommended_preset", project_profile=pp)
@@ -1058,16 +1056,12 @@ def apply_recommended(
     bw, bh, ow, oh, fps_v = _parse_basic_ini_video_dims(basic_ini)
 
     restart_obs_required = True
-    director = OBSDirector(
-        obs_cfg,
-        cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-    )
+    ws: Optional[obsws] = _ws_connect(obs_cfg)
+    if ws is None:
+        logger.info("apply_recommended: WebSocket 未连接，仅完成磁盘预设写入（无法连接 OBS）")
+
     try:
-        if director.connect_obs() and director.obs_ws:
-            ws = director.obs_ws
+        if ws is not None:
             if _obs_is_recording(ws):
                 logger.warning("apply_recommended: OBS 正在录制，跳过 WebSocket 同步")
                 changed.append("websocket_sync_skipped_recording")
@@ -1097,13 +1091,12 @@ def apply_recommended(
                     if _apply_scale_inner_transform(ws, sn, cn, bw_run, bh_run):
                         changed.append("fixed_capture_source_transform")
         else:
-            logger.info("apply_recommended: WebSocket 未连接，仅完成磁盘预设写入")
             changed.append("websocket_sync_skipped_no_connection")
     except Exception as e:
         logger.warning("apply_recommended: WebSocket 同步异常（磁盘已写入）: %s", e, exc_info=True)
         changed.append("websocket_sync_failed")
     finally:
-        director.disconnect_obs()
+        _ws_disconnect(ws)
 
     if bundled_used:
         restart_obs_required = True
@@ -1150,7 +1143,6 @@ def import_cs2obs_bytes(
 
     pp = _effective_project_profile(obs_root, project_profile)
 
-    cfg = load_config()
     backup_id = ""
     if create_backup:
         backup_id, _ = _create_backup(obs_root, reason="import_cs2obs_preset", project_profile=pp)
@@ -1183,19 +1175,10 @@ def import_cs2obs_bytes(
 
     changed = ["set_video", "set_recording_encoder_policy"]
     restart_obs_required = True
-    director = OBSDirector(
-        obs_cfg,
-        cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-    )
+    ws = _ws_connect(obs_cfg)
+    if ws is None:
+        raise ValueError("无法连接 OBS WebSocket")
     try:
-        if not director.connect_obs():
-            raise ValueError("无法连接 OBS WebSocket")
-        ws = director.obs_ws
-        if not ws:
-            raise ValueError("OBS WebSocket 未就绪")
         if _obs_is_recording(ws):
             raise ValueError("OBS 正在录制中，请停止录制后再修改配置。")
         _try_set_video_and_profile_params(
@@ -1220,7 +1203,7 @@ def import_cs2obs_bytes(
         if _apply_scale_inner_transform(ws, sn, cn, bwv, bhv):
             changed.append("fixed_capture_source_transform")
     finally:
-        director.disconnect_obs()
+        _ws_disconnect(ws)
 
     return {
         "ok": True,

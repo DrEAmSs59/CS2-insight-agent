@@ -1,4 +1,4 @@
-"""POV HUD：安装 pov.vpk、增量 patch gameinfo.gi、备份与恢复（实验性功能）。"""
+"""POV HUD：按地图选择源 vpk 写入 game/csgo/pov.vpk、增量 patch gameinfo.gi、备份与恢复（实验性功能）。"""
 
 from __future__ import annotations
 
@@ -21,12 +21,63 @@ class PovHudError(RuntimeError):
     pass
 
 
+def _pov_dir_has_any_vpk(pov_dir: Path) -> bool:
+    return (
+        (pov_dir / "pov.vpk").is_file()
+        or (pov_dir / "pov_default.vpk").is_file()
+        or (pov_dir / "pov_de_dust2.vpk").is_file()
+    )
+
+
 def find_project_root() -> Path:
     current = Path(__file__).resolve()
     for parent in [current.parent, *current.parents]:
-        if (parent / "pov" / "pov.vpk").is_file():
+        if _pov_dir_has_any_vpk(parent / "pov"):
             return parent
-    raise PovHudError("未找到项目根目录下的 pov/pov.vpk")
+    raise PovHudError("未找到项目根目录下的 pov 资源（pov_default.vpk / pov_de_dust2.vpk 或旧版 pov/pov.vpk）")
+
+
+def pov_split_layout_installed(pov_dir: Path) -> bool:
+    """若存在任一按地图拆分的 vpk，则按新布局解析（否则走旧版单文件 pov.vpk）。"""
+    return (pov_dir / "pov_default.vpk").is_file() or (pov_dir / "pov_de_dust2.vpk").is_file()
+
+
+def pov_hud_effective_map_name(demo_map_name: Optional[str], demo_path: Optional[str] = None) -> Optional[str]:
+    """DTO / 库解析的 map_name 为空时，从 demo 文件名猜测（当前仅 de_dust2 需专用 vpk）。"""
+    s = (demo_map_name or "").strip()
+    if s:
+        return s
+    p = (demo_path or "").strip()
+    if not p:
+        return None
+    base = Path(p).name.lower()
+    if "de_dust2" in base:
+        return "de_dust2"
+    return None
+
+
+def resolve_pov_vpk_source_in_project_pov_dir(pov_dir: Path, map_name: Optional[str]) -> Path:
+    """按 Demo 地图选择源 vpk；安装目标仍为 game/csgo/pov.vpk。"""
+    key = (map_name or "").strip().lower()
+    if pov_split_layout_installed(pov_dir):
+        if key == "de_dust2":
+            p = pov_dir / "pov_de_dust2.vpk"
+            if not p.is_file():
+                raise PovHudError(
+                    "当前 Demo 地图为 de_dust2，但未找到 pov/pov_de_dust2.vpk，请将该文件放入项目的 pov 目录。"
+                )
+            return p
+        p = pov_dir / "pov_default.vpk"
+        if not p.is_file():
+            raise PovHudError("未找到 pov/pov_default.vpk，请将该文件放入项目的 pov 目录。")
+        return p
+    legacy = pov_dir / "pov.vpk"
+    if legacy.is_file():
+        return legacy
+    raise PovHudError(
+        "未找到 POV HUD 资源：请使用 pov/pov_default.vpk + pov/pov_de_dust2.vpk，"
+        "或旧版单文件 pov/pov.vpk。"
+    )
 
 
 def resolve_csgo_dir_from_cs2_path(cs2_path: str) -> Path:
@@ -122,8 +173,8 @@ class PovHudManager:
     def get_project_pov_dir(self) -> Path:
         return find_project_root() / "pov"
 
-    def get_pov_vpk_source_path(self) -> Path:
-        return self.get_project_pov_dir() / "pov.vpk"
+    def get_pov_vpk_source_path(self, map_name: Optional[str] = None) -> Path:
+        return resolve_pov_vpk_source_in_project_pov_dir(self.get_project_pov_dir(), map_name)
 
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
@@ -177,15 +228,15 @@ class PovHudManager:
             "warnings": warnings,
         }
 
-    def install(self) -> None:
+    def install(self, map_name: Optional[str] = None) -> None:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
         if is_cs2_running():
             raise PovHudError(CS2_RUNNING_POV_MSG)
 
-        pov_src = self.get_pov_vpk_source_path()
+        pov_src = self.get_pov_vpk_source_path(map_name)
         if not pov_src.is_file():
-            raise PovHudError("未找到 POV HUD 资源文件 pov/pov.vpk，请确认 POV 资源已正确放入项目根目录的 pov 文件夹。")
+            raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
 
         csgo = self.get_csgo_dir()
         gi_path = self.get_gameinfo_path()
@@ -243,6 +294,8 @@ class PovHudManager:
             "gameinfo_path": str(gi_path),
             "backup_gameinfo_path": str(bak_path),
             "pov_vpk_path": str(pov_dst),
+            "pov_vpk_source_basename": pov_src.name,
+            "demo_map_name_used": (map_name or "").strip(),
             "original_gameinfo_sha256": original_sha,
             "patched_gameinfo_sha256": patched_sha,
             "installed_pov_vpk_sha256": pov_sha,
@@ -290,6 +343,36 @@ class PovHudManager:
                 backup_dir.rmdir()
         except OSError:
             pass
+
+    def replace_pov_vpk_for_map(self, map_name: Optional[str] = None) -> None:
+        """已在当次会话中完成 install 后，仅按地图覆盖 game/csgo/pov.vpk（不改动 gameinfo 与备份）。"""
+        if sys.platform != "win32":
+            raise PovHudError("POV HUD 仅支持 Windows。")
+        if is_cs2_running():
+            raise PovHudError(CS2_RUNNING_POV_MSG)
+        manifest_path = self.get_manifest_path()
+        if not manifest_path.is_file():
+            raise PovHudError("POV 尚未安装，无法按地图切换 VPK。")
+        pov_src = self.get_pov_vpk_source_path(map_name)
+        pov_dst = self.get_pov_vpk_target_path()
+        try:
+            shutil.copy2(pov_src, pov_dst)
+        except OSError as e:
+            raise PovHudError("无法写入 CS2 目录，请尝试以管理员权限运行，或检查 Steam / CS2 目录权限。") from e
+        pov_sha = sha256_file(pov_dst)
+        try:
+            raw = manifest_path.read_text(encoding="utf-8")
+            manifest = json.loads(raw) if raw.strip() else {}
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        manifest["pov_vpk_source_basename"] = pov_src.name
+        manifest["demo_map_name_used"] = (map_name or "").strip()
+        manifest["installed_pov_vpk_sha256"] = pov_sha
+        manifest["pov_vpk_replaced_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            raise PovHudError("无法更新 POV 安装记录文件。") from e
 
     def debug_compare_reference_gameinfo(self) -> dict[str, Any]:
         """开发阶段：对比参考 gameinfo，不参与录制。"""

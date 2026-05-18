@@ -83,18 +83,18 @@ export default function KillfeedEventRow({
     "killfeed-event-row flex min-h-9 w-full max-w-full cursor-default flex-col justify-center rounded-md border px-2.5 py-1.5 text-left transition-colors duration-150",
     normalAssistLine || flashAssistLine ? "min-h-[52px]" : "",
     isAssistOnly
-      ? "cursor-default border-white/[0.06] bg-black/35 text-zinc-500"
+      ? "cursor-default border-cs2-border bg-cs2-bg-input/60 text-cs2-text-muted"
       : isKill
         ? atkHighlight
-          ? "border-emerald-400/50 bg-gradient-to-r from-emerald-950/55 to-[rgb(12,18,14)]/95"
-          : "border-emerald-500/28 bg-gradient-to-r from-emerald-950/40 to-[rgb(10,10,10)]/92"
+          ? "border-emerald-400/50 bg-gradient-to-r from-cs2-emerald-surface to-cs2-bg-card"
+          : "border-emerald-500/28 bg-gradient-to-r from-cs2-emerald-surface to-cs2-bg-card"
         : isDeath
           ? vicHighlight
-            ? "border-rose-400/55 bg-gradient-to-r from-rose-950/55 to-[rgb(18,12,12)]/95"
-            : "border-rose-500/28 bg-gradient-to-r from-rose-950/38 to-[rgb(10,10,10)]/92"
-          : "border-white/10 bg-[rgb(8,8,8)]/88",
+            ? "border-rose-400/55 bg-gradient-to-r from-cs2-rose-surface to-cs2-bg-card"
+            : "border-rose-500/28 bg-gradient-to-r from-cs2-rose-surface to-cs2-bg-card"
+          : "border-cs2-border bg-[rgb(8,8,8)]/88",
     clickable ? "cursor-pointer hover:brightness-110" : "",
-    queued ? "ring-1 ring-cs2-orange/45" : "",
+    queued ? "ring-1 ring-cs2-accent/45" : "",
   ].join(" ");
 
   const badgeRow =
@@ -104,7 +104,7 @@ export default function KillfeedEventRow({
           <span
             key={b.k}
             title={b.title}
-            className="rounded border border-white/14 bg-black/55 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-zinc-200"
+            className="rounded border border-cs2-border bg-cs2-bg-page/85 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-cs2-text-primary"
           >
             {b.label}
           </span>
@@ -114,13 +114,13 @@ export default function KillfeedEventRow({
     return (
       <div className={rowClass}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-snug">
-        <span className="shrink-0 font-mono text-[11px] text-zinc-600">[{timeText}]</span>
+        <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
-          <span className="shrink-0 rounded border border-cyan-500/25 bg-cyan-950/35 px-1 py-0 font-mono text-[10px] font-semibold text-cyan-200/90">
+          <span className="shrink-0 rounded border border-cyan-500/25 bg-cs2-cyan-surface px-1 py-0 font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
             第 {roundNumber} 回合
           </span>
         ) : null}
-          <span className="text-zinc-500">{String(event?.assist_note || "助攻")}</span>
+          <span className="text-cs2-text-muted">{String(event?.assist_note || "助攻")}</span>
         </div>
       </div>
     );
@@ -144,16 +144,16 @@ export default function KillfeedEventRow({
       className={rowClass}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] leading-tight">
-        <span className="shrink-0 font-mono text-[11px] text-zinc-500">[{timeText}]</span>
+        <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
-          <span className="shrink-0 rounded border border-cyan-500/30 bg-cyan-950/40 px-1 py-0 font-mono text-[10px] font-semibold text-cyan-200/95">
+          <span className="shrink-0 rounded border border-cyan-500/30 bg-cs2-cyan-surface px-1 py-0 font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
             第 {roundNumber} 回合
           </span>
         ) : null}
         <span
           className={[
             "shrink-0 font-bold tracking-tight",
-            atkHighlight ? "text-cs2-orange" : "text-[#e8c56a]",
+            atkHighlight ? "text-cs2-accent" : "text-[#e8c56a]",
           ].join(" ")}
         >
           {atk}
@@ -165,25 +165,25 @@ export default function KillfeedEventRow({
         <span
           className={[
             "min-w-0 shrink-0 font-bold tracking-tight",
-            vicHighlight ? "text-cs2-orange" : "text-[#b8d9f6]",
+            vicHighlight ? "text-cs2-accent" : "text-[#b8d9f6]",
           ].join(" ")}
         >
           {vic}
         </span>
         {queued ? (
-          <span className="ml-auto shrink-0 rounded border border-cs2-orange/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-orange">
+          <span className="ml-auto shrink-0 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent">
             已入队
           </span>
         ) : null}
       </div>
       {flashAssistLine ? (
-        <p className="mt-1 pl-0.5 text-[12px] leading-snug text-zinc-400">
-          <span className="text-zinc-600">↳</span> 闪光助攻：
+        <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">
+          <span className="text-cs2-text-muted">↳</span> 闪光助攻：
           <span className="font-semibold text-amber-400">{assistName}</span>
         </p>
       ) : normalAssistLine ? (
-        <p className="mt-1 pl-0.5 text-[12px] leading-snug text-zinc-400">
-          <span className="text-zinc-600">↳</span> 助攻：
+        <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">
+          <span className="text-cs2-text-muted">↳</span> 助攻：
           <span className="font-semibold text-amber-400">{assistName}</span>
         </p>
       ) : null}

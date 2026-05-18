@@ -43,37 +43,37 @@ export default function RecordingBlockedDialog({ message, onClose }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
+      <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl">
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300"
+          className="absolute right-3 top-3 rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
           aria-label="关闭"
         >
           <X className="h-4 w-4" />
         </button>
 
-        <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-orange/30 bg-cs2-orange/10 text-cs2-orange">
+        <div className="flex items-start gap-3 border-b border-cs2-border px-5 py-4">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-accent/30 bg-cs2-accent/10 text-cs2-accent">
             <ShieldAlert className="h-5 w-5" />
           </div>
           <div className="min-w-0 pr-7">
-            <h2 id="recording-blocked-title" className="text-sm font-bold text-white">
+            <h2 id="recording-blocked-title" className="text-sm font-bold text-cs2-text-primary">
               无法开始录制
             </h2>
-            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{subtitle}</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">{subtitle}</p>
           </div>
         </div>
 
         <div className="px-5 py-4">
-          <p className="text-sm leading-6 text-zinc-300 whitespace-pre-wrap break-words">{message}</p>
+          <p className="text-sm leading-6 text-cs2-text-secondary whitespace-pre-wrap break-words">{message}</p>
         </div>
 
-        <div className="flex justify-end border-t border-white/10 bg-black/20 px-5 py-3">
+        <div className="flex justify-end border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-cs2-orange px-4 py-2 text-sm font-extrabold text-black shadow-lg shadow-cs2-orange/20 transition-colors hover:bg-cs2-orange-light"
+            className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20 transition-colors hover:bg-cs2-accent-light"
           >
             知道了
           </button>

@@ -99,8 +99,14 @@ class Clip:
     killer_name: Optional[str] = None
     victims: list[str] = field(default_factory=list)
     killers: list[str] = field(default_factory=list)
+    # 与 killers 等长；每次死亡对应击杀者的 steamid64（来自 player_death attacker_steamid），供 killer POV 分段
+    killers_steamid64s: list[str] = field(default_factory=list)
     # 高光多杀：本片段内目标玩家每次击杀的 tick（升序），供导播智能跳跃剪辑分段
     kill_ticks: list[int] = field(default_factory=list)
+    # 与 victims 等长；每次击杀对应受害者的 steamid64（来自 player_death user_steamid），供受害者 POV 分段
+    victim_steamid64s: list[str] = field(default_factory=list)
+    # 击杀目标玩家的凶手 steamid64（来自 player_death attacker_steamid），供下饭 killer POV 分段
+    killer_steamid64: Optional[str] = None
     # 本回合开局比分（目标方 round 胜场 : 对方），来自 round_freeze_end 刻度与 team_num
     score_own: Optional[int] = None
     score_opp: Optional[int] = None
@@ -122,7 +128,7 @@ class Clip:
     # 与 source_ticks 等长；freeze_to_death 每段 (start_round, end_round) 含端点，供前端按勾选子集入队切片
     source_round_ends: list[int] = field(default_factory=list)
     compilation_kind: Optional[str] = None
-    # 为 True 时：导播与入队合并忽略智能分段/开场结尾预留等 pacing（仍保留 POV 开关类字段的显式覆写）
+    # 为 True 时：导播与入队合并忽略智能分段 / 击杀前后预留等 pacing（仍保留 POV 开关类字段的显式覆写）
     fixed_segment_pacing: bool = False
     # 回合合集（compilation_kind=freeze_to_death）：本次解析使用的回合范围，写入结果 JSON 供库缓存/前端恢复。
     # None = 使用全部合规非赛后回合；非空 list = 仅这些回合（与 source_ticks 同源）。
@@ -268,7 +274,7 @@ def _highlight_weapon_used_label(kills_sorted: list[dict]) -> str:
 # ━━━ 武器分类 & 常量 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 TICK_RATE = 64
-# 「冻结结束前 → 死亡后固定留白」合辑：冻结结束 tick 之前开录的秒数（不受全局开场预留影响）
+# 「冻结结束前 → 死亡后固定留白」合辑：冻结结束 tick 之前开录的秒数（不受全局击杀前预留影响）
 _FREEZE_TO_DEATH_PRE_FREEZE_SEC = float(
     os.environ.get("CS2_INSIGHT_FREEZE_TO_DEATH_PRE_SEC", "8.0") or "8.0",
 )
@@ -835,29 +841,32 @@ class DemoAnalyzer:
         self,
         target_player: str,
         match_start_tick: int = 0,
-    ) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int]]:
+    ) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int]]:
         """
         解析 round_freeze_end，在冻结结束 tick 上汇总 Team 2 / Team 3 存活玩家 current_equip_value，
-        并记录目标玩家在该回合所属 team_num。
+        并记录目标玩家在该回合所属 team_num。同时解析 round_start 事件，
+        通过时间段匹配得出每回合冻结开始的真实 tick。
 
-        返回三元组:
-            economy_map            {round_num: {2: equip, 3: equip}}
-            target_team_map        {round_num: team_num}
-            round_freeze_end_ticks {round_num: freeze_end_tick}  ← 用于 clip_min_tick
+        返回四元组:
+            economy_map               {round_num: {2: equip, 3: equip}}
+            target_team_map           {round_num: team_num}
+            round_freeze_end_ticks    {round_num: freeze_end_tick}
+            round_freeze_start_ticks  {round_num: freeze_start_tick}  ← 真实回合开始 tick
         """
         economy_map: dict[int, dict[int, int]] = {}
         target_team_map: dict[int, int] = {}
         round_freeze_end_ticks: dict[int, int] = {}
+        round_freeze_start_ticks: dict[int, int] = {}
         fr = self._safe_parse_event("round_freeze_end", other=list(_EXTRA_EVENT_FIELDS))
         if fr.shape[0] == 0 or "tick" not in fr.columns:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         if match_start_tick > 0:
             fr = fr.loc[pd.to_numeric(fr["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
         if fr.shape[0] == 0:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         trc = "total_rounds_played" if "total_rounds_played" in fr.columns else None
         if trc is None:
-            return economy_map, target_team_map
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         tick_to_round: dict[int, int] = {}
         for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
@@ -870,9 +879,33 @@ class DemoAnalyzer:
             if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
                 round_freeze_end_ticks[rn_here] = tick
 
+        # Build round_freeze_start_ticks from round_start events using temporal matching.
+        # For each round N, find the round_start event tick that falls between the
+        # previous round's freeze_end and this round's freeze_end.  This gives the
+        # true demo tick at which the freeze/buy phase of round N began.
+        try:
+            rs_df = self._safe_parse_event("round_start")
+            if not rs_df.empty and "tick" in rs_df.columns:
+                rs_ticks = sorted(
+                    pd.to_numeric(rs_df["tick"], errors="coerce").dropna().astype(int).tolist()
+                )
+                if match_start_tick > 0:
+                    rs_ticks = [t for t in rs_ticks if t >= match_start_tick]
+                for rnd in sorted(round_freeze_end_ticks.keys()):
+                    fe = round_freeze_end_ticks[rnd]
+                    prev_fe = round_freeze_end_ticks.get(
+                        rnd - 1,
+                        match_start_tick if match_start_tick > 0 else 0,
+                    )
+                    candidates = [t for t in rs_ticks if prev_fe < t < fe]
+                    if candidates:
+                        round_freeze_start_ticks[rnd] = min(candidates)
+        except Exception:
+            pass
+
         ticks = sorted(tick_to_round.keys())
         if not ticks:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         try:
             raw = self.parser.parse_ticks(
@@ -881,9 +914,9 @@ class DemoAnalyzer:
             )
             pdf = _to_pandas_df(raw)
         except Exception:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
         if pdf.empty or "tick" not in pdf.columns:
-            return economy_map, target_team_map, round_freeze_end_ticks
+            return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
         tp = str(target_player or "").strip().lower()
         name_col = "name" if "name" in pdf.columns else None
@@ -934,7 +967,7 @@ class DemoAnalyzer:
                             pass
                         break
 
-        return economy_map, target_team_map, round_freeze_end_ticks
+        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
     def _build_round_scores(self, match_start_tick: int = 0) -> dict[int, dict[int, int]]:
         """
@@ -1059,9 +1092,12 @@ class DemoAnalyzer:
         match_start_tick = _get_match_start_tick(self.parser)
 
         # ── 每回合冻结结束瞬间：两队存活装备总价 + 目标所在阵营 ──
-        round_economy_map, round_target_team_map, round_freeze_end_ticks = self._build_round_economy(
-            target_player, match_start_tick,
-        )
+        (
+            round_economy_map,
+            round_target_team_map,
+            round_freeze_end_ticks,
+            round_freeze_start_ticks,
+        ) = self._build_round_economy(target_player, match_start_tick)
         # 以玩家队伍身份累计：own / opp 不随换边混淆，用于比分显示与赛点标签
         round_team_score_map = self._build_round_scores_team_based(
             round_target_team_map, match_start_tick,
@@ -1197,6 +1233,7 @@ class DemoAnalyzer:
                     "weapon": weapon,
                     "headshot": headshot,
                     "attacker": attacker,
+                    "attacker_steamid": str(row.get("attacker_steamid") or ""),
                     "attacker_team": attacker_team,
                     "victim_team": victim_team,
                     "attackerblind": attackerblind,
@@ -1235,6 +1272,7 @@ class DemoAnalyzer:
                     "noscope": noscope,
                     "tags": per_kill_tags,
                     "victim": victim,
+                    "victim_steamid": str(row.get("user_steamid") or ""),
                     "thrusmoke": thrusmoke,
                     "penetrated": penetrated,
                     "shots_to_kill": shots_to_kill,
@@ -1675,6 +1713,7 @@ class DemoAnalyzer:
             # =================================
 
             victims_list = [str(k.get("victim") or "") for k in kills_sorted]
+            victim_steamids_list = [str(k.get("victim_steamid") or "") for k in kills_sorted]
             kill_ticks_sorted = sorted({_int(k["tick"]) for k in kills_sorted})
             so, se = DemoAnalyzer._round_start_scores_for_target(
                 rnd, round_team_score_map,
@@ -1714,6 +1753,7 @@ class DemoAnalyzer:
                 end_tick=_clip_end_tick,
                 context_tags=_dedup_context_tags(tags),
                 victims=victims_list,
+                victim_steamid64s=victim_steamids_list,
                 kill_ticks=kill_ticks_sorted,
                 score_own=so,
                 score_opp=se,
@@ -1964,6 +2004,7 @@ class DemoAnalyzer:
             round_result_map,
             round_freeze_end_ticks,
             freeze_to_death_rounds=freeze_to_death_rounds,
+            round_freeze_start_ticks=round_freeze_start_ticks,
             map_name=map_name,
             demo_max_tick=_demo_max_tick,
         )
@@ -2047,21 +2088,38 @@ class DemoAnalyzer:
                     )
 
         _last_rnd_num = max(_round_end_evt_tick_map.keys()) if _round_end_evt_tick_map else None
+        # ``round_end`` 表 ``total_rounds_played`` 与记分表 ``_match_metrics_from_round_scores``
+        # 偶发错位（缺最后一行 / 序号偏差），仅用 ``max(round_end.keys)`` 会漏判决胜回合，
+        # 导致 ``clip_max_tick`` 未写 → 末段 / POV 滑进结算 UI。取二者较大作为「正赛最后一回合」序号。
+        _terminal_play_round: Optional[int] = None
+        try:
+            _lrn_i = int(_last_rnd_num) if _last_rnd_num is not None else 0
+        except (TypeError, ValueError):
+            _lrn_i = 0
+        try:
+            _done_i = int(_done_rounds) if _done_rounds else 0
+        except (TypeError, ValueError):
+            _done_i = 0
+        _tpr_i = max(_lrn_i, _done_i)
+        if _tpr_i > 0:
+            _terminal_play_round = _tpr_i
         # 最后一回合：结算界面在「最后击杀」帧同时出现，与 round_end 事件无关。
         # round_end 在击杀后数秒才 fire（比赛庆典动画），用 round_end_tick 做基准永远不准。
-        # 改为：用 clip 自身的最后击杀/死亡 tick 作为 clip_max_tick 上限（不加正缓冲）。
+        # 改为：用 clip 末事件 tick + 小缓冲（见下）作为 clip_max_tick 上限。
         # 正缓冲会让录制越过结算 tick，且 POV 段切换时 demo 可能滑入结算状态导致黑屏。
-        # CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC = 相对最后击杀 tick 的偏移（秒）。
-        # 默认 0.5：允许看到击杀后 0.5s 的画面；demo_pause 注入兜底保证不会长时间停留在结算界面。
-        # 如果仍然进入结算界面，可将此值调小（如 0.0 或 -0.3）；若 POV 截断太早则调大。
+        # CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC = 相对最后击杀/死亡 tick 的偏移（秒）。
+        # 默认 0.70：决胜回合主段与受害者 POV 死后留白略宽裕；仍远早于 round_end 庆典 tick。
+        # 若进结算 UI 可将此值调小；若末杀 POV/主段仍觉偏短则调大。
         _last_kill_buf_ticks = int(float(
-            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.45") or "0.45"
+            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
 
         logger.info(
-            "[clip_max_tick] round_end_evt_tick_map rounds=%s last_rnd=%s",
+            "[clip_max_tick] round_end_evt_tick_map rounds=%s last_rnd=%s terminal_round=%s done_rounds=%s",
             sorted(_round_end_evt_tick_map.keys()),
             _last_rnd_num,
+            _terminal_play_round,
+            _done_rounds,
         )
         for _c in clips:
             if _c.clip_max_tick is not None:
@@ -2074,7 +2132,70 @@ class DemoAnalyzer:
                         _c.clip_max_tick = int(_ld) + _last_kill_buf_ticks
                         if _c.end_tick > _c.clip_max_tick:
                             _c.end_tick = _c.clip_max_tick
-            elif _c.round == _last_rnd_num:
+                elif _terminal_play_round is not None:
+                    # 跨回合合集 ``clip.round`` 存首回合，不能仅用 ``_c.round == _terminal_play_round``。
+                    # 若 ``source_rounds`` 含决胜回合，末段 / POV 必须封顶在结算 UI 出现前，
+                    # 否则 ``demo_gototick`` 倒退无法恢复画面（与单回合 clip 最后一回合策略一致）。
+                    _rounds_src = getattr(_c, "source_rounds", None) or []
+                    _kts = getattr(_c, "kill_ticks", None) or []
+                    _last_match_evt: Optional[int] = None
+                    if isinstance(_rounds_src, list) and isinstance(_kts, list):
+                        try:
+                            _lrn = int(_terminal_play_round)
+                        except (TypeError, ValueError):
+                            _lrn = 0
+                        if _lrn > 0:
+                            for _i, _rn_raw in enumerate(_rounds_src):
+                                try:
+                                    _rni = int(_rn_raw)
+                                except (TypeError, ValueError):
+                                    continue
+                                if _rni != _lrn:
+                                    continue
+                                if _i >= len(_kts):
+                                    continue
+                                try:
+                                    _kti = int(_kts[_i])
+                                except (TypeError, ValueError):
+                                    continue
+                                if _kti > 0 and (
+                                    _last_match_evt is None or _kti > _last_match_evt
+                                ):
+                                    _last_match_evt = _kti
+                        # 回退：``round_end`` 推导的决胜回合号偏小（缺最后一行）时，
+                        # ``source_rounds`` 仍含更大回合号 → 按该最大回合扫末事件锚点。
+                        if _last_match_evt is None and _lrn > 0:
+                            try:
+                                _sr_max = max(
+                                    int(_rn_raw)
+                                    for _rn_raw in _rounds_src
+                                    if str(_rn_raw).strip() not in ("", "None")
+                                )
+                            except (TypeError, ValueError):
+                                _sr_max = 0
+                            if _sr_max > _lrn:
+                                for _i, _rn_raw in enumerate(_rounds_src):
+                                    try:
+                                        _rni = int(_rn_raw)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if _rni != _sr_max:
+                                        continue
+                                    if _i >= len(_kts):
+                                        continue
+                                    try:
+                                        _kti = int(_kts[_i])
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if _kti > 0 and (
+                                        _last_match_evt is None or _kti > _last_match_evt
+                                    ):
+                                        _last_match_evt = _kti
+                    if _last_match_evt is not None and _last_match_evt > 0:
+                        _c.clip_max_tick = int(_last_match_evt) + _last_kill_buf_ticks
+                        if _c.end_tick > _c.clip_max_tick:
+                            _c.end_tick = _c.clip_max_tick
+            elif _terminal_play_round is not None and _c.round == _terminal_play_round:
                 # 最后一回合：以该 clip 自身的最后击杀/死亡 tick 为基准
                 if _c.kill_ticks:
                     _last_evt_tick = max(_c.kill_ticks)
@@ -2085,7 +2206,9 @@ class DemoAnalyzer:
                     _re_t = _round_end_evt_tick_map.get(_c.round, 0)
                     _last_evt_tick = _re_t + _re_offset_last_ticks if _re_t else None
                 if _last_evt_tick:
-                    _c.clip_max_tick = _last_evt_tick + _last_kill_buf_ticks
+                    _c.clip_max_tick = int(_last_evt_tick) + int(_last_kill_buf_ticks)
+                    if _c.end_tick > _c.clip_max_tick:
+                        _c.end_tick = _c.clip_max_tick
             elif _c.round in _round_end_evt_tick_map:
                 # 非最后回合：round_end_tick + 宽松缓冲（不存在结算界面问题）
                 _round_end_tick = _round_end_evt_tick_map[_c.round]
@@ -2116,12 +2239,12 @@ class DemoAnalyzer:
                 if _c.end_tick > _c.clip_max_tick:
                     _c.end_tick = _c.clip_max_tick
             logger.info(
-                "[clip_max_tick] clip_id=%s round=%s last_evt_tick=%s clip_max_tick=%s (last_rnd=%s)",
+                "[clip_max_tick] clip_id=%s round=%s last_evt_tick=%s clip_max_tick=%s (terminal_rnd=%s)",
                 _c.clip_id,
                 _c.round,
                 max(_c.kill_ticks) if _c.kill_ticks else _c.death_tick,
                 _c.clip_max_tick,
-                _c.round == _last_rnd_num,
+                _terminal_play_round,
             )
 
         team_a_score, team_b_score, match_date, duration_mins, team_a_name, team_b_name = (
@@ -2402,6 +2525,7 @@ class DemoAnalyzer:
         round_freeze_end_ticks: dict[int, int],
         *,
         freeze_to_death_rounds: Optional[list[int]] = None,
+        round_freeze_start_ticks: Optional[dict[int, int]] = None,
         map_name: str,
         demo_max_tick: int = 0,
     ) -> list[Clip]:
@@ -2417,7 +2541,7 @@ class DemoAnalyzer:
         )
 
         _last_compilation_event_buf_ticks = int(float(
-            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.45") or "0.45"
+            os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
 
         def _segment_around_tick(
@@ -2434,11 +2558,12 @@ class DemoAnalyzer:
                 max(tick + 1, end_tick),
             ]
 
-        all_target_kills: list[tuple[int, int, str]] = []
+        all_target_kills: list[tuple[int, int, str, str]] = []
         for rnd, kills in round_kills.items():
             for k in kills:
                 kt = _int(k.get("tick"))
                 victim = str(k.get("victim") or "").strip()
+                victim_steamid = str(k.get("victim_steamid") or "").strip()
                 if kt <= 0 or not victim:
                     continue
                 if DemoAnalyzer._is_post_match_round(
@@ -2448,14 +2573,15 @@ class DemoAnalyzer:
                     final_scoreline=_final_line,
                 ):
                     continue
-                all_target_kills.append((rnd, kt, victim))
+                all_target_kills.append((rnd, kt, victim, victim_steamid))
         all_target_kills.sort(key=lambda item: (item[1], item[0], item[2]))
 
-        all_target_deaths: list[tuple[int, int, str]] = []
+        all_target_deaths: list[tuple[int, int, str, str]] = []
         for d in death_records:
             rn = _int(d.get("round"))
             dt = _int(d.get("tick"))
             attacker = str(d.get("attacker") or "").strip()
+            attacker_steamid = str(d.get("attacker_steamid") or "").strip()
             if rn <= 0 or dt <= 0 or not attacker or attacker == target_player:
                 continue
             if DemoAnalyzer._is_post_match_round(
@@ -2465,7 +2591,7 @@ class DemoAnalyzer:
                 final_scoreline=_final_line,
             ):
                 continue
-            all_target_deaths.append((rn, dt, attacker))
+            all_target_deaths.append((rn, dt, attacker, attacker_steamid))
         all_target_deaths.sort(key=lambda item: (item[1], item[0], item[2]))
 
         # —— 🥩 亲儿子喂饭 ——
@@ -2573,13 +2699,14 @@ class DemoAnalyzer:
             ))
 
         if all_target_kills:
-            first_rnd, first_t, _ = all_target_kills[0]
-            _last_rnd, last_t, _ = all_target_kills[-1]
+            first_rnd, first_t, _, _ = all_target_kills[0]
+            _last_rnd, last_t, _, _ = all_target_kills[-1]
             source_ticks = [
                 _segment_around_tick(kt, round_num=rn)
-                for rn, kt, _ in all_target_kills
+                for rn, kt, _, _ in all_target_kills
             ]
-            victims = [victim for _, _, victim in all_target_kills]
+            victims = [victim for _, _, victim, _ in all_target_kills]
+            victim_steamids = [vsid for _, _, _, vsid in all_target_kills]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
                 map_name=map_name,
@@ -2592,22 +2719,24 @@ class DemoAnalyzer:
                 context_tags=["🎬 全部击杀", f"🎯 {target_player} × {len(all_target_kills)}"],
                 killers=[target_player] * len(all_target_kills),
                 victims=victims,
-                kill_ticks=[kt for _, kt, _ in all_target_kills],
+                victim_steamid64s=victim_steamids,
+                kill_ticks=[kt for _, kt, _, _ in all_target_kills],
                 round_won=round_result_map.get(first_rnd),
                 clip_min_tick=round_freeze_end_ticks.get(first_rnd),
                 source_ticks=source_ticks,
-                source_rounds=[rn for rn, _, _ in all_target_kills],
+                source_rounds=[rn for rn, _, _, _ in all_target_kills],
                 compilation_kind="all_kills",
             ))
 
         if all_target_deaths:
-            first_rnd, first_t, _ = all_target_deaths[0]
-            _last_rnd, last_t, _ = all_target_deaths[-1]
+            first_rnd, first_t, _, _ = all_target_deaths[0]
+            _last_rnd, last_t, _, _ = all_target_deaths[-1]
             source_ticks = [
                 _segment_around_tick(dt, round_num=rn, lead_seconds=float(_DEATH_CLIP_LEAD_SECONDS))
-                for rn, dt, _ in all_target_deaths
+                for rn, dt, _, _ in all_target_deaths
             ]
-            killers = [attacker for _, _, attacker in all_target_deaths]
+            killers = [attacker for _, _, attacker, _ in all_target_deaths]
+            killer_steamids = [asid for _, _, _, asid in all_target_deaths]
             compilations.append(Clip(
                 clip_id=f"c_{uuid.uuid4().hex[:8]}",
                 map_name=map_name,
@@ -2620,12 +2749,13 @@ class DemoAnalyzer:
                 context_tags=["💀 全部死亡", f"☠️ {target_player} × {len(all_target_deaths)}"],
                 killer_name=None,
                 killers=killers,
+                killers_steamid64s=killer_steamids,
                 victims=[target_player] * len(all_target_deaths),
-                kill_ticks=[dt for _, dt, _ in all_target_deaths],
+                kill_ticks=[dt for _, dt, _, _ in all_target_deaths],
                 round_won=round_result_map.get(first_rnd),
                 clip_min_tick=round_freeze_end_ticks.get(first_rnd),
                 source_ticks=source_ticks,
-                source_rounds=[rn for rn, _, _ in all_target_deaths],
+                source_rounds=[rn for rn, _, _, _ in all_target_deaths],
                 compilation_kind="all_deaths",
             ))
 
@@ -2710,6 +2840,10 @@ class DemoAnalyzer:
                         "death_tick": int(dt)
                         if dt is not None and int(dt) > 0
                         else None,
+                        # True round start tick from the demo's round_start event.
+                        # Populated via temporal matching in _build_round_economy;
+                        # None when round_start events are unavailable.
+                        "round_start_tick": (round_freeze_start_ticks or {}).get(rnd),
                     }
                 )
 
@@ -2873,6 +3007,7 @@ class DemoAnalyzer:
                     tick=death["tick"],
                     tags=backstab_tags,
                     killer_name=DemoAnalyzer._fail_killer_display_name(death, target_player),
+                    killer_steamid64=death.get("attacker_steamid"),
                     death_core=True,
                     score_own=so,
                     score_opp=se,
@@ -2940,6 +3075,7 @@ class DemoAnalyzer:
                     tick=death["tick"],
                     tags=unique_tags,
                     killer_name=DemoAnalyzer._fail_killer_display_name(death, target_player),
+                    killer_steamid64=death.get("attacker_steamid"),
                     death_core=True,
                     score_own=so,
                     score_opp=se,
@@ -4616,6 +4752,7 @@ class DemoAnalyzer:
         tags: list[str],
         end_tick_override: int | None = None,
         killer_name: Optional[str] = None,
+        killer_steamid64: Optional[str] = None,
         victims: Optional[list[str]] = None,
         *,
         death_core: bool = False,
@@ -4641,6 +4778,7 @@ class DemoAnalyzer:
             end_tick=end,
             context_tags=_dedup_context_tags(tags),
             killer_name=killer_name,
+            killer_steamid64=killer_steamid64 or None,
             victims=list(victims) if victims else [],
             score_own=score_own,
             score_opp=score_opp,

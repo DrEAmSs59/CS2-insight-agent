@@ -1,13 +1,13 @@
 import { classifyDemoStatus } from "../../utils/demoLibraryDisplay";
 
 const styles = {
-  pending: "border-amber-500/35 bg-amber-500/10 text-amber-200",
-  loaded: "border-sky-500/35 bg-sky-500/10 text-sky-200",
-  parsing: "border-cs2-orange/45 bg-cs2-orange/12 text-cs2-orange",
-  done: "border-emerald-500/35 bg-emerald-500/10 text-emerald-200",
-  error: "border-red-500/40 bg-red-500/10 text-red-200",
-  meta_missing: "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
-  unknown: "border-white/10 bg-white/[0.04] text-zinc-400",
+  pending: "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface",
+  loaded: "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface",
+  parsing: "border-cs2-accent/45 bg-cs2-accent/12 text-cs2-accent",
+  done: "border-cs2-emerald-surface bg-cs2-emerald-surface text-cs2-emerald-on-surface",
+  error: "border-cs2-red-surface bg-cs2-red-surface text-cs2-red-on-surface",
+  meta_missing: "border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-secondary",
+  unknown: "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary",
 };
 
 export default function DemoStatusBadge({ item, className = "" }) {

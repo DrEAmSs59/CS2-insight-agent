@@ -13,9 +13,15 @@
   "cs2_path": "",
   "demo_directory": "",
   "ai_mode": false,
-  "cs2_fps_max": 240,
   "recording_global_pacing": {},
   "default_record_warmup": {},
   "cs2_extra_launch_args": "",
-  "record_inject_console_lines": ""
+  "record_inject_console_lines": "",
+  "spec_player_verify": {
+    "demo_timescale": 0.05,
+    "max_retries": 4,
+    "per_retry_timeout_sec": 0.6,
+    "settle_sec": 0.12,
+    "pov_goto_delay_extra_sec": null
+  }
 }

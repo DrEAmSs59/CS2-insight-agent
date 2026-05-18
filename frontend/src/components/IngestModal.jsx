@@ -117,24 +117,24 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm">
-      <div className="relative flex h-full max-h-[600px] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm">
+      <div className="relative flex h-full max-h-[600px] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl">
         {ingesting ? (
           <div
-            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-black/55 backdrop-blur-[1px]"
+            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-[1px]"
             aria-busy="true"
             aria-label="正在入库"
           >
-            <Loader2 className="h-8 w-8 animate-spin text-cs2-orange" />
-            <p className="text-xs font-semibold text-zinc-200">正在入库，请稍候…</p>
+            <Loader2 className="h-8 w-8 animate-spin text-cs2-accent" />
+            <p className="text-xs font-semibold text-cs2-text-primary">正在入库，请稍候…</p>
           </div>
         ) : null}
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-cs2-border px-5 py-4">
           <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-cs2-orange" />
-            <h2 className="text-sm font-bold text-white">待入库 Demo</h2>
-            <span className="rounded bg-cs2-orange/10 px-1.5 py-0.5 text-[10px] font-bold text-cs2-orange">
+            <Database className="h-5 w-5 text-cs2-accent" />
+            <h2 className="text-sm font-bold text-cs2-text-primary">待入库 Demo</h2>
+            <span className="rounded bg-cs2-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-cs2-accent">
               {total}
             </span>
           </div>
@@ -151,7 +151,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
               type="button"
               disabled={ingesting}
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold text-zinc-400 transition-all hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-hover px-3 py-1.5 text-[10px] font-bold text-cs2-text-secondary transition-all hover:bg-cs2-bg-active hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Upload className="h-3.5 w-3.5" />
               本地浏览并导入
@@ -160,7 +160,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
               type="button"
               disabled={ingesting}
               onClick={onClose}
-              className="rounded-md p-1.5 text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full p-1.5 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               <X className="h-4 w-4" />
             </button>
@@ -168,22 +168,22 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center gap-3 border-b border-white/5 bg-black/20 px-5 py-3">
-          <div className="flex flex-1 items-center gap-2 rounded-md border border-white/10 bg-cs2-bg-input px-2.5 py-1.5">
-            <Search className="h-3.5 w-3.5 text-zinc-500" />
+        <div className="flex items-center gap-3 border-b border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
+          <div className="flex flex-1 items-center gap-2 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5">
+            <Search className="h-3.5 w-3.5 text-cs2-text-muted" />
             <input
               type="text"
               placeholder="搜索文件名..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="flex-1 bg-transparent text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+              className="flex-1 bg-transparent text-xs text-cs2-text-primary outline-none placeholder:text-cs2-text-muted"
             />
           </div>
           <button
             type="button"
             disabled={ingesting}
             onClick={() => void fetchDiscovered()}
-            className="flex items-center justify-center rounded-md border border-white/10 p-1.5 text-zinc-400 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex items-center justify-center rounded-md border border-cs2-border p-1.5 text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <RefreshCcw className={`h-4 w-4 ${listLoading ? "animate-spin" : ""}`} />
           </button>
@@ -191,15 +191,15 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
 
         {/* Selection bar */}
         {items.length > 0 && (
-          <div className="flex items-center gap-2 border-b border-white/5 bg-black/10 px-5 py-2 text-[10px]">
-            <button type="button" disabled={ingesting} onClick={handleSelectAll} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40">
+          <div className="flex items-center gap-2 border-b border-cs2-border bg-cs2-bg-input/30 px-5 py-2 text-[10px]">
+            <button type="button" disabled={ingesting} onClick={handleSelectAll} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
               本页全选
             </button>
-            <span className="text-zinc-600">|</span>
-            <button type="button" disabled={ingesting} onClick={handleClearSelection} className="text-zinc-400 hover:text-zinc-200 disabled:opacity-40">
+            <span className="text-cs2-text-muted">|</span>
+            <button type="button" disabled={ingesting} onClick={handleClearSelection} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
               清空
             </button>
-            <span className="ml-auto text-zinc-500">已选 {selectedIds.size} / {items.length}</span>
+            <span className="ml-auto text-cs2-text-muted">已选 {selectedIds.size} / {items.length}</span>
           </div>
         )}
 
@@ -207,10 +207,10 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         <div className="flex-1 overflow-y-auto p-2">
           {listLoading ? (
             <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+              <Loader2 className="h-6 w-6 animate-spin text-cs2-text-muted" />
             </div>
           ) : items.length === 0 ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2 text-zinc-600">
+            <div className="flex h-32 flex-col items-center justify-center gap-2 text-cs2-text-muted">
               <HardDrive className="h-8 w-8 opacity-20" />
               <p className="text-xs">
                 {search
@@ -236,18 +236,18 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                         handleToggleSelect(it.id);
                       }
                     }}
-                    className={`flex items-center justify-between rounded-md border p-2.5 transition-colors ${ingesting ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${selectedIds.has(it.id) ? "border-cs2-orange/40 bg-cs2-orange/5" : "border-transparent hover:bg-white/5"}`}
+                    className={`flex items-center justify-between rounded-md border p-2.5 transition-colors ${ingesting ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${selectedIds.has(it.id) ? "border-cs2-accent/40 bg-cs2-accent/5" : "border-transparent hover:bg-cs2-bg-hover"}`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <input
                         type="checkbox"
                         readOnly
                         checked={selectedIds.has(it.id)}
-                        className="h-3.5 w-3.5 rounded border-white/20 bg-transparent text-cs2-orange focus:ring-offset-0"
+                        className="h-3.5 w-3.5 rounded border-cs2-border bg-transparent text-cs2-accent focus:ring-offset-0"
                       />
                       <div className="min-w-0">
-                        <p className="truncate text-xs font-mono text-zinc-300" title={it.path}>{it.filename}</p>
-                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
+                        <p className="truncate text-xs font-mono text-cs2-text-secondary" title={it.path}>{it.filename}</p>
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-cs2-text-muted">
                           <span>{sourceLabel}</span>
                           <span>•</span>
                           <span>{sizeMB} MB</span>
@@ -264,9 +264,9 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         </div>
 
         {/* Footer */}
-        <div className="flex flex-col gap-2 border-t border-white/10 bg-cs2-bg-dark px-5 py-3">
+        <div className="flex flex-col gap-2 border-t border-cs2-border bg-cs2-bg-page px-5 py-3">
           {ingestError ? (
-            <p className="text-center text-[11px] leading-snug text-red-400">{ingestError}</p>
+            <p className="text-center text-[12px] leading-snug text-cs2-text-error">{ingestError}</p>
           ) : null}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -274,18 +274,18 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                 type="button"
                 disabled={page <= 1 || ingesting}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-white/10 p-1 text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:opacity-30"
+                className="rounded-md border border-cs2-border p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-secondary disabled:opacity-30"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-[11px] text-cs2-text-muted">
                 第 {page} / {totalPages} 页
               </span>
               <button
                 type="button"
                 disabled={page >= totalPages || ingesting}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-white/10 p-1 text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:opacity-30"
+                className="rounded-md border border-cs2-border p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-secondary disabled:opacity-30"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -296,7 +296,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                 type="button"
                 disabled={selectedIds.size === 0 || ingesting}
                 onClick={() => void handleIngestSelected()}
-                className="flex items-center gap-1.5 rounded-lg bg-cs2-orange px-4 py-2 text-xs font-extrabold text-black shadow-lg shadow-cs2-orange/20 transition-all hover:bg-cs2-orange-light disabled:opacity-50 disabled:grayscale"
+                className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-extrabold text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20 transition-all hover:bg-cs2-accent-light disabled:opacity-50 disabled:grayscale"
               >
                 {ingesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 确认入库 ({selectedIds.size})

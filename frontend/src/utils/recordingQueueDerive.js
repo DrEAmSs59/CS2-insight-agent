@@ -30,11 +30,9 @@ export function mergedPacingForItem(item, globalPacing) {
   };
 }
 
-/** 段间跳转粗估（与 obs 导播 pre_cont + post_mid 同量级） */
-const SEGMENT_BRIDGE_SEC = 6.5;
-
 /**
- * 粗算单条入 OBS 的素材时长（秒）：tick 跨度 / source_ticks 累加 + 每段预热/结尾；POV 追加。
+ * 粗算单条入 OBS 的素材时长（秒）：tick 跨度 / source_ticks 累加；每段含击杀段前预留 + 击杀段后预留；
+ * 多段 smart jump-cut 时段间再各加一组（与后端分段一致）。含 POV 追加。
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {Record<string, unknown>} globalPacing
  */
@@ -63,8 +61,7 @@ export function estimateItemRecordSeconds(item, globalPacing) {
     segmentCount = Math.max(1, src.length);
   }
 
-  let sec = core + segmentCount * (pre + post);
-  if (segmentCount > 1) sec += (segmentCount - 1) * SEGMENT_BRIDGE_SEC;
+  let sec = core + (segmentCount * 2 - 1) * (pre + post);
 
   if (po.victim_pov) sec += 14;
   if (po.killer_pov) sec += 14;

@@ -23,8 +23,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, Up
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from math import gcd
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .demo_parse_isolation import (
     IsolatedParseError,
@@ -37,6 +36,7 @@ from .env_utils import (
     OBSConfig,
     LLMConfig,
     ExperimentalConfig,
+    SpecPlayerVerifyConfig,
     load_config,
     save_config,
     ensure_cs2_path,
@@ -53,7 +53,6 @@ from .file_hash import file_md5_hex
 from .gsi_ready import gsi_status, notify_gsi_payload
 from .montage_db import MontageDB
 from . import obs_config_center
-from .pov_experimental import merge_warmup_extras_for_pov
 from .pov_hud_manager import PovHudError, PovHudManager, try_restore_stale_pov_on_startup
 from .video_composer import MontageComposerError, compose_montage, resolve_ffmpeg_binary, validate_output_path
 from .cs2_config_backup import (
@@ -64,14 +63,8 @@ from .cs2_config_backup import (
     open_backup_directory,
     restore_latest_user_config_backup,
 )
-from .obs_director import (
-    CS2_RUNNING_MESSAGE,
-    CS2AlreadyRunningError,
-    CS2NotReadyError,
-    OBSDirector,
-    RecordingWarmupExtras,
-    _RECORDING_RESULT_CLIP_META_KEYS,
-)
+from .obs_director import OBSDirector
+from .recording.api import router as recording_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
@@ -80,11 +73,17 @@ try:
     _log_dir_raw = (os.environ.get("CS2_INSIGHT_LOG_DIR") or "").strip()
     _log_dir = Path(_log_dir_raw) if _log_dir_raw else (resolve_config_path().parent / "logs")
     _log_dir.mkdir(parents=True, exist_ok=True)
+    # 每次进程启动清空本地 *.log，避免单文件无限增长；与「重启程序」语义一致。
+    for _old_log in _log_dir.glob("*.log"):
+        try:
+            _old_log.unlink(missing_ok=True)
+        except OSError:
+            pass
     _backend_log = _log_dir / "backend.log"
-    _file_handler = logging.FileHandler(_backend_log, encoding="utf-8")
+    _file_handler = logging.FileHandler(_backend_log, mode="w", encoding="utf-8")
     _file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_file_handler)
-    _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("a", encoding="utf-8")
+    _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("w", encoding="utf-8")
     faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
     logging.getLogger(__name__).info("Backend file logging enabled: %s", _backend_log)
 except Exception:
@@ -94,9 +93,6 @@ DB_PATH = resolve_config_path().parent / "cs2-insight.db"
 demo_db = DemoDB(DB_PATH)
 montage_db = MontageDB(DB_PATH)
 demo_watcher: DemoWatcher | None = None
-
-# 单次 / 批量录制共用：请求中止时 set()，任务结束后在 finally 中置回 None
-_recording_abort_event: Optional[asyncio.Event] = None
 
 # 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
 _enqueue_striped_locks: list[asyncio.Lock] = []
@@ -275,6 +271,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(recording_router)
+
 
 @app.middleware("http")
 async def log_unhandled_http_errors(request: Request, call_next):
@@ -411,70 +409,6 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
         logger.exception("Upload summary parse failed for %s: %s", dem_path, e)
     return players, match_meta
 
-
-def _raise_if_recording_never_started(results: list[dict]) -> None:
-    if not results:
-        raise HTTPException(500, "录制没有产生任何结果，请检查 OBS / CS2 是否正常启动。")
-    statuses = {str(r.get("status") or "") for r in results if isinstance(r, dict)}
-    if "recorded" not in statuses and (statuses & {"obs_error", "error"}):
-        first_error = next(
-            (
-                str(r.get("error") or r.get("status") or "")
-                for r in results
-                if isinstance(r, dict) and str(r.get("status") or "") in {"obs_error", "error"}
-            ),
-            "unknown",
-        )
-        raise HTTPException(500, f"录制没有开始：{first_error}")
-
-
-def _clip_meta_from_recording_result(r: dict) -> dict[str, Any]:
-    """从单次录制结果提取可 JSON 化的片段元数据，写入 recorded_clips.clip_meta。"""
-    out: dict[str, Any] = {}
-    for k in _RECORDING_RESULT_CLIP_META_KEYS:
-        if k not in r:
-            continue
-        out[k] = r[k]
-    return out
-
-
-async def _persist_recorded_clips_from_results(results: list[dict]) -> None:
-    """将成功录制的片段写入 recorded_clips 表（供合辑工作台）。"""
-    for r in results:
-        if not isinstance(r, dict):
-            continue
-        if str(r.get("status") or "") != "recorded":
-            continue
-        op = (r.get("output_path") or "").strip()
-        if not op:
-            continue
-        demo_path = (r.get("demo_path") or "").strip()
-        if not demo_path:
-            continue
-        clip_id = str(r.get("clip_id") or "")
-        demo_fn = (r.get("demo_filename") or "").strip() or None
-        player = (r.get("player_name") or "").strip() or None
-        dur = r.get("duration")
-        dur_f: float | None = None
-        if dur is not None:
-            try:
-                dur_f = float(dur)
-            except (TypeError, ValueError):
-                dur_f = None
-        try:
-            meta = _clip_meta_from_recording_result(r)
-            await montage_db.insert_recorded_clip(
-                clip_id=clip_id,
-                demo_path=demo_path,
-                demo_filename=demo_fn,
-                player_name=player,
-                output_path=op,
-                duration_sec=dur_f,
-                status="ready",
-                clip_meta=meta if meta else None,
-            )
-        except Exception:
-            logger.exception("recorded_clips insert failed clip_id=%s path=%s", clip_id, op)
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
@@ -689,6 +623,15 @@ class ExperimentalPayload(BaseModel):
     pov_enabled: Optional[bool] = None
 
 
+class SpecPlayerVerifyPatch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    demo_timescale: Optional[float] = Field(default=None, ge=0.01, le=1.0)
+    max_retries: Optional[int] = Field(default=None, ge=1, le=16)
+    per_retry_timeout_sec: Optional[float] = Field(default=None, ge=0.05, le=5.0)
+    settle_sec: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+
 class ConfigPayload(BaseModel):
     obs: Optional[OBSConfig] = None
     llm: Optional[LLMConfig] = None
@@ -698,12 +641,15 @@ class ConfigPayload(BaseModel):
     demo_watch_paths: Optional[list[str]] = None
     ai_mode: Optional[bool] = None
     expected_parse_players: Optional[list[str]] = None
-    cs2_fps_max: Optional[int] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
+    obs_transition_enabled: Optional[bool] = None
+    obs_transition_name: Optional[str] = None
+    obs_transition_duration_ms: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
+    spec_player_verify: Optional[SpecPlayerVerifyPatch] = None
 
 
 @app.get("/api/config")
@@ -867,9 +813,6 @@ async def update_config(payload: ConfigPayload):
             if len(cleaned) >= 50:
                 break
         cfg.expected_parse_players = cleaned
-    if payload.cs2_fps_max is not None:
-        v = int(payload.cs2_fps_max)
-        cfg.cs2_fps_max = max(0, min(v, 9999))
     if payload.ffmpeg_path is not None:
         cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
     if payload.montage_encoder is not None:
@@ -890,9 +833,19 @@ async def update_config(payload: ConfigPayload):
         cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
     if payload.record_inject_console_lines is not None:
         cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
+    if payload.obs_transition_enabled is not None:
+        cfg.obs_transition_enabled = bool(payload.obs_transition_enabled)
+    if payload.obs_transition_name is not None:
+        cfg.obs_transition_name = str(payload.obs_transition_name).strip() or cfg.obs_transition_name
+    if payload.obs_transition_duration_ms is not None:
+        cfg.obs_transition_duration_ms = int(payload.obs_transition_duration_ms)
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
+    if payload.spec_player_verify is not None:
+        patch = payload.spec_player_verify.model_dump(exclude_unset=True, exclude_none=True)
+        if patch:
+            cfg.spec_player_verify = cfg.spec_player_verify.model_copy(update=patch)
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -983,9 +936,9 @@ def setup_status():
         director = OBSDirector(
             cfg.obs,
             cfg.cs2_path,
-            cs2_fps_max=cfg.cs2_fps_max,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
+            spec_player_verify=cfg.spec_player_verify,
         )
         probe_timeout = _setup_status_obs_handshake_timeout_sec()
         result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
@@ -1012,9 +965,9 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
     director = OBSDirector(
         obs_use,
         cfg.cs2_path,
-        cs2_fps_max=cfg.cs2_fps_max,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
+        spec_player_verify=cfg.spec_player_verify,
     )
     return director.test_obs_connection()
 
@@ -1695,406 +1648,16 @@ async def patch_demo_remark(demo_id: int, body: DemoRemarkPatch):
 # ─── Recording endpoints ──────────────────────────────────────
 
 
-def _resolution_matches_aspect(width: int, height: int, aspect_ratio: str) -> bool:
-    """判定整数宽高化简后是否与所选比例一致。
-
-    CS2 视频设置里「宽高比 4:3」下列有 **1280×1024** 等实为 **5:4** 的分辨率，
-    与游戏菜单保持一致：选 4:3 时同时接受标准 4:3 与 5:4。
-    """
-    g = gcd(int(width), int(height))
-    if g <= 0:
-        return False
-    wn, hn = int(width) // g, int(height) // g
-    if aspect_ratio == "4:3":
-        if wn * 3 == hn * 4:
-            return True
-        # 1280×1024 等：游戏内挂在 4:3 分组下，数学上为 5:4（宽:高 = 5:4）
-        return wn * 4 == hn * 5
-    if aspect_ratio == "16:9":
-        return wn * 9 == hn * 16
-    if aspect_ratio == "16:10":
-        return wn * 10 == hn * 16
-    return False
-
-
-class RecordWarmupOptions(BaseModel):
-    """与 obs 首次 seek 前预热阶段注入的观战 cvar 及本次 CS2 启动分辨率一致。"""
-
-    cl_draw_only_deathnotices: bool = True
-    spec_show_xray: int = Field(default=0, ge=0, le=1)
-    fov_cs_debug: Optional[float] = Field(default=None, ge=1, le=179)
-    resolution_width: Optional[int] = Field(default=None, ge=1)
-    resolution_height: Optional[int] = Field(default=None, ge=1)
-    aspect_ratio: Optional[Literal["4:3", "16:9", "16:10"]] = None
-    hud_showtargetid_hide: bool = True
-    tv_nochat: bool = True
-    viewmodel_fov_68: bool = False
-    snd_voipvolume_mute: bool = True
-    hide_demo_playback_ui: bool = True
-    hide_grenade_trajectory_pip: bool = True
-    console_cmds: Optional[list[str]] = None
-    pov_radar_mode: int = Field(default=-1, ge=-1, le=0)
-    pov_teamcounter_numeric: bool = True
-
-    @model_validator(mode="after")
-    def resolution_and_aspect_consistency(self) -> RecordWarmupOptions:
-        rw, rh = self.resolution_width, self.resolution_height
-        ar = self.aspect_ratio
-        has_both = rw is not None and rh is not None
-        has_either = rw is not None or rh is not None
-        if has_either and not has_both:
-            raise ValueError("启动分辨率须同时填写宽度与高度，或两者都留空。")
-        if ar is not None and not has_both:
-            raise ValueError("已选择屏幕比例时必须填写启动分辨率宽度与高度。")
-        if has_both and ar is None:
-            raise ValueError("填写启动分辨率时必须选择屏幕比例。")
-        if has_both and ar is not None and rw is not None and rh is not None:
-            if not _resolution_matches_aspect(rw, rh, ar):
-                raise ValueError(f"分辨率 {rw}×{rh} 与所选屏幕比例 {ar} 不符。")
-        return self
-
-
-class RecordRequest(BaseModel):
-    demo_filename: str
-    clips: list[dict]
-    # 与 /api/demo/parse 一致；Steam64 用字符串避免 JS JSON 大数精度丢失
-    target_player: Optional[str] = None
-    target_player_user_id: Optional[int] = None
-    target_steam_id: Optional[str] = None
-    warmup: Optional[RecordWarmupOptions] = None
-    obs: Optional[OBSConfig] = None
-
-
-def _raise_if_cs2_already_running() -> None:
-    if is_cs2_running():
-        raise HTTPException(409, CS2_RUNNING_MESSAGE)
-
-
-def _raise_if_config_restore_required() -> None:
-    if is_restore_required():
-        raise HTTPException(status_code=409, detail=CONFIG_RESTORE_REQUIRED)
-
-
-@app.post("/api/record/start")
-async def start_recording(req: RecordRequest):
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    obs_cfg = merge_obs_for_connection(req.obs, cfg.obs)
-
-    if not cfg.cs2_path:
-        raise HTTPException(
-            400,
-            "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
-        )
-    _raise_if_cs2_already_running()
-    _raise_if_config_restore_required()
-
-    dem_path = resolve_uploaded_demo_path(req.demo_filename)
-
-    roster = get_player_list_isolated(str(dem_path))
-
-    spectator_name: Optional[str] = None
-    raw_steam = (req.target_steam_id or "").strip()
-    if raw_steam:
-        try:
-            want_sid = int(raw_steam)
-        except ValueError:
-            want_sid = 0
-        if want_sid > 0:
-            for p in roster:
-                ps = p.get("steam_id")
-                if ps is None:
-                    continue
-                try:
-                    if int(str(ps)) == want_sid:
-                        spectator_name = str(p.get("name") or "").strip() or None
-                        break
-                except ValueError:
-                    continue
-            if not spectator_name:
-                logger.warning("target_steam_id 未匹配到本场玩家: %s", raw_steam)
-
-    spectator_uid: Optional[int] = req.target_player_user_id
-    if spectator_uid is not None:
-        allowed = {p.get("user_id") for p in roster if p.get("user_id") is not None}
-        if allowed and spectator_uid not in allowed:
-            logger.warning(
-                "target_player_user_id %r 不在本场 Demo 的 user_id 集合中，将忽略该 id",
-                spectator_uid,
-            )
-            spectator_uid = None
-    # 观战槽位按 tick 现算，需要稳定昵称；Steam 优先解析出 roster 内规范名
-    if spectator_name is None:
-        spectator_name = resolve_spectator_for_demo(dem_path, req.target_player)
-    if spectator_uid is None:
-        spectator_uid = _lookup_roster_user_id(roster, spectator_name)
-    warmup_extras: Optional[RecordingWarmupExtras] = None
-    if req.warmup is not None:
-        cc = req.warmup.console_cmds
-        tup = tuple(cc) if cc else None
-        warmup_extras = RecordingWarmupExtras(
-            cl_draw_only_deathnotices=req.warmup.cl_draw_only_deathnotices,
-            spec_show_xray=int(req.warmup.spec_show_xray),
-            fov_cs_debug=req.warmup.fov_cs_debug,
-            resolution_width=req.warmup.resolution_width,
-            resolution_height=req.warmup.resolution_height,
-            hud_showtargetid_hide=req.warmup.hud_showtargetid_hide,
-            tv_nochat=req.warmup.tv_nochat,
-            viewmodel_fov_68=req.warmup.viewmodel_fov_68,
-            snd_voipvolume_mute=req.warmup.snd_voipvolume_mute,
-            hide_demo_playback_ui=req.warmup.hide_demo_playback_ui,
-            hide_grenade_trajectory_pip=req.warmup.hide_grenade_trajectory_pip,
-            aspect_ratio=req.warmup.aspect_ratio,
-            console_cmds=tup,
-            pov_radar_mode=int(req.warmup.pov_radar_mode),
-            pov_teamcounter_numeric=bool(req.warmup.pov_teamcounter_numeric),
-        )
-
-    pov_on = bool(cfg.experimental.pov_enabled)
-    warmup_eff: Optional[RecordingWarmupExtras] = (
-        merge_warmup_extras_for_pov(warmup_extras) if pov_on else warmup_extras
-    )
-
-    global _recording_abort_event
-    if _recording_abort_event is not None:
-        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
-    abort_ev = asyncio.Event()
-    _recording_abort_event = abort_ev
-    pov_mgr: Optional[PovHudManager] = None
-    try:
-        if pov_on:
-            pov_mgr = PovHudManager(cfg)
-            pov_mgr.install()
-        director = OBSDirector(
-            obs_cfg,
-            cfg.cs2_path,
-            abort_event=abort_ev,
-            cs2_fps_max=cfg.cs2_fps_max,
-            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-            record_inject_console_lines=cfg.record_inject_console_lines,
-        )
-        results = await director.execute_recording_pipeline(
-            dem_path,
-            req.clips,
-            spectator_name=spectator_name,
-            spectator_user_id=spectator_uid,
-            warmup=warmup_eff,
-            pov_enabled=pov_on,
-        )
-        _raise_if_recording_never_started(results)
-        await _persist_recorded_clips_from_results(results)
-        return {"status": "completed", "results": results}
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    except CS2AlreadyRunningError as e:
-        raise HTTPException(409, str(e)) from e
-    except CS2NotReadyError as e:
-        raise HTTPException(409, str(e)) from e
-    finally:
-        _recording_abort_event = None
-        if pov_on and pov_mgr is not None:
-            try:
-                pov_mgr.restore()
-            except Exception:
-                logger.exception("POV HUD restore failed")
-
-
-class BatchRecordGroup(BaseModel):
-    demo_filename: str
-    demo_path: Optional[str] = None
-    clips: list[dict]
-    target_player: Optional[str] = None
-    target_player_user_id: Optional[int] = None
-    target_steam_id: Optional[str] = None
-
-
-class BatchRecordRequest(BaseModel):
-    """按 Demo 分组的待录制列表；同一 ``demo_filename`` 可合并为一组由前端保证。"""
-
-    groups: list[BatchRecordGroup] = Field(..., min_length=1)
-    warmup: Optional[RecordWarmupOptions] = None
-    obs: Optional[OBSConfig] = None
-
-
-def _resolve_spectators_for_record(
-    dem_path: Path,
-    req_like: RecordRequest | BatchRecordGroup,
-) -> tuple[Optional[str], Optional[int]]:
-    """与 ``start_recording`` 相同的观战名 / user_id 解析逻辑。"""
-    roster = get_player_list_isolated(str(dem_path))
-
-    spectator_name: Optional[str] = None
-    raw_steam = (getattr(req_like, "target_steam_id", None) or "").strip()
-    if raw_steam:
-        try:
-            want_sid = int(raw_steam)
-        except ValueError:
-            want_sid = 0
-        if want_sid > 0:
-            for p in roster:
-                ps = p.get("steam_id")
-                if ps is None:
-                    continue
-                try:
-                    if int(str(ps)) == want_sid:
-                        spectator_name = str(p.get("name") or "").strip() or None
-                        break
-                except ValueError:
-                    continue
-            if not spectator_name:
-                logger.warning("target_steam_id 未匹配到本场玩家: %s", raw_steam)
-
-    spectator_uid: Optional[int] = getattr(req_like, "target_player_user_id", None)
-    if spectator_uid is not None:
-        allowed = {p.get("user_id") for p in roster if p.get("user_id") is not None}
-        if allowed and spectator_uid not in allowed:
-            logger.warning(
-                "target_player_user_id %r 不在本场 Demo 的 user_id 集合中，将忽略该 id",
-                spectator_uid,
-            )
-            spectator_uid = None
-    if spectator_name is None:
-        spectator_name = resolve_spectator_for_demo(dem_path, getattr(req_like, "target_player", None))
-    if spectator_uid is None:
-        spectator_uid = _lookup_roster_user_id(roster, spectator_name)
-    return spectator_name, spectator_uid
-
-
-@app.post("/api/record/batch")
-async def start_batch_recording(req: BatchRecordRequest):
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    obs_cfg = merge_obs_for_connection(req.obs, cfg.obs)
-    if not cfg.cs2_path:
-        raise HTTPException(
-            400,
-            "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
-        )
-    _raise_if_cs2_already_running()
-    _raise_if_config_restore_required()
-
-    warmup_opts = req.warmup
-    wobj: Optional[RecordingWarmupExtras] = None
-    if warmup_opts is not None:
-        cc = warmup_opts.console_cmds
-        tup = tuple(cc) if cc else None
-        wobj = RecordingWarmupExtras(
-            cl_draw_only_deathnotices=warmup_opts.cl_draw_only_deathnotices,
-            spec_show_xray=int(warmup_opts.spec_show_xray),
-            fov_cs_debug=warmup_opts.fov_cs_debug,
-            resolution_width=warmup_opts.resolution_width,
-            resolution_height=warmup_opts.resolution_height,
-            hud_showtargetid_hide=warmup_opts.hud_showtargetid_hide,
-            tv_nochat=warmup_opts.tv_nochat,
-            viewmodel_fov_68=warmup_opts.viewmodel_fov_68,
-            snd_voipvolume_mute=warmup_opts.snd_voipvolume_mute,
-            hide_demo_playback_ui=warmup_opts.hide_demo_playback_ui,
-            hide_grenade_trajectory_pip=warmup_opts.hide_grenade_trajectory_pip,
-            aspect_ratio=warmup_opts.aspect_ratio,
-            console_cmds=tup,
-            pov_radar_mode=int(warmup_opts.pov_radar_mode),
-            pov_teamcounter_numeric=bool(warmup_opts.pov_teamcounter_numeric),
-        )
-
-    pov_on = bool(cfg.experimental.pov_enabled)
-    warmup_eff: Optional[RecordingWarmupExtras] = merge_warmup_extras_for_pov(wobj) if pov_on else wobj
-
-    # ── 两层聚合：demo（唯一启动 CS2）→ player（切换 spec_player）→ clips ──
-    # 同一个 demo 内的不同玩家合并为一个 CS2 会话，只启动/关闭游戏一次；
-    # 玩家之间通过在 clip dict 内嵌入 _spec_name / _spec_uid 字段来切换 spec_player，
-    # execute_batch_recording 不再感知玩家维度，OBSDirector 按 clip 自带信息注入。
-
-    # demo_key → (dem_path, ordered_player_groups)
-    # ordered_player_groups: list of (spec_name, spec_uid, clips_sorted_by_tick)
-    # inner list: [spec_name, spec_uid, clips_list]  — mutable so we can extend clips_list
-    demo_player_map: dict[str, tuple[Path, list[list]]] = {}
-
-    for g in req.groups:
-        candidate = (g.demo_path or "").strip() or g.demo_filename
-        dem_path = resolve_uploaded_demo_path(candidate)
-        spec_name, spec_uid = _resolve_spectators_for_record(dem_path, g)
-        demo_key = str(dem_path)
-        if demo_key not in demo_player_map:
-            demo_player_map[demo_key] = (dem_path, [])
-        _, player_groups = demo_player_map[demo_key]
-        # 同一玩家的多个 group 合并（player_groups 元素为 list，可直接 extend）
-        existing_idx = next(
-            (i for i, pg in enumerate(player_groups) if pg[0] == spec_name and pg[1] == spec_uid),
-            None,
-        )
-        if existing_idx is None:
-            player_groups.append([spec_name, spec_uid, list(g.clips)])
-        else:
-            player_groups[existing_idx][2].extend(g.clips)
-
-    # 展平为 execute_batch_recording 所需格式：每个 clip 内嵌 _spec_name / _spec_uid
-    # 玩家顺序保留原始 group 顺序，各玩家内部按 start_tick 升序
-    demo_jobs: list[tuple[Path, list[dict], Optional[str], Optional[int]]] = []
-    for demo_key, (dem_path, player_groups) in demo_player_map.items():
-        flat_clips: list[dict] = []
-        for spec_name, spec_uid, clips in player_groups:
-            sorted_clips = sorted(clips, key=lambda c: int(c.get("start_tick") or 0))
-            for clip in sorted_clips:
-                tagged = dict(clip)
-                tagged["_spec_name"] = spec_name
-                tagged["_spec_uid"]  = spec_uid
-                flat_clips.append(tagged)
-        if flat_clips:
-            # spec_name/spec_uid 设为 None：由各 clip 自带字段驱动
-            demo_jobs.append((dem_path, flat_clips, None, None))
-
-    if not demo_jobs:
-        raise HTTPException(400, "没有可录制的片段（clips 为空）")
-
-    global _recording_abort_event
-    if _recording_abort_event is not None:
-        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
-    abort_ev = asyncio.Event()
-    _recording_abort_event = abort_ev
-    pov_mgr: Optional[PovHudManager] = None
-    try:
-        if pov_on:
-            pov_mgr = PovHudManager(cfg)
-            pov_mgr.install()
-        director = OBSDirector(
-            obs_cfg,
-            cfg.cs2_path,
-            abort_event=abort_ev,
-            cs2_fps_max=cfg.cs2_fps_max,
-            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-            record_inject_console_lines=cfg.record_inject_console_lines,
-        )
-        results = await director.execute_batch_recording(
-            demo_jobs,
-            warmup=warmup_eff,
-            pov_enabled=pov_on,
-        )
-        _raise_if_recording_never_started(results)
-        await _persist_recorded_clips_from_results(results)
-        return {"status": "completed", "results": results}
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    except CS2AlreadyRunningError as e:
-        raise HTTPException(409, str(e)) from e
-    except CS2NotReadyError as e:
-        raise HTTPException(409, str(e)) from e
-    finally:
-        _recording_abort_event = None
-        if pov_on and pov_mgr is not None:
-            try:
-                pov_mgr.restore()
-            except Exception:
-                logger.exception("POV HUD restore failed")
-
 
 @app.post("/api/record/abort")
 def record_abort():
-    """请求中止当前进行中的单次或批量 OBS 录制（异步收尾，接口立即返回）。"""
-    global _recording_abort_event
-    if _recording_abort_event is None:
-        return {"status": "idle", "message": "当前没有进行中的录制"}
-    _recording_abort_event.set()
-    return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    """请求中止当前进行中的 OBS 录制（异步收尾，接口立即返回）。"""
+    from .recording.api import get_queue_abort_event
+    v3_ev = get_queue_abort_event()
+    if v3_ev is not None:
+        v3_ev.set()
+        return {"status": "ok", "message": "已请求中止，正在收尾…"}
+    return {"status": "idle", "message": "当前没有进行中的录制"}
 
 
 @app.get("/api/config-backup/status")
@@ -2155,6 +1718,7 @@ def cs2_gsi_status():
 
 
 class RadarOverlayOptions(BaseModel):
+    """已废弃：合辑导出不再应用后期雷达叠层；保留模型仅为兼容旧请求体。"""
     enabled: bool = False
     hud_overlay: bool = False
     killfeed_overlay: bool = False
@@ -2199,6 +1763,18 @@ async def delete_recorded_clip(clip_id: int):
     return r
 
 
+class BatchDeleteRecordedClipsBody(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=500)
+
+
+@app.post("/api/recorded-clips/batch-delete")
+async def batch_delete_recorded_clips(body: BatchDeleteRecordedClipsBody):
+    try:
+        return await montage_db.delete_recorded_clips_batch(body.ids)
+    except ValueError as e:
+        raise HTTPException(500, str(e)) from e
+
+
 @app.post("/api/montage/projects")
 async def save_montage_project(body: MontageProjectBody):
     proj_body = {
@@ -2210,8 +1786,8 @@ async def save_montage_project(body: MontageProjectBody):
     }
     if body.transitions is not None:
         proj_body["transitions"] = body.transitions
-    if body.radar_overlay is not None:
-        proj_body["radar_overlay"] = body.radar_overlay.model_dump()
+    # 后期 FFmpeg 雷达叠层已下线；忽略客户端传入的旧开关，写入占位以兼容旧前端读取。
+    proj_body["radar_overlay"] = {"enabled": False}
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -2331,22 +1907,6 @@ async def montage_export(body: MontageExportBody):
     if transitions_eff is None and isinstance(extras, dict):
         transitions_eff = extras.get("transitions")
 
-    radar_defaults: dict[str, Any] = {
-        "enabled": False,
-        "hud_overlay": False,
-        "killfeed_overlay": False,
-        "crosshair_overlay": False,
-        "lens_overlay": False,
-    }
-    radar_options = dict(radar_defaults)
-    if isinstance(extras, dict) and isinstance(extras.get("radar_overlay"), dict):
-        ro = extras["radar_overlay"]
-        for k in radar_defaults:
-            if k in ro:
-                radar_options[k] = bool(ro[k])
-    if body.radar_overlay is not None:
-        radar_options.update(body.radar_overlay.model_dump())
-
     try:
         out = validate_output_path(body.output_path)
     except MontageComposerError as e:
@@ -2354,13 +1914,11 @@ async def montage_export(body: MontageExportBody):
 
     rows = await montage_db.get_recorded_clips_by_ids([int(x) for x in clip_ids])
     clip_paths: list[Path] = []
-    ordered_clip_rows: list[dict[str, Any]] = []
     for cid in clip_ids:
         row = rows.get(int(cid))
         if not row:
             raise HTTPException(400, f"未知的 recorded_clip id: {cid}")
         clip_paths.append(Path(str(row["output_path"])))
-        ordered_clip_rows.append(dict(row))
 
     intro_p = Path(intro_s).expanduser() if intro_s else None
     outro_p = Path(outro_s).expanduser() if outro_s else None
@@ -2375,7 +1933,7 @@ async def montage_export(body: MontageExportBody):
     }
     if isinstance(transitions_eff, dict):
         snap["transitions"] = transitions_eff
-    snap["radar_overlay"] = radar_options
+    snap["radar_overlay"] = {"enabled": False}
     if body.ordered_ids is not None:
         snap["ordered_ids"] = list(body.ordered_ids)
     if body.theme_id is not None:
@@ -2407,8 +1965,6 @@ async def montage_export(body: MontageExportBody):
             output_path=out,
             transitions=transitions_eff if isinstance(transitions_eff, dict) else None,
             clip_row_ids=[int(x) for x in clip_ids],
-            radar_overlay=radar_options,
-            clip_rows=ordered_clip_rows,
             bgm_volume=bgm_volume_eff,
             bgm_start_sec=bgm_start_eff,
             intro_image_duration=intro_img_dur_eff,
