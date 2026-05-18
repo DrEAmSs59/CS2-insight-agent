@@ -151,6 +151,14 @@ class OBSFadeController:
             logger.warning("[OBSFade] ensure game capture failed: %s", exc)
             # non-fatal — scene exists but capture may need manual setup
 
+        # Switch OBS to the game scene so recording captures CS2 regardless of
+        # whether fade transitions are enabled.
+        try:
+            client.set_current_program_scene(game)
+            logger.info("[OBSFade] switched OBS program scene to %r", game)
+        except Exception as exc:
+            logger.warning("[OBSFade] set program scene failed (non-fatal): %s", exc)
+
         return True
 
     def _ensure_transition_scenes(self, client: OBSClient) -> bool:
