@@ -1988,7 +1988,6 @@ class OBSDirector:
             )
             self._ws.connect()
             logger.info("OBS WebSocket connected at %s:%d", self.obs_config.host, self.obs_config.port)
-            self._obs_ensure_managed_recording_scene()
             return True
         except Exception as e:
             logger.error("OBS connection failed: %s", e)
@@ -2022,21 +2021,17 @@ class OBSDirector:
                 ws = obsws(self.obs_config.host, self.obs_config.port, self.obs_config.password)
             ws.connect()
             ver = ws.call(obs_requests.GetVersion())
-            self._ws = ws
-            scene_ready = self._obs_ensure_managed_recording_scene()
             ws.disconnect()
-            self._ws = prev_ws
             return {
                 "ok": True,
                 "obs_version": ver.getObsVersion(),
                 "ws_version": ver.getObsWebSocketVersion(),
-                "managed_scene_ready": scene_ready,
-                "managed_input_ready": self._obs_managed_input_ready,
             }
         except Exception as e:
-            self._ws = prev_ws
             logger.warning("OBS WebSocket test failed: %s", e, exc_info=True)
             return {"ok": False, "error": _friendly_obs_websocket_test_error(e)}
+        finally:
+            self._ws = prev_ws
 
     def _obs_scene_has_source(self, scene_name: str, source_name: str) -> bool:
         return self._obs_find_scene_item_id(scene_name, source_name) is not None
