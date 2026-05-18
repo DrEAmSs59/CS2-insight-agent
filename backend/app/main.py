@@ -23,7 +23,6 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, Up
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from math import gcd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .demo_parse_isolation import (
@@ -1647,28 +1646,6 @@ async def patch_demo_remark(demo_id: int, body: DemoRemarkPatch):
 
 
 # ─── Recording endpoints ──────────────────────────────────────
-
-
-def _resolution_matches_aspect(width: int, height: int, aspect_ratio: str) -> bool:
-    """判定整数宽高化简后是否与所选比例一致。
-
-    CS2 视频设置里「宽高比 4:3」下列有 **1280×1024** 等实为 **5:4** 的分辨率，
-    与游戏菜单保持一致：选 4:3 时同时接受标准 4:3 与 5:4。
-    """
-    g = gcd(int(width), int(height))
-    if g <= 0:
-        return False
-    wn, hn = int(width) // g, int(height) // g
-    if aspect_ratio == "4:3":
-        if wn * 3 == hn * 4:
-            return True
-        # 1280×1024 等：游戏内挂在 4:3 分组下，数学上为 5:4（宽:高 = 5:4）
-        return wn * 4 == hn * 5
-    if aspect_ratio == "16:9":
-        return wn * 9 == hn * 16
-    if aspect_ratio == "16:10":
-        return wn * 10 == hn * 16
-    return False
 
 
 
