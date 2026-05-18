@@ -151,6 +151,29 @@ class OBSFadeController:
             logger.warning("[OBSFade] ensure game capture failed: %s", exc)
             # non-fatal — scene exists but capture may need manual setup
 
+        # Stretch game capture to fill the OBS canvas.
+        try:
+            video = client.get_video_settings()
+            bw = video.get("base_width", 1920)
+            bh = video.get("base_height", 1080)
+            item_id = client.get_scene_item_id(game, _GAME_CAPTURE_INPUT_NAME)
+            if item_id is not None:
+                client.set_scene_item_transform(
+                    game,
+                    item_id,
+                    {
+                        "boundsType": "OBS_BOUNDS_STRETCH",
+                        "boundsWidth": float(bw),
+                        "boundsHeight": float(bh),
+                        "positionX": 0.0,
+                        "positionY": 0.0,
+                        "rotation": 0.0,
+                    },
+                )
+                logger.info("[OBSFade] set game capture transform: stretch to %dx%d", bw, bh)
+        except Exception as exc:
+            logger.warning("[OBSFade] set game capture transform failed (non-fatal): %s", exc)
+
         # Switch OBS to the game scene so recording captures CS2 regardless of
         # whether fade transitions are enabled.
         try:
