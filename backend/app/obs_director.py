@@ -834,7 +834,7 @@ def _pacing_pre_first_sec_effective(clip: dict) -> float:
                 return max(0.0, float(v))
             except (TypeError, ValueError):
                 pass
-    ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
+    ticks = _env_int("CS2_INSIGHT_SMART_PRE_FIRST_TICKS", int(float(DEMO_TICK_RATE) * 2))
     return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
@@ -848,7 +848,7 @@ def _pacing_post_last_sec_effective(clip: dict) -> float:
                 return max(0.0, float(v))
             except (TypeError, ValueError):
                 pass
-    ticks = _env_int("CS2_INSIGHT_SMART_POST_LAST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
+    ticks = _env_int("CS2_INSIGHT_SMART_POST_LAST_TICKS", int(float(DEMO_TICK_RATE) * 1))
     return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
@@ -1178,8 +1178,8 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             return max(0, int(float(val) * DEMO_TICK_RATE))
         return _env_int(default_env_key, int(DEMO_TICK_RATE * default_sec))
 
-    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5)
-    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5)
+    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 2.0)
+    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.0)
     MAX_GAP = max(1, _get_override_ticks("max_gap_sec", "CS2_INSIGHT_SMART_MAX_GAP_TICKS", 12.0))
 
     clip_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
@@ -1285,12 +1285,12 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             pre_ticks = _death_comp_ov_ticks(
                 "pre_first_sec",
                 "CS2_INSIGHT_SMART_PRE_FIRST_TICKS",
-                1.5,
+                2.0,
             )
             post_ticks = _death_comp_ov_ticks(
                 "post_last_sec",
                 "CS2_INSIGHT_SMART_POST_LAST_TICKS",
-                1.5,
+                1.0,
             )
 
             _comp_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
@@ -1352,10 +1352,10 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
                 return _env_int(default_env_key, int(DEMO_TICK_RATE * default_sec))
 
             pre_first_ticks = _all_kills_ov_ticks(
-                "pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5
+                "pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 2.0
             )
             post_last_ticks = _all_kills_ov_ticks(
-                "post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5
+                "post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.0
             )
             pre_first_sec = pre_first_ticks / float(DEMO_TICK_RATE)
             post_last_sec = post_last_ticks / float(DEMO_TICK_RATE)
@@ -3186,7 +3186,7 @@ class OBSDirector:
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.normalizer import NormalizationError
-        from .pov_hud_manager import PovHudManager, PovHudError
+        from .pov_hud_manager import PovHudManager, PovHudError, pov_hud_effective_map_name
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
@@ -3204,6 +3204,15 @@ class OBSDirector:
             if key not in demo_abs_map:
                 demo_abs_map[key] = Path(dto.demo.demo_path or dto.demo.demo_filename)
 
+        _first_demo_key = next(iter(demo_groups))
+        _first_demo_reqs = demo_groups[_first_demo_key]
+        _first_demo_abs = demo_abs_map[_first_demo_key]
+        _d0demo = _first_demo_reqs[0].demo if _first_demo_reqs else None
+        _pov_first_map = pov_hud_effective_map_name(
+            _d0demo.map_name if _d0demo else None,
+            str(_first_demo_abs),
+        )
+
         # OBSClient is created here but connected lazily (right before the executor starts)
         # so the WebSocket receive thread does not die during the ~60s CS2 warmup window.
         obs_client = OBSClient(self.obs_config)
@@ -3218,9 +3227,11 @@ class OBSDirector:
                     from .env_utils import load_config as _load_cfg
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
-                    # Install with empty map; will be updated per-demo if needed
-                    logger.info("[RecordingV3][POV] install pov.vpk")
-                    pov_mgr_v3.install("")
+                    logger.info(
+                        "[RecordingV3][POV] install pov.vpk (map=%s)",
+                        _pov_first_map or "default",
+                    )
+                    pov_mgr_v3.install(_pov_first_map)
                     logger.info("[RecordingV3][POV] patch gameinfo.gi")
                     self._pov_enabled = True
                 except PovHudError as _pov_e:
@@ -3236,6 +3247,24 @@ class OBSDirector:
                 demo_name = demo_abs.name
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
+
+                if pov_on_v3 and pov_mgr_v3 is not None and job_idx > 0:
+                    _d_cur = demo_requests[0].demo if demo_requests else None
+                    _pov_map_cur = pov_hud_effective_map_name(
+                        _d_cur.map_name if _d_cur else None,
+                        str(demo_abs),
+                    )
+                    try:
+                        logger.info(
+                            "[RecordingV3][POV] replace pov.vpk for map=%s",
+                            _pov_map_cur or "default",
+                        )
+                        pov_mgr_v3.replace_pov_vpk_for_map(_pov_map_cur)
+                    except PovHudError as _pov_sw:
+                        logger.error(
+                            "[RecordingV3][POV] replace_pov_vpk_for_map failed: %s",
+                            _pov_sw,
+                        )
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:

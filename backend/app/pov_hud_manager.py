@@ -42,6 +42,20 @@ def pov_split_layout_installed(pov_dir: Path) -> bool:
     return (pov_dir / "pov_default.vpk").is_file() or (pov_dir / "pov_de_dust2.vpk").is_file()
 
 
+def pov_hud_effective_map_name(demo_map_name: Optional[str], demo_path: Optional[str] = None) -> Optional[str]:
+    """DTO / 库解析的 map_name 为空时，从 demo 文件名猜测（当前仅 de_dust2 需专用 vpk）。"""
+    s = (demo_map_name or "").strip()
+    if s:
+        return s
+    p = (demo_path or "").strip()
+    if not p:
+        return None
+    base = Path(p).name.lower()
+    if "de_dust2" in base:
+        return "de_dust2"
+    return None
+
+
 def resolve_pov_vpk_source_in_project_pov_dir(pov_dir: Path, map_name: Optional[str]) -> Path:
     """按 Demo 地图选择源 vpk；安装目标仍为 game/csgo/pov.vpk。"""
     key = (map_name or "").strip().lower()

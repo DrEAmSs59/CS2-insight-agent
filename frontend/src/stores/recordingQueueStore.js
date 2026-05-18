@@ -14,11 +14,11 @@ import { create } from "zustand";
 
 /**
  * 全局节奏默认值，与后端 build_smart_jump_segments 的硬编码默认值保持一致：
- *   PRE_FIRST = 1.5s  POST_LAST = 1.5s  MAX_GAP = 12s；续段预滚同 PRE_FIRST；中段末杀后留白同 POST_LAST
+ *   PRE_FIRST = 2s  POST_LAST = 1s  MAX_GAP = 12s；续段预滚同 PRE_FIRST；中段末杀后留白同 POST_LAST
  */
 export const BACKEND_DEFAULT_PACING = {
-  pre_first_sec: 1.5,
-  post_last_sec: 1.5,
+  pre_first_sec: 2,
+  post_last_sec: 1,
   max_gap_sec: 12,
 };
 
