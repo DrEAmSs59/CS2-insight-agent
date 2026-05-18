@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from ...env_utils import OBSConfig
 from .obs_client import OBSClient, OBSRecordError
@@ -19,6 +20,29 @@ logger = logging.getLogger(__name__)
 
 _BLACK_COLOR_SOURCE_NAME = "CS2 Insight Black Source"
 _GAME_CAPTURE_INPUT_NAME = "CS2 Insight Game Capture"
+
+
+def _game_capture_settings() -> dict:
+    """Build OBS Game Capture input settings matching the legacy managed capture.
+
+    Mirrors obs_director._obs_managed_game_capture_settings():
+    - capture_mode: window (env CS2_INSIGHT_OBS_GAME_CAPTURE_MODE)
+    - window: Counter-Strike 2:SDL_app:cs2.exe (env CS2_INSIGHT_OBS_GAME_CAPTURE_WINDOW)
+    - capture_cursor: False  (always — hides mouse pointer from the recording)
+    """
+    window = (
+        os.environ.get("CS2_INSIGHT_OBS_GAME_CAPTURE_WINDOW", "").strip()
+        or "Counter-Strike 2:SDL_app:cs2.exe"
+    )
+    capture_mode = (
+        os.environ.get("CS2_INSIGHT_OBS_GAME_CAPTURE_MODE", "").strip()
+        or "window"
+    )
+    return {
+        "capture_mode": capture_mode,
+        "window": window,
+        "capture_cursor": False,
+    }
 
 
 @dataclass
@@ -61,20 +85,27 @@ class OBSFadeController:
     # ------------------------------------------------------------------
 
     async def setup(self) -> bool:
-        """Ensure game scene + black scene exist in OBS.
+        """Ensure game scene + game capture exist in OBS (always).
 
-        Returns True on success (fade transitions will be used).
-        Returns False if disabled or any OBS call fails (hard-cut fallback).
+        When transitions are enabled, also ensures the black scene and validates
+        the transition name, then sets _ready = True so fade methods fire.
+
+        Returns True when _ready (transitions active).
+        Returns False in hard-cut mode (transitions disabled) or on OBS failure.
         """
-        if not self._cfg.enabled:
-            logger.info("[OBSFade] transition disabled; running in hard-cut mode")
-            return False
-
         client = self._new_client()
         try:
             await asyncio.to_thread(client.connect)
-            ok = await asyncio.to_thread(self._setup_scenes, client)
-            if ok:
+            game_ok = await asyncio.to_thread(self._ensure_game_scene, client)
+            if not game_ok:
+                return False
+
+            if not self._cfg.enabled:
+                logger.info("[OBSFade] transition disabled; game scene ensured, running in hard-cut mode")
+                return False
+
+            transition_ok = await asyncio.to_thread(self._ensure_transition_scenes, client)
+            if transition_ok:
                 self._ready = True
                 logger.info(
                     "[OBSFade] setup complete — game=%r black=%r transition=%r %dms",
@@ -83,7 +114,7 @@ class OBSFadeController:
                     self._cfg.transition_name,
                     self._cfg.duration_ms,
                 )
-            return ok
+            return transition_ok
         except Exception as exc:
             logger.warning("[OBSFade] setup failed: %s", exc)
             return False
@@ -93,15 +124,14 @@ class OBSFadeController:
             except Exception:
                 pass
 
-    def _setup_scenes(self, client: OBSClient) -> bool:
-        """Synchronous scene setup — runs in executor thread."""
+    def _ensure_game_scene(self, client: OBSClient) -> bool:
+        """Create game scene + game capture if missing. Always runs regardless of transition setting."""
         try:
             existing = set(client.get_scene_names())
         except OBSRecordError as exc:
             logger.warning("[OBSFade] GetSceneList failed: %s", exc)
             return False
 
-        # ── Game scene ──────────────────────────────────────────────────
         game = self._cfg.game_scene_name
         if game not in existing:
             try:
@@ -111,12 +141,25 @@ class OBSFadeController:
                 logger.warning("[OBSFade] create game scene failed: %s", exc)
                 return False
 
-        if not client.scene_has_source(game, _GAME_CAPTURE_INPUT_NAME):
-            try:
-                client.ensure_game_capture_in_scene(game, _GAME_CAPTURE_INPUT_NAME)
-            except Exception as exc:
-                logger.warning("[OBSFade] ensure game capture failed: %s", exc)
-                # non-fatal — scene exists but capture may need manual setup
+        try:
+            client.ensure_game_capture_in_scene(
+                game,
+                _GAME_CAPTURE_INPUT_NAME,
+                input_settings=_game_capture_settings(),
+            )
+        except Exception as exc:
+            logger.warning("[OBSFade] ensure game capture failed: %s", exc)
+            # non-fatal — scene exists but capture may need manual setup
+
+        return True
+
+    def _ensure_transition_scenes(self, client: OBSClient) -> bool:
+        """Create black scene + validate transition name. Only runs when transitions are enabled."""
+        try:
+            existing = set(client.get_scene_names())
+        except OBSRecordError as exc:
+            logger.warning("[OBSFade] GetSceneList failed: %s", exc)
+            return False
 
         # ── Black scene ─────────────────────────────────────────────────
         black = self._cfg.black_scene_name
