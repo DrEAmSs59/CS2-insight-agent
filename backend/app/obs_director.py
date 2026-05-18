@@ -2718,6 +2718,9 @@ class OBSDirector:
         "cs2_video.txt",
         "user_convars_0_slot0.vcfg",
         "cs2_user_convars_0_slot0.vcfg",
+        # -worldwide 会把区域选择偏好写入此文件；录制后需还原，否则玩家自己
+        # 通过 Steam 启动时永远不再弹选服窗口。
+        "localconfig.vdf",
     )
     _USER_CONFIG_GLOB_PATTERNS: tuple[str, ...] = (
         "user_convars_0_slot*.vcfg",
@@ -2777,6 +2780,10 @@ class OBSDirector:
                         candidate = uid / "730" / "local" / "cfg"
                         if candidate.is_dir() and candidate not in dirs:
                             dirs.append(candidate)
+                        # localconfig.vdf 在 <steamid>/config/，-worldwide 会写入此处
+                        cfg_dir = uid / "config"
+                        if cfg_dir.is_dir() and cfg_dir not in dirs:
+                            dirs.append(cfg_dir)
                 except OSError as e:
                     logger.warning("iter userdata failed: %s", e)
         return dirs

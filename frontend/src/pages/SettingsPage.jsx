@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import API from "../api/api";
 import { useAppShell } from "../context/AppShellContext";
 import {
@@ -9,7 +9,113 @@ import {
   Check,
   Server,
   RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Loader2,
 } from "lucide-react";
+
+const CODEC_LABELS = {
+  h264_nvenc: "NVIDIA NVENC",
+  h264_qsv: "Intel QSV",
+  h264_amf: "AMD AMF",
+  libx264: "x264 软件 (CPU)",
+  none: "无可用编码器",
+};
+
+function EncoderSelector({ value, onChange }) {
+  const [detecting, setDetecting] = useState(false);
+  const [result, setResult] = useState(null);
+  const abortRef = useRef(null);
+
+  const detect = async () => {
+    setDetecting(true);
+    setResult(null);
+    try {
+      const r = await API.post("/config/detect-encoder");
+      setResult(r.data);
+    } catch (e) {
+      setResult({ error: e?.response?.data?.detail || e?.message || "检测失败" });
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  return (
+    <div className="shrink-0 space-y-2">
+      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+        合辑视频编码
+      </label>
+      <div className="flex gap-2">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+        >
+          <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
+          <option value="h264_nvenc">NVIDIA NVENC</option>
+          <option value="h264_qsv">Intel Quick Sync (QSV)</option>
+          <option value="h264_amf">AMD AMF</option>
+          <option value="libx264">x264 软件（CPU）</option>
+        </select>
+        <button
+          type="button"
+          onClick={detect}
+          disabled={detecting}
+          className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary disabled:opacity-40 transition-all"
+        >
+          {detecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+          检测
+        </button>
+      </div>
+
+      {result && !result.error && (
+        <div className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-cs2-text-primary">
+            <span className="text-cs2-text-muted">自动选择：</span>
+            <span className={result.selected === "libx264" || result.selected === "none" ? "text-amber-400" : "text-emerald-400"}>
+              {CODEC_LABELS[result.selected] ?? result.selected}
+            </span>
+          </div>
+          <div className="space-y-1">
+            {result.hw?.map((h) => (
+              <div key={h.codec} className="flex items-start gap-2 text-[11px]">
+                {h.probe_ok
+                  ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />}
+                <span className={h.probe_ok ? "text-cs2-text-primary" : "text-cs2-text-muted"}>
+                  <span className="font-mono">{h.codec}</span>
+                  {!h.in_encoder_list && <span className="ml-1 text-amber-400/80">— FFmpeg 未编译</span>}
+                  {h.in_encoder_list && !h.probe_ok && <span className="ml-1 text-cs2-text-muted">— 探测失败</span>}
+                  {h.error && !h.probe_ok && (
+                    <span className="ml-1 block text-[10px] text-cs2-text-muted/70 leading-snug">{h.error}</span>
+                  )}
+                </span>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 text-[11px]">
+              {result.libx264_available
+                ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
+                : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />}
+              <span className={result.libx264_available ? "font-mono text-cs2-text-muted" : "font-mono text-red-400"}>
+                libx264
+              </span>
+            </div>
+          </div>
+          {!result.hw?.some(h => h.probe_ok) && (
+            <p className="text-[11px] text-amber-400/90 leading-snug">
+              未检测到可用硬件编码器。若 FFmpeg 为 essentials 构建，请替换为{" "}
+              <span className="font-semibold">full 构建</span>（含 NVENC/QSV/AMF）。
+            </p>
+          )}
+        </div>
+      )}
+      {result?.error && (
+        <p className="text-[11px] text-red-400">{result.error}</p>
+      )}
+      {!result && <p className="text-[10px] text-zinc-600">点击「检测」查看当前 FFmpeg 支持的编码器。</p>}
+    </div>
+  );
+}
 
 function llmBaseUrlLooksLocal(baseUrl) {
   try {
@@ -486,24 +592,10 @@ export default function SettingsPage() {
                     onPastePath={() => void handlePasteFfmpeg()}
                   />
                 </div>
-                <div className="shrink-0">
-                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                    合辑视频编码
-                  </label>
-                  <select
-                    value={s.montageEncoder ?? "auto"}
-                    onChange={(e) => s.setMontageEncoder(e.target.value)}
-                    onBlur={() => void s.handleSaveConfig({ montage_encoder: s.montageEncoder ?? "auto" })}
-                    className="w-full max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
-                  >
-                    <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
-                    <option value="h264_nvenc">NVIDIA NVENC</option>
-                    <option value="h264_qsv">Intel Quick Sync (QSV)</option>
-                    <option value="h264_amf">AMD AMF</option>
-                    <option value="libx264">x264 软件（CPU）</option>
-                  </select>
-                  <p className="mt-1 text-[10px] text-zinc-600">失败时可改用 x264 软件编码。</p>
-                </div>
+                <EncoderSelector
+                  value={s.montageEncoder ?? "auto"}
+                  onChange={(v) => { s.setMontageEncoder(v); void s.handleSaveConfig({ montage_encoder: v }); }}
+                />
                 <div className="flex-1" aria-hidden />
               </div>
             </SettingsCard>
