@@ -126,6 +126,9 @@ export default function RecordWarmupModal({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
   onPersistCs2RecordExtras,
+  initObsTransEnabled = false,
+  initObsTransName = "Fade",
+  initObsTransDurationMs = 200,
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
@@ -150,10 +153,10 @@ export default function RecordWarmupModal({
     }
     setOpts(base);
     setResolutionError("");
-    setObsTransEnabled(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.enabled);
-    setObsTransName(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.name);
-    setObsTransDurationMs(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs);
-  }, [open, defaultOverrides]);
+    setObsTransEnabled(!!initObsTransEnabled);
+    setObsTransName(initObsTransName || "Fade");
+    setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
+  }, [open, defaultOverrides, initObsTransEnabled, initObsTransName, initObsTransDurationMs]);
 
   useEffect(() => {
     if (!open) return;

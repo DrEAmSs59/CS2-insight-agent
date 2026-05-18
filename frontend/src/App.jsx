@@ -2300,6 +2300,9 @@ export default function App() {
           recordInjectConsoleLines={recordInjectConsoleLines}
           onRecordInjectConsoleLinesChange={setRecordInjectConsoleLines}
           onPersistCs2RecordExtras={persistCs2RecordExtras}
+          initObsTransEnabled={obsTransitionEnabled}
+          initObsTransName={obsTransitionName}
+          initObsTransDurationMs={obsTransitionDurationMs}
         />
 
         <LibraryLoadModeModal
