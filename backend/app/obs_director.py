@@ -1932,39 +1932,6 @@ class OBSDirector:
         await self._run_cleanup_step("CS2 shutdown", self._kill_cs2, timeout=30.0)
         await self._run_cleanup_step("CS2 artifact cleanup", self._cleanup_cs2_artifacts, timeout=8.0)
 
-    @staticmethod
-    def _append_aborted_results_for_tail(
-        demo_jobs: list[tuple[Path, list[dict], Optional[str], Optional[int]]],
-        job_idx: int,
-        after_clip_idx: int,
-        all_results: list[dict],
-    ) -> None:
-        """将同一 job 中 after_clip_idx 之后的片段及后续 job 全部标记为 aborted。"""
-        dem_path, clips, _, _ = demo_jobs[job_idx]
-        demo_name = dem_path.name
-        for idx in range(after_clip_idx + 1, len(clips)):
-            c = clips[idx]
-            all_results.append(
-                {
-                    "clip_id": c["clip_id"],
-                    "status": "aborted",
-                    "demo_path": str(dem_path),
-                    "demo_filename": demo_name,
-                },
-            )
-        for j in range(job_idx + 1, len(demo_jobs)):
-            dp, cls, _, _ = demo_jobs[j]
-            n = dp.name
-            for c in cls:
-                all_results.append(
-                    {
-                        "clip_id": c["clip_id"],
-                        "status": "aborted",
-                        "demo_path": str(dp),
-                        "demo_filename": n,
-                    },
-                )
-
     @property
     def state(self) -> DirectorState:
         return self._state
