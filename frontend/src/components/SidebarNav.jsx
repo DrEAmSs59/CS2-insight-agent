@@ -45,7 +45,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           />
           <div className="min-w-0">
             <div className="truncate text-sm font-bold tracking-wide text-cs2-text-primary">CS2 洞察</div>
-            <div className="font-mono text-[10px] tracking-widest text-cs2-text-muted">v2.0.1</div>
+            <div className="font-mono text-[10px] tracking-widest text-cs2-text-muted">V2.1.0</div>
           </div>
         </div>
       </div>
