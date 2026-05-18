@@ -291,6 +291,10 @@ class RecordingExecutor:
         self._fade: Optional[OBSFadeController] = fade_controller
         # Controller is created per-execute call so it always holds the current client.
         self._ctrl: Optional[OBSRecordingController] = None
+        # Tracks whether OBS program output is currently on the black scene.
+        # Persists across execute() calls so the next clip skips a redundant
+        # fade_to_black() when OBS was already left on black by the previous stop.
+        self._obs_on_black: bool = False
 
     def _is_aborted(self) -> bool:
         return self._abort_event is not None and self._abort_event.is_set()
@@ -311,6 +315,8 @@ class RecordingExecutor:
             ok = await self._fade.fade_to_black()
             if not ok:
                 logger.warning("[RecordingV3] fade_to_black failed at segment boundary; hard-cut")
+            else:
+                self._obs_on_black = True
 
         if is_last:
             silent_result, obs_result = await asyncio.gather(
@@ -530,38 +536,64 @@ class RecordingExecutor:
                     )
                     result.recording_started_at = time.time()
                     if self._fade is not None:
-                        ok = await self._fade.fade_to_black()
-                        if not ok:
-                            logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
+                        if self._obs_on_black:
+                            # OBS is already on the black scene from the previous
+                            # clip's fade-out — skip the redundant black→black transition.
+                            logger.debug("[RecordingV3] OBS already on black; skipping fade_to_black for StartRecord")
+                        else:
+                            ok = await self._fade.fade_to_black()
+                            if not ok:
+                                logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
+                            else:
+                                self._obs_on_black = True
+                        # Pre-warm the OBS connection for fade-in *before* StartRecord so
+                        # the scene switch fires with near-zero latency after recording begins,
+                        # eliminating any black-screen-with-audio gap at the clip start.
+                        await self._fade.prime_fade_to_game()
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
 
-                    # ── 5a. Resume demo BEFORE fade-in (StartRecord) ─────────
-                    # OBS is now recording the black scene.  Fire demo_resume
-                    # here so the game is already live when the fade-in plays —
-                    # this prevents a frozen game frame at the top of the clip.
-                    resume_ok = await demo_resume_silent_strict()
+                    # ── 5a. Resume demo concurrently with fade-in (StartRecord) ──
+                    # execute_primed_fade_to_game uses the pre-warmed WS connection so
+                    # the scene switch fires within ~2 ms of StartRecord returning —
+                    # the 200 ms animation then covers CS2 keypress processing latency.
                     if self._fade is not None:
-                        ok = await self._fade.fade_to_game()
-                        if not ok:
+                        (resume_ok, fade_ok) = await asyncio.gather(
+                            demo_resume_silent_strict(),
+                            self._fade.execute_primed_fade_to_game(),
+                        )
+                        if not fade_ok:
                             logger.warning("[RecordingV3] fade_to_game after StartRecord failed; hard-cut")
+                    else:
+                        resume_ok = await demo_resume_silent_strict()
+                    self._obs_on_black = False
                 else:
                     logger.info(
                         "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
+                    # Pre-warm the OBS connection for fade-in *before* ResumeRecord so
+                    # the scene switch fires with near-zero latency after recording resumes.
+                    # Without this, the WS connection setup (~100-300 ms) is recorded as
+                    # black-screen-with-audio at the start of the clip.
+                    if self._fade is not None:
+                        await self._fade.prime_fade_to_game()
                     await self._ctrl.resume_record_safe()
 
-                    # ── 5b. Resume demo BEFORE fade-in (ResumeRecord) ────────
-                    # The demo starts playing while OBS still records the black
-                    # scene; by the time the game fades in it is already live.
-                    resume_ok = await demo_resume_silent_strict()
+                    # ── 5b. Resume demo concurrently with fade-in (ResumeRecord) ─
+                    # execute_primed_fade_to_game uses the pre-warmed WS connection so
+                    # the scene switch fires within ~2 ms of ResumeRecord returning —
+                    # the 200 ms animation then covers CS2 keypress processing latency.
                     if self._fade is not None:
-                        # Always attempt the fade regardless of resume_ok so OBS
-                        # doesn't stay locked on the black scene.
-                        ok = await self._fade.fade_to_game()
-                        if not ok:
+                        (resume_ok, fade_ok) = await asyncio.gather(
+                            demo_resume_silent_strict(),
+                            self._fade.execute_primed_fade_to_game(),
+                        )
+                        if not fade_ok:
                             logger.warning("[RecordingV3] fade_to_game after ResumeRecord failed; hard-cut")
+                    else:
+                        resume_ok = await demo_resume_silent_strict()
+                    self._obs_on_black = False
 
                 # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.

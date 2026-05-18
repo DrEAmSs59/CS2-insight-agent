@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from typing import Optional
 from ...env_utils import OBSConfig
 from .obs_client import OBSClient, OBSRecordError
 
@@ -68,6 +69,9 @@ class OBSFadeController:
         self._obs_config = obs_config
         self._cfg = fade_config
         self._ready = False
+        # Pre-warmed client held between prime_fade_to_game() and execute_primed_fade_to_game()
+        # so the scene switch fires with near-zero connection latency after StartRecord/ResumeRecord.
+        self._primed_client: Optional[OBSClient] = None
 
     @property
     def is_ready(self) -> bool:
@@ -244,6 +248,80 @@ class OBSFadeController:
         if not self._ready:
             return True
         return await self._do_fade(self._cfg.game_scene_name, direction="to_game")
+
+    async def prime_fade_to_game(self) -> bool:
+        """Pre-establish the OBS connection and configure the transition before recording starts.
+
+        Call this BEFORE start_record/resume_record so execute_primed_fade_to_game() can
+        switch the scene with near-zero latency — eliminating the connection-setup gap that
+        would otherwise be recorded as black-screen-with-audio.
+
+        If not called (or if it fails), execute_primed_fade_to_game() falls back to the
+        normal _do_fade path.
+
+        Returns True on success (or when not ready — no-op).
+        """
+        if not self._ready:
+            return True
+
+        # Discard any stale primed client (shouldn't normally happen).
+        if self._primed_client is not None:
+            try:
+                await asyncio.to_thread(self._primed_client.disconnect)
+            except Exception:
+                pass
+            self._primed_client = None
+
+        client = self._new_client()
+        try:
+            await asyncio.to_thread(client.connect)
+            await asyncio.to_thread(
+                client.set_current_scene_transition,
+                self._cfg.transition_name,
+                self._cfg.duration_ms,
+            )
+            self._primed_client = client
+            logger.debug("[OBSFade] primed fade-to-game connection")
+            return True
+        except Exception as exc:
+            logger.warning("[OBSFade] prime_fade_to_game failed: %s", exc)
+            try:
+                await asyncio.to_thread(client.disconnect)
+            except Exception:
+                pass
+            return False
+
+    async def execute_primed_fade_to_game(self) -> bool:
+        """Execute fade-to-game using the pre-established connection from prime_fade_to_game().
+
+        Consumes the primed client so subsequent calls behave normally.
+        Falls back to a fresh _do_fade if prime_fade_to_game() was not called or failed.
+
+        Returns True on success. Returns True (no-op) when not ready.
+        """
+        if not self._ready:
+            return True
+
+        client = self._primed_client
+        self._primed_client = None  # consume
+
+        if client is None:
+            logger.warning("[OBSFade] execute_primed_fade_to_game: not primed; falling back to _do_fade")
+            return await self._do_fade(self._cfg.game_scene_name, direction="to_game")
+
+        try:
+            await asyncio.to_thread(client.set_current_program_scene, self._cfg.game_scene_name)
+            await asyncio.sleep(self._cfg.duration_ms / 1000.0)
+            logger.debug("[OBSFade] to_game complete (%dms) [primed]", self._cfg.duration_ms)
+            return True
+        except Exception as exc:
+            logger.warning("[OBSFade] execute_primed_fade_to_game failed: %s", exc)
+            return False
+        finally:
+            try:
+                await asyncio.to_thread(client.disconnect)
+            except Exception:
+                pass
 
     async def _do_fade(self, target_scene: str, direction: str) -> bool:
         client = self._new_client()
