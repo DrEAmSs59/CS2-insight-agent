@@ -2247,25 +2247,25 @@ export default function App() {
               <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
               <p className="text-sm font-medium text-cs2-text-primary">{libraryLoadingText}</p>
             </div>
-          )}
-          <SidebarNav queueLength={queue.length} disabled={batchRecording} />
-          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <Routes>
-                <Route path="/" element={<GuidePage />} />
-                <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<AnalysisPage />} />
-                <Route path="/queue" element={<RecordingQueuePage />} />
-                <Route path="/montage" element={<MontageWorkbenchPage />} />
-                <Route path="/params" element={<CommonParamsPage />} />
-                <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </main>
-        </div>
+          </div>
+        )}
+        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <Routes>
+              <Route path="/" element={<GuidePage />} />
+              <Route path="/library" element={<DemoLibraryPage />} />
+              <Route path="/analysis" element={<AnalysisPage />} />
+              <Route path="/queue" element={<RecordingQueuePage />} />
+              <Route path="/montage" element={<MontageWorkbenchPage />} />
+              <Route path="/params" element={<CommonParamsPage />} />
+              <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
 
         {showGlobalNotice ? (
           <div
