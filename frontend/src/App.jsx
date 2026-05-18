@@ -1407,7 +1407,7 @@ export default function App() {
       if (!currentParsed || !roundRow) return;
       const meta = queueItemMetaForIndex(currentMatchIndex);
       const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer });
+      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename });
       const uid = clipData.client_clip_uid;
       const qk = queueItemClientUid({
         clientClipUid: uid,

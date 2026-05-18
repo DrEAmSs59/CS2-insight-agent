@@ -9,13 +9,19 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on tcp:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder",
+    "electron:clean": "node scripts/clean-dist-electron.mjs",
+    "electron:build": "npm run build && npm run electron:clean && npm exec electron-builder --",
+    "electron:build:ver": "node scripts/electron-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs"
   },
   "build": {
     "appId": "com.cs2insightagent.app",
     "productName": "CS2 Insight Agent",
-    "directories": {      "output": "dist_electron"
+    "directories": {
+      "output": "dist_electron"
+    },
+    "toolsets": {
+      "winCodeSign": null
     },
     "files": [
       "dist/**/*",
@@ -64,7 +70,9 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/cs2-insight-logo.png"
+      "icon": "public/cs2-insight-logo.png",
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false
     },
     "linux": {
       "target": "AppImage",

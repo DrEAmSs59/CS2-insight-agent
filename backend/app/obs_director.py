@@ -2069,6 +2069,15 @@ class OBSDirector:
         self._snapshot_user_configs()
         self._cleanup_cs2_artifacts()
 
+        # CS2 读取 video.txt 的优先级高于 -w/-h 启动参数，在快照后立即 patch
+        # 磁盘文件，确保录制分辨率真正生效；结束后由 _restore_user_configs 还原。
+        if warmup is not None:
+            _w, _h = warmup.resolution_width, warmup.resolution_height
+            if _w is not None and _h is not None and int(_w) > 0 and int(_h) > 0:
+                _arm = warmup.aspect_ratio
+                _mode = _ASPECT_RATIO_VIDEOCFG_MODE.get(_arm) if _arm else None
+                self._patch_video_configs_for_resolution(int(_w), int(_h), _mode)
+
         game_root = self._game_root_from_cs2_exe(cs2)
         if not game_root:
             raise FileNotFoundError(
@@ -2846,6 +2855,55 @@ class OBSDirector:
         if restored:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
+
+    def _patch_video_configs_for_resolution(
+        self,
+        width: int,
+        height: int,
+        aspect_ratio_mode: Optional[int] = None,
+    ) -> None:
+        """CS2 启动前把快照中的 video.txt / cs2_video.txt 改为录制分辨率。
+
+        CS2 读取 video.txt 的优先级高于 -w/-h 命令行参数，所以仅靠启动参数
+        不足以改变渲染分辨率。这里直接 patch 磁盘文件；录制结束后
+        _restore_user_configs 会把文件还原为玩家原始内容。
+        """
+        patched = 0
+        for p, original in self._user_config_snapshot.items():
+            if p.name not in ("video.txt", "cs2_video.txt"):
+                continue
+            if original is None:
+                continue  # 文件原本不存在，跳过
+            try:
+                text = original.decode("utf-8", errors="replace")
+                text = re.sub(
+                    r'"setting\.defaultres"\s+"[^"]*"',
+                    f'"setting.defaultres"\t\t"{width}"',
+                    text,
+                )
+                text = re.sub(
+                    r'"setting\.defaultresheight"\s+"[^"]*"',
+                    f'"setting.defaultresheight"\t\t"{height}"',
+                    text,
+                )
+                if aspect_ratio_mode is not None:
+                    text = re.sub(
+                        r'"setting\.aspectratiomode"\s+"[^"]*"',
+                        f'"setting.aspectratiomode"\t\t"{aspect_ratio_mode}"',
+                        text,
+                    )
+                p.write_text(text, encoding="utf-8")
+                patched += 1
+                logger.info(
+                    "Patched %s for recording resolution %dx%d (aspectratiomode=%s)",
+                    p.name, width, height, aspect_ratio_mode,
+                )
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning("Failed to patch video config %s: %s", p, e)
+        if patched:
+            logger.info("Patched %d video config file(s) for %dx%d recording", patched, width, height)
+        else:
+            logger.debug("No video config files found in snapshot to patch for resolution")
 
     def _kill_cs2(self) -> None:
         """强杀整棵 CS2 进程树并等待窗口真正消失。

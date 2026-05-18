@@ -265,7 +265,9 @@ class OBSClient:
             resp = self._ws.call(req(sceneName=scene_name))
             items = (getattr(resp, "datain", None) or {}).get("sceneItems") or []
             return any(
-                isinstance(it, dict) and str(it.get("sourceName") or "") == source_name
+                isinstance(it, dict) and str(
+                    it.get("sourceName") or it.get("sceneItemSourceName") or ""
+                ) == source_name
                 for it in items
             )
         except Exception:
@@ -366,12 +368,14 @@ class OBSClient:
                         )
                     )
                 logger.info("OBSClient: game capture %r linked to scene %r", capture_name, scene_name)
-            except OBSRecordError:
-                raise
+            except OBSRecordError as exc:
+                logger.warning(
+                    "OBSClient: game capture creation/link failed (non-fatal, will still apply settings): %s", exc
+                )
             except Exception as exc:
-                raise OBSRecordError(
-                    f"ensure_game_capture_in_scene({scene_name!r}) failed: {exc}"
-                ) from exc
+                logger.warning(
+                    "OBSClient: game capture creation/link unexpected error (non-fatal, will still apply settings): %s", exc
+                )
 
         # Always (re-)apply settings so properties like capture_cursor=False are
         # enforced even when the source already existed before this run.

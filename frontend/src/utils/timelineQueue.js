@@ -106,9 +106,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
 }
 
 /**
- * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null }} p
+ * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, demoFilename?: string }} p
  */
-export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "" }) {
+export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "", demoFilename = "" }) {
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const fe = roundRow?.start_tick ?? roundRow?.round_start_tick;
   const en =
@@ -129,7 +129,7 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
     et = Math.min(et, cap);
     if (et <= st) et = st + 64;
   }
-  const client_clip_uid = `tl_round_${Number.isFinite(rn) ? rn : "x"}`;
+  const client_clip_uid = `tl_round:${demoFilename}:${Number.isFinite(rn) ? rn : "x"}`;
   const sum = roundRow?.summary && typeof roundRow.summary === "object" ? roundRow.summary : {};
   const ps = roundRow?.player_stats && typeof roundRow.player_stats === "object" ? roundRow.player_stats : {};
   const tk = Number(ps.kills ?? sum.kills) || 0;

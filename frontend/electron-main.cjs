@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, protocol, net, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
@@ -159,8 +159,8 @@ function startBackend() {
         PYTHONUNBUFFERED: '1',
         PYTHONFAULTHANDLER: '1',
         CS2_INSIGHT_CONFIG: configPath,
-        CS2_INSIGHT_LOG_DIR: logsPath
-      }
+        CS2_INSIGHT_LOG_DIR: logsPath,
+      },
     });
 
     backendProcess.stdout.on('data', (data) => {
@@ -174,8 +174,21 @@ function startBackend() {
     backendProcess.on('close', (code) => {
       console.log(`后端进程已退出，退出码 ${code}`);
     });
+
+    backendProcess.on('error', (err) => {
+      log.error('[Backend] spawn failed:', err);
+    });
   } else {
-    console.error('未能在以下位置找到 Python 可执行文件或后端脚本:', baseDir);
+    const searched = possibleBaseDirs.filter(Boolean).join('\n• ');
+    const msg = [
+      '未在安装目录中找到内嵌 Python 与后端（需要 resources/python/python.exe 与 resources/backend/...）。',
+      '打包前请在仓库根目录放置官方 Windows embeddable Python 解压到 python/，并确保 electron-builder 的 extraResources 已打进安装包。',
+      '',
+      '已搜索位置：',
+      `• ${searched}`,
+    ].join('\n');
+    log.error(`[Backend] ${msg}`);
+    dialog.showErrorBox('CS2 Insight Agent — 无法启动后端', msg);
   }
 }
 
@@ -204,7 +217,12 @@ app.whenReady().then(() => {
     callback({ path: filePath });
   });
 
-  startBackend();
+  try {
+    startBackend();
+  } catch (e) {
+    log.error('[Backend] startBackend threw:', e);
+    dialog.showErrorBox('CS2 Insight Agent', `启动后端时出错：${e?.message || e}`);
+  }
   createWindow();
 
   app.on('activate', function () {
