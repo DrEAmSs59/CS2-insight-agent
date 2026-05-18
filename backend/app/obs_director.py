@@ -1865,16 +1865,12 @@ class OBSDirector:
         self._copied_demo: Optional[Path] = None
         self._copied_cfg: Optional[Path] = None
         self._copied_gsi_cfg: Optional[Path] = None
-        self._obs_cursor_restore: list[tuple[str, bool]] = []
         self._spec_calibration_by_demo: dict[str, dict[str, int]] = {}
         self._spec_parse_fallback_offset_by_demo: dict[str, int] = {}
         self._demo_steam_by_name_cache: dict[str, dict[str, str]] = {}
         self._abort_event = abort_event
         # 实验性 POV：在首次片段预热注入末尾追加强制 cvar
         self._pov_enabled = False
-        # 录制期最近一次使用的 warmup 选项（预留给未来的兜底恢复路径；当前文件级
-        # snapshot + restore 方案已足够保护用户配置）。
-        self._last_warmup: Optional[RecordingWarmupExtras] = None
         # 启动 CS2 前对用户配置文件做的字节级快照：{Path: bytes | None}。
         # value=None 代表该文件原本不存在，restore 时需要删除 CS2 新建的同名文件。
         self._user_config_snapshot: dict[Path, Optional[bytes]] = {}
@@ -2058,7 +2054,6 @@ class OBSDirector:
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
         Source 2 对 Temp 等目录的绝对路径 +playdemo 常无效；工作目录需为 game/。
         """
-        self._last_warmup = warmup
         if not demo_abs.is_file():
             raise FileNotFoundError(f"Demo file not found: {demo_abs}")
         cs2 = Path(self.cs2_path)
