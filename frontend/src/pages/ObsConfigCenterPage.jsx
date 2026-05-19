@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../api/api";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Wifi, WifiOff } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
@@ -338,6 +338,12 @@ export default function ObsConfigCenterPage() {
                   {msg}
                 </div>
               ))}
+            </div>
+          ) : null}
+          {calibrateResult?.restart_obs_required ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-cs2-amber-on-surface/30 bg-amber-500/10 px-3 py-2.5 text-[12px] text-cs2-amber-on-surface">
+              <RotateCcw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>录像编码器已更改，<strong>需要重启 OBS</strong> 后新设置才会生效，重启前录制仍会失败。</span>
             </div>
           ) : null}
         </section>

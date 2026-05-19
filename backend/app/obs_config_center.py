@@ -875,6 +875,8 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         rec_q_data = getattr(rec_q_resp, "datain", None) or {}
         rec_quality = rec_q_data.get("parameterValue", "")
 
+        restart_required = False
+
         if rec_quality == "Stream":
             ws.call(obs_requests.SetProfileParameter(
                 parameterCategory="SimpleOutput",
@@ -896,29 +898,25 @@ def calibrate(obs_cfg) -> dict[str, Any]:
                     stream_enc = ((getattr(stream_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
                 except Exception:  # noqa: BLE001
                     stream_enc = ""
-                # 2. 串流编码器无效时按硬件优先顺序选取；obs_x264 仅作最后保底
+                # 2. 串流编码器无效时按硬件优先顺序选取
                 _HW_PRIORITY = [
-                    "jim_nvenc",       # NVENC（新版，推荐）
-                    "ffmpeg_nvenc",    # NVENC（旧版）
-                    "h264_texture_amf",# AMD AMF（新版）
-                    "amd_amf_h264",   # AMD AMF（旧版）
-                    "obs_qsv11_v2",   # Intel QSV（新版）
-                    "obs_qsv11",      # Intel QSV（旧版）
+                    "jim_nvenc",        # NVENC（新版，推荐）
+                    "ffmpeg_nvenc",     # NVENC（旧版）
+                    "h264_texture_amf", # AMD AMF（新版）
+                    "amd_amf_h264",    # AMD AMF（旧版）
+                    "obs_qsv11_v2",    # Intel QSV（新版）
+                    "obs_qsv11",       # Intel QSV（旧版）
                 ]
                 _INVALID = {"", "none", "null", "stream"}
-                if stream_enc.lower() not in _INVALID:
-                    target_enc = stream_enc
-                else:
-                    # 尝试向 OBS 查询已注册的编码器列表（WS v5 GetInputKindList 不含编码器，
-                    # 改为逐个 GetProfileParameter 探测不可行；直接按优先顺序写入，
-                    # OBS 启动录制时如不支持会自行报错，用户可在 OBS 界面更换。）
-                    target_enc = _HW_PRIORITY[0]  # jim_nvenc 作为默认硬件首选
+                target_enc = stream_enc if stream_enc.lower() not in _INVALID else _HW_PRIORITY[0]
                 ws.call(obs_requests.SetProfileParameter(
                     parameterCategory="SimpleOutput",
                     parameterName="RecEncoder",
                     parameterValue=target_enc,
                 ))
                 changed.append(f"录像编码器已设为「{target_enc}」（原质量为串流一致时未配置）")
+            # 编码器/质量变更写入的是磁盘 Profile，OBS 输出管线不会热重载，必须重启生效
+            restart_required = True
             changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
         else:
             already_ok.append("录像质量设置正常")
@@ -939,7 +937,12 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         else:
             already_ok.append("录像格式正确（混合 MP4）")
 
-        return {"success": True, "changed": changed, "already_ok": already_ok}
+        return {
+            "success": True,
+            "changed": changed,
+            "already_ok": already_ok,
+            "restart_obs_required": restart_required,
+        }
 
     finally:
         _ws_disconnect(ws)
