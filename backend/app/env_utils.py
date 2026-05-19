@@ -448,3 +448,13 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
             cfg.cs2_path = detected
             save_config(cfg)
     return cfg
+
+
+def get_primary_monitor_resolution() -> tuple[int, int]:
+    """返回主显示器分辨率 (width, height)。非 Windows 返回 (1920, 1080) 作为 fallback。"""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
+    except Exception:
+        return 1920, 1080
