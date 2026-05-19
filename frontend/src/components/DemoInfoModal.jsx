@@ -222,12 +222,17 @@ export default function DemoInfoModal({
     const allClips = [];
     for (const pname of Object.keys(parsedPlayers)) {
       const pd = parsedPlayers[pname];
+      const mm = pd.match_meta ?? null;
+      const steamId = mm?.target_steam_id != null && mm.target_steam_id !== ""
+        ? String(mm.target_steam_id) : null;
       for (const c of pd.clips || []) {
         if (!c.client_clip_uid || !selectedClipUids.has(c.client_clip_uid)) continue;
         const base = {
           demoPath: demoData?.path || "",
           demoFilename: demoData?.filename || "",
-          targetPlayer: pname,
+          targetPlayer: mm?.target_player || pname,
+          targetPlayerUserId: mm?.target_player_user_id ?? null,
+          targetSteamId: steamId,
           clipId: c.clip_id,
           clientClipUid: c.client_clip_uid,
           clipData: { ...c },
