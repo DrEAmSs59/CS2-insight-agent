@@ -960,14 +960,6 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
     return director.test_obs_connection()
 
 
-class ObsConfigApplyRecommended(BaseModel):
-    create_backup: bool = True
-    fix_scene: bool = True
-    # 留空则自动解析本机默认 Profile 目录（如「未命名」/ Untitled），不读环境变量
-    target_profile: str = ""
-    obs: Optional[OBSConfig] = None
-
-
 @app.get("/api/obs-config/status")
 def obs_config_status():
     cfg = load_config()
@@ -981,65 +973,11 @@ def obs_config_diagnose(payload: Optional[OBSConfig] = Body(default=None)):
     return obs_config_center.diagnose(obs_use)
 
 
-@app.post("/api/obs-config/apply-recommended")
-def obs_config_apply_recommended(body: Optional[ObsConfigApplyRecommended] = Body(default=None)):
+@app.post("/api/obs-config/calibrate")
+def obs_config_calibrate():
     cfg = load_config()
-    req = body or ObsConfigApplyRecommended()
-    obs_use = merge_obs_for_connection(req.obs, cfg.obs)
-    tp = (req.target_profile or "").strip() or None
     try:
-        return obs_config_center.apply_recommended(
-            obs_use,
-            project_profile=tp,
-            create_backup=req.create_backup,
-            fix_scene=req.fix_scene,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.post("/api/obs-config/import-preset")
-async def obs_config_import_preset(
-    file: UploadFile = File(...),
-    create_backup: bool = Form(True),
-):
-    cfg = load_config()
-    raw = await file.read()
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError:
-        raise HTTPException(400, "无效的 .cs2obs / JSON 文件") from None
-    try:
-        return obs_config_center.import_cs2obs_bytes(data, cfg.obs, create_backup=create_backup)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.get("/api/obs-config/export-preset")
-def obs_config_export_preset():
-    cfg = load_config()
-    data = obs_config_center.export_cs2obs_dict(cfg.obs)
-    buf = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return StreamingResponse(
-        io.BytesIO(buf),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="cs2-insight-obs-preset-{ts}.cs2obs"'},
-    )
-
-
-@app.post("/api/obs-config/import-native")
-async def obs_config_import_native(
-    files: list[UploadFile] = File(...),
-    create_backup: bool = Form(True),
-):
-    cfg = load_config()
-    pairs: list[tuple[str, bytes]] = []
-    for f in files:
-        raw = await f.read()
-        pairs.append((f.filename or "", raw))
-    try:
-        return obs_config_center.import_native_files(pairs, cfg.obs, create_backup=create_backup)
+        return obs_config_center.calibrate(cfg.obs)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
