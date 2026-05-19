@@ -794,18 +794,26 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         existing_fps_d = vd.get("fps_den", 1)
 
         # Step 3: 修正画布分辨率
+        # OBS WS v5 SetVideoSettings 字段是顶层 kwargs，不能嵌套在 videoSettings={}
         if canvas_w != monitor_w or canvas_h != monitor_h:
             ws.call(obs_requests.SetVideoSettings(
-                videoSettings={
-                    "baseWidth": monitor_w,
-                    "baseHeight": monitor_h,
-                    "outputWidth": monitor_w,
-                    "outputHeight": monitor_h,
-                    "fpsNumerator": existing_fps_n,
-                    "fpsDenominator": existing_fps_d,
-                }
+                fpsNumerator=existing_fps_n,
+                fpsDenominator=existing_fps_d,
+                baseWidth=monitor_w,
+                baseHeight=monitor_h,
+                outputWidth=monitor_w,
+                outputHeight=monitor_h,
             ))
-            changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+            # 回读验证：避免静默失败时错误报告成功
+            verify_vr = ws.call(obs_requests.GetVideoSettings())
+            verify_vd = _parse_ws_video(verify_vr)
+            if verify_vd["base_width"] == monitor_w and verify_vd["base_height"] == monitor_h:
+                changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+            else:
+                raise ValueError(
+                    f"OBS 未接受分辨率修改（仍为 {verify_vd['base_width']}×{verify_vd['base_height']}），"
+                    f"请在 OBS 设置→视频中手动将基础（画布）分辨率改为 {monitor_w}×{monitor_h}"
+                )
         else:
             already_ok.append(f"画布分辨率正确（{canvas_w}×{canvas_h}）")
 
