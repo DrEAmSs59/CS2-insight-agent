@@ -158,6 +158,7 @@ function SetupChecklist() {
       <div className="grid gap-2 sm:grid-cols-2">
         {SETUP_ITEMS.map(({ key, required, label, desc, to, linkLabel }) => {
           const ok = status?.[key] ?? false;
+          const isObs = key === "obs_connected";
           return (
             <div
               key={key}
@@ -196,53 +197,44 @@ function SetupChecklist() {
                       <ArrowRight className="h-3 w-3" />
                     </Link>
                   )}
+                  {/* OBS 连通后的录制配置子项 */}
+                  {isObs && ok && obsConfigHasIssues !== null && (
+                    <div className={`mt-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] ${
+                      obsConfigHasIssues
+                        ? "border-amber-500/25 bg-amber-500/8 text-amber-300"
+                        : "border-emerald-500/20 bg-emerald-500/8 text-emerald-300"
+                    }`}>
+                      {obsConfigHasIssues
+                        ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        : <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      }
+                      <div>
+                        <span className="font-semibold">
+                          {obsConfigHasIssues ? "录制配置存在问题" : "录制配置正常"}
+                        </span>
+                        <span className="ml-1 text-zinc-500">
+                          {obsConfigHasIssues
+                            ? "— 画布/场景/格式需修复"
+                            : "— 画布、场景源、格式均就绪"
+                          }
+                        </span>
+                        {obsConfigHasIssues && (
+                          <Link
+                            to="/obs-config-center"
+                            className="ml-2 font-semibold text-cs2-orange hover:underline"
+                          >
+                            前往修复 →
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           );
         })}
       </div>
-
-      {/* OBS 配置健康状态（仅 OBS 已连接时显示） */}
-      {status?.obs_connected && obsConfigHasIssues !== null && (
-        <div
-          className={`mt-2 flex items-center justify-between rounded-xl border px-4 py-3 transition-colors ${
-            obsConfigHasIssues
-              ? "border-amber-500/25 bg-amber-500/5"
-              : "border-emerald-500/20 bg-emerald-500/5"
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 shrink-0">
-              {obsConfigHasIssues
-                ? <AlertTriangle className="h-4 w-4 text-amber-400" />
-                : <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              }
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-white">OBS 录制配置正常</span>
-                <span className="rounded bg-cs2-orange/20 px-1.5 py-0.5 font-mono text-[10px] text-cs2-orange">必需</span>
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                {obsConfigHasIssues
-                  ? "检测到画布分辨率、场景、拉伸或录像格式存在问题，建议前往 OBS 配置中心修复。"
-                  : "画布分辨率、场景源、拉伸及录像格式均已就绪。"
-                }
-              </p>
-              {obsConfigHasIssues && (
-                <Link
-                  to="/obs-config-center"
-                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-cs2-orange hover:underline"
-                >
-                  前往 OBS 配置中心 修复
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
