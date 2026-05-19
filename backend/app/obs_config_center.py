@@ -881,6 +881,28 @@ def calibrate(obs_cfg) -> dict[str, Any]:
                 parameterName="RecQuality",
                 parameterValue="Small",
             ))
+            # RecQuality="Stream" 时 OBS 忽略 RecEncoder；改为 "Small" 后必须有有效编码器
+            # 否则 OBS 以空编码器启动录制会报「启动录像失败」
+            rec_enc_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecEncoder"
+            ))
+            rec_enc_val = ((getattr(rec_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
+            if not rec_enc_val or rec_enc_val.lower() in ("none", "null", "stream"):
+                # 读串流编码器作为首选；失败则兜底 obs_x264
+                try:
+                    stream_enc_resp = ws.call(obs_requests.GetProfileParameter(
+                        parameterCategory="SimpleOutput", parameterName="StreamEncoder"
+                    ))
+                    stream_enc = ((getattr(stream_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
+                except Exception:  # noqa: BLE001
+                    stream_enc = ""
+                target_enc = stream_enc if stream_enc and stream_enc.lower() not in ("none", "null", "") else "obs_x264"
+                ws.call(obs_requests.SetProfileParameter(
+                    parameterCategory="SimpleOutput",
+                    parameterName="RecEncoder",
+                    parameterValue=target_enc,
+                ))
+                changed.append(f"录像编码器已设为「{target_enc}」（原质量为串流一致时未配置）")
             changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
         else:
             already_ok.append("录像质量设置正常")
