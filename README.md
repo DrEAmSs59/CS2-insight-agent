@@ -13,15 +13,18 @@
 ## Tech Stack
 
 
-| Layer    | Technology                                      |
-| -------- | ----------------------------------------------- |
-| Frontend | React 19 + TailwindCSS 4 + Vite 6 + Zustand     |
-| Backend  | Python 3.10 + FastAPI                           |
-| 解析引擎     | demoparser2 + pandas                            |
-| AI 网关    | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / OpenAI 等） |
-| OBS 控制   | obs-websocket-py                                |
-| Demo 库   | aiosqlite + watchdog（目录监听）                      |
-| CS2 集成   | Game State Integration（启动就绪门控）                  |
+| Layer    | Technology                                                                 |
+| -------- | ---------------------------------------------------------------------------- |
+| Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand                   |
+| Desktop  | Electron 42（Windows 安装包 / `electron-updater` 自动更新）                        |
+| Backend  | Python 3.10+ + FastAPI + uvicorn                                              |
+| 解析引擎     | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程）                            |
+| AI 网关    | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等）           |
+| 录制管线     | `RecordingRequestDTO` → `plan_builder` → `RecordingExecutor`；CS2 启停与批量队列由 `obs_director` 编排 |
+| OBS 控制   | obs-websocket-py（分段 `StartRecord` / `PauseRecord` jump-cut；可选场景转场淡入淡出）      |
+| 合辑导出     | FFmpeg（`montage_encoder` 自动探测 NVENC / QSV / AMF / libx264）                   |
+| Demo 库   | aiosqlite + watchdog（目录监听 + SSE 推送）                                        |
+| CS2 集成   | Game State Integration（录制就绪门控）+ `win_cs2_console` 控制台注入                     |
 
 
 ---
@@ -32,37 +35,62 @@
 CS2-insight-agent/
 ├── backend/
 │   └── app/
-│       ├── main.py               # FastAPI 入口与 API 路由
-│       ├── demo_parser.py        # 高光 / 下饭 / 梗死亡 / 合集判定引擎
-│       ├── demo_parse_isolation.py  # 子进程隔离解析（防 Rust panic 拖垮主进程）
-│       ├── ai_reviewer.py        # 毒舌 AI 锐评（OpenAI 兼容）
-│       ├── insight_agent.py      # AI 模式主调度
-│       ├── obs_director.py       # OBS 自动导播 / CS2 回放控制
-│       ├── win_cs2_console.py    # Windows CS2 控制台注入（SendInput / WM_CHAR）
-│       ├── gsi_ready.py          # GSI 接收端，作为录制就绪门控
-│       ├── demo_db.py            # 本地 Demo 库（SQLite）
-│       ├── demo_watcher.py       # 录像目录监听（watchdog）
-│       ├── demo_library_hub.py   # 库内事件 SSE 推送
-│       └── env_utils.py          # 配置管理 & CS2 路径探测
+│       ├── main.py                    # FastAPI 入口（解析 / Demo 库 / GSI / 合辑导出等）
+│       ├── recording/                 # 录制 V3：Plan → Execute 管线
+│       │   ├── api.py                 # /api/recording/*（挂载于 main.py）
+│       │   ├── models.py              # RecordingRequestDTO / RecordingPlan / Segment
+│       │   ├── plan_builder.py        # 计划编排入口（分发至各 planner）
+│       │   ├── normalizer.py          # 请求规范化、参数校验
+│       │   ├── planners/              # highlight / fail / timeline / compilation / round POV
+│       │   ├── postprocess/           # 末回合保护、段禁用与 warnings 汇总
+│       │   ├── executor/              # RecordingExecutor、OBS 控制、demo seek、GSI 观战校验
+│       │   └── services/              # 单次录制结果落盘
+│       ├── obs_director.py            # CS2 启停、GSI 门控、预热 cvar、批量队列 execute_plan_queue
+│       ├── demo_parser.py             # 高光 / 下饭 / 梗死亡 / 合集判定引擎
+│       ├── demo_parse_isolation.py    # 子进程隔离解析（parse_worker.py）
+│       ├── ai_reviewer.py             # 毒舌 AI 锐评（OpenAI 兼容）
+│       ├── montage_db.py              # 已录片段 & 合辑工程（SQLite recorded_clips / projects）
+│       ├── montage_encoder.py         # FFmpeg H.264 编码器探测
+│       ├── video_composer.py          # 合辑时间轴合成导出
+│       ├── win_cs2_console.py         # Windows CS2 控制台注入（SendInput / WM_CHAR）
+│       ├── gsi_ready.py               # GSI HTTP sink（录制就绪门控）
+│       ├── cs2_config_backup.py       # 玩家 config 备份与回滚
+│       ├── demo_db.py / demo_watcher.py / demo_library_hub.py
+│       ├── obs_config_center.py       # OBS 场景 / 源管理 API
+│       ├── pov_experimental.py        # 实验性 POV HUD（pov.vpk / gameinfo.gi）
+│       ├── env_utils.py               # 配置管理 & CS2 路径探测
+│       └── radar/                     # 雷达图渲染（POV HUD / 录制叠加）
 ├── frontend/
 │   └── src/
-│       ├── App.jsx               # 主应用
+│       ├── App.jsx                    # 路由壳、全局状态、录制队列提交 / 阻断弹窗
+│       ├── main.jsx                   # React Router 入口
+│       ├── api/api.js                 # axios 封装与 API 基址
+│       ├── pages/                     # 各功能页（Demo 库 / 分析 / 录制队列 / 合辑 / 设置…）
+│       ├── recording/                 # RecordingRequestDTO 构建、plan 预览 API
+│       ├── stores/                    # recordingQueueStore / montageStore / themeStore
 │       ├── components/
-│       │   ├── Sidebar.jsx              # 侧边栏（OBS / CS2 / 关注玩家 / LLM 配置）
-│       │   ├── DemoUpload.jsx           # 拖拽上传
-│       │   ├── PlayerSelect.jsx         # 玩家选择 + 战绩面板
-│       │   ├── MatchScoreboard.jsx      # 计分板
-│       │   ├── ClipList.jsx             # 片段列表
-│       │   ├── ClipCard.jsx             # 单条片段卡
-│       │   ├── MemeDeathMontageCard.jsx # 「研发全集」整局梗合集卡
-│       │   ├── RecordWarmupModal.jsx    # 录制前观战预热选项
-│       │   ├── RecordingQueueDrawer.jsx # 录制队列抽屉（批量管理）
-│       │   ├── MatchSwitcher.jsx        # 多场次切换
-│       │   ├── LibraryLoadModeModal.jsx # 库装载模式
-│       │   ├── ProgressBar.jsx
-│       │   └── ActionBar.jsx
-│       └── stores/recordingQueueStore.js  # Zustand 录制队列
+│       │   ├── recordingQueue/        # 队列工作区、检视器、控制坞
+│       │   ├── montage/               # 合辑工作台（时间轴、导出、已录片段卡）
+│       │   ├── demoLibrary/           # Demo 库表格、筛选、批量操作
+│       │   ├── analysis/timeline/     # 回合时间轴与击杀 feed
+│       │   ├── SidebarNav.jsx         # 侧栏导航
+│       │   ├── ClipCard.jsx / ClipList.jsx / MemeDeathMontageCard.jsx
+│       │   ├── RecordWarmupModal.jsx  # 录制前观战预热 & POV HUD 选项
+│       │   └── RecordingBlockedDialog.jsx
+│       └── utils/                     # recordingBatch、timelineQueue、warmupDefaults 等
+├── frontend/electron-main.cjs         # Electron 主进程（内嵌 Python 后端）
 └── README.md
+```
+
+### 录制数据流（V3）
+
+```
+前端队列项 → recording/buildDtoFromQueueItem → RecordingRequestDTO
+    → POST /api/recording/queue
+    → plan_builder（planners + postprocess）→ RecordingPlan[]
+    → obs_director.execute_plan_queue（按 demo 分组启 CS2、注入预热 cvar）
+    → RecordingExecutor（逐段 seek / spec / OBS 录停 / jump-cut）
+    → 成片重命名 + montage_db 入库（合辑工作台可选用）
 ```
 
 ---
@@ -131,15 +159,22 @@ Electron打包位置：`frontend/dist_electron/`
 - **毒舌人设 Prompt** — 高光吹爆、下饭嘲讽、梗死亡当段子；硬约束 100 字以内、单行 JSON 输出，不输出场外废话。
 - **整局梗合集总评** — 211/o/i/z 系研发局会触发「整局综合评价」，独立于片段级评分。
 
-### 📺 OBS 自动导播
+### 📺 OBS 自动导播（V3 录制管线）
 
-- **GSI 启动就绪门控** — 用 CS2 Game State Integration 等真正进入游戏画面再注入控制台命令，超时（默认 120s）会**前端弹窗中止**，避免在读条页瞎打命令。
-- **智能跳跃剪辑 (smart jump-cut)** — 多杀片段按击杀 tick 自动分段，段间用 OBS `PauseRecord` / `ResumeRecord` 拼接，输出无空镜的紧凑成片。
-- **POV 段** — 高光自动追加受害者视角、失误自动追加击杀者视角，叙事弧线完整。
-- **录制前观战预热** — 一键勾选 `cl_draw_only_deathnotices` / `hud_showtargetid 0` / `tv_nochat 1` / 隐藏投掷物轨迹 / 自定义 FOV 等观战 cvar，首片段统一注入。
-- **批量队列录制** — 跨场次 / 跨玩家加入队列，一次启动 CS2 顺序录完所有片段，并自动按 `玩家_地图_回合_击杀数` 命名 OBS 输出文件。
-- **键位与配置保护** — 录制开始注入 `unbindall` + 默认绑定，避免玩家自定义键位干扰；同时把玩家 `config.cfg` / `video.txt` / `user_convars_*.vcfg` 的当前快照拷贝到项目目录 `.cs2_config_backup/` 留档，运行期内存快照在 `taskkill` CS2 后自动回滚 archive cvar。
-- **CS2 占用检测** — 启动录制前若发现 CS2 已在运行，前端弹同款阻断对话框提示用户先关闭。
+- **Plan → Execute 分离** — 前端提交 `RecordingRequestDTO`，后端 `plan_builder` 生成 tick 级 `RecordingPlan`（含 disabled 段与 warnings），再由 `RecordingExecutor` 驱动 OBS；`/api/recording/plan` 可单独预览计划。
+- **GSI 启动就绪门控** — 用 CS2 Game State Integration 确认已进入游戏画面再注入控制台命令，超时（默认 120s）会**前端弹窗中止**，避免在读条页瞎打命令。
+- **智能跳跃剪辑 (jump-cut)** — 多杀 / 击杀合集按击杀 tick 自动分段，段间 OBS `PauseRecord` / `ResumeRecord`（失败时回退 `StopRecord` + 控制台 `demo_pause`）。
+- **可选 OBS 场景转场** — `OBSFadeController` 在段间用场景转场做淡入淡出，与 jump-cut 正交（不占用 PauseRecord 链路）。
+- **POV 段** — 高光可追加受害者视角、下饭可追加击杀者视角；回合 POV / 时间轴回合走独立 `round_pov_planner`。
+- **末回合保护** — `final_round_guard` 防止 seek 越过 demo 尾部或误触退出。
+- **录制前观战预热** — 一键勾选 `cl_draw_only_deathnotices` / `hud_showtargetid 0` / `tv_nochat 1` / 隐藏投掷物轨迹 / 自定义 FOV 等观战 cvar，每个 demo 会话首段统一注入。
+- **批量队列录制** — 跨场次 / 跨玩家加入队列；`obs_director.execute_plan_queue` 按 demo 分组启 CS2，顺序执行各 `RecordingPlan`，成片自动重命名并写入合辑库。
+- **键位与配置保护** — 录制开始注入 `unbindall` + 默认绑定；玩家 `config.cfg` / `video.txt` / `user_convars_*.vcfg` 快照至 `.cs2_config_backup/`，`taskkill` CS2 后自动回滚。
+- **CS2 占用 / 配置恢复检测** — CS2 已运行或上次异常退出未恢复配置时，接口返回 409，前端阻断弹窗提示。
+
+### 🎞️ 合辑工作台（可选）
+
+- 录制成功的片段自动入库 `recorded_clips`，可在合辑工作台拖拽排序、配 BGM / 转场主题，经 FFmpeg 导出 MP4。
 
 ### 📚 Demo 库
 
@@ -150,7 +185,7 @@ Electron打包位置：`frontend/dist_electron/`
 ### 🎨 UI / UX
 
 - 暗黑磨砂黑底 + CS2 经典亮橙强调色，原生电竞风。
-- 录制队列抽屉支持跨场次跨玩家管理与节奏微调（pre-roll / post-kill / jump-cut gap 等参数 per-clip 可覆盖）。
+- 录制队列页支持跨场次跨玩家管理、计划预览与节奏微调（pre-roll / post-kill / jump-cut 阈值等，队列项可 per-clip 覆盖）。
 - 阻断弹窗根据后端返回 detail 自动判断「CS2 占用 / GSI 未就绪 / 录制任务进行中」并切换副标题。
 
 ---
@@ -176,10 +211,13 @@ Electron打包位置：`frontend/dist_electron/`
 | POST   | `/api/demos/{id}/parse`     | 重新解析                 |
 | POST   | `/api/demos/{id}/analyze`   | 直接对库内 Demo 出片段       |
 | GET    | `/api/demos/{id}/players`   | 库内 Demo 玩家名册         |
-| POST   | `/api/recording/queue`      | V3 批量录制队列（前端「录制队列」；`requests` + `warmup` + `obs`） |
-| POST   | `/api/recording/plan`       | V3 预览录制计划（调试）           |
-| POST   | `/api/recording/execute`    | V3 单请求执行（调试）             |
-| POST   | `/api/recording/abort`      | 中止当前 V3 录制队列               |
+| POST   | `/api/recording/queue`      | 批量录制：`RecordingRequestDTO[]` → `plan_builder` → `execute_plan_queue` |
+| POST   | `/api/recording/plan`       | 预览 `RecordingPlan`（active / disabled 段、warnings、末回合元数据） |
+| POST   | `/api/recording/execute`    | 单条 DTO 即时执行（调试用，不经队列编排） |
+| POST   | `/api/recording/abort`      | 中止当前进行中的批量录制队列 |
+| GET    | `/api/recorded-clips`       | 已录片段列表（合辑工作台） |
+| POST   | `/api/montage/projects`     | 保存合辑工程 |
+| POST   | `/api/montage/export`       | FFmpeg 合辑导出 |
 | POST   | `/api/gsi/cs2`              | CS2 GSI Sink（录制就绪门控） |
 | GET    | `/api/gsi/status`           | 查看最近 GSI 状态          |
 
