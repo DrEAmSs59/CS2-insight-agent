@@ -104,13 +104,37 @@ Step 6: 设置 Game Capture 拉伸填满画布
       无需手动计算 scaleX/scaleY）
     → 记录变更（若 transform 有变化）
 
-Step 7: 返回结果
+Step 7: 校准 OBS 输出设置（Simple Output 模式）
+    → obs_client.get_profile_parameter("SimpleOutput", "RecQuality")
+    IF RecQuality == "Stream"（与串流一致）:
+        → obs_client.set_profile_parameter("SimpleOutput", "RecQuality", "High")
+        → 记录变更："录像质量已从「与串流一致」改为「高质量，中等文件大小」"
+
+    → obs_client.get_profile_parameter("SimpleOutput", "RecFormat2")
+    IF RecFormat2 != "hybrid_mp4":
+        → obs_client.set_profile_parameter("SimpleOutput", "RecFormat2", "hybrid_mp4")
+        → 记录变更："录像格式已改为「混合 MP4」"
+
+    注意：SetProfileParameter 写入 profile INI 后，OBS 需要在下次录制时才会生效，
+    无需重启 OBS，但如果 OBS 正在录制时调用则跳过此步骤并提示用户。
+
+Step 8: 返回结果
     → { changed: [...变更列表], already_ok: [...无需修改的项], success: true }
 ```
 
 ### 技术实现
 
 #### 新增后端代码
+
+**`backend/app/recording/obs_client.py`** — 还需新增两个方法（除 `set_video_settings` 外）：
+
+```python
+def get_profile_parameter(self, category: str, parameter_name: str) -> str:
+    """调用 obs_requests.GetProfileParameter()，返回参数值字符串"""
+
+def set_profile_parameter(self, category: str, parameter_name: str, parameter_value: str):
+    """调用 obs_requests.SetProfileParameter()，写入 profile INI"""
+```
 
 **`backend/app/obs_config_center.py`** — 新增函数：
 
