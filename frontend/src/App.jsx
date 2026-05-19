@@ -1485,6 +1485,19 @@ export default function App() {
     }
   }, []);
 
+  const obsTransitionEnabled = savedRecordWarmupDefaults?.obs_transition_enabled ?? true;
+  const obsTransitionName = savedRecordWarmupDefaults?.obs_transition_name ?? "Fade";
+  const obsTransitionDurationMs = savedRecordWarmupDefaults?.obs_transition_duration_ms ?? 100;
+
+  const persistObsTransition = useCallback(async (data) => {
+    await persistWarmupDefaults({
+      ...(savedRecordWarmupDefaults ?? {}),
+      obs_transition_enabled: !!data.obs_transition_enabled,
+      obs_transition_name: data.obs_transition_name ?? "Fade",
+      obs_transition_duration_ms: Number(data.obs_transition_duration_ms) || 100,
+    });
+  }, [savedRecordWarmupDefaults, persistWarmupDefaults]);
+
   const persistExperimentalPov = useCallback(async (enabled) => {
     try {
       await API.put("config", { experimental: { pov_enabled: enabled } });
@@ -2110,6 +2123,10 @@ export default function App() {
     refreshConfigBackupStatus,
     handleRestorePlayerConfig,
     handleOpenConfigBackupDir,
+    obsTransitionEnabled,
+    obsTransitionName,
+    obsTransitionDurationMs,
+    persistObsTransition,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;

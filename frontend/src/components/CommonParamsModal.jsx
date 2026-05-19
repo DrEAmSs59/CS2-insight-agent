@@ -111,9 +111,9 @@ export default function CommonParamsModal({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
   onPersistCs2RecordExtras,
-  obsTransitionEnabled: initObsTransitionEnabled = false,
+  obsTransitionEnabled: initObsTransitionEnabled = true,
   obsTransitionName: initObsTransitionName = "Fade",
-  obsTransitionDurationMs: initObsTransitionDurationMs = 200,
+  obsTransitionDurationMs: initObsTransitionDurationMs = 100,
   onPersistObsTransition,
 }) {
   const isPage = variant === "page";
