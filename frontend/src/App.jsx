@@ -123,6 +123,9 @@ export default function App() {
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
+  const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
+  const [obsTransitionName, setObsTransitionName] = useState("Fade");
+  const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
@@ -790,6 +793,15 @@ export default function App() {
           }
           if (typeof data.record_inject_console_lines === "string") {
             setRecordInjectConsoleLines(data.record_inject_console_lines);
+          }
+          if (typeof data.obs_transition_enabled === "boolean") {
+            setObsTransitionEnabled(data.obs_transition_enabled);
+          }
+          if (typeof data.obs_transition_name === "string") {
+            setObsTransitionName(data.obs_transition_name);
+          }
+          if (typeof data.obs_transition_duration_ms === "number") {
+            setObsTransitionDurationMs(data.obs_transition_duration_ms);
           }
           if (
             data.recording_global_pacing &&
@@ -1489,17 +1501,23 @@ export default function App() {
     }
   }, []);
 
-  const obsTransitionEnabled = savedRecordWarmupDefaults?.obs_transition_enabled ?? true;
-  const obsTransitionName = savedRecordWarmupDefaults?.obs_transition_name ?? "Fade";
-  const obsTransitionDurationMs = savedRecordWarmupDefaults?.obs_transition_duration_ms ?? 100;
-
   const persistObsTransition = useCallback(async (data) => {
-    await persistWarmupDefaults({
-      obs_transition_enabled: !!data.obs_transition_enabled,
-      obs_transition_name: data.obs_transition_name ?? "Fade",
-      obs_transition_duration_ms: Number(data.obs_transition_duration_ms) || 100,
-    });
-  }, [persistWarmupDefaults]);
+    const enabled = !!data.obs_transition_enabled;
+    const name = data.obs_transition_name ?? "Fade";
+    const ms = Number(data.obs_transition_duration_ms) || 100;
+    setObsTransitionEnabled(enabled);
+    setObsTransitionName(name);
+    setObsTransitionDurationMs(ms);
+    try {
+      await API.put("config", {
+        obs_transition_enabled: enabled,
+        obs_transition_name: name,
+        obs_transition_duration_ms: ms,
+      });
+    } catch {
+      /* silent */
+    }
+  }, []);
 
   const persistExperimentalPov = useCallback(async (enabled) => {
     try {

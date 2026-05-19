@@ -111,7 +111,7 @@ export default function CommonParamsModal({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
   onPersistCs2RecordExtras,
-  obsTransitionEnabled: initObsTransitionEnabled = true,
+  obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
   onPersistObsTransition,
