@@ -420,6 +420,8 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         prof_name, sc_name = _read_global_profile_names(obs_root)
 
     latest = _latest_backup_summary()
+    from .env_utils import get_primary_monitor_resolution
+    _mon_w, _mon_h = get_primary_monitor_resolution()
     base: dict[str, Any] = {
         "ok": True,
         "obs_connected": False,
@@ -444,6 +446,7 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             "capture_source_exists": False,
             "source_fit_to_canvas": False,
         },
+        "monitor": {"width": _mon_w, "height": _mon_h},
         "latest_backup": latest,
         "obs_version": None,
     }
@@ -517,6 +520,7 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         base["recording"]["encoder"] = (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
         base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
         base["recording"]["output_path"] = _recording_output_path_from_simple(simple)
+        base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
     except Exception as e:  # noqa: BLE001
         base["ws_error"] = str(e)
     finally:
