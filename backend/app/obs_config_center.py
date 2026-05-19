@@ -986,6 +986,135 @@ def diagnose(obs_cfg) -> dict[str, Any]:
     }
 
 
+def calibrate(obs_cfg) -> dict[str, Any]:
+    """运行时校准：读显示器分辨率 → 修正 OBS 画布 → 建场景 → 建 Game Capture → 设拉伸 → 修输出格式。
+    仅操作 CS2 Insight 专用场景，不动用户其他场景。
+    """
+    from .env_utils import get_primary_monitor_resolution
+
+    ws = None
+    try:
+        ws = _ws_connect(obs_cfg)
+    except Exception as exc:
+        raise ValueError(f"OBS WebSocket 未连接，请先在设置中测试连接：{exc}") from exc
+
+    try:
+        if _obs_is_recording(ws):
+            raise ValueError("录制进行中，无法修改视频设置，请录制结束后再校准")
+
+        changed: list[str] = []
+        already_ok: list[str] = []
+
+        # Step 1+2: 读显示器分辨率 & OBS 画布
+        monitor_w, monitor_h = get_primary_monitor_resolution()
+
+        vr = ws.call(obs_requests.GetVideoSettings())
+        vd = _parse_ws_video(vr)
+        canvas_w = vd.get("base_width", 0)
+        canvas_h = vd.get("base_height", 0)
+
+        # Step 3: 修正画布分辨率
+        if canvas_w != monitor_w or canvas_h != monitor_h:
+            ws.call(obs_requests.SetVideoSettings(
+                baseWidth=monitor_w,
+                baseHeight=monitor_h,
+                outputWidth=monitor_w,
+                outputHeight=monitor_h,
+                fpsNumerator=60,
+                fpsDenominator=1,
+            ))
+            changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+        else:
+            already_ok.append(f"画布分辨率正确（{canvas_w}×{canvas_h}）")
+
+        # Step 4: 确保 CS2 Insight 场景存在
+        scene_name = _dedicated_scene_name()
+        scenes_resp = ws.call(obs_requests.GetSceneList())
+        scenes_data = getattr(scenes_resp, "datain", None) or {}
+        scene_names = [s.get("sceneName", "") for s in scenes_data.get("scenes", [])]
+
+        if scene_name not in scene_names:
+            ws.call(obs_requests.CreateScene(sceneName=scene_name))
+            changed.append(f"已创建场景「{scene_name}」")
+        else:
+            already_ok.append(f"场景「{scene_name}」已存在")
+
+        # Step 5: 确保 Game Capture 源存在
+        capture_name = _dedicated_capture_name()
+        items_resp = ws.call(obs_requests.GetSceneItemList(sceneName=scene_name))
+        items_data = getattr(items_resp, "datain", None) or {}
+        source_names = [item.get("sourceName", "") for item in items_data.get("sceneItems", [])]
+
+        if capture_name not in source_names:
+            ws.call(obs_requests.CreateInput(
+                sceneName=scene_name,
+                inputName=capture_name,
+                inputKind="game_capture",
+                inputSettings={"capture_mode": "window", "window": "cs2.exe"},
+            ))
+            changed.append(f"已创建 Game Capture 源「{capture_name}」")
+        else:
+            already_ok.append(f"Game Capture 源「{capture_name}」已存在")
+
+        # Step 6: 设置拉伸填满画布
+        item_id_resp = ws.call(obs_requests.GetSceneItemId(
+            sceneName=scene_name, sourceName=capture_name
+        ))
+        item_id_data = getattr(item_id_resp, "datain", None) or {}
+        item_id = item_id_data.get("sceneItemId")
+        if item_id is not None:
+            ws.call(obs_requests.SetSceneItemTransform(
+                sceneName=scene_name,
+                sceneItemId=int(item_id),
+                sceneItemTransform={
+                    "positionX": 0,
+                    "positionY": 0,
+                    "boundsType": "OBS_BOUNDS_STRETCH",
+                    "boundsWidth": monitor_w,
+                    "boundsHeight": monitor_h,
+                },
+            ))
+            changed.append("已设置 Game Capture 拉伸填满画布")
+
+        # Step 7: 修正输出设置（RecQuality / RecFormat2）
+        rec_q_resp = ws.call(obs_requests.GetProfileParameter(
+            parameterCategory="SimpleOutput", parameterName="RecQuality"
+        ))
+        rec_q_data = getattr(rec_q_resp, "datain", None) or {}
+        rec_quality = rec_q_data.get("parameterValue", "")
+
+        if rec_quality == "Stream":
+            ws.call(obs_requests.SetProfileParameter(
+                parameterCategory="SimpleOutput",
+                parameterName="RecQuality",
+                parameterValue="High",
+            ))
+            changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
+        else:
+            already_ok.append("录像质量设置正常")
+
+        rec_f_resp = ws.call(obs_requests.GetProfileParameter(
+            parameterCategory="SimpleOutput", parameterName="RecFormat2"
+        ))
+        rec_f_data = getattr(rec_f_resp, "datain", None) or {}
+        rec_format = rec_f_data.get("parameterValue", "")
+
+        if rec_format != "hybrid_mp4":
+            ws.call(obs_requests.SetProfileParameter(
+                parameterCategory="SimpleOutput",
+                parameterName="RecFormat2",
+                parameterValue="hybrid_mp4",
+            ))
+            changed.append("录像格式已改为「混合 MP4」")
+        else:
+            already_ok.append("录像格式正确（混合 MP4）")
+
+        return {"success": True, "changed": changed, "already_ok": already_ok}
+
+    finally:
+        _ws_disconnect(ws)
+
+
 def apply_recommended(
     obs_cfg,
     *,
