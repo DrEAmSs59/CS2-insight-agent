@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../api/api";
-import { AlertTriangle, CheckCircle2, Loader2, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
@@ -20,6 +20,7 @@ export default function ObsConfigCenterPage() {
   const [status, setStatus] = useState(null);
   const [calibrating, setCalibrating] = useState(false);
   const [calibrateResult, setCalibrateResult] = useState(null);
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [obsTesting, setObsTesting] = useState(false);
   const [obsTestResult, setObsTestResult] = useState(null);
@@ -214,7 +215,22 @@ export default function ObsConfigCenterPage() {
 
         {/* 一键校准 */}
         <section className="mt-4 rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-sm">
-          <div className="text-sm font-semibold text-cs2-text-primary">一键校准</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-cs2-text-primary">一键校准</div>
+            <button
+              type="button"
+              disabled={statusRefreshing || calibrating}
+              onClick={async () => {
+                setStatusRefreshing(true);
+                try { await refreshSilent(); } finally { setStatusRefreshing(false); }
+              }}
+              title="刷新配置状态"
+              className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-40 transition-colors"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${statusRefreshing ? "animate-spin" : ""}`} />
+              刷新
+            </button>
+          </div>
           <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-secondary">
             检测并修正 OBS 录制环境中的常见配置问题。仅操作 CS2 Insight 专用场景，不影响其他 OBS 场景。
           </p>
@@ -266,7 +282,7 @@ export default function ObsConfigCenterPage() {
                   label: "录像质量",
                   value: QUALITY_LABELS[status.recording?.rec_quality] ?? status.recording?.rec_quality ?? "未知",
                   ok: status.recording?.rec_quality !== "Stream" && !!status.recording?.rec_quality,
-                  issue: "当前：与串流一致，录制质量可能降低",
+                  issue: "当前：与串流一致，可能无法正常录制",
                 },
               ].map((item, i) => (
                 <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]">

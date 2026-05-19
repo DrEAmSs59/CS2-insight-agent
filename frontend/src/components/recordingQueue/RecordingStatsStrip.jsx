@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 /**
  * @param {{
  *   pendingCount: number,
@@ -7,6 +9,7 @@
  *   queueStatusLabel: "待开始" | "录制中" | "已完成",
  *   obsConnected: boolean | null,
  *   obsEndpointLabel: string,
+ *   obsConfigHasIssues: boolean | null,
  * }} props
  */
 export default function RecordingStatsStrip({
@@ -17,6 +20,7 @@ export default function RecordingStatsStrip({
   queueStatusLabel,
   obsConnected,
   obsEndpointLabel,
+  obsConfigHasIssues,
 }) {
   let durationNum = "—";
   let durationUnit = "";
@@ -66,6 +70,13 @@ export default function RecordingStatsStrip({
       >
         {obsConnected === false ? "OBS · 未连接" : `OBS · ${obsEndpointLabel}`}
       </span>
+      {obsConnected === true && obsConfigHasIssues === true && (
+        <Link to="/obs-config-center">
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-amber-300 hover:bg-amber-500/20 transition-colors">
+            OBS 配置待修复
+          </span>
+        </Link>
+      )}
     </div>
   );
 }

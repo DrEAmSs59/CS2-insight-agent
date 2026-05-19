@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../api/api";
+import { getObsConfigStatus } from "../api/obsConfigCenter";
 import {
   BookOpen,
   Clapperboard,
@@ -18,6 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowRight,
+  AlertTriangle,
 } from "lucide-react";
 
 // ─── Setup checklist ────────────────────────────────────────────
@@ -67,6 +69,7 @@ function SetupChecklist() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [obsConfigHasIssues, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
   const timerRef = useRef(null);
 
   const fetchStatus = async (isBackground = false) => {
@@ -81,16 +84,46 @@ function SetupChecklist() {
     }
   };
 
+  // OBS 已连接时拉一次配置健康状态（随 setup 刷新同步）
+  const fetchObsConfigHealth = async () => {
+    try {
+      const st = await getObsConfigStatus();
+      if (!st?.obs_connected) { setObsConfigHasIssues(null); return; }
+      setObsConfigHasIssues(!!(
+        st.video?.base_width !== st.monitor?.width ||
+        st.video?.base_height !== st.monitor?.height ||
+        !st.scene?.dedicated_scene_exists ||
+        !st.scene?.capture_source_exists ||
+        !st.scene?.source_fit_to_canvas ||
+        st.recording?.format !== "hybrid_mp4" ||
+        st.recording?.rec_quality === "Stream"
+      ));
+    } catch {
+      setObsConfigHasIssues(null);
+    }
+  };
+
   useEffect(() => {
     fetchStatus(false);
     timerRef.current = setInterval(() => fetchStatus(true), 8000);
     return () => clearInterval(timerRef.current);
   }, []);
 
+  // OBS 连通状态变化时同步拉配置健康
+  useEffect(() => {
+    if (status?.obs_connected) {
+      void fetchObsConfigHealth();
+    } else {
+      setObsConfigHasIssues(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.obs_connected]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       await fetchStatus(true);
+      if (status?.obs_connected) await fetchObsConfigHealth();
     } finally {
       setRefreshing(false);
     }
@@ -169,6 +202,47 @@ function SetupChecklist() {
           );
         })}
       </div>
+
+      {/* OBS 配置健康状态（仅 OBS 已连接时显示） */}
+      {status?.obs_connected && obsConfigHasIssues !== null && (
+        <div
+          className={`mt-2 flex items-center justify-between rounded-xl border px-4 py-3 transition-colors ${
+            obsConfigHasIssues
+              ? "border-amber-500/25 bg-amber-500/5"
+              : "border-emerald-500/20 bg-emerald-500/5"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 shrink-0">
+              {obsConfigHasIssues
+                ? <AlertTriangle className="h-4 w-4 text-amber-400" />
+                : <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              }
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] font-semibold text-white">OBS 录制配置正常</span>
+                <span className="rounded bg-cs2-orange/20 px-1.5 py-0.5 font-mono text-[10px] text-cs2-orange">必需</span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                {obsConfigHasIssues
+                  ? "检测到画布分辨率、场景、拉伸或录像格式存在问题，建议前往 OBS 配置中心修复。"
+                  : "画布分辨率、场景源、拉伸及录像格式均已就绪。"
+                }
+              </p>
+              {obsConfigHasIssues && (
+                <Link
+                  to="/obs-config-center"
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-cs2-orange hover:underline"
+                >
+                  前往 OBS 配置中心 修复
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

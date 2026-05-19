@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import API from "../api/api";
+import { getObsConfigStatus } from "../api/obsConfigCenter";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import {
@@ -60,9 +61,11 @@ export default function RecordingQueuePage() {
   const obsEndpointLabel = `${s.obsConfig?.host || "localhost"}:${s.obsConfig?.port ?? 4455}`;
 
   const [obsConnected, setObsConnected] = useState(/** @type {boolean | null} */ (null));
+  const [obsConfigHasIssues, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
   const obsProbeGen = useRef(0);
   useEffect(() => {
     setObsConnected(null);
+    setObsConfigHasIssues(null);
     const gen = ++obsProbeGen.current;
     let cancelled = false;
     const run = async () => {
@@ -82,6 +85,26 @@ export default function RecordingQueuePage() {
       clearInterval(id);
     };
   }, [s.obsConfig?.host, s.obsConfig?.port, s.obsConfig?.password]);
+
+  // OBS 连上后拉一次配置健康状态（不循环轮询，避免频繁打扰 OBS）
+  useEffect(() => {
+    if (obsConnected !== true) { setObsConfigHasIssues(null); return; }
+    let cancelled = false;
+    getObsConfigStatus().then((st) => {
+      if (cancelled) return;
+      if (!st?.obs_connected) { setObsConfigHasIssues(null); return; }
+      setObsConfigHasIssues(!!(
+        st.video?.base_width !== st.monitor?.width ||
+        st.video?.base_height !== st.monitor?.height ||
+        !st.scene?.dedicated_scene_exists ||
+        !st.scene?.capture_source_exists ||
+        !st.scene?.source_fit_to_canvas ||
+        st.recording?.format !== "hybrid_mp4" ||
+        st.recording?.rec_quality === "Stream"
+      ));
+    }).catch(() => { if (!cancelled) setObsConfigHasIssues(null); });
+    return () => { cancelled = true; };
+  }, [obsConnected]);
 
   const canReorder = queue.length > 1 && !s.batchRecording;
 
@@ -138,6 +161,7 @@ export default function RecordingQueuePage() {
           queueStatusLabel={queueStatusLabel}
           obsConnected={obsConnected}
           obsEndpointLabel={obsEndpointLabel}
+          obsConfigHasIssues={obsConfigHasIssues}
         />
       </div>
 
