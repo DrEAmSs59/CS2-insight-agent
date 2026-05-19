@@ -116,6 +116,7 @@ export default function App() {
   const [configBackupLoading, setConfigBackupLoading] = useState(false);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
+  const savedRecordWarmupDefaultsRef = useRef(null);
   const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
   const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
@@ -1476,10 +1477,13 @@ export default function App() {
     }
   }, []);
 
+  savedRecordWarmupDefaultsRef.current = savedRecordWarmupDefaults;
+
   const persistWarmupDefaults = useCallback(async (obj) => {
-    setSavedRecordWarmupDefaults(obj);
+    const merged = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...obj };
+    setSavedRecordWarmupDefaults(merged);
     try {
-      await API.put("config", { default_record_warmup: obj });
+      await API.put("config", { default_record_warmup: merged });
     } catch {
       /* silent */
     }
@@ -1491,12 +1495,11 @@ export default function App() {
 
   const persistObsTransition = useCallback(async (data) => {
     await persistWarmupDefaults({
-      ...(savedRecordWarmupDefaults ?? {}),
       obs_transition_enabled: !!data.obs_transition_enabled,
       obs_transition_name: data.obs_transition_name ?? "Fade",
       obs_transition_duration_ms: Number(data.obs_transition_duration_ms) || 100,
     });
-  }, [savedRecordWarmupDefaults, persistWarmupDefaults]);
+  }, [persistWarmupDefaults]);
 
   const persistExperimentalPov = useCallback(async (enabled) => {
     try {

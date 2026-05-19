@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
@@ -145,6 +145,7 @@ export default function CommonParamsModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(() => !!initObsTransitionEnabled);
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
+  const obsTransMounted = useRef(false);
 
   useEffect(() => {
     if (!open && !isPage) return;
@@ -206,6 +207,10 @@ export default function CommonParamsModal({
 
   useEffect(() => {
     if ((!open && !isPage) || !onPersistObsTransition) return;
+    if (!obsTransMounted.current) {
+      obsTransMounted.current = true;
+      return;
+    }
     const t = setTimeout(() => {
       onPersistObsTransition({
         obs_transition_enabled: obsTransEnabled,
