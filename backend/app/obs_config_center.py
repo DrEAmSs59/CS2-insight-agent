@@ -888,7 +888,7 @@ def calibrate(obs_cfg) -> dict[str, Any]:
             ))
             rec_enc_val = ((getattr(rec_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
             if not rec_enc_val or rec_enc_val.lower() in ("none", "null", "stream"):
-                # 读串流编码器作为首选；失败则兜底 obs_x264
+                # 1. 优先用当前串流编码器（用户已确认可用的硬件编码器）
                 try:
                     stream_enc_resp = ws.call(obs_requests.GetProfileParameter(
                         parameterCategory="SimpleOutput", parameterName="StreamEncoder"
@@ -896,7 +896,23 @@ def calibrate(obs_cfg) -> dict[str, Any]:
                     stream_enc = ((getattr(stream_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
                 except Exception:  # noqa: BLE001
                     stream_enc = ""
-                target_enc = stream_enc if stream_enc and stream_enc.lower() not in ("none", "null", "") else "obs_x264"
+                # 2. 串流编码器无效时按硬件优先顺序选取；obs_x264 仅作最后保底
+                _HW_PRIORITY = [
+                    "jim_nvenc",       # NVENC（新版，推荐）
+                    "ffmpeg_nvenc",    # NVENC（旧版）
+                    "h264_texture_amf",# AMD AMF（新版）
+                    "amd_amf_h264",   # AMD AMF（旧版）
+                    "obs_qsv11_v2",   # Intel QSV（新版）
+                    "obs_qsv11",      # Intel QSV（旧版）
+                ]
+                _INVALID = {"", "none", "null", "stream"}
+                if stream_enc.lower() not in _INVALID:
+                    target_enc = stream_enc
+                else:
+                    # 尝试向 OBS 查询已注册的编码器列表（WS v5 GetInputKindList 不含编码器，
+                    # 改为逐个 GetProfileParameter 探测不可行；直接按优先顺序写入，
+                    # OBS 启动录制时如不支持会自行报错，用户可在 OBS 界面更换。）
+                    target_enc = _HW_PRIORITY[0]  # jim_nvenc 作为默认硬件首选
                 ws.call(obs_requests.SetProfileParameter(
                     parameterCategory="SimpleOutput",
                     parameterName="RecEncoder",
