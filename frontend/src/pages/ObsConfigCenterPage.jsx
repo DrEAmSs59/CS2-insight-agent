@@ -88,6 +88,22 @@ export default function ObsConfigCenterPage() {
     }
   };
 
+  const FORMAT_LABELS = {
+    hybrid_mp4: "混合 MP4",
+    mp4: "MP4",
+    mkv: "MKV",
+    mov: "MOV",
+    ts: "TS",
+    fragmented_mp4: "分段 MP4",
+  };
+  const QUALITY_LABELS = {
+    High: "高质量，中等文件大小",
+    Small: "较小文件大小",
+    Lossless: "无损",
+    Stream: "与串流一致",
+    HQ: "高质量",
+  };
+
   const hasIssues = !!(
     status?.obs_connected && (
       status.video?.base_width !== status.monitor?.width ||
@@ -243,13 +259,13 @@ export default function ObsConfigCenterPage() {
                 },
                 {
                   label: "录像格式",
-                  value: status.recording?.format || "未知",
+                  value: FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? "未知",
                   ok: status.recording?.format === "hybrid_mp4",
-                  issue: `当前：${status.recording?.format || "未知"}，应为混合 MP4`,
+                  issue: `当前：${FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? "未知"}，应为混合 MP4`,
                 },
                 {
                   label: "录像质量",
-                  value: status.recording?.rec_quality === "Stream" ? "与串流一致" : (status.recording?.rec_quality || "未知"),
+                  value: QUALITY_LABELS[status.recording?.rec_quality] ?? status.recording?.rec_quality ?? "未知",
                   ok: status.recording?.rec_quality !== "Stream" && !!status.recording?.rec_quality,
                   issue: "当前：与串流一致，录制质量可能降低",
                 },

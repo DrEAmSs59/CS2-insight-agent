@@ -330,12 +330,21 @@ def _source_fits_canvas(ws: obsws, scene_name: str, source_name: str, base_w: in
     t = _scene_item_transform(ws, scene_name, source_name)
     if not isinstance(t, dict):
         return False
-    bw = int(float(t.get("boundsWidth") or 0))
-    bh = int(float(t.get("boundsHeight") or 0))
     bt = str(t.get("boundsType") or "")
-    ok_dims = bw >= base_w - 4 and bh >= base_h - 4 and bw > 0 and bh > 0
-    ok_type = "STRETCH" in bt.upper() or "SCALE_INNER" in bt.upper() or "SCALE_OUTER" in bt.upper() or "SCALE_TO_INNER" in bt.upper()
-    return ok_dims and ok_type
+    # Bounds-based stretch/scale (set via calibrate or OBS bounds UI)
+    if bt and bt != "OBS_BOUNDS_NONE":
+        bw = int(float(t.get("boundsWidth") or 0))
+        bh = int(float(t.get("boundsHeight") or 0))
+        ok_dims = bw >= base_w - 4 and bh >= base_h - 4 and bw > 0 and bh > 0
+        ok_type = "STRETCH" in bt.upper() or "SCALE_INNER" in bt.upper() or "SCALE_OUTER" in bt.upper()
+        if ok_dims and ok_type:
+            return True
+    # Fallback: manual scale without bounds (OBS UI "Stretch to screen" via transform)
+    w = int(float(t.get("width") or 0))
+    h = int(float(t.get("height") or 0))
+    px = float(t.get("positionX") or 0)
+    py = float(t.get("positionY") or 0)
+    return w >= base_w - 4 and h >= base_h - 4 and w > 0 and h > 0 and abs(px) <= 4 and abs(py) <= 4
 
 
 def _create_backup(
