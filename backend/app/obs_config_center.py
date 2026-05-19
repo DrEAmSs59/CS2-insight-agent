@@ -1012,16 +1012,20 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         vd = _parse_ws_video(vr)
         canvas_w = vd.get("base_width", 0)
         canvas_h = vd.get("base_height", 0)
+        existing_fps_n = vd.get("fps_num", 60)
+        existing_fps_d = vd.get("fps_den", 1)
 
         # Step 3: 修正画布分辨率
         if canvas_w != monitor_w or canvas_h != monitor_h:
             ws.call(obs_requests.SetVideoSettings(
-                baseWidth=monitor_w,
-                baseHeight=monitor_h,
-                outputWidth=monitor_w,
-                outputHeight=monitor_h,
-                fpsNumerator=60,
-                fpsDenominator=1,
+                videoSettings={
+                    "baseWidth": monitor_w,
+                    "baseHeight": monitor_h,
+                    "outputWidth": monitor_w,
+                    "outputHeight": monitor_h,
+                    "fpsNumerator": existing_fps_n,
+                    "fpsDenominator": existing_fps_d,
+                }
             ))
             changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
         else:
@@ -1075,6 +1079,8 @@ def calibrate(obs_cfg) -> dict[str, Any]:
                 },
             ))
             changed.append("已设置 Game Capture 拉伸填满画布")
+        else:
+            already_ok.append("Game Capture 拉伸变换跳过（无法获取 sceneItemId）")
 
         # Step 7: 修正输出设置（RecQuality / RecFormat2）
         rec_q_resp = ws.call(obs_requests.GetProfileParameter(
