@@ -339,12 +339,23 @@ def _source_fits_canvas(ws: obsws, scene_name: str, source_name: str, base_w: in
         ok_type = "STRETCH" in bt.upper() or "SCALE_INNER" in bt.upper() or "SCALE_OUTER" in bt.upper()
         if ok_dims and ok_type:
             return True
-    # Fallback: manual scale without bounds (OBS UI "Stretch to screen" via transform)
-    w = int(float(t.get("width") or 0))
-    h = int(float(t.get("height") or 0))
+    # Fallback: OBS "拉伸至全屏" (boundsType=NONE, fills via scale)
     px = float(t.get("positionX") or 0)
     py = float(t.get("positionY") or 0)
-    return w >= base_w - 4 and h >= base_h - 4 and w > 0 and h > 0 and abs(px) <= 4 and abs(py) <= 4
+    if abs(px) <= 4 and abs(py) <= 4:
+        w = int(float(t.get("width") or 0))
+        h = int(float(t.get("height") or 0))
+        if w >= base_w - 4 and h >= base_h - 4 and w > 0 and h > 0:
+            return True
+        # scaleX * sourceWidth in case width is pre-scale
+        sx = float(t.get("scaleX") or 0)
+        sy = float(t.get("scaleY") or 0)
+        sw = int(float(t.get("sourceWidth") or 0))
+        sh = int(float(t.get("sourceHeight") or 0))
+        if sx > 0 and sy > 0 and sw > 0 and sh > 0:
+            if int(sx * sw) >= base_w - 8 and int(sy * sh) >= base_h - 8:
+                return True
+    return False
 
 
 def _create_backup(
@@ -860,7 +871,7 @@ def calibrate(obs_cfg) -> dict[str, Any]:
             ws.call(obs_requests.SetProfileParameter(
                 parameterCategory="SimpleOutput",
                 parameterName="RecQuality",
-                parameterValue="High",
+                parameterValue="Small",
             ))
             changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
         else:

@@ -97,11 +97,10 @@ export default function ObsConfigCenterPage() {
     fragmented_mp4: "分段 MP4",
   };
   const QUALITY_LABELS = {
-    High: "高质量，中等文件大小",
-    Small: "较小文件大小",
-    Lossless: "无损",
     Stream: "与串流一致",
-    HQ: "高质量",
+    Small: "高质量，中等文件大小",
+    HQ: "近似无损，大文件大小",
+    Lossless: "无损，非常大的文件大小",
   };
 
   const hasIssues = !!(
