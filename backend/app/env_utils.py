@@ -451,10 +451,20 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
 
 
 def get_primary_monitor_resolution() -> tuple[int, int]:
-    """返回主显示器分辨率 (width, height)。非 Windows 返回 (1920, 1080) 作为 fallback。"""
+    """返回主显示器物理分辨率 (width, height)，忽略 DPI 缩放。非 Windows 返回 (1920, 1080) 作为 fallback。"""
     try:
         import ctypes
+        # DESKTOPHORZRES/DESKTOPVERTRES 返回实际物理像素，不受 DPI 缩放影响
+        gdi32 = ctypes.windll.gdi32  # type: ignore[attr-defined]
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        hdc = user32.GetDC(0)
+        try:
+            w = gdi32.GetDeviceCaps(hdc, 118)  # DESKTOPHORZRES
+            h = gdi32.GetDeviceCaps(hdc, 117)  # DESKTOPVERTRES
+        finally:
+            user32.ReleaseDC(0, hdc)
+        if w > 0 and h > 0:
+            return int(w), int(h)
         return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
     except Exception:
         return 1920, 1080

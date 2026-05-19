@@ -518,9 +518,24 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             simple = _parse_simple_output(obs_root / "basic" / "profiles" / prof_name / "basic.ini")
         base["recording"]["use_stream_encoder"] = _detect_use_stream_encoder(simple, ws)
         base["recording"]["encoder"] = (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
-        base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
         base["recording"]["output_path"] = _recording_output_path_from_simple(simple)
-        base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
+        # 优先从 OBS WebSocket 读取格式和质量，避免 INI 路径检测失败导致"未知"
+        try:
+            fmt_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecFormat2"
+            ))
+            fmt_val = (getattr(fmt_resp, "datain", None) or {}).get("parameterValue", "")
+            base["recording"]["format"] = fmt_val or (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
+        except Exception:  # noqa: BLE001
+            base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
+        try:
+            q_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecQuality"
+            ))
+            q_val = (getattr(q_resp, "datain", None) or {}).get("parameterValue", "")
+            base["recording"]["rec_quality"] = q_val or (simple.get("RecQuality") or "").strip()
+        except Exception:  # noqa: BLE001
+            base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
     except Exception as e:  # noqa: BLE001
         base["ws_error"] = str(e)
     finally:
