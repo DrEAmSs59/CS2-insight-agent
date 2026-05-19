@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import API from "../api/api";
 import { getObsConfigStatus } from "../api/obsConfigCenter";
+import { obsConfigHasIssues } from "../utils/obsConfigHealth";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import {
@@ -93,15 +94,7 @@ export default function RecordingQueuePage() {
     getObsConfigStatus().then((st) => {
       if (cancelled) return;
       if (!st?.obs_connected) { setObsConfigHasIssues(null); return; }
-      setObsConfigHasIssues(!!(
-        st.video?.base_width !== st.monitor?.width ||
-        st.video?.base_height !== st.monitor?.height ||
-        !st.scene?.dedicated_scene_exists ||
-        !st.scene?.capture_source_exists ||
-        !st.scene?.source_fit_to_canvas ||
-        st.recording?.format !== "hybrid_mp4" ||
-        st.recording?.rec_quality === "Stream"
-      ));
+      setObsConfigHasIssues(obsConfigHasIssues(st));
     }).catch(() => { if (!cancelled) setObsConfigHasIssues(null); });
     return () => { cancelled = true; };
   }, [obsConnected]);

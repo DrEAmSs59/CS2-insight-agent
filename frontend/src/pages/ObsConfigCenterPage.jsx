@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Wifi, WifiO
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
+import { obsConfigHasIssues } from "../utils/obsConfigHealth";
 
 export default function ObsConfigCenterPage() {
   const {
@@ -104,17 +105,7 @@ export default function ObsConfigCenterPage() {
     Lossless: "无损，非常大的文件大小",
   };
 
-  const hasIssues = !!(
-    status?.obs_connected && (
-      status.video?.base_width !== status.monitor?.width ||
-      status.video?.base_height !== status.monitor?.height ||
-      !status.scene?.dedicated_scene_exists ||
-      !status.scene?.capture_source_exists ||
-      !status.scene?.source_fit_to_canvas ||
-      status.recording?.format !== "hybrid_mp4" ||
-      status.recording?.rec_quality === "Stream"
-    )
-  );
+  const hasIssues = obsConfigHasIssues(status);
 
   return (
     <div className="h-full min-h-0 w-full overflow-y-auto">
@@ -122,7 +113,7 @@ export default function ObsConfigCenterPage() {
         <div>
           <h1 className="text-lg font-bold tracking-wide text-cs2-text-primary">OBS 配置中心</h1>
           <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-cs2-text-secondary">
-            一键校准 OBS 录制环境，自动修复画布分辨率错位、4:3 黑边、Game Capture 源缺失、录像格式错误等问题。
+            一键校准 OBS 录制环境，自动修复画布/输出分辨率错位、4:3 黑边、Game Capture 源缺失、录像格式错误等问题。
           </p>
         </div>
 
@@ -242,6 +233,12 @@ export default function ObsConfigCenterPage() {
                   label: "画布分辨率",
                   value: `${status.video?.base_width ?? 0}×${status.video?.base_height ?? 0}`,
                   ok: status.video?.base_width === status.monitor?.width && status.video?.base_height === status.monitor?.height,
+                  issue: `应为 ${status.monitor?.width ?? "?"}×${status.monitor?.height ?? "?"}（主显示器）`,
+                },
+                {
+                  label: "输出分辨率",
+                  value: `${status.video?.output_width ?? 0}×${status.video?.output_height ?? 0}`,
+                  ok: status.video?.output_width === status.monitor?.width && status.video?.output_height === status.monitor?.height,
                   issue: `应为 ${status.monitor?.width ?? "?"}×${status.monitor?.height ?? "?"}（主显示器）`,
                 },
                 {

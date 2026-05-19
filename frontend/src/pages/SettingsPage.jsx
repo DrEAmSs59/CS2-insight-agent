@@ -413,11 +413,11 @@ export default function SettingsPage() {
               hint="切换后会影响解析是否请求大模型；AI 模式需配置密钥。"
               fill
             >
-              <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch">
+              <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,12.5rem),1fr))] gap-3 items-stretch">
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(false)}
-                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[5rem] ${
+                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all @min-[28rem]/settings:min-h-[5rem] ${
                     !s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
@@ -435,7 +435,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(true)}
-                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all sm:min-h-[5rem] ${
+                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all @min-[28rem]/settings:min-h-[5rem] ${
                     s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"

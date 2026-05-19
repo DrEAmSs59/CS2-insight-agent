@@ -603,11 +603,34 @@ def diagnose(obs_cfg) -> dict[str, Any]:
                     "fixable": False,
                 }
             )
+        from .env_utils import get_primary_monitor_resolution
+
+        monitor_w, monitor_h = get_primary_monitor_resolution()
         vr = ws.call(obs_requests.GetVideoSettings())
         video_dims = _parse_ws_video(vr)
         fps = _fps_from_video_dict(video_dims)
         bw, bh = video_dims["base_width"], video_dims["base_height"]
         ow, oh = video_dims["output_width"], video_dims["output_height"]
+        if bw and bh and (bw != monitor_w or bh != monitor_h):
+            issues.append(
+                {
+                    "code": "CANVAS_RESOLUTION_MISMATCH",
+                    "level": "warning",
+                    "title": "画布分辨率与主显示器不一致",
+                    "message": f"当前 {bw}×{bh}，应为 {monitor_w}×{monitor_h}。",
+                    "fixable": True,
+                }
+            )
+        if ow and oh and (ow != monitor_w or oh != monitor_h):
+            issues.append(
+                {
+                    "code": "OUTPUT_RESOLUTION_MISMATCH",
+                    "level": "warning",
+                    "title": "输出分辨率与主显示器不一致",
+                    "message": f"当前 {ow}×{oh}，应为 {monitor_w}×{monitor_h}。",
+                    "fixable": True,
+                }
+            )
         if bw and bh and ow and oh and (bw != ow or bh != oh):
             issues.append(
                 {
@@ -790,12 +813,16 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         vd = _parse_ws_video(vr)
         canvas_w = vd.get("base_width", 0)
         canvas_h = vd.get("base_height", 0)
+        output_w = vd.get("output_width", 0)
+        output_h = vd.get("output_height", 0)
         existing_fps_n = vd.get("fps_num", 60)
         existing_fps_d = vd.get("fps_den", 1)
 
-        # Step 3: 修正画布分辨率
+        # Step 3: 修正画布与输出分辨率
         # OBS WS v5 SetVideoSettings 字段是顶层 kwargs，不能嵌套在 videoSettings={}
-        if canvas_w != monitor_w or canvas_h != monitor_h:
+        canvas_needs_fix = canvas_w != monitor_w or canvas_h != monitor_h
+        output_needs_fix = output_w != monitor_w or output_h != monitor_h
+        if canvas_needs_fix or output_needs_fix:
             ws.call(obs_requests.SetVideoSettings(
                 fpsNumerator=existing_fps_n,
                 fpsDenominator=existing_fps_d,
@@ -807,15 +834,30 @@ def calibrate(obs_cfg) -> dict[str, Any]:
             # 回读验证：避免静默失败时错误报告成功
             verify_vr = ws.call(obs_requests.GetVideoSettings())
             verify_vd = _parse_ws_video(verify_vr)
-            if verify_vd["base_width"] == monitor_w and verify_vd["base_height"] == monitor_h:
-                changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+            canvas_ok = verify_vd["base_width"] == monitor_w and verify_vd["base_height"] == monitor_h
+            output_ok = verify_vd["output_width"] == monitor_w and verify_vd["output_height"] == monitor_h
+            if canvas_ok and output_ok:
+                if canvas_needs_fix:
+                    changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+                if output_needs_fix:
+                    changed.append(f"已将输出分辨率从 {output_w}×{output_h} 修正为 {monitor_w}×{monitor_h}")
             else:
+                parts: list[str] = []
+                if not canvas_ok:
+                    parts.append(
+                        f"画布仍为 {verify_vd['base_width']}×{verify_vd['base_height']}（应为 {monitor_w}×{monitor_h}）"
+                    )
+                if not output_ok:
+                    parts.append(
+                        f"输出仍为 {verify_vd['output_width']}×{verify_vd['output_height']}（应为 {monitor_w}×{monitor_h}）"
+                    )
                 raise ValueError(
-                    f"OBS 未接受分辨率修改（仍为 {verify_vd['base_width']}×{verify_vd['base_height']}），"
-                    f"请在 OBS 设置→视频中手动将基础（画布）分辨率改为 {monitor_w}×{monitor_h}"
+                    "OBS 未接受分辨率修改（" + "；".join(parts) + "），"
+                    f"请在 OBS 设置→视频中手动将基础（画布）与输出（缩放）分辨率改为 {monitor_w}×{monitor_h}"
                 )
         else:
             already_ok.append(f"画布分辨率正确（{canvas_w}×{canvas_h}）")
+            already_ok.append(f"输出分辨率正确（{output_w}×{output_h}）")
 
         # Step 4: 确保 CS2 Insight 场景存在
         scene_name = _dedicated_scene_name()
