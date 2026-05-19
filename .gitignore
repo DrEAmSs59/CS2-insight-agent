@@ -37,6 +37,7 @@ cs2_demo_lib
 
 # Project doc not tracked
 开发白皮书.md
+docs/
 
 # Local tooling scripts (keep local only)
 debug_demoparser2.py
