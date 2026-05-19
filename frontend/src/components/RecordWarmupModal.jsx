@@ -112,7 +112,7 @@ export function OptionRow({ checked, onChange, title, code, disabled = false, di
 
 /**
  * 一键录制前：分组观战 / 摄像机 / 音频与启动项；提交时生成 console_cmds 供后端注入。
- * 额外启动参数与附加控制台与「常用参数」共用配置，由 onPersistCs2RecordExtras 防抖写入。
+ * 初始值来自常用参数（配置文件）；本次修改仅随 onConfirm 提交，不写入 JSON。
  */
 export default function RecordWarmupModal({
   open,
@@ -120,12 +120,8 @@ export default function RecordWarmupModal({
   onConfirm,
   defaultOverrides,
   experimentalPovEnabled = false,
-  onExperimentalPovChange,
   cs2ExtraLaunchArgs = "",
-  onCs2ExtraLaunchArgsChange,
   recordInjectConsoleLines = "",
-  onRecordInjectConsoleLinesChange,
-  onPersistCs2RecordExtras,
   initObsTransEnabled = false,
   initObsTransName = "Fade",
   initObsTransDurationMs = 200,
@@ -135,6 +131,9 @@ export default function RecordWarmupModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
+  const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
+  const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
+  const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -156,7 +155,19 @@ export default function RecordWarmupModal({
     setObsTransEnabled(!!initObsTransEnabled);
     setObsTransName(initObsTransName || "Fade");
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
-  }, [open, defaultOverrides, initObsTransEnabled, initObsTransName, initObsTransDurationMs]);
+    setSessionPovEnabled(!!experimentalPovEnabled);
+    setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
+    setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
+  }, [
+    open,
+    defaultOverrides,
+    initObsTransEnabled,
+    initObsTransName,
+    initObsTransDurationMs,
+    experimentalPovEnabled,
+    cs2ExtraLaunchArgs,
+    recordInjectConsoleLines,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -167,25 +178,9 @@ export default function RecordWarmupModal({
     return () => clearTimeout(t);
   }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height]);
 
-  useEffect(() => {
-    if (!open || !onPersistCs2RecordExtras) return;
-    const t = setTimeout(() => {
-      void onPersistCs2RecordExtras({
-        cs2_extra_launch_args: cs2ExtraLaunchArgs,
-        record_inject_console_lines: recordInjectConsoleLines,
-      });
-    }, 600);
-    return () => clearTimeout(t);
-  }, [
-    open,
-    cs2ExtraLaunchArgs,
-    recordInjectConsoleLines,
-    onPersistCs2RecordExtras,
-  ]);
-
   const injectExtraCount = useMemo(
-    () => countInjectConsoleLines(recordInjectConsoleLines),
-    [recordInjectConsoleLines],
+    () => countInjectConsoleLines(sessionRecordInjectConsoleLines),
+    [sessionRecordInjectConsoleLines],
   );
 
   const baseWarmupCmdCount = useMemo(
@@ -245,6 +240,9 @@ export default function RecordWarmupModal({
         obs_transition_enabled: obsTransEnabled,
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
+        experimental_pov_enabled: sessionPovEnabled,
+        session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
+        session_record_inject_console_lines: sessionRecordInjectConsoleLines,
       });
   };
 
@@ -281,7 +279,7 @@ export default function RecordWarmupModal({
           ）。分辨率以 <code className="text-cs2-accent/90">-w</code> / <code className="text-cs2-accent/90">-h</code>{" "}
           附加到本次 CS2 进程。
           <span className="mt-1 block text-cs2-text-muted">
-            下方「额外启动参数 / 附加预热控制台」与常用参数页一致，写入同一配置文件。
+            默认选项来自「常用参数」；此处修改仅作用于本次录制，不会写入配置文件。
           </span>
         </p>
 
@@ -353,7 +351,7 @@ export default function RecordWarmupModal({
                 checked={opts.cl_draw_only_deathnotices}
                 onChange={(v) => set({ cl_draw_only_deathnotices: v })}
                 outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
-                disabled={!!experimentalPovEnabled}
+                disabled={!!sessionPovEnabled}
                 disabledReason={POV_CONFLICT_HUD}
               />
               <RecordingHudCard
@@ -459,9 +457,8 @@ export default function RecordWarmupModal({
           <div className="min-w-0 space-y-4">
           <ExperimentalPovSection
             visible={open}
-            experimentalPovEnabled={experimentalPovEnabled}
-            onExperimentalPovChange={onExperimentalPovChange}
-            checkboxDisabled={!onExperimentalPovChange}
+            experimentalPovEnabled={sessionPovEnabled}
+            onExperimentalPovChange={setSessionPovEnabled}
             povRadarMode={opts.pov_radar_mode}
             onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
             povTeamcounterNumeric={opts.pov_teamcounter_numeric}
@@ -604,10 +601,10 @@ export default function RecordWarmupModal({
               命令行与控制台
             </p>
             <Cs2LaunchConsoleFields
-              cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
-              onCs2ExtraLaunchArgsChange={onCs2ExtraLaunchArgsChange}
-              recordInjectConsoleLines={recordInjectConsoleLines}
-              onRecordInjectConsoleLinesChange={onRecordInjectConsoleLinesChange}
+              cs2ExtraLaunchArgs={sessionCs2ExtraLaunchArgs}
+              onCs2ExtraLaunchArgsChange={setSessionCs2ExtraLaunchArgs}
+              recordInjectConsoleLines={sessionRecordInjectConsoleLines}
+              onRecordInjectConsoleLinesChange={setSessionRecordInjectConsoleLines}
             />
           </section>
 

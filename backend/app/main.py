@@ -625,6 +625,9 @@ class ConfigPayload(BaseModel):
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
+    obs_transition_enabled: Optional[bool] = None
+    obs_transition_name: Optional[str] = None
+    obs_transition_duration_ms: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
 
 
@@ -825,6 +828,16 @@ async def update_config(payload: ConfigPayload):
         cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
     if payload.record_inject_console_lines is not None:
         cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
+    if payload.obs_transition_enabled is not None:
+        cfg.obs_transition_enabled = bool(payload.obs_transition_enabled)
+    if payload.obs_transition_name is not None:
+        name = str(payload.obs_transition_name).strip()
+        cfg.obs_transition_name = name or "Fade"
+    if payload.obs_transition_duration_ms is not None:
+        try:
+            cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
+        except (TypeError, ValueError):
+            pass
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)

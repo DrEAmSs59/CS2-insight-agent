@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Save, X } from "lucide-react";
 import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../stores/recordingQueueStore";
@@ -95,26 +95,24 @@ function PacingSlider({
 }
 
 /**
- * 常用参数：内联编辑「全局节奏（数值）+ 入队默认 POV」与「录制前观战默认选项」，写入 data/cs2-insight.config.json。
+ * 常用参数：内联编辑「全局节奏（数值）+ 入队默认 POV」与「录制前观战默认选项」；
+ * 由顶栏「保存」一次性写入 data/cs2-insight.config.json。
  */
 export default function CommonParamsModal({
   open,
   onClose,
   variant = "modal",
   batchRecording,
+  configReady = true,
   savedWarmupDefaults,
-  onPersistWarmupDefaults,
-  experimentalPovEnabled,
-  onExperimentalPovChange,
+  onSaveAllCommonParams,
+  experimentalPovEnabled = false,
   cs2ExtraLaunchArgs = "",
-  onCs2ExtraLaunchArgsChange,
   recordInjectConsoleLines = "",
-  onRecordInjectConsoleLinesChange,
-  onPersistCs2RecordExtras,
   obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
-  onPersistObsTransition,
+  configRefreshKey = 0,
 }) {
   const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
@@ -145,7 +143,12 @@ export default function CommonParamsModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(() => !!initObsTransitionEnabled);
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
-  const obsTransMounted = useRef(false);
+  const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
+  const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
+  const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
+  const [saveState, setSaveState] = useState("idle");
+  const [saveError, setSaveError] = useState("");
+  const lastHydratedRefreshKey = useRef(null);
 
   useEffect(() => {
     if (!open && !isPage) return;
@@ -153,7 +156,10 @@ export default function CommonParamsModal({
   }, [open, isPage]);
 
   useEffect(() => {
+    if (!configReady) return;
     if (!open && !isPage) return;
+    if (lastHydratedRefreshKey.current === configRefreshKey) return;
+    lastHydratedRefreshKey.current = configRefreshKey;
     const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
     const o = savedWarmupDefaults;
     if (o && typeof o === "object" && !Array.isArray(o)) {
@@ -168,58 +174,86 @@ export default function CommonParamsModal({
       }
     }
     setWarmupOpts(base);
-  }, [open, isPage]);
+    setObsTransEnabled(!!initObsTransitionEnabled);
+    setObsTransName(initObsTransitionName);
+    setObsTransDurationMs(Number(initObsTransitionDurationMs));
+    setPovEnabled(!!experimentalPovEnabled);
+    setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
+    setLocalRecordInjectLines(recordInjectConsoleLines);
+    setWarmupResolutionError("");
+    setSaveError("");
+  }, [
+    configRefreshKey,
+    open,
+    isPage,
+    configReady,
+    savedWarmupDefaults,
+    initObsTransitionEnabled,
+    initObsTransitionName,
+    initObsTransitionDurationMs,
+    experimentalPovEnabled,
+    cs2ExtraLaunchArgs,
+    recordInjectConsoleLines,
+  ]);
 
   const patchWarmup = useCallback((patch) => {
     setWarmupOpts((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  useEffect(() => {
-    if ((!open && !isPage) || !onPersistWarmupDefaults) return;
-    const t = setTimeout(() => {
-      const vr = validateWarmupResolution(warmupOpts);
-      if (!vr.ok) {
-        setWarmupResolutionError(vr.message);
-        return;
-      }
-      setWarmupResolutionError("");
-      onPersistWarmupDefaults(warmupUiOptsToPersisted(warmupOpts));
-    }, 500);
-    return () => clearTimeout(t);
-  }, [warmupOpts, open, isPage, onPersistWarmupDefaults]);
-
-  useEffect(() => {
-    if ((!open && !isPage) || !onPersistCs2RecordExtras) return;
-    const t = setTimeout(() => {
-      void onPersistCs2RecordExtras({
-        cs2_extra_launch_args: cs2ExtraLaunchArgs,
-        record_inject_console_lines: recordInjectConsoleLines,
-      });
-    }, 600);
-    return () => clearTimeout(t);
-  }, [
-    cs2ExtraLaunchArgs,
-    recordInjectConsoleLines,
-    open,
-    isPage,
-    onPersistCs2RecordExtras,
-  ]);
-
-  useEffect(() => {
-    if ((!open && !isPage) || !onPersistObsTransition) return;
-    if (!obsTransMounted.current) {
-      obsTransMounted.current = true;
+  const handleSaveAll = useCallback(async () => {
+    if (!onSaveAllCommonParams || saveState === "saving") return;
+    const vr = validateWarmupResolution(warmupOpts);
+    if (!vr.ok) {
+      setWarmupResolutionError(vr.message);
+      setSaveError(vr.message);
       return;
     }
-    const t = setTimeout(() => {
-      onPersistObsTransition({
-        obs_transition_enabled: obsTransEnabled,
-        obs_transition_name: obsTransName,
-        obs_transition_duration_ms: obsTransDurationMs,
-      });
-    }, 600);
-    return () => clearTimeout(t);
-  }, [obsTransEnabled, obsTransName, obsTransDurationMs, open, isPage, onPersistObsTransition]);
+    setWarmupResolutionError("");
+    setSaveError("");
+    setSaveState("saving");
+    const result = await onSaveAllCommonParams({
+      default_record_warmup: warmupUiOptsToPersisted(warmupOpts),
+      recording_global_pacing: globalPacing,
+      cs2_extra_launch_args: localCs2ExtraLaunchArgs,
+      record_inject_console_lines: localRecordInjectLines,
+      obs_transition_enabled: obsTransEnabled,
+      obs_transition_name: obsTransName,
+      obs_transition_duration_ms: obsTransDurationMs,
+      experimental_pov_enabled: povEnabled,
+    });
+    setSaveState(result?.ok ? "saved" : "error");
+    if (!result?.ok && result?.error) setSaveError(String(result.error));
+    if (result?.ok) {
+      setTimeout(() => setSaveState("idle"), 2000);
+    }
+  }, [
+    onSaveAllCommonParams,
+    saveState,
+    warmupOpts,
+    globalPacing,
+    localCs2ExtraLaunchArgs,
+    localRecordInjectLines,
+    obsTransEnabled,
+    obsTransName,
+    obsTransDurationMs,
+    povEnabled,
+  ]);
+
+  const saveButton = onSaveAllCommonParams ? (
+    <button
+      type="button"
+      disabled={!configReady || saveState === "saving" || batchRecording}
+      onClick={() => void handleSaveAll()}
+      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      {saveState === "saving" ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      ) : (
+        <Save className="h-4 w-4" aria-hidden />
+      )}
+      {saveState === "saving" ? "保存中…" : saveState === "saved" ? "已保存" : "保存到配置文件"}
+    </button>
+  ) : null;
 
   if (!open && !isPage) return null;
 
@@ -243,22 +277,26 @@ export default function CommonParamsModal({
             <p className="mt-1 text-xs leading-relaxed text-cs2-text-muted">
               在此定义<strong className="text-cs2-text-secondary">全局录制节奏</strong>、
               <strong className="text-cs2-text-secondary">默认镜头逻辑</strong>与
-              <strong className="text-cs2-text-secondary">预热阶段画面规则</strong>。数值写入{" "}
+              <strong className="text-cs2-text-secondary">预热阶段画面规则</strong>。修改后请点击
+              <strong className="text-cs2-text-secondary">「保存到配置文件」</strong>写入{" "}
               <span className="font-mono text-cs2-text-secondary">data/cs2-insight.config.json</span>
               ；节奏与入队默认视角影响<strong className="text-cs2-text-secondary">之后新加入队列</strong>
-              的片段，预热选项在批量录制确认时沿用。
+              的片段，预热选项在批量录制确认时作为默认值。
             </p>
           </div>
-          {!isPage ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="shrink-0 rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input hover:text-cs2-text-secondary"
-              aria-label="关闭"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          ) : null}
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {saveButton}
+            {!isPage ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input hover:text-cs2-text-secondary"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
         </div>
         ) : null}
 
@@ -475,14 +513,14 @@ export default function CommonParamsModal({
                 影响说明：启用后以更接近真实第一人称的 HUD 资源录制本地 Demo，与普通观战 HUD 管线不同。
               </p>
               <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
-                当前状态：{experimentalPovEnabled ? "已启用 POV 特殊录制模式" : "未启用（使用标准观战 HUD 管线）"}
+                当前状态：{povEnabled ? "已启用 POV 特殊录制模式" : "未启用（使用标准观战 HUD 管线）"}
                 。兼容性：需本地 Demo、临时改写 gameinfo 与 pov.vpk，仅用于离线回放；勿连接联机服务器。
               </p>
               <ExperimentalPovSection
                 visible={open || isPage}
-                experimentalPovEnabled={experimentalPovEnabled}
-                onExperimentalPovChange={onExperimentalPovChange}
-                checkboxDisabled={batchRecording || !onExperimentalPovChange}
+                experimentalPovEnabled={povEnabled}
+                onExperimentalPovChange={setPovEnabled}
+                checkboxDisabled={batchRecording}
                 povRadarMode={warmupOpts.pov_radar_mode}
                 onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
                 povTeamcounterNumeric={warmupOpts.pov_teamcounter_numeric}
@@ -610,7 +648,7 @@ export default function CommonParamsModal({
                     checked={warmupOpts.cl_draw_only_deathnotices}
                     onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
                     outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
-                    disabled={!!experimentalPovEnabled}
+                    disabled={!!povEnabled}
                     disabledReason={POV_CONFLICT_HUD}
                   />
                   <RecordingHudCard
@@ -672,10 +710,10 @@ export default function CommonParamsModal({
                   命令行与控制台
                 </p>
                 <Cs2LaunchConsoleFields
-                  cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
-                  onCs2ExtraLaunchArgsChange={onCs2ExtraLaunchArgsChange}
-                  recordInjectConsoleLines={recordInjectConsoleLines}
-                  onRecordInjectConsoleLinesChange={onRecordInjectConsoleLinesChange}
+                  cs2ExtraLaunchArgs={localCs2ExtraLaunchArgs}
+                  onCs2ExtraLaunchArgsChange={setLocalCs2ExtraLaunchArgs}
+                  recordInjectConsoleLines={localRecordInjectLines}
+                  onRecordInjectConsoleLinesChange={setLocalRecordInjectLines}
                 />
 
                 <div className="my-5 border-t border-cs2-border" />
@@ -831,12 +869,20 @@ export default function CommonParamsModal({
     return (
       <div className="flex h-full min-h-0 w-full flex-col bg-cs2-bg-page">
         <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-sm sm:px-5">
-          <div className="w-full min-w-0">
-            <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">常用参数</h1>
-            <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
-              全局节奏、观战默认与预热画面写入{" "}
-              <span className="font-mono text-cs2-text-secondary">data/cs2-insight.config.json</span>
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">常用参数</h1>
+              <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
+                录制时的常用参数设置，修改后请点击「保存到配置文件」。
+              </p>
+              {saveError ? (
+                <p className="mt-2 text-xs leading-snug text-rose-400">{saveError}</p>
+              ) : null}
+              {!configReady ? (
+                <p className="mt-2 text-xs text-cs2-text-muted">正在加载配置…</p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center self-center">{saveButton}</div>
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>

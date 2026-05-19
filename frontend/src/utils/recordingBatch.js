@@ -126,3 +126,25 @@ export function buildRecordingQueueRequestsFromQueue(queue, globalPacing, upload
   }
   return requests;
 }
+
+/**
+ * 将录制前弹窗中的 OBS 转场写入各 request.options（仅本次队列，不写配置）。
+ * @param {object[]} requests
+ * @param {{ obs_transition_enabled?: boolean | null, obs_transition_name?: string | null, obs_transition_duration_ms?: number | null }} session
+ */
+export function applySessionObsTransitionToRequests(requests, session) {
+  if (!Array.isArray(requests) || !requests.length || !session) return requests;
+  const { obs_transition_enabled: enabled, obs_transition_name: name, obs_transition_duration_ms: ms } =
+    session;
+  const patch = {};
+  if (enabled !== undefined && enabled !== null) patch.obs_transition_enabled = !!enabled;
+  if (name != null && name !== "") patch.obs_transition_name = name;
+  if (ms != null && ms !== "" && Number.isFinite(Number(ms))) {
+    patch.obs_transition_duration_ms = Number(ms);
+  }
+  if (!Object.keys(patch).length) return requests;
+  return requests.map((r) => ({
+    ...r,
+    options: { ...(r.options || {}), ...patch },
+  }));
+}

@@ -1,6 +1,5 @@
 import CommonParamsModal from "../components/CommonParamsModal";
 import { useAppShell } from "../context/AppShellContext";
-import PageContainer from "../components/PageContainer";
 
 export default function CommonParamsPage() {
   const s = useAppShell();
@@ -9,20 +8,17 @@ export default function CommonParamsPage() {
       variant="page"
       open
       onClose={() => {}}
+      configReady={s.savedRecordWarmupDefaults !== null}
+      configRefreshKey={s.commonParamsRefreshKey}
       batchRecording={s.batchRecording}
       savedWarmupDefaults={s.savedRecordWarmupDefaults}
-      onPersistWarmupDefaults={s.persistWarmupDefaults}
+      onSaveAllCommonParams={s.saveAllCommonParams}
       experimentalPovEnabled={s.experimentalPovEnabled}
-      onExperimentalPovChange={s.persistExperimentalPov}
       cs2ExtraLaunchArgs={s.cs2ExtraLaunchArgs}
-      onCs2ExtraLaunchArgsChange={s.setCs2ExtraLaunchArgs}
       recordInjectConsoleLines={s.recordInjectConsoleLines}
-      onRecordInjectConsoleLinesChange={s.setRecordInjectConsoleLines}
-      onPersistCs2RecordExtras={s.persistCs2RecordExtras}
       obsTransitionEnabled={s.obsTransitionEnabled}
       obsTransitionName={s.obsTransitionName}
       obsTransitionDurationMs={s.obsTransitionDurationMs}
-      onPersistObsTransition={s.persistObsTransition}
     />
   );
 }

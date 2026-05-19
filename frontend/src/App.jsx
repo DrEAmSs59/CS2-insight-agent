@@ -23,9 +23,14 @@ import {
   isFreezeToDeathCompilation,
   sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
-import { warmupApiPayloadToPersisted } from "./utils/warmupDefaults";
+import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
-import { queueItemClientUid, runWithConcurrency, buildRecordingQueueRequestsFromQueue } from "./utils/recordingBatch";
+import {
+  queueItemClientUid,
+  runWithConcurrency,
+  buildRecordingQueueRequestsFromQueue,
+  applySessionObsTransitionToRequests,
+} from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL } from "./api/api";
@@ -54,7 +59,6 @@ export default function App() {
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
   /** GET /api/config 已注入录制队列全局节奏后再允许自动写回，避免覆盖用户在本页会话内的修改 */
-  const pacingPersistReadyRef = useRef(false);
   const [llmConfig, setLlmConfig] = useState({
     model: "",
     api_key: "",
@@ -126,6 +130,8 @@ export default function App() {
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
+  /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
+  const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
@@ -741,6 +747,49 @@ export default function App() {
     setSelectedLibraryDemoIds(new Set());
   }, []);
 
+  const applyCommonParamsFromConfigData = useCallback((data) => {
+    if (!data || typeof data !== "object") return;
+    if (data.default_record_warmup && typeof data.default_record_warmup === "object") {
+      setSavedRecordWarmupDefaults(
+        Array.isArray(data.default_record_warmup) ? {} : data.default_record_warmup,
+      );
+    } else {
+      setSavedRecordWarmupDefaults({});
+    }
+    if (typeof data.cs2_extra_launch_args === "string") {
+      setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
+    }
+    if (typeof data.record_inject_console_lines === "string") {
+      setRecordInjectConsoleLines(data.record_inject_console_lines);
+    }
+    if (typeof data.obs_transition_enabled === "boolean") {
+      setObsTransitionEnabled(data.obs_transition_enabled);
+    }
+    if (typeof data.obs_transition_name === "string") {
+      setObsTransitionName(data.obs_transition_name);
+    }
+    if (typeof data.obs_transition_duration_ms === "number") {
+      setObsTransitionDurationMs(data.obs_transition_duration_ms);
+    }
+    if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
+      setExperimentalPovEnabled(data.experimental.pov_enabled);
+    }
+    if (
+      data.recording_global_pacing &&
+      typeof data.recording_global_pacing === "object" &&
+      !Array.isArray(data.recording_global_pacing)
+    ) {
+      useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
+    }
+  }, []);
+
+  const refreshCommonParamsFromServer = useCallback(async () => {
+    const { data } = await API.get("config");
+    applyCommonParamsFromConfigData(data);
+    setCommonParamsRefreshKey((k) => k + 1);
+    return data;
+  }, [applyCommonParamsFromConfigData]);
+
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
@@ -769,9 +818,6 @@ export default function App() {
             });
           }
           if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
-          if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
-            setExperimentalPovEnabled(data.experimental.pov_enabled);
-          }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
@@ -781,40 +827,10 @@ export default function App() {
           if (Array.isArray(data.expected_parse_players)) {
             setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
           }
-          if (
-            data.default_record_warmup &&
-            typeof data.default_record_warmup === "object" &&
-            !Array.isArray(data.default_record_warmup)
-          ) {
-            setSavedRecordWarmupDefaults(data.default_record_warmup);
-          }
-          if (typeof data.cs2_extra_launch_args === "string") {
-            setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
-          }
-          if (typeof data.record_inject_console_lines === "string") {
-            setRecordInjectConsoleLines(data.record_inject_console_lines);
-          }
-          if (typeof data.obs_transition_enabled === "boolean") {
-            setObsTransitionEnabled(data.obs_transition_enabled);
-          }
-          if (typeof data.obs_transition_name === "string") {
-            setObsTransitionName(data.obs_transition_name);
-          }
-          if (typeof data.obs_transition_duration_ms === "number") {
-            setObsTransitionDurationMs(data.obs_transition_duration_ms);
-          }
-          if (
-            data.recording_global_pacing &&
-            typeof data.recording_global_pacing === "object" &&
-            !Array.isArray(data.recording_global_pacing)
-          ) {
-            useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
-          }
-          
+          applyCommonParamsFromConfigData(data);
+          setCommonParamsRefreshKey((k) => k + 1);
+
           obsConfigHydratedRef.current = true;
-          queueMicrotask(() => {
-            pacingPersistReadyRef.current = true;
-          });
           setBackendReady(true);
           break; // 成功后跳出循环
         } catch (e) {
@@ -828,7 +844,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyCommonParamsFromConfigData]);
 
   const refreshConfigBackupStatus = useCallback(async () => {
     setConfigBackupLoading(true);
@@ -855,13 +871,7 @@ export default function App() {
     void refreshConfigBackupStatus();
   }, [refreshConfigBackupStatus]);
 
-  useEffect(() => {
-    if (!pacingPersistReadyRef.current) return;
-    const t = setTimeout(() => {
-      void API.put("config", { recording_global_pacing: globalPacing }).catch(() => {});
-    }, 600);
-    return () => clearTimeout(t);
-  }, [globalPacing]);
+  // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
   useEffect(() => {
     // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「扫描本地 demo 库」入库。
@@ -1528,6 +1538,45 @@ export default function App() {
     }
   }, []);
 
+  /** 常用参数页：一次性写入配置文件（替代分项防抖保存） */
+  const saveAllCommonParams = useCallback(async (payload) => {
+    const warmupPatch =
+      payload?.default_record_warmup && typeof payload.default_record_warmup === "object"
+        ? payload.default_record_warmup
+        : {};
+    const mergedWarmup = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...warmupPatch };
+    const pacing =
+      payload?.recording_global_pacing && typeof payload.recording_global_pacing === "object"
+        ? payload.recording_global_pacing
+        : useRecordingQueue.getState().globalPacing;
+    const body = {
+      default_record_warmup: mergedWarmup,
+      recording_global_pacing: pacing,
+      cs2_extra_launch_args: String(payload?.cs2_extra_launch_args ?? ""),
+      record_inject_console_lines: String(payload?.record_inject_console_lines ?? ""),
+      obs_transition_enabled: !!payload?.obs_transition_enabled,
+      obs_transition_name: payload?.obs_transition_name ?? "Fade",
+      obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
+      experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
+    };
+    try {
+      await API.put("config", body);
+      await refreshCommonParamsFromServer();
+      setProgressText("常用参数已保存到配置文件。", { autoDismissMs: 2800 });
+      return { ok: true };
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      const msg =
+        detail != null
+          ? typeof detail === "string"
+            ? detail
+            : JSON.stringify(detail)
+          : e.message || "保存失败";
+      setProgressText(`常用参数保存失败: ${msg}`);
+      return { ok: false, error: msg };
+    }
+  }, [setProgressText, refreshCommonParamsFromServer]);
+
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
     if (configBackupStatus?.restore_required) {
@@ -1542,9 +1591,9 @@ export default function App() {
   }, [queue.length, configBackupStatus?.restore_required]);
 
   const handleWarmupConfirm = useCallback(
-    async (warmup) => {
+    async (warmupPayload) => {
       const intent = warmupIntent;
-      await persistWarmupDefaults(warmupApiPayloadToPersisted(warmup));
+      const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
@@ -1553,7 +1602,7 @@ export default function App() {
         setBatchRecording(true);
         setProgressText("正在执行批量 OBS 导播…");
         try {
-          const requests = buildRecordingQueueRequestsFromQueue(
+          let requests = buildRecordingQueueRequestsFromQueue(
             queue,
             useRecordingQueue.getState().globalPacing,
             uploadedDemos,
@@ -1563,17 +1612,20 @@ export default function App() {
             setProgressText("队列中没有可录制的片段（已跳过不支持的类型）。");
             return;
           }
-          const povHud = experimentalPovEnabled
+          requests = applySessionObsTransitionToRequests(requests, session);
+          const povHud = session.experimental_pov_enabled
             ? {
                 enabled: true,
-                radar_mode: Number(warmup?.pov_radar_mode ?? 0),
-                teamcounter_numeric: Boolean(warmup?.pov_teamcounter_numeric),
+                radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
+                teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
               }
             : undefined;
           const body = {
             requests,
-            warmup,
+            warmup: warmupForApi,
             obs: obsConfig,
+            cs2_extra_launch_args: session.cs2_extra_launch_args,
+            record_inject_console_lines: session.record_inject_console_lines,
             ...(povHud ? { pov_hud: povHud } : {}),
           };
           const { data } = await API.post("recording/queue", body);
@@ -1612,12 +1664,9 @@ export default function App() {
       queue,
       clearQueue,
       obsConfig,
-      globalPacing,
-      persistWarmupDefaults,
       refreshConfigBackupStatus,
       uploadedDemos,
       parsedMatches,
-      experimentalPovEnabled,
     ]
   );
 
@@ -2052,14 +2101,11 @@ export default function App() {
     currentDemoFilename,
     batchRecording,
     savedRecordWarmupDefaults,
-    persistWarmupDefaults,
+    saveAllCommonParams,
+    commonParamsRefreshKey,
     cs2ExtraLaunchArgs,
-    setCs2ExtraLaunchArgs,
     recordInjectConsoleLines,
-    setRecordInjectConsoleLines,
-    persistCs2RecordExtras,
     experimentalPovEnabled,
-    persistExperimentalPov,
     hasDemos,
     parsing,
     handleUpload,
@@ -2147,7 +2193,6 @@ export default function App() {
     obsTransitionEnabled,
     obsTransitionName,
     obsTransitionDurationMs,
-    persistObsTransition,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2243,12 +2288,11 @@ export default function App() {
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
-          onExperimentalPovChange={persistExperimentalPov}
           cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
-          onCs2ExtraLaunchArgsChange={setCs2ExtraLaunchArgs}
           recordInjectConsoleLines={recordInjectConsoleLines}
-          onRecordInjectConsoleLinesChange={setRecordInjectConsoleLines}
-          onPersistCs2RecordExtras={persistCs2RecordExtras}
+          initObsTransEnabled={obsTransitionEnabled}
+          initObsTransName={obsTransitionName}
+          initObsTransDurationMs={obsTransitionDurationMs}
         />
 
         <LibraryLoadModeModal

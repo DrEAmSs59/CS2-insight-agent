@@ -411,6 +411,9 @@ class QueueRecordingRequest(BaseModel):
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
     pov_hud: Optional[dict] = None  # {enabled: bool, radar_mode: int, teamcounter_numeric: bool}
+    # 仅本次录制队列生效，不写入 cs2-insight.config.json
+    cs2_extra_launch_args: Optional[str] = None
+    record_inject_console_lines: Optional[str] = None
 
 
 @router.post("/queue", response_model=list[dict])
@@ -537,12 +540,22 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     if not await fade_ctrl.setup():
         logger.warning("[RecordingV3] OBS fade transition setup failed or disabled; recording in hard-cut mode")
 
+    launch_args = (
+        req.cs2_extra_launch_args
+        if req.cs2_extra_launch_args is not None
+        else cfg.cs2_extra_launch_args
+    )
+    inject_lines = (
+        req.record_inject_console_lines
+        if req.record_inject_console_lines is not None
+        else cfg.record_inject_console_lines
+    )
     director = OBSDirector(
         obs_cfg,
         cfg.cs2_path,
         abort_event=abort_ev,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
+        cs2_extra_launch_args=launch_args,
+        record_inject_console_lines=inject_lines,
         spec_player_verify=cfg.spec_player_verify,
     )
 
