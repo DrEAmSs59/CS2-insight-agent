@@ -48,6 +48,7 @@ class DemoContext(BaseModel):
 class TargetPlayer(BaseModel):
     name: str
     steamid64: str
+    spec_slot: Optional[int] = None
 
 
 class EventInfo(BaseModel):
@@ -132,6 +133,7 @@ class RecordingSegment(BaseModel):
     round: Optional[int] = None
     target_player_name: str
     target_steamid64: str
+    target_spec_slot: Optional[int] = None
     perspective: Perspective
     is_final_round: bool = False
     safe_seek_tick: int

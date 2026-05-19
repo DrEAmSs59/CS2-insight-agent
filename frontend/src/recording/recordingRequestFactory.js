@@ -30,11 +30,13 @@ export const DEFAULT_RECORDING_OPTIONS = {
   obs_transition_duration_ms: null,
 };
 
-function buildTargetPlayer(name, steamid64) {
-  return {
+function buildTargetPlayer(name, steamid64, specSlot) {
+  const obj = {
     name: String(name || ""),
     steamid64: String(steamid64 || ""),
   };
+  if (specSlot != null) obj.spec_slot = Number(specSlot);
+  return obj;
 }
 
 function buildDemoContext(clipData, queueItem, matchMeta) {
@@ -119,7 +121,8 @@ function deriveNextRoundStartTick(round, clipData) {
 export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   return {
     request_id: newRequestId(),
@@ -131,13 +134,14 @@ export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, o
       const victimName = clipData.victims?.[i] || "";
       // victim_steamid64s is populated from player_death user_steamid in demo_parser; fall back to nameToSteamId roster map
       const victimSteamId = clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
+      const victimSpecSlot = clipData.victim_spec_slots?.[i] ?? null;
       return {
         event_type: "kill",
         tick: killTick,
         round: clipData.round,
-        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        victim: buildTargetPlayer(victimName, victimSteamId),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        victim: buildTargetPlayer(victimName, victimSteamId, victimSpecSlot),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
         perspective: "killer",
       };
     }),
@@ -150,9 +154,11 @@ export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, o
 export function buildFailRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const killerName = clipData.killer_name || "";
   const killerSteamId = resolveKillerSteamId(killerName, clipData, matchMeta);
+  const killerSpecSlot = clipData.killer_spec_slot ?? null;
   return {
     request_id: newRequestId(),
     request_type: "fail",
@@ -164,9 +170,9 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
         event_type: "death",
         tick: clipData.death_tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(killerName, killerSteamId),
-        victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        killer: buildTargetPlayer(killerName, killerSteamId, killerSpecSlot),
+        victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
         perspective: "victim",
       },
     ],
@@ -179,11 +185,13 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
 export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   const victimName = clipData.victims?.[0] || "";
   const victimSteamId =
     clipData.victim_steamid64s?.[0] || nameToSteamId[victimName] || "";
+  const victimSpecSlot = clipData.victim_spec_slots?.[0] ?? null;
   return {
     request_id: newRequestId(),
     request_type: "timeline_kill",
@@ -195,9 +203,9 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
         event_type: "kill",
         tick: clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        victim: buildTargetPlayer(victimName, victimSteamId),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        victim: buildTargetPlayer(victimName, victimSteamId, victimSpecSlot),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
         perspective: "killer",
       },
     ],
@@ -210,9 +218,11 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
 export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const killerName = clipData.killer_name || "";
   const killerSteamId = resolveKillerSteamId(killerName, clipData, matchMeta);
+  const killerSpecSlot = clipData.killer_spec_slot ?? null;
   return {
     request_id: newRequestId(),
     request_type: "timeline_death",
@@ -224,9 +234,9 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
         event_type: "death",
         tick: clipData.death_tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(killerName, killerSteamId),
-        victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+        killer: buildTargetPlayer(killerName, killerSteamId, killerSpecSlot),
+        victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
         perspective: "victim",
       },
     ],
@@ -239,7 +249,8 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
 export function buildKillCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   return {
     request_id: newRequestId(),
@@ -252,13 +263,14 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
         const victimName = clipData.victims?.[i] || "";
         const victimSteamId =
           clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
+        const victimSpecSlot = clipData.victim_spec_slots?.[i] ?? null;
         return {
           event_type: "kill",
           tick,
           round: clipData.source_rounds?.[i] ?? clipData.round,
-          killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-          victim: buildTargetPlayer(victimName, victimSteamId),
-          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+          victim: buildTargetPlayer(victimName, victimSteamId, victimSpecSlot),
+          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
           perspective: "killer",
         };
       }) || [],
@@ -271,7 +283,8 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
 export function buildDeathCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   const nameToSteamId = matchMeta?.nameToSteamId ?? {};
   // kill_ticks holds death ticks for death compilation clips
   return {
@@ -291,8 +304,8 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
           tick,
           round: clipData.source_rounds?.[i] ?? clipData.round,
           killer: buildTargetPlayer(kName, kSteamId),
-          victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
-          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId),
+          victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+          target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
           perspective: "victim",
         };
       }) || [],

@@ -22,11 +22,12 @@ async def spec_player(player_name: str, mode: int = 5) -> None:
     # Wait for spec switch to settle
     await asyncio.sleep(0.8)
 
-async def spec_by_slot(slot: int, mode: int = 5) -> None:
+async def spec_by_slot(slot: int, mode: int = 5, settle: float = 0.8) -> None:
     """Send spec_mode + spec_player by numeric slot."""
     cmds = [f"spec_mode {mode}", f"spec_player {int(slot)}"]
     try:
         await asyncio.to_thread(inject_console_sequence, cmds)
     except Exception as e:
         logger.warning("spec_player slot %s failed: %s", slot, e)
-    await asyncio.sleep(0.8)
+    if settle > 0:
+        await asyncio.sleep(settle)

@@ -3650,9 +3650,10 @@ class OBSDirector:
                     })
 
                 # ── Kill CS2 after this demo group ────────────────────────────
-                if not batch_aborted:
-                    await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
-                    await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
+                # Always kill CS2 and restore user configs, even when aborted;
+                # _kill_cs2 calls _restore_user_configs internally.
+                await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
+                await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
 
         except (CS2AlreadyRunningError, CS2NotReadyError):
             raise

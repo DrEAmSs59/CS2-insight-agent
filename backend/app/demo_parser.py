@@ -107,6 +107,14 @@ class Clip:
     victim_steamid64s: list[str] = field(default_factory=list)
     # 击杀目标玩家的凶手 steamid64（来自 player_death attacker_steamid），供下饭 killer POV 分段
     killer_steamid64: Optional[str] = None
+    # 目标玩家的 spec_player 槽位（解析时计算，录制时直接用；高光=击杀者，下饭=被击杀者）
+    target_spec_slot: Optional[int] = None
+    # 与 kill_ticks 等长；目标玩家（击杀者）在各击杀处的 spec_player 槽位
+    kill_spec_slots: list[Optional[int]] = field(default_factory=list)
+    # 与 victims 等长；各受害者的 spec_player 槽位
+    victim_spec_slots: list[Optional[int]] = field(default_factory=list)
+    # 下饭片段：击杀了目标玩家的凶手的 spec_player 槽位
+    killer_spec_slot: Optional[int] = None
     # 本回合开局比分（目标方 round 胜场 : 对方），来自 round_freeze_end 刻度与 team_num
     score_own: Optional[int] = None
     score_opp: Optional[int] = None
@@ -2259,14 +2267,22 @@ class DemoAnalyzer:
         )
         observed_user_ids = tuple(name_to_uid.values())
         event_user_id = _lookup_user_id_for_name(name_to_uid, target_player)
-        target_player_user_id = _spec_player_slot_from_event_user_id(
-            event_user_id,
-            self.dem_path,
-            observed_user_ids,
+        spec_slots = build_player_name_to_spec_player_slot_dict(self.parser, roster_tick, self.dem_path)
+        target_player_user_id = (
+            _spec_player_slot_from_event_user_id(event_user_id, self.dem_path, observed_user_ids)
+            or lookup_spec_player_slot_for_name(spec_slots, target_player)
         )
-        if target_player_user_id is None:
-            spec_slots = build_player_name_to_spec_player_slot_dict(self.parser, roster_tick, self.dem_path)
-            target_player_user_id = lookup_spec_player_slot_for_name(spec_slots, target_player)
+        # Post-annotate all clips with pre-computed spec slots so recording can
+        # use slot numbers directly without re-parsing the demo.
+        for _c in clips:
+            _c.target_spec_slot = target_player_user_id
+            _c.kill_spec_slots = [target_player_user_id] * len(_c.kill_ticks)
+            _c.victim_spec_slots = [
+                spec_slots.get(v.lower()) if v else None
+                for v in _c.victims
+            ]
+            if _c.killer_name:
+                _c.killer_spec_slot = spec_slots.get(_c.killer_name.lower())
         name_to_sid = build_player_name_to_steam_id(self.parser, match_start_tick)
         tsid = _lookup_steam_id_for_name(name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None

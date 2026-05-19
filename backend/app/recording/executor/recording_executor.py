@@ -13,7 +13,7 @@ from .demo_controller import (
     demo_pause_silent_strict, demo_resume_silent_strict,
     DemoSeekError,
 )
-from .spec_controller import spec_player
+from .spec_controller import spec_by_slot
 from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
@@ -279,6 +279,73 @@ class ExecutionResult:
     obs_record_directory: Optional[str] = None     # OBS output directory (from GetRecordDirectory)
 
 
+# Max additional slot offsets to try after the demo-parsed base slot fails GSI verify.
+# 5E / Perfect World demos are often off by +1; rarely more.
+_SPEC_SLOT_MAX_OFFSET = 3
+
+
+async def _spec_by_slot_with_retry(
+    base_slot: Optional[int],
+    player_name: str,
+    target_steamid64: str,
+    result_warnings: list,
+    segment_index: int,
+) -> "bool | None":
+    """
+    Switch to base_slot (pre-computed during demo parsing), then verify via GSI.
+    If verification fails, increment the slot by 1 and retry up to
+    _SPEC_SLOT_MAX_OFFSET times (handles 5E/PW demos that shift slots by +1).
+
+    Returns:
+        True  — verified correct player
+        None  — GSI inconclusive (proceed with warning)
+        False — all offsets exhausted, still wrong player
+    """
+    if base_slot is None:
+        logger.warning(
+            "[RecordingV3] no spec slot for %r (not set during parsing); skipping spec switch",
+            player_name,
+        )
+        return None
+
+    for offset in range(_SPEC_SLOT_MAX_OFFSET + 1):
+        slot = base_slot + offset
+        logger.info(
+            "[RecordingV3] spec_by_slot %d (base=%d offset=%d) for %r steamid=%s",
+            slot, base_slot, offset, player_name, target_steamid64,
+        )
+        await spec_by_slot(slot)
+
+        if not target_steamid64:
+            return None
+
+        verified = await verify_spec_target(target_steamid64)
+        if verified is True:
+            if offset > 0:
+                logger.info(
+                    "[RecordingV3] slot offset +%d worked for %r (base=%d actual=%d)",
+                    offset, player_name, base_slot, slot,
+                )
+            return True
+        if verified is None:
+            result_warnings.append(
+                f"segment {segment_index}: spec verify inconclusive for "
+                f"{player_name} at slot {slot} — GSI silent"
+            )
+            return None
+        # verified is False — try next offset
+        logger.warning(
+            "[RecordingV3] slot %d wrong for %r (offset=%d), trying +1",
+            slot, player_name, offset,
+        )
+
+    logger.error(
+        "[RecordingV3] all slot offsets 0..%d failed for %r steamid=%s",
+        _SPEC_SLOT_MAX_OFFSET, player_name, target_steamid64,
+    )
+    return False
+
+
 class RecordingExecutor:
     def __init__(
         self,
@@ -462,50 +529,39 @@ class RecordingExecutor:
                 spec_elapsed = 0.0
                 if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
-                    await spec_player(segment.target_player_name)
+                    spec_ok = await _spec_by_slot_with_retry(
+                        base_slot=segment.target_spec_slot,
+                        player_name=segment.target_player_name,
+                        target_steamid64=segment.target_steamid64,
+                        result_warnings=result.warnings,
+                        segment_index=segment.segment_index,
+                    )
+                    spec_elapsed = time.monotonic() - spec_t0
 
-                    if segment.target_steamid64:
-                        verified = await verify_spec_target(segment.target_steamid64)
-                        spec_elapsed = time.monotonic() - spec_t0
-
-                        if verified is False:
-                            logger.error(
-                                "[RecordingV3] spec verify confirmed WRONG PLAYER for %s (steamid=%s); aborting recording",
-                                segment.target_player_name, segment.target_steamid64,
-                            )
-                            await demo_pause()
-                            result.segment_results.append(SegmentResult(
-                                segment_index=segment.segment_index,
-                                status="spec_failed",
-                                start_tick=segment.start_tick,
-                                end_tick=segment.end_tick,
-                                perspective=segment.perspective,
-                                error=f"spec confirm: wrong player spectated for {segment.target_player_name}",
-                            ))
-                            result.error = (
-                                f"spec verify failed for {segment.target_player_name} — "
-                                "recording aborted to avoid capturing wrong POV"
-                            )
-                            if obs_recording_started:
-                                await self._ctrl.stop_record_safe()
-                            result.output_path = final_output_path
-                            result.success = any(r.status == "ok" for r in result.segment_results)
-                            result.warnings.extend(plan.warnings)
-                            return result
-
-                        elif verified is None:
-                            logger.warning(
-                                "[RecordingV3] spec verify inconclusive for %s (steamid=%s); "
-                                "GSI silent while running — proceeding",
-                                segment.target_player_name, segment.target_steamid64,
-                            )
-                            result.warnings.append(
-                                f"segment {segment.segment_index}: spec verify inconclusive for "
-                                f"{segment.target_player_name} — GSI silent while running"
-                            )
-                            spec_elapsed = time.monotonic() - spec_t0
-                    else:
-                        spec_elapsed = time.monotonic() - spec_t0
+                    if spec_ok is False:
+                        logger.error(
+                            "[RecordingV3] spec failed for %s (steamid=%s) after slot retries; aborting",
+                            segment.target_player_name, segment.target_steamid64,
+                        )
+                        await demo_pause()
+                        result.segment_results.append(SegmentResult(
+                            segment_index=segment.segment_index,
+                            status="spec_failed",
+                            start_tick=segment.start_tick,
+                            end_tick=segment.end_tick,
+                            perspective=segment.perspective,
+                            error=f"spec confirm: wrong player spectated for {segment.target_player_name}",
+                        ))
+                        result.error = (
+                            f"spec verify failed for {segment.target_player_name} — "
+                            "recording aborted to avoid capturing wrong POV"
+                        )
+                        if obs_recording_started:
+                            await self._ctrl.stop_record_safe()
+                        result.output_path = final_output_path
+                        result.success = any(r.status == "ok" for r in result.segment_results)
+                        result.warnings.extend(plan.warnings)
+                        return result
 
                 # ── 3. Wait for demo to reach start_tick, then pause ────────
                 # spec_player / GSI-verify run while the demo is playing inside
