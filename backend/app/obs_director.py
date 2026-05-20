@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import socket
+import struct
 import sys
 import shutil
 import shlex
@@ -35,6 +36,7 @@ from .demo_parser import (
     spec_player_extra_offset_for_gsi_failure,
 )
 from .cs2_config_backup import (
+    _atomic_write_bytes,
     is_cs2_running,
     is_restore_required,
     restore_latest_user_config_backup,
@@ -2072,6 +2074,7 @@ class OBSDirector:
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
         self._cleanup_cs2_artifacts()
+        self._clear_voice_ban_files()
 
         # CS2 读取 video.txt 的优先级高于 -w/-h 启动参数，在快照后立即 patch
         # 磁盘文件，确保录制分辨率真正生效；结束后由 _restore_user_configs 还原。
@@ -2880,6 +2883,42 @@ class OBSDirector:
         if restored:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
+
+    def _voice_ban_paths(self) -> list[Path]:
+        """返回所有 Steam 账号的 ``userdata/<id>/730/voice_ban.dt`` 路径。"""
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for cfg_dir in self._candidate_user_config_dirs():
+            try:
+                parent_730 = cfg_dir.parents[2]
+            except IndexError:
+                continue
+            if parent_730.name != "730":
+                continue
+            candidate = parent_730 / "voice_ban.dt"
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                paths.append(candidate)
+        return paths
+
+    def _clear_voice_ban_files(self) -> None:
+        """CS2 启动前将 voice_ban.dt 清空（count=0），确保无人被静音。
+        tv_listen_voice_indices 在 demo 层做队伍过滤，dt 文件仅需保持全开。
+        结束后由 _restore_user_configs 自动还原原始文件。
+        """
+        data = struct.pack("<I", 0)  # count=0，无屏蔽名单
+        for p in self._voice_ban_paths():
+            try:
+                if p not in self._user_config_snapshot:
+                    self._user_config_snapshot[p] = p.read_bytes() if p.is_file() else None
+                current = p.read_bytes() if p.is_file() else None
+                if current == data:
+                    continue
+                _atomic_write_bytes(p, data)
+                logger.info("voice_ban.dt cleared: %s", p)
+            except OSError as e:
+                logger.warning("Clear voice_ban.dt failed for %s: %s", p, e)
 
     def _patch_video_configs_for_resolution(
         self,
