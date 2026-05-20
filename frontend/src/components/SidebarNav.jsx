@@ -5,6 +5,7 @@ import {
   Microscope,
   Package,
   Clapperboard,
+  Download,
   SlidersHorizontal,
   Settings,
   Gamepad2,
@@ -27,7 +28,7 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function SidebarNav({ queueLength = 0, disabled = false }) {
+export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
 
@@ -102,6 +103,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           <Settings className="h-4 w-4 shrink-0 opacity-90" />
           设置
         </NavLink>
+        <button
+          type="button"
+          disabled={disabled || !onCheckUpdate}
+          onClick={() => onCheckUpdate?.()}
+          className={`${linkBase} w-full text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary disabled:pointer-events-none disabled:opacity-40`}
+        >
+          <Download className="h-4 w-4 shrink-0 opacity-90" />
+          检查更新
+        </button>
         <button
           type="button"
           onClick={toggleTheme}

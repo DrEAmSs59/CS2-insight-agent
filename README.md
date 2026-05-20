@@ -128,6 +128,78 @@ Electron打包位置：`frontend/dist_electron/`
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
 
+### Windows 安装包（预编译）
+
+**官方发布页**：[Releases · DrEAmSs59/CS2-insight-agent](https://github.com/DrEAmSs59/CS2-insight-agent/releases)。每个符合 `v*` 的 **git tag** 会触发 GitHub Actions 工作流 **Release Windows**，在对应 Release 下上传构建产物（无需自己从源码打包即可安装）。
+
+**每个版本通常包含**：
+
+| 文件 | 说明 |
+|------|------|
+| `CS2InsightAgent-<版本号>-Setup.exe` | **推荐**：Inno Setup 安装包（内置 Python 运行时、后端与已构建的前端静态资源）。`<版本号>` 与 tag 一致，例如 tag `v1.2.3` → 安装包内版本为 `1.2.3`。 |
+| `CS2InsightAgent-<版本号>-windows-amd64.zip` | **便携版**：解压到任意目录即可运行（需路径可写）；适合不想走安装向导的用户。 |
+| `SHA256SUMS` | 上述文件的 SHA256 列表，可用 `Get-FileHash` 或 `sha256sum` 对照校验。 |
+
+若在 **fork** 或预发布渠道获取 CI 构建，请到该仓库的 **Releases** 页面下载与 **tag 名称** 对应的资源（流程与上游相同）。
+
+**安装步骤（Setup.exe）**：
+
+1. **双击** `CS2InsightAgent-*-Setup.exe` 按向导安装。**不要**安装到 `Program Files` 等无写权限目录；安装器默认使用 `%LocalAppData%\CS2InsightAgent`，便于写入配置与 SQLite 数据库。
+2. 向导最后一页可**按需勾选**「下载 FFmpeg」：勾选后会在安装结束时联网下载 FFmpeg 到安装目录下的 `third_party\ffmpeg\`（用于部分视频能力）；不勾选也可后装。
+3. 安装完成后用「开始」菜单或**桌面快捷方式**启动 **CS2 Insight Agent**。会先出现 PowerShell 控制台窗口并启动本地服务（默认 `http://127.0.0.1:8000/`），就绪后会尝试自动打开浏览器。**启动脚本会在运行前执行 `chcp 65001` 并统一控制台为 UTF-8**，减少中文与日志乱码。
+4. 首次运行会在安装目录的 `data\` 下生成 `cs2-insight.config.json`（由示例配置复制）；CS2 路径、Demo 监听目录、LLM、OBS 等均在应用内「设置」中配置。玩法说明见 [PLAYER_GUIDE.md](PLAYER_GUIDE.md)。
+
+**便携版（zip）**：解压到**可写**文件夹后，运行目录中的 **`CS2 Insight Agent.cmd`**（或 `Launch-CS2Insight.ps1`，需本机允许 PowerShell 执行策略）。
+
+### 本地开发：重新打包 Windows（开发者）
+
+在 **Windows x64** 本机或虚拟机里操作（macOS / Linux 无法打出该 Inno 安装包，只能改代码后在 Windows 上打包）。
+
+**依赖**
+
+| 依赖 | 说明 |
+|------|------|
+| Node.js | 建议 **20+**（CI 使用 22）；用于 `npm run build` |
+| Inno Setup **6** | [官方下载](https://jrsoftware.org/isdl.php)，或 `choco install innosetup -y` |
+| PowerShell | 5.1 即可（仓库根目录执行下列命令） |
+
+**推荐流程**（仓库根目录 → `frontend` 构建 → 可选写入版本号 → `bootstrap-staging` → `ISCC`）
+
+```powershell
+cd frontend
+npm ci          # 日常开发若已 npm install 可省略，发布前建议 ci
+npm run build
+cd ..
+
+# 可选：写入安装包/关于界面用的版本字符串（与下面 /DMyAppVersion 保持一致）
+.\packaging\windows\write-release-version.ps1 -Version "0.0.0-dev"
+
+# 生成 dist\staging（嵌入 Python、pip 依赖、后端与前端静态文件，通常需数分钟）
+.\packaging\windows\bootstrap-staging.ps1
+
+# 与 CI 一致的自检（可选）
+& "dist\staging\python\python.exe" -c "import demoparser2, fastapi; print('imports-ok')"
+
+# 编译安装包；/DMyAppVersion 须与 write-release-version 写入的版本一致（未跑 stamp 时可用任意与文件名一致的测试号）
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.0.0-dev .\packaging\windows\CS2InsightAgent.iss
+```
+
+**产物**
+
+- **安装包**：`dist\CS2InsightAgent-<版本>-Setup.exe`（`<版本>` 即 `/DMyAppVersion` 的值）。
+- **便携 zip**（与 Release 中 `*-windows-amd64.zip` 同结构，可选）：
+
+```powershell
+$ver = "0.0.0-dev"
+Compress-Archive -Path "dist\staging\*" -DestinationPath "CS2InsightAgent-$ver-windows-amd64.zip" -Force
+```
+
+**提示**
+
+- `CS2InsightAgent.iss` 的 `SourceDir` 已指向 `dist\staging`，无需手改。
+- 本地一般**不做** Authenticode 签名；CI、证书与 tag 发版流程见 [packaging/windows/RELEASE-WINDOWS.md](packaging/windows/RELEASE-WINDOWS.md)。
+- 修改了 `packaging/windows/install-optional-ffmpeg.ps1` 等安装期脚本后，需重新执行 **bootstrap + ISCC** 才会打进新的 `Setup.exe`。
+
 ---
 
 ## Features

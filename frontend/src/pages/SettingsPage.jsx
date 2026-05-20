@@ -266,6 +266,10 @@ export default function SettingsPage() {
 
   const handleCheckUpdates = () => {
     if (!isPackaged) {
+      if (s.fetchUpdateInfo) {
+        void s.fetchUpdateInfo({ force: true, manual: true });
+        return;
+      }
       setUpdateStatus({ status: "error", message: "开发模式下不支持检查更新" });
       setTimeout(() => setUpdateStatus(null), 3000);
       return;
@@ -569,6 +573,45 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
+
+                <div className="border-t border-white/5 pt-3 space-y-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
+                    GitHub 镜像（开发/手动下载）
+                  </p>
+                  <select
+                    value={s.updateGithubMirror ?? "auto"}
+                    onChange={(e) => s.setUpdateGithubMirror(e.target.value)}
+                    onBlur={() => {
+                      const v =
+                        s.updateGithubMirror === "custom"
+                          ? (s.updateGithubMirrorCustom || "").trim()
+                          : (s.updateGithubMirror || "auto").trim();
+                      void s.handleSaveConfig({ update_github_mirror: v || "auto" });
+                    }}
+                    className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus:border-cs2-accent/50 focus:outline-none"
+                  >
+                    <option value="auto">自动（镜像与直连并发，推荐）</option>
+                    <option value="on">仅镜像</option>
+                    <option value="off">仅 GitHub 直连</option>
+                    <option value="custom">自定义镜像前缀</option>
+                  </select>
+                  {s.updateGithubMirror === "custom" ? (
+                    <input
+                      value={s.updateGithubMirrorCustom ?? ""}
+                      placeholder="https://ghfast.top"
+                      onChange={(e) => s.setUpdateGithubMirrorCustom(e.target.value)}
+                      onBlur={() => {
+                        const v = (s.updateGithubMirrorCustom || "").trim();
+                        if (v) void s.handleSaveConfig({ update_github_mirror: v });
+                      }}
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[12px] text-cs2-text-primary focus:border-cs2-accent/50 focus:outline-none"
+                    />
+                  ) : (
+                    <p className="text-[10px] text-zinc-500">
+                      内置 ghfast.top、mirror.ghproxy.com；安装包自动更新走 Electron，手动检查/开发模式走后端 API。
+                    </p>
+                  )}
+                </div>
               </div>
             </SettingsCard>
 

@@ -1,0 +1,7 @@
+{
+  "label": "GyanD/codexffmpeg 8.1.1 ffmpeg-8.1.1-essentials_build.zip",
+  "zip_url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-essentials_build.zip",
+  "sha256": "6f58ce889f59c311410f7d2b18895b33c03456463486f3b1ebc93d97a0f54541",
+  "zip_relative_ffmpeg": "ffmpeg-8.1.1-essentials_build/bin/ffmpeg.exe",
+  "zip_relative_ffprobe": "ffmpeg-8.1.1-essentials_build/bin/ffprobe.exe"
+}

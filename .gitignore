@@ -35,6 +35,18 @@ Thumbs.db
 cs2_demo/
 cs2_demo_lib
 
+# Local / agent plans and specs (not versioned)
+docs/
+
+# Local GitHub PAT for update check (never commit)
+.cs2-insight-github-token
+
+# Stamped by packaging/windows/write-release-version.ps1 (local/CI); not kept in git
+backend/app/release_version.txt
+
+# Local portable zip from Compress-Archive (repo root)
+CS2InsightAgent-*-windows-amd64.zip
+
 # Project doc not tracked
 开发白皮书.md
 docs/

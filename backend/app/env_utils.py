@@ -380,6 +380,8 @@ class AppConfig(BaseModel):
     cs2_extra_launch_args_user_configured: bool = False
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
     record_inject_console_lines: str = ""
+    # 检查更新：auto=镜像与直连并发；on=仅用镜像；off=仅直连；或以 https:// 开头的自定义镜像前缀
+    update_github_mirror: str = "auto"
     obs_transition_enabled: bool = False
     obs_transition_name: str = "Fade"
     obs_transition_duration_ms: int = 100

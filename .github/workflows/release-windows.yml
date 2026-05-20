@@ -1,0 +1,102 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Stamp release version
+        shell: pwsh
+        run: ./packaging/windows/write-release-version.ps1 -Version "${{ github.ref_name }}"
+
+      - name: Bootstrap staging
+        shell: pwsh
+        run: ./packaging/windows/bootstrap-staging.ps1
+
+      - name: Verify imports
+        shell: pwsh
+        run: |
+          & "dist/staging/python/python.exe" -c "import demoparser2, fastapi; print('imports-ok')"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc /DMyAppVersion=$ver (Join-Path (Get-Location) "packaging\windows\CS2InsightAgent.iss")
+
+      - name: Zip staging (portable)
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          $zip = "CS2InsightAgent-$ver-windows-amd64.zip"
+          Compress-Archive -Path "dist\staging\*" -DestinationPath $zip -Force
+          Get-FileHash $zip -Algorithm SHA256 | Format-List
+
+      - name: Decode signing certificate
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_PFX_BASE64)) {
+            Write-Host "No WINDOWS_PFX_BASE64 secret; skipping decode."
+            exit 0
+          }
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64)
+          [IO.File]::WriteAllBytes("codesign.pfx", $bytes)
+
+      - name: Sign installer
+        env:
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "codesign.pfx")) {
+            Write-Host "No codesign.pfx; skipping Authenticode signing."
+            exit 0
+          }
+          $setup = Get-ChildItem -Path "dist" -Filter "CS2InsightAgent-*-Setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "dist/CS2InsightAgent-*-Setup.exe not found" }
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool.FullName sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f codesign.pfx /p $env:WINDOWS_PFX_PASSWORD $setup.FullName
+
+      - name: Write SHA256SUMS
+        shell: pwsh
+        run: |
+          $sums = @()
+          Get-ChildItem -Path "dist" -Filter "CS2InsightAgent-*-Setup.exe" | ForEach-Object { $sums += ((Get-FileHash $_.FullName -Algorithm SHA256).Hash + "  " + $_.Name) }
+          Get-ChildItem -Filter "CS2InsightAgent-*-windows-amd64.zip" | ForEach-Object { $sums += ((Get-FileHash $_.FullName -Algorithm SHA256).Hash + "  " + $_.Name) }
+          $sums | Set-Content -Encoding utf8 SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/CS2InsightAgent-*-Setup.exe
+            CS2InsightAgent-*-windows-amd64.zip
+            SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

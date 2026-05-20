@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
+import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
@@ -63,6 +64,9 @@ export default function App() {
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
   /** 用户是否正在编辑密码框（用于失焦时恢复“已保存”提示） */
   const [obsPasswordEditing, setObsPasswordEditing] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateModalManual, setUpdateModalManual] = useState(false);
   const obsConfigRef = useRef(obsConfig);
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
@@ -142,6 +146,8 @@ export default function App() {
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [updateGithubMirror, setUpdateGithubMirror] = useState("auto");
+  const [updateGithubMirrorCustom, setUpdateGithubMirrorCustom] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
@@ -801,7 +807,6 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
-      // 轮询直到后端就绪
       while (!cancelled) {
         try {
           const { data } = await API.get("config");
@@ -826,8 +831,40 @@ export default function App() {
             });
           }
           if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
+          if (typeof data.experimental?.pov_enabled === "boolean") {
+            setExperimentalPovEnabled(data.experimental.pov_enabled);
+          }
+          if (data.spec_player_verify && typeof data.spec_player_verify === "object") {
+            const spv = data.spec_player_verify;
+            setSpecPlayerVerify((prev) => ({
+              ...prev,
+              ...(typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)
+                ? { demo_timescale: spv.demo_timescale }
+                : {}),
+              ...(typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)
+                ? { max_retries: Math.round(spv.max_retries) }
+                : {}),
+              ...(typeof spv.per_retry_timeout_sec === "number" &&
+              Number.isFinite(spv.per_retry_timeout_sec)
+                ? { per_retry_timeout_sec: spv.per_retry_timeout_sec }
+                : {}),
+              ...(typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)
+                ? { settle_sec: spv.settle_sec }
+                : {}),
+            }));
+          }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+          if (typeof data.update_github_mirror === "string") {
+            const m = data.update_github_mirror.trim();
+            if (m.startsWith("http://") || m.startsWith("https://")) {
+              setUpdateGithubMirror("custom");
+              setUpdateGithubMirrorCustom(m);
+            } else if (m) {
+              setUpdateGithubMirror(m);
+              setUpdateGithubMirrorCustom("");
+            }
+          }
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
@@ -840,9 +877,8 @@ export default function App() {
 
           obsConfigHydratedRef.current = true;
           setBackendReady(true);
-          break; // 成功后跳出循环
-        } catch (e) {
-          // 后端尚未启动或连接失败，等待后重试
+          break;
+        } catch {
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
@@ -2017,6 +2053,7 @@ export default function App() {
     const defaults = {
       cs2_path: "",
       ffmpeg_path: "",
+      update_github_mirror: "auto",
       montage_encoder: "auto",
       ai_mode: false,
       expected_parse_players: [],
@@ -2029,6 +2066,8 @@ export default function App() {
       await API.put("config", defaults);
       setCs2Path("");
       setFfmpegPath("");
+      setUpdateGithubMirror("auto");
+      setUpdateGithubMirrorCustom("");
       setMontageEncoder("auto");
       setAiMode(false);
       setExpectedParsePlayersText("");
@@ -2068,6 +2107,41 @@ export default function App() {
     }
   }, [persistLlmConfig]);
 
+  const fetchUpdateInfo = useCallback(async (opts = { force: false, manual: false }) => {
+    try {
+      const { data } = await API.get("/app/update-info", {
+        params: opts.force ? { force: "true" } : {},
+        timeout: 15000,
+      });
+      setUpdateInfo(data);
+      if (data?.update_available) {
+        setUpdateModalManual(Boolean(opts.manual));
+        setUpdateModalOpen(true);
+      } else if (opts.manual) {
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    } catch {
+      if (opts.manual) {
+        setUpdateInfo({
+          error: "无法连接服务器",
+          current_version: "",
+          latest_version: null,
+          update_available: false,
+          release_notes: "",
+          release_url: "",
+          downloads: { setup_url: null, zip_url: null },
+        });
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchUpdateInfo({ force: false, manual: false });
+  }, [fetchUpdateInfo]);
+
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
 
@@ -2101,11 +2175,16 @@ export default function App() {
     setCs2Path,
     ffmpegPath,
     setFfmpegPath,
+    updateGithubMirror,
+    setUpdateGithubMirror,
+    updateGithubMirrorCustom,
+    setUpdateGithubMirrorCustom,
     montageEncoder,
     setMontageEncoder,
     demoWatchPaths,
     setDemoWatchPaths,
     handleSaveConfig,
+    fetchUpdateInfo,
     handleDetectCs2,
     handleSaveAllSettingsPage,
     saveExpectedPlayersFromList,
@@ -2241,7 +2320,11 @@ export default function App() {
               </div>
             </div>
           )}
-          <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+          <SidebarNav
+            queueLength={queue.length}
+            disabled={batchRecording}
+            onCheckUpdate={() => void fetchUpdateInfo({ force: true, manual: true })}
+          />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
             {!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
@@ -2330,6 +2413,17 @@ export default function App() {
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
           onClose={() => setRecordingBlockedMessage("")}
+        />
+
+        <UpdateCheckModal
+          open={updateModalOpen}
+          info={updateInfo}
+          manual={updateModalManual}
+          title={updateModalManual ? "检查更新" : "发现新版本"}
+          onClose={() => {
+            setUpdateModalOpen(false);
+            setUpdateModalManual(false);
+          }}
         />
       </div>
     </AppShellProvider>
