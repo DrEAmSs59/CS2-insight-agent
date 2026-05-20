@@ -207,19 +207,19 @@ function PrimaryButton({ children, className = "", ...rest }) {
 
 function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPastePath }) {
   return (
-    <div className="min-w-0 space-y-1.5">
+    <div className="w-full max-w-full space-y-1.5">
       <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+      <div className="flex w-full max-w-full flex-wrap items-end gap-2">
         <input
           value={value ?? ""}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlurSave}
-          className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[11px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none sm:text-[12px]"
+          className="min-w-[min(100%,10rem)] shrink grow basis-48 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[11px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
         />
         <SecondaryButton
           type="button"
-          className="w-full shrink-0 px-2.5 py-2 sm:w-auto"
+          className="shrink-0 px-2.5 py-2"
           onClick={onPastePath}
           title="从剪贴板粘贴完整路径"
         >
@@ -411,44 +411,43 @@ export default function SettingsPage() {
             <SettingsCard
               title="运行模式"
               hint="切换后会影响解析是否请求大模型；AI 模式需配置密钥。"
-              fill
             >
-              <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,12.5rem),1fr))] gap-3 items-stretch">
+              <div className="flex w-full max-w-full flex-wrap gap-3">
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(false)}
-                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all @min-[28rem]/settings:min-h-[5rem] ${
+                  className={`relative flex min-h-[5rem] shrink grow basis-40 flex-col rounded-lg border p-3 text-left transition-all ${
                     !s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
                   }`}
                 >
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <Zap className={`h-4 w-4 shrink-0 ${!s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`min-w-0 flex-1 text-sm font-bold ${!s.aiMode ? "text-white" : "text-zinc-400"}`}>极速本地</span>
+                    <span className={`text-sm font-bold ${!s.aiMode ? "text-white" : "text-zinc-400"}`}>极速本地</span>
                     {!s.aiMode ? (
                       <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
                     ) : null}
                   </div>
-                  <p className="mt-2 min-w-0 text-[11px] leading-relaxed text-zinc-500">本地规则提取片段，无需 AI</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">本地规则提取片段，无需 AI</p>
                 </button>
                 <button
                   type="button"
                   onClick={() => void s.handleAiModeChange(true)}
-                  className={`relative flex min-h-[4.5rem] min-w-0 w-full flex-col rounded-lg border p-3 text-left transition-all @min-[28rem]/settings:min-h-[5rem] ${
+                  className={`relative flex min-h-[5rem] shrink grow basis-40 flex-col rounded-lg border p-3 text-left transition-all ${
                     s.aiMode
                       ? "border-cs2-orange bg-cs2-orange/12 shadow-[0_0_0_1px_rgba(255,140,0,0.35)]"
                       : "border-white/[0.08] bg-black/20 hover:border-white/15"
                   }`}
                 >
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <Brain className={`h-4 w-4 shrink-0 ${s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`min-w-0 flex-1 text-sm font-bold ${s.aiMode ? "text-white" : "text-zinc-400"}`}>AI 洞察</span>
+                    <span className={`text-sm font-bold ${s.aiMode ? "text-white" : "text-zinc-400"}`}>AI 洞察</span>
                     {s.aiMode ? (
                       <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
                     ) : null}
                   </div>
-                  <ul className="mt-2 min-w-0 space-y-0.5 text-[11px] leading-relaxed text-zinc-500">
+                  <ul className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-zinc-500">
                     <li>· AI 锐评与评分</li>
                   </ul>
                 </button>
@@ -458,18 +457,15 @@ export default function SettingsPage() {
             <SettingsCard
               title="CS2 路径"
               hint="一键录制依赖本机 CS2；若自动探测失败请粘贴 Steam 库中的 cs2.exe 完整路径。"
-              fill
             >
-              <div className="flex min-h-0 flex-1 flex-col space-y-3">
-                <PathFieldRow
-                  label="cs2.exe 完整路径"
-                  value={s.cs2Path}
-                  placeholder="...\\game\\bin\\win64\\cs2.exe"
-                  onChange={s.setCs2Path}
-                  onBlurSave={() => void s.handleSaveConfig({ cs2_path: s.cs2Path ?? "" })}
-                  onPastePath={() => void handlePasteCs2()}
-                />
-              </div>
+              <PathFieldRow
+                label="cs2.exe 完整路径"
+                value={s.cs2Path}
+                placeholder="...\\game\\bin\\win64\\cs2.exe"
+                onChange={s.setCs2Path}
+                onBlurSave={() => void s.handleSaveConfig({ cs2_path: s.cs2Path ?? "" })}
+                onPastePath={() => void handlePasteCs2()}
+              />
             </SettingsCard>
 
             <SettingsCard

@@ -115,6 +115,8 @@ class Clip:
     victim_spec_slots: list[Optional[int]] = field(default_factory=list)
     # 下饭片段：击杀了目标玩家的凶手的 spec_player 槽位
     killer_spec_slot: Optional[int] = None
+    # 死亡合集：与 killers 等长；每次死亡对应击杀者的 spec_player 槽位
+    killers_spec_slots: list[Optional[int]] = field(default_factory=list)
     # 本回合开局比分（目标方 round 胜场 : 对方），来自 round_freeze_end 刻度与 team_num
     score_own: Optional[int] = None
     score_opp: Optional[int] = None
@@ -2283,6 +2285,11 @@ class DemoAnalyzer:
             ]
             if _c.killer_name:
                 _c.killer_spec_slot = spec_slots.get(_c.killer_name.lower())
+            # 死亡合集：killers 列表里每个击杀者的 slot
+            _c.killers_spec_slots = [
+                spec_slots.get(k.lower()) if k else None
+                for k in _c.killers
+            ]
         name_to_sid = build_player_name_to_steam_id(self.parser, match_start_tick)
         tsid = _lookup_steam_id_for_name(name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None
@@ -2329,6 +2336,7 @@ class DemoAnalyzer:
                 total_rounds=total_rounds,
                 match_start_tick=match_start_tick,
                 tick_rate=float(TICK_RATE),
+                spec_slots=spec_slots,
             )
             timeline = bundle.get("timeline")
             round_timeline = bundle.get("round_timeline")

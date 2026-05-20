@@ -78,6 +78,10 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
   } else {
     queueSummaryLine = "时间线事件";
   }
+  // Spec slots pre-computed by round_timeline.py during demo parsing.
+  // attacker_spec_slot = killer's spec_player slot; victim_spec_slot = victim's slot.
+  const atkSpecSlot = event?.attacker_spec_slot ?? null;
+  const vicSpecSlot = event?.victim_spec_slot ?? null;
   return {
     clip_id: client_clip_uid,
     client_clip_uid,
@@ -99,6 +103,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     killer_steamid64: isDeath ? atkSid || null : null,
     victims: isKill && vic ? [vic] : [],
     victim_steamid64s: isKill && vic ? [vicSid] : [],
+    // spec slots from demo parsing — used by recording executor to switch spectator by slot number
+    attacker_spec_slot: atkSpecSlot,
+    victim_spec_slot: vicSpecSlot,
     timeline_source: "round_timeline_event",
     timeline_event_id: String(event?.id || ""),
     _timeline_target: targetPlayer || null,
@@ -153,6 +160,8 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
     clip_min_tick: st,
     clip_max_tick: et,
     kill_ticks: [],
+    // target player's spec_player slot pre-computed during demo parsing
+    target_spec_slot: roundRow?.target_player_spec_slot ?? null,
     timeline_source: "round_timeline_round",
     _timeline_target: targetPlayer || null,
   };

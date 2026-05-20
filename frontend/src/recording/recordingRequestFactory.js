@@ -185,13 +185,15 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
 export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetSpecSlot = clipData.target_spec_slot ?? null;
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
+  // timeline event fields: attacker_name/attacker_steamid/attacker_spec_slot (killer)
+  //                        victim_name/victim_steamid/victim_spec_slot
   const nameToSteamId = matchMeta?.nameToSteamId ?? {};
-  const victimName = clipData.victims?.[0] || "";
+  const killerSpecSlot = clipData.attacker_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, killerSpecSlot);
+  const victimName = clipData.victim_name || clipData.victims?.[0] || "";
   const victimSteamId =
-    clipData.victim_steamid64s?.[0] || nameToSteamId[victimName] || "";
-  const victimSpecSlot = clipData.victim_spec_slots?.[0] ?? null;
+    clipData.victim_steamid || clipData.victim_steamid64s?.[0] || nameToSteamId[victimName] || "";
+  const victimSpecSlot = clipData.victim_spec_slot ?? null;
   return {
     request_id: newRequestId(),
     request_type: "timeline_kill",
@@ -201,11 +203,11 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
     events: [
       {
         event_type: "kill",
-        tick: clipData.kill_ticks?.[0] || 0,
+        tick: clipData.tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
-        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        killer: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, killerSpecSlot),
         victim: buildTargetPlayer(victimName, victimSteamId, victimSpecSlot),
-        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
+        target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, killerSpecSlot),
         perspective: "killer",
       },
     ],
@@ -218,11 +220,15 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
 export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  // timeline event fields: attacker_name/attacker_steamid/attacker_spec_slot (killer)
+  //                        victim_spec_slot = target player's spec slot (target player died)
+  const nameToSteamId = matchMeta?.nameToSteamId ?? {};
+  const targetSpecSlot = clipData.victim_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
-  const killerName = clipData.killer_name || "";
-  const killerSteamId = resolveKillerSteamId(killerName, clipData, matchMeta);
-  const killerSpecSlot = clipData.killer_spec_slot ?? null;
+  const killerName = clipData.attacker_name || clipData.killer_name || "";
+  const killerSteamId =
+    clipData.attacker_steamid || resolveKillerSteamId(killerName, clipData, matchMeta);
+  const killerSpecSlot = clipData.attacker_spec_slot ?? null;
   return {
     request_id: newRequestId(),
     request_type: "timeline_death",
@@ -232,7 +238,7 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
     events: [
       {
         event_type: "death",
-        tick: clipData.death_tick || clipData.kill_ticks?.[0] || 0,
+        tick: clipData.tick || clipData.death_tick || clipData.kill_ticks?.[0] || 0,
         round: clipData.round,
         killer: buildTargetPlayer(killerName, killerSteamId, killerSpecSlot),
         victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
@@ -299,11 +305,12 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
         const kSteamId = String(
           clipData.killers_steamid64s?.[i] || nameToSteamId[kName] || ""
         );
+        const kSpecSlot = clipData.killers_spec_slots?.[i] ?? null;
         return {
           event_type: "death",
           tick,
           round: clipData.source_rounds?.[i] ?? clipData.round,
-          killer: buildTargetPlayer(kName, kSteamId),
+          killer: buildTargetPlayer(kName, kSteamId, kSpecSlot),
           victim: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
           target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
           perspective: "victim",
@@ -331,7 +338,8 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
   const baseDemo = buildDemoContext(clipData, queueItem, matchMeta);
   const demo = maxRoundEndTick > 0 ? { ...baseDemo, demo_end_tick: maxRoundEndTick } : baseDemo;
 
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   return {
     request_id: newRequestId(),
     request_type: "round_compilation",
@@ -380,7 +388,8 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
 export function buildTimelineRoundRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId);
+  const targetSpecSlot = clipData.target_spec_slot ?? null;
+  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
   return {
     request_id: newRequestId(),
     request_type: "timeline_round",

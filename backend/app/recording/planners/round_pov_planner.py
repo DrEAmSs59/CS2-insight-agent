@@ -107,6 +107,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
             round=round_info.round,
             target_player_name=req.target_player.name,
             target_steamid64=req.target_player.steamid64,
+            target_spec_slot=req.target_player.spec_slot,
             perspective=Perspective.round,
             is_final_round=is_final_round,
             safe_seek_tick=start_tick,

@@ -306,6 +306,7 @@ def build_round_timeline(
     total_rounds: int,
     match_start_tick: int,
     tick_rate: float,
+    spec_slots: "dict[str, int] | None" = None,
 ) -> dict[str, Any]:
     from . import demo_parser as dp
 
@@ -411,6 +412,18 @@ def build_round_timeline(
 
             ev_seq += 1
             eid = f"r{eff_rn}-t{tick}-{typ}-{ev_seq}"
+            _sl = spec_slots or {}
+            # When the target player is the attacker/victim, prefer the pre-computed
+            # target_player_user_id (resolved via user_id, more reliable for 5E/PW demos)
+            # over the name-keyed spec_slots dict which may be incomplete.
+            if is_att:
+                _att_slot = target_player_user_id
+            else:
+                _att_slot = _sl.get(attacker.lower()) if attacker else None
+            if is_vic:
+                _vic_slot = target_player_user_id
+            else:
+                _vic_slot = _sl.get(victim.lower()) if victim else None
             legacy_ev = {
                 "id": eid,
                 "type": typ,
@@ -419,8 +432,10 @@ def build_round_timeline(
                 "round_time_seconds": round_time_sec,
                 "attacker_name": attacker or None,
                 "attacker_steamid": attacker_sid,
+                "attacker_spec_slot": _att_slot,
                 "victim_name": victim or None,
                 "victim_steamid": victim_sid,
+                "victim_spec_slot": _vic_slot,
                 "assister_name": (assister or None) if assist_col else None,
                 "assister_steamid": assister_sid,
                 "weapon": weapon or None,
@@ -453,8 +468,10 @@ def build_round_timeline(
                         "time_text": time_text,
                         "attacker_name": attacker,
                         "attacker_steamid": attacker_sid,
+                        "attacker_spec_slot": _att_slot,
                         "victim_name": victim,
                         "victim_steamid": victim_sid,
+                        "victim_spec_slot": _vic_slot,
                         "assister_name": (assister or None) if (assist_col and assister) else None,
                         "weapon_name": weapon_name,
                         "weapon_key": weapon or None,
@@ -482,8 +499,10 @@ def build_round_timeline(
                         "time_text": time_text,
                         "attacker_name": killer,
                         "attacker_steamid": killer_sid,
+                        "attacker_spec_slot": _att_slot,
                         "victim_name": victim,
                         "victim_steamid": victim_sid,
+                        "victim_spec_slot": _vic_slot,
                         "assister_name": (assister or None) if (assist_col and assister) else None,
                         "weapon_name": weapon_name,
                         "weapon_key": weapon or None,
@@ -622,6 +641,7 @@ def build_round_timeline(
                 "end_tick": int(ret) if ret is not None else None,
                 "record_end_tick": int(record_end) if record_end is not None else None,
                 "focused_player": tp,
+                "target_player_spec_slot": target_player_user_id,
                 "summary": {"kills": tk, "deaths": td, "assists": ta},
                 "player_stats": {"kills": tk, "deaths": td, "assists": ta, "headshots": headshots},
                 "events": kf_sorted,

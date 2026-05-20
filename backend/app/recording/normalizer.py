@@ -170,10 +170,14 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
 
     if (
         dto.options.enable_victim_pov
-        and dto.request_type not in {RequestType.highlight, RequestType.kill_compilation}
+        and dto.request_type not in {
+            RequestType.highlight,
+            RequestType.kill_compilation,
+            RequestType.timeline_kill,
+        }
     ):
         warnings.append(
-            "enable_victim_pov only applies to highlight and kill_compilation"
+            "enable_victim_pov only applies to highlight, kill_compilation, and timeline_kill"
         )
 
     return NormalizedRequest(
