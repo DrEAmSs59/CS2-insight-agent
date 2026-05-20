@@ -34,6 +34,7 @@ _DEFAULT_EXAMPLE_FILENAME = "cs2-insight.config.example.json"
 _DATA_SUBDIR = "data"
 _BACKUP_DIR_NAME = ".cs2_config_backup"
 _DB_BASENAME = "cs2-insight.db"
+_DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen"
 
 
 def get_data_dir() -> Path:
@@ -373,7 +374,10 @@ class AppConfig(BaseModel):
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
-    cs2_extra_launch_args: str = ""
+    cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+    # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，
+    # 此时即便清空也应尊重用户选择，不再自动回填 -fullscreen。
+    cs2_extra_launch_args_user_configured: bool = False
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
     record_inject_console_lines: str = ""
     obs_transition_enabled: bool = False
@@ -381,6 +385,33 @@ class AppConfig(BaseModel):
     obs_transition_duration_ms: int = 100
     obs_game_scene_name: str = "CS2 Insight Recording"
     obs_black_scene_name: str = "CS2 Insight Black"
+
+
+def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
+    changed = False
+    fullscreen_re = re.compile(r"(?<!\S)-fullscreen(?!\S)", re.IGNORECASE)
+
+    def ensure_fullscreen_arg(text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+        if fullscreen_re.search(s):
+            return s
+        return s + "\n" + _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+
+    # 旧配置迁移：
+    # - 仅当本次是从 JSON 原始对象加载，且缺少 user_configured 标记时，补写该字段
+    # - save_config(cfg) 传入 raw=None 时，不做“缺字段迁移”推断，避免把用户已配置状态误重置
+    if isinstance(raw, dict) and ("cs2_extra_launch_args_user_configured" not in raw):
+        changed = True
+
+    if not cfg.cs2_extra_launch_args_user_configured:
+        current_args = str(cfg.cs2_extra_launch_args or "")
+        next_args = ensure_fullscreen_arg(current_args)
+        if next_args != current_args:
+            cfg.cs2_extra_launch_args = next_args
+            changed = True
+    return changed
 
 
 def _parse_config_json_file(path: Path) -> dict:
@@ -408,7 +439,10 @@ def load_config() -> AppConfig:
     path = resolve_config_path()
     if path.is_file():
         raw = _parse_config_json_file(path)
-        return AppConfig(**raw)
+        cfg = AppConfig(**raw)
+        if _normalize_config_defaults(cfg, raw):
+            save_config(cfg)
+        return cfg
     if _LEGACY_CONFIG_PATH.is_file():
         raw = _parse_config_json_file(_LEGACY_CONFIG_PATH)
         cfg = AppConfig(**raw)
@@ -426,6 +460,7 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig) -> None:
+    _normalize_config_defaults(cfg)
     path = resolve_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")

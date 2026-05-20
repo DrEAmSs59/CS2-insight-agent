@@ -133,7 +133,10 @@ export default function Cs2LaunchConsoleFields({
         <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
           {launchChips.length === 0 ? (
             <span className="py-1 text-[12px] text-cs2-text-muted">
-              尚未添加；每条在 cs2.exe 上单独解析（可写 -threads 8 为一条）
+              尚未添加额外启动参数；每条会作为独立参数追加到 cs2.exe
+              <br />
+              例如可添加一条 -threads 8。
+              <br />默认保留 -fullscreen，自行修改可能影响 CS2 启动或录制表现
             </span>
           ) : (
             launchChips.map((line, idx) => (

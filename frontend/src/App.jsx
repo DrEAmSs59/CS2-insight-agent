@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
@@ -36,6 +35,15 @@ import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+
+const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
+
+function ensureDefaultCs2FullscreenArg(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return DEFAULT_CS2_EXTRA_LAUNCH_ARGS;
+  if (/(?:^|\s)-fullscreen(?=$|\s)/i.test(text)) return text;
+  return `${text}\n${DEFAULT_CS2_EXTRA_LAUNCH_ARGS}`;
+}
 
 export default function App() {
   const navigate = useNavigate();
@@ -1954,6 +1962,20 @@ export default function App() {
       if (Array.isArray(raw.expected_parse_players)) {
         put.expected_parse_players = raw.expected_parse_players;
         setExpectedParsePlayersText(raw.expected_parse_players.join("\n"));
+      }
+      if (typeof raw.cs2_extra_launch_args === "string") {
+        const launchArgsUserConfigured =
+          typeof raw.cs2_extra_launch_args_user_configured === "boolean"
+            ? raw.cs2_extra_launch_args_user_configured
+            : false;
+        const launchArgs = launchArgsUserConfigured
+          ? raw.cs2_extra_launch_args
+          : ensureDefaultCs2FullscreenArg(raw.cs2_extra_launch_args);
+        put.cs2_extra_launch_args = launchArgs;
+        put.cs2_extra_launch_args_user_configured = launchArgsUserConfigured;
+        setCs2ExtraLaunchArgs(launchArgs);
+      } else if (typeof raw.cs2_extra_launch_args_user_configured === "boolean") {
+        put.cs2_extra_launch_args_user_configured = raw.cs2_extra_launch_args_user_configured;
       }
       if (Object.keys(put).length) {
         await API.put("config", put);
