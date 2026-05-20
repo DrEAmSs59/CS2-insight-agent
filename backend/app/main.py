@@ -624,6 +624,7 @@ class ConfigPayload(BaseModel):
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
+    cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
@@ -825,7 +826,15 @@ async def update_config(payload: ConfigPayload):
             else {}
         )
     if payload.cs2_extra_launch_args is not None:
-        cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
+        next_launch_args = str(payload.cs2_extra_launch_args)
+        if payload.cs2_extra_launch_args_user_configured is not None:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
+        elif next_launch_args != cfg.cs2_extra_launch_args:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = True
+    elif payload.cs2_extra_launch_args_user_configured is not None:
+        cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
     if payload.record_inject_console_lines is not None:
         cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
     if payload.obs_transition_enabled is not None:
@@ -2018,7 +2027,9 @@ def reveal_file_in_explorer(body: RevealFileInExplorerBody):
             if p.is_dir():
                 os.startfile(str(p))  # noqa: S606
             else:
-                sp.Popen(["explorer", "/select," + str(p)])
+                # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
+                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
+                sp.Popen(["explorer.exe", "/select,", str(p)])
         elif sys.platform == "darwin":
             sp.run(["open", "-R", str(p)], check=False, timeout=20)
         else:
