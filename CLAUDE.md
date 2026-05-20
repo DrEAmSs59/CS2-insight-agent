@@ -8,7 +8,7 @@ CS2 Insight Agent — Windows 桌面端 CS2 电竞终端。自动解析 `.dem` �
 
 - **目标平台**: Windows（录制 / CS2 控制仅 Windows 可用）
 - **开发平台**: macOS / Linux 可启动后端和前端，解析、AI、Demo 库等功能均可正常开发调试
-- **Backend**: Python 3.10+ / FastAPI / uvicorn
+- **Backend**: Python 3.12 / FastAPI / uvicorn
 - **Frontend**: React 19 / TailwindCSS 4 / Vite 6 / Zustand
 - **解析引擎**: `demoparser2`（Rust 实现，可能 panic）
 - **AI 网关**: litellm（单片段）+ openai SDK（批量评审），OpenAI 兼容协议
@@ -20,7 +20,7 @@ CS2 Insight Agent — Windows 桌面端 CS2 电竞终端。自动解析 `.dem` �
 
 ```bash
 # 开发环境（macOS / Linux）
-uv venv .venv --python 3.11
+uv venv .venv --python 3.12
 source .venv/bin/activate
 uv pip install -r backend/requirements.txt
 
@@ -39,6 +39,8 @@ python -m app.run_server
 ```
 
 前端 Vite 已配置 `/api/*` 代理到 `localhost:8000`。生产模式由 FastAPI 直接 serve `frontend/dist/` 静态文件。
+
+实际发放版本使用的内置 Python 运行时为 `3.12`。
 
 ### 跨平台开发
 
@@ -68,11 +70,11 @@ python -m app.run_server
 
 ### API 路由（[main.py](backend/app/main.py)）
 
-所有路由在单文件 `main.py` 中定义（~51KB）。关键端点：
+所有路由在单文件 `main.py` 中定义；录制 V3 另见 [recording/api.py](backend/app/recording/api.py)（`app.include_router` 挂载）。关键端点：
 - `POST /api/demo/parse` — 单玩家解析
 - `POST /api/demo/parse-batch` — 跨 demo 批量解析
-- `POST /api/record/start` — 单 demo 录制
-- `POST /api/record/batch` — 跨 demo 批量录制
+- `POST /api/recording/queue` — V3 录制队列（前端批量 OBS 录制；`RecordingExecutor` / `execute_plan_queue`）
+- `POST /api/recording/abort` — 中止当前 V3 录制队列
 - `POST /api/gsi/cs2` — CS2 GSI HTTP sink（录制就绪门控）
 - `GET /api/demos/stream` — Demo 库 SSE 实时推送
 

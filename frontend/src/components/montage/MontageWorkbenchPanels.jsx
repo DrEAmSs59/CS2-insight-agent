@@ -18,6 +18,7 @@ import {
 import { AiScoreBadge } from "../ClipCard";
 import {
   getClipDurationSeconds,
+  getClipRoundLabel,
   getClipTitle,
   getMontageBlockShortLabel,
   getMontageClipFactLine,
@@ -532,6 +533,9 @@ export function MontageOrchestrationTimeline({
               const dragging = dragId === clip.id;
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = getMontageBlockShortLabel(clip);
+              const suppressMontageAi = variant === "timeline" || variant === "compilation";
+              const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip);
+              const outBase = pathBasenameQuick(clip?.output_path);
               return (
                 <li key={clip.id} className="flex flex-col">
                   <div
@@ -570,24 +574,31 @@ export function MontageOrchestrationTimeline({
                         </span>
                       </div>
 
-                      {/* 辅助合并行描述：地图、比分、视角及武器降噪排布 */}
+                      {/* 摘要行：武器、地图、回合、比分（详情拆到下方，避免 truncate + 仅靠 hover） */}
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
                         {weapon ? <span className="font-medium text-cs2-text-secondary">{weapon}</span> : null}
                         {weapon && (mapName || rnd != null) ? <span>•</span> : null}
-                        {mapName ? <span className="truncate max-w-[140px]">{mapName}</span> : null}
-                        {rnd != null ? <span className="font-mono text-cs2-text-secondary">R{rnd}</span> : null}
+                        {mapName ? <span className="break-words text-cs2-text-secondary">{mapName}</span> : null}
+                        {getClipRoundLabel(clip) != null ? (
+                          <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
+                        ) : null}
                         {scorePair ? (
                           <span className="font-mono font-semibold text-cs2-text-primary">
                             {scorePair.left}:{scorePair.right}
                           </span>
                         ) : null}
-                        {factLine ? <span className="truncate max-w-[200px] italic text-cs2-text-muted ml-auto" title={factLine}>{factLine}</span> : null}
                       </div>
+
+                      {factLine ? (
+                        <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-secondary break-words">
+                          {factLine}
+                        </p>
+                      ) : null}
 
                       {/* 次级状态微标区 */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {victimSegCount > 0 ? (
-                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
+                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface">
                             受害者视角 ×{victimSegCount}
                           </span>
                         ) : null}
@@ -597,7 +608,6 @@ export function MontageOrchestrationTimeline({
                               ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
                               : "bg-cs2-bg-input text-cs2-text-muted"
                           }`}
-                          title={perspectiveZh}
                         >
                           {perspectivePrimary}
                         </span>
@@ -605,6 +615,29 @@ export function MontageOrchestrationTimeline({
                           <span className="rounded bg-cs2-cyan-surface px-2 py-0.5 text-xs font-bold text-cs2-cyan-on-surface">HUD</span>
                         ) : null}
                       </div>
+                      {povTip ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          {povTip}
+                        </p>
+                      ) : null}
+                      {perspectiveZh !== perspectivePrimary ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
+                          录制视角：{perspectiveZh}
+                        </p>
+                      ) : null}
+                      {aiLine ? (
+                        <p className="mt-1.5 text-[11px] leading-relaxed italic text-cs2-text-muted break-words">
+                          {aiLine}
+                        </p>
+                      ) : null}
+                      {outBase ? (
+                        <p
+                          className="mt-1.5 font-mono text-[10px] text-cs2-text-muted/90 break-all"
+                          title={String(clip.output_path || "")}
+                        >
+                          {outBase}
+                        </p>
+                      ) : null}
 
                       {/* 标签列表 */}
                       {tags.length ? (
@@ -727,7 +760,7 @@ export function MontageMaterialPoolCard({
   const playerName = clip.player_name?.trim() || "未知玩家";
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
-  const factLine = getMontageClipFactLine(clip);
+  const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
   const killBadge = getMontageBlockShortLabel(clip);
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = variant === "timeline" || variant === "compilation";
@@ -746,22 +779,21 @@ export function MontageMaterialPoolCard({
       onDragStart={(e) => onDragStart(e, clip.id)}
       onDragEnd={onDragEnd}
       onClick={(e) => onClickMulti(e, clip.id)}
-      className={`group relative min-h-[110px] shrink-0 overflow-hidden rounded-xl bg-cs2-surface-1 p-3.5 transition-all cursor-grab border ${
+      className={`group flex min-h-[110px] shrink-0 gap-2.5 rounded-xl bg-cs2-surface-1 p-3.5 transition-all cursor-grab border ${
         selected
           ? "border-cs2-accent shadow-glow-accent bg-cs2-surface-2"
           : "border-cs2-border-subtle hover:border-cs2-border-focus hover:bg-cs2-surface-2"
       }`}
     >
-      {/* 左侧状态标识竖条 */}
       <div
-        className={`absolute left-0 top-2 bottom-2 w-1 rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
+        className={`w-1 shrink-0 self-stretch rounded-r-md ${VARIANT_BAR[variant] || VARIANT_BAR.neutral}`}
         aria-hidden
       />
 
-      <div className="pl-1.5 flex flex-col justify-between h-full min-w-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div>
-          {/* 首行核心信息区 */}
-          <div className="flex items-center justify-between gap-2">
+          {/* 首行：左信息 + 右 AI / 删除（同高对齐，左右留白一致） */}
+          <div className="flex items-center gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${VARIANT_RING[variant] || VARIANT_RING.neutral}`}>
                 {killBadge}
@@ -771,23 +803,61 @@ export function MontageMaterialPoolCard({
                 {dur != null ? `${dur.toFixed(1)}s` : "?s"}
               </span>
             </div>
-            {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
+            <div className="flex shrink-0 items-center gap-1">
+              {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
+              <button
+                type="button"
+                title="删除素材"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(clip);
+                }}
+                className="rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          {/* 次级合并说明行：地图、回合、武器及特殊视角数量等低频上下文整合降噪 */}
+          {/* 次级合并说明行：地图、回合、武器 */}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cs2-text-muted">
             {weaponShow ? <span className="font-medium text-cs2-text-secondary">{weaponShow}</span> : null}
             {weaponShow && (mapName || rnd != null) ? <span>•</span> : null}
             {mapName ? <span className="truncate max-w-[120px]">{mapName}</span> : null}
-            {rnd != null ? <span className="font-mono text-cs2-text-secondary">R{rnd}</span> : null}
+            {getClipRoundLabel(clip) != null ? (
+              <span className="font-mono text-cs2-text-secondary">{getClipRoundLabel(clip)}</span>
+            ) : null}
             {scorePair ? (
               <span className="font-mono font-semibold text-cs2-text-primary">
                 {scorePair.left}:{scorePair.right}
               </span>
             ) : null}
+          </div>
+
+          {/* 事实摘要行：击杀数 + 被击杀玩家（截断防撑高） */}
+          {factLine ? (
+            <p className="mt-1.5 truncate text-[11px] text-cs2-text-secondary" title={factLine}>
+              {factLine}
+            </p>
+          ) : null}
+
+          {/* 视角徽标行 */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                perspectivePrimary !== "观战视角"
+                  ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+                  : "bg-cs2-bg-input text-cs2-text-muted"
+              }`}
+            >
+              {perspectivePrimary}
+            </span>
+            {clip.pov_hud_enabled === true ? (
+              <span className="rounded bg-cs2-cyan-surface px-1.5 py-0.5 text-[11px] font-bold text-cs2-cyan-on-surface">HUD</span>
+            ) : null}
             {victimSegCount > 0 ? (
-              <span className="ml-auto rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
-                POV ×{victimSegCount}
+              <span className="rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
+                受害者视角 ×{victimSegCount}
               </span>
             ) : null}
           </div>
@@ -835,18 +905,6 @@ export function MontageMaterialPoolCard({
           </div>
         </div>
       </div>
-
-      <button
-        type="button"
-        title="删除素材"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(clip);
-        }}
-        className="absolute bottom-2 right-2 rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
     </li>
   );
 }

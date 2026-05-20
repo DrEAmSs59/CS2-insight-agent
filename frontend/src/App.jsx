@@ -1,12 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import useSessionState from "./hooks/useSessionState";
-import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
-import RecordWarmupModal, { RECORD_WARMUP_DEFAULT_OPTIONS } from "./components/RecordWarmupModal";
+import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import GuidePage from "./pages/GuidePage";
@@ -25,25 +23,42 @@ import {
   isFreezeToDeathCompilation,
   sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
-import { warmupApiPayloadToPersisted, warmupUiOptsToPersisted } from "./utils/warmupDefaults";
+import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
-import { queueItemClientUid, runWithConcurrency, buildBatchGroupsFromQueue } from "./utils/recordingBatch";
+import {
+  queueItemClientUid,
+  runWithConcurrency,
+  buildRecordingQueueRequestsFromQueue,
+  applySessionObsTransitionToRequests,
+} from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
+import API, { API_BASE_URL } from "./api/api";
 
-const API = axios.create({ baseURL: "/api" });
+import CustomTitleBar from "./components/CustomTitleBar";
 
-const DEFAULT_SPEC_PLAYER_VERIFY = Object.freeze({
-  demo_timescale: 0.05,
-  max_retries: 4,
-  per_retry_timeout_sec: 0.6,
-  settle_sec: 0.12,
-});
+const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
+
+function ensureDefaultCs2FullscreenArg(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return DEFAULT_CS2_EXTRA_LAUNCH_ARGS;
+  if (/(?:^|\s)-fullscreen(?=$|\s)/i.test(text)) return text;
+  return `${text}\n${DEFAULT_CS2_EXTRA_LAUNCH_ARGS}`;
+}
 
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [aiMode, setAiMode] = useSessionState("aiMode", false);
+  const [backendReady, setBackendReady] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
+  
+  // 修正 isPackaged 检测：同步判断
+  const [isPackaged, setIsPackaged] = useState(false);
+  useEffect(() => {
+    if (window.electron?.isPackaged) {
+      window.electron.isPackaged().then(setIsPackaged);
+    }
+  }, []);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
@@ -56,7 +71,6 @@ export default function App() {
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
   /** GET /api/config 已注入录制队列全局节奏后再允许自动写回，避免覆盖用户在本页会话内的修改 */
-  const pacingPersistReadyRef = useRef(false);
   const [llmConfig, setLlmConfig] = useState({
     model: "",
     api_key: "",
@@ -64,30 +78,26 @@ export default function App() {
   });
 
   /** @type {[Array<{ filename: string, path: string, players: any[], match_meta: any }>|null, Function]} */
-  const stripCachedResult = useCallback((demos) => {
-    if (!Array.isArray(demos)) return demos;
-    return demos.map(({ cached_result, ...rest }) => rest);
-  }, []);
-  const [uploadedDemos, setUploadedDemos, resetUploadedDemos] = useSessionState("uploadedDemos", null, { storageTransform: stripCachedResult });
+  const [uploadedDemos, setUploadedDemos] = useState(null);
 
   /**
    * 与 uploadedDemos 等长；未解析的槽位为 null。
    * 已解析槽位结构: { players: { [playerName]: { clips, match_meta } }, demo_path, demo_filename }
    */
   const [parsedMatches, setParsedMatches] = useState(null);
-  const [currentMatchIndex, setCurrentMatchIndex, resetCurrentMatchIndex] = useSessionState("currentMatchIndex", 0);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const currentMatchIndexRef = useRef(0);
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
-  const [selectedPlayers, setSelectedPlayers, resetSelectedPlayers] = useSessionState("selectedPlayers", {});
+  const [selectedPlayers, setSelectedPlayers] = useState({});
   /** 每场「回合合集」勾选：空 → 请求里发 null（整局合规非赛后）；非空 → 只解析所选回合 */
   const [freezeToDeathRoundsByMatch, setFreezeToDeathRoundsByMatch] = useState({});
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
-  const [activePlayerTabs, setActivePlayerTabs, resetActivePlayerTabs] = useSessionState("activePlayerTabs", {});
+  const [activePlayerTabs, setActivePlayerTabs] = useState({});
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
@@ -119,15 +129,21 @@ export default function App() {
   const [warmupIntent, setWarmupIntent] = useState(null);
   /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
   const [configBackupStatus, setConfigBackupStatus] = useState(null);
+  const [configBackupLoading, setConfigBackupLoading] = useState(false);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
+  const savedRecordWarmupDefaultsRef = useRef(null);
   const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
   const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
-  const [specPlayerVerify, setSpecPlayerVerify] = useState(() => ({ ...DEFAULT_SPEC_PLAYER_VERIFY }));
+  const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
+  const [obsTransitionName, setObsTransitionName] = useState("Fade");
+  const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
+  /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
+  const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [updateGithubMirror, setUpdateGithubMirror] = useState("auto");
@@ -433,7 +449,7 @@ export default function App() {
     const connect = () => {
       if (cancelled) return;
       try {
-        es = new EventSource("/api/demos/stream");
+        es = new EventSource(`${API_BASE_URL}/api/demos/stream`);
       } catch {
         return;
       }
@@ -745,114 +761,153 @@ export default function App() {
     setSelectedLibraryDemoIds(new Set());
   }, []);
 
+  const applyCommonParamsFromConfigData = useCallback((data) => {
+    if (!data || typeof data !== "object") return;
+    if (data.default_record_warmup && typeof data.default_record_warmup === "object") {
+      setSavedRecordWarmupDefaults(
+        Array.isArray(data.default_record_warmup) ? {} : data.default_record_warmup,
+      );
+    } else {
+      setSavedRecordWarmupDefaults({});
+    }
+    if (typeof data.cs2_extra_launch_args === "string") {
+      setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
+    }
+    if (typeof data.record_inject_console_lines === "string") {
+      setRecordInjectConsoleLines(data.record_inject_console_lines);
+    }
+    if (typeof data.obs_transition_enabled === "boolean") {
+      setObsTransitionEnabled(data.obs_transition_enabled);
+    }
+    if (typeof data.obs_transition_name === "string") {
+      setObsTransitionName(data.obs_transition_name);
+    }
+    if (typeof data.obs_transition_duration_ms === "number") {
+      setObsTransitionDurationMs(data.obs_transition_duration_ms);
+    }
+    if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
+      setExperimentalPovEnabled(data.experimental.pov_enabled);
+    }
+    if (
+      data.recording_global_pacing &&
+      typeof data.recording_global_pacing === "object" &&
+      !Array.isArray(data.recording_global_pacing)
+    ) {
+      useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
+    }
+  }, []);
+
+  const refreshCommonParamsFromServer = useCallback(async () => {
+    const { data } = await API.get("config");
+    applyCommonParamsFromConfigData(data);
+    setCommonParamsRefreshKey((k) => k + 1);
+    return data;
+  }, [applyCommonParamsFromConfigData]);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await API.get("config");
-        if (cancelled) return;
-        if (data.obs) {
-          const rawPw = data.obs.password ?? "";
-          const masked = typeof rawPw === "string" && rawPw.startsWith("****");
-          setObsHasSavedPassword(masked);
-          setObsPasswordEditing(false);
-          setObsConfig({
-            ...data.obs,
-            password: "",
-          });
-        }
-        if (data.llm) {
-          const rawKey = data.llm.api_key ?? "";
-          const masked = typeof rawKey === "string" && rawKey.startsWith("****");
-          setLlmKeySavedOnServer(masked);
-          setLlmConfig({
-            ...data.llm,
-            api_key: masked ? "" : rawKey,
-          });
-        }
-        if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
-        if (typeof data.experimental?.pov_enabled === "boolean") {
-          setExperimentalPovEnabled(data.experimental.pov_enabled);
-        }
-        if (data.spec_player_verify && typeof data.spec_player_verify === "object") {
-          const spv = data.spec_player_verify;
-          setSpecPlayerVerify((prev) => ({
-            ...prev,
-            ...(typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)
-              ? { demo_timescale: spv.demo_timescale }
-              : {}),
-            ...(typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)
-              ? { max_retries: Math.round(spv.max_retries) }
-              : {}),
-            ...(typeof spv.per_retry_timeout_sec === "number" &&
-            Number.isFinite(spv.per_retry_timeout_sec)
-              ? { per_retry_timeout_sec: spv.per_retry_timeout_sec }
-              : {}),
-            ...(typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)
-              ? { settle_sec: spv.settle_sec }
-              : {}),
-          }));
-        }
-        if (data.cs2_path) setCs2Path(data.cs2_path);
-        if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
-        if (typeof data.update_github_mirror === "string") {
-          const m = data.update_github_mirror.trim();
-          if (m.startsWith("http://") || m.startsWith("https://")) {
-            setUpdateGithubMirror("custom");
-            setUpdateGithubMirrorCustom(m);
-          } else if (m) {
-            setUpdateGithubMirror(m);
-            setUpdateGithubMirrorCustom("");
+    const initialize = async () => {
+      while (!cancelled) {
+        try {
+          const { data } = await API.get("config");
+          if (cancelled) return;
+          if (data.obs) {
+            const rawPw = data.obs.password ?? "";
+            const masked = typeof rawPw === "string" && rawPw.startsWith("****");
+            setObsHasSavedPassword(masked);
+            setObsPasswordEditing(false);
+            setObsConfig({
+              ...data.obs,
+              password: "",
+            });
           }
-        }
-        if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
-          setMontageEncoder(data.montage_encoder.trim().toLowerCase());
-        }
-        if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
-        if (Array.isArray(data.expected_parse_players)) {
-          setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
-        }
-        if (
-          data.default_record_warmup &&
-          typeof data.default_record_warmup === "object" &&
-          !Array.isArray(data.default_record_warmup)
-        ) {
-          setSavedRecordWarmupDefaults(data.default_record_warmup);
-        }
-        if (typeof data.cs2_extra_launch_args === "string") {
-          setCs2ExtraLaunchArgs(data.cs2_extra_launch_args);
-        }
-        if (typeof data.record_inject_console_lines === "string") {
-          setRecordInjectConsoleLines(data.record_inject_console_lines);
-        }
-        if (
-          data.recording_global_pacing &&
-          typeof data.recording_global_pacing === "object" &&
-          !Array.isArray(data.recording_global_pacing)
-        ) {
-          useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
-        }
-        if (!cancelled) {
+          if (data.llm) {
+            const rawKey = data.llm.api_key ?? "";
+            const masked = typeof rawKey === "string" && rawKey.startsWith("****");
+            setLlmKeySavedOnServer(masked);
+            setLlmConfig({
+              ...data.llm,
+              api_key: masked ? "" : rawKey,
+            });
+          }
+          if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
+          if (typeof data.experimental?.pov_enabled === "boolean") {
+            setExperimentalPovEnabled(data.experimental.pov_enabled);
+          }
+          if (data.spec_player_verify && typeof data.spec_player_verify === "object") {
+            const spv = data.spec_player_verify;
+            setSpecPlayerVerify((prev) => ({
+              ...prev,
+              ...(typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)
+                ? { demo_timescale: spv.demo_timescale }
+                : {}),
+              ...(typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)
+                ? { max_retries: Math.round(spv.max_retries) }
+                : {}),
+              ...(typeof spv.per_retry_timeout_sec === "number" &&
+              Number.isFinite(spv.per_retry_timeout_sec)
+                ? { per_retry_timeout_sec: spv.per_retry_timeout_sec }
+                : {}),
+              ...(typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)
+                ? { settle_sec: spv.settle_sec }
+                : {}),
+            }));
+          }
+          if (data.cs2_path) setCs2Path(data.cs2_path);
+          if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+          if (typeof data.update_github_mirror === "string") {
+            const m = data.update_github_mirror.trim();
+            if (m.startsWith("http://") || m.startsWith("https://")) {
+              setUpdateGithubMirror("custom");
+              setUpdateGithubMirrorCustom(m);
+            } else if (m) {
+              setUpdateGithubMirror(m);
+              setUpdateGithubMirrorCustom("");
+            }
+          }
+          if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
+            setMontageEncoder(data.montage_encoder.trim().toLowerCase());
+          }
+          if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
+          if (Array.isArray(data.expected_parse_players)) {
+            setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
+          }
+          applyCommonParamsFromConfigData(data);
+          setCommonParamsRefreshKey((k) => k + 1);
+
           obsConfigHydratedRef.current = true;
-          queueMicrotask(() => {
-            pacingPersistReadyRef.current = true;
-          });
+          setBackendReady(true);
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-      } catch {
-        /* ignore */
       }
-    })();
+    };
+
+    initialize();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyCommonParamsFromConfigData]);
 
   const refreshConfigBackupStatus = useCallback(async () => {
+    setConfigBackupLoading(true);
     try {
       const { data } = await API.get("/config-backup/status");
-      setConfigBackupStatus(data);
-    } catch {
-      setConfigBackupStatus(null);
+      setConfigBackupStatus(data && typeof data === "object" ? data : null);
+    } catch (e) {
+      const msg =
+        e?.response?.data?.detail != null
+          ? typeof e.response.data.detail === "string"
+            ? e.response.data.detail
+            : JSON.stringify(e.response.data.detail)
+          : e?.message || "无法连接后端";
+      setConfigBackupStatus({
+        fetch_failed: true,
+        message: String(msg),
+      });
+    } finally {
+      setConfigBackupLoading(false);
     }
   }, []);
 
@@ -860,21 +915,7 @@ export default function App() {
     void refreshConfigBackupStatus();
   }, [refreshConfigBackupStatus]);
 
-  useEffect(() => {
-    if (!pacingPersistReadyRef.current) return;
-    const t = setTimeout(() => {
-      void API.put("config", { recording_global_pacing: globalPacing }).catch(() => {});
-    }, 600);
-    return () => clearTimeout(t);
-  }, [globalPacing]);
-
-  useEffect(() => {
-    if (!pacingPersistReadyRef.current) return;
-    const t = setTimeout(() => {
-      void API.put("config", { spec_player_verify: specPlayerVerify }).catch(() => {});
-    }, 600);
-    return () => clearTimeout(t);
-  }, [specPlayerVerify]);
+  // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
   useEffect(() => {
     // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「扫描本地 demo 库」入库。
@@ -1502,50 +1543,83 @@ export default function App() {
     }
   }, []);
 
+  savedRecordWarmupDefaultsRef.current = savedRecordWarmupDefaults;
+
   const persistWarmupDefaults = useCallback(async (obj) => {
-    setSavedRecordWarmupDefaults(obj);
+    const merged = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...obj };
+    setSavedRecordWarmupDefaults(merged);
     try {
-      await API.put("config", { default_record_warmup: obj });
+      await API.put("config", { default_record_warmup: merged });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  const persistObsTransition = useCallback(async (data) => {
+    const enabled = !!data.obs_transition_enabled;
+    const name = data.obs_transition_name ?? "Fade";
+    const ms = Number(data.obs_transition_duration_ms) || 100;
+    setObsTransitionEnabled(enabled);
+    setObsTransitionName(name);
+    setObsTransitionDurationMs(ms);
+    try {
+      await API.put("config", {
+        obs_transition_enabled: enabled,
+        obs_transition_name: name,
+        obs_transition_duration_ms: ms,
+      });
     } catch {
       /* silent */
     }
   }, []);
 
   const persistExperimentalPov = useCallback(async (enabled) => {
-    const en = !!enabled;
     try {
-      if (en) {
-        const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
-        const o = savedRecordWarmupDefaults;
-        if (o && typeof o === "object" && !Array.isArray(o)) {
-          for (const k of Object.keys(RECORD_WARMUP_DEFAULT_OPTIONS)) {
-            if (!Object.prototype.hasOwnProperty.call(o, k) || o[k] === undefined) continue;
-            const v = o[k];
-            if (k === "resolution_width" || k === "resolution_height") {
-              base[k] = v != null && v !== "" ? String(v) : "";
-            } else {
-              base[k] = v;
-            }
-          }
-        }
-        const nextPersisted = warmupUiOptsToPersisted({
-          ...base,
-          pov_radar_mode: 0,
-          pov_teamcounter_numeric: false,
-        });
-        await API.put("config", {
-          experimental: { pov_enabled: true },
-          default_record_warmup: nextPersisted,
-        });
-        setSavedRecordWarmupDefaults(nextPersisted);
-      } else {
-        await API.put("config", { experimental: { pov_enabled: false } });
-      }
-      setExperimentalPovEnabled(en);
+      await API.put("config", { experimental: { pov_enabled: enabled } });
+      setExperimentalPovEnabled(!!enabled);
     } catch {
       /* silent */
     }
-  }, [savedRecordWarmupDefaults]);
+  }, []);
+
+  /** 常用参数页：一次性写入配置文件（替代分项防抖保存） */
+  const saveAllCommonParams = useCallback(async (payload) => {
+    const warmupPatch =
+      payload?.default_record_warmup && typeof payload.default_record_warmup === "object"
+        ? payload.default_record_warmup
+        : {};
+    const mergedWarmup = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...warmupPatch };
+    const pacing =
+      payload?.recording_global_pacing && typeof payload.recording_global_pacing === "object"
+        ? payload.recording_global_pacing
+        : useRecordingQueue.getState().globalPacing;
+    const body = {
+      default_record_warmup: mergedWarmup,
+      recording_global_pacing: pacing,
+      cs2_extra_launch_args: String(payload?.cs2_extra_launch_args ?? ""),
+      record_inject_console_lines: String(payload?.record_inject_console_lines ?? ""),
+      obs_transition_enabled: !!payload?.obs_transition_enabled,
+      obs_transition_name: payload?.obs_transition_name ?? "Fade",
+      obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
+      experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
+    };
+    try {
+      await API.put("config", body);
+      await refreshCommonParamsFromServer();
+      setProgressText("常用参数已保存到配置文件。", { autoDismissMs: 2800 });
+      return { ok: true };
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      const msg =
+        detail != null
+          ? typeof detail === "string"
+            ? detail
+            : JSON.stringify(detail)
+          : e.message || "保存失败";
+      setProgressText(`常用参数保存失败: ${msg}`);
+      return { ok: false, error: msg };
+    }
+  }, [setProgressText, refreshCommonParamsFromServer]);
 
   const openBatchWarmup = useCallback(() => {
     if (!queue.length) return;
@@ -1561,9 +1635,9 @@ export default function App() {
   }, [queue.length, configBackupStatus?.restore_required]);
 
   const handleWarmupConfirm = useCallback(
-    async (warmup) => {
+    async (warmupPayload) => {
       const intent = warmupIntent;
-      await persistWarmupDefaults(warmupApiPayloadToPersisted(warmup));
+      const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
@@ -1572,11 +1646,38 @@ export default function App() {
         setBatchRecording(true);
         setProgressText("正在执行批量 OBS 导播…");
         try {
-          const groups = buildBatchGroupsFromQueue(queue, useRecordingQueue.getState().globalPacing);
-          const { data } = await API.post("/record/batch", { groups, warmup, obs: obsConfig });
-          const results = data.results ?? [];
-          const ok = results.filter((r) => r.status === "recorded").length;
-          const aborted = results.filter((r) => r.status === "aborted").length;
+          let requests = buildRecordingQueueRequestsFromQueue(
+            queue,
+            useRecordingQueue.getState().globalPacing,
+            uploadedDemos,
+            parsedMatches,
+          );
+          if (!requests.length) {
+            setProgressText("队列中没有可录制的片段（已跳过不支持的类型）。");
+            return;
+          }
+          requests = applySessionObsTransitionToRequests(requests, session);
+          const povHud = session.experimental_pov_enabled
+            ? {
+                enabled: true,
+                radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
+                teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
+              }
+            : undefined;
+          const body = {
+            requests,
+            warmup: warmupForApi,
+            obs: obsConfig,
+            cs2_extra_launch_args: session.cs2_extra_launch_args,
+            record_inject_console_lines: session.record_inject_console_lines,
+            ...(povHud ? { pov_hud: povHud } : {}),
+          };
+          const { data } = await API.post("recording/queue", body);
+          const results = Array.isArray(data) ? data : [];
+          const ok = results.filter((r) => r && r.success).length;
+          const aborted = results.filter(
+            (r) => r && (r.error === "aborted" || String(r.error || "").toLowerCase() === "aborted"),
+          ).length;
           if (aborted > 0) {
             setProgressText(
               `批量录制已结束：成功 ${ok}，中止 ${aborted}，其余 ${results.length - ok - aborted} 条；共 ${results.length} 个片段。`,
@@ -1607,9 +1708,9 @@ export default function App() {
       queue,
       clearQueue,
       obsConfig,
-      globalPacing,
-      persistWarmupDefaults,
       refreshConfigBackupStatus,
+      uploadedDemos,
+      parsedMatches,
     ]
   );
 
@@ -1650,7 +1751,7 @@ export default function App() {
 
   const handleAbortBatchRecording = useCallback(async () => {
     try {
-      const { data } = await API.post("/record/abort");
+      const { data } = await API.post("recording/abort");
       setProgressText(data?.message || "已发送中止请求。");
     } catch (e) {
       setProgressText(`中止失败: ${e.response?.data?.detail || e.message}`);
@@ -1789,12 +1890,12 @@ export default function App() {
   );
 
   const handleResetDemo = useCallback(() => {
-    resetUploadedDemos();
+    setUploadedDemos(null);
     setParsedMatches(null);
     setLibraryDemoIdsByIndex({});
-    resetCurrentMatchIndex();
-    resetSelectedPlayers();
-    resetActivePlayerTabs();
+    setCurrentMatchIndex(0);
+    setSelectedPlayers({});
+    setActivePlayerTabs({});
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
@@ -1898,31 +1999,22 @@ export default function App() {
         put.expected_parse_players = raw.expected_parse_players;
         setExpectedParsePlayersText(raw.expected_parse_players.join("\n"));
       }
+      if (typeof raw.cs2_extra_launch_args === "string") {
+        const launchArgsUserConfigured =
+          typeof raw.cs2_extra_launch_args_user_configured === "boolean"
+            ? raw.cs2_extra_launch_args_user_configured
+            : false;
+        const launchArgs = launchArgsUserConfigured
+          ? raw.cs2_extra_launch_args
+          : ensureDefaultCs2FullscreenArg(raw.cs2_extra_launch_args);
+        put.cs2_extra_launch_args = launchArgs;
+        put.cs2_extra_launch_args_user_configured = launchArgsUserConfigured;
+        setCs2ExtraLaunchArgs(launchArgs);
+      } else if (typeof raw.cs2_extra_launch_args_user_configured === "boolean") {
+        put.cs2_extra_launch_args_user_configured = raw.cs2_extra_launch_args_user_configured;
+      }
       if (Object.keys(put).length) {
         await API.put("config", put);
-      }
-      if (raw.spec_player_verify && typeof raw.spec_player_verify === "object") {
-        const spv = raw.spec_player_verify;
-        const merged = {
-          demo_timescale: 0.05,
-          max_retries: 4,
-          per_retry_timeout_sec: 0.6,
-          settle_sec: 0.12,
-        };
-        if (typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)) {
-          merged.demo_timescale = spv.demo_timescale;
-        }
-        if (typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)) {
-          merged.max_retries = Math.round(spv.max_retries);
-        }
-        if (typeof spv.per_retry_timeout_sec === "number" && Number.isFinite(spv.per_retry_timeout_sec)) {
-          merged.per_retry_timeout_sec = spv.per_retry_timeout_sec;
-        }
-        if (typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)) {
-          merged.settle_sec = spv.settle_sec;
-        }
-        await API.put("config", { spec_player_verify: merged });
-        setSpecPlayerVerify(merged);
       }
       if (raw.llm && typeof raw.llm === "object") {
         const lm = raw.llm;
@@ -2092,6 +2184,7 @@ export default function App() {
     demoWatchPaths,
     setDemoWatchPaths,
     handleSaveConfig,
+    fetchUpdateInfo,
     handleDetectCs2,
     handleSaveAllSettingsPage,
     saveExpectedPlayersFromList,
@@ -2109,14 +2202,11 @@ export default function App() {
     currentDemoFilename,
     batchRecording,
     savedRecordWarmupDefaults,
-    persistWarmupDefaults,
+    saveAllCommonParams,
+    commonParamsRefreshKey,
     cs2ExtraLaunchArgs,
-    setCs2ExtraLaunchArgs,
     recordInjectConsoleLines,
-    setRecordInjectConsoleLines,
-    persistCs2RecordExtras,
     experimentalPovEnabled,
-    persistExperimentalPov,
     hasDemos,
     parsing,
     handleUpload,
@@ -2197,9 +2287,13 @@ export default function App() {
     libraryRename,
     libraryDeletePrompt,
     configBackupStatus,
+    configBackupLoading,
     refreshConfigBackupStatus,
     handleRestorePlayerConfig,
     handleOpenConfigBackupDir,
+    obsTransitionEnabled,
+    obsTransitionName,
+    obsTransitionDurationMs,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2215,43 +2309,67 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-page">
-        {libraryLoadingOverlay && (
-          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-[1px]">
-            <div className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 shadow-2xl">
-              <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
-              <p className="text-sm font-medium text-cs2-text-primary">{libraryLoadingText}</p>
+      <div className="relative flex flex-col h-screen overflow-hidden bg-cs2-bg-dark">
+        <CustomTitleBar />
+        <div className="relative flex flex-1 overflow-hidden">
+          {libraryLoadingOverlay && (
+            <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
+              <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
+                <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
+                <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+              </div>
             </div>
-          </div>
-        )}
-        <SidebarNav
-          queueLength={queue.length}
-          disabled={batchRecording}
-          onCheckUpdate={() => void fetchUpdateInfo({ force: true, manual: true })}
-        />
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <Routes>
-              <Route path="/" element={<GuidePage />} />
-              <Route path="/library" element={<DemoLibraryPage />} />
-              <Route path="/analysis" element={<AnalysisPage />} />
-              <Route path="/queue" element={<RecordingQueuePage />} />
-              <Route path="/montage" element={<MontageWorkbenchPage />} />
-              <Route path="/params" element={<CommonParamsPage />} />
-              <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        </main>
+          )}
+          <SidebarNav
+            queueLength={queue.length}
+            disabled={batchRecording}
+            onCheckUpdate={() => void fetchUpdateInfo({ force: true, manual: true })}
+          />
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
+            {!backendReady ? (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
+                  <div className="relative">
+                    <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
+                    <div className="absolute inset-0 animate-ping rounded-full bg-cs2-orange/20" />
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <h2 className="text-xl font-bold tracking-tight text-white">等待后端连接...</h2>
+                    <p className="text-sm text-zinc-400">正在启动本地分析引擎，请稍候</p>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                      Attempting to connect: 127.0.0.1:19871
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <Routes>
+                <Route path="/" element={<GuidePage />} />
+                <Route path="/library" element={<DemoLibraryPage />} />
+                <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/queue" element={<RecordingQueuePage />} />
+                <Route path="/montage" element={<MontageWorkbenchPage />} />
+                <Route path="/params" element={<CommonParamsPage />} />
+                <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
+          </main>
+        </div>
 
         {showGlobalNotice ? (
           <div
             className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
             aria-live="polite"
           >
-            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-cs2-shadow">
+            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
               <ProgressBar
                 text={progressText || (batchRecording ? "正在批量录制…" : "")}
                 active={anyDemoParsing}
@@ -2275,12 +2393,11 @@ export default function App() {
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
-          onExperimentalPovChange={persistExperimentalPov}
           cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
-          onCs2ExtraLaunchArgsChange={setCs2ExtraLaunchArgs}
           recordInjectConsoleLines={recordInjectConsoleLines}
-          onRecordInjectConsoleLinesChange={setRecordInjectConsoleLines}
-          onPersistCs2RecordExtras={persistCs2RecordExtras}
+          initObsTransEnabled={obsTransitionEnabled}
+          initObsTransName={obsTransitionName}
+          initObsTransDurationMs={obsTransitionDurationMs}
         />
 
         <LibraryLoadModeModal

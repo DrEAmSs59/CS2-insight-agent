@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import axios from "axios";
+import API from "../api/api";
 import { LayoutGrid, List } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
@@ -18,8 +18,6 @@ import {
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
-
-const API = axios.create({ baseURL: "/api" });
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",

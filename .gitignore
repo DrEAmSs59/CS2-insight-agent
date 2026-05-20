@@ -1,4 +1,5 @@
 # Python
+python/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -48,6 +49,7 @@ CS2InsightAgent-*-windows-amd64.zip
 
 # Project doc not tracked
 开发白皮书.md
+docs/
 
 # Local tooling scripts (keep local only)
 debug_demoparser2.py
@@ -58,7 +60,7 @@ debug_parse_demo.py
 /scripts/*
 !/scripts/github-bootstrap.ps1
 build_portable.bat
-package_portable.ps1
+!build_electron.bat
 rebuild_frontend.ps1
 dev.sh
 
@@ -74,3 +76,7 @@ cs2-insight.db-shm
 data/**
 !data/cs2-insight.config.example.json
 !data/basic.ini
+
+# Electron distribution
+frontend/dist_electron/
+frontend/build/

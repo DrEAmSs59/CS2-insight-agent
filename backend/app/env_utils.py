@@ -34,16 +34,36 @@ _DEFAULT_EXAMPLE_FILENAME = "cs2-insight.config.example.json"
 _DATA_SUBDIR = "data"
 _BACKUP_DIR_NAME = ".cs2_config_backup"
 _DB_BASENAME = "cs2-insight.db"
+_DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen"
 
 
 def get_data_dir() -> Path:
-    """持久化数据目录：配置、SQLite、玩家配置备份、日志等。"""
-    return _REPO_ROOT / _DATA_SUBDIR
+    """可写应用数据目录：OBS / 玩家配置备份、库边文件等（与正式配置文件同盘根树）。
+
+    默认：仓库根下 ``data/``。Electron 安装版通过 ``CS2_INSIGHT_DATA_DIR`` 指向
+    ``%APPDATA%/<应用>/data``（与配置文件、SQLite、logs 同级），避免写入 ``Program Files`` 下的 ``resources``。
+    """
+    override = os.environ.get("CS2_INSIGHT_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (_REPO_ROOT / _DATA_SUBDIR).resolve()
+
+
+def get_bundle_data_dir() -> Path:
+    """只读随包资源：``cs2-insight.config.example.json``、``basic.ini`` 等。
+
+    开发/便携包：与 ``get_data_dir()`` 相同。Electron 安装版由 ``CS2_INSIGHT_BUNDLE_DATA_DIR``
+    指向 ``resources/data``（安装目录下只读副本）。
+    """
+    override = os.environ.get("CS2_INSIGHT_BUNDLE_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return get_data_dir()
 
 
 def resolve_example_config_path() -> Path:
-    """随仓库提供的示例配置（默认 ``data/cs2-insight.config.example.json``）。"""
-    return get_data_dir() / _DEFAULT_EXAMPLE_FILENAME
+    """随应用提供的示例配置（默认 ``data/cs2-insight.config.example.json``）。"""
+    return get_bundle_data_dir() / _DEFAULT_EXAMPLE_FILENAME
 
 
 def migrate_legacy_app_data() -> None:
@@ -354,11 +374,46 @@ class AppConfig(BaseModel):
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
-    cs2_extra_launch_args: str = ""
+    cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+    # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，
+    # 此时即便清空也应尊重用户选择，不再自动回填 -fullscreen。
+    cs2_extra_launch_args_user_configured: bool = False
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
     record_inject_console_lines: str = ""
     # 检查更新：auto=镜像与直连并发；on=仅用镜像；off=仅直连；或以 https:// 开头的自定义镜像前缀
     update_github_mirror: str = "auto"
+    obs_transition_enabled: bool = False
+    obs_transition_name: str = "Fade"
+    obs_transition_duration_ms: int = 100
+    obs_game_scene_name: str = "CS2 Insight Recording"
+    obs_black_scene_name: str = "CS2 Insight Black"
+
+
+def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
+    changed = False
+    fullscreen_re = re.compile(r"(?<!\S)-fullscreen(?!\S)", re.IGNORECASE)
+
+    def ensure_fullscreen_arg(text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+        if fullscreen_re.search(s):
+            return s
+        return s + "\n" + _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+
+    # 旧配置迁移：
+    # - 仅当本次是从 JSON 原始对象加载，且缺少 user_configured 标记时，补写该字段
+    # - save_config(cfg) 传入 raw=None 时，不做“缺字段迁移”推断，避免把用户已配置状态误重置
+    if isinstance(raw, dict) and ("cs2_extra_launch_args_user_configured" not in raw):
+        changed = True
+
+    if not cfg.cs2_extra_launch_args_user_configured:
+        current_args = str(cfg.cs2_extra_launch_args or "")
+        next_args = ensure_fullscreen_arg(current_args)
+        if next_args != current_args:
+            cfg.cs2_extra_launch_args = next_args
+            changed = True
+    return changed
 
 
 def _parse_config_json_file(path: Path) -> dict:
@@ -386,7 +441,10 @@ def load_config() -> AppConfig:
     path = resolve_config_path()
     if path.is_file():
         raw = _parse_config_json_file(path)
-        return AppConfig(**raw)
+        cfg = AppConfig(**raw)
+        if _normalize_config_defaults(cfg, raw):
+            save_config(cfg)
+        return cfg
     if _LEGACY_CONFIG_PATH.is_file():
         raw = _parse_config_json_file(_LEGACY_CONFIG_PATH)
         cfg = AppConfig(**raw)
@@ -404,6 +462,7 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig) -> None:
+    _normalize_config_defaults(cfg)
     path = resolve_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
@@ -426,3 +485,23 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
             cfg.cs2_path = detected
             save_config(cfg)
     return cfg
+
+
+def get_primary_monitor_resolution() -> tuple[int, int]:
+    """返回主显示器物理分辨率 (width, height)，忽略 DPI 缩放。非 Windows 返回 (1920, 1080) 作为 fallback。"""
+    try:
+        import ctypes
+        # DESKTOPHORZRES/DESKTOPVERTRES 返回实际物理像素，不受 DPI 缩放影响
+        gdi32 = ctypes.windll.gdi32  # type: ignore[attr-defined]
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        hdc = user32.GetDC(0)
+        try:
+            w = gdi32.GetDeviceCaps(hdc, 118)  # DESKTOPHORZRES
+            h = gdi32.GetDeviceCaps(hdc, 117)  # DESKTOPVERTRES
+        finally:
+            user32.ReleaseDC(0, hdc)
+        if w > 0 and h > 0:
+            return int(w), int(h)
+        return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
+    except Exception:
+        return 1920, 1080

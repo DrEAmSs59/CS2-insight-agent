@@ -46,7 +46,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           />
           <div className="min-w-0">
             <div className="truncate text-sm font-bold tracking-wide text-cs2-text-primary">CS2 洞察</div>
-            <div className="font-mono text-[10px] tracking-widest text-cs2-text-muted">v2.0.1</div>
+            <div className="font-mono text-[10px] tracking-widest text-cs2-text-muted">v{__APP_VERSION__}</div>
           </div>
         </div>
       </div>
@@ -98,7 +98,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         </NavLink>
       </nav>
 
-      <div className="border-t border-cs2-border px-1.5 py-2 space-y-1">
+      <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">
         <NavLink to="/settings" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Settings className="h-4 w-4 shrink-0 opacity-90" />
           设置

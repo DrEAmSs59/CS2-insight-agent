@@ -80,7 +80,7 @@ export default function RoundTimelineItem({
     );
   };
 
-  const roundUid = `tl_round_${Number.isFinite(rn) ? rn : "x"}`;
+  const roundUid = `tl_round:${demoFilename}:${Number.isFinite(rn) ? rn : "x"}`;
   const roundQueued =
     queuedUids &&
     queuedUids.has(

@@ -7,7 +7,6 @@ import filecmp
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -17,17 +16,13 @@ from typing import Any, Optional
 
 from obswebsocket import obsws, requests as obs_requests
 
-from .env_utils import get_data_dir, load_config
-from .obs_director import OBSDirector
+from .env_utils import get_data_dir
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "V2.0.1"
+APP_VERSION = "V2.1.0"
 DEFAULT_PROJECT_PROFILE = "未命名"  # 解析失败时的兜底目录名；正常由 resolve_default_project_profile_for_obs() 解析
-BUNDLED_OBS_BASIC_INI_NAME = "basic.ini"
 BACKUP_SUBDIR = ".obs_config_backups"
-NATIVE_MAX_BYTES = 1_048_576
-NATIVE_ALLOWLIST = frozenset({"basic.ini", "recordEncoder.json", "streamEncoder.json"})
 
 
 def _dedicated_scene_name() -> str:
@@ -183,51 +178,6 @@ def _parse_simple_output(ini_path: Path) -> dict[str, str]:
     return {k: str(v) for k, v in cp["SimpleOutput"].items()}
 
 
-def _bundled_obs_basic_ini_path() -> Path:
-    """随应用提供的 OBS 预设模板路径：``data/basic.ini`` → 一键推荐预设时写入玩家本机 Profile。"""
-    return get_data_dir() / BUNDLED_OBS_BASIC_INI_NAME
-
-
-def _parse_basic_ini_video_dims(ini_path: Path) -> tuple[int, int, int, int, int]:
-    """从 OBS Profile ``basic.ini`` 的 ``[Video]`` 读取画布/输出/FPS；缺失时回退 1080p60。"""
-    bw, bh, ow, oh, fps = 1920, 1080, 1920, 1080, 60
-    if not ini_path.is_file():
-        return bw, bh, ow, oh, fps
-    cp = configparser.ConfigParser(interpolation=None)
-    try:
-        cp.read(ini_path, encoding="utf-8-sig")
-    except configparser.Error:
-        return bw, bh, ow, oh, fps
-    if "Video" not in cp:
-        return bw, bh, ow, oh, fps
-    v = cp["Video"]
-    try:
-        bw = int(v.get("BaseCX") or bw)
-        bh = int(v.get("BaseCY") or bh)
-        ow = int(v.get("OutputCX") or bw)
-        oh = int(v.get("OutputCY") or bh)
-        fps = int(v.get("FPSCommon") or fps)
-    except (TypeError, ValueError):
-        pass
-    return bw, bh, ow, oh, fps
-
-
-def _merge_write_simple_output(ini_path: Path, updates: dict[str, str]) -> None:
-    cp = configparser.ConfigParser(interpolation=None)
-    if ini_path.is_file():
-        try:
-            cp.read(ini_path, encoding="utf-8-sig")
-        except configparser.Error:
-            pass
-    if "SimpleOutput" not in cp:
-        cp.add_section("SimpleOutput")
-    for k, v in updates.items():
-        cp.set("SimpleOutput", k, v)
-    ini_path.parent.mkdir(parents=True, exist_ok=True)
-    with ini_path.open("w", encoding="utf-8", newline="\n") as f:
-        cp.write(f)
-
-
 def _copy_profile_tree(src: Path, dst: Path) -> None:
     if not src.is_dir():
         return
@@ -267,35 +217,6 @@ def _ensure_project_profile_folder(obs_root: Path, project_profile: str) -> Path
             basic.write_text("[General]\nName=" + project_profile + "\n", encoding="utf-8")
         logger.info("Created empty OBS profile directory: %s", tgt)
     return tgt
-
-
-def _pick_rec_encoder_from_simple(simple: dict[str, str], obs_ws: Optional[obsws]) -> str:
-    # 保留用户当前独立录制编码器；无法判断时回退 x264
-    cur = (simple.get("RecEncoder") or simple.get("recEncoder") or "").strip()
-    if cur and "same" not in cur.lower():
-        return cur
-    if obs_ws is not None:
-        for name in (
-            "RecEncoder",
-            "recEncoder",
-        ):
-            try:
-                req = getattr(obs_requests, "GetProfileParameter", None)
-                if req is None:
-                    break
-                r = obs_ws.call(
-                    req(
-                        parameterCategory="SimpleOutput",
-                        parameterName=name,
-                    )
-                )
-                d = getattr(r, "datain", {}) or {}
-                v = d.get("parameterValue") or d.get("value")
-                if v and str(v).strip():
-                    return str(v).strip()
-            except Exception as e:  # noqa: BLE001
-                logger.debug("GetProfileParameter %s: %s", name, e)
-    return "obs_x264"
 
 
 def _ws_connect(obs_cfg) -> obsws:
@@ -409,135 +330,32 @@ def _source_fits_canvas(ws: obsws, scene_name: str, source_name: str, base_w: in
     t = _scene_item_transform(ws, scene_name, source_name)
     if not isinstance(t, dict):
         return False
-    bw = int(float(t.get("boundsWidth") or 0))
-    bh = int(float(t.get("boundsHeight") or 0))
     bt = str(t.get("boundsType") or "")
-    ok_dims = bw >= base_w - 4 and bh >= base_h - 4 and bw > 0 and bh > 0
-    ok_type = "STRETCH" in bt.upper() or "SCALE_INNER" in bt.upper() or "SCALE_OUTER" in bt.upper() or "SCALE_TO_INNER" in bt.upper()
-    return ok_dims and ok_type
-
-
-def _apply_scale_inner_transform(ws: obsws, scene_name: str, source_name: str, base_w: int, base_h: int) -> bool:
-    try:
-        il = ws.call(obs_requests.GetSceneItemList(sceneName=scene_name))
-        items = getattr(il, "datain", {}).get("sceneItems") or []
-        sid = None
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            nm = it.get("sourceName") or it.get("sceneItemSourceName")
-            if str(nm or "") == source_name:
-                sid = it.get("sceneItemId")
-                break
-        if sid is None:
-            return False
-        transform = {
-            "positionX": 0,
-            "positionY": 0,
-            "rotation": 0,
-            "scaleX": 1,
-            "scaleY": 1,
-            "cropTop": 0,
-            "cropBottom": 0,
-            "cropLeft": 0,
-            "cropRight": 0,
-            "boundsType": "OBS_BOUNDS_SCALE_INNER",
-            "boundsAlignment": 5,
-            "boundsWidth": float(base_w),
-            "boundsHeight": float(base_h),
-            "alignment": 5,
-        }
-        ws.call(
-            obs_requests.SetSceneItemTransform(
-                sceneName=scene_name,
-                sceneItemId=int(sid),
-                sceneItemTransform=transform,
-            )
-        )
-        return True
-    except Exception as e:  # noqa: BLE001
-        logger.warning("SetSceneItemTransform failed: %s", e)
-        return False
-
-
-def _try_set_video_and_profile_params(
-    ws: obsws,
-    *,
-    base_w: int,
-    base_h: int,
-    fps: int,
-    encoder: str,
-    output_width: Optional[int] = None,
-    output_height: Optional[int] = None,
-    rec_format: Optional[str] = None,
-    project_profile: Optional[str] = None,
-    basic_ini_path: Optional[Path] = None,
-    sync_simple_output_from_disk: bool = False,
-) -> None:
-    """将画布/输出/FPS 推到 OBS；SimpleOutput 可从磁盘 ``basic.ini`` 读取（与一键内置预设一致）。"""
-    ow = int(output_width or base_w)
-    oh = int(output_height or base_h)
-    prof = (project_profile or "").strip() or resolve_default_project_profile_for_obs()
-    try:
-        req = getattr(obs_requests, "SetVideoSettings", None)
-        if req:
-            ws.call(
-                req(
-                    videoSettings={
-                        "baseWidth": base_w,
-                        "baseHeight": base_h,
-                        "outputWidth": ow,
-                        "outputHeight": oh,
-                        "fpsNumerator": fps,
-                        "fpsDenominator": 1,
-                    }
-                )
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("SetVideoSettings failed: %s", e)
-
-    if sync_simple_output_from_disk and basic_ini_path is not None:
-        simple = _parse_simple_output(basic_ini_path)
-        rus = str(simple.get("RecUseStreamEncoder") or "false").strip().lower() in ("1", "true", "yes")
-        us = str(simple.get("UseStreamEncoder") or "false").strip().lower() in ("1", "true", "yes")
-        enc = (simple.get("RecEncoder") or encoder or "obs_x264").strip()
-        rf = (simple.get("RecFormat2") or "mkv").strip() or "mkv"
-        loop = (
-            ("RecUseStreamEncoder", rus, "bool"),
-            ("UseStreamEncoder", us, "bool"),
-            ("RecEncoder", enc, "string"),
-            ("RecFormat2", rf, "string"),
-        )
-    else:
-        rf = (rec_format or "mkv").strip() or "mkv"
-        loop = (
-            ("RecUseStreamEncoder", False, "bool"),
-            ("UseStreamEncoder", False, "bool"),
-            ("RecEncoder", encoder, "string"),
-            ("RecFormat2", rf, "string"),
-        )
-
-    for pname, pval, ptype in loop:
-        try:
-            sreq = getattr(obs_requests, "SetProfileParameter", None)
-            if sreq is None:
-                break
-            ws.call(
-                sreq(
-                    parameterCategory="SimpleOutput",
-                    parameterName=pname,
-                    parameterValue=pval,
-                    parameterType=ptype,
-                )
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("SetProfileParameter %s skipped: %s", pname, e)
-    try:
-        creq = getattr(obs_requests, "SetCurrentProfile", None)
-        if creq:
-            ws.call(creq(profileName=prof))
-    except Exception as e:  # noqa: BLE001
-        logger.debug("SetCurrentProfile: %s", e)
+    # Bounds-based stretch/scale (set via calibrate or OBS bounds UI)
+    if bt and bt != "OBS_BOUNDS_NONE":
+        bw = int(float(t.get("boundsWidth") or 0))
+        bh = int(float(t.get("boundsHeight") or 0))
+        ok_dims = bw >= base_w - 4 and bh >= base_h - 4 and bw > 0 and bh > 0
+        ok_type = "STRETCH" in bt.upper() or "SCALE_INNER" in bt.upper() or "SCALE_OUTER" in bt.upper()
+        if ok_dims and ok_type:
+            return True
+    # Fallback: OBS "拉伸至全屏" (boundsType=NONE, fills via scale)
+    px = float(t.get("positionX") or 0)
+    py = float(t.get("positionY") or 0)
+    if abs(px) <= 4 and abs(py) <= 4:
+        w = int(float(t.get("width") or 0))
+        h = int(float(t.get("height") or 0))
+        if w >= base_w - 4 and h >= base_h - 4 and w > 0 and h > 0:
+            return True
+        # scaleX * sourceWidth in case width is pre-scale
+        sx = float(t.get("scaleX") or 0)
+        sy = float(t.get("scaleY") or 0)
+        sw = int(float(t.get("sourceWidth") or 0))
+        sh = int(float(t.get("sourceHeight") or 0))
+        if sx > 0 and sy > 0 and sw > 0 and sh > 0:
+            if int(sx * sw) >= base_w - 8 and int(sy * sh) >= base_h - 8:
+                return True
+    return False
 
 
 def _create_backup(
@@ -615,66 +433,6 @@ def _latest_backup_summary() -> Optional[dict[str, str]]:
     return {"id": top["id"], "created_at": top.get("created_at") or ""}
 
 
-def validate_cs2obs_payload(data: dict[str, Any]) -> tuple[bool, str]:
-    try:
-        ver = int(data.get("version") or 0)
-        if ver < 1:
-            return False, "invalid version"
-        v = data.get("video") or {}
-        if not isinstance(v, dict):
-            return False, "video must be object"
-        bw = int(v.get("base_width") or 0)
-        bh = int(v.get("base_height") or 0)
-        ow = int(v.get("output_width") or 0)
-        oh = int(v.get("output_height") or 0)
-        fps = int(v.get("fps") or 0)
-        if not (1280 <= bw <= 3840 and 720 <= bh <= 2160):
-            return False, "video resolution out of range"
-        if not (1280 <= ow <= 3840 and 720 <= oh <= 2160):
-            return False, "output resolution out of range"
-        if fps not in (30, 60, 120):
-            return False, "fps must be 30, 60 or 120"
-        rec = data.get("recording") or {}
-        if rec.get("use_stream_encoder") is not None and not isinstance(rec.get("use_stream_encoder"), bool):
-            return False, "recording.use_stream_encoder must be bool"
-        scene = data.get("scene") or {}
-        if scene.get("fit_to_screen") is not None and not isinstance(scene.get("fit_to_screen"), bool):
-            return False, "scene.fit_to_screen must be bool"
-        cq = data.get("recording", {}).get("cq_or_crf")
-        if cq is not None:
-            if int(cq) < 14 or int(cq) > 28:
-                return False, "cq_or_crf out of range"
-        return True, ""
-    except (TypeError, ValueError):
-        return False, "invalid preset fields"
-
-
-def _reject_native_content_if_sensitive(text: str, filename: str) -> Optional[str]:
-    low = filename.lower()
-    if low == "service.json":
-        return "不允许导入推流服务配置"
-    if re.search(r"(?im)(stream[_-]?key|password)\s*=\s*\S+", text):
-        return "文件疑似包含推流密钥或密码字段"
-    return None
-
-
-def _strip_sensitive_for_export(payload: dict[str, Any]) -> dict[str, Any]:
-    def scrub(obj: Any) -> Any:
-        if isinstance(obj, dict):
-            out = {}
-            for k, v in obj.items():
-                lk = str(k).lower()
-                if lk in {"password", "stream_key", "server", "streamkey", "bind_ip"}:
-                    continue
-                out[k] = scrub(v)
-            return out
-        if isinstance(obj, list):
-            return [scrub(x) for x in obj]
-        return obj
-
-    return scrub(payload)
-
-
 def get_status_payload(obs_cfg) -> dict[str, Any]:
     obs_root = _obs_studio_root()
     prof_name, sc_name = (None, None)
@@ -682,6 +440,8 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         prof_name, sc_name = _read_global_profile_names(obs_root)
 
     latest = _latest_backup_summary()
+    from .env_utils import get_primary_monitor_resolution
+    _mon_w, _mon_h = get_primary_monitor_resolution()
     base: dict[str, Any] = {
         "ok": True,
         "obs_connected": False,
@@ -706,6 +466,7 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             "capture_source_exists": False,
             "source_fit_to_canvas": False,
         },
+        "monitor": {"width": _mon_w, "height": _mon_h},
         "latest_backup": latest,
         "obs_version": None,
     }
@@ -777,8 +538,24 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             simple = _parse_simple_output(obs_root / "basic" / "profiles" / prof_name / "basic.ini")
         base["recording"]["use_stream_encoder"] = _detect_use_stream_encoder(simple, ws)
         base["recording"]["encoder"] = (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
-        base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
         base["recording"]["output_path"] = _recording_output_path_from_simple(simple)
+        # 优先从 OBS WebSocket 读取格式和质量，避免 INI 路径检测失败导致"未知"
+        try:
+            fmt_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecFormat2"
+            ))
+            fmt_val = (getattr(fmt_resp, "datain", None) or {}).get("parameterValue", "")
+            base["recording"]["format"] = fmt_val or (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
+        except Exception:  # noqa: BLE001
+            base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
+        try:
+            q_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecQuality"
+            ))
+            q_val = (getattr(q_resp, "datain", None) or {}).get("parameterValue", "")
+            base["recording"]["rec_quality"] = q_val or (simple.get("RecQuality") or "").strip()
+        except Exception:  # noqa: BLE001
+            base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
     except Exception as e:  # noqa: BLE001
         base["ws_error"] = str(e)
     finally:
@@ -826,11 +603,34 @@ def diagnose(obs_cfg) -> dict[str, Any]:
                     "fixable": False,
                 }
             )
+        from .env_utils import get_primary_monitor_resolution
+
+        monitor_w, monitor_h = get_primary_monitor_resolution()
         vr = ws.call(obs_requests.GetVideoSettings())
         video_dims = _parse_ws_video(vr)
         fps = _fps_from_video_dict(video_dims)
         bw, bh = video_dims["base_width"], video_dims["base_height"]
         ow, oh = video_dims["output_width"], video_dims["output_height"]
+        if bw and bh and (bw != monitor_w or bh != monitor_h):
+            issues.append(
+                {
+                    "code": "CANVAS_RESOLUTION_MISMATCH",
+                    "level": "warning",
+                    "title": "画布分辨率与主显示器不一致",
+                    "message": f"当前 {bw}×{bh}，应为 {monitor_w}×{monitor_h}。",
+                    "fixable": True,
+                }
+            )
+        if ow and oh and (ow != monitor_w or oh != monitor_h):
+            issues.append(
+                {
+                    "code": "OUTPUT_RESOLUTION_MISMATCH",
+                    "level": "warning",
+                    "title": "输出分辨率与主显示器不一致",
+                    "message": f"当前 {ow}×{oh}，应为 {monitor_w}×{monitor_h}。",
+                    "fixable": True,
+                }
+            )
         if bw and bh and ow and oh and (bw != ow or bh != oh):
             issues.append(
                 {
@@ -987,383 +787,207 @@ def diagnose(obs_cfg) -> dict[str, Any]:
     }
 
 
-def apply_recommended(
-    obs_cfg,
-    *,
-    project_profile: Optional[str] = None,
-    create_backup: bool = True,
-    fix_scene: bool = True,
-) -> dict[str, Any]:
-    if sys.platform != "win32":
-        raise ValueError("推荐预设应用仅支持 Windows（需要写入 %APPDATA%\\obs-studio）")
-    obs_root = _obs_studio_root()
-    if obs_root is None:
-        raise ValueError("无法定位 OBS 配置目录")
-    obs_root.mkdir(parents=True, exist_ok=True)
+def calibrate(obs_cfg) -> dict[str, Any]:
+    """运行时校准：读显示器分辨率 → 修正 OBS 画布 → 建场景 → 建 Game Capture → 设拉伸 → 修输出格式。
+    仅操作 CS2 Insight 专用场景，不动用户其他场景。
+    """
+    from .env_utils import get_primary_monitor_resolution
 
-    pp = _effective_project_profile(obs_root, project_profile)
-
-    cfg = load_config()
-    backup_id = ""
-    if create_backup:
-        backup_id, _ = _create_backup(obs_root, reason="apply_recommended_preset", project_profile=pp)
-
-    changed: list[str] = []
-    prof_dir = _ensure_project_profile_folder(obs_root, pp)
-    basic_ini = prof_dir / "basic.ini"
-
-    bundled_src = _bundled_obs_basic_ini_path()
-    bundled_used = bundled_src.is_file()
-
-    if bundled_used:
-        logger.info(
-            "Applying OBS preset: template=%s -> profile_basic_ini=%s (profile=%s)",
-            bundled_src.resolve(),
-            basic_ini.resolve(),
-            pp,
-        )
-        try:
-            basic_ini.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(bundled_src, basic_ini)
-        except OSError as e:
-            raise ValueError(
-                f"无法写入 OBS Profile（复制预设失败）。若 OBS 正在运行，请先完全退出 OBS 后再应用预设。详情：{e}"
-            ) from e
-        if not filecmp.cmp(bundled_src, basic_ini, shallow=False):
-            raise ValueError(
-                "预设未能正确写入磁盘（写入后校验失败）。请先关闭 OBS，再重新点击「一键应用推荐预设」。"
-            )
-        changed.append("copied_data_basic_ini_to_obs_profile")
-    else:
-        simple_merge = _parse_simple_output(basic_ini)
-        enc_merge = _pick_rec_encoder_from_simple(simple_merge, None)
-        _merge_write_simple_output(
-            basic_ini,
-            {
-                "RecEncoder": enc_merge,
-                "Encoder": simple_merge.get("Encoder") or enc_merge,
-                "RecFormat2": "mkv",
-                "RecUseStreamEncoder": "false",
-                "UseStreamEncoder": "false",
-            },
-        )
-        changed.append("updated_project_profile_ini")
-
-    simple_before = _parse_simple_output(basic_ini)
-    encoder_pick = _pick_rec_encoder_from_simple(simple_before, None)
-
-    if _set_global_ini_current_profile(obs_root, pp):
-        changed.append("set_active_profile_to_project")
-
-    bw, bh, ow, oh, fps_v = _parse_basic_ini_video_dims(basic_ini)
-
-    restart_obs_required = True
-    director = OBSDirector(
-        obs_cfg,
-        cfg.cs2_path,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-        spec_player_verify=cfg.spec_player_verify,
-    )
-    try:
-        if director.connect_obs() and director.obs_ws:
-            ws = director.obs_ws
-            if _obs_is_recording(ws):
-                logger.warning("apply_recommended: OBS 正在录制，跳过 WebSocket 同步")
-                changed.append("websocket_sync_skipped_recording")
-            else:
-                _try_set_video_and_profile_params(
-                    ws,
-                    base_w=bw,
-                    base_h=bh,
-                    fps=fps_v,
-                    encoder=encoder_pick,
-                    output_width=ow,
-                    output_height=oh,
-                    project_profile=pp,
-                    basic_ini_path=basic_ini,
-                    sync_simple_output_from_disk=bundled_used,
-                )
-                changed.append("websocket_video_and_simple_output")
-                restart_obs_required = False
-
-                if fix_scene:
-                    sn = _dedicated_scene_name()
-                    cn = _dedicated_capture_name()
-                    vr = ws.call(obs_requests.GetVideoSettings())
-                    vd = _parse_ws_video(vr)
-                    bw_run = int(vd["base_width"] or bw)
-                    bh_run = int(vd["base_height"] or bh)
-                    if _apply_scale_inner_transform(ws, sn, cn, bw_run, bh_run):
-                        changed.append("fixed_capture_source_transform")
-        else:
-            logger.info("apply_recommended: WebSocket 未连接，仅完成磁盘预设写入")
-            changed.append("websocket_sync_skipped_no_connection")
-    except Exception as e:
-        logger.warning("apply_recommended: WebSocket 同步异常（磁盘已写入）: %s", e, exc_info=True)
-        changed.append("websocket_sync_failed")
-    finally:
-        director.disconnect_obs()
-
-    if bundled_used:
-        restart_obs_required = True
-
-    if bundled_used:
-        summary_msg = (
-            "已写入预设模板。若写入时 OBS 曾处于运行状态，配置可能不会完全生效；推荐在关闭 OBS 后重新应用一次，然后启动 OBS。"
-            "（应用后请重启 OBS 查看完整效果。）"
-        )
-    else:
-        summary_msg = (
-            "已应用推荐 OBS 录制预设。修改配置文件时同样建议在 OBS 关闭后进行更稳妥；完成后重启 OBS。"
-        )
-
-    return {
-        "ok": True,
-        "backup_id": backup_id,
-        "changed": changed,
-        "restart_obs_required": restart_obs_required,
-        "bundled_basic_ini_applied": bundled_used,
-        "project_profile": pp,
-        "basic_ini_path": str(basic_ini.resolve()),
-        "preset_template_path": str(bundled_src.resolve()) if bundled_used else None,
-        "message": summary_msg,
-    }
-
-
-def import_cs2obs_bytes(
-    data: dict[str, Any],
-    obs_cfg,
-    *,
-    project_profile: Optional[str] = None,
-    create_backup: bool = True,
-) -> dict[str, Any]:
-    ok, err = validate_cs2obs_payload(data)
-    if not ok:
-        raise ValueError(err)
-    if sys.platform != "win32":
-        raise ValueError("导入预设仅支持 Windows（需要写入 OBS 配置目录）")
-    obs_root = _obs_studio_root()
-    if obs_root is None:
-        raise ValueError("无法定位 OBS 配置目录")
-    obs_root.mkdir(parents=True, exist_ok=True)
-
-    pp = _effective_project_profile(obs_root, project_profile)
-
-    cfg = load_config()
-    backup_id = ""
-    if create_backup:
-        backup_id, _ = _create_backup(obs_root, reason="import_cs2obs_preset", project_profile=pp)
-
-    v = data["video"]
-    fps = int(v["fps"])
-    bw = int(v["base_width"])
-    bh = int(v["base_height"])
-    ow = int(v.get("output_width") or bw)
-    oh = int(v.get("output_height") or bh)
-    rec = data.get("recording") or {}
-    use_stream = bool(rec.get("use_stream_encoder", False))
-    rec_fmt = str(rec.get("format") or "mkv").strip() or "mkv"
-
-    prof_dir = _ensure_project_profile_folder(obs_root, pp)
-    basic_ini = prof_dir / "basic.ini"
-    simple_before = _parse_simple_output(basic_ini)
-    encoder_pick = _pick_rec_encoder_from_simple(simple_before, None)
-
-    _merge_write_simple_output(
-        basic_ini,
-        {
-            "RecEncoder": encoder_pick,
-            "RecUseStreamEncoder": "true" if use_stream else "false",
-            "UseStreamEncoder": "true" if use_stream else "false",
-            "RecFormat2": str(rec.get("format") or "mkv"),
-        },
-    )
-    _set_global_ini_current_profile(obs_root, pp)
-
-    changed = ["set_video", "set_recording_encoder_policy"]
-    restart_obs_required = True
-    director = OBSDirector(
-        obs_cfg,
-        cfg.cs2_path,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-        spec_player_verify=cfg.spec_player_verify,
-    )
-    try:
-        if not director.connect_obs():
-            raise ValueError("无法连接 OBS WebSocket")
-        ws = director.obs_ws
-        if not ws:
-            raise ValueError("OBS WebSocket 未就绪")
-        if _obs_is_recording(ws):
-            raise ValueError("OBS 正在录制中，请停止录制后再修改配置。")
-        _try_set_video_and_profile_params(
-            ws,
-            base_w=bw,
-            base_h=bh,
-            fps=fps,
-            encoder=encoder_pick,
-            output_width=ow,
-            output_height=oh,
-            rec_format=rec_fmt,
-            project_profile=pp,
-            sync_simple_output_from_disk=False,
-        )
-        restart_obs_required = False
-        sn = _dedicated_scene_name()
-        cn = _dedicated_capture_name()
-        vr = ws.call(obs_requests.GetVideoSettings())
-        vd = _parse_ws_video(vr)
-        bwv = int(vd["base_width"] or bw)
-        bhv = int(vd["base_height"] or bh)
-        if _apply_scale_inner_transform(ws, sn, cn, bwv, bhv):
-            changed.append("fixed_capture_source_transform")
-    finally:
-        director.disconnect_obs()
-
-    return {
-        "ok": True,
-        "backup_id": backup_id,
-        "preset_name": str(data.get("name") or ""),
-        "changed": changed,
-        "restart_obs_required": restart_obs_required,
-    }
-
-
-def export_cs2obs_dict(obs_cfg) -> dict[str, Any]:
-    ws: Optional[obsws] = None
+    ws = None
     try:
         ws = _ws_connect(obs_cfg)
+    except Exception as exc:
+        raise ValueError(f"OBS WebSocket 未连接，请先在设置中测试连接：{exc}") from exc
+
+    try:
+        if _obs_is_recording(ws):
+            raise ValueError("录制进行中，无法修改视频设置，请录制结束后再校准")
+
+        changed: list[str] = []
+        already_ok: list[str] = []
+
+        # Step 1+2: 读显示器分辨率 & OBS 画布
+        monitor_w, monitor_h = get_primary_monitor_resolution()
+
         vr = ws.call(obs_requests.GetVideoSettings())
         vd = _parse_ws_video(vr)
-        fps = _fps_from_video_dict(vd)
-        payload = {
-            "name": "Exported OBS preset",
-            "version": 1,
-            "video": {
-                "base_width": int(vd["base_width"] or 1920),
-                "base_height": int(vd["base_height"] or 1080),
-                "output_width": int(vd["output_width"] or vd["base_width"] or 1920),
-                "output_height": int(vd["output_height"] or vd["base_height"] or 1080),
-                "fps": fps,
-            },
-            "recording": {
-                "use_stream_encoder": False,
-                "format": "mkv",
-                "encoder": "auto",
-            },
-            "scene": {"fit_to_screen": True, "scale_filter": "bicubic", "bounds_type": "OBS_BOUNDS_SCALE_INNER"},
+        canvas_w = vd.get("base_width", 0)
+        canvas_h = vd.get("base_height", 0)
+        output_w = vd.get("output_width", 0)
+        output_h = vd.get("output_height", 0)
+        existing_fps_n = vd.get("fps_num", 60)
+        existing_fps_d = vd.get("fps_den", 1)
+
+        # Step 3: 修正画布与输出分辨率
+        # OBS WS v5 SetVideoSettings 字段是顶层 kwargs，不能嵌套在 videoSettings={}
+        canvas_needs_fix = canvas_w != monitor_w or canvas_h != monitor_h
+        output_needs_fix = output_w != monitor_w or output_h != monitor_h
+        if canvas_needs_fix or output_needs_fix:
+            ws.call(obs_requests.SetVideoSettings(
+                fpsNumerator=existing_fps_n,
+                fpsDenominator=existing_fps_d,
+                baseWidth=monitor_w,
+                baseHeight=monitor_h,
+                outputWidth=monitor_w,
+                outputHeight=monitor_h,
+            ))
+            # 回读验证：避免静默失败时错误报告成功
+            verify_vr = ws.call(obs_requests.GetVideoSettings())
+            verify_vd = _parse_ws_video(verify_vr)
+            canvas_ok = verify_vd["base_width"] == monitor_w and verify_vd["base_height"] == monitor_h
+            output_ok = verify_vd["output_width"] == monitor_w and verify_vd["output_height"] == monitor_h
+            if canvas_ok and output_ok:
+                if canvas_needs_fix:
+                    changed.append(f"已将画布分辨率从 {canvas_w}×{canvas_h} 修正为 {monitor_w}×{monitor_h}")
+                if output_needs_fix:
+                    changed.append(f"已将输出分辨率从 {output_w}×{output_h} 修正为 {monitor_w}×{monitor_h}")
+            else:
+                parts: list[str] = []
+                if not canvas_ok:
+                    parts.append(
+                        f"画布仍为 {verify_vd['base_width']}×{verify_vd['base_height']}（应为 {monitor_w}×{monitor_h}）"
+                    )
+                if not output_ok:
+                    parts.append(
+                        f"输出仍为 {verify_vd['output_width']}×{verify_vd['output_height']}（应为 {monitor_w}×{monitor_h}）"
+                    )
+                raise ValueError(
+                    "OBS 未接受分辨率修改（" + "；".join(parts) + "），"
+                    f"请在 OBS 设置→视频中手动将基础（画布）与输出（缩放）分辨率改为 {monitor_w}×{monitor_h}"
+                )
+        else:
+            already_ok.append(f"画布分辨率正确（{canvas_w}×{canvas_h}）")
+            already_ok.append(f"输出分辨率正确（{output_w}×{output_h}）")
+
+        # Step 4: 确保 CS2 Insight 场景存在
+        scene_name = _dedicated_scene_name()
+        scenes_resp = ws.call(obs_requests.GetSceneList())
+        scenes_data = getattr(scenes_resp, "datain", None) or {}
+        scene_names = [s.get("sceneName", "") for s in scenes_data.get("scenes", [])]
+
+        if scene_name not in scene_names:
+            ws.call(obs_requests.CreateScene(sceneName=scene_name))
+            changed.append(f"已创建场景「{scene_name}」")
+        else:
+            already_ok.append(f"场景「{scene_name}」已存在")
+
+        # Step 5: 确保 Game Capture 源存在
+        capture_name = _dedicated_capture_name()
+        items_resp = ws.call(obs_requests.GetSceneItemList(sceneName=scene_name))
+        items_data = getattr(items_resp, "datain", None) or {}
+        source_names = [item.get("sourceName", "") for item in items_data.get("sceneItems", [])]
+
+        if capture_name not in source_names:
+            ws.call(obs_requests.CreateInput(
+                sceneName=scene_name,
+                inputName=capture_name,
+                inputKind="game_capture",
+                inputSettings={"capture_mode": "window", "window": "cs2.exe"},
+            ))
+            changed.append(f"已创建 Game Capture 源「{capture_name}」")
+        else:
+            already_ok.append(f"Game Capture 源「{capture_name}」已存在")
+
+        # Step 6: 设置拉伸填满画布
+        item_id_resp = ws.call(obs_requests.GetSceneItemId(
+            sceneName=scene_name, sourceName=capture_name
+        ))
+        item_id_data = getattr(item_id_resp, "datain", None) or {}
+        item_id = item_id_data.get("sceneItemId")
+        if item_id is not None:
+            ws.call(obs_requests.SetSceneItemTransform(
+                sceneName=scene_name,
+                sceneItemId=int(item_id),
+                sceneItemTransform={
+                    "positionX": 0,
+                    "positionY": 0,
+                    "boundsType": "OBS_BOUNDS_STRETCH",
+                    "boundsWidth": monitor_w,
+                    "boundsHeight": monitor_h,
+                },
+            ))
+            changed.append("已设置 Game Capture 拉伸填满画布")
+        else:
+            already_ok.append("Game Capture 拉伸变换跳过（无法获取 sceneItemId）")
+
+        # Step 7: 修正输出设置（RecQuality / RecFormat2）
+        rec_q_resp = ws.call(obs_requests.GetProfileParameter(
+            parameterCategory="SimpleOutput", parameterName="RecQuality"
+        ))
+        rec_q_data = getattr(rec_q_resp, "datain", None) or {}
+        rec_quality = rec_q_data.get("parameterValue", "")
+
+        restart_required = False
+
+        if rec_quality == "Stream":
+            ws.call(obs_requests.SetProfileParameter(
+                parameterCategory="SimpleOutput",
+                parameterName="RecQuality",
+                parameterValue="Small",
+            ))
+            # RecQuality="Stream" 时 OBS 忽略 RecEncoder；改为 "Small" 后必须有有效编码器
+            # 否则 OBS 以空编码器启动录制会报「启动录像失败」
+            rec_enc_resp = ws.call(obs_requests.GetProfileParameter(
+                parameterCategory="SimpleOutput", parameterName="RecEncoder"
+            ))
+            rec_enc_val = ((getattr(rec_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
+            if not rec_enc_val or rec_enc_val.lower() in ("none", "null", "stream"):
+                # 1. 优先用当前串流编码器（用户已确认可用的硬件编码器）
+                try:
+                    stream_enc_resp = ws.call(obs_requests.GetProfileParameter(
+                        parameterCategory="SimpleOutput", parameterName="StreamEncoder"
+                    ))
+                    stream_enc = ((getattr(stream_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
+                except Exception:  # noqa: BLE001
+                    stream_enc = ""
+                # 2. 串流编码器无效时按硬件优先顺序选取
+                _HW_PRIORITY = [
+                    "jim_nvenc",        # NVENC（新版，推荐）
+                    "ffmpeg_nvenc",     # NVENC（旧版）
+                    "h264_texture_amf", # AMD AMF（新版）
+                    "amd_amf_h264",    # AMD AMF（旧版）
+                    "obs_qsv11_v2",    # Intel QSV（新版）
+                    "obs_qsv11",       # Intel QSV（旧版）
+                ]
+                _INVALID = {"", "none", "null", "stream"}
+                target_enc = stream_enc if stream_enc.lower() not in _INVALID else _HW_PRIORITY[0]
+                ws.call(obs_requests.SetProfileParameter(
+                    parameterCategory="SimpleOutput",
+                    parameterName="RecEncoder",
+                    parameterValue=target_enc,
+                ))
+                changed.append(f"录像编码器已设为「{target_enc}」（原质量为串流一致时未配置）")
+            # 编码器/质量变更写入的是磁盘 Profile，OBS 输出管线不会热重载，必须重启生效
+            restart_required = True
+            changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
+        else:
+            already_ok.append("录像质量设置正常")
+
+        rec_f_resp = ws.call(obs_requests.GetProfileParameter(
+            parameterCategory="SimpleOutput", parameterName="RecFormat2"
+        ))
+        rec_f_data = getattr(rec_f_resp, "datain", None) or {}
+        rec_format = rec_f_data.get("parameterValue", "")
+
+        if rec_format != "hybrid_mp4":
+            ws.call(obs_requests.SetProfileParameter(
+                parameterCategory="SimpleOutput",
+                parameterName="RecFormat2",
+                parameterValue="hybrid_mp4",
+            ))
+            changed.append("录像格式已改为「混合 MP4」")
+        else:
+            already_ok.append("录像格式正确（混合 MP4）")
+
+        return {
+            "success": True,
+            "changed": changed,
+            "already_ok": already_ok,
+            "restart_obs_required": restart_required,
         }
-        obs_root = _obs_studio_root()
-        if obs_root:
-            prof_name, _ = _read_global_profile_names(obs_root)
-            if prof_name:
-                simple = _parse_simple_output(obs_root / "basic" / "profiles" / prof_name / "basic.ini")
-                payload["recording"]["use_stream_encoder"] = _detect_use_stream_encoder(simple, ws)
-                payload["recording"]["format"] = (simple.get("RecFormat2") or "mkv").strip() or "mkv"
-        return _strip_sensitive_for_export(payload)
+
     finally:
         _ws_disconnect(ws)
-
-
-def import_native_files(
-    files: list[tuple[str, bytes]],
-    obs_cfg,
-    *,
-    project_profile: Optional[str] = None,
-    create_backup: bool = True,
-) -> dict[str, Any]:
-    if sys.platform != "win32":
-        raise ValueError("原生配置导入仅支持 Windows")
-    obs_root = _obs_studio_root()
-    if obs_root is None:
-        raise ValueError("无法定位 OBS 配置目录")
-    obs_root.mkdir(parents=True, exist_ok=True)
-
-    pp = _effective_project_profile(obs_root, project_profile)
-
-    imported: list[str] = []
-    skipped: list[dict[str, str]] = []
-    prof_dir = _ensure_project_profile_folder(obs_root, pp)
-
-    backup_id = ""
-    if create_backup:
-        backup_id, _ = _create_backup(obs_root, reason="import_native_config", project_profile=pp)
-
-    for name, raw in files:
-        base = Path(name).name
-        if base not in NATIVE_ALLOWLIST:
-            skipped.append({"file": base, "reason": "文件名不在白名单"})
-            continue
-        if len(raw) > NATIVE_MAX_BYTES:
-            skipped.append({"file": base, "reason": "文件超过 1MB 限制"})
-            continue
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            skipped.append({"file": base, "reason": "无法按 UTF-8 解码"})
-            continue
-        bad = _reject_native_content_if_sensitive(text, base)
-        if bad:
-            skipped.append({"file": base, "reason": bad})
-            continue
-        if base.endswith(".json"):
-            try:
-                json.loads(text)
-            except json.JSONDecodeError:
-                skipped.append({"file": base, "reason": "JSON 格式无效"})
-                continue
-        else:
-            cp = configparser.ConfigParser(interpolation=None)
-            try:
-                cp.read_string(text)
-            except configparser.Error:
-                skipped.append({"file": base, "reason": "INI 格式无效"})
-                continue
-        dest = prof_dir / base
-        dest.write_bytes(raw)
-        imported.append(base)
-
-    ws_flags: list[str] = []
-    ws: Optional[obsws] = None
-    if imported:
-        try:
-            try:
-                ws = _ws_connect(obs_cfg)
-                if _obs_is_recording(ws):
-                    logger.warning("import_native_files: OBS 正在录制，文件已写入 Profile")
-                    ws_flags.append("recording_active")
-            except Exception as e:
-                logger.info("import_native_files: WebSocket 不可用，跳过录制检测（磁盘已写入）: %s", e)
-                ws_flags.append("websocket_skipped")
-        finally:
-            _ws_disconnect(ws)
-
-    if imported:
-        msg_parts = [
-            "已将所选文件写入当前 OBS Profile 目录。",
-            "为保证生效，建议先完全退出 OBS 再导入；完成后重新启动 OBS。",
-        ]
-        if "websocket_skipped" in ws_flags:
-            msg_parts.append("（未连接 WebSocket，仅完成磁盘写入。）")
-        if "recording_active" in ws_flags:
-            msg_parts.append("（检测到 OBS 正在录制，文件已落盘，建议停止录制并重启 OBS 后再试。）")
-        message = "".join(msg_parts)
-    else:
-        message = (
-            "没有文件被写入（全部被跳过或校验失败）。请确认文件名在白名单内且格式有效。"
-            "若曾备份，可在下方备份列表中恢复。"
-        )
-
-    return {
-        "ok": True,
-        "backup_id": backup_id,
-        "imported": imported,
-        "skipped": skipped,
-        "restart_obs_required": bool(imported),
-        "message": message,
-    }
 
 
 def restore_backup(backup_id: str, obs_cfg, *, project_profile: Optional[str] = None) -> dict[str, Any]:

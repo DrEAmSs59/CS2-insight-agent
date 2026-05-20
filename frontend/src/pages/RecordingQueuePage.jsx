@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
-import axios from "axios";
+import API from "../api/api";
+import { getObsConfigStatus } from "../api/obsConfigCenter";
+import { obsConfigHasIssues } from "../utils/obsConfigHealth";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import {
@@ -60,14 +62,16 @@ export default function RecordingQueuePage() {
   const obsEndpointLabel = `${s.obsConfig?.host || "localhost"}:${s.obsConfig?.port ?? 4455}`;
 
   const [obsConnected, setObsConnected] = useState(/** @type {boolean | null} */ (null));
+  const [obsConfigHasIssues, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
   const obsProbeGen = useRef(0);
   useEffect(() => {
     setObsConnected(null);
+    setObsConfigHasIssues(null);
     const gen = ++obsProbeGen.current;
     let cancelled = false;
     const run = async () => {
       try {
-        const { data } = await axios.post("/api/obs/test", s.obsConfig);
+        const { data } = await API.post("/obs/test", s.obsConfig);
         if (cancelled || gen !== obsProbeGen.current) return;
         setObsConnected(Boolean(data?.ok));
       } catch {
@@ -82,6 +86,18 @@ export default function RecordingQueuePage() {
       clearInterval(id);
     };
   }, [s.obsConfig?.host, s.obsConfig?.port, s.obsConfig?.password]);
+
+  // OBS 连上后拉一次配置健康状态（不循环轮询，避免频繁打扰 OBS）
+  useEffect(() => {
+    if (obsConnected !== true) { setObsConfigHasIssues(null); return; }
+    let cancelled = false;
+    getObsConfigStatus().then((st) => {
+      if (cancelled) return;
+      if (!st?.obs_connected) { setObsConfigHasIssues(null); return; }
+      setObsConfigHasIssues(obsConfigHasIssues(st));
+    }).catch(() => { if (!cancelled) setObsConfigHasIssues(null); });
+    return () => { cancelled = true; };
+  }, [obsConnected]);
 
   const canReorder = queue.length > 1 && !s.batchRecording;
 
@@ -138,6 +154,7 @@ export default function RecordingQueuePage() {
           queueStatusLabel={queueStatusLabel}
           obsConnected={obsConnected}
           obsEndpointLabel={obsEndpointLabel}
+          obsConfigHasIssues={obsConfigHasIssues}
         />
       </div>
 

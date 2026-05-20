@@ -19,25 +19,17 @@ from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from math import gcd
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field
 
-from .demo_parse_isolation import (
-    IsolatedParseError,
-    analyze_demo_isolated,
-    get_demo_match_summary_isolated,
-    get_player_list_isolated,
-)
 from .env_utils import (
     AppConfig,
     OBSConfig,
     LLMConfig,
     ExperimentalConfig,
-    SpecPlayerVerifyConfig,
     load_config,
     save_config,
     ensure_cs2_path,
@@ -46,7 +38,6 @@ from .env_utils import (
     llm_api_key_configured,
     llm_base_url_is_local_host,
 )
-from .ai_reviewer import enrich_clips_dicts_with_reviewer
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
@@ -55,24 +46,13 @@ from .gsi_ready import gsi_status, notify_gsi_payload
 from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
 from . import obs_config_center
-from .pov_experimental import merge_warmup_extras_for_pov
-from .pov_hud_manager import PovHudError, PovHudManager, try_restore_stale_pov_on_startup
-from .video_composer import MontageComposerError, compose_montage, resolve_ffmpeg_binary, validate_output_path
+from .recording.api import router as recording_router
 from .cs2_config_backup import (
-    CONFIG_RESTORE_REQUIRED,
     build_config_backup_status_payload,
     is_cs2_running,
     is_restore_required,
     open_backup_directory,
     restore_latest_user_config_backup,
-)
-from .obs_director import (
-    CS2_RUNNING_MESSAGE,
-    CS2AlreadyRunningError,
-    CS2NotReadyError,
-    OBSDirector,
-    RecordingWarmupExtras,
-    _RECORDING_RESULT_CLIP_META_KEYS,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -82,16 +62,18 @@ try:
     _log_dir_raw = (os.environ.get("CS2_INSIGHT_LOG_DIR") or "").strip()
     _log_dir = Path(_log_dir_raw) if _log_dir_raw else (resolve_config_path().parent / "logs")
     _log_dir.mkdir(parents=True, exist_ok=True)
-    # 每次进程启动清空本地 *.log，避免单文件无限增长；与「重启程序」语义一致。
-    for _old_log in _log_dir.glob("*.log"):
-        try:
-            _old_log.unlink(missing_ok=True)
-        except OSError:
-            pass
     _backend_log = _log_dir / "backend.log"
+    # 使用 mode='w' 确保每次启动清空旧日志，仅保留当次运行记录
     _file_handler = logging.FileHandler(_backend_log, mode="w", encoding="utf-8")
     _file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_file_handler)
+    
+    # 将 Uvicorn 的访问日志 (API 请求) 也写入文件
+    for _u_logger_name in ("uvicorn", "uvicorn.access"):
+        _u_logger = logging.getLogger(_u_logger_name)
+        _u_logger.addHandler(_file_handler)
+        _u_logger.propagate = False # 避免重复输出到 root logger
+
     _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("w", encoding="utf-8")
     faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
     logging.getLogger(__name__).info("Backend file logging enabled: %s", _backend_log)
@@ -102,9 +84,6 @@ DB_PATH = resolve_config_path().parent / "cs2-insight.db"
 demo_db = DemoDB(DB_PATH)
 montage_db = MontageDB(DB_PATH)
 demo_watcher: DemoWatcher | None = None
-
-# 单次 / 批量录制共用：请求中止时 set()，任务结束后在 finally 中置回 None
-_recording_abort_event: Optional[asyncio.Event] = None
 
 # 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
 _enqueue_striped_locks: list[asyncio.Lock] = []
@@ -223,6 +202,8 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
 
         # 轻量解析：只提取地图与记分板元数据，避免重量级玩家片段解析。
         try:
+            from .demo_parse_isolation import get_demo_match_summary_isolated
+
             meta = await asyncio.to_thread(get_demo_match_summary_isolated, demo_path)
             if isinstance(meta, dict):
                 refined_source = infer_demo_source(path.name, server_name=meta.get("server_name"))
@@ -264,6 +245,8 @@ async def lifespan(_: FastAPI):
     await montage_db.init_tables()
     cfg = load_config()
     demo_watcher = DemoWatcher(cfg.demo_watch_paths or [], _enqueue_demo_path, demo_db)
+    from .pov_hud_manager import try_restore_stale_pov_on_startup
+
     for _msg in try_restore_stale_pov_on_startup(cfg):
         if _msg:
             logger.info("POV startup: %s", _msg)
@@ -273,7 +256,9 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
+
+app.include_router(recording_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -334,6 +319,8 @@ def resolve_spectator_for_demo(dem_path: Path, requested: Optional[str]) -> Opti
     再用于 spec_player。必须先对 roster 匹配：昵称里可能出现 SQLException 等字样，
     不能当作异常串过滤掉。
     """
+    from .demo_parse_isolation import get_player_list_isolated
+
     raw = (requested or "").strip()
     if not raw:
         return None
@@ -366,22 +353,6 @@ def resolve_spectator_for_demo(dem_path: Path, requested: Optional[str]) -> Opti
     return raw
 
 
-def _lookup_roster_user_id(roster: list[dict], spectator_name: Optional[str]) -> Optional[int]:
-    raw = (spectator_name or "").strip()
-    if not raw:
-        return None
-    low = raw.lower()
-    for p in roster:
-        name = str(p.get("name") or "").strip()
-        if name and name.lower() == low and p.get("user_id") is not None:
-            try:
-                uid = int(p.get("user_id"))
-            except (TypeError, ValueError):
-                return None
-            return uid if uid > 0 else None
-    return None
-
-
 def resolve_uploaded_demo_path(p: str) -> Path:
     """接受绝对路径或仅文件名（相对 ``UPLOAD_DIR``）。"""
     raw = (p or "").strip()
@@ -402,11 +373,15 @@ def _analyze_demo_sync(
     freeze_to_death_rounds: Optional[list[int]] = None,
 ) -> dict:
     """Parse in a child process so demoparser native crashes cannot kill FastAPI."""
+    from .demo_parse_isolation import analyze_demo_isolated
+
     return analyze_demo_isolated(dem_path, target_player, freeze_to_death_rounds)
 
 
 async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
     """Best-effort metadata for upload responses; upload must not fail if parsing does."""
+    from .demo_parse_isolation import get_demo_match_summary_isolated, get_player_list_isolated
+
     players: list[dict] = []
     match_meta: dict = {}
     try:
@@ -418,71 +393,6 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
     except Exception as e:  # noqa: BLE001
         logger.exception("Upload summary parse failed for %s: %s", dem_path, e)
     return players, match_meta
-
-
-def _raise_if_recording_never_started(results: list[dict]) -> None:
-    if not results:
-        raise HTTPException(500, "录制没有产生任何结果，请检查 OBS / CS2 是否正常启动。")
-    statuses = {str(r.get("status") or "") for r in results if isinstance(r, dict)}
-    if "recorded" not in statuses and (statuses & {"obs_error", "error"}):
-        first_error = next(
-            (
-                str(r.get("error") or r.get("status") or "")
-                for r in results
-                if isinstance(r, dict) and str(r.get("status") or "") in {"obs_error", "error"}
-            ),
-            "unknown",
-        )
-        raise HTTPException(500, f"录制没有开始：{first_error}")
-
-
-def _clip_meta_from_recording_result(r: dict) -> dict[str, Any]:
-    """从单次录制结果提取可 JSON 化的片段元数据，写入 recorded_clips.clip_meta。"""
-    out: dict[str, Any] = {}
-    for k in _RECORDING_RESULT_CLIP_META_KEYS:
-        if k not in r:
-            continue
-        out[k] = r[k]
-    return out
-
-
-async def _persist_recorded_clips_from_results(results: list[dict]) -> None:
-    """将成功录制的片段写入 recorded_clips 表（供合辑工作台）。"""
-    for r in results:
-        if not isinstance(r, dict):
-            continue
-        if str(r.get("status") or "") != "recorded":
-            continue
-        op = (r.get("output_path") or "").strip()
-        if not op:
-            continue
-        demo_path = (r.get("demo_path") or "").strip()
-        if not demo_path:
-            continue
-        clip_id = str(r.get("clip_id") or "")
-        demo_fn = (r.get("demo_filename") or "").strip() or None
-        player = (r.get("player_name") or "").strip() or None
-        dur = r.get("duration")
-        dur_f: float | None = None
-        if dur is not None:
-            try:
-                dur_f = float(dur)
-            except (TypeError, ValueError):
-                dur_f = None
-        try:
-            meta = _clip_meta_from_recording_result(r)
-            await montage_db.insert_recorded_clip(
-                clip_id=clip_id,
-                demo_path=demo_path,
-                demo_filename=demo_fn,
-                player_name=player,
-                output_path=op,
-                duration_sec=dur_f,
-                status="ready",
-                clip_meta=meta if meta else None,
-            )
-        except Exception:
-            logger.exception("recorded_clips insert failed clip_id=%s path=%s", clip_id, op)
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
@@ -535,6 +445,8 @@ def _match_expected_to_roster_row(expected: str, roster: list[dict]) -> Optional
 
 def _matched_demo_players_in_order(expected: list[str], dem_path: str) -> list[dict]:
     """按配置名单顺序，在本场 roster 中依次匹配；同一场可命中多名（去重后保留名单顺序）。"""
+    from .demo_parse_isolation import get_player_list_isolated
+
     roster = get_player_list_isolated(str(dem_path))
     if not roster:
         return []
@@ -607,6 +519,8 @@ async def _run_library_demo_analyze(
     await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
     try:
+        from .demo_parse_isolation import IsolatedParseError
+
         for player in target_players:
             parsed = await asyncio.to_thread(
                 _analyze_demo_sync,
@@ -624,6 +538,8 @@ async def _run_library_demo_analyze(
 
     cfg = load_config()
     if cfg.ai_mode and cfg.llm.api_key:
+        from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
         async def _enrich_library_player(player: str) -> None:
             pdata = players_out.get(player)
             if not isinstance(pdata, dict):
@@ -697,15 +613,6 @@ class ExperimentalPayload(BaseModel):
     pov_enabled: Optional[bool] = None
 
 
-class SpecPlayerVerifyPatch(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    demo_timescale: Optional[float] = Field(default=None, ge=0.01, le=1.0)
-    max_retries: Optional[int] = Field(default=None, ge=1, le=16)
-    per_retry_timeout_sec: Optional[float] = Field(default=None, ge=0.05, le=5.0)
-    settle_sec: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-
-
 class ConfigPayload(BaseModel):
     obs: Optional[OBSConfig] = None
     llm: Optional[LLMConfig] = None
@@ -718,9 +625,12 @@ class ConfigPayload(BaseModel):
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
+    cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
+    obs_transition_enabled: Optional[bool] = None
+    obs_transition_name: Optional[str] = None
+    obs_transition_duration_ms: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
-    spec_player_verify: Optional[SpecPlayerVerifyPatch] = None
 
 
 @app.get("/api/config")
@@ -742,6 +652,22 @@ def get_app_update_info(force: bool = False):
     """对比 GitHub 最新 Release；force=true 跳过进程内短缓存（手动「检查更新」）。"""
     cur, src = resolve_local_version_info()
     return build_update_payload(cur, src, force_refresh=bool(force))
+
+
+@app.post("/api/config/detect-encoder")
+async def detect_encoder():
+    """检测当前 FFmpeg 支持哪些 H.264 编码器，返回自动选择结果与各硬件编码器探测详情。"""
+    from .montage_encoder import diagnose_encoders
+    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
+
+    cfg = load_config()
+    try:
+        ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
+    except MontageComposerError as e:
+        raise HTTPException(400, str(e)) from e
+    result = await asyncio.to_thread(diagnose_encoders, ffmpeg_bin)
+    result["ffmpeg_path"] = str(ffmpeg_bin)
+    return result
 
 
 @app.post("/api/config/detect-cs2")
@@ -908,16 +834,30 @@ async def update_config(payload: ConfigPayload):
             else {}
         )
     if payload.cs2_extra_launch_args is not None:
-        cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
+        next_launch_args = str(payload.cs2_extra_launch_args)
+        if payload.cs2_extra_launch_args_user_configured is not None:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
+        elif next_launch_args != cfg.cs2_extra_launch_args:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = True
+    elif payload.cs2_extra_launch_args_user_configured is not None:
+        cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
     if payload.record_inject_console_lines is not None:
         cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
+    if payload.obs_transition_enabled is not None:
+        cfg.obs_transition_enabled = bool(payload.obs_transition_enabled)
+    if payload.obs_transition_name is not None:
+        name = str(payload.obs_transition_name).strip()
+        cfg.obs_transition_name = name or "Fade"
+    if payload.obs_transition_duration_ms is not None:
+        try:
+            cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
+        except (TypeError, ValueError):
+            pass
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
-    if payload.spec_player_verify is not None:
-        patch = payload.spec_player_verify.model_dump(exclude_unset=True, exclude_none=True)
-        if patch:
-            cfg.spec_player_verify = cfg.spec_player_verify.model_copy(update=patch)
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -929,6 +869,8 @@ async def update_config(payload: ConfigPayload):
 
 @app.get("/api/experimental/pov/status")
 def experimental_pov_status():
+    from .pov_hud_manager import PovHudError, PovHudManager
+
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
     try:
@@ -942,6 +884,8 @@ def experimental_pov_status():
 
 @app.post("/api/experimental/pov/restore")
 def experimental_pov_restore():
+    from .pov_hud_manager import PovHudError, PovHudManager
+
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
     try:
@@ -1007,12 +951,13 @@ def setup_status():
 
     obs_connected = False
     try:
+        from .obs_director import OBSDirector
+
         director = OBSDirector(
             cfg.obs,
             cfg.cs2_path,
             cs2_extra_launch_args=cfg.cs2_extra_launch_args,
             record_inject_console_lines=cfg.record_inject_console_lines,
-            spec_player_verify=cfg.spec_player_verify,
         )
         probe_timeout = _setup_status_obs_handshake_timeout_sec()
         result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
@@ -1034,6 +979,8 @@ def setup_status():
 
 @app.post("/api/obs/test")
 def test_obs(payload: OBSConfig | None = Body(default=None)):
+    from .obs_director import OBSDirector
+
     cfg = load_config()
     obs_use = merge_obs_for_connection(payload, cfg.obs)
     director = OBSDirector(
@@ -1041,17 +988,8 @@ def test_obs(payload: OBSConfig | None = Body(default=None)):
         cfg.cs2_path,
         cs2_extra_launch_args=cfg.cs2_extra_launch_args,
         record_inject_console_lines=cfg.record_inject_console_lines,
-        spec_player_verify=cfg.spec_player_verify,
     )
     return director.test_obs_connection()
-
-
-class ObsConfigApplyRecommended(BaseModel):
-    create_backup: bool = True
-    fix_scene: bool = True
-    # 留空则自动解析本机默认 Profile 目录（如「未命名」/ Untitled），不读环境变量
-    target_profile: str = ""
-    obs: Optional[OBSConfig] = None
 
 
 @app.get("/api/obs-config/status")
@@ -1067,65 +1005,11 @@ def obs_config_diagnose(payload: Optional[OBSConfig] = Body(default=None)):
     return obs_config_center.diagnose(obs_use)
 
 
-@app.post("/api/obs-config/apply-recommended")
-def obs_config_apply_recommended(body: Optional[ObsConfigApplyRecommended] = Body(default=None)):
+@app.post("/api/obs-config/calibrate")
+def obs_config_calibrate():
     cfg = load_config()
-    req = body or ObsConfigApplyRecommended()
-    obs_use = merge_obs_for_connection(req.obs, cfg.obs)
-    tp = (req.target_profile or "").strip() or None
     try:
-        return obs_config_center.apply_recommended(
-            obs_use,
-            project_profile=tp,
-            create_backup=req.create_backup,
-            fix_scene=req.fix_scene,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.post("/api/obs-config/import-preset")
-async def obs_config_import_preset(
-    file: UploadFile = File(...),
-    create_backup: bool = Form(True),
-):
-    cfg = load_config()
-    raw = await file.read()
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError:
-        raise HTTPException(400, "无效的 .cs2obs / JSON 文件") from None
-    try:
-        return obs_config_center.import_cs2obs_bytes(data, cfg.obs, create_backup=create_backup)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.get("/api/obs-config/export-preset")
-def obs_config_export_preset():
-    cfg = load_config()
-    data = obs_config_center.export_cs2obs_dict(cfg.obs)
-    buf = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return StreamingResponse(
-        io.BytesIO(buf),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="cs2-insight-obs-preset-{ts}.cs2obs"'},
-    )
-
-
-@app.post("/api/obs-config/import-native")
-async def obs_config_import_native(
-    files: list[UploadFile] = File(...),
-    create_backup: bool = Form(True),
-):
-    cfg = load_config()
-    pairs: list[tuple[str, bytes]] = []
-    for f in files:
-        raw = await f.read()
-        pairs.append((f.filename or "", raw))
-    try:
-        return obs_config_center.import_native_files(pairs, cfg.obs, create_backup=create_backup)
+        return obs_config_center.calibrate(cfg.obs)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -1209,6 +1093,8 @@ async def upload_demos(files: Annotated[list[UploadFile], File()]):
 
 @app.post("/api/demo/parse")
 async def parse_demo(req: ParseRequest, filename: str):
+    from .demo_parse_isolation import IsolatedParseError
+
     dem_path = UPLOAD_DIR / filename
     if not dem_path.exists():
         raise HTTPException(404, f"Demo file not found: {filename}")
@@ -1226,6 +1112,8 @@ async def parse_demo(req: ParseRequest, filename: str):
     cfg = load_config()
     if cfg.ai_mode and cfg.llm.api_key:
         try:
+            from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
             result["clips"] = await enrich_clips_dicts_with_reviewer(
                 result.get("clips") or [],
                 result.get("match_meta") or {},
@@ -1245,6 +1133,8 @@ class ParseMultiRequest(BaseModel):
 @app.post("/api/demo/parse-multi")
 async def parse_demo_multi(req: ParseMultiRequest, filename: str):
     """多玩家解析：对同一个 Demo 依次分析每个目标玩家，返回 { players: { name: result } }。"""
+    from .demo_parse_isolation import IsolatedParseError
+
     dem_path = UPLOAD_DIR / filename
     if not dem_path.exists():
         raise HTTPException(status_code=404, detail=f"Demo file not found: {filename}")
@@ -1264,6 +1154,8 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
     if cfg.ai_mode and cfg.llm.api_key:
+        from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
         async def _review(player: str, result) -> None:
             try:
                 result["clips"] = await enrich_clips_dicts_with_reviewer(
@@ -1293,6 +1185,8 @@ async def parse_demo_batch(req: BatchParseRequest):
     批量解析：``paths`` 为上传后返回的绝对路径或 ``UPLOAD_DIR`` 下的文件名。
     使用线程池并行调用 ``DemoAnalyzer.analyze``，顺序与 ``paths`` 一致。
     """
+    from .demo_parse_isolation import IsolatedParseError
+
     resolved: list[Path] = []
     for p in req.paths:
         resolved.append(resolve_uploaded_demo_path(p))
@@ -1322,6 +1216,8 @@ async def parse_demo_batch(req: BatchParseRequest):
         response["demo_filename"] = dem_path.name
         if cfg.ai_mode and cfg.llm.api_key:
             try:
+                from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
                 response["clips"] = await enrich_clips_dicts_with_reviewer(
                     response["clips"],
                     response["match_meta"],
@@ -1386,6 +1282,8 @@ def _demo_library_filters_from_query(
 
 
 async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any]:
+    from .demo_parse_isolation import get_player_list_isolated
+
     try:
         raw = await asyncio.to_thread(get_player_list_isolated, demo_path)
         if isinstance(raw, dict):
@@ -1623,6 +1521,8 @@ class DemoAnalyzeRequest(BaseModel):
 
 @app.get("/api/demos/{demo_id}/players")
 async def get_demo_players(demo_id: int):
+    from .demo_parse_isolation import get_player_list_isolated
+
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
@@ -1690,6 +1590,8 @@ async def batch_ingest_demos(body: BatchIngestBody):
             failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": "文件不存在"})
             continue
         try:
+            from .demo_parse_isolation import get_demo_match_summary_isolated
+
             meta = await asyncio.to_thread(get_demo_match_summary_isolated, dem_path)
             if isinstance(meta, dict):
                 refined_source = infer_demo_source(Path(dem_path).name, server_name=meta.get("server_name"))
@@ -1718,425 +1620,6 @@ async def patch_demo_remark(demo_id: int, body: DemoRemarkPatch):
     await demo_library_hub.notify("remark")
     return {"status": "ok", "demo_id": demo_id}
 
-
-# ─── Recording endpoints ──────────────────────────────────────
-
-
-def _resolution_matches_aspect(width: int, height: int, aspect_ratio: str) -> bool:
-    """判定整数宽高化简后是否与所选比例一致。
-
-    CS2 视频设置里「宽高比 4:3」下列有 **1280×1024** 等实为 **5:4** 的分辨率，
-    与游戏菜单保持一致：选 4:3 时同时接受标准 4:3 与 5:4。
-    """
-    g = gcd(int(width), int(height))
-    if g <= 0:
-        return False
-    wn, hn = int(width) // g, int(height) // g
-    if aspect_ratio == "4:3":
-        if wn * 3 == hn * 4:
-            return True
-        # 1280×1024 等：游戏内挂在 4:3 分组下，数学上为 5:4（宽:高 = 5:4）
-        return wn * 4 == hn * 5
-    if aspect_ratio == "16:9":
-        return wn * 9 == hn * 16
-    if aspect_ratio == "16:10":
-        return wn * 10 == hn * 16
-    return False
-
-
-class RecordWarmupOptions(BaseModel):
-    """与 obs 首次 seek 前预热阶段注入的观战 cvar 及本次 CS2 启动分辨率一致。"""
-
-    cl_draw_only_deathnotices: bool = True
-    spec_show_xray: int = Field(default=0, ge=0, le=1)
-    fov_cs_debug: Optional[float] = Field(default=None, ge=1, le=179)
-    resolution_width: Optional[int] = Field(default=None, ge=1)
-    resolution_height: Optional[int] = Field(default=None, ge=1)
-    aspect_ratio: Optional[Literal["4:3", "16:9", "16:10"]] = None
-    hud_showtargetid_hide: bool = True
-    tv_nochat: bool = True
-    viewmodel_fov_68: bool = False
-    snd_voipvolume_mute: bool = True
-    hide_demo_playback_ui: bool = True
-    hide_grenade_trajectory_pip: bool = True
-    console_cmds: Optional[list[str]] = None
-    pov_radar_mode: int = Field(default=0, ge=-1, le=0)
-    pov_teamcounter_numeric: bool = False
-
-    @model_validator(mode="after")
-    def resolution_and_aspect_consistency(self) -> RecordWarmupOptions:
-        rw, rh = self.resolution_width, self.resolution_height
-        ar = self.aspect_ratio
-        has_both = rw is not None and rh is not None
-        has_either = rw is not None or rh is not None
-        if has_either and not has_both:
-            raise ValueError("启动分辨率须同时填写宽度与高度，或两者都留空。")
-        if ar is not None and not has_both:
-            raise ValueError("已选择屏幕比例时必须填写启动分辨率宽度与高度。")
-        if has_both and ar is None:
-            raise ValueError("填写启动分辨率时必须选择屏幕比例。")
-        if has_both and ar is not None and rw is not None and rh is not None:
-            if not _resolution_matches_aspect(rw, rh, ar):
-                raise ValueError(f"分辨率 {rw}×{rh} 与所选屏幕比例 {ar} 不符。")
-        return self
-
-
-class RecordRequest(BaseModel):
-    demo_filename: str
-    clips: list[dict]
-    # 与 /api/demo/parse 一致；Steam64 用字符串避免 JS JSON 大数精度丢失
-    target_player: Optional[str] = None
-    target_player_user_id: Optional[int] = None
-    target_steam_id: Optional[str] = None
-    warmup: Optional[RecordWarmupOptions] = None
-    obs: Optional[OBSConfig] = None
-
-
-def _raise_if_cs2_already_running() -> None:
-    if is_cs2_running():
-        raise HTTPException(409, CS2_RUNNING_MESSAGE)
-
-
-def _raise_if_config_restore_required() -> None:
-    if is_restore_required():
-        raise HTTPException(status_code=409, detail=CONFIG_RESTORE_REQUIRED)
-
-
-@app.post("/api/record/start")
-async def start_recording(req: RecordRequest):
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    obs_cfg = merge_obs_for_connection(req.obs, cfg.obs)
-
-    if not cfg.cs2_path:
-        raise HTTPException(
-            400,
-            "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
-        )
-    _raise_if_cs2_already_running()
-    _raise_if_config_restore_required()
-
-    dem_path = resolve_uploaded_demo_path(req.demo_filename)
-
-    roster = get_player_list_isolated(str(dem_path))
-
-    spectator_name: Optional[str] = None
-    raw_steam = (req.target_steam_id or "").strip()
-    if raw_steam:
-        try:
-            want_sid = int(raw_steam)
-        except ValueError:
-            want_sid = 0
-        if want_sid > 0:
-            for p in roster:
-                ps = p.get("steam_id")
-                if ps is None:
-                    continue
-                try:
-                    if int(str(ps)) == want_sid:
-                        spectator_name = str(p.get("name") or "").strip() or None
-                        break
-                except ValueError:
-                    continue
-            if not spectator_name:
-                logger.warning("target_steam_id 未匹配到本场玩家: %s", raw_steam)
-
-    spectator_uid: Optional[int] = req.target_player_user_id
-    if spectator_uid is not None:
-        allowed = {p.get("user_id") for p in roster if p.get("user_id") is not None}
-        if allowed and spectator_uid not in allowed:
-            logger.warning(
-                "target_player_user_id %r 不在本场 Demo 的 user_id 集合中，将忽略该 id",
-                spectator_uid,
-            )
-            spectator_uid = None
-    # 观战槽位按 tick 现算，需要稳定昵称；Steam 优先解析出 roster 内规范名
-    if spectator_name is None:
-        spectator_name = resolve_spectator_for_demo(dem_path, req.target_player)
-    if spectator_uid is None:
-        spectator_uid = _lookup_roster_user_id(roster, spectator_name)
-    warmup_extras: Optional[RecordingWarmupExtras] = None
-    if req.warmup is not None:
-        cc = req.warmup.console_cmds
-        tup = tuple(cc) if cc else None
-        warmup_extras = RecordingWarmupExtras(
-            cl_draw_only_deathnotices=req.warmup.cl_draw_only_deathnotices,
-            spec_show_xray=int(req.warmup.spec_show_xray),
-            fov_cs_debug=req.warmup.fov_cs_debug,
-            resolution_width=req.warmup.resolution_width,
-            resolution_height=req.warmup.resolution_height,
-            hud_showtargetid_hide=req.warmup.hud_showtargetid_hide,
-            tv_nochat=req.warmup.tv_nochat,
-            viewmodel_fov_68=req.warmup.viewmodel_fov_68,
-            snd_voipvolume_mute=req.warmup.snd_voipvolume_mute,
-            hide_demo_playback_ui=req.warmup.hide_demo_playback_ui,
-            hide_grenade_trajectory_pip=req.warmup.hide_grenade_trajectory_pip,
-            aspect_ratio=req.warmup.aspect_ratio,
-            console_cmds=tup,
-            pov_radar_mode=int(req.warmup.pov_radar_mode),
-            pov_teamcounter_numeric=bool(req.warmup.pov_teamcounter_numeric),
-        )
-
-    pov_on = bool(cfg.experimental.pov_enabled)
-    warmup_eff: Optional[RecordingWarmupExtras] = (
-        merge_warmup_extras_for_pov(warmup_extras) if pov_on else warmup_extras
-    )
-
-    global _recording_abort_event
-    if _recording_abort_event is not None:
-        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
-    abort_ev = asyncio.Event()
-    _recording_abort_event = abort_ev
-    pov_mgr: Optional[PovHudManager] = None
-    try:
-        if pov_on:
-            pov_mgr = PovHudManager(cfg)
-            demo_map_for_pov = ""
-            try:
-                sm = await asyncio.to_thread(get_demo_match_summary_isolated, str(dem_path))
-                demo_map_for_pov = str(sm.get("map_name") or "").strip()
-            except IsolatedParseError:
-                pass
-            pov_mgr.install(demo_map_for_pov)
-        director = OBSDirector(
-            obs_cfg,
-            cfg.cs2_path,
-            abort_event=abort_ev,
-            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-            record_inject_console_lines=cfg.record_inject_console_lines,
-            spec_player_verify=cfg.spec_player_verify,
-        )
-        results = await director.execute_recording_pipeline(
-            dem_path,
-            req.clips,
-            spectator_name=spectator_name,
-            spectator_user_id=spectator_uid,
-            warmup=warmup_eff,
-            pov_enabled=pov_on,
-        )
-        _raise_if_recording_never_started(results)
-        await _persist_recorded_clips_from_results(results)
-        return {"status": "completed", "results": results}
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    except CS2AlreadyRunningError as e:
-        raise HTTPException(409, str(e)) from e
-    except CS2NotReadyError as e:
-        raise HTTPException(409, str(e)) from e
-    finally:
-        _recording_abort_event = None
-        if pov_on and pov_mgr is not None:
-            try:
-                pov_mgr.restore()
-            except Exception:
-                logger.exception("POV HUD restore failed")
-
-
-class BatchRecordGroup(BaseModel):
-    demo_filename: str
-    demo_path: Optional[str] = None
-    clips: list[dict]
-    target_player: Optional[str] = None
-    target_player_user_id: Optional[int] = None
-    target_steam_id: Optional[str] = None
-
-
-class BatchRecordRequest(BaseModel):
-    """按 Demo 分组的待录制列表；同一 ``demo_filename`` 可合并为一组由前端保证。"""
-
-    groups: list[BatchRecordGroup] = Field(..., min_length=1)
-    warmup: Optional[RecordWarmupOptions] = None
-    obs: Optional[OBSConfig] = None
-
-
-def _resolve_spectators_for_record(
-    dem_path: Path,
-    req_like: RecordRequest | BatchRecordGroup,
-) -> tuple[Optional[str], Optional[int]]:
-    """与 ``start_recording`` 相同的观战名 / user_id 解析逻辑。"""
-    roster = get_player_list_isolated(str(dem_path))
-
-    spectator_name: Optional[str] = None
-    raw_steam = (getattr(req_like, "target_steam_id", None) or "").strip()
-    if raw_steam:
-        try:
-            want_sid = int(raw_steam)
-        except ValueError:
-            want_sid = 0
-        if want_sid > 0:
-            for p in roster:
-                ps = p.get("steam_id")
-                if ps is None:
-                    continue
-                try:
-                    if int(str(ps)) == want_sid:
-                        spectator_name = str(p.get("name") or "").strip() or None
-                        break
-                except ValueError:
-                    continue
-            if not spectator_name:
-                logger.warning("target_steam_id 未匹配到本场玩家: %s", raw_steam)
-
-    spectator_uid: Optional[int] = getattr(req_like, "target_player_user_id", None)
-    if spectator_uid is not None:
-        allowed = {p.get("user_id") for p in roster if p.get("user_id") is not None}
-        if allowed and spectator_uid not in allowed:
-            logger.warning(
-                "target_player_user_id %r 不在本场 Demo 的 user_id 集合中，将忽略该 id",
-                spectator_uid,
-            )
-            spectator_uid = None
-    if spectator_name is None:
-        spectator_name = resolve_spectator_for_demo(dem_path, getattr(req_like, "target_player", None))
-    if spectator_uid is None:
-        spectator_uid = _lookup_roster_user_id(roster, spectator_name)
-    return spectator_name, spectator_uid
-
-
-@app.post("/api/record/batch")
-async def start_batch_recording(req: BatchRecordRequest):
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    obs_cfg = merge_obs_for_connection(req.obs, cfg.obs)
-    if not cfg.cs2_path:
-        raise HTTPException(
-            400,
-            "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
-        )
-    _raise_if_cs2_already_running()
-    _raise_if_config_restore_required()
-
-    warmup_opts = req.warmup
-    wobj: Optional[RecordingWarmupExtras] = None
-    if warmup_opts is not None:
-        cc = warmup_opts.console_cmds
-        tup = tuple(cc) if cc else None
-        wobj = RecordingWarmupExtras(
-            cl_draw_only_deathnotices=warmup_opts.cl_draw_only_deathnotices,
-            spec_show_xray=int(warmup_opts.spec_show_xray),
-            fov_cs_debug=warmup_opts.fov_cs_debug,
-            resolution_width=warmup_opts.resolution_width,
-            resolution_height=warmup_opts.resolution_height,
-            hud_showtargetid_hide=warmup_opts.hud_showtargetid_hide,
-            tv_nochat=warmup_opts.tv_nochat,
-            viewmodel_fov_68=warmup_opts.viewmodel_fov_68,
-            snd_voipvolume_mute=warmup_opts.snd_voipvolume_mute,
-            hide_demo_playback_ui=warmup_opts.hide_demo_playback_ui,
-            hide_grenade_trajectory_pip=warmup_opts.hide_grenade_trajectory_pip,
-            aspect_ratio=warmup_opts.aspect_ratio,
-            console_cmds=tup,
-            pov_radar_mode=int(warmup_opts.pov_radar_mode),
-            pov_teamcounter_numeric=bool(warmup_opts.pov_teamcounter_numeric),
-        )
-
-    pov_on = bool(cfg.experimental.pov_enabled)
-    warmup_eff: Optional[RecordingWarmupExtras] = merge_warmup_extras_for_pov(wobj) if pov_on else wobj
-
-    # ── 两层聚合：demo（唯一启动 CS2）→ player（切换 spec_player）→ clips ──
-    # 同一个 demo 内的不同玩家合并为一个 CS2 会话，只启动/关闭游戏一次；
-    # 玩家之间通过在 clip dict 内嵌入 _spec_name / _spec_uid 字段来切换 spec_player，
-    # execute_batch_recording 不再感知玩家维度，OBSDirector 按 clip 自带信息注入。
-
-    # demo_key → (dem_path, ordered_player_groups)
-    # ordered_player_groups: list of (spec_name, spec_uid, clips_sorted_by_tick)
-    # inner list: [spec_name, spec_uid, clips_list]  — mutable so we can extend clips_list
-    demo_player_map: dict[str, tuple[Path, list[list]]] = {}
-
-    for g in req.groups:
-        candidate = (g.demo_path or "").strip() or g.demo_filename
-        dem_path = resolve_uploaded_demo_path(candidate)
-        spec_name, spec_uid = _resolve_spectators_for_record(dem_path, g)
-        demo_key = str(dem_path)
-        if demo_key not in demo_player_map:
-            demo_player_map[demo_key] = (dem_path, [])
-        _, player_groups = demo_player_map[demo_key]
-        # 同一玩家的多个 group 合并（player_groups 元素为 list，可直接 extend）
-        existing_idx = next(
-            (i for i, pg in enumerate(player_groups) if pg[0] == spec_name and pg[1] == spec_uid),
-            None,
-        )
-        if existing_idx is None:
-            player_groups.append([spec_name, spec_uid, list(g.clips)])
-        else:
-            player_groups[existing_idx][2].extend(g.clips)
-
-    # 展平为 execute_batch_recording 所需格式：每个 clip 内嵌 _spec_name / _spec_uid
-    # 玩家顺序保留原始 group 顺序，各玩家内部按 start_tick 升序
-    demo_jobs: list[tuple[Path, list[dict], Optional[str], Optional[int]]] = []
-    for demo_key, (dem_path, player_groups) in demo_player_map.items():
-        flat_clips: list[dict] = []
-        for spec_name, spec_uid, clips in player_groups:
-            sorted_clips = sorted(clips, key=lambda c: int(c.get("start_tick") or 0))
-            for clip in sorted_clips:
-                tagged = dict(clip)
-                tagged["_spec_name"] = spec_name
-                tagged["_spec_uid"]  = spec_uid
-                flat_clips.append(tagged)
-        if flat_clips:
-            # spec_name/spec_uid 设为 None：由各 clip 自带字段驱动
-            demo_jobs.append((dem_path, flat_clips, None, None))
-
-    if not demo_jobs:
-        raise HTTPException(400, "没有可录制的片段（clips 为空）")
-
-    demo_map_for_pov = ""
-    if pov_on:
-        try:
-            sm0 = await asyncio.to_thread(get_demo_match_summary_isolated, str(demo_jobs[0][0]))
-            demo_map_for_pov = str(sm0.get("map_name") or "").strip()
-        except IsolatedParseError:
-            demo_map_for_pov = ""
-
-    global _recording_abort_event
-    if _recording_abort_event is not None:
-        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
-    abort_ev = asyncio.Event()
-    _recording_abort_event = abort_ev
-    pov_mgr: Optional[PovHudManager] = None
-    try:
-        if pov_on:
-            pov_mgr = PovHudManager(cfg)
-            pov_mgr.install(demo_map_for_pov)
-        director = OBSDirector(
-            obs_cfg,
-            cfg.cs2_path,
-            abort_event=abort_ev,
-            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-            record_inject_console_lines=cfg.record_inject_console_lines,
-            spec_player_verify=cfg.spec_player_verify,
-        )
-        results = await director.execute_batch_recording(
-            demo_jobs,
-            warmup=warmup_eff,
-            pov_enabled=pov_on,
-            pov_hud_manager=pov_mgr if pov_on else None,
-        )
-        _raise_if_recording_never_started(results)
-        await _persist_recorded_clips_from_results(results)
-        return {"status": "completed", "results": results}
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    except CS2AlreadyRunningError as e:
-        raise HTTPException(409, str(e)) from e
-    except CS2NotReadyError as e:
-        raise HTTPException(409, str(e)) from e
-    finally:
-        _recording_abort_event = None
-        if pov_on and pov_mgr is not None:
-            try:
-                pov_mgr.restore()
-            except Exception:
-                logger.exception("POV HUD restore failed")
-
-
-@app.post("/api/record/abort")
-def record_abort():
-    """请求中止当前进行中的单次或批量 OBS 录制（异步收尾，接口立即返回）。"""
-    global _recording_abort_event
-    if _recording_abort_event is None:
-        return {"status": "idle", "message": "当前没有进行中的录制"}
-    _recording_abort_event.set()
-    return {"status": "ok", "message": "已请求中止，正在收尾…"}
 
 
 @app.get("/api/config-backup/status")
@@ -2197,7 +1680,6 @@ def cs2_gsi_status():
 
 
 class RadarOverlayOptions(BaseModel):
-    """已废弃：合辑导出不再应用后期雷达叠层；保留模型仅为兼容旧请求体。"""
     enabled: bool = False
     hud_overlay: bool = False
     killfeed_overlay: bool = False
@@ -2322,6 +1804,8 @@ class MontageExportBody(BaseModel):
 async def montage_export(body: MontageExportBody):
     cfg = load_config()
     try:
+        from .video_composer import resolve_ffmpeg_binary
+
         ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
     except MontageComposerError as e:
         raise HTTPException(400, str(e)) from e
@@ -2387,6 +1871,8 @@ async def montage_export(body: MontageExportBody):
         transitions_eff = extras.get("transitions")
 
     try:
+        from .video_composer import MontageComposerError, validate_output_path
+
         out = validate_output_path(body.output_path)
     except MontageComposerError as e:
         raise HTTPException(400, str(e)) from e
@@ -2434,6 +1920,8 @@ async def montage_export(body: MontageExportBody):
     )
 
     try:
+        from .video_composer import MontageComposerError, compose_montage
+
         await asyncio.to_thread(
             compose_montage,
             ffmpeg_bin=ffmpeg_bin,
@@ -2549,7 +2037,9 @@ def reveal_file_in_explorer(body: RevealFileInExplorerBody):
             if p.is_dir():
                 os.startfile(str(p))  # noqa: S606
             else:
-                sp.Popen(["explorer", "/select," + str(p)])
+                # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
+                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
+                sp.Popen(["explorer.exe", "/select,", str(p)])
         elif sys.platform == "darwin":
             sp.run(["open", "-R", str(p)], check=False, timeout=20)
         else:
@@ -2637,7 +2127,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.0.2"}
 
 
 @app.get("/")

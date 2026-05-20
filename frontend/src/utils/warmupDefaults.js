@@ -151,3 +151,37 @@ export function aspectExportHint(aspectRatio) {
   if (ar === "16:10") return "横向成片略宽于 16:9 显示器常见比例";
   return "由 OBS 场景与画布决定最终导出方向；此处为游戏内渲染分辨率";
 }
+
+/**
+ * 录制前弹窗确认载荷：拆出仅本次录制使用的字段，其余送入 POST warmup。
+ * @param {Record<string, unknown>} payload
+ */
+export function splitRecordWarmupConfirmPayload(payload) {
+  const src = payload && typeof payload === "object" ? payload : {};
+  const {
+    session_cs2_extra_launch_args,
+    session_record_inject_console_lines,
+    experimental_pov_enabled,
+    obs_transition_enabled,
+    obs_transition_name,
+    obs_transition_duration_ms,
+    ...warmupForApi
+  } = src;
+  return {
+    warmupForApi,
+    session: {
+      cs2_extra_launch_args:
+        typeof session_cs2_extra_launch_args === "string"
+          ? session_cs2_extra_launch_args
+          : undefined,
+      record_inject_console_lines:
+        typeof session_record_inject_console_lines === "string"
+          ? session_record_inject_console_lines
+          : undefined,
+      experimental_pov_enabled: !!experimental_pov_enabled,
+      obs_transition_enabled,
+      obs_transition_name,
+      obs_transition_duration_ms,
+    },
+  };
+}

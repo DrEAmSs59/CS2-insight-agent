@@ -61,9 +61,9 @@ def main() -> None:
         sys.path.insert(0, backend)
     host = os.environ.get("CS2_INSIGHT_HOST", "127.0.0.1")
     try:
-        port = int(os.environ.get("CS2_INSIGHT_PORT", "8000"))
+        port = int(os.environ.get("CS2_INSIGHT_PORT", "19871"))
     except ValueError:
-        port = 8000
+        port = 19871
     uvicorn.run(
         "app.main:app",
         host=host,

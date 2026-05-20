@@ -275,7 +275,7 @@ export function MontageStyleConsole({
           {activeTab === "media" && (<CollapsibleSection
             title="媒体资源"
             hint="BGM、片头与片尾（均可选）"
-            defaultOpen={bgmFilled || introFilled || outroFilled}
+            defaultOpen
           >
             <div
               className={`rounded-xl border p-3 transition-all ${bgmPath.trim() ? "border-violet-500/40 bg-violet-500/[0.08]" : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"}`}

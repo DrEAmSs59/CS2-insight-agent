@@ -25,6 +25,7 @@ __all__ = [
     "inject_console_command",
     "inject_console_sequence",
     "send_cs2_space_taps",
+    "send_cs2_vk_tap",
 ]
 
 
@@ -48,6 +49,9 @@ if sys.platform != "win32":
         skip_console_toggle: bool = False,
         close_console: bool = True,
     ) -> bool:
+        return False
+
+    def send_cs2_vk_tap(vk: int) -> bool:
         return False
 
 else:
@@ -350,6 +354,24 @@ else:
         for _ in range(n):
             _vk_tap_with_fallback(hwnd, VK_SPACE, SCAN_SPACE)
             time.sleep(between)
+        return True
+
+    def send_cs2_vk_tap(vk: int) -> bool:
+        """Send a single VK key tap to CS2 without opening the console.
+
+        Used for recording-time demo control (demo_pause / demo_resume via
+        bound numpad keys) where opening the console would appear in the OBS capture.
+        """
+        hwnd = find_cs2_hwnd()
+        if not hwnd:
+            logger.warning("send_cs2_vk_tap: CS2 window not found (vk=0x%02X)", vk)
+            return False
+        scan = int(user32.MapVirtualKeyW(vk, 0)) or 0
+        # Best-effort foreground (short timeout — CS2 should already be in front).
+        if user32.GetForegroundWindow() != hwnd:
+            ensure_cs2_foreground(0.5)
+        _vk_tap_with_fallback(hwnd, vk, scan)
+        time.sleep(0.05)
         return True
 
     def inject_console_sequence(

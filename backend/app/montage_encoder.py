@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 MontageEncoderTier = Literal["quality", "fast"]
 
@@ -23,22 +26,15 @@ _hw_probe_cache: dict[tuple[str, str], bool] = {}
 
 
 def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
-    """单帧 lavfi 探测用参数（与成片不必一致，但求各编码器能接受）。"""
+    """单帧 lavfi 探测用参数——只求编码器能打开，不指定 preset 以兼容新旧版 FFmpeg。"""
     if codec == "libx264":
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "35", "-pix_fmt", "yuv420p"]
     if codec == "h264_nvenc":
-        return ["-c:v", "h264_nvenc", "-preset", "p7", "-pix_fmt", "yuv420p"]
+        # p4 = 新 SDK 的"medium"，是 p1-p7 里兼容性最好的中档，FFmpeg 4.4+ 均支持。
+        # 不传 preset 反而可能因编码器使用 lossless 默认值而初始化失败。
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-pix_fmt", "yuv420p"]
     if codec == "h264_qsv":
-        return [
-            "-c:v",
-            "h264_qsv",
-            "-preset",
-            "veryfast",
-            "-global_quality",
-            "28",
-            "-pix_fmt",
-            "yuv420p",
-        ]
+        return ["-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "28", "-pix_fmt", "yuv420p"]
     if codec == "h264_amf":
         return [
             "-c:v",
@@ -76,7 +72,7 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
         "-f",
         "lavfi",
         "-i",
-        "testsrc2=s=64x64:r=1:d=0.05,format=yuv420p",
+        "testsrc2=s=320x240:r=1:d=0.05,format=yuv420p",
         "-frames:v",
         "1",
         "-an",
@@ -88,7 +84,18 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         ok = proc.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
+        if not ok:
+            logger.warning(
+                "硬件编码器探测失败 codec=%s returncode=%d\nstderr: %s",
+                codec,
+                proc.returncode,
+                (proc.stderr or "").strip()[:500],
+            )
+    except subprocess.TimeoutExpired:
+        logger.warning("硬件编码器探测超时 codec=%s", codec)
+        ok = False
+    except OSError as e:
+        logger.warning("硬件编码器探测异常 codec=%s: %s", codec, e)
         ok = False
     _hw_probe_cache[key] = ok
     return ok
@@ -274,3 +281,43 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
             ]
 
     _composer_err(f"不支持的编码器: {codec}")
+
+
+def diagnose_encoders(ffmpeg_bin: Path) -> dict:
+    """返回各 H.264 编码器的可用状态，供设置页展示。"""
+    avail = _ffmpeg_encoder_names(ffmpeg_bin)
+    hw_results = []
+    selected = None
+
+    for name in _HW_ORDER:
+        in_list = name in avail
+        probe_ok = False
+        probe_err = ""
+        if in_list:
+            # 直接跑探测，捕获 warning 日志中的 stderr
+            key = (str(ffmpeg_bin.resolve()), name)
+            # 清缓存，保证每次检测都重跑
+            _hw_probe_cache.pop(key, None)
+            probe_ok = _hw_encoder_runtime_ok(ffmpeg_bin, name)
+            if not probe_ok:
+                probe_err = "单帧编码测试失败（驱动不支持或 FFmpeg 未编译对应 SDK）"
+        else:
+            probe_err = "FFmpeg 未编译此编码器（essentials 构建不含硬件编码器，请换用 full 构建）"
+        hw_results.append({
+            "codec": name,
+            "in_encoder_list": in_list,
+            "probe_ok": probe_ok,
+            "error": probe_err,
+        })
+        if selected is None and in_list and probe_ok:
+            selected = name
+
+    x264_ok = "libx264" in avail
+    if selected is None and x264_ok:
+        selected = "libx264"
+
+    return {
+        "selected": selected or "none",
+        "hw": hw_results,
+        "libx264_available": x264_ok,
+    }

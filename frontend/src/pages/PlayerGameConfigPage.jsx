@@ -1,13 +1,19 @@
+import { useEffect } from "react";
 import { FolderOpen, RefreshCw, ShieldAlert, CheckCircle2, Loader2 } from "lucide-react";
 import { useAppShell } from "../context/AppShellContext";
 import PageContainer from "../components/PageContainer";
 
 export default function PlayerGameConfigPage() {
   const s = useAppShell();
+  const loading = s.configBackupLoading;
   const st = s.configBackupStatus;
 
+  useEffect(() => {
+    void s.refreshConfigBackupStatus();
+  }, [s.refreshConfigBackupStatus]);
+
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       <PageContainer>
       <div className="mb-6 shrink-0 border-b border-cs2-border pb-4">
         <h1 className="text-lg font-bold text-cs2-text-primary">玩家游戏配置</h1>
@@ -36,12 +42,28 @@ export default function PlayerGameConfigPage() {
           </button>
         </div>
 
-        {!st ? (
+        {loading ? (
           <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 text-[12px] text-cs2-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" aria-hidden />
             正在读取配置备份状态…
           </div>
-        ) : st.restore_required ? (
+        ) : st?.fetch_failed ? (
+          <section
+            className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-4"
+            role="alert"
+          >
+            <p className="text-sm font-bold text-red-200">无法连接后端读取备份状态</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-red-100/85">{st.message}</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-muted">
+              安装版可写数据在 Electron「用户数据」下的{" "}
+              <span className="font-mono text-cs2-text-secondary">data</span>{" "}
+              文件夹（配置 / 数据库 / 日志 / 备份均在该目录）。设置页的「打开配置数据目录」会打开该
+              <span className="font-mono"> data </span>
+              目录；玩家 CFG 备份在其中的{" "}
+              <span className="font-mono">.cs2_config_backup</span>。
+            </p>
+          </section>
+        ) : st?.restore_required ? (
           <section
             className="rounded-xl border border-amber-500/45 bg-amber-500/10 px-4 py-4 shadow-sm"
             role="status"
@@ -110,7 +132,7 @@ export default function PlayerGameConfigPage() {
           </section>
         )}
 
-        {st?.message ? (
+        {st?.message && !st.fetch_failed ? (
           <p className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 font-mono text-[12px] text-cs2-text-secondary">
             {st.message}
           </p>

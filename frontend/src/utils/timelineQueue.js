@@ -64,7 +64,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
         ? Number(event.round)
         : 0;
   const atk = String(event?.attacker_name || "").trim();
+  const atkSid = String(event?.attacker_steamid || "").trim();
   const vic = String(event?.victim_name || "").trim();
+  const vicSid = String(event?.victim_steamid || "").trim();
   const wpn = String(event?.weapon_name || event?.weapon || "").trim();
   let queueSummaryLine = "";
   if (isKill) {
@@ -76,6 +78,10 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
   } else {
     queueSummaryLine = "时间线事件";
   }
+  // Spec slots pre-computed by round_timeline.py during demo parsing.
+  // attacker_spec_slot = killer's spec_player slot; victim_spec_slot = victim's slot.
+  const atkSpecSlot = event?.attacker_spec_slot ?? null;
+  const vicSpecSlot = event?.victim_spec_slot ?? null;
   return {
     clip_id: client_clip_uid,
     client_clip_uid,
@@ -94,7 +100,12 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     kill_ticks: isKill && Number.isFinite(tick) ? [tick] : [],
     death_tick: isDeath && Number.isFinite(tick) ? tick : null,
     killer_name: isDeath ? atk || null : null,
+    killer_steamid64: isDeath ? atkSid || null : null,
     victims: isKill && vic ? [vic] : [],
+    victim_steamid64s: isKill && vic ? [vicSid] : [],
+    // spec slots from demo parsing — used by recording executor to switch spectator by slot number
+    attacker_spec_slot: atkSpecSlot,
+    victim_spec_slot: vicSpecSlot,
     timeline_source: "round_timeline_event",
     timeline_event_id: String(event?.id || ""),
     _timeline_target: targetPlayer || null,
@@ -102,9 +113,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
 }
 
 /**
- * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null }} p
+ * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, demoFilename?: string }} p
  */
-export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "" }) {
+export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "", demoFilename = "" }) {
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const fe = roundRow?.start_tick ?? roundRow?.round_start_tick;
   const en =
@@ -125,7 +136,7 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
     et = Math.min(et, cap);
     if (et <= st) et = st + 64;
   }
-  const client_clip_uid = `tl_round_${Number.isFinite(rn) ? rn : "x"}`;
+  const client_clip_uid = `tl_round:${demoFilename}:${Number.isFinite(rn) ? rn : "x"}`;
   const sum = roundRow?.summary && typeof roundRow.summary === "object" ? roundRow.summary : {};
   const ps = roundRow?.player_stats && typeof roundRow.player_stats === "object" ? roundRow.player_stats : {};
   const tk = Number(ps.kills ?? sum.kills) || 0;
@@ -149,6 +160,8 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
     clip_min_tick: st,
     clip_max_tick: et,
     kill_ticks: [],
+    // target player's spec_player slot pre-computed during demo parsing
+    target_spec_slot: roundRow?.target_player_spec_slot ?? null,
     timeline_source: "round_timeline_round",
     _timeline_target: targetPlayer || null,
   };
