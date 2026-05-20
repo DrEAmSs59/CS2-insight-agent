@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import socket
-import struct
 import sys
 import shutil
 import shlex
@@ -36,7 +35,6 @@ from .demo_parser import (
     spec_player_extra_offset_for_gsi_failure,
 )
 from .cs2_config_backup import (
-    _atomic_write_bytes,
     is_cs2_running,
     is_restore_required,
     restore_latest_user_config_backup,
@@ -2055,7 +2053,6 @@ class OBSDirector:
         self,
         demo_abs: Path,
         warmup: Optional[RecordingWarmupExtras] = None,
-        enemy_steamids: Optional[set[str]] = None,
     ) -> None:
         """
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
@@ -2075,12 +2072,6 @@ class OBSDirector:
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
         self._cleanup_cs2_artifacts()
-
-        # 若录制配置要求开启游戏内语音（snd_voipvolume_mute=False），写入
-        # voice_ban.dt：屏蔽敌方玩家，只让目标玩家一侧队伍的语音播放。
-        # 结束后由 _restore_user_configs 自动还原原始文件。
-        if warmup is not None and not warmup.snd_voipvolume_mute:
-            self._set_voice_ban_files(enemy_steamids or set())
 
         # CS2 读取 video.txt 的优先级高于 -w/-h 启动参数，在快照后立即 patch
         # 磁盘文件，确保录制分辨率真正生效；结束后由 _restore_user_configs 还原。
@@ -2890,77 +2881,6 @@ class OBSDirector:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
 
-    def _voice_ban_paths(self) -> list[Path]:
-        """返回所有 Steam 账号的 ``userdata/<id>/730/voice_ban.dt`` 路径（不论是否存在）。
-
-        ``_candidate_user_config_dirs()`` 已经遍历了 ``userdata/<id>``；
-        ``730/local/cfg`` 的父级两层上就是 ``userdata/<id>/730``，取其
-        ``voice_ban.dt`` 即可。
-        """
-        paths: list[Path] = []
-        seen: set[str] = set()
-        for cfg_dir in self._candidate_user_config_dirs():
-            # cfg_dir 可能是 <uid>/730/local/cfg 或 <uid>/config
-            # 尝试 cfg_dir.parents[2] == <uid>/730
-            try:
-                parent_730 = cfg_dir.parents[2]
-            except IndexError:
-                continue
-            if parent_730.name != "730":
-                continue
-            candidate = parent_730 / "voice_ban.dt"
-            key = str(candidate)
-            if key not in seen:
-                seen.add(key)
-                paths.append(candidate)
-        return paths
-
-    def _set_voice_ban_files(self, enemy_steamids: set[str]) -> None:
-        """录制启动前写入 ``voice_ban.dt``，让 CS2 只播放目标玩家一侧队伍的语音。
-
-        格式：4 字节 LE uint32 数量 + N × 8 字节 LE uint64 SteamID64。
-
-        - ``enemy_steamids`` 非空：屏蔽敌方全员，目标玩家队伍语音可正常听到。
-        - ``enemy_steamids`` 为空（无法从 events 推断敌方，如 round 类请求）：
-          写入 count=0 的空名单，10 人语音全开，优于静音。
-
-        必须在 ``_snapshot_user_configs()`` 之后、CS2 启动之前调用，
-        ``_restore_user_configs()`` 会在录制完成后自动还原原始文件。
-        """
-        # 构造二进制内容
-        valid_sids: list[int] = []
-        for sid_str in enemy_steamids:
-            try:
-                valid_sids.append(int(sid_str))
-            except (ValueError, TypeError):
-                logger.warning("voice_ban: invalid SteamID64 skipped: %r", sid_str)
-
-        data = struct.pack("<I", len(valid_sids))
-        for sid_int in valid_sids:
-            data += struct.pack("<Q", sid_int)
-
-        if valid_sids:
-            log_msg = f"voice_ban.dt: muting {len(valid_sids)} enemy player(s)"
-        else:
-            log_msg = "voice_ban.dt: no enemies identified, clearing ban list (all voices)"
-
-        for p in self._voice_ban_paths():
-            try:
-                # 若快照中尚未记录此文件，现在补录原始内容（或 None 表示不存在）
-                if p not in self._user_config_snapshot:
-                    self._user_config_snapshot[p] = p.read_bytes() if p.is_file() else None
-                    logger.debug("voice_ban snapshot added: %s", p)
-
-                current = p.read_bytes() if p.is_file() else None
-                if current == data:
-                    logger.debug("voice_ban.dt already correct, skipping: %s", p)
-                    continue
-
-                _atomic_write_bytes(p, data)
-                logger.info("%s: %s", log_msg, p)
-            except OSError as e:
-                logger.warning("Set voice_ban.dt failed for %s: %s", p, e)
-
     def _patch_video_configs_for_resolution(
         self,
         width: int,
@@ -3337,6 +3257,7 @@ class OBSDirector:
             lines.append("snd_voipvolume 0")
         else:
             lines.append("snd_voipvolume 1")
+            lines.append("tv_listen_voice_indices -1")
         if w.hide_grenade_trajectory_pip:
             lines.append("sv_grenade_trajectory 0")
             lines.append("sv_grenade_trajectory_prac_pipreview 0")
@@ -3440,24 +3361,9 @@ class OBSDirector:
                             _pov_sw,
                         )
 
-                # ── 收集敌方 SteamID（用于 voice_ban.dt）────────────────────
-                # 每个 event 里 killer / victim 中不是 target_player 的那一方即敌方。
-                # round 类请求 events 为空时 enemy_steamids 为空集，_set_voice_ban_files
-                # 会回落到清空名单（全员可听）。
-                _enemy_steamids: set[str] = set()
-                for _dto in demo_requests:
-                    _ts = (_dto.target_player.steamid64 or "").strip()
-                    for _ev in _dto.events:
-                        for _raw in (
-                            (_ev.killer.steamid64 or "").strip(),
-                            (_ev.victim.steamid64 or "").strip(),
-                        ):
-                            if _raw and _raw != _ts:
-                                _enemy_steamids.add(_raw)
-
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
-                    self._launch_cs2(demo_abs, warmup, enemy_steamids=_enemy_steamids)
+                    self._launch_cs2(demo_abs, warmup)
                 except CS2AlreadyRunningError:
                     raise
                 except CS2NotReadyError:

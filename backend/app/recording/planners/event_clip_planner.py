@@ -1,5 +1,11 @@
 from ..models import RecordingSegment, SourceType, Perspective, RequestType
 from ..normalizer import NormalizedRequest
+from ..platform_utils import platform_slot_offset, compute_voice_listen_mask
+
+
+def _voice_mask(req: NormalizedRequest) -> "int | None":
+    offset = platform_slot_offset(req.demo.demo_filename, req.demo.server_name)
+    return compute_voice_listen_mask(req.demo.all_players, req.target_player.steamid64, offset)
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify overhead
 # without consuming the user-configured highlight_pre_sec recording window.
@@ -47,6 +53,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
     opts = req.options
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
+    _mask = _voice_mask(req)
 
     pre_ticks = sec_to_ticks(opts.highlight_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.highlight_post_sec, tick_rate)
@@ -105,6 +112,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled=False,
             disabled_reason=None,
             metadata={},
+            voice_listen_mask=_mask,
         )
         segments.append(seg)
         seg_idx += 1
@@ -136,6 +144,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled=victim_disabled,
                 disabled_reason=victim_disabled_reason,
                 metadata={},
+                voice_listen_mask=_mask,
             )
             segments.append(victim_seg)
             seg_idx += 1
@@ -147,6 +156,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
     opts = req.options
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
+    _mask = _voice_mask(req)
 
     pre_ticks = sec_to_ticks(opts.death_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.death_post_sec, tick_rate)
@@ -175,6 +185,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled=False,
         disabled_reason=None,
         metadata={},
+        voice_listen_mask=_mask,
     )
     segments.append(seg)
 
@@ -184,7 +195,6 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
         killer_steamid64 = killer.steamid64 if killer else ""
 
         if not killer_steamid64:
-            # Killer steamid64 missing — generate a disabled placeholder segment.
             k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
             k_end = event.tick + sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
             k_start, k_end = _clamp(k_start, k_end, req)
@@ -205,6 +215,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled=True,
                 disabled_reason="missing_killer_steamid64",
                 metadata={},
+                voice_listen_mask=_mask,
             )
         else:
             k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
@@ -227,6 +238,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled=False,
                 disabled_reason=None,
                 metadata={},
+                voice_listen_mask=_mask,
             )
         segments.append(killer_seg)
 
@@ -237,11 +249,11 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
     opts = req.options
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
+    _mask = _voice_mask(req)
 
     pre_ticks = sec_to_ticks(opts.timeline_kill_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.timeline_kill_post_sec, tick_rate)
 
-    # Victim POV independent timing — fall back to timeline_kill timing if not set.
     vic_pre_sec = opts.victim_pov_pre_sec if opts.victim_pov_pre_sec is not None else opts.timeline_kill_pre_sec
     vic_post_sec = opts.victim_pov_post_sec
     vic_pre_ticks = sec_to_ticks(vic_pre_sec, tick_rate)
@@ -269,6 +281,7 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled=False,
         disabled_reason=None,
         metadata={},
+        voice_listen_mask=_mask,
     )
     segments = [seg]
 
@@ -300,6 +313,7 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled=victim_disabled,
             disabled_reason=victim_disabled_reason,
             metadata={},
+            voice_listen_mask=_mask,
         )
         segments.append(victim_seg)
 
@@ -310,9 +324,8 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
     opts = req.options
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
+    _mask = _voice_mask(req)
 
-    # Use fail_killer timing for the victim clip so both perspectives share the same
-    # duration — the killer_pov timing is what the user configures for timeline_death.
     pre_ticks = sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
 
@@ -338,6 +351,7 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled=False,
         disabled_reason=None,
         metadata={},
+        voice_listen_mask=_mask,
     )
     segments = [seg]
 
@@ -369,6 +383,7 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled=killer_disabled,
             disabled_reason=killer_disabled_reason,
             metadata={},
+            voice_listen_mask=_mask,
         )
         segments.append(killer_seg)
 

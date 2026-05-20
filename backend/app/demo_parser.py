@@ -81,6 +81,10 @@ class MatchMeta:
     # 「研发全集」大卡专用：整局特殊战绩总评（仅在有 meme_death 合集且开启 AI 时填充）
     ai_meme_montage_score: Optional[float] = None
     ai_meme_montage_commentary: Optional[str] = None
+    # Demo 来源平台（从 header server_name 读取）；供录制侧计算 spec_slot 偏移量
+    server_name: str = ""
+    # 全员名单：[{name, steamid64, spec_slot, team_num}, ...]；spec_slot 为原始未校准值
+    all_players: list = field(default_factory=list)
 
 
 @dataclass
@@ -2294,6 +2298,20 @@ class DemoAnalyzer:
         tsid = _lookup_steam_id_for_name(name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None
 
+        # ── 全员名单（供 tv_listen_voice_indices 掩码计算）─────────────────
+        all_players_roster = _build_all_players_roster(
+            self.parser, match_start_tick, spec_slots, name_to_sid
+        )
+
+        # ── server_name（平台识别用）─────────────────────────────────────
+        _server_name = ""
+        try:
+            _hdr = self.parser.parse_header()
+            _sn_raw = _hdr.get("server_name") if isinstance(_hdr, dict) else None
+            _server_name = str(_sn_raw).strip() if _sn_raw is not None else ""
+        except Exception:
+            pass
+
         total_rounds = max(round_kills.keys(), default=0)
         if events.shape[0] > 0:
             total_rounds = max(total_rounds, _int(events["total_rounds_played"].max()) + 1)
@@ -2373,6 +2391,8 @@ class DemoAnalyzer:
                 match_date=match_date,
                 duration_mins=duration_mins,
                 meme_series_badges=meme_series_badges_for_kd(target_total_kills, target_total_deaths),
+                server_name=_server_name,
+                all_players=all_players_roster,
             ),
             clips=clips,
             timeline=timeline,
@@ -5451,6 +5471,49 @@ def build_player_name_to_steam_id(parser: DemoParser, match_start_tick: int) -> 
         if an and ast is not None:
             out[an] = ast
     return out
+
+
+def _build_all_players_roster(
+    parser: DemoParser,
+    match_start_tick: int,
+    spec_slots: dict[str, int],
+    name_to_sid: dict[str, int],
+) -> list[dict]:
+    """全员名单：[{name, steamid64, spec_slot, team_num}, ...]。
+
+    spec_slot 为原始未校准值（5E/完美世界的 +1 偏移在录制侧由 platform_slot_offset 修正）。
+    team_num: 2=T，3=CT（match_start_tick 刻度的初始阵营，换边后玩家所在组不变）。
+    """
+    try:
+        df = _to_pandas_df(parser.parse_ticks([max(1, match_start_tick)], props=["name", "team_num"]))
+    except BaseException as e:
+        if isinstance(e, _DEMOPARSER_RE_RAISE):
+            raise
+        return []
+    if df.empty:
+        return []
+    players: list[dict] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        name = str(row.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        team_num = row.get("team_num")
+        try:
+            team_num = int(team_num)
+        except (TypeError, ValueError):
+            team_num = 0
+        if team_num not in (2, 3):
+            continue  # skip spectators / unassigned
+        seen.add(name)
+        sid_int = name_to_sid.get(name) or name_to_sid.get(name.lower())
+        players.append({
+            "name": name,
+            "steamid64": str(sid_int) if sid_int is not None else "",
+            "spec_slot": spec_slots.get(name.lower()),
+            "team_num": team_num,
+        })
+    return players
 
 
 def _lookup_steam_id_for_name(name_to_sid: dict[str, int], player_name: str) -> Optional[int]:

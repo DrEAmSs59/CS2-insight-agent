@@ -11,7 +11,7 @@ from .obs_fade_controller import OBSFadeController
 from .demo_controller import (
     gototick, demo_resume, demo_pause,
     demo_pause_silent_strict, demo_resume_silent_strict,
-    DemoSeekError,
+    DemoSeekError, inject_console_sequence,
 )
 from .spec_controller import spec_by_slot
 from .gsi_verifier import verify_spec_target
@@ -537,6 +537,18 @@ class RecordingExecutor:
                         segment_index=segment.segment_index,
                     )
                     spec_elapsed = time.monotonic() - spec_t0
+
+                    if spec_ok is not False and segment.voice_listen_mask is not None:
+                        mask_val = segment.voice_listen_mask
+                        try:
+                            await asyncio.to_thread(
+                                inject_console_sequence,
+                                ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
+                            )
+                        except Exception as _e:
+                            logger.warning(
+                                "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
+                            )
 
                     if spec_ok is False:
                         logger.error(
