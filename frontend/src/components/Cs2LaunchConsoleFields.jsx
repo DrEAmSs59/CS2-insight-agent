@@ -135,7 +135,8 @@ export default function Cs2LaunchConsoleFields({
             <span className="py-1 text-[12px] text-cs2-text-muted">
               尚未添加额外启动参数；每条会作为独立参数追加到 cs2.exe
               <br />
-              例如可添加一条 -threads 8。默认保留 -fullscreen，自行修改可能影响 CS2 启动或录制表现
+              例如可添加一条 -threads 8。
+              <br />默认保留 -fullscreen，自行修改可能影响 CS2 启动或录制表现
             </span>
           ) : (
             launchChips.map((line, idx) => (
