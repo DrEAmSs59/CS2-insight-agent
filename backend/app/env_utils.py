@@ -292,6 +292,10 @@ class OBSConfig(BaseModel):
     host: str = "localhost"
     port: int = 4455
     password: str = ""
+    # OBS 可执行文件完整路径，用于录制前自动启动 OBS
+    obs_path: str = ""
+    # OBS 配置中心"配置检查"是否通过过（WebSocket 连接成功）
+    obs_config_verified: bool = False
 
 
 class LLMConfig(BaseModel):

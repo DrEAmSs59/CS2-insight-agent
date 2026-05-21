@@ -59,7 +59,7 @@ export default function App() {
       window.electron.isPackaged().then(setIsPackaged);
     }
   }, []);
-  const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
+  const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "", obs_path: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
   /** 用户是否正在编辑密码框（用于失焦时恢复“已保存”提示） */
@@ -1621,7 +1621,7 @@ export default function App() {
     }
   }, [setProgressText, refreshCommonParamsFromServer]);
 
-  const openBatchWarmup = useCallback(() => {
+  const openBatchWarmup = useCallback(async () => {
     if (!queue.length) return;
     if (configBackupStatus?.restore_required) {
       setRecordingBlockedMessage(
@@ -1629,10 +1629,36 @@ export default function App() {
       );
       return;
     }
+    // 1) 检查 OBS 进程是否在运行
+    try {
+      const { data: runData } = await API.post("/obs/is-running");
+      if (!runData.running) {
+        setProgressText("检测到 OBS 未运行，正在自动启动…");
+        await API.post("/obs/launch");
+        await new Promise((r) => setTimeout(r, 3000));
+        setProgressText("OBS 已启动，正在检测连接…");
+      }
+    } catch (e) {
+      setProgressText(`OBS 启动失败: ${e.response?.data?.detail || e.message}`);
+      return;
+    }
+    // 2) 测试 WebSocket 连接
+    try {
+      const { data } = await API.get("/status/setup");
+      if (!data?.obs_connected) {
+        setProgressText(
+          "无法连接 OBS。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
+        );
+        return;
+      }
+    } catch (e) {
+      setProgressText("OBS 连通性检测失败，请稍后重试。");
+      return;
+    }
     setQueueDrawerOpen(false);
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
-  }, [queue.length, configBackupStatus?.restore_required]);
+  }, [queue.length, configBackupStatus?.restore_required, setProgressText]);
 
   const handleWarmupConfirm = useCallback(
     async (warmupPayload) => {
@@ -1794,6 +1820,10 @@ export default function App() {
     if (pw && !pw.startsWith("****")) {
       obs.password = pw;
     }
+    const obsPath = String(o.obs_path ?? "").trim();
+    if (obsPath) {
+      obs.obs_path = obsPath;
+    }
     try {
       await API.put("config", { obs });
       if (pw && !pw.startsWith("****")) {
@@ -1833,7 +1863,7 @@ export default function App() {
       void persistObsConfig();
     }, 500);
     return () => clearTimeout(t);
-  }, [obsConfig.host, obsConfig.port, persistObsConfig]);
+  }, [obsConfig.host, obsConfig.port, obsConfig.obs_path, persistObsConfig]);
 
   const persistLlmConfig = useCallback(async () => {
     await Promise.resolve();
