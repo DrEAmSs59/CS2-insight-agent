@@ -703,6 +703,21 @@ def open_config_data_dir():
         return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
 
 
+@app.post("/api/config/detect-obs")
+def detect_obs_path_save():
+    """扫描常见安装路径并写入 cs2-insight.config.json 中的 obs.obs_path。"""
+    path = _auto_detect_obs_path()
+    if not path:
+        raise HTTPException(
+            404,
+            "未找到 OBS（obs64.exe）。请确认已安装 OBS，或在 OBS 配置中心手动填写完整路径。",
+        )
+    cfg = load_config()
+    cfg.obs.obs_path = path
+    save_config(cfg)
+    return {"obs_path": path}
+
+
 @app.post("/api/config/test-llm")
 async def test_llm_connection():
     """轻量探测当前大模型配置是否可用（本地 HTTP 或云端一次极短补全）。"""
@@ -792,6 +807,8 @@ async def update_config(payload: ConfigPayload):
         elif raw_pw:
             cfg.obs.password = raw_pw
         # 空字符串：GET 脱敏后输入框为空或未提交密码，不覆盖已保存的密码
+        if o.obs_path is not None:
+            cfg.obs.obs_path = str(o.obs_path).strip()
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm
@@ -915,6 +932,34 @@ def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> 
     return OBSConfig(host=host, port=port, password=password)
 
 
+_DEFAULT_OBS_PATHS = (
+    r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+    r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe",
+)
+
+
+def _auto_detect_obs_path() -> Optional[str]:
+    """尝试自动探测 OBS 可执行文件路径。"""
+    for p in _DEFAULT_OBS_PATHS:
+        pp = Path(p)
+        if pp.is_file():
+            return str(pp)
+    # 也尝试从 PATH 中查找
+    found = shutil.which("obs64.exe") or shutil.which("obs.exe")
+    if found:
+        return found
+    return None
+
+
+def _normalize_obs_path_auto_detect(cfg: AppConfig) -> None:
+    """OBS 验证成功后：若 obs_path 为空，尝试自动探测并写入配置。"""
+    if cfg.obs.obs_path and Path(cfg.obs.obs_path).is_file():
+        return
+    detected = _auto_detect_obs_path()
+    if detected:
+        cfg.obs.obs_path = detected
+
+
 # ─── Setup status endpoint ─────────────────────────────────────
 
 def _setup_status_obs_handshake_timeout_sec() -> float:
@@ -928,9 +973,44 @@ def _setup_status_obs_handshake_timeout_sec() -> float:
     return 4.0
 
 
+@app.get("/api/config/quick-check")
+def config_quick_check():
+    """轻量配置核查：返回各项配置是否已检测通过（OBS 为 obs_config_verified 标记，
+    CS2 路径为实际文件存在性）。**不尝试连接 OBS**。
+    供首页引导页、录制队列页状态展示使用，避免 /api/status/setup 的 WebSocket 开销。
+    """
+    cfg = load_config()
+    cfg = ensure_cs2_path(cfg)
+
+    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
+
+    ffmpeg_ok = False
+    if cfg.ffmpeg_path:
+        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
+    else:
+        ffmpeg_ok = shutil.which("ffmpeg") is not None
+
+    ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
+        cfg.llm.base_url
+    )
+
+    try:
+        port_val = int(cfg.obs.port) if cfg.obs.port is not None else 0
+    except (TypeError, ValueError):
+        port_val = 0
+    return {
+        "obs_configured": cfg.obs.obs_config_verified,
+        "cs2_path_ok": cs2_path_ok,
+        "ffmpeg_ok": ffmpeg_ok,
+        "ai_key_ok": ai_key_ok,
+        "cs2_path": cfg.cs2_path or "",
+        "ffmpeg_path": cfg.ffmpeg_path or "",
+    }
+
+
 @app.get("/api/status/setup")
 def setup_status():
-    """快速核查四项配置是否就绪，供新手引导页轮询。"""
+    """快速核查四项配置是否就绪，供录制启动前调用（含 OBS 真实连接检测）。"""
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
 
@@ -962,6 +1042,12 @@ def setup_status():
         probe_timeout = _setup_status_obs_handshake_timeout_sec()
         result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
         obs_connected = bool(result.get("ok", False))
+
+        # OBS 验证成功后自动写入配置文件，标记为已验证
+        if obs_connected:
+            _normalize_obs_path_auto_detect(cfg)
+            cfg.obs.obs_config_verified = True
+            save_config(cfg)
     except Exception:
         obs_connected = False
 
@@ -977,19 +1063,111 @@ def setup_status():
 
 # ─── OBS endpoints ─────────────────────────────────────────────
 
-@app.post("/api/obs/test")
-def test_obs(payload: OBSConfig | None = Body(default=None)):
-    from .obs_director import OBSDirector
+@app.post("/api/obs/config-check")
+def obs_config_check(payload: OBSConfig | None = Body(default=None)):
+    """配置检查：先测路径（拉起 OBS），再测连接。"""
+    import time as _time
 
     cfg = load_config()
     obs_use = merge_obs_for_connection(payload, cfg.obs)
-    director = OBSDirector(
-        obs_use,
-        cfg.cs2_path,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-    )
-    return director.test_obs_connection()
+
+    path_ok = False
+    launched_obs = False
+    connected = False
+    obs_version = None
+
+    obs_path = (obs_use.obs_path or cfg.obs.obs_path or "").strip()
+    logger.info("[OBS config-check] obs_path=%r", obs_path)
+
+    if obs_path and Path(obs_path).is_file():
+        running = _is_obs_process_running(obs_path)
+        logger.info("[OBS config-check] Path OK, OBS already running=%s", running)
+        if not running:
+            logger.info("[OBS config-check] Launching OBS: %s", obs_path)
+            try:
+                subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+                launched_obs = True
+                path_ok = True
+                # 轮询等待 OBS 进程出现，最多 15 秒
+                for _attempt in range(30):
+                    if _is_obs_process_running(obs_path):
+                        break
+                    _time.sleep(0.5)
+                else:
+                    logger.warning("[OBS config-check] OBS did not appear after 15s; continuing anyway")
+                _time.sleep(1)
+            except Exception as e:
+                logger.error("[OBS config-check] Failed to launch OBS: %s", e)
+                return {"path_ok": False, "error": f"无法启动 OBS: {e}"}
+        else:
+            path_ok = True
+    elif obs_path:
+        logger.warning("[OBS config-check] Path configured but file not found: %s", obs_path)
+        return {"path_ok": False, "error": "OBS 路径不存在"}
+    else:
+        logger.info("[OBS config-check] No obs_path configured, skipping launch")
+        return {"path_ok": False, "connected": False, "error": "请先配置 OBS 路径，再点击配置检查"}
+
+    # 2) 测试 WebSocket 连接
+    try:
+        from .obs_director import OBSDirector
+        director = OBSDirector(obs_use, cfg.cs2_path)
+        result = director.test_obs_connection()
+        connected = bool(result.get("ok"))
+        obs_version = result.get("obs_version")
+        if connected:
+            _normalize_obs_path_auto_detect(cfg)
+            cfg.obs.obs_config_verified = True
+            save_config(cfg)
+    except Exception:
+        connected = False
+        obs_version = None
+
+    return {
+        "path_ok": path_ok,
+        "connected": connected,
+        "obs_version": obs_version,
+        "launched_obs": launched_obs,
+    }
+
+
+def _is_obs_process_running(obs_path: str) -> bool:
+    """检查 OBS 进程是否已在运行（Windows 上按可执行文件名匹配）。"""
+    import subprocess as _sp
+    try:
+        exe_name = Path(obs_path).name
+        result = _sp.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/NH", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return exe_name.lower() in result.stdout.lower()
+    except Exception:
+        return False
+
+
+@app.post("/api/obs/is-running")
+def obs_is_running():
+    """检查 OBS 进程是否在运行（不尝试连接 WebSocket）。"""
+    cfg = load_config()
+    obs_path = (cfg.obs.obs_path or "").strip()
+    running = _is_obs_process_running(obs_path) if obs_path else False
+    return {"running": running, "obs_path": obs_path}
+
+
+@app.post("/api/obs/launch")
+def obs_launch():
+    """拉起 OBS 进程（不等待 WebSocket）。"""
+    import time as _t
+    cfg = load_config()
+    obs_path = (cfg.obs.obs_path or "").strip()
+    if not obs_path or not Path(obs_path).is_file():
+        raise HTTPException(400, "OBS 路径未配置或文件不存在")
+    try:
+        subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+        _t.sleep(2)
+    except Exception as e:
+        raise HTTPException(400, f"无法启动 OBS: {e}")
+    return {"ok": True}
 
 
 @app.get("/api/obs-config/status")

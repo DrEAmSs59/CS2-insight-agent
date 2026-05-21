@@ -7,7 +7,7 @@ import { Link } from "react-router-dom";
  *   povSegmentCount: number,
  *   demoCount: number,
  *   queueStatusLabel: "待开始" | "录制中" | "已完成",
- *   obsConnected: boolean | null,
+ *   obsConfigured: boolean,
  *   obsEndpointLabel: string,
  *   obsConfigHasIssues: boolean | null,
  * }} props
@@ -18,7 +18,7 @@ export default function RecordingStatsStrip({
   povSegmentCount,
   demoCount,
   queueStatusLabel,
-  obsConnected,
+  obsConfigured,
   obsEndpointLabel,
   obsConfigHasIssues,
 }) {
@@ -61,16 +61,14 @@ export default function RecordingStatsStrip({
       </span>
       <span
         className={
-          obsConnected === true
+          obsConfigured
             ? "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-emerald-300"
-            : obsConnected === false
-              ? "rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-rose-on-surface"
-              : "rounded-full border border-cs2-border bg-cs2-bg-hover px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-text-muted"
+            : "rounded-full border border-cs2-border bg-cs2-bg-hover px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-text-muted"
         }
       >
-        {obsConnected === false ? "OBS · 未连接" : `OBS · ${obsEndpointLabel}`}
+        {obsConfigured ? "OBS · 已配置" : "OBS · 未配置"}
       </span>
-      {obsConnected === true && obsConfigHasIssues === true && (
+      {obsConfigured && obsConfigHasIssues === true && (
         <Link to="/obs-config-center">
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-amber-300 hover:bg-amber-500/20 transition-colors">
             OBS 配置待修复

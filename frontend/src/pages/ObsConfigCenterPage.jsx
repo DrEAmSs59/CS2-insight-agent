@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import API from "../api/api";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Wifi, WifiOff, Monitor } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
@@ -21,13 +21,29 @@ export default function ObsConfigCenterPage() {
   const [status, setStatus] = useState(null);
   const [calibrating, setCalibrating] = useState(false);
   const [calibrateResult, setCalibrateResult] = useState(null);
-  const [statusRefreshing, setStatusRefreshing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState(null);
   const [errorText, setErrorText] = useState("");
-  const [obsTesting, setObsTesting] = useState(false);
-  const [obsTestResult, setObsTestResult] = useState(null);
+  const [detectingObs, setDetectingObs] = useState(false);
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
 
   const obsConfigRef = useRef(obsConfig);
   obsConfigRef.current = obsConfig;
+
+  const detectObsPath = async () => {
+    setDetectingObs(true);
+    try {
+      const { data } = await API.post("/config/detect-obs");
+      if (data?.obs_path) {
+        setObsConfig({ ...obsConfigRef.current, obs_path: data.obs_path });
+        await persistObsConfig?.();
+      }
+    } catch (e) {
+      setErrorText(e.response?.data?.detail || e.message || "自动探测失败");
+    } finally {
+      setDetectingObs(false);
+    }
+  };
 
   const fetchStatus = useCallback(async () => {
     const st = await getObsConfigStatus();
@@ -43,30 +59,22 @@ export default function ObsConfigCenterPage() {
     }
   }, [fetchStatus]);
 
-  useEffect(() => {
-    void refreshSilent();
-  }, [refreshSilent]);
 
-  const testObsConnection = async () => {
-    setObsTesting(true);
-    setObsTestResult(null);
+  const handleConfigCheck = async () => {
+    setChecking(true);
+    setCheckResult(null);
+    setErrorText("");
     try {
-      const { data } = await API.post("/obs/test", obsConfigRef.current);
-      if (data?.ok) {
+      const { data } = await API.post("/obs/config-check", obsConfigRef.current);
+      setCheckResult(data);
+      if (data.connected) {
         await persistObsConfig?.();
-        await refreshSilent();
-        setStatus((prev) => {
-          if (!prev) return prev;
-          const ver = data.obs_version || prev.obs_version;
-          return { ...prev, obs_connected: true, ...(ver ? { obs_version: ver } : {}) };
-        });
-      } else {
-        setObsTestResult({ ok: false, error: data?.error || "连接失败" });
+        await fetchStatus();
       }
     } catch (e) {
-      setObsTestResult({ ok: false, error: e?.response?.data?.detail || e.message });
+      setErrorText(e.response?.data?.detail || e.message || "配置检查失败");
     } finally {
-      setObsTesting(false);
+      setChecking(false);
     }
   };
 
@@ -123,82 +131,132 @@ export default function ObsConfigCenterPage() {
           </div>
         ) : null}
 
-        {/* OBS WebSocket 连接 */}
+        {/* OBS 程序设置 */}
         <section className="mt-4 rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-cs2-text-primary">OBS WebSocket 连接</div>
-              <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">
-                与 OBS「工具 → WebSocket 服务器设置」中的主机、端口、密码一致；保存配置后录制均使用该连接。
-              </p>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-cs2-text-primary">OBS 程序设置</h2>
+            <button
+              type="button"
+              onClick={() => void handleConfigCheck()}
+              disabled={checking}
+              title="配置检查"
+              className="shrink-0 flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-4 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:bg-cs2-bg-hover disabled:opacity-50"
+            >
+              {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {checking ? "检查中" : "配置检查"}
+            </button>
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-secondary">
+            配置 OBS 启动路径与 WebSocket 连接信息，用于录制前自动拉起 OBS 并控制回放。
+          </p>
+
+          {/* 启动配置 */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[13px] font-semibold text-cs2-text-primary">启动配置</div>
+              {checkResult != null && (
+                <span className={`inline-flex items-center gap-1.5 font-mono text-[12px] ${checkResult.path_ok ? "text-cs2-text-success" : "text-cs2-amber-on-surface"}`}>
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  路径正确
+                </span>
+              )}
             </div>
-            {status != null ? (
-              <div className="shrink-0 text-right">
-                {status.obs_connected ? (
+            <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
+              填写 OBS 可执行文件的完整路径，用于录制前自动启动 OBS。
+            </p>
+            <div className="mt-2 flex gap-2">
+              <input
+                type="text"
+                value={obsConfig.obs_path ?? ""}
+                onChange={(e) => setObsConfig({ ...obsConfig, obs_path: e.target.value })}
+                placeholder="例如 C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+                className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void detectObsPath()}
+                disabled={detectingObs}
+                title="自动探测 OBS 安装路径"
+                className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-50"
+              >
+                {detectingObs ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Monitor className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* 连接配置 */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[13px] font-semibold text-cs2-text-primary">连接配置</div>
+              {checkResult != null ? (
+                checkResult.connected ? (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
                     <Wifi className="h-3.5 w-3.5 shrink-0" />
-                    已连接{status.obs_version ? ` · ${status.obs_version}` : ""}
+                    连接正确{checkResult.obs_version ? ` · ${checkResult.obs_version}` : ""}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-amber-on-surface">
                     <WifiOff className="h-3.5 w-3.5 shrink-0" />
-                    未连接
+                    连接失败
                   </span>
-                )}
+                )
+              ) : status != null ? (
+                status.obs_connected ? (
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
+                    <Wifi className="h-3.5 w-3.5 shrink-0" />
+                    已连接{status.obs_version ? ` · ${status.obs_version}` : ""}
+                  </span>
+                ) : null
+              ) : null}
+            </div>
+            <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
+              与 OBS 菜单栏「工具 → WebSocket 服务器设置」中的主机、端口、密码保持一致。
+            </p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
+                  主机地址
+                </label>
+                <input
+                  type="text"
+                  value={obsConfig.host ?? ""}
+                  onChange={(e) => setObsConfig({ ...obsConfig, host: e.target.value })}
+                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
+                />
               </div>
-            ) : null}
-          </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <div>
-              <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                主机地址
-              </label>
-              <input
-                type="text"
-                value={obsConfig.host ?? ""}
-                onChange={(e) => setObsConfig({ ...obsConfig, host: e.target.value })}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                端口
-              </label>
-              <input
-                type="number"
-                value={obsConfig.port ?? 4455}
-                onChange={(e) => setObsConfig({ ...obsConfig, port: Number(e.target.value) })}
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                密码
-              </label>
-              <input
-                type="password"
-                value={obsConfig.password ?? ""}
-                placeholder={obsPasswordPlaceholder}
-                onChange={(e) => setObsConfig({ ...obsConfig, password: e.target.value })}
-                onFocus={() => handleObsPasswordFocus?.()}
-                onBlur={() => handleObsPasswordBlur?.()}
-                autoComplete="new-password"
-                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
-              />
+              <div>
+                <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
+                  端口
+                </label>
+                <input
+                  type="number"
+                  value={obsConfig.port ?? 4455}
+                  onChange={(e) => setObsConfig({ ...obsConfig, port: Number(e.target.value) })}
+                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
+                  密码
+                </label>
+                <input
+                  type="password"
+                  value={obsConfig.password ?? ""}
+                  placeholder={obsPasswordPlaceholder}
+                  onChange={(e) => setObsConfig({ ...obsConfig, password: e.target.value })}
+                  onFocus={() => handleObsPasswordFocus?.()}
+                  onBlur={() => handleObsPasswordBlur?.()}
+                  autoComplete="new-password"
+                  className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void testObsConnection()}
-            disabled={obsTesting}
-            className="mt-3 w-full rounded-lg border border-cs2-border bg-cs2-bg-input py-2.5 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:bg-cs2-bg-hover disabled:opacity-50 sm:w-auto sm:px-6"
-          >
-            {obsTesting ? "测试中…" : "测试连接"}
-          </button>
-          {obsTestResult && !obsTestResult.ok ? (
+
+          {checkResult?.error && !checkResult.path_ok && !checkResult.connected ? (
             <div className="mt-3 rounded-lg bg-cs2-rose-surface px-3 py-2 font-mono text-[12px] text-cs2-rose-on-surface">
               <span className="flex items-center gap-2">
-                <WifiOff className="h-3.5 w-3.5 shrink-0" /> {obsTestResult.error}
+                <WifiOff className="h-3.5 w-3.5 shrink-0" /> {checkResult.error}
               </span>
             </div>
           ) : null}

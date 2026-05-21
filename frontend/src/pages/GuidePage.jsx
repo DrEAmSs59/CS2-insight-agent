@@ -33,10 +33,10 @@ function StatusDot({ ok, loading }) {
 
 const SETUP_ITEMS = [
   {
-    key: "obs_connected",
+    key: "obs_configured",
     required: true,
-    label: "OBS WebSocket 已连通",
-    desc: "录制功能必需。OBS 需开启 WebSocket 服务器，并在配置中心填写端口与密码。",
+    label: "OBS 配置已验证",
+    desc: "录制功能必需。需在 OBS 配置中心点击「配置检查」，成功连接后标记为已验证。录制前会自动检测 OBS 是否运行。",
     to: "/obs-config-center",
     linkLabel: "OBS 配置中心",
   },
@@ -76,7 +76,7 @@ function SetupChecklist() {
   const fetchStatus = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const { data } = await API.get("/status/setup");
+      const { data } = await API.get("/config/quick-check");
       setStatus(data);
     } catch {
       setStatus(null);
@@ -85,7 +85,7 @@ function SetupChecklist() {
     }
   };
 
-  // OBS 已连接时拉一次配置健康状态（随 setup 刷新同步）
+  // OBS 已配置时拉一次配置健康状态（随 setup 刷新同步）
   const fetchObsConfigHealth = async () => {
     try {
       const st = await getObsConfigStatus();
@@ -98,32 +98,33 @@ function SetupChecklist() {
 
   useEffect(() => {
     fetchStatus(false);
-    timerRef.current = setInterval(() => fetchStatus(true), 8000);
+    // quick-check 不连 OBS 很快，保留轮询以反映配置变化
+    timerRef.current = setInterval(() => fetchStatus(true), 15000);
     return () => clearInterval(timerRef.current);
   }, []);
 
-  // OBS 连通状态变化时同步拉配置健康
+  // OBS 配置状态变化时同步拉配置健康
   useEffect(() => {
-    if (status?.obs_connected) {
+    if (status?.obs_configured) {
       void fetchObsConfigHealth();
     } else {
       setObsConfigHasIssues(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status?.obs_connected]);
+  }, [status?.obs_configured]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       await fetchStatus(true);
-      if (status?.obs_connected) await fetchObsConfigHealth();
+      if (status?.obs_configured) await fetchObsConfigHealth();
     } finally {
       setRefreshing(false);
     }
   };
 
   const allRequired =
-    status?.obs_connected && status?.cs2_path_ok;
+    status?.obs_configured && status?.cs2_path_ok;
 
   return (
     <section>
@@ -151,7 +152,7 @@ function SetupChecklist() {
       <div className="grid gap-2 sm:grid-cols-2">
         {SETUP_ITEMS.map(({ key, required, label, desc, to, linkLabel }) => {
           const ok = status?.[key] ?? false;
-          const isObs = key === "obs_connected";
+          const isObs = key === "obs_configured";
           return (
             <div
               key={key}

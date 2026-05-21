@@ -488,6 +488,23 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
             pass
     obs_cfg = _merge_obs(obs_cfg_override, cfg.obs)
 
+    # Pre-recording OBS connection check — verify OBS is reachable before
+    # launching CS2, so we fail fast rather than wasting ~60s on CS2 warmup
+    # only to discover OBS is down.
+    try:
+        _pre_obs_client = OBSClient(obs_cfg)
+        _pre_obs_client.connect()
+        try:
+            _pre_obs_client.disconnect()
+        except Exception:
+            pass
+        logger.info("[RecordingV3] OBS pre-check: connection OK")
+    except OBSConnectionError as e:
+        raise HTTPException(
+            400,
+            f"无法连接 OBS：{e}。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
+        )
+
     # Resolve demo paths: replace filename/relative refs with absolute paths.
     resolved_requests = []
     for dto in req.requests:
