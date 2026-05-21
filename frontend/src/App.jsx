@@ -33,7 +33,7 @@ import {
 } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
-import API, { API_BASE_URL } from "./api/api";
+import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 
@@ -833,25 +833,6 @@ export default function App() {
           if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
           if (typeof data.experimental?.pov_enabled === "boolean") {
             setExperimentalPovEnabled(data.experimental.pov_enabled);
-          }
-          if (data.spec_player_verify && typeof data.spec_player_verify === "object") {
-            const spv = data.spec_player_verify;
-            setSpecPlayerVerify((prev) => ({
-              ...prev,
-              ...(typeof spv.demo_timescale === "number" && Number.isFinite(spv.demo_timescale)
-                ? { demo_timescale: spv.demo_timescale }
-                : {}),
-              ...(typeof spv.max_retries === "number" && Number.isFinite(spv.max_retries)
-                ? { max_retries: Math.round(spv.max_retries) }
-                : {}),
-              ...(typeof spv.per_retry_timeout_sec === "number" &&
-              Number.isFinite(spv.per_retry_timeout_sec)
-                ? { per_retry_timeout_sec: spv.per_retry_timeout_sec }
-                : {}),
-              ...(typeof spv.settle_sec === "number" && Number.isFinite(spv.settle_sec)
-                ? { settle_sec: spv.settle_sec }
-                : {}),
-            }));
           }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
@@ -2370,7 +2351,7 @@ export default function App() {
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
                     <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
                     <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                      Attempting to connect: 127.0.0.1:19871
+                      Attempting to connect: {BACKEND_CONNECT_LABEL}
                     </span>
                   </div>
                 </div>

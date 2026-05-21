@@ -1011,6 +1011,8 @@ def config_quick_check():
 @app.get("/api/status/setup")
 def setup_status():
     """快速核查四项配置是否就绪，供录制启动前调用（含 OBS 真实连接检测）。"""
+    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
+
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
 
