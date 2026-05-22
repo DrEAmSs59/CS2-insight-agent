@@ -395,6 +395,22 @@ class DemoWatcher:
             max_conc = max(2, min(8, (os.cpu_count() or 4)))
         sem = asyncio.Semaphore(max_conc)
 
+        # 收集磁盘上所有真实存在的 .dem 绝对路径，用于清理已删除的 DB 记录
+        existing_paths: set[str] = set()
+        for p in self._normalized_paths():
+            for dem in p.glob("*.dem"):
+                try:
+                    existing_paths.add(str(dem.resolve()))
+                except OSError:
+                    pass
+
+        # 清理物理已删除但仍在库中的记录（在入库新文件之前执行）
+        if existing_paths and self._demo_db is not None:
+            try:
+                await self._demo_db.purge_deleted_demo_files(existing_paths)
+            except Exception:
+                logger.exception("purge_deleted_demo_files failed during scan")
+
         async def _enqueue_dem(path: Path) -> None:
             async with sem:
                 try:

@@ -945,6 +945,32 @@ class DemoDB:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
+    async def purge_deleted_demo_files(self, existing_paths: set[str]) -> int:
+        """删除 `demo_files` 中 ``path`` 不在 ``existing_paths`` 里的记录（物理文件已被手动删除）。
+
+        用临时表收集现有路径集合，然后单条 ``DELETE ... WHERE path NOT IN (SELECT ...)`` 级联清理，
+        避免全表预读和 ``NOT IN`` 参数数量限制。
+        """
+        if not existing_paths:
+            return 0
+        batch_size = 500
+        all_paths = list(existing_paths)
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("CREATE TEMP TABLE IF NOT EXISTS _tmp_existing_paths (path TEXT PRIMARY KEY)")
+            await conn.execute("DELETE FROM _tmp_existing_paths")
+            for i in range(0, len(all_paths), batch_size):
+                chunk = all_paths[i:i + batch_size]
+                await conn.executemany("INSERT INTO _tmp_existing_paths(path) VALUES (?)", [(p,) for p in chunk])
+            await conn.execute("DELETE FROM match_results WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id NOT IN (SELECT d.id FROM demo_files d WHERE d.path IN (SELECT path FROM _tmp_existing_paths))")
+            cur = await conn.execute("DELETE FROM demo_files WHERE path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.commit()
+            total = cur.rowcount
+            if total:
+                logger.info("purge_deleted_demo_files: removed %d rows for files no longer on disk", total)
+            return total
+
     async def all_content_md5_hexes(self) -> set[str]:
         """已入库 demo 的内容 MD5 集合，供 zip 解压前去重。"""
         if not self.ingest_md5_supported:
