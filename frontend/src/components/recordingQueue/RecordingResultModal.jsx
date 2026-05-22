@@ -9,32 +9,21 @@ import {
 } from "lucide-react";
 import Modal from "../ui/Modal";
 import API from "../../api/api";
+import {
+  friendlyClipTitleForQueue,
+  formatClipCombatSummaryLine,
+} from "../../utils/montageUtils";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-const CATEGORY_LABEL = {
-  highlight: "高光",
-  fail: "下饭",
-  compilation: "合集",
-};
-
-function friendlyName(result) {
-  const item = result._queueItem;
-  if (!item) return `片段 #${result._index + 1}`;
-
-  const { targetPlayer, demoFilename, clipData } = item;
-
-  let categoryLabel = "";
-  if (clipData?.category) {
-    const base = CATEGORY_LABEL[clipData.category] ?? clipData.category;
-    categoryLabel =
-      clipData.category === "compilation" && clipData.compilation_kind
-        ? `${base}(${clipData.compilation_kind})`
-        : base;
+/** 回合标签：R3 · 5:7 或 R3 */
+function roundLabel(cd) {
+  if (!cd) return null;
+  if (cd.round != null && cd.score_own != null && cd.score_opp != null) {
+    return `R${cd.round} · ${cd.score_own}:${cd.score_opp}`;
   }
-
-  const parts = [categoryLabel, targetPlayer, demoFilename].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : `片段 #${result._index + 1}`;
+  if (cd.round != null) return `R${cd.round}`;
+  return null;
 }
 
 function isAborted(result) {
@@ -125,34 +114,75 @@ export default function RecordingResultModal({
       {/* Result list */}
       <ul className="divide-y divide-cs2-border">
         {results.map((result) => {
-          const name = friendlyName(result);
           const aborted = isAborted(result);
+          const cd = result._queueItem?.clipData ?? null;
+          const title = cd ? friendlyClipTitleForQueue(cd) : `片段 #${result._index + 1}`;
+          const combatLine = cd ? formatClipCombatSummaryLine(cd) : "";
+          const rl = roundLabel(cd);
+          const killCount = cd?.kill_count ? Number(cd.kill_count) : null;
+          const demoFile = String(result._queueItem?.demoFilename || result._queueItem?.demoPath || "").trim();
+          const playerName = String(result._queueItem?.targetPlayer || "").trim();
 
-          if (result.success) {
-            return (
-              <li
-                key={result.request_id ?? result._index}
-                className="flex items-center gap-3 px-5 py-3"
-              >
-                {/* Status icon */}
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-cs2-text-success" />
+          /* ── 状态图标 ── */
+          const statusIcon = result.success ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cs2-text-success" />
+          ) : aborted ? (
+            <Ban className="mt-0.5 h-4 w-4 shrink-0 text-cs2-text-muted" />
+          ) : (
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-cs2-rose-on-surface" />
+          );
 
-                {/* Name */}
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cs2-text-primary">
-                  {name}
-                </span>
+          return (
+            <li
+              key={result.request_id ?? result._index}
+              className="flex items-start gap-3 px-5 py-3"
+            >
+              {statusIcon}
 
-                {/* Path + actions */}
-                {result.output_path && (
-                  <div className="flex min-w-0 items-center gap-1">
-                    <span className="max-w-[220px] truncate font-mono text-[11px] text-cs2-text-secondary">
+              {/* 片段信息主体 */}
+              <div className="min-w-0 flex-1 space-y-0.5">
+                {/* 标题行：片段标题 + 玩家 */}
+                <div className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate text-[12px] font-semibold text-cs2-text-primary">
+                    {title}
+                  </span>
+                  {playerName && (
+                    <span className="shrink-0 text-[11px] text-cs2-text-muted">{playerName}</span>
+                  )}
+                </div>
+
+                {/* 元信息行：回合 + 击杀数 + 战斗摘要 */}
+                {(rl || killCount || combatLine) && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-cs2-text-secondary">
+                    {rl && <span className="font-mono">{rl}</span>}
+                    {killCount != null && killCount > 0 && (
+                      <span>{killCount}K</span>
+                    )}
+                    {combatLine && <span className="truncate">{combatLine}</span>}
+                  </div>
+                )}
+
+                {/* Demo 文件名 */}
+                {demoFile && (
+                  <div className="truncate font-mono text-[10px] text-cs2-text-muted">
+                    {demoFile}
+                  </div>
+                )}
+
+                {/* 成功：输出路径 + 操作按钮 */}
+                {result.success && result.output_path && (
+                  <div className="flex min-w-0 items-center gap-1 pt-0.5">
+                    <span
+                      className="min-w-0 truncate font-mono text-[11px] text-cs2-text-secondary"
+                      title={result.output_path}
+                    >
                       {result.output_path}
                     </span>
                     <button
                       type="button"
                       title="复制路径"
                       onClick={() => handleCopy(result._index, result.output_path)}
-                      className="rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
+                      className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
                     >
                       {copiedIdx === result._index ? (
                         <Check className="h-3.5 w-3.5 text-cs2-text-success" />
@@ -164,46 +194,23 @@ export default function RecordingResultModal({
                       type="button"
                       title="在资源管理器中显示"
                       onClick={() => handleReveal(result.output_path)}
-                      className="rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
+                      className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
                     >
                       <FolderOpen className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 )}
-              </li>
-            );
-          }
 
-          if (aborted) {
-            return (
-              <li
-                key={result.request_id ?? result._index}
-                className="flex items-center gap-3 px-5 py-3"
-              >
-                <Ban className="h-4 w-4 shrink-0 text-cs2-text-muted" />
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cs2-text-primary">
-                  {name}
-                </span>
-                <span className="text-[11px] text-cs2-text-muted">已中止</span>
-              </li>
-            );
-          }
+                {/* 失败：错误信息 */}
+                {!result.success && !aborted && result.error && (
+                  <div className="text-[11px] text-cs2-rose-on-surface">{result.error}</div>
+                )}
 
-          // failure
-          return (
-            <li
-              key={result.request_id ?? result._index}
-              className="flex items-center gap-3 px-5 py-3"
-            >
-              <XCircle className="h-4 w-4 shrink-0 text-cs2-rose-on-surface" />
-              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cs2-text-primary">
-                {name}
-              </span>
-              {result.error && (
-                <span className="max-w-[260px] truncate text-[11px] text-cs2-rose-on-surface">
-                  {result.error}
-                </span>
-              )}
+                {/* 中止 */}
+                {aborted && (
+                  <div className="text-[11px] text-cs2-text-muted">已中止</div>
+                )}
+              </div>
             </li>
           );
         })}

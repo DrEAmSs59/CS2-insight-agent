@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../api/api";
 import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, RotateCcw, ScanSearch, Wifi, WifiOff } from "lucide-react";
 import PageContainer from "../components/PageContainer";
@@ -59,7 +59,6 @@ export default function ObsConfigCenterPage() {
     }
   }, [fetchStatus]);
 
-
   const handleConfigCheck = async () => {
     setChecking(true);
     setCheckResult(null);
@@ -77,6 +76,12 @@ export default function ObsConfigCenterPage() {
       setChecking(false);
     }
   };
+
+  // 进入页面时自动触发一次配置检查
+  useEffect(() => {
+    void handleConfigCheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCalibrate = async () => {
     setCalibrating(true);
