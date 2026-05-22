@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import API from "../api/api";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, ScanSearch, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, RotateCcw, ScanSearch, Wifi, WifiOff } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
@@ -344,12 +344,33 @@ export default function ObsConfigCenterPage() {
                   ok: status.recording?.rec_quality !== "Stream" && !!status.recording?.rec_quality,
                   issue: "当前：与串流一致，可能无法正常录制",
                 },
+                {
+                  label: "录像输出目录",
+                  value: status.recording?.output_path || "未配置（OBS 将使用默认路径）",
+                  ok: true,
+                  infoOnly: true,
+                  outputPath: status.recording?.output_path || "",
+                },
               ].map((item, i) => (
                 <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]">
                   <span className="text-cs2-text-muted w-24 shrink-0">{item.label}</span>
                   <span className="flex-1 font-mono text-cs2-text-secondary">{item.value}</span>
                   {item.skip ? (
                     <span className="text-cs2-text-muted">—</span>
+                  ) : item.infoOnly ? (
+                    item.outputPath ? (
+                      <button
+                        type="button"
+                        title="在资源管理器中打开"
+                        onClick={() => API.post("/open-folder", { path: item.outputPath }).catch(() => {})}
+                        className="flex items-center gap-1 rounded px-2 py-0.5 text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                        打开
+                      </button>
+                    ) : (
+                      <span className="text-cs2-text-muted">—</span>
+                    )
                   ) : item.ok ? (
                     <span className="flex items-center gap-1 text-cs2-text-success">
                       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
