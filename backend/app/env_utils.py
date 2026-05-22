@@ -540,6 +540,148 @@ def detect_ffmpeg_path() -> Optional[str]:
     return None
 
 
+_OBS64_REL = Path("bin") / "64bit" / "obs64.exe"
+_DEFAULT_OBS_PATHS: tuple[str, ...] = (
+    r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+    r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe",
+)
+
+
+def _obs64_from_install_root(install_root: Path) -> Optional[Path]:
+    """由 OBS 安装根目录推断 obs64.exe。"""
+    candidates = (
+        install_root / _OBS64_REL,
+        install_root / "obs64.exe",
+        install_root / "bin" / "obs64.exe",
+    )
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _obs_path_from_registry_value(raw: object) -> Optional[Path]:
+    """解析卸载项 InstallLocation / DisplayIcon / UninstallString。"""
+    if raw is None:
+        return None
+    text = str(raw).strip().strip('"')
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",", 1)[0].strip().strip('"')
+    try:
+        p = Path(text)
+    except ValueError:
+        return None
+    name = p.name.lower()
+    if name in ("obs64.exe", "obs.exe") and p.is_file():
+        return p
+    if name == "uninstall.exe":
+        root = p.parent
+        if root.name.lower() == "64bit":
+            root = root.parent.parent
+        found = _obs64_from_install_root(root)
+        if found:
+            return found
+    if p.is_dir():
+        return _obs64_from_install_root(p)
+    if p.is_file():
+        found = _obs64_from_install_root(p.parent)
+        if found:
+            return found
+    return None
+
+
+def _obs_paths_from_uninstall_registry() -> list[Path]:
+    """扫描 Windows 卸载注册表中的 OBS Studio 安装信息。"""
+    if winreg is None:
+        return []
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def add(candidate: Optional[Path]) -> None:
+        if candidate is None or not candidate.is_file():
+            return
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(candidate)
+
+    uninstall_roots = (
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    )
+    for hive, sub in uninstall_roots:
+        try:
+            root_key = winreg.OpenKey(hive, sub)
+        except OSError:
+            continue
+        try:
+            for direct in ("OBS Studio",):
+                try:
+                    sk = winreg.OpenKey(root_key, direct)
+                except OSError:
+                    continue
+                try:
+                    for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                        try:
+                            raw, _ = winreg.QueryValueEx(sk, val_name)
+                        except OSError:
+                            continue
+                        add(_obs_path_from_registry_value(raw))
+                finally:
+                    winreg.CloseKey(sk)
+
+            i = 0
+            while True:
+                try:
+                    sub_name = winreg.EnumKey(root_key, i)
+                except OSError:
+                    break
+                i += 1
+                sk = None
+                try:
+                    sk = winreg.OpenKey(root_key, sub_name)
+                    try:
+                        disp, _ = winreg.QueryValueEx(sk, "DisplayName")
+                    except OSError:
+                        continue
+                    name = str(disp).strip().lower()
+                    if "obs studio" not in name:
+                        continue
+                    for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                        try:
+                            raw, _ = winreg.QueryValueEx(sk, val_name)
+                        except OSError:
+                            continue
+                        add(_obs_path_from_registry_value(raw))
+                finally:
+                    if sk is not None:
+                        winreg.CloseKey(sk)
+        finally:
+            winreg.CloseKey(root_key)
+    return out
+
+
+def detect_obs_path() -> Optional[str]:
+    """查找 OBS 可执行文件。优先级：卸载注册表 → 常见安装路径 → PATH。"""
+    for candidate in _obs_paths_from_uninstall_registry():
+        return str(candidate.resolve())
+    for p in _DEFAULT_OBS_PATHS:
+        pp = Path(p)
+        if pp.is_file():
+            return str(pp.resolve())
+    found = shutil.which("obs64.exe") or shutil.which("obs.exe")
+    if found:
+        return str(Path(found).resolve())
+    return None
+
+
 def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
     """If cs2_path is empty, try auto-detection and persist."""
     if not cfg.cs2_path:

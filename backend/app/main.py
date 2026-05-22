@@ -35,6 +35,7 @@ from .env_utils import (
     ensure_cs2_path,
     detect_cs2_path,
     detect_ffmpeg_path,
+    detect_obs_path,
     resolve_config_path,
     llm_api_key_configured,
     llm_base_url_is_local_host,
@@ -722,7 +723,7 @@ def open_config_data_dir():
 @app.post("/api/config/detect-obs")
 def detect_obs_path_save():
     """扫描常见安装路径并写入 cs2-insight.config.json 中的 obs.obs_path。"""
-    path = _auto_detect_obs_path()
+    path = detect_obs_path()
     if not path:
         raise HTTPException(
             404,
@@ -948,30 +949,11 @@ def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> 
     return OBSConfig(host=host, port=port, password=password)
 
 
-_DEFAULT_OBS_PATHS = (
-    r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
-    r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe",
-)
-
-
-def _auto_detect_obs_path() -> Optional[str]:
-    """尝试自动探测 OBS 可执行文件路径。"""
-    for p in _DEFAULT_OBS_PATHS:
-        pp = Path(p)
-        if pp.is_file():
-            return str(pp)
-    # 也尝试从 PATH 中查找
-    found = shutil.which("obs64.exe") or shutil.which("obs.exe")
-    if found:
-        return found
-    return None
-
-
 def _normalize_obs_path_auto_detect(cfg: AppConfig) -> None:
     """OBS 验证成功后：若 obs_path 为空，尝试自动探测并写入配置。"""
     if cfg.obs.obs_path and Path(cfg.obs.obs_path).is_file():
         return
-    detected = _auto_detect_obs_path()
+    detected = detect_obs_path()
     if detected:
         cfg.obs.obs_path = detected
 

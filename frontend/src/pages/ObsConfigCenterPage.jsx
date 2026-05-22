@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import API from "../api/api";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Wifi, WifiOff, Monitor } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, RotateCcw, ScanSearch, Wifi, WifiOff } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
@@ -164,22 +164,27 @@ export default function ObsConfigCenterPage() {
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
               填写 OBS 可执行文件的完整路径，用于录制前自动启动 OBS。
             </p>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 space-y-2">
               <input
                 type="text"
                 value={obsConfig.obs_path ?? ""}
                 onChange={(e) => setObsConfig({ ...obsConfig, obs_path: e.target.value })}
                 placeholder="例如 C:\Program Files\obs-studio\bin\64bit\obs64.exe"
-                className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
+                className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => void detectObsPath()}
                 disabled={detectingObs}
                 title="自动探测 OBS 安装路径"
-                className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
               >
-                {detectingObs ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Monitor className="h-3.5 w-3.5" />}
+                {detectingObs ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ScanSearch className="h-3.5 w-3.5" />
+                )}
+                {detectingObs ? "探测中…" : "自动探测 OBS"}
               </button>
             </div>
           </div>
