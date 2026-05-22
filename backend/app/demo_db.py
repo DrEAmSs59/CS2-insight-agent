@@ -461,6 +461,16 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
             await conn.commit()
 
+    async def find_by_filename(self, filename: str):
+        """Return the demo_files row for the given filename, or None."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM demo_files WHERE filename = ? LIMIT 1", (filename,)
+            ) as cur:
+                row = await cur.fetchone()
+        return dict(row) if row else None
+
     @staticmethod
     def _need_player_join(f: DemoListFilters) -> bool:
         return bool(str(f.get("player_query") or "").strip())
