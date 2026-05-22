@@ -56,6 +56,16 @@ from .cs2_config_backup import (
     open_backup_directory,
     restore_latest_user_config_backup,
 )
+import httpx
+
+from .steam_match_history import (
+    fetch_match_history,
+    fetch_player_summary,
+    parse_match_row,
+    download_demo,
+    game_type_to_mode,
+    is_demo_expired,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
@@ -637,6 +647,12 @@ class ConfigPayload(BaseModel):
     steam_id64: Optional[str] = None
     match_mode: Optional[str] = None
     match_count: Optional[int] = None
+
+
+class MatchHistoryDownloadBody(BaseModel):
+    demo_url: str
+    match_id: str
+    filename: str  # e.g. "match730_3733386468353335412.dem"
 
 
 @app.get("/api/config")
@@ -1564,6 +1580,118 @@ async def demo_library_event_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/match-history/matches")
+async def get_match_history():
+    cfg = load_config()
+    if not cfg.steam_api_key or not cfg.steam_id64:
+        raise HTTPException(400, "Steam API Key 和 SteamID64 未配置，请先保存凭据")
+
+    try:
+        raw_matches = await fetch_match_history(cfg.steam_api_key, cfg.steam_id64, cfg.match_count)
+        player = await fetch_player_summary(cfg.steam_api_key, cfg.steam_id64)
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status == 403:
+            raise HTTPException(403, "Steam API Key 无效，请检查凭据")
+        if status == 429:
+            raise HTTPException(429, "Steam API 请求频率超限，请稍后再试")
+        raise HTTPException(502, f"Steam API 返回 {status}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"无法连接 Steam API: {e}")
+    except ValueError as e:
+        raise HTTPException(502, str(e))
+
+    mode_filter = cfg.match_mode
+    rows = []
+    for i, m in enumerate(raw_matches):
+        wmi = m.get("watchablematchinfo") or {}
+        mode = game_type_to_mode(int(wmi.get("game_type", 0)))
+        if mode != mode_filter:
+            continue
+        try:
+            row = parse_match_row(m, player_index=0)
+        except Exception:
+            logger.exception("Failed to parse match %s", m.get("matchid"))
+            continue
+        # check if already in library
+        dem_name = f"match730_{row['match_id']}.dem"
+        find_fn = getattr(demo_db, "find_by_filename", None)
+        in_lib = (await find_fn(dem_name) is not None) if find_fn else False
+        row["demo_in_library"] = in_lib
+        rows.append(row)
+
+    wins = sum(1 for r in rows if r["result"] == "win")
+    losses = sum(1 for r in rows if r["result"] == "loss")
+    total_kills = sum(r["kills"] for r in rows)
+    total_deaths = sum(r["deaths"] for r in rows)
+    total_hs = sum(r["headshot_kills"] for r in rows)
+    total_dmg = sum(r["damage"] for r in rows)
+    total_rounds = sum(r["score_own"] + r["score_opp"] for r in rows)
+    avg_kd = round(total_kills / total_deaths, 2) if total_deaths else 0.0
+    hs_pct = round(total_hs / total_kills * 100) if total_kills else 0
+    avg_adr = round(total_dmg / total_rounds, 1) if total_rounds else 0.0
+    avg_rating = round(sum(r["rating"] for r in rows) / len(rows), 2) if rows else 0.0
+
+    return {
+        "player": {
+            "name": player.get("personaname", ""),
+            "avatar": player.get("avatarfull", ""),
+            "steam_id64": cfg.steam_id64,
+        },
+        "stats_summary": {
+            "wins": wins,
+            "losses": losses,
+            "avg_kd": avg_kd,
+            "headshot_pct": hs_pct,
+            "avg_adr": avg_adr,
+            "rating": avg_rating,
+        },
+        "matches": rows,
+        "total": len(rows),
+    }
+
+
+@app.post("/api/match-history/test-connection")
+async def test_steam_connection(body: dict = Body(...)):
+    api_key = str(body.get("steam_api_key") or "").strip()
+    steam_id64 = str(body.get("steam_id64") or "").strip()
+    if not api_key or not steam_id64:
+        raise HTTPException(400, "steam_api_key 和 steam_id64 不能为空")
+    try:
+        player = await fetch_player_summary(api_key, steam_id64)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"Steam API 返回 {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"无法连接 Steam: {e}")
+    if not player:
+        raise HTTPException(404, "未找到该 SteamID 的玩家信息，请检查 SteamID64")
+    return {"ok": True, "name": player.get("personaname", ""), "avatar": player.get("avatarfull", "")}
+
+
+@app.post("/api/match-history/download")
+async def download_match_demo(body: MatchHistoryDownloadBody):
+    cfg = load_config()
+    watch_paths = [p for p in cfg.demo_watch_paths if p.strip()]
+    if not watch_paths:
+        raise HTTPException(400, "未配置 Demo 库监听目录，请先在「Demo 库」设置监听路径")
+
+    dest_dir = Path(watch_paths[0])
+    filename = body.filename if body.filename.endswith(".dem") else body.filename + ".dem"
+    try:
+        dem_path = await download_demo(body.demo_url, dest_dir, filename)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(502, f"下载失败，HTTP {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"下载超时或网络错误: {e}")
+    except OSError as e:
+        raise HTTPException(500, f"文件写入失败: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"解压失败: {e}")
+
+    await _enqueue_demo_path(dem_path)
+    return {"ok": True, "path": str(dem_path), "filename": filename}
 
 
 @app.get("/api/demos/discovered")
