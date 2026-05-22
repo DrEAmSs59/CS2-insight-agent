@@ -633,6 +633,10 @@ class ConfigPayload(BaseModel):
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
+    steam_api_key: Optional[str] = None
+    steam_id64: Optional[str] = None
+    match_mode: Optional[str] = None
+    match_count: Optional[int] = None
 
 
 @app.get("/api/config")
@@ -642,6 +646,9 @@ def get_config():
     data = cfg.model_dump()
     if data["llm"]["api_key"]:
         data["llm"]["api_key"] = "****" + data["llm"]["api_key"][-4:]
+    if data.get("steam_api_key"):
+        raw = data["steam_api_key"]
+        data["steam_api_key"] = "****" + raw[-4:] if len(raw) >= 4 else "****"
     obs_pw = (data.get("obs") or {}).get("password") or ""
     if obs_pw:
         data.setdefault("obs", {})
@@ -892,6 +899,14 @@ async def update_config(payload: ConfigPayload):
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
+    if payload.steam_api_key is not None and not payload.steam_api_key.startswith("****"):
+        cfg.steam_api_key = payload.steam_api_key.strip()
+    if payload.steam_id64 is not None:
+        cfg.steam_id64 = payload.steam_id64.strip()
+    if payload.match_mode is not None and payload.match_mode in ("premier", "competitive"):
+        cfg.match_mode = payload.match_mode
+    if payload.match_count is not None and payload.match_count in (20, 50, 100):
+        cfg.match_count = payload.match_count
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；

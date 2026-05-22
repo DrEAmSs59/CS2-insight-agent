@@ -391,6 +391,11 @@ class AppConfig(BaseModel):
     obs_transition_duration_ms: int = 100
     obs_game_scene_name: str = "CS2 Insight Recording"
     obs_black_scene_name: str = "CS2 Insight Black"
+    # 官匹战绩
+    steam_api_key: str = ""
+    steam_id64: str = ""
+    match_mode: str = "premier"   # premier / competitive
+    match_count: int = 20         # 20 / 50 / 100
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
