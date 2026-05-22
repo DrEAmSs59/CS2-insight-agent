@@ -1702,6 +1702,8 @@ export default function App() {
             _queueItem: reqIdToQueueItem[r?.request_id] ?? null,
             _index: i,
           }));
+          const allSucceeded = results.length > 0 && results.every((r) => r && r.success);
+          if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
         } catch (e) {
