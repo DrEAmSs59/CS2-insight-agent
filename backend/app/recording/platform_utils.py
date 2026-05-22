@@ -95,3 +95,37 @@ def compute_voice_listen_mask(
             mask |= 1 << (actual - 1)
 
     return mask if mask != 0 else None
+
+
+def compute_voice_listen_mask_enemy(
+    all_players: list[dict],
+    target_steamid64: str,
+    slot_offset: int,
+) -> Optional[int]:
+    """计算 ``tv_listen_voice_indices`` 位掩码，只听目标玩家对方队伍的语音。"""
+    if not all_players or not target_steamid64:
+        return None
+
+    target_team: Optional[int] = None
+    for p in all_players:
+        if p.get("steamid64") == target_steamid64 and p.get("team_num") in (2, 3):
+            target_team = p["team_num"]
+            break
+
+    if target_team is None:
+        return None
+
+    enemy_team = 3 if target_team == 2 else 2
+
+    mask = 0
+    for p in all_players:
+        if p.get("team_num") != enemy_team:
+            continue
+        slot = p.get("spec_slot")
+        if slot is None:
+            continue
+        actual = int(slot) + slot_offset
+        if 1 <= actual <= 64:
+            mask |= 1 << (actual - 1)
+
+    return mask if mask != 0 else None

@@ -377,8 +377,10 @@ class RecordingExecutor:
           - None when is_last=False (pause case)
         Populates self._obs_force_stopped when PauseRecord fell back to StopRecord.
         """
-        # Fade to black before OBS pause/stop — the transition is recorded as fade-out.
-        if self._fade is not None:
+        # Fade to black before OBS pause — only between segments, not at the final stop.
+        # The very start and end of the recording use a hard cut to avoid audio fade-in/out
+        # artifacts on the global Desktop Audio track during the OBS scene transition.
+        if self._fade is not None and not is_last:
             ok = await self._fade.fade_to_black()
             if not ok:
                 logger.warning("[RecordingV3] fade_to_black failed at segment boundary; hard-cut")
@@ -603,37 +605,12 @@ class RecordingExecutor:
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     result.recording_started_at = time.time()
-                    if self._fade is not None:
-                        if self._obs_on_black:
-                            # OBS is already on the black scene from the previous
-                            # clip's fade-out — skip the redundant black→black transition.
-                            logger.debug("[RecordingV3] OBS already on black; skipping fade_to_black for StartRecord")
-                        else:
-                            ok = await self._fade.fade_to_black()
-                            if not ok:
-                                logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
-                            else:
-                                self._obs_on_black = True
-                        # Pre-warm the OBS connection for fade-in *before* StartRecord so
-                        # the scene switch fires with near-zero latency after recording begins,
-                        # eliminating any black-screen-with-audio gap at the clip start.
-                        await self._fade.prime_fade_to_game()
+                    # Hard cut at the very start of recording — no fade-in from black.
+                    # Fade transitions are reserved for mid-clip segment boundaries only,
+                    # so the global Desktop Audio track is never cross-faded at clip edges.
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
-
-                    # ── 5a. Resume demo concurrently with fade-in (StartRecord) ──
-                    # execute_primed_fade_to_game uses the pre-warmed WS connection so
-                    # the scene switch fires within ~2 ms of StartRecord returning —
-                    # the 200 ms animation then covers CS2 keypress processing latency.
-                    if self._fade is not None:
-                        (resume_ok, fade_ok) = await asyncio.gather(
-                            demo_resume_silent_strict(),
-                            self._fade.execute_primed_fade_to_game(),
-                        )
-                        if not fade_ok:
-                            logger.warning("[RecordingV3] fade_to_game after StartRecord failed; hard-cut")
-                    else:
-                        resume_ok = await demo_resume_silent_strict()
+                    resume_ok = await demo_resume_silent_strict()
                     self._obs_on_black = False
                 else:
                     logger.info(

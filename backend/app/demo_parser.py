@@ -5485,7 +5485,7 @@ def _build_all_players_roster(
     team_num: 2=T，3=CT（match_start_tick 刻度的初始阵营，换边后玩家所在组不变）。
     """
     try:
-        df = _to_pandas_df(parser.parse_ticks([max(1, match_start_tick)], props=["name", "team_num"]))
+        df = _to_pandas_df(parser.parse_ticks(["name", "team_num"], ticks=[max(1, match_start_tick)]))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise

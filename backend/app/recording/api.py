@@ -523,8 +523,12 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     warmup_extras = None
     if req.warmup:
         try:
+            _warmup_dict = dict(req.warmup)
+            # Backward compat: convert old boolean snd_voipvolume_mute → voice_filter
+            if "snd_voipvolume_mute" in _warmup_dict and "voice_filter" not in _warmup_dict:
+                _warmup_dict["voice_filter"] = "mute" if _warmup_dict["snd_voipvolume_mute"] else "team"
             _valid_keys = {f.name for f in dataclasses.fields(RecordingWarmupExtras)}
-            _filtered = {k: v for k, v in req.warmup.items() if k in _valid_keys}
+            _filtered = {k: v for k, v in _warmup_dict.items() if k in _valid_keys}
             warmup_extras = RecordingWarmupExtras(**_filtered)
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)

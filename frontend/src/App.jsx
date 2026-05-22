@@ -1658,6 +1658,7 @@ export default function App() {
             useRecordingQueue.getState().globalPacing,
             uploadedDemos,
             parsedMatches,
+            demoLibraryItems,
           );
           if (!requests.length) {
             setProgressText("队列中没有可录制的片段（已跳过不支持的类型）。");
@@ -1718,6 +1719,7 @@ export default function App() {
       refreshConfigBackupStatus,
       uploadedDemos,
       parsedMatches,
+      demoLibraryItems,
     ]
   );
 
@@ -1923,6 +1925,19 @@ export default function App() {
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
       setProgressText(typeof msg === "string" ? msg : "CS2 自动探测失败");
+    }
+  }, []);
+
+  const handleDetectFfmpeg = useCallback(async () => {
+    try {
+      const { data } = await API.post("config/detect-ffmpeg");
+      if (data.ffmpeg_path) {
+        setFfmpegPath(data.ffmpeg_path);
+        setProgressText(`已自动找到 FFmpeg：${data.ffmpeg_path}`);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message;
+      setProgressText(typeof msg === "string" ? msg : "FFmpeg 自动探测失败");
     }
   }, []);
 
@@ -2197,6 +2212,7 @@ export default function App() {
     handleSaveConfig,
     fetchUpdateInfo,
     handleDetectCs2,
+    handleDetectFfmpeg,
     handleSaveAllSettingsPage,
     saveExpectedPlayersFromList,
     handleExportSettingsConfig,

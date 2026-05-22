@@ -144,6 +144,7 @@ class RecordingSegment(BaseModel):
     disabled_reason: Optional[str] = None
     metadata: dict = {}
     voice_listen_mask: Optional[int] = None
+    voice_listen_mask_enemy: Optional[int] = None
 
 
 class RecordingPlan(BaseModel):

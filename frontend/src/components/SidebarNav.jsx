@@ -103,7 +103,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           <Settings className="h-4 w-4 shrink-0 opacity-90" />
           设置
         </NavLink>
-        <button
+        {/* <button
           type="button"
           disabled={disabled || !onCheckUpdate}
           onClick={() => onCheckUpdate?.()}
@@ -111,7 +111,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         >
           <Download className="h-4 w-4 shrink-0 opacity-90" />
           检查更新
-        </button>
+        </button> */}
         <button
           type="button"
           onClick={toggleTheme}

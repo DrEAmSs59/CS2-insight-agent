@@ -34,6 +34,7 @@ from .env_utils import (
     save_config,
     ensure_cs2_path,
     detect_cs2_path,
+    detect_ffmpeg_path,
     resolve_config_path,
     llm_api_key_configured,
     llm_base_url_is_local_host,
@@ -683,6 +684,21 @@ def detect_cs2_save():
     cfg.cs2_path = path
     save_config(cfg)
     return {"cs2_path": path}
+
+
+@app.post("/api/config/detect-ffmpeg")
+def detect_ffmpeg_save():
+    """扫描本机常见位置并写入 cs2-insight.config.json 中的 ffmpeg_path。"""
+    path = detect_ffmpeg_path()
+    if not path:
+        raise HTTPException(
+            404,
+            "未找到 FFmpeg（ffmpeg.exe）。请安装 FFmpeg 并确保其在系统 PATH 中，或在设置中手动填写完整路径。",
+        )
+    cfg = load_config()
+    cfg.ffmpeg_path = path
+    save_config(cfg)
+    return {"ffmpeg_path": path}
 
 
 @app.post("/api/config/open-dir")

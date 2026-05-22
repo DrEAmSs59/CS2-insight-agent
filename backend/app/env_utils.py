@@ -481,6 +481,65 @@ def detect_cs2_path() -> Optional[str]:
     return None
 
 
+_FFMPEG_SCAN_ROOTS: list[Path] = [
+    Path(r"C:\\"),
+    Path(r"D:\\"),
+    Path(r"E:\\"),
+    Path(r"F:\\"),
+]
+
+_DEFAULT_FFMPEG_DIRS: list[Path] = [
+    Path(r"C:\ffmpeg\bin"),
+    Path(r"C:\Program Files\ffmpeg\bin"),
+    Path(r"C:\Program Files (x86)\ffmpeg\bin"),
+    Path(r"D:\ffmpeg\bin"),
+    Path(r"E:\ffmpeg\bin"),
+    Path(r"C:\tools\ffmpeg\bin"),
+    Path(r"C:\ProgramData\chocolatey\bin"),
+    Path(r"C:\tools\ffmpeg"),
+]
+
+
+def _iter_ffmpeg_glob_candidates(exe_name: str):
+    """在各盘根目录下查找 ffmpeg* 开头的文件夹，返回其中可能的 exe 路径。"""
+    for root in _FFMPEG_SCAN_ROOTS:
+        if not root.is_dir():
+            continue
+        try:
+            for d in sorted(root.glob("ffmpeg*")):
+                if not d.is_dir():
+                    continue
+                # 优先 bin/ 子目录，再尝试根目录本身
+                for sub in (d / "bin", d):
+                    candidate = sub / exe_name
+                    if candidate.is_file():
+                        yield candidate
+        except OSError:
+            continue
+
+
+def detect_ffmpeg_path() -> Optional[str]:
+    """搜索本机 FFmpeg 可执行文件。优先级：bundled → PATH → 固定目录 → 盘根 ffmpeg* 通配。"""
+    bundled = get_data_dir().parent / "third_party" / "ffmpeg" / "ffmpeg.exe"
+    if bundled.is_file():
+        return str(bundled.resolve())
+
+    found = shutil.which("ffmpeg")
+    if found:
+        return str(Path(found).resolve())
+
+    exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    for d in _DEFAULT_FFMPEG_DIRS:
+        candidate = d / exe_name
+        if candidate.is_file():
+            return str(candidate.resolve())
+
+    for candidate in _iter_ffmpeg_glob_candidates(exe_name):
+        return str(candidate.resolve())
+
+    return None
+
+
 def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
     """If cs2_path is empty, try auto-detection and persist."""
     if not cfg.cs2_path:

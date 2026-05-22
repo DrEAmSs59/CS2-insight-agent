@@ -1,11 +1,16 @@
 from ..models import RecordingSegment, SourceType, Perspective, RequestType
 from ..normalizer import NormalizedRequest
-from ..platform_utils import platform_slot_offset, compute_voice_listen_mask
+from ..platform_utils import platform_slot_offset, compute_voice_listen_mask, compute_voice_listen_mask_enemy
 
 
 def _voice_mask(req: NormalizedRequest) -> "int | None":
     offset = platform_slot_offset(req.demo.demo_filename, req.demo.server_name)
     return compute_voice_listen_mask(req.demo.all_players, req.target_player.steamid64, offset)
+
+
+def _voice_mask_enemy(req: NormalizedRequest) -> "int | None":
+    offset = platform_slot_offset(req.demo.demo_filename, req.demo.server_name)
+    return compute_voice_listen_mask_enemy(req.demo.all_players, req.target_player.steamid64, offset)
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify overhead
 # without consuming the user-configured highlight_pre_sec recording window.
@@ -54,6 +59,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
     _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = sec_to_ticks(opts.highlight_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.highlight_post_sec, tick_rate)
@@ -113,6 +119,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled_reason=None,
             metadata={},
             voice_listen_mask=_mask,
+            voice_listen_mask_enemy=_mask_enemy,
         )
         segments.append(seg)
         seg_idx += 1
@@ -145,6 +152,7 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled_reason=victim_disabled_reason,
                 metadata={},
                 voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
             )
             segments.append(victim_seg)
             seg_idx += 1
@@ -157,6 +165,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
     _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = sec_to_ticks(opts.death_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.death_post_sec, tick_rate)
@@ -186,6 +195,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled_reason=None,
         metadata={},
         voice_listen_mask=_mask,
+        voice_listen_mask_enemy=_mask_enemy,
     )
     segments.append(seg)
 
@@ -216,6 +226,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled_reason="missing_killer_steamid64",
                 metadata={},
                 voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
             )
         else:
             k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
@@ -239,6 +250,7 @@ def _plan_fail(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled_reason=None,
                 metadata={},
                 voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
             )
         segments.append(killer_seg)
 
@@ -250,6 +262,7 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
     _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = sec_to_ticks(opts.timeline_kill_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.timeline_kill_post_sec, tick_rate)
@@ -282,6 +295,7 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled_reason=None,
         metadata={},
         voice_listen_mask=_mask,
+        voice_listen_mask_enemy=_mask_enemy,
     )
     segments = [seg]
 
@@ -314,6 +328,7 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled_reason=victim_disabled_reason,
             metadata={},
             voice_listen_mask=_mask,
+            voice_listen_mask_enemy=_mask_enemy,
         )
         segments.append(victim_seg)
 
@@ -325,6 +340,7 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     first_tick = req.demo.first_tick
     _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
@@ -352,6 +368,7 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
         disabled_reason=None,
         metadata={},
         voice_listen_mask=_mask,
+        voice_listen_mask_enemy=_mask_enemy,
     )
     segments = [seg]
 
@@ -384,6 +401,7 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
             disabled_reason=killer_disabled_reason,
             metadata={},
             voice_listen_mask=_mask,
+            voice_listen_mask_enemy=_mask_enemy,
         )
         segments.append(killer_seg)
 

@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import logging
 import os
+import struct
 import time
+import zlib
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, Optional
@@ -22,6 +24,8 @@ from .file_hash import file_md5_hex
 logger = logging.getLogger(__name__)
 
 OnDemoDetected = Callable[[Path, Optional[str]], Awaitable[None]]
+
+_LOCAL_ZIP_SIG = b"PK\x03\x04"
 
 
 def _sort_paths_by_mtime_newest_first(paths: Iterable[Path]) -> list[Path]:
@@ -51,6 +55,71 @@ def _safe_zip_member_name(name: str) -> str | None:
     return base
 
 
+def _iter_local_header_zip_dems(zip_path: Path) -> list[tuple[str, bytes]]:
+    """Parse .dem payloads from ZIP local headers when EOCD is missing (e.g. some 5E replays)."""
+    try:
+        data = zip_path.read_bytes()
+    except OSError:
+        return []
+    if not data.startswith(_LOCAL_ZIP_SIG):
+        return []
+    out: list[tuple[str, bytes]] = []
+    offset = 0
+    while offset + 30 <= len(data) and data[offset : offset + 4] == _LOCAL_ZIP_SIG:
+        fn_len = struct.unpack_from("<H", data, offset + 26)[0]
+        extra_len = struct.unpack_from("<H", data, offset + 28)[0]
+        header_end = offset + 30 + fn_len + extra_len
+        if header_end > len(data):
+            break
+        name = data[offset + 30 : offset + 30 + fn_len].decode("utf-8", "replace")
+        method = struct.unpack_from("<H", data, offset + 8)[0]
+        csize = struct.unpack_from("<I", data, offset + 18)[0]
+        usize = struct.unpack_from("<I", data, offset + 22)[0]
+        base = _safe_zip_member_name(name)
+        payload_end = header_end + csize if csize else len(data)
+        if payload_end > len(data):
+            logger.warning("Truncated local-header zip payload in %s", zip_path)
+            break
+        payload = data[header_end:payload_end]
+        if base:
+            try:
+                if method == 8:
+                    raw = zlib.decompressobj(-zlib.MAX_WBITS).decompress(payload)
+                elif method == 0:
+                    raw = payload
+                else:
+                    logger.warning("Unsupported zip compression method %s in %s", method, zip_path)
+                    break
+            except Exception:
+                logger.exception("Failed to decompress local-header zip member %s from %s", name, zip_path)
+                break
+            if usize and len(raw) != usize:
+                logger.warning(
+                    "Local-header zip size mismatch for %s: got %d expected %d",
+                    zip_path,
+                    len(raw),
+                    usize,
+                )
+            out.append((base, raw))
+        if payload_end >= len(data):
+            break
+        offset = payload_end
+    return out
+
+
+def _reuse_existing_dem_if_same_size(dest_dir: Path, base: str, size: int) -> Path | None:
+    existing_target = dest_dir / base
+    if not existing_target.is_file():
+        return None
+    try:
+        if existing_target.stat().st_size == size:
+            logger.info("Demo 已解压（同名且大小一致），跳过: %s", existing_target)
+            return existing_target.resolve()
+    except OSError:
+        pass
+    return None
+
+
 def _pick_extract_path(dest_dir: Path, member_base: str, zip_path: Path) -> Path:
     """Avoid overwriting an existing .dem in the watch folder."""
     stem = Path(member_base).stem
@@ -64,35 +133,44 @@ def _pick_extract_path(dest_dir: Path, member_base: str, zip_path: Path) -> Path
     return dest_dir / f"{stem}_fromzip_{zip_path.stem}_{int(time.time() * 1000)}.dem"
 
 
+def _zip_extract_outputs_present(zip_path: Path) -> bool:
+    """5E 等平台通常解压为与 zip 同 stem 的 .dem；用于判断 skip extract 是否安全。"""
+    return zip_path.with_suffix(".dem").is_file()
+
+
 def _extract_dems_from_zip_sync(zip_path: Path) -> list[Path]:
     """Extract all .dem from zip into the same directory as the zip. Returns written paths."""
     out: list[Path] = []
     dest_dir = zip_path.parent
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        members = [m for m in zf.namelist() if _safe_zip_member_name(m)]
-        if not members:
-            return out
-        for m in members:
-            base = _safe_zip_member_name(m)
-            if not base:
-                continue
-            
-            # 优化：如果同名文件已存在且大小一致，跳过解压
-            info = zf.getinfo(m)
-            existing_target = dest_dir / base
-            if existing_target.is_file():
-                try:
-                    if existing_target.stat().st_size == info.file_size:
-                        logger.info("Demo 已解压（同名且大小一致），跳过: %s", existing_target)
-                        out.append(existing_target.resolve())
-                        continue
-                except OSError:
-                    pass
-
-            target = _pick_extract_path(dest_dir, base, zip_path)
-            with zf.open(m, "r") as src, target.open("wb") as dst:
-                dst.write(src.read())
-            out.append(target.resolve())
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = [m for m in zf.namelist() if _safe_zip_member_name(m)]
+            if not members:
+                return out
+            for m in members:
+                base = _safe_zip_member_name(m)
+                if not base:
+                    continue
+                info = zf.getinfo(m)
+                reused = _reuse_existing_dem_if_same_size(dest_dir, base, info.file_size)
+                if reused:
+                    out.append(reused)
+                    continue
+                target = _pick_extract_path(dest_dir, base, zip_path)
+                with zf.open(m, "r") as src, target.open("wb") as dst:
+                    dst.write(src.read())
+                out.append(target.resolve())
+        return out
+    except zipfile.BadZipFile:
+        logger.info("Standard zip parse failed, trying local-header fallback: %s", zip_path)
+    for base, raw in _iter_local_header_zip_dems(zip_path):
+        reused = _reuse_existing_dem_if_same_size(dest_dir, base, len(raw))
+        if reused:
+            out.append(reused)
+            continue
+        target = _pick_extract_path(dest_dir, base, zip_path)
+        target.write_bytes(raw)
+        out.append(target.resolve())
     return out
 
 
@@ -106,54 +184,68 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
     out: list[Path] = []
     seen: set[str] = set(existing_md5s)
     dest_dir = zip_path.parent
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        members = [m for m in zf.namelist() if _safe_zip_member_name(m)]
-        if not members:
-            return out
-        for m in members:
-            base = _safe_zip_member_name(m)
-            if not base:
-                continue
-            
-            # 优化：如果同名文件已存在且大小一致，跳过解压（即使 MD5 去重开启，已在磁盘的文件也无需重写）
-            info = zf.getinfo(m)
-            existing_target = dest_dir / base
-            if existing_target.is_file():
-                try:
-                    if existing_target.stat().st_size == info.file_size:
-                        logger.info("Demo 物理文件已存在且匹配，跳过重复解压: %s", existing_target)
-                        out.append(existing_target.resolve())
-                        continue
-                except OSError:
-                    pass
 
-            target = _pick_extract_path(dest_dir, base, zip_path)
-            h = hashlib.md5()
-            try:
-                with zf.open(m, "r") as src, target.open("wb") as dst:
-                    while True:
-                        chunk = src.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        h.update(chunk)
-                        dst.write(chunk)
-            except Exception:
+    def _write_deduped(base: str, raw: bytes, size_hint: int | None = None) -> None:
+        reused = _reuse_existing_dem_if_same_size(dest_dir, base, size_hint if size_hint is not None else len(raw))
+        if reused:
+            out.append(reused)
+            return
+        target = _pick_extract_path(dest_dir, base, zip_path)
+        h = hashlib.md5()
+        h.update(raw)
+        md5_hex = h.hexdigest()
+        if md5_hex in seen:
+            return
+        target.write_bytes(raw)
+        seen.add(md5_hex)
+        out.append(target.resolve())
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = [m for m in zf.namelist() if _safe_zip_member_name(m)]
+            if not members:
+                return out
+            for m in members:
+                base = _safe_zip_member_name(m)
+                if not base:
+                    continue
+                info = zf.getinfo(m)
+                reused = _reuse_existing_dem_if_same_size(dest_dir, base, info.file_size)
+                if reused:
+                    out.append(reused)
+                    continue
+                target = _pick_extract_path(dest_dir, base, zip_path)
+                h = hashlib.md5()
                 try:
-                    if target.is_file():
-                        target.unlink()
-                except OSError:
-                    pass
-                raise
-            md5_hex = h.hexdigest()
-            if md5_hex in seen:
-                try:
-                    if target.is_file():
-                        target.unlink()
-                except OSError:
-                    pass
-                continue
-            seen.add(md5_hex)
-            out.append(target.resolve())
+                    with zf.open(m, "r") as src, target.open("wb") as dst:
+                        while True:
+                            chunk = src.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            h.update(chunk)
+                            dst.write(chunk)
+                except Exception:
+                    try:
+                        if target.is_file():
+                            target.unlink()
+                    except OSError:
+                        pass
+                    raise
+                md5_hex = h.hexdigest()
+                if md5_hex in seen:
+                    try:
+                        if target.is_file():
+                            target.unlink()
+                    except OSError:
+                        pass
+                    continue
+                seen.add(md5_hex)
+                out.append(target.resolve())
+        return out
+    except zipfile.BadZipFile:
+        logger.info("Standard zip parse failed, trying local-header fallback: %s", zip_path)
+    for base, raw in _iter_local_header_zip_dems(zip_path):
+        _write_deduped(base, raw)
     return out
 
 
@@ -274,49 +366,69 @@ class DemoWatcher:
                             if zip_md5_stored:
                                 zm = await loop.run_in_executor(None, file_md5_hex, path)
                                 if zm == zip_md5_stored:
-                                    logger.info("Zip unchanged (md5), skip extract: %s", path)
-                                    await self._demo_db.record_zip_extracted(
-                                        zip_resolved,
-                                        mtime_ns,
-                                        size_b,
-                                        zip_md5=zm,
-                                    )
-                                    return
-                            if st_row and not zip_md5_stored:
-                                if int(st_row["mtime_ns"]) == mtime_ns and int(st_row["size_bytes"]) == size_b:
-                                    zm = await loop.run_in_executor(None, file_md5_hex, path)
-                                    await self._demo_db.record_zip_extracted(
-                                        zip_resolved,
-                                        mtime_ns,
-                                        size_b,
-                                        zip_md5=zm,
-                                    )
+                                    if _zip_extract_outputs_present(path):
+                                        logger.info("Zip unchanged (md5), skip extract: %s", path)
+                                        await self._demo_db.record_zip_extracted(
+                                            zip_resolved,
+                                            mtime_ns,
+                                            size_b,
+                                            zip_md5=zm,
+                                        )
+                                        return
                                     logger.info(
-                                        "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                        "Zip unchanged (md5) but extracted .dem missing, re-extract: %s",
                                         path,
                                     )
-                                    return
+                            if st_row and not zip_md5_stored:
+                                if int(st_row["mtime_ns"]) == mtime_ns and int(st_row["size_bytes"]) == size_b:
+                                    if _zip_extract_outputs_present(path):
+                                        zm = await loop.run_in_executor(None, file_md5_hex, path)
+                                        await self._demo_db.record_zip_extracted(
+                                            zip_resolved,
+                                            mtime_ns,
+                                            size_b,
+                                            zip_md5=zm,
+                                        )
+                                        logger.info(
+                                            "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                            path,
+                                        )
+                                        return
+                                    logger.info(
+                                        "Zip unchanged (mtime+size) but extracted .dem missing, re-extract: %s",
+                                        path,
+                                    )
                         if not dedupe_md5 and await self._demo_db.zip_unchanged_since_extract(
                             zip_resolved,
                             mtime_ns,
                             size_b,
                         ):
-                            zm = await loop.run_in_executor(None, file_md5_hex, path)
-                            await self._demo_db.record_zip_extracted(
-                                zip_resolved,
-                                mtime_ns,
-                                size_b,
-                                zip_md5=zm,
-                            )
+                            if _zip_extract_outputs_present(path):
+                                zm = await loop.run_in_executor(None, file_md5_hex, path)
+                                await self._demo_db.record_zip_extracted(
+                                    zip_resolved,
+                                    mtime_ns,
+                                    size_b,
+                                    zip_md5=zm,
+                                )
+                                logger.info(
+                                    "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                    path,
+                                )
+                                return
                             logger.info(
-                                "Zip unchanged (mtime+size), skip extract; backfilled zip_md5: %s",
+                                "Zip unchanged (mtime+size) but extracted .dem missing, re-extract: %s",
                                 path,
                             )
-                            return
                     else:
                         if await self._demo_db.zip_unchanged_since_extract(zip_resolved, mtime_ns, size_b):
-                            logger.info("Zip unchanged since last extract, skip re-import: %s", path)
-                            return
+                            if _zip_extract_outputs_present(path):
+                                logger.info("Zip unchanged since last extract, skip re-import: %s", path)
+                                return
+                            logger.info(
+                                "Zip unchanged since last extract but .dem missing, re-extract: %s",
+                                path,
+                            )
                 except Exception:
                     logger.exception("zip_extract_state / md5 check failed for %s", path)
 
@@ -326,9 +438,6 @@ class DemoWatcher:
                     extracted = await loop.run_in_executor(None, _extract_zip_dems_dedupe_sync, path, existing)
                 else:
                     extracted = await loop.run_in_executor(None, _extract_dems_from_zip_sync, path)
-            except zipfile.BadZipFile:
-                logger.warning("Not a valid zip, skip: %s", path)
-                return
             except Exception:
                 logger.exception("Failed to extract zip: %s", path)
                 return

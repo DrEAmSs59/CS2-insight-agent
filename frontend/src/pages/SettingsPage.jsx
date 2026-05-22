@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  ScanSearch,
 } from "lucide-react";
 
 const CODEC_LABELS = {
@@ -21,6 +22,36 @@ const CODEC_LABELS = {
   libx264: "x264 软件 (CPU)",
   none: "无可用编码器",
 };
+
+function FfmpegDetectButton({ onDetect }) {
+  const [detecting, setDetecting] = useState(false);
+
+  const handleClick = async () => {
+    if (!onDetect) return;
+    setDetecting(true);
+    try {
+      await onDetect();
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={detecting}
+      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
+    >
+      {detecting ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <ScanSearch className="h-3.5 w-3.5" />
+      )}
+      {detecting ? "探测中…" : "自动探测 FFmpeg"}
+    </button>
+  );
+}
 
 function EncoderSelector({ value, onChange }) {
   const [detecting, setDetecting] = useState(false);
@@ -574,7 +605,7 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                <div className="border-t border-white/5 pt-3 space-y-3">
+                {/* <div className="border-t border-white/5 pt-3 space-y-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
                     GitHub 镜像（开发/手动下载）
                   </p>
@@ -611,7 +642,7 @@ export default function SettingsPage() {
                       内置 ghfast.top、mirror.ghproxy.com；安装包自动更新走 Electron，手动检查/开发模式走后端 API。
                     </p>
                   )}
-                </div>
+                </div> */}
               </div>
             </SettingsCard>
 
@@ -621,7 +652,7 @@ export default function SettingsPage() {
               <div className="flex min-w-0 flex-col gap-3 @min-[68rem]/settings:min-h-0 @min-[68rem]/settings:flex-1 @min-[68rem]/settings:gap-4">
             <SettingsCard title="FFmpeg 与合辑" hint="合辑导出与编码器选择。" fill>
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
-                <div className="shrink-0">
+                <div className="shrink-0 space-y-2">
                   <PathFieldRow
                     label="FFmpeg 可执行文件（可选）"
                     value={s.ffmpegPath}
@@ -630,6 +661,15 @@ export default function SettingsPage() {
                     onBlurSave={() => void s.handleSaveConfig({ ffmpeg_path: s.ffmpegPath ?? "" })}
                     onPastePath={() => void handlePasteFfmpeg()}
                   />
+                  <FfmpegDetectButton onDetect={s.handleDetectFfmpeg} />
+                  {setup && !setup.ffmpeg_ok && !String(s.ffmpegPath || "").trim() && (
+                    <p className="text-[11px] leading-relaxed text-amber-400/90">
+                      未检测到 FFmpeg。请填写{" "}
+                      <span className="font-mono">ffmpeg.exe</span>{" "}
+                      的完整路径，例如{" "}
+                      <span className="font-mono select-all">C:\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe</span>
+                    </p>
+                  )}
                 </div>
                 <EncoderSelector
                   value={s.montageEncoder ?? "auto"}

@@ -417,7 +417,12 @@ PRE_ROLL_TICKS = 300  # ~5 seconds of pre-roll（无 kill_ticks 时的传统 see
 # 智能跳跃分段阈值见 ``build_smart_jump_segments`` 内 _env_int 默认值。
 
 # 仅随录制预热（首次 seek 前、与 Space 后控制台批次）注入，段间 jump_cut 不再重复执行
-_WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = ("cl_hud_telemetry_frametime_show 0",)
+_WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = (
+    "cl_hud_telemetry_frametime_show 0",
+    "engine_no_focus_sleep 0",
+    "cl_demo_predict 0",
+    "fps_max 0",
+)
 # 录制开始时把玩家所有按键解绑并恢复到一组最小默认绑定。配合下面的「文件级用户配置
 # 快照 + 恢复」机制使用：本次 CS2 进程内按键还原为下方默认，让玩家自定义的奇葩 bind
 # 不会在 demo 回放/控制台注入期间触发；录制结束（或异常杀进程后下次启动）时再用
@@ -1771,7 +1776,8 @@ class RecordingWarmupExtras:
     hud_showtargetid_hide: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
-    snd_voipvolume_mute: bool = True
+    # "mute"=全部静音, "open"=所有玩家, "team"=只听主角队伍, "enemy"=只听对方队伍, "off"=不注入
+    voice_filter: str = "mute"
     # Demo 底部时间轴 / 回放控制条：社区常用需先 sv_cheats 1 再 demoui false
     hide_demo_playback_ui: bool = True
     # 投掷物抛物线 + 画中窗预览
@@ -2102,7 +2108,6 @@ class OBSDirector:
         stem = dest.stem  # _insight_<uuid>
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
-        # engine_no_focus_sleep 0 关闭 Source 2 失焦节流（默认 50ms/帧 ≈ 20fps）。
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
             console_toggle_key = "`"
@@ -2112,8 +2117,6 @@ class OBSDirector:
         if console_toggle_key != "F10":
             console_bind_lines.append('bind "F10" "toggleconsole"')
         cfg_lines = [
-            "engine_no_focus_sleep 0",
-            "cl_demo_predict 0",
             "cl_spec_show_bindings 0",
             "con_enable 1",
             *console_bind_lines,
@@ -2165,11 +2168,6 @@ class OBSDirector:
         argv: List[str] = [
             str(cs2),
             "-console", "-novid", "-insecure", "-worldwide", "-allow_third_party_software",
-            # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
-            # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
-            "+engine_no_focus_sleep", "0",
-            # 关闭TrueView
-            "+cl_demo_predict", "0",
         ]
 
         if warmup is not None:
@@ -3292,9 +3290,16 @@ class OBSDirector:
             lines.append(f"fov_cs_debug {float(w.fov_cs_debug)}")
         if w.viewmodel_fov_68:
             lines.append("viewmodel_fov 68")
-        if w.snd_voipvolume_mute:
+        _vf = getattr(w, "voice_filter", "mute")
+        if _vf in ("mute", "all"):  # "all" 为旧值向后兼容
             lines.append("snd_voipvolume 0")
-        else:
+        elif _vf == "open":
+            lines.append("snd_voipvolume 1")
+            lines.append("tv_listen_voice_indices -1")
+        elif _vf == "off":
+            pass  # 不注入任何语音指令
+        else:  # "team" or "enemy" — 先打开全员基线，per-segment 再收窄到掩码
+            # all_players 为空时以"全部可听"降级，而不是静音
             lines.append("snd_voipvolume 1")
             lines.append("tv_listen_voice_indices -1")
         if w.hide_grenade_trajectory_pip:
@@ -3518,6 +3523,15 @@ class OBSDirector:
                             "error": str(e), "segment_results": [], "warnings": [],
                         })
                         continue
+
+                    # ── voice_filter: patch segment masks before execution ────────
+                    _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"
+                    if _vf in ("off", "open", "mute", "all"):
+                        for _seg in plan.segments:
+                            _seg.voice_listen_mask = None
+                    elif _vf == "enemy":
+                        for _seg in plan.segments:
+                            _seg.voice_listen_mask = _seg.voice_listen_mask_enemy
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
                     _pre_execute_wall = time.time()

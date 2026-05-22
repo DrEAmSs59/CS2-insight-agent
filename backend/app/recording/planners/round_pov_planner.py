@@ -2,7 +2,7 @@ import logging
 
 from ..models import RecordingSegment, SourceType, Perspective
 from ..normalizer import NormalizedRequest, RoundInfo
-from ..platform_utils import platform_slot_offset, compute_voice_listen_mask
+from ..platform_utils import platform_slot_offset, compute_voice_listen_mask, compute_voice_listen_mask_enemy
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
     round_freeze_preroll_ticks = sec_to_ticks(opts.round_freeze_preroll_sec, tick_rate)
     _offset = platform_slot_offset(req.demo.demo_filename, req.demo.server_name)
     _mask = compute_voice_listen_mask(req.demo.all_players, req.target_player.steamid64, _offset)
+    _mask_enemy = compute_voice_listen_mask_enemy(req.demo.all_players, req.target_player.steamid64, _offset)
     default_freeze_ticks = int(15 * tick_rate)
 
     for segment_index, round_info in enumerate(req.rounds):
@@ -128,6 +129,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                 "end_reason": end_reason,
             },
             voice_listen_mask=_mask,
+            voice_listen_mask_enemy=_mask_enemy,
         )
         segments.append(segment)
 

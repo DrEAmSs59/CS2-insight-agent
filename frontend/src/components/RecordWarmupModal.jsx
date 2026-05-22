@@ -12,7 +12,12 @@ import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 
 /** 与后端 `RecordingWarmupExtras._recording_warmup_console_lines` 拼装顺序一致（无 console_cmds 覆盖时） */
 export function buildWarmupConsoleCommands(o) {
-  const lines = ["cl_hud_telemetry_frametime_show 0"];
+  const lines = [
+    "cl_hud_telemetry_frametime_show 0",
+    "engine_no_focus_sleep 0",
+    "cl_demo_predict 0",
+    "fps_max 0",
+  ];
   lines.push(
     o.cl_draw_only_deathnotices
       ? "cl_draw_only_deathnotices true"
@@ -32,8 +37,19 @@ export function buildWarmupConsoleCommands(o) {
   if (o.viewmodel_fov_68) {
     lines.push("viewmodel_fov 68");
   }
-  if (o.snd_voipvolume_mute) {
+  const vf = o.voice_filter ?? "mute";
+  if (vf === "mute" || vf === "all") {
     lines.push("snd_voipvolume 0");
+  } else if (vf === "open") {
+    lines.push("snd_voipvolume 1");
+    lines.push("tv_listen_voice_indices -1");
+  } else if (vf === "off") {
+    // 不注入语音指令
+  } else {
+    // "team" / "enemy"：先打开全员基线，per-segment 再收窄到掩码
+    // all_players 为空时以"全部可听"降级，而不是静音
+    lines.push("snd_voipvolume 1");
+    lines.push("tv_listen_voice_indices -1");
   }
   if (o.hide_grenade_trajectory_pip) {
     lines.push("sv_grenade_trajectory 0");
@@ -51,7 +67,7 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   apply_fov: false,
   fov_cs_debug: 90,
   viewmodel_fov_68: false,
-  snd_voipvolume_mute: true,
+  voice_filter: "mute",
   hide_demo_playback_ui: true,
   hide_grenade_trajectory_pip: true,
   aspect_ratio: "",
@@ -220,7 +236,7 @@ export default function RecordWarmupModal({
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
       viewmodel_fov_68: opts.viewmodel_fov_68,
-      snd_voipvolume_mute: opts.snd_voipvolume_mute,
+      voice_filter: opts.voice_filter ?? "mute",
       hide_demo_playback_ui: opts.hide_demo_playback_ui,
       hide_grenade_trajectory_pip: opts.hide_grenade_trajectory_pip,
       resolution_width: rw,
@@ -469,21 +485,40 @@ export default function RecordWarmupModal({
             <SectionHeader en="Audio & canvas" zh="音频与画布" />
             <div id="sec-audio" className="space-y-2">
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">采集与静音</p>
-              <OptionRow
-                checked={opts.snd_voipvolume_mute}
-                onChange={(v) => set({ snd_voipvolume_mute: v })}
-                title="静音游戏内玩家语音"
-                code="snd_voipvolume 0"
-              />
-              {opts.snd_voipvolume_mute ? (
-                <p className="mb-4 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
-                  成片预期：录制轨中不包含其他玩家语音（仍可能包含游戏内其他音效，取决于游戏与 OBS）。
-                </p>
-              ) : (
-                <p className="mb-4 ml-1 text-[11px] text-cs2-text-muted">
-                  成片预期：可能录到队内语音（取决于游戏内语音与 OBS 音轨设置）。
-                </p>
-              )}
+              {(() => {
+                const vf = opts.voice_filter ?? "mute";
+                const VF_OPTIONS = [
+                  { value: "open",  label: "所有玩家",   code: "tv_listen_voice_indices -1",     desc: "录制轨包含所有玩家语音。" },
+                  { value: "team",  label: "第一视角我方", code: "tv_listen_voice_indices <mask>", desc: "只保留主角所在队伍的语音。" },
+                  { value: "enemy", label: "第一视角敌方", code: "tv_listen_voice_indices <mask>", desc: "只保留对方队伍的语音。" },
+                  { value: "mute",  label: "全部静音",   code: "snd_voipvolume 0",              desc: "录制轨不含任何玩家语音。" },
+                ];
+                const selected = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                      {VF_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => set({ voice_filter: opt.value })}
+                          className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                            vf === opt.value
+                              ? "border-cs2-accent/60 bg-cs2-accent/10"
+                              : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
+                          }`}
+                        >
+                          <p className="text-[11px] font-semibold text-cs2-text-primary">{opt.label}</p>
+                          <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <p className={`mb-4 mt-1.5 ml-0.5 text-[11px] leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
+                      {selected.desc}
+                    </p>
+                  </>
+                );
+              })()}
 
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
                 录制输出比例

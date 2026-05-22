@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Optional
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 DemoListFilters = dict[str, Any]
 
