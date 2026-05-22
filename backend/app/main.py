@@ -899,9 +899,9 @@ async def update_config(payload: ConfigPayload):
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
-    if payload.steam_api_key is not None and not payload.steam_api_key.startswith("****"):
+    if payload.steam_api_key is not None and payload.steam_api_key and not payload.steam_api_key.startswith("****"):
         cfg.steam_api_key = payload.steam_api_key.strip()
-    if payload.steam_id64 is not None:
+    if payload.steam_id64 is not None and payload.steam_id64:
         cfg.steam_id64 = payload.steam_id64.strip()
     if payload.match_mode is not None and payload.match_mode in ("premier", "competitive"):
         cfg.match_mode = payload.match_mode

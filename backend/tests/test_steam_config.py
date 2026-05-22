@@ -14,5 +14,6 @@ def test_steam_fields_defaults():
 def test_steam_fields_from_dict():
     cfg = AppConfig(steam_api_key="ABCD1234", steam_id64="76561198012345678", match_mode="competitive", match_count=50)
     assert cfg.steam_api_key == "ABCD1234"
+    assert cfg.steam_id64 == "76561198012345678"
     assert cfg.match_mode == "competitive"
     assert cfg.match_count == 50
