@@ -186,7 +186,7 @@ export default function CredentialPanel({
         </button>
         <button
           onClick={handleSave}
-          disabled={saving || (!apiKey && !steamId64)}
+          disabled={saving || (!apiKey && !id64)}
           className="flex items-center gap-1.5 rounded-[7px] bg-cs2-accent px-4 py-2 text-[13px] font-semibold text-black hover:bg-cs2-accent-light disabled:opacity-50"
         >
           {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

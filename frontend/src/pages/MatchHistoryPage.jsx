@@ -132,7 +132,10 @@ export default function MatchHistoryPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             刷新战绩
           </button>
-          <button className="flex items-center gap-1.5 rounded-[7px] bg-cs2-accent px-3 py-1.5 text-[13px] font-semibold text-black hover:bg-cs2-accent-light">
+          <button
+            disabled
+            className="flex items-center gap-1.5 rounded-[7px] bg-cs2-accent px-3 py-1.5 text-[13px] font-semibold text-black opacity-40 cursor-not-allowed"
+          >
             <Download className="h-3.5 w-3.5" />
             下载选中 Demo
           </button>
