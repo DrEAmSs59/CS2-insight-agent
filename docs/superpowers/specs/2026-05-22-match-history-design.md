@@ -7,7 +7,7 @@
 
 ## 功能概述
 
-在 CS2 Insight Agent 桌面客户端新增「官匹战绩」页面。用户输入 Steam Web API Key 和 SteamID64，即可拉取官方匹配（竞技 / 天梯 / 搭档）战绩，并直接在后端下载 Valve 官方 Demo、解压入库，送入现有 Demo 库解析流程。
+在 CS2 Insight Agent 桌面客户端新增「官匹战绩」页面。用户输入 Steam Web API Key 和 SteamID64，即可拉取官方匹配（优先排位 / 竞技）战绩，并直接在后端下载 Valve 官方 Demo、解压入库，送入现有 Demo 库解析流程。
 
 ---
 
@@ -28,7 +28,7 @@
 ```python
 steam_api_key: str = ""       # Steam Web API Key（32 位字符串）
 steam_id64: str = ""          # SteamID64（17 位数字，以 7656119 开头）
-match_mode: str = "competitive"  # competitive / premier / wingman
+match_mode: str = "premier"       # premier（优先排位）/ competitive（竞技）
 match_count: int = 20         # 20 / 50 / 100
 ```
 
@@ -65,7 +65,7 @@ match_count: int = 20         # 20 / 50 / 100
     {
       "match_id": "...",
       "map": "de_mirage",
-      "mode": "competitive",
+      "mode": "premier",             // premier / competitive
       "result": "win",           // win / loss / tie
       "score_own": 13, "score_opp": 9,
       "duration_sec": 2280,

@@ -97,6 +97,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           <Gamepad2 className="h-4 w-4 shrink-0 opacity-90" />
           玩家游戏配置
         </NavLink>
+        {/* 官匹战绩：Valve API 国服不可用，暂时隐藏入口
         <NavLink to="/match-history" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Trophy className="h-4 w-4 shrink-0 opacity-90" />
           <span className="flex min-w-0 flex-1 items-center justify-between gap-1">
@@ -104,6 +105,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
             <span className="rounded bg-cs2-accent/20 px-1 font-mono text-[9px] text-cs2-accent">新</span>
           </span>
         </NavLink>
+        */}
       </nav>
 
       <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">

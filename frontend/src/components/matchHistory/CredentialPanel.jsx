@@ -112,12 +112,24 @@ export default function CredentialPanel({
             placeholder="32 位字符串，例如 1A2B3C4D5E6F…"
             className="w-full rounded-[7px] border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[12.5px] text-cs2-text-primary placeholder:text-cs2-text-muted focus:border-cs2-accent focus:outline-none"
           />
+          <p className="mt-1 text-[11.5px] text-cs2-text-muted">
+            注册时「域名名称」填 <span className="font-mono text-cs2-text-secondary">localhost</span> 即可，
+            API Key 仅存储于本地配置文件，请勿泄露给他人
+          </p>
         </div>
 
         {/* SteamID64 */}
         <div>
           <label className="mb-1 block text-[12.5px] font-semibold text-cs2-text-secondary">
             Steam64ID
+            <a
+              href="https://www.steamidfinder.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="ml-2 text-cs2-accent underline"
+            >
+              查询
+            </a>
           </label>
           <input
             type="text"
@@ -126,6 +138,10 @@ export default function CredentialPanel({
             placeholder="17 位数字，以 7656119 开头"
             className="w-full rounded-[7px] border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-[12.5px] text-cs2-text-primary placeholder:text-cs2-text-muted focus:border-cs2-accent focus:outline-none"
           />
+          <p className="mt-1 text-[11.5px] text-cs2-text-muted">
+            Steam 客户端右上角头像 → 账户明细，页面中即可看到；
+            或点「查询」用昵称 / 个人资料链接搜索
+          </p>
         </div>
 
         {/* Mode */}
@@ -165,6 +181,26 @@ export default function CredentialPanel({
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Risk notice */}
+      <div
+        className="mt-4 rounded-[8px] border px-4 py-3 text-[12px] leading-relaxed text-cs2-text-secondary"
+        style={{ background: "rgba(255,140,0,0.07)", borderColor: "rgba(255,140,0,0.25)" }}
+      >
+        <span className="font-semibold text-cs2-accent">⚠ 安全提示：</span>
+        Steam Web API Key 相当于账号的访问凭证，泄露后他人可查询你的对局记录。
+        本工具仅在本机与 Steam 官方服务器之间通信，Key 不会上传至任何第三方。
+        若 Key 意外泄露，请前往{" "}
+        <a
+          href="https://steamcommunity.com/dev/apikey"
+          target="_blank"
+          rel="noreferrer"
+          className="text-cs2-accent underline"
+        >
+          Steam 开发者页面
+        </a>{" "}
+        重新生成。
       </div>
 
       {testResult && (
