@@ -71,3 +71,31 @@ def test_parse_match_row_win():
     assert result["kills"] == 24
     assert result["mode"] == "premier"
     assert result["demo_expired"] is False
+
+
+def test_parse_match_row_rounds_strip_delta():
+    """rounds_strip should encode per-round win/loss, not cumulative score."""
+    # Round 1: own wins (1-0), Round 2: opp wins (1-1), Round 3: own wins (2-1)
+    raw_match = {
+        "matchid": "111",
+        "matchtime": int(time.time()) - 3600,
+        "watchablematchinfo": {"game_type": 2048},
+        "roundstatsall": [
+            {"reservation_id": "1", "map": 6, "num_rounds": 1, "match_duration": 90,
+             "team_scores": [1, 0], "kills": [1], "assists": [0], "deaths": [0],
+             "enemy_headshots": [0], "enemy_kills": [1], "mvps": [0]},
+            {"reservation_id": "2", "map": 6, "num_rounds": 2, "match_duration": 180,
+             "team_scores": [1, 1], "kills": [0], "assists": [0], "deaths": [1],
+             "enemy_headshots": [0], "enemy_kills": [0], "mvps": [0]},
+            {"reservation_id": "3", "map": 6, "num_rounds": 3, "match_duration": 270,
+             "team_scores": [2, 1], "kills": [1], "assists": [0], "deaths": [0],
+             "enemy_headshots": [1], "enemy_kills": [1], "mvps": [1]},
+        ],
+    }
+    result = parse_match_row(raw_match, player_index=0)
+    rounds = result["rounds"]
+    assert rounds[0] is True,  "Round 1: own scored (delta 1-0) → True"
+    assert rounds[1] is False, "Round 2: opp scored (delta 0-1) → False"
+    assert rounds[2] is True,  "Round 3: own scored (delta 1-0) → True"
+    assert rounds[3] is None,  "Round 4+: not played → None"
+    assert len(rounds) == 24,  "Always padded to 24"

@@ -63,6 +63,7 @@ def calc_rating(kills: int, deaths: int, assists: int, rounds: int, damage: int)
 
 def build_demo_url(match_id: str, reservation_id: str) -> str:
     try:
+        # Valve routes demos across replay servers 131–140 by match_id modulo
         n = int(match_id) % 10 + 131
     except (ValueError, TypeError):
         n = 131
@@ -120,16 +121,20 @@ def parse_match_row(raw: dict, player_index: int = 0) -> dict:
     played_at = datetime.fromtimestamp(match_time, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     rounds_strip: list[Optional[bool]] = []
+    prev_own, prev_opp = 0, 0
     for r in rounds_all:
         ts = r.get("team_scores") or [0, 0]
         s_own = int(ts[0]) if ts else 0
         s_opp = int(ts[1]) if len(ts) > 1 else 0
-        if s_own > s_opp:
-            rounds_strip.append(True)
-        elif s_own < s_opp:
-            rounds_strip.append(False)
+        d_own = s_own - prev_own
+        d_opp = s_opp - prev_opp
+        if d_own > d_opp:
+            rounds_strip.append(True)   # won this round
+        elif d_own < d_opp:
+            rounds_strip.append(False)  # lost this round
         else:
-            rounds_strip.append(None)
+            rounds_strip.append(None)   # tie/no round
+        prev_own, prev_opp = s_own, s_opp
     while len(rounds_strip) < 24:
         rounds_strip.append(None)
     rounds_strip = rounds_strip[:24]
@@ -202,7 +207,9 @@ async def download_demo(demo_url: str, dest_dir: Path, filename: str) -> Path:
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
                     f.write(chunk)
 
-    data = bz2_path.read_bytes()
-    dem_path.write_bytes(bz2.decompress(data))
+    # Stream decompress — avoids double-buffering full file in RAM
+    with bz2.open(bz2_path, "rb") as src, open(dem_path, "wb") as dst:
+        while chunk := src.read(65536):
+            dst.write(chunk)
     bz2_path.unlink(missing_ok=True)
     return dem_path

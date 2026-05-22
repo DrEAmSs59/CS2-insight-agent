@@ -1617,8 +1617,7 @@ async def get_match_history():
             continue
         # check if already in library
         dem_name = f"match730_{row['match_id']}.dem"
-        find_fn = getattr(demo_db, "find_by_filename", None)
-        in_lib = (await find_fn(dem_name) is not None) if find_fn else False
+        in_lib = await demo_db.find_by_filename(dem_name) is not None
         row["demo_in_library"] = in_lib
         rows.append(row)
 
