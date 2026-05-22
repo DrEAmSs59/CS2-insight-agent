@@ -4,6 +4,7 @@ import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
+import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
@@ -125,6 +126,8 @@ export default function App() {
     setAnalysisInlineProgress(null);
   }, [currentMatchIndex]);
   const [batchRecording, setBatchRecording] = useState(false);
+  const [recordingResults, setRecordingResults] = useState(null);
+  const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
@@ -1683,21 +1686,24 @@ export default function App() {
           };
           const { data } = await API.post("recording/queue", body);
           const results = Array.isArray(data) ? data : [];
-          const ok = results.filter((r) => r && r.success).length;
-          const aborted = results.filter(
-            (r) => r && (r.error === "aborted" || String(r.error || "").toLowerCase() === "aborted"),
-          ).length;
-          if (aborted > 0) {
-            setProgressText(
-              `批量录制已结束：成功 ${ok}，中止 ${aborted}，其余 ${results.length - ok - aborted} 条；共 ${results.length} 个片段。`,
-              { autoDismissMs: 3000 },
-            );
-          } else {
-            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个片段。`, {
-              autoDismissMs: 3000,
-            });
-          }
-          clearQueue();
+
+          // Build request_id → queue item mapping for friendly names in the result modal
+          const reqIdToQueueItem = {};
+          requests.forEach((req) => {
+            const qid = req.source_ref?.queue_item_id;
+            if (qid) {
+              const found = queue.find((q) => q.id === qid);
+              if (found) reqIdToQueueItem[req.request_id] = found;
+            }
+          });
+
+          const annotated = results.map((r, i) => ({
+            ...r,
+            _queueItem: reqIdToQueueItem[r?.request_id] ?? null,
+            _index: i,
+          }));
+          setRecordingResults(annotated);
+          setRecordingResultModalOpen(true);
         } catch (e) {
           const detail = formatRecordingApiError(e);
           if (e.response?.status === 409 || e.response?.status === 422) {
@@ -2437,6 +2443,16 @@ export default function App() {
             setLibraryBatchModalOpen(false);
             void runLibraryBatchLoad(payload);
           }}
+        />
+
+        <RecordingResultModal
+          open={recordingResultModalOpen}
+          onClose={() => setRecordingResultModalOpen(false)}
+          onClearQueue={() => {
+            clearQueue();
+            setRecordingResultModalOpen(false);
+          }}
+          results={recordingResults ?? []}
         />
 
         <RecordingBlockedDialog
