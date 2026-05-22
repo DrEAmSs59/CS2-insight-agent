@@ -12,6 +12,7 @@ import {
   RadioTower,
   Sun,
   Moon,
+  Trophy,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
 
@@ -95,6 +96,13 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         <NavLink to="/player-game-config" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Gamepad2 className="h-4 w-4 shrink-0 opacity-90" />
           玩家游戏配置
+        </NavLink>
+        <NavLink to="/match-history" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
+          <Trophy className="h-4 w-4 shrink-0 opacity-90" />
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-1">
+            官匹战绩
+            <span className="rounded bg-cs2-accent/20 px-1 font-mono text-[9px] text-cs2-accent">新</span>
+          </span>
         </NavLink>
       </nav>
 

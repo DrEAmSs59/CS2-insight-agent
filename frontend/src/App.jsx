@@ -16,6 +16,7 @@ import CommonParamsPage from "./pages/CommonParamsPage";
 import ObsConfigCenterPage from "./pages/ObsConfigCenterPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
+import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
@@ -2385,6 +2386,7 @@ export default function App() {
                 <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+                <Route path="/match-history" element={<MatchHistoryPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>
