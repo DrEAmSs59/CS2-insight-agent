@@ -20,7 +20,7 @@ export default function CustomTitleBar() {
 
   return (
     <div 
-      className="flex justify-between items-center w-full bg-[#111111] text-white z-50 shrink-0" 
+      className="flex justify-between items-center w-full bg-[#111111] text-dynamic-white z-50 shrink-0" 
       style={{ height: '50px', WebkitAppRegion: 'drag' }}
     >
       <div className="flex items-center px-4">

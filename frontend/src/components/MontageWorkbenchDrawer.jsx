@@ -1318,7 +1318,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 shadow-sm transition-all"
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-dynamic-white hover:bg-rose-600 shadow-sm transition-all"
                 onClick={() => void confirmDeleteLibraryClip()}
               >
                 确认删除
@@ -1363,7 +1363,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 shadow-sm transition-all"
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-dynamic-white hover:bg-rose-600 shadow-sm transition-all"
                 onClick={() => void confirmBatchDeleteLibraryClips()}
               >
                 确认删除全部
