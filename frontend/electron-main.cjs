@@ -76,7 +76,7 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    // mainWindow.webContents.openDevTools(); // 在开发模式下打开开发者工具
+    mainWindow.webContents.openDevTools(); // 在开发模式下自动打开开发者工具
   } else {
     // 使用更标准的 app://local 域名，避免 blocked:origin 错误
     log.info('Production mode: loading app://local/index.html');
