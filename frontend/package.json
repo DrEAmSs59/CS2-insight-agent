@@ -49,7 +49,14 @@
           "**/*",
           "!**/__pycache__",
           "!**/*.pyc",
-          "!**/.pytest_cache"
+          "!**/.pytest_cache",
+          "!dist/**",
+          "!logs/**",
+          "!scripts/**",
+          "!tests/**",
+          "!*.db",
+          "!*.exe",
+          "!debug_*.py"
         ]
       },
       {

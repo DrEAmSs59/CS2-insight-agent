@@ -44,6 +44,16 @@ function shouldSkip(rel) {
   if (lower.includes("/__pycache__/") || lower.endsWith("/__pycache__")) return true;
   if (lower.includes("/lib/test/") || lower.endsWith("/lib/test")) return true;
   if (lower.includes("/lib/tkinter/test/")) return true;
+  // Exclude pip and build tools — not needed at runtime
+  if (lower.includes("/lib/site-packages/pip/") || lower.endsWith("/lib/site-packages/pip")) return true;
+  if (lower.includes("/lib/site-packages/pip-") && lower.includes(".dist-info")) return true;
+  if (lower.includes("/lib/site-packages/setuptools/") || lower.endsWith("/lib/site-packages/setuptools")) return true;
+  if (lower.includes("/lib/site-packages/setuptools-") && lower.includes(".dist-info")) return true;
+  if (lower.includes("/lib/site-packages/wheel/") || lower.endsWith("/lib/site-packages/wheel")) return true;
+  if (lower.includes("/lib/site-packages/wheel-") && lower.includes(".dist-info")) return true;
+  if (lower.includes("/lib/site-packages/pkg_resources/") || lower.endsWith("/lib/site-packages/pkg_resources")) return true;
+  if (lower.includes("/lib/site-packages/pkg_resources-") && lower.includes(".dist-info")) return true;
+  if (lower.startsWith("scripts/pip") || lower.includes("/scripts/pip")) return true;
   return false;
 }
 

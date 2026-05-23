@@ -125,6 +125,8 @@ function Install-BackendRequirements {
     if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)" }
     & $PythonExe -m pip install -r $RequirementsPath
     if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)" }
+    Write-Step "Remove pip / setuptools / wheel (not needed at runtime)"
+    & $PythonExe -m pip uninstall -y pip setuptools wheel
 }
 
 function Bundle-PythonInto {
