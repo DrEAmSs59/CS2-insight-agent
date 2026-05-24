@@ -116,7 +116,7 @@ export function MatchListRow({
               : "text-cs2-text-secondary";
 
   return (
-    <div 
+    <div
       className={`group relative flex items-center gap-4 rounded-lg border px-4 py-2 transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
@@ -133,7 +133,7 @@ export function MatchListRow({
       {/* 2. 地图与来源 */}
       <div className="flex items-center gap-3 w-[180px] shrink-0">
         <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-cs2-bg-input/70 border border-cs2-border relative">
-          <img 
+          <img
             src={`/images/maps/${mapName}.png`}
             alt={mapName}
             className="h-full w-full object-cover opacity-60"
@@ -172,9 +172,9 @@ export function MatchListRow({
 
         {/* Score */}
         <div className="flex items-center gap-2 px-3 py-1 bg-cs2-bg-input/70 rounded-lg border border-cs2-border shrink-0">
-           <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_a_score ?? 0}</span>
-           <div className="h-3 w-[1px] bg-cs2-border" />
-           <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_b_score ?? 0}</span>
+          <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_a_score ?? 0}</span>
+          <div className="h-3 w-[1px] bg-cs2-border" />
+          <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_b_score ?? 0}</span>
         </div>
 
         {/* Team B & Players */}
@@ -199,9 +199,8 @@ export function MatchListRow({
           <div className="flex flex-col items-end gap-0.5">
             <div className="flex items-center gap-1.5">
               <span
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${listStatusDot} ${
-                  listStatus.kind === "pending" || listStatus.kind === "parsing" ? "animate-pulse" : ""
-                }`}
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${listStatusDot} ${listStatus.kind === "pending" || listStatus.kind === "parsing" ? "animate-pulse" : ""
+                  }`}
               />
               <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatus.tooltip}>
                 {listStatus.label}
@@ -211,7 +210,7 @@ export function MatchListRow({
               {demo.added_at ? new Date(demo.added_at).toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' }) : ""}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-1 text-[11px] font-black text-cs2-text-secondary w-12 tabular-nums">
             <Clock className="h-3.5 w-3.5 opacity-40 text-cs2-accent" />
             {formatDuration(matchMeta.duration_mins).replace(' min', '')}
@@ -221,8 +220,8 @@ export function MatchListRow({
 
         {/* 悬停显示：操作按钮 */}
         <div className="hidden group-hover:flex items-center gap-1 animate-in fade-in duration-200" onClick={e => e.stopPropagation()}>
-          <button 
-            onClick={() => setIsEditingRemark(!isEditingRemark)} 
+          <button
+            onClick={() => setIsEditingRemark(!isEditingRemark)}
             className={`p-2 rounded-md transition-colors ${demo.remark ? 'text-cs2-accent' : 'text-cs2-text-muted'} hover:bg-cs2-bg-input/50`}
             title="备注"
           >
@@ -242,7 +241,7 @@ export function MatchListRow({
 
       {/* 6. 展开备注编辑区 */}
       {isEditingRemark && (
-        <div 
+        <div
           className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-cs2-border bg-cs2-bg-card p-3 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           onClick={e => e.stopPropagation()}
         >
@@ -350,20 +349,20 @@ export default function MatchCard({
   };
 
   return (
-    <div 
+    <div
       className={`group relative flex flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
       {/* 顶部：地图缩略图背景 */}
       <div className="relative h-[70px] w-full overflow-hidden">
-        <img 
-          src={mapThumbnail} 
+        <img
+          src={mapThumbnail}
           alt={mapName}
           className="h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
           onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.png"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
-        
+
         {/* 顶部悬浮信息 */}
         <div className="absolute inset-0 flex flex-col justify-center px-2 py-0.5">
           <div className="relative flex items-center justify-between">
@@ -400,7 +399,7 @@ export default function MatchCard({
           {/* 底部行：来源 / 时长 / 日期 */}
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
             <div className="flex min-w-0 items-center gap-1.5 overflow-hidden" title={demo.source || "Local"}>
-              <img src={sourceLogo} alt={demo.source} className="h-3 max-w-7 shrink-0 object-contain opacity-80" />
+              <img src={sourceLogo} alt={demo.source} className="h-3 shrink-0 object-contain opacity-80" />
               <span className="min-w-0 truncate uppercase">{demo.source || "Local"}</span>
             </div>
             <div className="flex items-center justify-center gap-1 whitespace-nowrap justify-self-center">
