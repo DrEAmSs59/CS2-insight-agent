@@ -398,17 +398,19 @@ export default function MatchCard({
           </div>
 
           {/* 底部行：来源 / 时长 / 日期 */}
-          <div className="relative flex items-center justify-between text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
-            <div className="flex items-center gap-1.5">
-              <img src={sourceLogo} alt={demo.source} className="h-3 object-contain opacity-80" />
-              <span className="uppercase">{demo.source || "Local"}</span>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden" title={demo.source || "Local"}>
+              <img src={sourceLogo} alt={demo.source} className="h-3 max-w-7 shrink-0 object-contain opacity-80" />
+              <span className="min-w-0 truncate uppercase">{demo.source || "Local"}</span>
             </div>
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
+            <div className="flex items-center justify-center gap-1 whitespace-nowrap justify-self-center">
               <Clock className="h-3 w-3" />
               {formatDuration(matchMeta.duration_mins)}
             </div>
-            <div className="opacity-80 tabular-nums">
-              {demo.added_at ? new Date(demo.added_at).toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' }) : ""}
+            <div className="min-w-0 justify-self-end overflow-hidden text-right opacity-80 tabular-nums">
+              <span className="block truncate">
+                {demo.added_at ? new Date(demo.added_at).toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' }) : ""}
+              </span>
             </div>
           </div>
         </div>
