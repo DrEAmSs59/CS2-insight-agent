@@ -160,10 +160,17 @@ export default function ObsConfigCenterPage() {
             <div className="flex items-center justify-between">
               <div className="text-[13px] font-semibold text-cs2-text-primary">启动配置</div>
               {checkResult != null && (
-                <span className={`inline-flex items-center gap-1.5 font-mono text-[12px] ${checkResult.path_ok ? "text-cs2-text-success" : "text-cs2-amber-on-surface"}`}>
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                  路径正确
-                </span>
+                checkResult.path_ok ? (
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    路径正确
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-amber-on-surface">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    路径错误
+                  </span>
+                )
               )}
             </div>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
@@ -202,7 +209,7 @@ export default function ObsConfigCenterPage() {
                 checkResult.connected ? (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
                     <Wifi className="h-3.5 w-3.5 shrink-0" />
-                    连接正确{checkResult.obs_version ? ` · ${checkResult.obs_version}` : ""}
+                    连接正确
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-amber-on-surface">
@@ -210,13 +217,6 @@ export default function ObsConfigCenterPage() {
                     连接失败
                   </span>
                 )
-              ) : status != null ? (
-                status.obs_connected ? (
-                  <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
-                    <Wifi className="h-3.5 w-3.5 shrink-0" />
-                    已连接{status.obs_version ? ` · ${status.obs_version}` : ""}
-                  </span>
-                ) : null
               ) : null}
             </div>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">

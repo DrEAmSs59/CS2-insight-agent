@@ -1139,13 +1139,23 @@ def obs_config_check(payload: OBSConfig | None = Body(default=None)):
         logger.info("[OBS config-check] No obs_path configured, skipping launch")
         return {"path_ok": False, "connected": False, "error": "请先配置 OBS 路径，再点击配置检查"}
 
-    # 2) 测试 WebSocket 连接
+    # 2) 测试 WebSocket 连接 — 15s 内每 1s 重试一次
     try:
         from .obs_director import OBSDirector
         director = OBSDirector(obs_use, cfg.cs2_path)
-        result = director.test_obs_connection()
-        connected = bool(result.get("ok"))
-        obs_version = result.get("obs_version")
+
+        connected = False
+        obs_version = None
+        for _attempt in range(15):
+            result = director.test_obs_connection()
+            if result.get("ok"):
+                connected = True
+                obs_version = result.get("obs_version")
+                break
+            _time.sleep(1)
+        else:
+            logger.warning("[OBS config-check] WebSocket connection failed after 15 retries")
+
         if connected:
             _normalize_obs_path_auto_detect(cfg)
             cfg.obs.obs_config_verified = True
