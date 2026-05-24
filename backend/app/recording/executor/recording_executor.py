@@ -159,6 +159,13 @@ async def _record_until_tick_round_segment(
     # the target round, which must not be misread as "the round just ended".
     phase_guard_armed = False
     poll_count = 0
+    # Computed once: used by both the phase guard and the round guard below.
+    is_alive_round = meta_death_tick is None
+    # Final-round alive player: after the match-winning kill, CS2/GSI may emit
+    # "freezetime" (end-game screen transition) and/or advance map.round beyond
+    # target_round. Neither signal represents a real next round, so both GSI-based
+    # stop conditions are disabled here — wall-clock timing takes over instead.
+    is_final_alive = segment.is_final_round and is_alive_round
     t0 = time.monotonic()
 
     logger.info(
@@ -204,27 +211,37 @@ async def _record_until_tick_round_segment(
                 seg_idx, estimated_tick,
             )
         elif phase_guard_armed:
-            is_alive_round = meta_death_tick is None
-            stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
-            if gsi_phase in stop_phases:
-                logger.info(
-                    "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
-                    "stopping OBS (alive_round=%s)",
-                    seg_idx, gsi_phase, estimated_tick, is_alive_round,
-                )
-                return "done"
+            # is_final_alive: disable GSI phase stop — see comment above t0.
+            if not is_final_alive:
+                stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
+                if gsi_phase in stop_phases:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
+                        "stopping OBS (alive_round=%s)",
+                        seg_idx, gsi_phase, estimated_tick, is_alive_round,
+                    )
+                    return "done"
 
         # GSI round guard: fire as soon as the demo has entered a later round.
+        # Skip for final-round alive player — map.round may transiently exceed
+        # target_round during the end-game transition and must not stop recording.
         gsi_round = _get_gsi_current_round()
         if gsi_round is not None:
             gsi_seen = True
             if target_round is not None and gsi_round > target_round:
-                logger.info(
-                    "[RecordingV3][TickWatcher] segment=%d GSI round advanced to %d > target %d "
-                    "at estimated_tick=%d; stopping OBS",
-                    seg_idx, gsi_round, target_round, estimated_tick,
-                )
-                return "done"
+                if is_final_alive:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d final_round_alive: "
+                        "ignoring GSI round advance to %d (end-game transition)",
+                        seg_idx, gsi_round,
+                    )
+                else:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d GSI round advanced to %d > target %d "
+                        "at estimated_tick=%d; stopping OBS",
+                        seg_idx, gsi_round, target_round, estimated_tick,
+                    )
+                    return "done"
         else:
             if not gsi_seen and not gsi_unavailable_warned and elapsed > 5.0:
                 # GSI has been silent for 5 s since recording started.
