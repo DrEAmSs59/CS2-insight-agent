@@ -82,9 +82,18 @@ def apply_final_round_guard(
                     f"(safe_end={safe_end_tick}, max_anchor={max_anchor})"
                 )
     else:
-        # Round-type segments: always clamp to safe_end_tick
-        end_tick = min(segment.end_tick, safe_end_tick)
-        end_tick = min(end_tick, latest_recordable_tick)
+        # Round-type segments: clamp to safe_end_tick to stay clear of post-round scoreboard.
+        # Exception: if the planner chose round_end_tick as end_tick (recorded in metadata),
+        # the segment already ends at the natural round boundary — not in the scoreboard zone.
+        # Applying safe_end_tick here would cut INTO the round, so skip the scoreboard guard.
+        # Also skip latest_recordable_tick: demo_end_tick may equal round_end_tick when the
+        # frontend had no post-round data, so the exit guard would be unnecessarily conservative.
+        meta_round_end = segment.metadata.get("round_end_tick") if segment.metadata else None
+        if meta_round_end is not None and segment.end_tick <= meta_round_end:
+            end_tick = segment.end_tick
+        else:
+            end_tick = min(segment.end_tick, safe_end_tick)
+            end_tick = min(end_tick, latest_recordable_tick)
 
     # Compute safe_seek_tick
     latest_safe_seek_tick = safe_end_tick - seek_guard_ticks

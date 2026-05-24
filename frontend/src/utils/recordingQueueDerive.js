@@ -1,8 +1,5 @@
 import { BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
-import {
-  getClipDurationSeconds,
-  getCompilationSourceTicksSpanSeconds,
-} from "./montageUtils";
+import { DEMO_TICK_RATE } from "./montageUtils";
 
 /** @param {Record<string, unknown>} gp */
 function gNum(gp, key) {
@@ -31,40 +28,108 @@ export function mergedPacingForItem(item, globalPacing) {
 }
 
 /**
- * 粗算单条入 OBS 的素材时长（秒）：tick 跨度 / source_ticks 累加；每段含击杀段前预留 + 击杀段后预留；
- * 多段 smart jump-cut 时段间再各加一组（与后端分段一致）。含 POV 追加。
+ * Group kill ticks into segments by jump-cut threshold (mirrors backend build_smart_jump_segments).
+ * @param {number[]} killTicks
+ * @param {number} thresholdTicks
+ * @returns {number[][]}
+ */
+function groupKillTicksByThreshold(killTicks, thresholdTicks) {
+  const sorted = [...killTicks]
+    .map(Number)
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return [];
+  const groups = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] <= thresholdTicks) {
+      groups[groups.length - 1].push(sorted[i]);
+    } else {
+      groups.push([sorted[i]]);
+    }
+  }
+  return groups;
+}
+
+// Backend defaults that the frontend can't derive from pacing_override alone.
+// victim_pov_pre falls back to highlight_pre_sec (3.0) when not overridden;
+// victim_pov_post and fail_killer pre/post come from RecordingOptions defaults.
+const _VICTIM_POV_PRE_DEFAULT = 3.0;
+const _VICTIM_POV_POST_DEFAULT = 1.5;
+const _KILLER_POV_PRE_DEFAULT = 1.5; // buildDtoFromQueueItem fallback chain
+const _KILLER_POV_POST_DEFAULT = 1.5;
+
+/**
+ * 估算单条入 OBS 的输出视频时长（秒）。
+ *
+ * 路径一（kill_ticks 可用）：按 max_gap_sec 分组，每组 = (last-first)/64 + pre + post。
+ * 路径二（source_ticks 合集）：各段跨度之和 + N × (pre + post)。
+ * 路径三（兜底）：(end_tick - start_tick)/64，不额外叠加 pre/post（已含于 parser 输出的 tick 窗口中）。
+ *
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {Record<string, unknown>} globalPacing
  */
 export function estimateItemRecordSeconds(item, globalPacing) {
   const clip = item.clipData || {};
   const po = item.pacing_override && typeof item.pacing_override === "object" ? item.pacing_override : {};
-  const { pre_first_sec, post_last_sec } = mergedPacingForItem(item, globalPacing);
+  const { pre_first_sec, post_last_sec, max_gap_sec } = mergedPacingForItem(item, globalPacing);
   const pre = Math.max(0.5, pre_first_sec);
   const post = Math.max(0.5, post_last_sec);
+  const thresholdTicks = max_gap_sec * DEMO_TICK_RATE;
 
-  const kind = String(clip.compilation_kind || "");
-  const src = clip.source_ticks;
-  const spanFromSources = getCompilationSourceTicksSpanSeconds(clip);
-  let core =
-    spanFromSources != null && Number.isFinite(spanFromSources)
-      ? spanFromSources
-      : getClipDurationSeconds(clip);
-  if (core == null || !Number.isFinite(core)) {
-    const kc = Number(clip.kill_count);
-    core = Number.isFinite(kc) && kc > 0 ? Math.max(4, kc * 5) : 12;
+  const compilationKind = String(clip.compilation_kind || "");
+  const isKillCompilation = compilationKind === "rival_kills" || compilationKind === "all_kills";
+  const sourceTicks = clip.source_ticks;
+  const killTicks = Array.isArray(clip.kill_ticks)
+    ? clip.kill_ticks.filter((t) => Number.isFinite(Number(t)))
+    : [];
+
+  let sec = 0;
+
+  if (isKillCompilation && Array.isArray(sourceTicks) && sourceTicks.length > 0) {
+    // 路径二：合集 — 累加各段原始 tick 跨度，每段各加一份 pre+post
+    let spans = 0;
+    for (const p of sourceTicks) {
+      if (Array.isArray(p) && p.length >= 2) {
+        const a = Number(p[0]);
+        const b = Number(p[1]);
+        if (Number.isFinite(a) && Number.isFinite(b) && b > a) {
+          spans += (b - a) / DEMO_TICK_RATE;
+        }
+      }
+    }
+    const N = sourceTicks.length;
+    sec = spans + N * (pre + post);
+  } else if (killTicks.length > 0) {
+    // 路径一：按阈值分组 kill_ticks，每组 = span + pre + post
+    const groups = groupKillTicksByThreshold(killTicks, thresholdTicks);
+    for (const group of groups) {
+      const span = (group[group.length - 1] - group[0]) / DEMO_TICK_RATE;
+      sec += span + pre + post;
+    }
+  } else {
+    // 路径三：兜底 — tick 窗口已含 parser 的 pre/post，直接用
+    const st = Number(clip.start_tick);
+    const et = Number(clip.end_tick);
+    if (Number.isFinite(st) && Number.isFinite(et) && et > st) {
+      sec = (et - st) / DEMO_TICK_RATE;
+    } else {
+      const kc = Number(clip.kill_count);
+      sec = Number.isFinite(kc) && kc > 0 ? Math.max(4, kc * 5 + pre + post) : 12;
+    }
   }
-  core = Math.max(0.5, core);
 
-  let segmentCount = 1;
-  if (Array.isArray(src) && src.length > 0 && (kind === "rival_kills" || kind === "all_kills")) {
-    segmentCount = Math.max(1, src.length);
+  // POV 追加：每杀一个 victim POV 段，killer POV 只有一段
+  if (po.victim_pov) {
+    const killCount = Math.max(1, killTicks.length || Number(clip.kill_count) || 1);
+    const povPre = po.victim_pov_pre_sec ?? _VICTIM_POV_PRE_DEFAULT;
+    const povPost = po.victim_pov_post_sec ?? _VICTIM_POV_POST_DEFAULT;
+    sec += killCount * (povPre + povPost);
   }
-
-  let sec = core + (segmentCount * 2 - 1) * (pre + post);
-
-  if (po.victim_pov) sec += 14;
-  if (po.killer_pov) sec += 14;
+  if (po.killer_pov) {
+    const kPre = po.killer_pov_pre_sec ?? po.victim_pov_pre_sec ?? _KILLER_POV_PRE_DEFAULT;
+    const kPost = po.killer_pov_post_sec ?? po.victim_pov_post_sec ?? _KILLER_POV_POST_DEFAULT;
+    sec += kPre + kPost;
+  }
 
   return Math.max(3, Math.round(sec));
 }
