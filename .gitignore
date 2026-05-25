@@ -37,6 +37,7 @@ cs2_demo_lib
 
 # Local / agent plans and specs (not versioned)
 docs/
+docs/superpowers/
 
 # Local GitHub PAT for update check (never commit)
 .cs2-insight-github-token
