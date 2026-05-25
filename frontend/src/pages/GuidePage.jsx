@@ -135,7 +135,7 @@ function SetupChecklist() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 disabled:opacity-50"
+          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-dynamic-zinc-300 disabled:opacity-50"
         >
           <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
           刷新
@@ -170,12 +170,12 @@ function SetupChecklist() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-semibold text-white">{label}</span>
+                    <span className="text-[13px] font-semibold text-dynamic-white">{label}</span>
                     <span
                       className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
                         required
                           ? "bg-cs2-orange/20 text-cs2-orange"
-                          : "bg-zinc-700/60 text-zinc-400"
+                          : "bg-zinc-700/60 text-dynamic-zinc-400"
                       }`}
                     >
                       {required ? "必需" : "可选"}
@@ -254,7 +254,7 @@ function QuickStart() {
             <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-orange/20 font-mono text-[11px] font-bold text-cs2-orange">
               {step}
             </div>
-            <span className="text-[12px] text-zinc-300">{text}</span>
+            <span className="text-[12px] text-dynamic-zinc-300">{text}</span>
             {i < STEPS.length - 1 && (
               <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
             )}
@@ -295,7 +295,7 @@ function FeatureCards() {
               <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-[12px] font-bold text-white">{label}</p>
+              <p className="text-[12px] font-bold text-dynamic-white">{label}</p>
               <p className="truncate text-[11px] text-zinc-500">{desc}</p>
             </div>
           </Link>
@@ -387,7 +387,7 @@ function FaqAccordion() {
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/[0.03]"
                 onClick={() => setOpenIdx(open ? null : i)}
               >
-                <span className="text-[12px] font-semibold text-zinc-200">{q}</span>
+                <span className="text-[12px] font-semibold text-dynamic-zinc-200">{q}</span>
                 {open ? (
                   <ChevronUp className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
                 ) : (
@@ -396,7 +396,7 @@ function FaqAccordion() {
               </button>
               {open && (
                 <div className="border-t border-white/6 px-4 py-3">
-                  <p className="text-[12px] leading-relaxed text-zinc-400">{a}</p>
+                  <p className="text-[12px] leading-relaxed text-dynamic-zinc-400">{a}</p>
                 </div>
               )}
             </div>
@@ -416,7 +416,7 @@ export default function GuidePage() {
       <div className="mb-5 shrink-0 border-b border-white/10 pb-4">
         <div className="flex items-center gap-2">
           <BookOpen className="h-5 w-5 text-cs2-orange" />
-          <h1 className="text-xl font-bold text-white">上手指南</h1>
+          <h1 className="text-xl font-bold text-dynamic-white">上手指南</h1>
         </div>
         <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
           第一次使用？按照下方清单完成配置，然后拖入 Demo 开始解析录制。

@@ -2355,7 +2355,7 @@ export default function App() {
             <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
                 <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
-                <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+                <p className="text-sm font-medium text-dynamic-zinc-200">{libraryLoadingText}</p>
               </div>
             </div>
           )}
@@ -2373,8 +2373,8 @@ export default function App() {
                     <div className="absolute inset-0 animate-ping rounded-full bg-cs2-orange/20" />
                   </div>
                   <div className="flex flex-col items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight text-white">等待后端连接...</h2>
-                    <p className="text-sm text-zinc-400">正在启动本地分析引擎，请稍候</p>
+                    <h2 className="text-xl font-bold tracking-tight text-dynamic-white">等待后端连接...</h2>
+                    <p className="text-sm text-dynamic-zinc-400">正在启动本地分析引擎，请稍候</p>
                   </div>
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
                     <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />

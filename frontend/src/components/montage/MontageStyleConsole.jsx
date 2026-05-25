@@ -247,7 +247,7 @@ export function MontageStyleConsole({
                 <button
                   type="button"
                   onClick={() => void onCopyText(lastExport.output_path)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 transition-all shadow-sm"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-emerald-600 transition-all shadow-sm"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   复制文件路径

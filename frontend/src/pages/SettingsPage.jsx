@@ -80,7 +80,7 @@ function EncoderSelector({ value, onChange }) {
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-white focus:border-cs2-orange/50 focus:outline-none"
+          className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
         >
           <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
           <option value="h264_nvenc">NVIDIA NVENC</option>
@@ -183,7 +183,7 @@ function StatusLine({ tone, children }) {
           ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.35)]"
           : "bg-zinc-500";
   return (
-    <div className="flex items-start gap-2 text-[11px] leading-snug text-zinc-300">
+    <div className="flex items-start gap-2 text-[11px] leading-snug text-dynamic-zinc-300">
       <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
       <span>{children}</span>
     </div>
@@ -200,7 +200,7 @@ function SettingsCard({ title, hint, children, className = "", fill = false }) {
       } ${className}`}
     >
       <div className="mb-3 shrink-0">
-        <h2 className="text-[13px] font-bold tracking-wide text-zinc-100">{title}</h2>
+        <h2 className="text-[13px] font-bold tracking-wide text-dynamic-zinc-100">{title}</h2>
         {hint ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{hint}</p> : null}
       </div>
       {fill ? (
@@ -216,7 +216,7 @@ function SecondaryButton({ children, className = "", ...rest }) {
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-zinc-200 transition-colors hover:border-cs2-orange/45 hover:text-white disabled:opacity-45 ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-dynamic-zinc-200 transition-colors hover:border-cs2-orange/45 hover:text-dynamic-white disabled:opacity-45 ${className}`}
       {...rest}
     >
       {children}
@@ -246,7 +246,7 @@ function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPaste
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlurSave}
-          className="min-w-[min(100%,10rem)] shrink grow basis-48 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[11px] text-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
+          className="min-w-[min(100%,10rem)] shrink grow basis-48 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[11px] text-dynamic-white transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-orange/50 focus:outline-none"
         />
         <SecondaryButton
           type="button"
@@ -414,7 +414,7 @@ export default function SettingsPage() {
     <div className="flex min-h-0 w-full flex-1 flex-col bg-cs2-bg-dark">
       <header className="shrink-0 border-b border-white/10 bg-cs2-bg-dark/95 px-4 py-3 backdrop-blur-sm sm:px-5">
         <div className="w-full min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-white">设置中心</h1>
+          <h1 className="text-lg font-bold tracking-tight text-dynamic-white">设置中心</h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
             管理 CS2、FFmpeg、AI 洞察与录制相关选项。
           </p>
@@ -459,7 +459,7 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-2">
                     <Zap className={`h-4 w-4 shrink-0 ${!s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`text-sm font-bold ${!s.aiMode ? "text-white" : "text-zinc-400"}`}>极速本地</span>
+                    <span className={`text-sm font-bold ${!s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>极速本地</span>
                     {!s.aiMode ? (
                       <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
                     ) : null}
@@ -477,7 +477,7 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-2">
                     <Brain className={`h-4 w-4 shrink-0 ${s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`text-sm font-bold ${s.aiMode ? "text-white" : "text-zinc-400"}`}>AI 洞察</span>
+                    <span className={`text-sm font-bold ${s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>AI 洞察</span>
                     {s.aiMode ? (
                       <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
                     ) : null}
@@ -510,7 +510,7 @@ export default function SettingsPage() {
               <div className="flex flex-col gap-3">
                 <div className="flex max-h-48 min-h-[5rem] w-full flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/25 p-2">
                 {players.length === 0 ? (
-                  <span className="flex min-h-[3rem] w-full items-center justify-center px-2 py-2 text-center text-[11px] text-zinc-400">
+                  <span className="flex min-h-[3rem] w-full items-center justify-center px-2 py-2 text-center text-[11px] text-dynamic-zinc-400">
                     尚未添加玩家
                   </span>
                 ) : (
@@ -529,7 +529,7 @@ export default function SettingsPage() {
                       </button>
                       <button
                         type="button"
-                        className="rounded p-0.5 text-zinc-500 hover:bg-white/10 hover:text-white"
+                        className="rounded p-0.5 text-zinc-500 hover:bg-white/10 hover:text-dynamic-white"
                         aria-label={`移除 ${p}`}
                         onClick={() => removePlayer(p)}
                       >
@@ -550,7 +550,7 @@ export default function SettingsPage() {
                     }
                   }}
                   placeholder="输入昵称后回车或点添加"
-                  className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
+                  className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-dynamic-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
                   spellCheck={false}
                 />
                 <SecondaryButton type="button" className="w-full shrink-0 sm:w-auto" onClick={() => addPlayer(playerDraft)}>
@@ -564,7 +564,7 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between rounded-lg bg-black/20 p-3 border border-white/5">
                   <div>
-                    <p className="text-[11px] font-semibold text-zinc-300">当前版本</p>
+                    <p className="text-[11px] font-semibold text-dynamic-zinc-300">当前版本</p>
                     <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">v{__APP_VERSION__} {!isPackaged && "(DEV)"}</p>
                   </div>
                   <button
@@ -574,7 +574,7 @@ export default function SettingsPage() {
                     className={`flex items-center gap-2 px-3 py-2 rounded-md text-[11px] font-bold transition-all border ${
                       updateStatus?.status === 'available'
                         ? 'bg-cs2-orange border-cs2-orange text-black'
-                        : 'bg-cs2-bg-input border-cs2-border text-white hover:border-cs2-orange/50'
+                        : 'bg-cs2-bg-input border-cs2-border text-dynamic-white hover:border-cs2-orange/50'
                     } disabled:opacity-50`}
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${updateStatus?.status === "checking" || updateStatus?.status === "downloading" ? "animate-spin" : ""}`} />
@@ -692,7 +692,7 @@ export default function SettingsPage() {
                       placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, base_url: e.target.value })}
                       onBlur={schedulePersistLlm}
-                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
+                      className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
                     />
                   </SmallField>
                   <SmallField label="模型名称">
@@ -701,7 +701,7 @@ export default function SettingsPage() {
                       placeholder="网关上注册的模型名，如 deepseek-chat、gpt-4o-mini"
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, model: e.target.value })}
                       onBlur={schedulePersistLlm}
-                      className="w-full min-w-0 max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-white focus:border-cs2-orange/50 focus:outline-none @min-[40rem]/settings:max-w-md"
+                      className="w-full min-w-0 max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-dynamic-white focus:border-cs2-orange/50 focus:outline-none @min-[40rem]/settings:max-w-md"
                     />
                   </SmallField>
                   {isLocal && (
@@ -727,12 +727,12 @@ export default function SettingsPage() {
                           placeholder={s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() ? "留空沿用已保存密钥" : "sk-..."}
                           onChange={(e) => s.setLlmConfig({ ...s.llmConfig, api_key: e.target.value })}
                           onBlur={schedulePersistLlm}
-                          className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2.5 pl-3 pr-10 font-mono text-[12px] text-white focus:border-cs2-orange/50 focus:outline-none"
+                          className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2.5 pl-3 pr-10 font-mono text-[12px] text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
                         />
                         <button
                           type="button"
                           onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary hover:text-white"
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-cs2-text-secondary hover:text-dynamic-white"
                         >
                           {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                         </button>
@@ -744,7 +744,7 @@ export default function SettingsPage() {
             ) : null}
 
             <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-              <p className="text-[11px] leading-relaxed text-zinc-400">
+              <p className="text-[11px] leading-relaxed text-dynamic-zinc-400">
                 将路径、编码、关注名单与大模型接口/模型名一次性写入配置文件。
               </p>
               <PrimaryButton

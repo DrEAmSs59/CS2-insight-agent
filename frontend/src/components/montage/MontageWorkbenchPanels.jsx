@@ -434,7 +434,7 @@ export function MontageOrchestrationTimeline({
               <button
                 type="button"
                 onClick={onBulkRemove}
-                className="rounded-lg border border-rose-500/30 bg-rose-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-600 transition-all shadow-sm"
+                className="rounded-lg border border-rose-500/30 bg-rose-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-rose-600 transition-all shadow-sm"
               >
                 批量移除 ({multiCount})
               </button>

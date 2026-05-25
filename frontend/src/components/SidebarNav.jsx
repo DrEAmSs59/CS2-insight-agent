@@ -38,7 +38,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
       <div className="border-b border-cs2-border px-2.5 py-3">
         <div className="flex items-center gap-2.5">
           <img
-            src="/cs2-insight-logo.png"
+            src="/cs2-insight-logo-new.png"
             alt="CS2 洞察"
             width={64}
             height={64}

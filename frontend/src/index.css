@@ -76,6 +76,13 @@
   --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.30);
   --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,0.20);
 
+  /* 动态颜色替换 (白/黑，各种 zinc) */
+  --cs2-dynamic-white: #ffffff;
+  --cs2-dynamic-zinc-400: #a1a1aa;
+  --cs2-dynamic-zinc-300: #d4d4d8;
+  --cs2-dynamic-zinc-200: #e4e4e7;
+  --cs2-dynamic-zinc-100: #f4f4f5;
+
   /* 动画 */
   --cs2-transition-fast: 150ms ease;
   --cs2-transition-normal: 200ms ease;
@@ -84,78 +91,85 @@
 /* ===== 浅色主题 ===== */
 .light {
   /* 背景层次 */
-  --cs2-bg-page: #f4f4f5;
-  --cs2-bg-card: #ffffff;
-  --cs2-bg-sidebar: #e8e8ec;
-  --cs2-bg-input: #f0f0f2;
-  --cs2-bg-elevated: #ffffff;
+  --cs2-bg-page: #f4f4f5;      /* 页面背景：清爽浅灰 */
+  --cs2-bg-card: #ffffff;      /* 卡片背景：纯白 */
+  --cs2-bg-sidebar: #ffffff;   /* 侧边栏：纯白，提升明亮感 */
+  --cs2-bg-input: #f8fafc;     /* 输入框：极浅冷灰，与纯白背景卡片拉开明显差距 */
+  --cs2-bg-elevated: #ffffff;  /* 悬浮层/弹窗：纯白 */
 
   /* 交互状态 */
-  --cs2-bg-hover: rgba(0,0,0,0.04);
-  --cs2-bg-active: rgba(0,0,0,0.07);
-  --cs2-bg-overlay: rgba(0,0,0,0.40);
-  --cs2-bg-skeleton: rgba(0,0,0,0.04);
+  --cs2-bg-hover: rgba(0,0,0,0.06);
+  --cs2-bg-active: rgba(0,0,0,0.10);
+  --cs2-bg-overlay: rgba(0,0,0,0.50);
+  --cs2-bg-skeleton: rgba(0,0,0,0.08);
 
   /* 边框 */
-  --cs2-border: #d4d4d8;
-  --cs2-border-subtle: rgba(0,0,0,0.08);
+  --cs2-border: #a1a1aa;       /* 主边框：加深到 a1a1aa，保证分割线、外框十分清晰 */
+  --cs2-border-subtle: #d4d4d8;/* 次级边框：加深到 d4d4d8，保证输入框、内部分割边界可见 */
   --cs2-border-focus: var(--cs2-accent);
-  --cs2-border-error: #dc2626;
+  --cs2-border-error: #ef4444;
 
   /* 文字 */
-  --cs2-text-primary: #18181b;
-  --cs2-text-secondary: #52525b;
-  --cs2-text-muted: #a1a1aa;
+  --cs2-text-primary: #000000; /* 主标题/正文：纯黑，极限对比度 */
+  --cs2-text-secondary: #27272a; /* 次要文字：极深灰，保证亮色下绝不发虚 */
+  --cs2-text-muted: #3f3f46;   /* 辅助文字：深灰，保证亮色下清晰易读 */
   --cs2-text-on-accent: #ffffff;
   --cs2-text-inverse: #ffffff;
-  --cs2-text-error: #b91c1c;
-  --cs2-text-success: #15803d;
+  --cs2-text-error: #b91c1c;   /* 错误色文字：暗红，极高可读性 */
+  --cs2-text-success: #15803d; /* 成功色文字：深绿，极高可读性 */
 
   /* 品牌色 */
-  --cs2-accent: #c2410c;
-  --cs2-accent-light: #ea580c;
-  --cs2-accent-soft: rgba(194,65,12,0.08);
+  --cs2-accent: #ea580c;       /* 品牌橙色：更加明快清晰 */
+  --cs2-accent-light: #f97316;
+  --cs2-accent-soft: rgba(234,88,12,0.15);
 
   /* 语义色 */
   --cs2-highlight: #15803d;
-  --cs2-fail: #b91c1c;
-  --cs2-compilation: #b45309;
+  --cs2-fail: #dc2626;
+  --cs2-compilation: #d97706;
 
-  /* 表面层次 */
+  /* 表面层次 (例如：没有选中时的按钮/模块底色) */
   --cs2-surface-0: var(--cs2-bg-page);
   --cs2-surface-1: var(--cs2-bg-card);
   --cs2-surface-2: var(--cs2-bg-elevated);
-  --cs2-surface-3: #e4e4e7;
+  --cs2-surface-3: #d4d4d8;    /* 明显加深的浅灰，用于未激活按钮或块级背景填充 */
 
   /* 滚动条 */
-  --cs2-scrollbar-track: #f4f4f5;
-  --cs2-scrollbar-thumb: #c4c4c8;
-  --cs2-scrollbar-thumb-hover: #a1a1aa;
+  --cs2-scrollbar-track: transparent;
+  --cs2-scrollbar-thumb: #a1a1aa;
+  --cs2-scrollbar-thumb-hover: #71717a;
 
-  /* 状态色 surface */
-  --cs2-rose-surface: rgba(220,38,38,0.08);
-  --cs2-emerald-surface: rgba(22,163,74,0.08);
-  --cs2-amber-surface: rgba(217,119,6,0.08);
-  --cs2-cyan-surface: rgba(8,145,178,0.08);
-  --cs2-fuchsia-surface: rgba(192,38,211,0.08);
-  --cs2-violet-surface: rgba(124,58,237,0.08);
-  --cs2-red-surface: rgba(220,38,38,0.08);
+  /* 状态色 surface (背景色：提高透明度使其不再泛白发虚) */
+  --cs2-rose-surface: rgba(225,29,72,0.20);
+  --cs2-emerald-surface: rgba(16,185,129,0.20);
+  --cs2-amber-surface: rgba(245,158,11,0.20);
+  --cs2-cyan-surface: rgba(6,182,212,0.20);
+  --cs2-fuchsia-surface: rgba(217,70,239,0.20);
+  --cs2-violet-surface: rgba(139,92,246,0.20);
+  --cs2-red-surface: rgba(239,68,68,0.20);
 
-  /* 状态色 on-surface */
-  --cs2-rose-on-surface: #b91c1c;
-  --cs2-emerald-on-surface: #15803d;
-  --cs2-amber-on-surface: #b45309;
-  --cs2-cyan-on-surface: #0e7490;
-  --cs2-fuchsia-on-surface: #a21caf;
-  --cs2-violet-on-surface: #7c3aed;
-  --cs2-red-on-surface: #b91c1c;
+  /* 状态色 on-surface (文本色：采用最深的色阶以匹配加深的背景块) */
+  --cs2-rose-on-surface: #9f1239;
+  --cs2-emerald-on-surface: #064e3b;
+  --cs2-amber-on-surface: #78350f;
+  --cs2-cyan-on-surface: #164e63;
+  --cs2-fuchsia-on-surface: #701a75;
+  --cs2-violet-on-surface: #4c1d95;
+  --cs2-red-on-surface: #7f1d1d;
 
   /* 阴影 */
-  --cs2-shadow: rgba(0,0,0,0.08);
-  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
-  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
-  --cs2-shadow-glow-accent: 0 0 16px rgba(194,65,12,0.15);
+  --cs2-shadow: rgba(0,0,0,0.10);
+  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.16);
+  --cs2-shadow-glow-accent: 0 0 16px rgba(234,88,12,0.20);
+
+  /* 动态颜色替换 (白/黑，各种 zinc) */
+  --cs2-dynamic-white: #000000;
+  --cs2-dynamic-zinc-400: #3f3f46; /* zinc-700 (之前您让我换成 zinc-100，在亮色下会看不见，我在此自动帮您修正为深灰) */
+  --cs2-dynamic-zinc-300: #27272a; /* zinc-800 */
+  --cs2-dynamic-zinc-200: #52525b; /* zinc-600 */
+  --cs2-dynamic-zinc-100: #18181b; /* zinc-900 */
 }
 
 /* ===== Tailwind 主题注册 ===== */
@@ -217,6 +231,13 @@
 
   /* 阴影 */
   --color-cs2-shadow: var(--cs2-shadow);
+
+  /* 动态映射颜色 */
+  --color-dynamic-white: var(--cs2-dynamic-white);
+  --color-dynamic-zinc-400: var(--cs2-dynamic-zinc-400);
+  --color-dynamic-zinc-300: var(--cs2-dynamic-zinc-300);
+  --color-dynamic-zinc-200: var(--cs2-dynamic-zinc-200);
+  --color-dynamic-zinc-100: var(--cs2-dynamic-zinc-100);
 
   /* 旧兼容 token（渐进移除） */
   --color-cs2-orange: var(--cs2-accent);
