@@ -178,6 +178,37 @@ def _parse_simple_output(ini_path: Path) -> dict[str, str]:
     return {k: str(v) for k, v in cp["SimpleOutput"].items()}
 
 
+def _parse_adv_output_rec_path(ini_path: Path) -> str:
+    """从 basic.ini [AdvOut] 读取高级输出模式的录像目录（RecFilePath）。"""
+    if not ini_path.is_file():
+        return ""
+    cp = configparser.ConfigParser(interpolation=None)
+    try:
+        cp.read(ini_path, encoding="utf-8-sig")
+    except configparser.Error:
+        return ""
+    section = cp["AdvOut"] if "AdvOut" in cp else {}
+    return str(section.get("recfilepath") or section.get("RecFilePath") or "").strip()
+
+
+def _get_record_directory_via_ws(ws: obsws) -> str:
+    """通过 OBS WebSocket GetRecordDirectory 获取录像目录，失败返回空串。"""
+    try:
+        req = getattr(obs_requests, "GetRecordDirectory", None)
+        if req is None:
+            return ""
+        resp = ws.call(req())
+        datain = getattr(resp, "datain", None) or {}
+        raw = (
+            datain.get("recordDirectory")
+            or datain.get("record_directory")
+            or datain.get("record-directory")
+        )
+        return str(raw).strip() if raw else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _copy_profile_tree(src: Path, dst: Path) -> None:
     if not src.is_dir():
         return
@@ -538,7 +569,14 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             simple = _parse_simple_output(obs_root / "basic" / "profiles" / prof_name / "basic.ini")
         base["recording"]["use_stream_encoder"] = _detect_use_stream_encoder(simple, ws)
         base["recording"]["encoder"] = (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
-        base["recording"]["output_path"] = _recording_output_path_from_simple(simple)
+        # 三路兜底：Simple 输出 INI → Advanced 输出 INI → WebSocket GetRecordDirectory
+        _ini_path = (obs_root / "basic" / "profiles" / prof_name / "basic.ini") if (obs_root and prof_name) else None
+        _out_path = (
+            _recording_output_path_from_simple(simple)
+            or (_parse_adv_output_rec_path(_ini_path) if _ini_path else "")
+            or _get_record_directory_via_ws(ws)
+        )
+        base["recording"]["output_path"] = _out_path
         # 优先从 OBS WebSocket 读取格式和质量，避免 INI 路径检测失败导致"未知"
         try:
             fmt_resp = ws.call(obs_requests.GetProfileParameter(

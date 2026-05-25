@@ -15,10 +15,8 @@ function ThemeApplier() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <ThemeApplier />
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>,
+  <BrowserRouter>
+    <ThemeApplier />
+    <App />
+  </BrowserRouter>,
 );

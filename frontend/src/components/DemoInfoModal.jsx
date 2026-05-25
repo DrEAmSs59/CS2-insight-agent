@@ -236,6 +236,8 @@ export default function DemoInfoModal({
           clipId: c.clip_id,
           clientClipUid: c.client_clip_uid,
           clipData: { ...c },
+          // 将 match_meta 随入队项一起携带，确保录制时 all_players 可用（尤其是从库页加入时）
+          matchMeta: mm,
         };
         if (isFreezeToDeathCompilation(c)) {
           const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);

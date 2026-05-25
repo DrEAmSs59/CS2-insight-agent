@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import API from "../api/api";
 import {
   Settings,
-  Wifi,
-  WifiOff,
   Brain,
   Zap,
   Eye,
@@ -68,8 +66,6 @@ export default function Sidebar({
   const [cs2Open, setCs2Open] = useState(true);
   const [llmOpen, setLlmOpen] = useState(true);
   const [expectedPlayersOpen, setExpectedPlayersOpen] = useState(true);
-  const [obsTestResult, setObsTestResult] = useState(null);
-  const [obsTesting, setObsTesting] = useState(false);
   const [detectingCs2, setDetectingCs2] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [watchOpen, setWatchOpen] = useState(true);
@@ -115,22 +111,6 @@ export default function Sidebar({
     }
   };
 
-  const testObs = async () => {
-    setObsTesting(true);
-    setObsTestResult(null);
-    try {
-      const { data } = await API.post("/obs/test", obsConfig);
-      setObsTestResult(data);
-      if (data?.ok) {
-        await onPersistObs?.();
-      }
-    } catch (e) {
-      setObsTestResult({ ok: false, error: e?.response?.data?.detail || e.message });
-    } finally {
-      setObsTesting(false);
-    }
-  };
-
   const schedulePersistLlm = () => {
     if (!onPersistLlm) return;
     queueMicrotask(() => {
@@ -141,7 +121,7 @@ export default function Sidebar({
   const isLocal = llmBaseUrlLooksLocal(llmConfig.base_url);
 
   return (
-    <aside className="w-72 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
+    <aside className="w-60 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-cs2-border">
         <div className="flex items-center gap-2">
@@ -293,22 +273,6 @@ export default function Sidebar({
                 className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-secondary/50 focus:border-cs2-accent/50 focus:outline-none"
               />
             </div>
-            <button
-              onClick={testObs}
-              disabled={obsTesting}
-              className="w-full py-2 rounded-md text-xs font-semibold bg-cs2-bg-input border border-cs2-border hover:border-cs2-accent/50 transition-colors disabled:opacity-50"
-            >
-              {obsTesting ? "测试中..." : "测试连接"}
-            </button>
-            {obsTestResult && (
-              <div className={`text-[11px] font-mono px-2 py-1.5 rounded ${obsTestResult.ok ? "text-cs2-highlight bg-cs2-highlight/10" : "text-cs2-fail bg-cs2-fail/10"}`}>
-                {obsTestResult.ok ? (
-                  <span className="flex items-center gap-1"><Wifi className="w-3 h-3" /> OBS {obsTestResult.obs_version}</span>
-                ) : (
-                  <span className="flex items-center gap-1"><WifiOff className="w-3 h-3" /> {obsTestResult.error}</span>
-                )}
-              </div>
-            )}
           </div>
         )}
       </div>

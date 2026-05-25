@@ -34,6 +34,9 @@ from .env_utils import (
     save_config,
     ensure_cs2_path,
     detect_cs2_path,
+    detect_ffmpeg_path,
+    detect_obs_path,
+    minimize_obs_window,
     resolve_config_path,
     llm_api_key_configured,
     llm_base_url_is_local_host,
@@ -43,6 +46,7 @@ from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import gsi_status, notify_gsi_payload
+from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
 from . import obs_config_center
 from .recording.api import router as recording_router
@@ -52,6 +56,16 @@ from .cs2_config_backup import (
     is_restore_required,
     open_backup_directory,
     restore_latest_user_config_backup,
+)
+import httpx
+
+from .steam_match_history import (
+    fetch_match_history,
+    fetch_player_summary,
+    parse_match_row,
+    download_demo,
+    game_type_to_mode,
+    is_demo_expired,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -281,6 +295,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
+# 防止并发请求同时拉起多个 OBS（React StrictMode 双重挂载导致请求发两次）
+import threading
+
+_obs_launch_lock = threading.Lock()
 
 def _resolve_web_dist_dir() -> Optional[Path]:
     """
@@ -624,11 +642,22 @@ class ConfigPayload(BaseModel):
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
     cs2_extra_launch_args: Optional[str] = None
+    cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
+    steam_api_key: Optional[str] = None
+    steam_id64: Optional[str] = None
+    match_mode: Optional[str] = None
+    match_count: Optional[int] = None
+
+
+class MatchHistoryDownloadBody(BaseModel):
+    demo_url: str
+    match_id: str
+    filename: str  # e.g. "match730_3733386468353335412.dem"
 
 
 @app.get("/api/config")
@@ -638,11 +667,21 @@ def get_config():
     data = cfg.model_dump()
     if data["llm"]["api_key"]:
         data["llm"]["api_key"] = "****" + data["llm"]["api_key"][-4:]
+    if data.get("steam_api_key"):
+        raw = data["steam_api_key"]
+        data["steam_api_key"] = "****" + raw[-4:] if len(raw) >= 4 else "****"
     obs_pw = (data.get("obs") or {}).get("password") or ""
     if obs_pw:
         data.setdefault("obs", {})
         data["obs"]["password"] = "****" + str(obs_pw)[-4:] if len(str(obs_pw)) > 4 else "****"
     return data
+
+
+@app.get("/api/app/update-info")
+def get_app_update_info(force: bool = False):
+    """对比 GitHub 最新 Release；force=true 跳过进程内短缓存（手动「检查更新」）。"""
+    cur, src = resolve_local_version_info()
+    return build_update_payload(cur, src, force_refresh=bool(force))
 
 
 @app.post("/api/config/detect-encoder")
@@ -676,6 +715,21 @@ def detect_cs2_save():
     return {"cs2_path": path}
 
 
+@app.post("/api/config/detect-ffmpeg")
+def detect_ffmpeg_save():
+    """扫描本机常见位置并写入 cs2-insight.config.json 中的 ffmpeg_path。"""
+    path = detect_ffmpeg_path()
+    if not path:
+        raise HTTPException(
+            404,
+            "未找到 FFmpeg（ffmpeg.exe）。请安装 FFmpeg 并确保其在系统 PATH 中，或在设置中手动填写完整路径。",
+        )
+    cfg = load_config()
+    cfg.ffmpeg_path = path
+    save_config(cfg)
+    return {"ffmpeg_path": path}
+
+
 @app.post("/api/config/open-dir")
 def open_config_data_dir():
     """在资源管理器中打开主配置文件所在目录（含 cs2-insight.config.json）。"""
@@ -692,6 +746,21 @@ def open_config_data_dir():
     except Exception as e:  # noqa: BLE001
         logging.warning("open config dir failed: %s", e)
         return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
+
+
+@app.post("/api/config/detect-obs")
+def detect_obs_path_save():
+    """扫描常见安装路径并写入 cs2-insight.config.json 中的 obs.obs_path。"""
+    path = detect_obs_path()
+    if not path:
+        raise HTTPException(
+            404,
+            "未找到 OBS（obs64.exe）。请确认已安装 OBS，或在 OBS 配置中心手动填写完整路径。",
+        )
+    cfg = load_config()
+    cfg.obs.obs_path = path
+    save_config(cfg)
+    return {"obs_path": path}
 
 
 @app.post("/api/config/test-llm")
@@ -783,6 +852,8 @@ async def update_config(payload: ConfigPayload):
         elif raw_pw:
             cfg.obs.password = raw_pw
         # 空字符串：GET 脱敏后输入框为空或未提交密码，不覆盖已保存的密码
+        if o.obs_path is not None:
+            cfg.obs.obs_path = str(o.obs_path).strip()
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm
@@ -825,7 +896,15 @@ async def update_config(payload: ConfigPayload):
             else {}
         )
     if payload.cs2_extra_launch_args is not None:
-        cfg.cs2_extra_launch_args = str(payload.cs2_extra_launch_args)
+        next_launch_args = str(payload.cs2_extra_launch_args)
+        if payload.cs2_extra_launch_args_user_configured is not None:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
+        elif next_launch_args != cfg.cs2_extra_launch_args:
+            cfg.cs2_extra_launch_args = next_launch_args
+            cfg.cs2_extra_launch_args_user_configured = True
+    elif payload.cs2_extra_launch_args_user_configured is not None:
+        cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
     if payload.record_inject_console_lines is not None:
         cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
     if payload.obs_transition_enabled is not None:
@@ -841,6 +920,14 @@ async def update_config(payload: ConfigPayload):
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
+    if payload.steam_api_key is not None and payload.steam_api_key and not payload.steam_api_key.startswith("****"):
+        cfg.steam_api_key = payload.steam_api_key.strip()
+    if payload.steam_id64 is not None and payload.steam_id64:
+        cfg.steam_id64 = payload.steam_id64.strip()
+    if payload.match_mode is not None and payload.match_mode in ("premier", "competitive"):
+        cfg.match_mode = payload.match_mode
+    if payload.match_count is not None and payload.match_count in (20, 50, 100):
+        cfg.match_count = payload.match_count
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
@@ -898,6 +985,15 @@ def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> 
     return OBSConfig(host=host, port=port, password=password)
 
 
+def _normalize_obs_path_auto_detect(cfg: AppConfig) -> None:
+    """OBS 验证成功后：若 obs_path 为空，尝试自动探测并写入配置。"""
+    if cfg.obs.obs_path and Path(cfg.obs.obs_path).is_file():
+        return
+    detected = detect_obs_path()
+    if detected:
+        cfg.obs.obs_path = detected
+
+
 # ─── Setup status endpoint ─────────────────────────────────────
 
 def _setup_status_obs_handshake_timeout_sec() -> float:
@@ -911,13 +1007,15 @@ def _setup_status_obs_handshake_timeout_sec() -> float:
     return 4.0
 
 
-@app.get("/api/status/setup")
-def setup_status():
-    """快速核查四项配置是否就绪，供新手引导页轮询。"""
+@app.get("/api/config/quick-check")
+def config_quick_check():
+    """轻量配置核查：返回各项配置是否已检测通过（OBS 为 obs_config_verified 标记，
+    CS2 路径为实际文件存在性）。**不尝试连接 OBS**。
+    供首页引导页、录制队列页状态展示使用，避免 /api/status/setup 的 WebSocket 开销。
+    """
     cfg = load_config()
     cfg = ensure_cs2_path(cfg)
 
-    # 本地项先算好（不依赖网络），OBS 失败时也能立刻返回其余状态
     cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
 
     ffmpeg_ok = False
@@ -925,6 +1023,43 @@ def setup_status():
         ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
     else:
         ffmpeg_ok = shutil.which("ffmpeg") is not None
+
+    ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
+        cfg.llm.base_url
+    )
+
+    try:
+        port_val = int(cfg.obs.port) if cfg.obs.port is not None else 0
+    except (TypeError, ValueError):
+        port_val = 0
+    return {
+        "obs_configured": cfg.obs.obs_config_verified,
+        "cs2_path_ok": cs2_path_ok,
+        "ffmpeg_ok": ffmpeg_ok,
+        "ai_key_ok": ai_key_ok,
+        "cs2_path": cfg.cs2_path or "",
+        "ffmpeg_path": cfg.ffmpeg_path or "",
+    }
+
+
+@app.get("/api/status/setup")
+def setup_status():
+    """快速核查四项配置是否就绪，供录制启动前调用（含 OBS 真实连接检测）。"""
+    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
+
+    cfg = load_config()
+    cfg = ensure_cs2_path(cfg)
+
+    # 本地项先算好（不依赖网络），OBS 失败时也能立刻返回其余状态
+    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
+
+    # 与 video_composer.resolve_ffmpeg_binary 一致：配置路径 → 安装目录 third_party/ffmpeg → PATH
+    ffmpeg_ok = False
+    try:
+        resolve_ffmpeg_binary(cfg.ffmpeg_path or None)
+        ffmpeg_ok = True
+    except MontageComposerError:
+        ffmpeg_ok = False
 
     ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
         cfg.llm.base_url
@@ -943,6 +1078,12 @@ def setup_status():
         probe_timeout = _setup_status_obs_handshake_timeout_sec()
         result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
         obs_connected = bool(result.get("ok", False))
+
+        # OBS 验证成功后自动写入配置文件，标记为已验证
+        if obs_connected:
+            _normalize_obs_path_auto_detect(cfg)
+            cfg.obs.obs_config_verified = True
+            save_config(cfg)
     except Exception:
         obs_connected = False
 
@@ -958,19 +1099,124 @@ def setup_status():
 
 # ─── OBS endpoints ─────────────────────────────────────────────
 
-@app.post("/api/obs/test")
-def test_obs(payload: OBSConfig | None = Body(default=None)):
-    from .obs_director import OBSDirector
+@app.post("/api/obs/config-check")
+def obs_config_check(payload: OBSConfig | None = Body(default=None)):
+    """配置检查：先测路径（拉起 OBS），再测连接。"""
+    import time as _time
 
     cfg = load_config()
     obs_use = merge_obs_for_connection(payload, cfg.obs)
-    director = OBSDirector(
-        obs_use,
-        cfg.cs2_path,
-        cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-        record_inject_console_lines=cfg.record_inject_console_lines,
-    )
-    return director.test_obs_connection()
+
+    path_ok = False
+    launched_obs = False
+    connected = False
+    obs_version = None
+
+    obs_path = (obs_use.obs_path or cfg.obs.obs_path or "").strip()
+    logger.info("[OBS config-check] obs_path=%r", obs_path)
+
+    if obs_path and Path(obs_path).is_file():
+        with _obs_launch_lock:
+            # 双重检查：第一个请求可能已经拉起了 OBS
+            running = _is_obs_process_running(obs_path)
+            logger.info("[OBS config-check] Path OK, OBS already running=%s", running)
+            if not running:
+                logger.info("[OBS config-check] Launching OBS: %s", obs_path)
+                try:
+                    subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+                    launched_obs = True
+                    path_ok = True
+                    # 轮询等待 OBS 进程出现，最多 15 秒
+                    for _attempt in range(30):
+                        if _is_obs_process_running(obs_path):
+                            break
+                        _time.sleep(0.5)
+                    else:
+                        logger.warning("[OBS config-check] OBS did not appear after 15s; continuing anyway")
+                    _time.sleep(1)
+                except Exception as e:
+                    logger.error("[OBS config-check] Failed to launch OBS: %s", e)
+                    return {"path_ok": False, "error": f"无法启动 OBS: {e}"}
+            else:
+                path_ok = True
+    elif obs_path:
+        logger.warning("[OBS config-check] Path configured but file not found: %s", obs_path)
+        return {"path_ok": False, "error": "OBS 路径不存在"}
+    else:
+        logger.info("[OBS config-check] No obs_path configured, skipping launch")
+        return {"path_ok": False, "connected": False, "error": "请先配置 OBS 路径，再点击配置检查"}
+
+    # 2) 测试 WebSocket 连接 — 15s 内每 1s 重试一次
+    try:
+        from .obs_director import OBSDirector
+        director = OBSDirector(obs_use, cfg.cs2_path)
+
+        connected = False
+        for _attempt in range(15):
+            result = director.test_obs_connection()
+            if result.get("ok"):
+                connected = True
+                break
+            _time.sleep(1)
+        else:
+            logger.warning("[OBS config-check] WebSocket connection failed after 15 retries")
+
+        if connected:
+            _normalize_obs_path_auto_detect(cfg)
+            cfg.obs.obs_config_verified = True
+            save_config(cfg)
+    except Exception as e:
+        logger.warning("[OBS config-check] OBS connection test exception: %s", e)
+        connected = False
+
+    # 连接成功后最小化 OBS 窗口（放在 try 外确保执行）
+    if connected:
+        minimize_obs_window()
+
+    return {
+        "path_ok": path_ok,
+        "connected": connected,
+        "launched_obs": launched_obs,
+    }
+
+
+def _is_obs_process_running(obs_path: str) -> bool:
+    """检查 OBS 进程是否已在运行（Windows 上按可执行文件名匹配）。"""
+    import subprocess as _sp
+    try:
+        exe_name = Path(obs_path).name
+        result = _sp.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/NH", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return exe_name.lower() in result.stdout.lower()
+    except Exception:
+        return False
+
+
+@app.post("/api/obs/is-running")
+def obs_is_running():
+    """检查 OBS 进程是否在运行（不尝试连接 WebSocket）。"""
+    cfg = load_config()
+    obs_path = (cfg.obs.obs_path or "").strip()
+    running = _is_obs_process_running(obs_path) if obs_path else False
+    return {"running": running, "obs_path": obs_path}
+
+
+@app.post("/api/obs/launch")
+def obs_launch():
+    """拉起 OBS 进程（不等待 WebSocket）。"""
+    import time as _t
+    cfg = load_config()
+    obs_path = (cfg.obs.obs_path or "").strip()
+    if not obs_path or not Path(obs_path).is_file():
+        raise HTTPException(400, "OBS 路径未配置或文件不存在")
+    try:
+        subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+        _t.sleep(2)
+    except Exception as e:
+        raise HTTPException(400, f"无法启动 OBS: {e}")
+    return {"ok": True}
 
 
 @app.get("/api/obs-config/status")
@@ -1354,6 +1600,117 @@ async def demo_library_event_stream():
     )
 
 
+@app.get("/api/match-history/matches")
+async def get_match_history():
+    cfg = load_config()
+    if not cfg.steam_api_key or not cfg.steam_id64:
+        raise HTTPException(400, "Steam API Key 和 SteamID64 未配置，请先保存凭据")
+
+    try:
+        raw_matches = await fetch_match_history(cfg.steam_api_key, cfg.steam_id64, cfg.match_count)
+        player = await fetch_player_summary(cfg.steam_api_key, cfg.steam_id64)
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status == 403:
+            raise HTTPException(403, "Steam API Key 无效，请检查凭据")
+        if status == 429:
+            raise HTTPException(429, "Steam API 请求频率超限，请稍后再试")
+        raise HTTPException(502, f"Steam API 返回 {status}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"无法连接 Steam API: {e}")
+    except ValueError as e:
+        raise HTTPException(502, str(e))
+
+    mode_filter = cfg.match_mode
+    rows = []
+    for i, m in enumerate(raw_matches):
+        wmi = m.get("watchablematchinfo") or {}
+        mode = game_type_to_mode(int(wmi.get("game_type", 0)))
+        if mode != mode_filter:
+            continue
+        try:
+            row = parse_match_row(m, player_index=0)
+        except Exception:
+            logger.exception("Failed to parse match %s", m.get("matchid"))
+            continue
+        # check if already in library
+        dem_name = f"match730_{row['match_id']}.dem"
+        in_lib = await demo_db.find_by_filename(dem_name) is not None
+        row["demo_in_library"] = in_lib
+        rows.append(row)
+
+    wins = sum(1 for r in rows if r["result"] == "win")
+    losses = sum(1 for r in rows if r["result"] == "loss")
+    total_kills = sum(r["kills"] for r in rows)
+    total_deaths = sum(r["deaths"] for r in rows)
+    total_hs = sum(r["headshot_kills"] for r in rows)
+    total_dmg = sum(r["damage"] for r in rows)
+    total_rounds = sum(r["score_own"] + r["score_opp"] for r in rows)
+    avg_kd = round(total_kills / total_deaths, 2) if total_deaths else 0.0
+    hs_pct = round(total_hs / total_kills * 100) if total_kills else 0
+    avg_adr = round(total_dmg / total_rounds, 1) if total_rounds else 0.0
+    avg_rating = round(sum(r["rating"] for r in rows) / len(rows), 2) if rows else 0.0
+
+    return {
+        "player": {
+            "name": player.get("personaname", ""),
+            "avatar": player.get("avatarfull", ""),
+            "steam_id64": cfg.steam_id64,
+        },
+        "stats_summary": {
+            "wins": wins,
+            "losses": losses,
+            "avg_kd": avg_kd,
+            "headshot_pct": hs_pct,
+            "avg_adr": avg_adr,
+            "rating": avg_rating,
+        },
+        "matches": rows,
+        "total": len(rows),
+    }
+
+
+@app.post("/api/match-history/test-connection")
+async def test_steam_connection(body: dict = Body(...)):
+    api_key = str(body.get("steam_api_key") or "").strip()
+    steam_id64 = str(body.get("steam_id64") or "").strip()
+    if not api_key or not steam_id64:
+        raise HTTPException(400, "steam_api_key 和 steam_id64 不能为空")
+    try:
+        player = await fetch_player_summary(api_key, steam_id64)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"Steam API 返回 {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"无法连接 Steam: {e}")
+    if not player:
+        raise HTTPException(404, "未找到该 SteamID 的玩家信息，请检查 SteamID64")
+    return {"ok": True, "name": player.get("personaname", ""), "avatar": player.get("avatarfull", "")}
+
+
+@app.post("/api/match-history/download")
+async def download_match_demo(body: MatchHistoryDownloadBody):
+    cfg = load_config()
+    watch_paths = [p for p in cfg.demo_watch_paths if p.strip()]
+    if not watch_paths:
+        raise HTTPException(400, "未配置 Demo 库监听目录，请先在「Demo 库」设置监听路径")
+
+    dest_dir = Path(watch_paths[0])
+    filename = body.filename if body.filename.endswith(".dem") else body.filename + ".dem"
+    try:
+        dem_path = await download_demo(body.demo_url, dest_dir, filename)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(502, f"下载失败，HTTP {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"下载超时或网络错误: {e}")
+    except OSError as e:
+        raise HTTPException(500, f"文件写入失败: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"解压失败: {e}")
+
+    await _enqueue_demo_path(dem_path)
+    return {"ok": True, "path": str(dem_path), "filename": filename}
+
+
 @app.get("/api/demos/discovered")
 async def list_discovered_demos(
     limit: int = Query(default=200, ge=1, le=1000),
@@ -1547,6 +1904,32 @@ async def delete_demo(
         raise HTTPException(404, f"Demo not found: {demo_id}")
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id}
+
+
+@app.post("/api/demos/{demo_id}/delete-file")
+async def delete_demo_file(demo_id: int):
+    """从磁盘删除 .dem 文件（如有同名 .zip 也一并删除），同时删除库内记录。"""
+    demo = await demo_db.get_demo_by_id(demo_id)
+    if not demo:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    disk_path = str(demo["path"])
+    import os as _os
+    deleted_files: list[str] = []
+    errors: list[str] = []
+    for target in (disk_path, disk_path.rsplit(".", 1)[0] + ".zip" if "." in _os.path.basename(disk_path) else None):
+        if target is None:
+            continue
+        try:
+            _os.remove(target)
+            deleted_files.append(target)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            errors.append(f"{target}: {e}")
+    # 无论文件删除成功与否，都删除库内记录
+    await demo_db.delete_demo(demo_id, rescan="skip")
+    await demo_library_hub.notify("deleted")
+    return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
 
 
 class BatchIngestBody(BaseModel):
@@ -2018,7 +2401,9 @@ def reveal_file_in_explorer(body: RevealFileInExplorerBody):
             if p.is_dir():
                 os.startfile(str(p))  # noqa: S606
             else:
-                sp.Popen(["explorer", "/select," + str(p)])
+                # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
+                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
+                sp.Popen(["explorer.exe", "/select,", str(p)])
         elif sys.platform == "darwin":
             sp.run(["open", "-R", str(p)], check=False, timeout=20)
         else:

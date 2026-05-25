@@ -1,6 +1,6 @@
 from ..models import RecordingSegment, SourceType, Perspective, RequestType
 from ..normalizer import NormalizedRequest
-from .event_clip_planner import PREPARE_PREROLL_SEC, _prepare_seek_tick
+from .event_clip_planner import PREPARE_PREROLL_SEC, _prepare_seek_tick, _voice_mask, _voice_mask_enemy
 
 
 def plan_event_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
@@ -15,6 +15,8 @@ def plan_event_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
 def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     opts = req.options
+    _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = int(opts.kill_compilation_pre_sec * tick_rate)
     post_ticks = int(opts.kill_compilation_post_sec * tick_rate)
@@ -88,6 +90,8 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled=False,
                 disabled_reason=None,
                 metadata={},
+                voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
             )
         )
         seg_idx += 1
@@ -119,6 +123,8 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
                     disabled=victim_disabled,
                     disabled_reason=victim_disabled_reason,
                     metadata={},
+                    voice_listen_mask=_mask,
+                    voice_listen_mask_enemy=_mask_enemy,
                 )
             )
             seg_idx += 1
@@ -129,6 +135,8 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
 def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     opts = req.options
+    _mask = _voice_mask(req)
+    _mask_enemy = _voice_mask_enemy(req)
 
     pre_ticks = int(opts.death_compilation_pre_sec * tick_rate)
     post_ticks = int(opts.death_compilation_post_sec * tick_rate)
@@ -203,6 +211,8 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
                 disabled=False,
                 disabled_reason=None,
                 metadata={},
+                voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
             )
         )
         seg_idx += 1
@@ -237,6 +247,8 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
                     disabled=killer_disabled,
                     disabled_reason=killer_disabled_reason,
                     metadata={},
+                    voice_listen_mask=_mask,
+                    voice_listen_mask_enemy=_mask_enemy,
                 )
             )
             seg_idx += 1

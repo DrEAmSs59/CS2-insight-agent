@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -34,6 +35,7 @@ _DEFAULT_EXAMPLE_FILENAME = "cs2-insight.config.example.json"
 _DATA_SUBDIR = "data"
 _BACKUP_DIR_NAME = ".cs2_config_backup"
 _DB_BASENAME = "cs2-insight.db"
+_DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen"
 
 
 def get_data_dir() -> Path:
@@ -291,6 +293,10 @@ class OBSConfig(BaseModel):
     host: str = "localhost"
     port: int = 4455
     password: str = ""
+    # OBS 可执行文件完整路径，用于录制前自动启动 OBS
+    obs_path: str = ""
+    # OBS 配置中心"配置检查"是否通过过（WebSocket 连接成功）
+    obs_config_verified: bool = False
 
 
 class LLMConfig(BaseModel):
@@ -373,14 +379,51 @@ class AppConfig(BaseModel):
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
-    cs2_extra_launch_args: str = ""
+    cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+    # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，
+    # 此时即便清空也应尊重用户选择，不再自动回填 -fullscreen。
+    cs2_extra_launch_args_user_configured: bool = False
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
     record_inject_console_lines: str = ""
+    # 检查更新：auto=镜像与直连并发；on=仅用镜像；off=仅直连；或以 https:// 开头的自定义镜像前缀
+    update_github_mirror: str = "auto"
     obs_transition_enabled: bool = False
     obs_transition_name: str = "Fade"
     obs_transition_duration_ms: int = 100
     obs_game_scene_name: str = "CS2 Insight Recording"
     obs_black_scene_name: str = "CS2 Insight Black"
+    # 官匹战绩
+    steam_api_key: str = ""
+    steam_id64: str = ""
+    match_mode: str = "premier"   # premier / competitive
+    match_count: int = 20         # 20 / 50 / 100
+
+
+def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
+    changed = False
+    fullscreen_re = re.compile(r"(?<!\S)-fullscreen(?!\S)", re.IGNORECASE)
+
+    def ensure_fullscreen_arg(text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+        if fullscreen_re.search(s):
+            return s
+        return s + "\n" + _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
+
+    # 旧配置迁移：
+    # - 仅当本次是从 JSON 原始对象加载，且缺少 user_configured 标记时，补写该字段
+    # - save_config(cfg) 传入 raw=None 时，不做“缺字段迁移”推断，避免把用户已配置状态误重置
+    if isinstance(raw, dict) and ("cs2_extra_launch_args_user_configured" not in raw):
+        changed = True
+
+    if not cfg.cs2_extra_launch_args_user_configured:
+        current_args = str(cfg.cs2_extra_launch_args or "")
+        next_args = ensure_fullscreen_arg(current_args)
+        if next_args != current_args:
+            cfg.cs2_extra_launch_args = next_args
+            changed = True
+    return changed
 
 
 def _parse_config_json_file(path: Path) -> dict:
@@ -408,7 +451,10 @@ def load_config() -> AppConfig:
     path = resolve_config_path()
     if path.is_file():
         raw = _parse_config_json_file(path)
-        return AppConfig(**raw)
+        cfg = AppConfig(**raw)
+        if _normalize_config_defaults(cfg, raw):
+            save_config(cfg)
+        return cfg
     if _LEGACY_CONFIG_PATH.is_file():
         raw = _parse_config_json_file(_LEGACY_CONFIG_PATH)
         cfg = AppConfig(**raw)
@@ -426,6 +472,7 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig) -> None:
+    _normalize_config_defaults(cfg)
     path = resolve_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
@@ -438,6 +485,276 @@ def detect_cs2_path() -> Optional[str]:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+_FFMPEG_SCAN_ROOTS: list[Path] = [
+    Path(r"C:\\"),
+    Path(r"D:\\"),
+    Path(r"E:\\"),
+    Path(r"F:\\"),
+]
+
+_DEFAULT_FFMPEG_DIRS: list[Path] = [
+    Path(r"C:\ffmpeg\bin"),
+    Path(r"C:\Program Files\ffmpeg\bin"),
+    Path(r"C:\Program Files (x86)\ffmpeg\bin"),
+    Path(r"D:\ffmpeg\bin"),
+    Path(r"E:\ffmpeg\bin"),
+    Path(r"C:\tools\ffmpeg\bin"),
+    Path(r"C:\ProgramData\chocolatey\bin"),
+    Path(r"C:\tools\ffmpeg"),
+]
+
+
+def _iter_ffmpeg_glob_candidates(exe_name: str):
+    """在各盘根目录下查找 ffmpeg* 开头的文件夹，返回其中可能的 exe 路径。"""
+    for root in _FFMPEG_SCAN_ROOTS:
+        if not root.is_dir():
+            continue
+        try:
+            for d in sorted(root.glob("ffmpeg*")):
+                if not d.is_dir():
+                    continue
+                # 优先 bin/ 子目录，再尝试根目录本身
+                for sub in (d / "bin", d):
+                    candidate = sub / exe_name
+                    if candidate.is_file():
+                        yield candidate
+        except OSError:
+            continue
+
+
+def detect_ffmpeg_path() -> Optional[str]:
+    """搜索本机 FFmpeg 可执行文件。优先级：bundled → PATH → 固定目录 → 盘根 ffmpeg* 通配。"""
+    bundled = get_data_dir().parent / "third_party" / "ffmpeg" / "ffmpeg.exe"
+    if bundled.is_file():
+        return str(bundled.resolve())
+
+    found = shutil.which("ffmpeg")
+    if found:
+        return str(Path(found).resolve())
+
+    exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    for d in _DEFAULT_FFMPEG_DIRS:
+        candidate = d / exe_name
+        if candidate.is_file():
+            return str(candidate.resolve())
+
+    for candidate in _iter_ffmpeg_glob_candidates(exe_name):
+        return str(candidate.resolve())
+
+    return None
+
+
+_OBS64_REL = Path("bin") / "64bit" / "obs64.exe"
+_DEFAULT_OBS_PATHS: tuple[str, ...] = (
+    r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+    r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe",
+)
+
+
+def _obs64_from_install_root(install_root: Path) -> Optional[Path]:
+    """由 OBS 安装根目录推断 obs64.exe。"""
+    candidates = (
+        install_root / _OBS64_REL,
+        install_root / "obs64.exe",
+        install_root / "bin" / "obs64.exe",
+    )
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _obs_path_from_registry_value(raw: object) -> Optional[Path]:
+    """解析卸载项 InstallLocation / DisplayIcon / UninstallString。"""
+    if raw is None:
+        return None
+    text = str(raw).strip().strip('"')
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",", 1)[0].strip().strip('"')
+    try:
+        p = Path(text)
+    except ValueError:
+        return None
+    name = p.name.lower()
+    if name in ("obs64.exe", "obs.exe") and p.is_file():
+        return p
+    if name == "uninstall.exe":
+        root = p.parent
+        if root.name.lower() == "64bit":
+            root = root.parent.parent
+        found = _obs64_from_install_root(root)
+        if found:
+            return found
+    if p.is_dir():
+        return _obs64_from_install_root(p)
+    if p.is_file():
+        found = _obs64_from_install_root(p.parent)
+        if found:
+            return found
+    return None
+
+
+def _obs_paths_from_uninstall_registry() -> list[Path]:
+    """扫描 Windows 卸载注册表中的 OBS Studio 安装信息。"""
+    if winreg is None:
+        return []
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def add(candidate: Optional[Path]) -> None:
+        if candidate is None or not candidate.is_file():
+            return
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(candidate)
+
+    uninstall_roots = (
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    )
+    for hive, sub in uninstall_roots:
+        try:
+            root_key = winreg.OpenKey(hive, sub)
+        except OSError:
+            continue
+        try:
+            for direct in ("OBS Studio",):
+                try:
+                    sk = winreg.OpenKey(root_key, direct)
+                except OSError:
+                    continue
+                try:
+                    for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                        try:
+                            raw, _ = winreg.QueryValueEx(sk, val_name)
+                        except OSError:
+                            continue
+                        add(_obs_path_from_registry_value(raw))
+                finally:
+                    winreg.CloseKey(sk)
+
+            i = 0
+            while True:
+                try:
+                    sub_name = winreg.EnumKey(root_key, i)
+                except OSError:
+                    break
+                i += 1
+                sk = None
+                try:
+                    sk = winreg.OpenKey(root_key, sub_name)
+                    try:
+                        disp, _ = winreg.QueryValueEx(sk, "DisplayName")
+                    except OSError:
+                        continue
+                    name = str(disp).strip().lower()
+                    if "obs studio" not in name:
+                        continue
+                    for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                        try:
+                            raw, _ = winreg.QueryValueEx(sk, val_name)
+                        except OSError:
+                            continue
+                        add(_obs_path_from_registry_value(raw))
+                finally:
+                    if sk is not None:
+                        winreg.CloseKey(sk)
+        finally:
+            winreg.CloseKey(root_key)
+    return out
+
+
+def detect_obs_path() -> Optional[str]:
+    """查找 OBS 可执行文件。优先级：卸载注册表 → 常见安装路径 → PATH。"""
+    for candidate in _obs_paths_from_uninstall_registry():
+        return str(candidate.resolve())
+    for p in _DEFAULT_OBS_PATHS:
+        pp = Path(p)
+        if pp.is_file():
+            return str(pp.resolve())
+    found = shutil.which("obs64.exe") or shutil.which("obs.exe")
+    if found:
+        return str(Path(found).resolve())
+    return None
+
+
+def minimize_obs_window() -> None:
+    """最小化 OBS 主窗口。仅 Windows 生效；非 Windows 为 no-op。
+
+    先通过 tasklist 找 obs64.exe/obs32.exe 的 PID，再按 PID + 可见窗口匹配。
+    OBS 进程起来后需要一点时间才创建窗口，因此内部带重试。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import subprocess as _sp
+        import time as _t
+
+        SW_MINIMIZE = 2
+
+        def _get_obs_pids() -> set[int]:
+            obs_pids: set[int] = set()
+            try:
+                result = _sp.run(
+                    ["tasklist", "/FI", "IMAGENAME eq obs64.exe", "/NH", "/FO", "CSV"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                for line in result.stdout.splitlines():
+                    parts = [p.strip().strip('"') for p in line.split(",")]
+                    if len(parts) >= 2 and parts[0] and parts[1].isdigit():
+                        obs_pids.add(int(parts[1]))
+            except Exception:
+                pass
+            return obs_pids
+
+        def _find_visible_hwnd(obs_pids: set[int]):
+            found = None
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_long
+            )
+
+            def enum_callback(hwnd, _lparam):
+                nonlocal found
+                if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                    return True
+                pid_buf = ctypes.c_ulong(0)
+                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_buf))
+                if pid_buf.value not in obs_pids:
+                    return True
+                found = hwnd
+                return False
+
+            ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+            return found
+
+        # 重试最多 5 次，每 0.5 秒一次，给 OBS 时间创建窗口
+        for _attempt in range(5):
+            obs_pids = _get_obs_pids()
+            if not obs_pids:
+                logger.warning("OBS process not found for minimization")
+                return
+            hwnd = _find_visible_hwnd(obs_pids)
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, SW_MINIMIZE)
+                logger.info("Minimized OBS window (hwnd=%d, pid=%d)", hwnd, list(obs_pids)[0])
+                return
+            _t.sleep(0.5)
+
+        logger.warning("No visible OBS window found after retries (PIDs: %s)", obs_pids)
+    except Exception as e:
+        logger.warning("Failed to minimize OBS window: %s", e)
 
 
 def ensure_cs2_path(cfg: AppConfig) -> AppConfig:

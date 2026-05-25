@@ -124,10 +124,18 @@ def _timeline_round_record_end_tick(
     tail = int(_TIMELINE_LAST_ROUND_KILL_TAIL_SEC * trf)
     fe0 = round_freeze_end_ticks.get(int(rn))
     fe_tick = int(fe0) if fe0 is not None else re
-    loose_cap = fe_tick + int(60.0 * trf)
-    out = re + buf_mid
+    # CS2 competitive rounds last at most ~115s (1:55); use 130s to safely cover the
+    # full round without cutting before late-round kills on the final round.
+    # (For non-final rounds this branch is unreachable — nxt_fe provides the cap.)
+    loose_cap = fe_tick + int(130.0 * trf)
+    # For the final round, round_end is when the settlement/scoreboard appears —
+    # adding buf_mid (3 s) would record into the settlement screen.
+    # Use last_kill + tail instead: covers the kill animation and stops before settlement.
+    # Fall back to round_end exactly if the target had no kills this round.
     if last_k is not None:
-        out = max(out, last_k + tail)
+        out = last_k + tail
+    else:
+        out = re
     return int(min(out, loose_cap))
 
 

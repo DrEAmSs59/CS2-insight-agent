@@ -9,6 +9,11 @@ const IS_ELECTRON_APP =
 
 export const API_BASE_URL = IS_ELECTRON_APP ? "http://127.0.0.1:19871" : "";
 
+/** 启动屏展示的连接目标（dev 走 Vite 代理到 8000，Electron 直连 19871） */
+export const BACKEND_CONNECT_LABEL = IS_ELECTRON_APP
+  ? "127.0.0.1:19871"
+  : "127.0.0.1:8000 (Vite proxy)";
+
 /** Electron 下须用绝对 URL；浏览器 dev 用相对路径走 Vite 代理 */
 export function getDemosStreamUrl() {
   return API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";

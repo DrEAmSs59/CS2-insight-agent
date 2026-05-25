@@ -11,7 +11,7 @@ from .obs_fade_controller import OBSFadeController
 from .demo_controller import (
     gototick, demo_resume, demo_pause,
     demo_pause_silent_strict, demo_resume_silent_strict,
-    DemoSeekError,
+    DemoSeekError, inject_console_sequence,
 )
 from .spec_controller import spec_by_slot
 from .gsi_verifier import verify_spec_target
@@ -159,6 +159,13 @@ async def _record_until_tick_round_segment(
     # the target round, which must not be misread as "the round just ended".
     phase_guard_armed = False
     poll_count = 0
+    # Computed once: used by both the phase guard and the round guard below.
+    is_alive_round = meta_death_tick is None
+    # Final-round alive player: after the match-winning kill, CS2/GSI may emit
+    # "freezetime" (end-game screen transition) and/or advance map.round beyond
+    # target_round. Neither signal represents a real next round, so both GSI-based
+    # stop conditions are disabled here — wall-clock timing takes over instead.
+    is_final_alive = segment.is_final_round and is_alive_round
     t0 = time.monotonic()
 
     logger.info(
@@ -204,27 +211,37 @@ async def _record_until_tick_round_segment(
                 seg_idx, estimated_tick,
             )
         elif phase_guard_armed:
-            is_alive_round = meta_death_tick is None
-            stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
-            if gsi_phase in stop_phases:
-                logger.info(
-                    "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
-                    "stopping OBS (alive_round=%s)",
-                    seg_idx, gsi_phase, estimated_tick, is_alive_round,
-                )
-                return "done"
+            # is_final_alive: disable GSI phase stop — see comment above t0.
+            if not is_final_alive:
+                stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
+                if gsi_phase in stop_phases:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
+                        "stopping OBS (alive_round=%s)",
+                        seg_idx, gsi_phase, estimated_tick, is_alive_round,
+                    )
+                    return "done"
 
         # GSI round guard: fire as soon as the demo has entered a later round.
+        # Skip for final-round alive player — map.round may transiently exceed
+        # target_round during the end-game transition and must not stop recording.
         gsi_round = _get_gsi_current_round()
         if gsi_round is not None:
             gsi_seen = True
             if target_round is not None and gsi_round > target_round:
-                logger.info(
-                    "[RecordingV3][TickWatcher] segment=%d GSI round advanced to %d > target %d "
-                    "at estimated_tick=%d; stopping OBS",
-                    seg_idx, gsi_round, target_round, estimated_tick,
-                )
-                return "done"
+                if is_final_alive:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d final_round_alive: "
+                        "ignoring GSI round advance to %d (end-game transition)",
+                        seg_idx, gsi_round,
+                    )
+                else:
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d GSI round advanced to %d > target %d "
+                        "at estimated_tick=%d; stopping OBS",
+                        seg_idx, gsi_round, target_round, estimated_tick,
+                    )
+                    return "done"
         else:
             if not gsi_seen and not gsi_unavailable_warned and elapsed > 5.0:
                 # GSI has been silent for 5 s since recording started.
@@ -377,8 +394,10 @@ class RecordingExecutor:
           - None when is_last=False (pause case)
         Populates self._obs_force_stopped when PauseRecord fell back to StopRecord.
         """
-        # Fade to black before OBS pause/stop — the transition is recorded as fade-out.
-        if self._fade is not None:
+        # Fade to black before OBS pause — only between segments, not at the final stop.
+        # The very start and end of the recording use a hard cut to avoid audio fade-in/out
+        # artifacts on the global Desktop Audio track during the OBS scene transition.
+        if self._fade is not None and not is_last:
             ok = await self._fade.fade_to_black()
             if not ok:
                 logger.warning("[RecordingV3] fade_to_black failed at segment boundary; hard-cut")
@@ -538,6 +557,18 @@ class RecordingExecutor:
                     )
                     spec_elapsed = time.monotonic() - spec_t0
 
+                    if spec_ok is not False and segment.voice_listen_mask is not None:
+                        mask_val = segment.voice_listen_mask
+                        try:
+                            await asyncio.to_thread(
+                                inject_console_sequence,
+                                ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
+                            )
+                        except Exception as _e:
+                            logger.warning(
+                                "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
+                            )
+
                     if spec_ok is False:
                         logger.error(
                             "[RecordingV3] spec failed for %s (steamid=%s) after slot retries; aborting",
@@ -591,37 +622,12 @@ class RecordingExecutor:
                         segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
                     )
                     result.recording_started_at = time.time()
-                    if self._fade is not None:
-                        if self._obs_on_black:
-                            # OBS is already on the black scene from the previous
-                            # clip's fade-out — skip the redundant black→black transition.
-                            logger.debug("[RecordingV3] OBS already on black; skipping fade_to_black for StartRecord")
-                        else:
-                            ok = await self._fade.fade_to_black()
-                            if not ok:
-                                logger.warning("[RecordingV3] fade_to_black before StartRecord failed; hard-cut")
-                            else:
-                                self._obs_on_black = True
-                        # Pre-warm the OBS connection for fade-in *before* StartRecord so
-                        # the scene switch fires with near-zero latency after recording begins,
-                        # eliminating any black-screen-with-audio gap at the clip start.
-                        await self._fade.prime_fade_to_game()
+                    # Hard cut at the very start of recording — no fade-in from black.
+                    # Fade transitions are reserved for mid-clip segment boundaries only,
+                    # so the global Desktop Audio track is never cross-faded at clip edges.
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
-
-                    # ── 5a. Resume demo concurrently with fade-in (StartRecord) ──
-                    # execute_primed_fade_to_game uses the pre-warmed WS connection so
-                    # the scene switch fires within ~2 ms of StartRecord returning —
-                    # the 200 ms animation then covers CS2 keypress processing latency.
-                    if self._fade is not None:
-                        (resume_ok, fade_ok) = await asyncio.gather(
-                            demo_resume_silent_strict(),
-                            self._fade.execute_primed_fade_to_game(),
-                        )
-                        if not fade_ok:
-                            logger.warning("[RecordingV3] fade_to_game after StartRecord failed; hard-cut")
-                    else:
-                        resume_ok = await demo_resume_silent_strict()
+                    resume_ok = await demo_resume_silent_strict()
                     self._obs_on_black = False
                 else:
                     logger.info(

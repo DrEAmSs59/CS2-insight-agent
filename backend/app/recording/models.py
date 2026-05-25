@@ -43,6 +43,8 @@ class DemoContext(BaseModel):
     final_round: int
     final_round_start_tick: int
     final_round_end_tick: int
+    server_name: str = ""
+    all_players: list = []
 
 
 class TargetPlayer(BaseModel):
@@ -141,6 +143,8 @@ class RecordingSegment(BaseModel):
     disabled: bool = False
     disabled_reason: Optional[str] = None
     metadata: dict = {}
+    voice_listen_mask: Optional[int] = None
+    voice_listen_mask_enemy: Optional[int] = None
 
 
 class RecordingPlan(BaseModel):

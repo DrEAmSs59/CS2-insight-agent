@@ -1,7 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import API from "../api/api";
-import { getObsConfigStatus } from "../api/obsConfigCenter";
-import { obsConfigHasIssues } from "../utils/obsConfigHealth";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
 import {
@@ -25,6 +23,22 @@ export default function RecordingQueuePage() {
   const [selectedId, setSelectedId] = useState(null);
   const [dragSourceIndex, setDragSourceIndex] = useState(null);
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
+
+  // OBS 配置状态：与首页 /api/config/quick-check 一致，后端判断 host + password + port > 0
+  const [obsConfigured, setObsConfigured] = useState(false);
+  const [obsConfigHasIssues, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get("/config/quick-check").then(({ data }) => {
+      if (cancelled) return;
+      setObsConfigured(!!data?.obs_configured);
+    }).catch(() => {
+      if (cancelled) return;
+      setObsConfigured(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (queue.length === 0) {
@@ -60,44 +74,6 @@ export default function RecordingQueuePage() {
       ? "待开始"
       : "已完成";
   const obsEndpointLabel = `${s.obsConfig?.host || "localhost"}:${s.obsConfig?.port ?? 4455}`;
-
-  const [obsConnected, setObsConnected] = useState(/** @type {boolean | null} */ (null));
-  const [obsConfigHasIssues, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
-  const obsProbeGen = useRef(0);
-  useEffect(() => {
-    setObsConnected(null);
-    setObsConfigHasIssues(null);
-    const gen = ++obsProbeGen.current;
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const { data } = await API.post("/obs/test", s.obsConfig);
-        if (cancelled || gen !== obsProbeGen.current) return;
-        setObsConnected(Boolean(data?.ok));
-      } catch {
-        if (cancelled || gen !== obsProbeGen.current) return;
-        setObsConnected(false);
-      }
-    };
-    void run();
-    const id = setInterval(run, 45_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [s.obsConfig?.host, s.obsConfig?.port, s.obsConfig?.password]);
-
-  // OBS 连上后拉一次配置健康状态（不循环轮询，避免频繁打扰 OBS）
-  useEffect(() => {
-    if (obsConnected !== true) { setObsConfigHasIssues(null); return; }
-    let cancelled = false;
-    getObsConfigStatus().then((st) => {
-      if (cancelled) return;
-      if (!st?.obs_connected) { setObsConfigHasIssues(null); return; }
-      setObsConfigHasIssues(obsConfigHasIssues(st));
-    }).catch(() => { if (!cancelled) setObsConfigHasIssues(null); });
-    return () => { cancelled = true; };
-  }, [obsConnected]);
 
   const canReorder = queue.length > 1 && !s.batchRecording;
 
@@ -152,7 +128,7 @@ export default function RecordingQueuePage() {
           povSegmentCount={povN}
           demoCount={demoN}
           queueStatusLabel={queueStatusLabel}
-          obsConnected={obsConnected}
+          obsConfigured={obsConfigured}
           obsEndpointLabel={obsEndpointLabel}
           obsConfigHasIssues={obsConfigHasIssues}
         />
@@ -227,7 +203,7 @@ export default function RecordingQueuePage() {
         onAbort={s.handleAbortBatchRecording}
         onClear={handleClear}
         disabledStart={queue.length === 0 || s.batchRecording}
-        obsConnected={obsConnected}
+        obsConfigured={obsConfigured}
       />
     </div>
     </PageContainer>

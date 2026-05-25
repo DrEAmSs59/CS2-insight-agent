@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const PAGE_SIZE_OPTIONS = [12, 24, 48, 96];
 
 export default function DemoPagination({
   libraryPage,

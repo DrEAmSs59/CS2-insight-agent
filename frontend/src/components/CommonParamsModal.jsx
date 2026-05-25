@@ -720,21 +720,40 @@ export default function CommonParamsModal({
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
                   采集与静音
                 </p>
-            <OptionRow
-              checked={warmupOpts.snd_voipvolume_mute}
-              onChange={(v) => patchWarmup({ snd_voipvolume_mute: v })}
-              title="静音游戏内玩家语音"
-              code="snd_voipvolume 0"
-            />
-            {warmupOpts.snd_voipvolume_mute ? (
-              <p className="mb-4 ml-1 text-xs leading-relaxed text-emerald-400/85">
-                成片预期：录制轨中不包含其他玩家语音（仍可能包含游戏内其他音效，取决于游戏与 OBS）。
-              </p>
-            ) : (
-              <p className="mb-4 ml-1 text-xs text-cs2-text-muted">
-                成片预期：可能录到队内语音（取决于游戏内语音与 OBS 音轨设置）。
-              </p>
-            )}
+            {(() => {
+              const vf = warmupOpts.voice_filter ?? "mute";
+              const VF_OPTIONS = [
+                { value: "open",  label: "所有玩家",    code: "tv_listen_voice_indices -1",     desc: "录制轨包含所有玩家语音。" },
+                { value: "team",  label: "第一视角我方", code: "tv_listen_voice_indices <mask>", desc: "只保留主角所在队伍的语音。" },
+                { value: "enemy", label: "第一视角敌方", code: "tv_listen_voice_indices <mask>", desc: "只保留对方队伍的语音。" },
+                { value: "mute",  label: "全部静音",    code: "snd_voipvolume 0",              desc: "录制轨不含任何玩家语音。" },
+              ];
+              const selected = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
+              return (
+                <>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                    {VF_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => patchWarmup({ voice_filter: opt.value })}
+                        className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                          vf === opt.value
+                            ? "border-cs2-accent/60 bg-cs2-accent/10"
+                            : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
+                        }`}
+                      >
+                        <p className="text-[11px] font-semibold text-cs2-text-primary">{opt.label}</p>
+                        <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <p className={`mb-4 mt-1.5 ml-0.5 text-xs leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
+                    {selected.desc}
+                  </p>
+                </>
+              );
+            })()}
 
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
               录制输出比例

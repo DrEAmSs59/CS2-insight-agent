@@ -5,12 +5,14 @@ import {
   Microscope,
   Package,
   Clapperboard,
+  Download,
   SlidersHorizontal,
   Settings,
   Gamepad2,
   RadioTower,
   Sun,
   Moon,
+  Trophy,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
 
@@ -27,7 +29,7 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function SidebarNav({ queueLength = 0, disabled = false }) {
+export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
 
@@ -36,7 +38,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
       <div className="border-b border-cs2-border px-2.5 py-3">
         <div className="flex items-center gap-2.5">
           <img
-            src={`${theme === "dark" ? "/cs2-insight-logo.png" : "/cs2-insight-logo-new.png"}`}
+            src="/cs2-insight-logo-new.png"
             alt="CS2 洞察"
             width={64}
             height={64}
@@ -95,6 +97,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           <Gamepad2 className="h-4 w-4 shrink-0 opacity-90" />
           玩家游戏配置
         </NavLink>
+        {/* 官匹战绩：Valve API 国服不可用，暂时隐藏入口
+        <NavLink to="/match-history" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
+          <Trophy className="h-4 w-4 shrink-0 opacity-90" />
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-1">
+            官匹战绩
+            <span className="rounded bg-cs2-accent/20 px-1 font-mono text-[9px] text-cs2-accent">新</span>
+          </span>
+        </NavLink>
+        */}
       </nav>
 
       <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">
@@ -102,6 +113,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           <Settings className="h-4 w-4 shrink-0 opacity-90" />
           设置
         </NavLink>
+        {/* <button
+          type="button"
+          disabled={disabled || !onCheckUpdate}
+          onClick={() => onCheckUpdate?.()}
+          className={`${linkBase} w-full text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary disabled:pointer-events-none disabled:opacity-40`}
+        >
+          <Download className="h-4 w-4 shrink-0 opacity-90" />
+          检查更新
+        </button> */}
         <button
           type="button"
           onClick={toggleTheme}

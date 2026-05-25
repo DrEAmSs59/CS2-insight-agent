@@ -380,6 +380,24 @@ export default function DemoLibraryPage() {
                   之后目录监听与手动扫描都会跳过该路径；仅改文件名或移动文件可视为新路径再入库。
                 </span>
               </button>
+              <button
+                type="button"
+                className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-left text-[11px] leading-snug text-red-400 hover:bg-red-500/20"
+                onClick={() => {
+                  const p = s.libraryDeletePrompt;
+                  const row = s.demoLibraryItems.find((it) => it.id === p.id);
+                  const base = (row?.filename || p.label || "").replace(/\.\w+$/, "");
+                  const files = [`${base}.dem`, `${base}.zip`];
+                  if (window.confirm(`确定要删除以下文件？\n\n${files.join("\n")}\n\n此操作不可恢复。`)) {
+                    void s.handleDeleteDemoFile(p.id);
+                  }
+                }}
+              >
+                从磁盘删除文件
+                <span className="mt-0.5 block text-[11px] font-normal text-red-300/60">
+                  永久删除 .dem 及同名 .zip 文件，不可恢复。
+                </span>
+              </button>
             </div>
             <div className="mt-4 flex justify-end">
               <button

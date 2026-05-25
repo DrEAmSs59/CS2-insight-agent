@@ -15,7 +15,8 @@
   "ai_mode": false,
   "recording_global_pacing": {},
   "default_record_warmup": {},
-  "cs2_extra_launch_args": "",
+  "cs2_extra_launch_args": "-fullscreen",
+  "cs2_extra_launch_args_user_configured": false,
   "record_inject_console_lines": "",
   "spec_player_verify": {
     "demo_timescale": 0.05,

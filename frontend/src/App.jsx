@@ -1,9 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
+import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
+import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
@@ -16,6 +17,7 @@ import CommonParamsPage from "./pages/CommonParamsPage";
 import ObsConfigCenterPage from "./pages/ObsConfigCenterPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
+import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
@@ -33,9 +35,18 @@ import {
 } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { Loader2 } from "lucide-react";
-import API, { API_BASE_URL } from "./api/api";
+import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+
+const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
+
+function ensureDefaultCs2FullscreenArg(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return DEFAULT_CS2_EXTRA_LAUNCH_ARGS;
+  if (/(?:^|\s)-fullscreen(?=$|\s)/i.test(text)) return text;
+  return `${text}\n${DEFAULT_CS2_EXTRA_LAUNCH_ARGS}`;
+}
 
 export default function App() {
   const navigate = useNavigate();
@@ -50,11 +61,14 @@ export default function App() {
       window.electron.isPackaged().then(setIsPackaged);
     }
   }, []);
-  const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
+  const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "", obs_path: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
   /** 用户是否正在编辑密码框（用于失焦时恢复“已保存”提示） */
   const [obsPasswordEditing, setObsPasswordEditing] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateModalManual, setUpdateModalManual] = useState(false);
   const obsConfigRef = useRef(obsConfig);
   obsConfigRef.current = obsConfig;
   const obsConfigHydratedRef = useRef(false);
@@ -112,6 +126,8 @@ export default function App() {
     setAnalysisInlineProgress(null);
   }, [currentMatchIndex]);
   const [batchRecording, setBatchRecording] = useState(false);
+  const [recordingResults, setRecordingResults] = useState(null);
+  const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
@@ -134,6 +150,8 @@ export default function App() {
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [updateGithubMirror, setUpdateGithubMirror] = useState("auto");
+  const [updateGithubMirrorCustom, setUpdateGithubMirrorCustom] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
@@ -172,7 +190,7 @@ export default function App() {
   });
   const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
   /** Demo 库列表每页条数（与 GET /demos limit 一致） */
-  const [libraryPageSize, setLibraryPageSize] = useState(10);
+  const [libraryPageSize, setLibraryPageSize] = useState(12);
   const libraryPageSizeEffectSkipRef = useRef(false);
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
@@ -511,6 +529,20 @@ export default function App() {
     [refreshDemoLibrary, libraryPage]
   );
 
+  const handleDeleteDemoFile = useCallback(
+    async (id) => {
+      try {
+        await API.post(`/demos/${id}/delete-file`);
+        setLibraryDeletePrompt(null);
+        setProgressText("已从磁盘删除 .dem 文件（如有同名 .zip 也一并删除）。");
+        await refreshDemoLibrary(libraryPage, { manageLoading: false });
+      } catch (e) {
+        setProgressText(`删除文件失败: ${e.response?.data?.detail || e.message}`);
+      }
+    },
+    [refreshDemoLibrary, libraryPage]
+  );
+
   const handleLibraryBatchDelete = useCallback(
     async (ids, rescan = "skip") => {
       const list = [...ids];
@@ -793,7 +825,6 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
-      // 轮询直到后端就绪
       while (!cancelled) {
         try {
           const { data } = await API.get("config");
@@ -818,8 +849,21 @@ export default function App() {
             });
           }
           if (typeof data.ai_mode === "boolean") setAiMode(data.ai_mode);
+          if (typeof data.experimental?.pov_enabled === "boolean") {
+            setExperimentalPovEnabled(data.experimental.pov_enabled);
+          }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
+          if (typeof data.update_github_mirror === "string") {
+            const m = data.update_github_mirror.trim();
+            if (m.startsWith("http://") || m.startsWith("https://")) {
+              setUpdateGithubMirror("custom");
+              setUpdateGithubMirrorCustom(m);
+            } else if (m) {
+              setUpdateGithubMirror(m);
+              setUpdateGithubMirrorCustom("");
+            }
+          }
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
@@ -832,9 +876,8 @@ export default function App() {
 
           obsConfigHydratedRef.current = true;
           setBackendReady(true);
-          break; // 成功后跳出循环
-        } catch (e) {
-          // 后端尚未启动或连接失败，等待后重试
+          break;
+        } catch {
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
@@ -1577,7 +1620,7 @@ export default function App() {
     }
   }, [setProgressText, refreshCommonParamsFromServer]);
 
-  const openBatchWarmup = useCallback(() => {
+  const openBatchWarmup = useCallback(async () => {
     if (!queue.length) return;
     if (configBackupStatus?.restore_required) {
       setRecordingBlockedMessage(
@@ -1585,10 +1628,23 @@ export default function App() {
       );
       return;
     }
+    // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
+    setProgressText("正在检测 OBS 连接…");
+    try {
+      const { data } = await API.post("/obs/config-check", obsConfig);
+      if (!data?.connected) {
+        setProgressText("无法连接 OBS。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。");
+        return;
+      }
+    } catch (e) {
+      setProgressText(`OBS 连接检测失败: ${e.response?.data?.detail || e.message}`);
+      return;
+    }
     setQueueDrawerOpen(false);
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
-  }, [queue.length, configBackupStatus?.restore_required]);
+    setProgressText("");
+  }, [queue.length, configBackupStatus?.restore_required, setProgressText]);
 
   const handleWarmupConfirm = useCallback(
     async (warmupPayload) => {
@@ -1607,6 +1663,7 @@ export default function App() {
             useRecordingQueue.getState().globalPacing,
             uploadedDemos,
             parsedMatches,
+            demoLibraryItems,
           );
           if (!requests.length) {
             setProgressText("队列中没有可录制的片段（已跳过不支持的类型）。");
@@ -1630,21 +1687,27 @@ export default function App() {
           };
           const { data } = await API.post("recording/queue", body);
           const results = Array.isArray(data) ? data : [];
-          const ok = results.filter((r) => r && r.success).length;
-          const aborted = results.filter(
-            (r) => r && (r.error === "aborted" || String(r.error || "").toLowerCase() === "aborted"),
-          ).length;
-          if (aborted > 0) {
-            setProgressText(
-              `批量录制已结束：成功 ${ok}，中止 ${aborted}，其余 ${results.length - ok - aborted} 条；共 ${results.length} 个片段。`,
-              { autoDismissMs: 3000 },
-            );
-          } else {
-            setProgressText(`批量录制完成！成功 ${ok} / ${results.length} 个片段。`, {
-              autoDismissMs: 3000,
-            });
-          }
-          clearQueue();
+
+          // Build request_id → queue item mapping for friendly names in the result modal
+          const reqIdToQueueItem = {};
+          requests.forEach((req) => {
+            const qid = req.source_ref?.queue_item_id;
+            if (qid) {
+              const found = queue.find((q) => q.id === qid);
+              if (found) reqIdToQueueItem[req.request_id] = found;
+            }
+          });
+
+          const annotated = results.map((r, i) => ({
+            ...r,
+            _queueItem: reqIdToQueueItem[r?.request_id] ?? null,
+            _index: i,
+          }));
+          const allSucceeded = results.length > 0 && results.every((r) => r && r.success);
+          if (allSucceeded) clearQueue();
+          setRecordingResults(annotated);
+          setRecordingResultModalOpen(true);
+          setProgressText("", { autoDismissMs: 100 });
         } catch (e) {
           const detail = formatRecordingApiError(e);
           if (e.response?.status === 409 || e.response?.status === 422) {
@@ -1667,6 +1730,7 @@ export default function App() {
       refreshConfigBackupStatus,
       uploadedDemos,
       parsedMatches,
+      demoLibraryItems,
     ]
   );
 
@@ -1675,9 +1739,9 @@ export default function App() {
     try {
       const { data } = await API.post("/config-backup/restore");
       if (data?.ok) {
-        setProgressText(data.message || "玩家配置已恢复");
+        setProgressText(data.message || "玩家配置已恢复", { autoDismissMs: 3000 });
       } else {
-        setProgressText(data?.message || "部分配置恢复失败");
+        setProgressText(data?.message || "部分配置恢复失败", { autoDismissMs: 4000 });
       }
       await refreshConfigBackupStatus();
     } catch (e) {
@@ -1688,7 +1752,7 @@ export default function App() {
           "CS2 正在运行，无法覆盖配置文件。\n请先关闭 CS2，然后再次点击一键恢复。",
         );
       } else {
-        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`);
+        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`, { autoDismissMs: 5000 });
       }
       await refreshConfigBackupStatus();
     }
@@ -1750,6 +1814,10 @@ export default function App() {
     if (pw && !pw.startsWith("****")) {
       obs.password = pw;
     }
+    const obsPath = String(o.obs_path ?? "").trim();
+    if (obsPath) {
+      obs.obs_path = obsPath;
+    }
     try {
       await API.put("config", { obs });
       if (pw && !pw.startsWith("****")) {
@@ -1789,7 +1857,7 @@ export default function App() {
       void persistObsConfig();
     }, 500);
     return () => clearTimeout(t);
-  }, [obsConfig.host, obsConfig.port, persistObsConfig]);
+  }, [obsConfig.host, obsConfig.port, obsConfig.obs_path, persistObsConfig]);
 
   const persistLlmConfig = useCallback(async () => {
     await Promise.resolve();
@@ -1868,6 +1936,19 @@ export default function App() {
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
       setProgressText(typeof msg === "string" ? msg : "CS2 自动探测失败");
+    }
+  }, []);
+
+  const handleDetectFfmpeg = useCallback(async () => {
+    try {
+      const { data } = await API.post("config/detect-ffmpeg");
+      if (data.ffmpeg_path) {
+        setFfmpegPath(data.ffmpeg_path);
+        setProgressText(`已自动找到 FFmpeg：${data.ffmpeg_path}`);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message;
+      setProgressText(typeof msg === "string" ? msg : "FFmpeg 自动探测失败");
     }
   }, []);
 
@@ -1955,6 +2036,20 @@ export default function App() {
         put.expected_parse_players = raw.expected_parse_players;
         setExpectedParsePlayersText(raw.expected_parse_players.join("\n"));
       }
+      if (typeof raw.cs2_extra_launch_args === "string") {
+        const launchArgsUserConfigured =
+          typeof raw.cs2_extra_launch_args_user_configured === "boolean"
+            ? raw.cs2_extra_launch_args_user_configured
+            : false;
+        const launchArgs = launchArgsUserConfigured
+          ? raw.cs2_extra_launch_args
+          : ensureDefaultCs2FullscreenArg(raw.cs2_extra_launch_args);
+        put.cs2_extra_launch_args = launchArgs;
+        put.cs2_extra_launch_args_user_configured = launchArgsUserConfigured;
+        setCs2ExtraLaunchArgs(launchArgs);
+      } else if (typeof raw.cs2_extra_launch_args_user_configured === "boolean") {
+        put.cs2_extra_launch_args_user_configured = raw.cs2_extra_launch_args_user_configured;
+      }
       if (Object.keys(put).length) {
         await API.put("config", put);
       }
@@ -1995,6 +2090,7 @@ export default function App() {
     const defaults = {
       cs2_path: "",
       ffmpeg_path: "",
+      update_github_mirror: "auto",
       montage_encoder: "auto",
       ai_mode: false,
       expected_parse_players: [],
@@ -2007,6 +2103,8 @@ export default function App() {
       await API.put("config", defaults);
       setCs2Path("");
       setFfmpegPath("");
+      setUpdateGithubMirror("auto");
+      setUpdateGithubMirrorCustom("");
       setMontageEncoder("auto");
       setAiMode(false);
       setExpectedParsePlayersText("");
@@ -2046,6 +2144,41 @@ export default function App() {
     }
   }, [persistLlmConfig]);
 
+  const fetchUpdateInfo = useCallback(async (opts = { force: false, manual: false }) => {
+    try {
+      const { data } = await API.get("/app/update-info", {
+        params: opts.force ? { force: "true" } : {},
+        timeout: 15000,
+      });
+      setUpdateInfo(data);
+      if (data?.update_available) {
+        setUpdateModalManual(Boolean(opts.manual));
+        setUpdateModalOpen(true);
+      } else if (opts.manual) {
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    } catch {
+      if (opts.manual) {
+        setUpdateInfo({
+          error: "无法连接服务器",
+          current_version: "",
+          latest_version: null,
+          update_available: false,
+          release_notes: "",
+          release_url: "",
+          downloads: { setup_url: null, zip_url: null },
+        });
+        setUpdateModalManual(true);
+        setUpdateModalOpen(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchUpdateInfo({ force: false, manual: false });
+  }, [fetchUpdateInfo]);
+
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
 
@@ -2079,12 +2212,18 @@ export default function App() {
     setCs2Path,
     ffmpegPath,
     setFfmpegPath,
+    updateGithubMirror,
+    setUpdateGithubMirror,
+    updateGithubMirrorCustom,
+    setUpdateGithubMirrorCustom,
     montageEncoder,
     setMontageEncoder,
     demoWatchPaths,
     setDemoWatchPaths,
     handleSaveConfig,
+    fetchUpdateInfo,
     handleDetectCs2,
+    handleDetectFfmpeg,
     handleSaveAllSettingsPage,
     saveExpectedPlayersFromList,
     handleExportSettingsConfig,
@@ -2178,6 +2317,7 @@ export default function App() {
     hasLibraryAdvancedFilters,
     handleLoadDemoFromLibrary,
     handleDeleteDemo,
+    handleDeleteDemoFile,
     handleLibraryBatchDelete,
     setProgressText,
     handleSaveLibraryRename,
@@ -2219,7 +2359,11 @@ export default function App() {
               </div>
             </div>
           )}
-          <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+          <SidebarNav
+            queueLength={queue.length}
+            disabled={batchRecording}
+            onCheckUpdate={() => void fetchUpdateInfo({ force: true, manual: true })}
+          />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
             {!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
@@ -2235,7 +2379,7 @@ export default function App() {
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
                     <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
                     <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                      Attempting to connect: 127.0.0.1:19871
+                      Attempting to connect: {BACKEND_CONNECT_LABEL}
                     </span>
                   </div>
                 </div>
@@ -2253,6 +2397,7 @@ export default function App() {
                 <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
+                <Route path="/match-history" element={<MatchHistoryPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>
@@ -2267,7 +2412,7 @@ export default function App() {
             <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
               <ProgressBar
                 text={progressText || (batchRecording ? "正在批量录制…" : "")}
-                active={anyDemoParsing}
+                active={anyDemoParsing || (progressText && !batchRecording && !progressToastMeta?.autoDismissMs)}
                 batchRecording={batchRecording}
                 onAbortBatch={handleAbortBatchRecording}
                 dismissible={Boolean(progressText?.trim())}
@@ -2305,9 +2450,30 @@ export default function App() {
           }}
         />
 
+        <RecordingResultModal
+          open={recordingResultModalOpen}
+          onClose={() => setRecordingResultModalOpen(false)}
+          onClearQueue={() => {
+            clearQueue();
+            setRecordingResultModalOpen(false);
+          }}
+          results={recordingResults ?? []}
+        />
+
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
           onClose={() => setRecordingBlockedMessage("")}
+        />
+
+        <UpdateCheckModal
+          open={updateModalOpen}
+          info={updateInfo}
+          manual={updateModalManual}
+          title={updateModalManual ? "检查更新" : "发现新版本"}
+          onClose={() => {
+            setUpdateModalOpen(false);
+            setUpdateModalManual(false);
+          }}
         />
       </div>
     </AppShellProvider>

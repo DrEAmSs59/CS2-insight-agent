@@ -60,6 +60,8 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
     final_round: finalRound,
     final_round_start_tick: 0,
     final_round_end_tick: finalRoundEndTick,
+    server_name: matchMeta?.server_name || "",
+    all_players: matchMeta?.all_players || [],
   };
 }
 

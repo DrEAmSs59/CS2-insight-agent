@@ -10,7 +10,7 @@ import { Play, Square, Trash2, Layers, Timer, Settings2 } from "lucide-react";
  *   onAbort: () => void,
  *   onClear: () => void,
  *   disabledStart: boolean,
- *   obsConnected: boolean | null,
+ *   obsConfigured: boolean,
  * }} props
  */
 export default function RecordingControlDock({
@@ -21,7 +21,7 @@ export default function RecordingControlDock({
   onAbort,
   onClear,
   disabledStart,
-  obsConnected,
+  obsConfigured,
 }) {
   const estLabel =
     totalEstimateSec <= 0
@@ -31,8 +31,7 @@ export default function RecordingControlDock({
         : `${Math.max(1, Math.round(totalEstimateSec / 60))} min`;
 
   const statusLabel = batchRecording ? "录制中" : queueLength ? "就绪" : "空闲";
-  const obsDisconnected = obsConnected === false;
-  const startDisabled = disabledStart || obsDisconnected;
+  const startDisabled = disabledStart;
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-4 border-t border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-md sm:gap-4 sm:px-5">
@@ -66,9 +65,6 @@ export default function RecordingControlDock({
             <Play className="h-3.5 w-3.5" />
             开始录制
           </button>
-          {obsDisconnected && !batchRecording && (
-            <span className="text-[9px] font-medium text-red-400/80">OBS 未连接</span>
-          )}
         </div>
         <button
           type="button"

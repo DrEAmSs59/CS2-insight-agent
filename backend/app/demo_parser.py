@@ -81,6 +81,10 @@ class MatchMeta:
     # 「研发全集」大卡专用：整局特殊战绩总评（仅在有 meme_death 合集且开启 AI 时填充）
     ai_meme_montage_score: Optional[float] = None
     ai_meme_montage_commentary: Optional[str] = None
+    # Demo 来源平台（从 header server_name 读取）；供录制侧计算 spec_slot 偏移量
+    server_name: str = ""
+    # 全员名单：[{name, steamid64, spec_slot, team_num}, ...]；spec_slot 为原始未校准值
+    all_players: list = field(default_factory=list)
 
 
 @dataclass
@@ -343,7 +347,6 @@ _TAG_COVERAGE_RULES: tuple[tuple[str, str], ...] = (
     ("🫵 贴脸超度", "👃 零距离"),
     # 穿墙系：更具体的 tag 已包含穿墙语义，"穿墙杀"在这些情况下冗余
     ("🧱 穿墙杀",   "🎯 超远穿墙"),  # 超远穿墙 = 穿墙 + 远距离
-    ("🧱 穿墙杀",   "🔫 一弹双穿"),  # 一弹双穿定义里至少一杀 penetrated≥1
     # 飞天盲狙 = 盲狙 + 跳跃，盲狙冗余
     ("🙈 盲狙",     "✈️ 飞天盲狙"),
 )
@@ -411,23 +414,21 @@ _PB_DIST_EXECUTION        = 60.0    # 👃 零距离：距离 ≤ 此值 且爆�
 _RUSH_VEL_MIN             = 220.0   # 🚀 上去就是干：|vel_xy| > 此值
 _RUNGUN_VEL_MIN           = 120.0   # 🏃‍♂️ 跑打 下限
 _RUNGUN_VEL_MAX           = 220.0   # 🏃‍♂️ 跑打 上限（与上去就是干互斥）
+_RUNGUN_IMMEDIATE_VEL_MIN = 70.0    # 🏃‍♂️ 跑打 近窗口（kt-2→kt，2 tick≈31ms）下限：排除急停杀（急停后位移趋近 0）
 _WALLBANG_DIST_MIN        = 400.0   # 🎯 超远穿墙：penetrated≥1 且距离 > 此值
 _QUICKSCOPE_YAW_DELTA_MIN  = 40.0   # 🌪️ 甩狙：击杀前 N tick 与击杀时 yaw 最大差
 # 同时采样 kt-8 和 kt-16 取最大值：甩枪动作可能在击杀前 125ms 已完成，
 # 若只看 kt-8 会在"已对准但仍在扣扳机"阶段读到 0 差值，漏检。
 _QUICKSCOPE_LOOKBACK_OFFSETS = (8, 16)  # 均已在 jump_sample_ticks 中覆盖
-_AIRBORNE_VEL_Z_MIN       = 150.0   # 🛸 乌鸦坐飞机：击杀帧 vel_z 上限
+_AIRBORNE_VEL_Z_MIN       = 80.0    # 🛸 乌鸦坐飞机：击杀帧垂直位移 Δz，用于检测上升期击杀
 _AIRBORNE_LOOKBACK_TICKS  = 16
 _SLIDE_VEL_XY_MIN         = 150.0   # 🎿 一个大拉：下蹲+移动近似速度下限
 
 # 回合级标签
-_CAMPER_WINDOW_TICKS      = int(TICK_RATE * 4.0)  # 🐍 老六本色：回看 4s
-_CAMPER_MAX_DISP          = 30.0                   # 攻击者位移上限
-_CAMPER_SHOTS_MAX         = 2                      # shots_to_kill 上限
 _CLUTCH_ROUNDEND_SEC      = 5.0     # 🔔 极限操作：距回合结束 ≤ 此秒
 _CLUTCH_BOMB_SEC          = 3.0     # 🔔 极限操作：距 C4 爆炸 ≤ 此秒
 _AVENGE_WINDOW_TICKS      = int(TICK_RATE * 2.5)   # ⚰️ 补枪：2.5s 内队友被打
-_BAREFOOT_EQUIP_MAX       = 2000     # 👢 光脚干皮鞋：本回合队伍装备价值上限
+_BAREFOOT_EQUIP_MAX       = 5000     # 👢 光脚干皮鞋：本回合队伍装备价值上限（每人1000左右）
 _COMEBACK_HP_MAX          = 20       # ❤️‍🩹 残血绝地反击：起始 HP 上限
 _IRONSHIRT_HITS_MIN       = 4        # 🪨 挨揍王：非道具命中次数下限
 _IRONSHIRT_DMG_MIN        = 95       # 🪨 挨揍王：累计伤害下限
@@ -1352,13 +1353,22 @@ class DemoAnalyzer:
                 flying_ticks.extend([kt, max(0, kt - _FLYING_SNIPER_LOOKBACK_TICKS)])
 
         # 击杀前多帧采样（复用于跳杀检测 + 智斗耐心窗口检测）
-        # -8 / -16  : 跳跃速度采样
+        # -2        : 跑打急停过滤近窗口（2 tick ≈ 31ms，急停后几乎无位移）
+        # -8 / -16  : 跳跃速度采样 + 甩狙检测
         # -64 / -128: 耐心窗口——检测受害者是否在击杀前 1s/2s 就已在攻击者射程内
         jump_sample_ticks = [
             max(0, _int(k["tick"]) - off)
             for kills in round_kills.values()
             for k in kills
-            for off in (8, 16, 64, 128)
+            for off in (2, 8, 16, 64, 128)
+        ]
+
+        # 下饭死亡前多帧采样（用于僵尸步 / 散步流 / 吸铁石）
+        fail_lookback_ticks = [
+            max(0, d["tick"] - off)
+            for d in death_records
+            if d["headshot"]  # 僵尸步/散步流 都需要爆头
+            for off in (_ZOMBIE_STEP_PRE_TICKS, _STROLL_PRE_TICKS)
         ]
 
         # 肩并肩检测：全场按 1s 间隔均匀采样（合并进同一次 parse_ticks，避免二次 IO）
@@ -1371,7 +1381,7 @@ class DemoAnalyzer:
 
         spatial_ticks = sorted(set(
             hs_ticks + backstab_ticks + highlight_ticks + bomb_def_ticks
-            + flying_ticks + jump_sample_ticks + _shoulder_sample_ticks,
+            + flying_ticks + jump_sample_ticks + fail_lookback_ticks + _shoulder_sample_ticks,
         ))
         spatial_cache = self._parse_spatial_snapshots(spatial_ticks)
         bomb_highlights = self._analyze_bomb_defuse_highlights(
@@ -1622,11 +1632,13 @@ class DemoAnalyzer:
         # 8) round_hurt_on_target_index：每回合目标受到的伤害事件 → 🪨 挨揍王
         round_hurt_on_target_index: dict[int, list[tuple[int, int, str]]] = {}
         if not hurt_df.empty and "user_name" in hurt_df.columns:
+            # 构建 tick → round 映射（用于处理 total_rounds_played 不可用的情况）
+            tick_to_round: dict[int, int] = {}
+            for rn in round_freeze_end_ticks:
+                tick_to_round[int(round_freeze_end_ticks[rn])] = rn
+
             for _, _hr in hurt_df.iterrows():
                 if str(_hr.get("user_name") or "") != target_player:
-                    continue
-                _rn = _int(_hr.get("total_rounds_played")) + 1 if "total_rounds_played" in hurt_df.columns else 0
-                if _rn <= 0:
                     continue
                 _ht = _int(_hr.get("tick"))
                 _hd = 0
@@ -1635,7 +1647,21 @@ class DemoAnalyzer:
                         _hd = _int(_hr.get(_dc))
                         break
                 _hw = _normalize_item(_hr.get("weapon", ""))
-                round_hurt_on_target_index.setdefault(_rn, []).append((_ht, _hd, _hw))
+
+                # 优先使用 total_rounds_played，降级使用 tick 映射
+                _rn = 0
+                if "total_rounds_played" in hurt_df.columns:
+                    _rn = _int(_hr.get("total_rounds_played")) + 1
+                if _rn <= 0 and _ht > 0:
+                    # 查找此 tick 属于哪一回合（找最近的 freeze_end_tick）
+                    for freeze_tick in sorted(round_freeze_end_ticks.values(), reverse=True):
+                        if _ht >= freeze_tick:
+                            _rn = tick_to_round.get(freeze_tick, 0)
+                            if _rn > 0:
+                                break
+
+                if _rn > 0:
+                    round_hurt_on_target_index.setdefault(_rn, []).append((_ht, _hd, _hw))
         for _rn in round_hurt_on_target_index:
             round_hurt_on_target_index[_rn].sort()
 
@@ -1652,7 +1678,6 @@ class DemoAnalyzer:
             round_result_map,
             round_freeze_end_ticks,
             map_name=map_name,
-            flash_on_target_index=flash_on_target_index,
             grenade_detonate_points=grenade_detonate_points,
         )
         target_total_deaths = len(death_records)
@@ -1724,7 +1749,7 @@ class DemoAnalyzer:
 
             victims_list = [str(k.get("victim") or "") for k in kills_sorted]
             victim_steamids_list = [str(k.get("victim_steamid") or "") for k in kills_sorted]
-            kill_ticks_sorted = sorted({_int(k["tick"]) for k in kills_sorted})
+            kill_ticks_sorted = [_int(k["tick"]) for k in kills_sorted]
             so, se = DemoAnalyzer._round_start_scores_for_target(
                 rnd, round_team_score_map,
             )
@@ -1736,7 +1761,7 @@ class DemoAnalyzer:
             _clip_end_tick = last_tick + BUFFER_SECONDS_AFTER * TICK_RATE
             _NICE_TRY_TAGS_SET = frozenset({
                 "😤 1v2 饮恨",
-                "💸 ECO反击 (差点成了)",
+                "💸 ECO反击",
                 "🛡️ 赛点失守",
                 "📉 绝地追分未果",
                 "⛰️ 天王山饮恨",
@@ -2294,6 +2319,20 @@ class DemoAnalyzer:
         tsid = _lookup_steam_id_for_name(name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None
 
+        # ── 全员名单（供 tv_listen_voice_indices 掩码计算）─────────────────
+        all_players_roster = _build_all_players_roster(
+            self.parser, match_start_tick, spec_slots, name_to_sid
+        )
+
+        # ── server_name（平台识别用）─────────────────────────────────────
+        _server_name = ""
+        try:
+            _hdr = self.parser.parse_header()
+            _sn_raw = _hdr.get("server_name") if isinstance(_hdr, dict) else None
+            _server_name = str(_sn_raw).strip() if _sn_raw is not None else ""
+        except Exception:
+            pass
+
         total_rounds = max(round_kills.keys(), default=0)
         if events.shape[0] > 0:
             total_rounds = max(total_rounds, _int(events["total_rounds_played"].max()) + 1)
@@ -2373,6 +2412,8 @@ class DemoAnalyzer:
                 match_date=match_date,
                 duration_mins=duration_mins,
                 meme_series_badges=meme_series_badges_for_kd(target_total_kills, target_total_deaths),
+                server_name=_server_name,
+                all_players=all_players_roster,
             ),
             clips=clips,
             timeline=timeline,
@@ -2998,7 +3039,6 @@ class DemoAnalyzer:
         round_freeze_end_ticks: dict[int, int],
         *,
         map_name: str,
-        flash_on_target_index: Optional[list[tuple[int, float]]] = None,
         grenade_detonate_points: Optional[list[tuple[int, float, float]]] = None,
     ) -> tuple[list[Clip], set[tuple[int, int]]]:
 
@@ -3081,7 +3121,7 @@ class DemoAnalyzer:
                 tags.extend(DemoAnalyzer._check_magnet_nade(
                     death, spatial_cache, target_player, grenade_detonate_points,
                 ))
-            tags.extend(DemoAnalyzer._check_flash_send(death, flash_on_target_index))
+            tags.extend(DemoAnalyzer._check_flash_send(death, death["round"], round_freeze_end_ticks))
 
             # 去重 (保持顺序)
             seen: set[str] = set()
@@ -3643,20 +3683,37 @@ class DemoAnalyzer:
                         if penetrated >= 1 and dist > _WALLBANG_DIST_MIN:
                             extra.append("🎯 超远穿墙")
 
-                    # —— 攻击者速度：上去就是干 / 跑打 / 一个大拉 ——
+                    # —— 攻击者速度（用位置差分近似，因为 demoparser2 不支持 vel_x/vel_y）——
+                    # 中窗口：从 kt-8 到 kt 的位移 × 8（≈ units/s），用于判断"整体在移动"
+                    # 近窗口：从 kt-4 到 kt 的位移 × 16，用于排除急停杀（急停后近 4 tick 几乎无位移）
                     vxy: Optional[float] = None
-                    vz_a: Optional[float] = None
-                    if atk is not None:
+                    vxy_imm: Optional[float] = None   # immediate: kt-4 → kt
+                    if atk is not None and "X" in atk.index and "Y" in atk.index:
+                        ax, ay = float(atk["X"]), float(atk["Y"])
+                        # 中窗口 kt-8
+                        snap_prev8 = spatial_cache.get(kt - 8)
+                        prev_row8 = (
+                            DemoAnalyzer._spatial_player_row(snap_prev8, target_player)
+                            if snap_prev8 is not None else None
+                        )
                         try:
-                            if "vel_x" in atk.index and "vel_y" in atk.index:
-                                vxy = math.hypot(float(atk["vel_x"]), float(atk["vel_y"]))
+                            if prev_row8 is not None and "X" in prev_row8.index and "Y" in prev_row8.index:
+                                px8, py8 = float(prev_row8["X"]), float(prev_row8["Y"])
+                                vxy = math.hypot(ax - px8, ay - py8) * 8  # 8 ticks at 64 fps
                         except (TypeError, ValueError):
                             vxy = None
+                        # 近窗口 kt-2（急停过滤：2 tick ≈ 31ms，急停后位移趋近 0）
+                        snap_prev2 = spatial_cache.get(kt - 2)
+                        prev_row2 = (
+                            DemoAnalyzer._spatial_player_row(snap_prev2, target_player)
+                            if snap_prev2 is not None else None
+                        )
                         try:
-                            if "vel_z" in atk.index:
-                                vz_a = float(atk["vel_z"])
+                            if prev_row2 is not None and "X" in prev_row2.index and "Y" in prev_row2.index:
+                                px2, py2 = float(prev_row2["X"]), float(prev_row2["Y"])
+                                vxy_imm = math.hypot(ax - px2, ay - py2) * 32  # 2 ticks at 64 fps
                         except (TypeError, ValueError):
-                            vz_a = None
+                            vxy_imm = None
 
                     is_jump = DemoAnalyzer._is_jump_kill(spatial_cache, kt, target_player)
                     if vxy is not None:
@@ -3664,26 +3721,53 @@ class DemoAnalyzer:
                             extra.append("🚀 上去就是干")
                         elif (_RUNGUN_VEL_MIN <= vxy <= _RUNGUN_VEL_MAX
                               and not is_jump
-                              and not _bool(k.get("noscope"))):
+                              and not _bool(k.get("noscope"))
+                              # 急停过滤：近 4 tick 速度也需 ≥ 下限，否则说明已急停静止
+                              and (vxy_imm is None or vxy_imm >= _RUNGUN_IMMEDIATE_VEL_MIN)):
                             extra.append("🏃‍♂️ 跑打")
 
-                    # 🎿 一个大拉：下蹲近似（vel_z < 0 且 vxy > 阈值；跳跃中不算）
-                    if (vxy is not None and vz_a is not None
-                            and vz_a < 0 and vxy > _SLIDE_VEL_XY_MIN and not is_jump):
-                        extra.append("🎿 一个大拉")
+                    # 🎿 一个大拉：高速侧向移动击杀（横向位移 > 阈值 且 速度方向与视角方向夹角 ≥ 45°）
+                    # 位移近似速度：disp / (offset_ticks / TICK_RATE) = disp * TICK_RATE / offset_ticks
+                    # 16 ticks = 0.25s，所以 vxy_approx = hypot(ΔX, ΔY) * 4
+                    if (atk is not None and "X" in atk.index and "Y" in atk.index
+                            and "yaw" in atk.index and not is_jump):
+                        snap_prev = spatial_cache.get(kt - 16)
+                        prev_row = (
+                            DemoAnalyzer._spatial_player_row(snap_prev, target_player)
+                            if snap_prev is not None else None
+                        )
+                        try:
+                            if prev_row is not None:
+                                ax, ay = float(atk["X"]), float(atk["Y"])
+                                px, py = float(prev_row["X"]), float(prev_row["Y"])
+                                disp = math.hypot(ax - px, ay - py)
+                                vxy_approx = disp * 4  # 16 ticks at 64 fps
+                                if vxy_approx > _SLIDE_VEL_XY_MIN:
+                                    # 检查位移方向是否与视角夹角 ≥ 45°（侧向跑位）
+                                    move_angle = math.degrees(math.atan2(ay - py, ax - px))
+                                    yaw = float(atk["yaw"])
+                                    strafe_angle = _smallest_angle_diff_deg(move_angle, yaw)
+                                    if strafe_angle >= 45.0:
+                                        extra.append("🎿 一个大拉")
+                        except (TypeError, ValueError):
+                            pass
 
-                    # 🛸 乌鸦坐飞机：击杀帧竖直速度大且相对 16 tick 前 Z 上升
-                    if vz_a is not None and vz_a > _AIRBORNE_VEL_Z_MIN and atk is not None:
+                    # 🛸 乌鸦坐飞机：上升期击杀（Z坐标升高 且 时间距离近）
+                    # 近似：如果 kt 相对 kt-16 的 Z 增长 > _AIRBORNE_VEL_Z_MIN units，说明在上升
+                    if atk is not None and "Z" in atk.index:
                         snap_prev = spatial_cache.get(kt - _AIRBORNE_LOOKBACK_TICKS)
                         prev_row = (
                             DemoAnalyzer._spatial_player_row(snap_prev, target_player)
                             if snap_prev is not None else None
                         )
                         try:
-                            if (prev_row is not None
-                                    and "Z" in atk.index and "Z" in prev_row.index
-                                    and float(atk["Z"]) > float(prev_row["Z"])):
-                                extra.append("🛸 乌鸦坐飞机")
+                            if prev_row is not None and "Z" in prev_row.index:
+                                z_now = float(atk["Z"])
+                                z_prev = float(prev_row["Z"])
+                                z_delta = z_now - z_prev
+                                # z_delta > 80 in 16 ticks ≈ vel_z > 80 units/s
+                                if z_delta > _AIRBORNE_VEL_Z_MIN:
+                                    extra.append("🛸 乌鸦坐飞机")
                         except (TypeError, ValueError):
                             pass
 
@@ -3754,33 +3838,6 @@ class DemoAnalyzer:
         return False
 
     @staticmethod
-    def _check_camper_tag(kills_sorted: list[dict],
-                          spatial_cache: dict[int, pd.DataFrame],
-                          target_player: str) -> bool:
-        """🐍 老六本色：任一杀满足 击杀前 4s 攻击者位移 < 30 且 shots_to_kill ≤ 2。"""
-        for k in kills_sorted:
-            shots = _int(k.get("shots_to_kill"), 0)
-            if shots == 0 or shots > _CAMPER_SHOTS_MAX:
-                continue
-            kt = _int(k.get("tick"))
-            snap_now = spatial_cache.get(kt)
-            snap_pre = spatial_cache.get(kt - _CAMPER_WINDOW_TICKS)
-            if snap_now is None or snap_pre is None:
-                continue
-            r_now = DemoAnalyzer._spatial_player_row(snap_now, target_player)
-            r_pre = DemoAnalyzer._spatial_player_row(snap_pre, target_player)
-            if r_now is None or r_pre is None:
-                continue
-            try:
-                dx = float(r_now["X"]) - float(r_pre["X"])
-                dy = float(r_now["Y"]) - float(r_pre["Y"])
-                if math.hypot(dx, dy) < _CAMPER_MAX_DISP:
-                    return True
-            except (TypeError, ValueError, KeyError):
-                continue
-        return False
-
-    @staticmethod
     def _check_clutch_time_tag(kills_sorted: list[dict],
                                 round_num: int,
                                 round_end_tick_map: Optional[dict[int, int]],
@@ -3847,25 +3904,22 @@ class DemoAnalyzer:
     def _check_barefoot_tag(round_num: int,
                              target_team_at_freeze: Optional[int],
                              round_economy_map: dict[int, dict[int, int]]) -> bool:
-        """👢 光脚干皮鞋：本回合目标所在队伍装备价值 ≤ 2000 且 ≥1 杀（本函数在外部已保证 ≥1 杀）。"""
+        """👢 光脚干皮鞋：己方经济被碾压（己方 ≤ 3000 且 对面 ≥ 12000）。
+
+        本回合击杀时己方装备低廉但仍完成击杀，展现经济逆境下的实力。
+        """
         if target_team_at_freeze not in (2, 3):
             return False
         rd = round_economy_map.get(round_num, {})
         if not rd:
             return False
-        val = int(rd.get(target_team_at_freeze, 0))
-        return val > 0 and val <= _BAREFOOT_EQUIP_MAX
+        target_equip = int(rd.get(target_team_at_freeze, 0))
+        enemy_tm = 3 if target_team_at_freeze == 2 else 2
+        enemy_equip = int(rd.get(enemy_tm, 0))
 
-    @staticmethod
-    def _check_double_penetrate_tag(kills_sorted: list[dict]) -> bool:
-        """🔫 一弹双穿：同 tick 两杀 且 至少一杀 penetrated ≥ 1。"""
-        by_tick: dict[int, list[dict]] = {}
-        for k in kills_sorted:
-            by_tick.setdefault(_int(k.get("tick")), []).append(k)
-        for kt, ks in by_tick.items():
-            if len(ks) >= 2 and any(_int(k.get("penetrated"), 0) >= 1 for k in ks):
-                return True
-        return False
+        # 己方经济 ≤ 3000（很光脚） 且 对面 ≥ 12000（对面充分装备）
+        return target_equip > 0 and target_equip <= 3000 and enemy_equip >= 12000
+
 
     @staticmethod
     def _check_comeback_lowhp_tag(n: int,
@@ -4036,21 +4090,21 @@ class DemoAnalyzer:
 
     @staticmethod
     def _check_flash_send(death: dict,
-                           flash_on_target_index: Optional[list[tuple[int, float]]]) -> list[str]:
-        """🚪 闪送：flash_duration ≥ 2.5s 后 ≤ 3s 被杀，或被闪期间死亡。
+                           round_num: int,
+                           round_freeze_end_ticks: Optional[dict[int, int]]) -> list[str]:
+        """🚪 闪送：开局 8 秒内就死（仓促送死）。
 
-        flash_on_target_index: 目标被闪事件列表 [(tick, duration_sec), ...] 已按 tick 排序。
+        开局是指 round_freeze_end，8 秒内死亡判定为闪送。
         """
-        if not flash_on_target_index:
+        if not round_freeze_end_ticks:
+            return []
+        freeze_tick = round_freeze_end_ticks.get(round_num)
+        if freeze_tick is None:
             return []
         dt = _int(death.get("tick"))
-        for (ft, dur) in flash_on_target_index:
-            if dur < _FLASH_SEND_MIN_DUR:
-                continue
-            flash_end = ft + int(dur * TICK_RATE)
-            # 被闪期间死亡 —— 或 闪完后 3s 内死亡
-            if ft <= dt <= flash_end + _FLASH_SEND_WINDOW_TICKS:
-                return ["🚪 闪送"]
+        # 开局 8s 内死亡（512 ticks @ 64fps）
+        if 0 < dt - freeze_tick <= int(8.0 * TICK_RATE):
+            return ["🚪 闪送"]
         return []
 
     # ────────────────────────────────────────────────────────────
@@ -4613,8 +4667,6 @@ class DemoAnalyzer:
         if DemoAnalyzer._check_knife_backstab_tag(kills_sorted, spatial_cache, target_player):
             if "🔙 背刺" not in tags:
                 tags.append("🔙 背刺")
-        if DemoAnalyzer._check_camper_tag(kills_sorted, spatial_cache, target_player):
-            tags.append("🐍 老六本色")
         if DemoAnalyzer._check_clutch_time_tag(
             kills_sorted, round_num, round_end_tick_map, bomb_explode_tick_map,
         ):
@@ -4631,8 +4683,6 @@ class DemoAnalyzer:
             round_num, target_team_at_freeze, round_economy_map,
         ):
             tags.append("👢 光脚干皮鞋")
-        if DemoAnalyzer._check_double_penetrate_tag(kills_sorted):
-            tags.append("🔫 一弹双穿")
         if DemoAnalyzer._check_comeback_lowhp_tag(n, first_tick, spatial_cache, target_player):
             tags.append("❤️‍🩹 残血绝地反击")
         if DemoAnalyzer._check_ironshirt_tag(
@@ -5451,6 +5501,49 @@ def build_player_name_to_steam_id(parser: DemoParser, match_start_tick: int) -> 
         if an and ast is not None:
             out[an] = ast
     return out
+
+
+def _build_all_players_roster(
+    parser: DemoParser,
+    match_start_tick: int,
+    spec_slots: dict[str, int],
+    name_to_sid: dict[str, int],
+) -> list[dict]:
+    """全员名单：[{name, steamid64, spec_slot, team_num}, ...]。
+
+    spec_slot 为原始未校准值（5E/完美世界的 +1 偏移在录制侧由 platform_slot_offset 修正）。
+    team_num: 2=T，3=CT（match_start_tick 刻度的初始阵营，换边后玩家所在组不变）。
+    """
+    try:
+        df = _to_pandas_df(parser.parse_ticks(["name", "team_num"], ticks=[max(1, match_start_tick)]))
+    except BaseException as e:
+        if isinstance(e, _DEMOPARSER_RE_RAISE):
+            raise
+        return []
+    if df.empty:
+        return []
+    players: list[dict] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        name = str(row.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        team_num = row.get("team_num")
+        try:
+            team_num = int(team_num)
+        except (TypeError, ValueError):
+            team_num = 0
+        if team_num not in (2, 3):
+            continue  # skip spectators / unassigned
+        seen.add(name)
+        sid_int = name_to_sid.get(name) or name_to_sid.get(name.lower())
+        players.append({
+            "name": name,
+            "steamid64": str(sid_int) if sid_int is not None else "",
+            "spec_slot": spec_slots.get(name.lower()),
+            "team_num": team_num,
+        })
+    return players
 
 
 def _lookup_steam_id_for_name(name_to_sid: dict[str, int], player_name: str) -> Optional[int]:

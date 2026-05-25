@@ -48,6 +48,25 @@ class TestResolveFfmpeg(unittest.TestCase):
             resolve_ffmpeg_binary("__no_such_ffmpeg__.exe")
 
 
+class TestResolveFfmpegBundled(unittest.TestCase):
+    def test_bundled_third_party_before_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "third_party" / "ffmpeg").mkdir(parents=True)
+            exe = root / "third_party" / "ffmpeg" / "ffmpeg.exe"
+            exe.write_bytes(b"")
+            data = root / "data"
+            data.mkdir()
+
+            def fake_get_data_dir():
+                return data
+
+            with patch("app.env_utils.get_data_dir", fake_get_data_dir):
+                with patch("app.video_composer.shutil.which", return_value=None):
+                    p = resolve_ffmpeg_binary("")
+                    self.assertEqual(p.resolve(), exe.resolve())
+
+
 class TestBgmFilter(unittest.TestCase):
     def test_contains_loop_and_trim(self):
         s = build_bgm_filter(120.5)

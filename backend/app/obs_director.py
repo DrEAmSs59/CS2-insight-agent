@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import socket
+import struct
 import sys
 import shutil
 import shlex
@@ -35,6 +36,7 @@ from .demo_parser import (
     spec_player_extra_offset_for_gsi_failure,
 )
 from .cs2_config_backup import (
+    _atomic_write_bytes,
     is_cs2_running,
     is_restore_required,
     restore_latest_user_config_backup,
@@ -415,7 +417,12 @@ PRE_ROLL_TICKS = 300  # ~5 seconds of pre-roll（无 kill_ticks 时的传统 see
 # 智能跳跃分段阈值见 ``build_smart_jump_segments`` 内 _env_int 默认值。
 
 # 仅随录制预热（首次 seek 前、与 Space 后控制台批次）注入，段间 jump_cut 不再重复执行
-_WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = ("cl_hud_telemetry_frametime_show 0",)
+_WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = (
+    "cl_hud_telemetry_frametime_show 0",
+    "engine_no_focus_sleep 0",
+    "cl_demo_predict 0",
+    "fps_max 0",
+)
 # 录制开始时把玩家所有按键解绑并恢复到一组最小默认绑定。配合下面的「文件级用户配置
 # 快照 + 恢复」机制使用：本次 CS2 进程内按键还原为下方默认，让玩家自定义的奇葩 bind
 # 不会在 demo 回放/控制台注入期间触发；录制结束（或异常杀进程后下次启动）时再用
@@ -1769,7 +1776,8 @@ class RecordingWarmupExtras:
     hud_showtargetid_hide: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
-    snd_voipvolume_mute: bool = True
+    # "mute"=全部静音, "open"=所有玩家, "team"=只听主角队伍, "enemy"=只听对方队伍, "off"=不注入
+    voice_filter: str = "mute"
     # Demo 底部时间轴 / 回放控制条：社区常用需先 sv_cheats 1 再 demoui false
     hide_demo_playback_ui: bool = True
     # 投掷物抛物线 + 画中窗预览
@@ -1981,11 +1989,7 @@ class OBSDirector:
             ws.connect()
             ver = ws.call(obs_requests.GetVersion())
             ws.disconnect()
-            return {
-                "ok": True,
-                "obs_version": ver.getObsVersion(),
-                "ws_version": ver.getObsWebSocketVersion(),
-            }
+            return {"ok": True}
         except Exception as e:
             logger.warning("OBS WebSocket test failed: %s", e, exc_info=True)
             return {"ok": False, "error": _friendly_obs_websocket_test_error(e)}
@@ -2049,7 +2053,11 @@ class OBSDirector:
         self._copied_cfg = None
         self._copied_gsi_cfg = None
 
-    def _launch_cs2(self, demo_abs: Path, warmup: Optional[RecordingWarmupExtras] = None) -> None:
+    def _launch_cs2(
+        self,
+        demo_abs: Path,
+        warmup: Optional[RecordingWarmupExtras] = None,
+    ) -> None:
         """
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
         Source 2 对 Temp 等目录的绝对路径 +playdemo 常无效；工作目录需为 game/。
@@ -2068,6 +2076,7 @@ class OBSDirector:
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
         self._cleanup_cs2_artifacts()
+        self._clear_voice_ban_files()
 
         # CS2 读取 video.txt 的优先级高于 -w/-h 启动参数，在快照后立即 patch
         # 磁盘文件，确保录制分辨率真正生效；结束后由 _restore_user_configs 还原。
@@ -2095,7 +2104,6 @@ class OBSDirector:
         stem = dest.stem  # _insight_<uuid>
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
-        # engine_no_focus_sleep 0 关闭 Source 2 失焦节流（默认 50ms/帧 ≈ 20fps）。
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
             console_toggle_key = "`"
@@ -2105,8 +2113,6 @@ class OBSDirector:
         if console_toggle_key != "F10":
             console_bind_lines.append('bind "F10" "toggleconsole"')
         cfg_lines = [
-            "engine_no_focus_sleep 0",
-            "cl_demo_predict 0",
             "cl_spec_show_bindings 0",
             "con_enable 1",
             *console_bind_lines,
@@ -2152,16 +2158,12 @@ class OBSDirector:
         child_env = os.environ.copy()
         child_env["SteamAppId"] = "730"
         child_env["SteamGameId"] = "730"
-        # Recording forces fullscreen for this CS2 process only. The user config
-        # snapshot/restore below keeps the player's original video settings untouched.
+        # 默认继承玩家当前的视频模式，不强制切到独占全屏；否则会把原本的
+        # 「全屏窗口 / 窗口化」录制会话硬改成 fullscreen，并可能被 CS2 持久化。
+        # 若调用方确实想强制独占全屏，可经 cs2_extra_launch_args 显式追加。
         argv: List[str] = [
             str(cs2),
-            "-console", "-novid", "-insecure", "-worldwide", "-fullscreen", "-allow_third_party_software",
-            # 失焦不降速（见下方 cfg 注释）——命令行 +cvar 在 +exec 之前生效，
-            # 双层设置确保从启动第 0 帧起就关闭 Source 2 的后台节流。
-            "+engine_no_focus_sleep", "0",
-            # 关闭TrueView
-            "+cl_demo_predict", "0",
+            "-console", "-novid", "-insecure", "-worldwide", "-allow_third_party_software",
         ]
 
         if warmup is not None:
@@ -2876,6 +2878,42 @@ class OBSDirector:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
 
+    def _voice_ban_paths(self) -> list[Path]:
+        """返回所有 Steam 账号的 ``userdata/<id>/730/voice_ban.dt`` 路径。"""
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for cfg_dir in self._candidate_user_config_dirs():
+            try:
+                parent_730 = cfg_dir.parents[2]
+            except IndexError:
+                continue
+            if parent_730.name != "730":
+                continue
+            candidate = parent_730 / "voice_ban.dt"
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                paths.append(candidate)
+        return paths
+
+    def _clear_voice_ban_files(self) -> None:
+        """CS2 启动前将 voice_ban.dt 清空（count=0），确保无人被静音。
+        tv_listen_voice_indices 在 demo 层做队伍过滤，dt 文件仅需保持全开。
+        结束后由 _restore_user_configs 自动还原原始文件。
+        """
+        data = struct.pack("<I", 0)  # count=0，无屏蔽名单
+        for p in self._voice_ban_paths():
+            try:
+                if p not in self._user_config_snapshot:
+                    self._user_config_snapshot[p] = p.read_bytes() if p.is_file() else None
+                current = p.read_bytes() if p.is_file() else None
+                if current == data:
+                    continue
+                _atomic_write_bytes(p, data)
+                logger.info("voice_ban.dt cleared: %s", p)
+            except OSError as e:
+                logger.warning("Clear voice_ban.dt failed for %s: %s", p, e)
+
     def _patch_video_configs_for_resolution(
         self,
         width: int,
@@ -3248,8 +3286,18 @@ class OBSDirector:
             lines.append(f"fov_cs_debug {float(w.fov_cs_debug)}")
         if w.viewmodel_fov_68:
             lines.append("viewmodel_fov 68")
-        if w.snd_voipvolume_mute:
+        _vf = getattr(w, "voice_filter", "mute")
+        if _vf in ("mute", "all"):  # "all" 为旧值向后兼容
             lines.append("snd_voipvolume 0")
+        elif _vf == "open":
+            lines.append("snd_voipvolume 1")
+            lines.append("tv_listen_voice_indices -1")
+        elif _vf == "off":
+            pass  # 不注入任何语音指令
+        else:  # "team" or "enemy" — 先打开全员基线，per-segment 再收窄到掩码
+            # all_players 为空时以"全部可听"降级，而不是静音
+            lines.append("snd_voipvolume 1")
+            lines.append("tv_listen_voice_indices -1")
         if w.hide_grenade_trajectory_pip:
             lines.append("sv_grenade_trajectory 0")
             lines.append("sv_grenade_trajectory_prac_pipreview 0")
@@ -3471,6 +3519,15 @@ class OBSDirector:
                             "error": str(e), "segment_results": [], "warnings": [],
                         })
                         continue
+
+                    # ── voice_filter: patch segment masks before execution ────────
+                    _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"
+                    if _vf in ("off", "open", "mute", "all"):
+                        for _seg in plan.segments:
+                            _seg.voice_listen_mask = None
+                    elif _vf == "enemy":
+                        for _seg in plan.segments:
+                            _seg.voice_listen_mask = _seg.voice_listen_mask_enemy
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
                     _pre_execute_wall = time.time()

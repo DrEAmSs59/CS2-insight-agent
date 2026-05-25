@@ -488,6 +488,23 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
             pass
     obs_cfg = _merge_obs(obs_cfg_override, cfg.obs)
 
+    # Pre-recording OBS connection check — verify OBS is reachable before
+    # launching CS2, so we fail fast rather than wasting ~60s on CS2 warmup
+    # only to discover OBS is down.
+    try:
+        _pre_obs_client = OBSClient(obs_cfg)
+        _pre_obs_client.connect()
+        try:
+            _pre_obs_client.disconnect()
+        except Exception:
+            pass
+        logger.info("[RecordingV3] OBS pre-check: connection OK")
+    except OBSConnectionError as e:
+        raise HTTPException(
+            400,
+            f"无法连接 OBS：{e}。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
+        )
+
     # Resolve demo paths: replace filename/relative refs with absolute paths.
     resolved_requests = []
     for dto in req.requests:
@@ -506,8 +523,12 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     warmup_extras = None
     if req.warmup:
         try:
+            _warmup_dict = dict(req.warmup)
+            # Backward compat: convert old boolean snd_voipvolume_mute → voice_filter
+            if "snd_voipvolume_mute" in _warmup_dict and "voice_filter" not in _warmup_dict:
+                _warmup_dict["voice_filter"] = "mute" if _warmup_dict["snd_voipvolume_mute"] else "team"
             _valid_keys = {f.name for f in dataclasses.fields(RecordingWarmupExtras)}
-            _filtered = {k: v for k, v in req.warmup.items() if k in _valid_keys}
+            _filtered = {k: v for k, v in _warmup_dict.items() if k in _valid_keys}
             warmup_extras = RecordingWarmupExtras(**_filtered)
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)
