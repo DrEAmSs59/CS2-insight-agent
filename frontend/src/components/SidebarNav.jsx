@@ -43,7 +43,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
             width={64}
             height={64}
             decoding="async"
-            className={`h-16 w-16 shrink-0 object-contain ${theme === "dark" ? "mix-blend-lighten" : "invert mix-blend-darken opacity-90"}`}
+            className="h-16 w-16 shrink-0 object-contain"
           />
           <div className="min-w-0">
             <div className="truncate text-sm font-bold tracking-wide text-cs2-text-primary">CS2 洞察</div>
