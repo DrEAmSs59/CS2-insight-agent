@@ -418,7 +418,7 @@ export default function MatchCard({
       <div className="grid grid-cols-2 border-y border-cs2-border bg-cs2-bg-input/30 group/roster w-full transition-colors hover:bg-cs2-bg-hover">
         <div className="relative border-r border-cs2-border px-3 py-1">
           <div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_a_name || "Team A"}</div>
-          <div className="flex flex-wrap gap-1">
+          <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
             {teamA.length > 0 ? teamA.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
                 {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}
@@ -430,7 +430,7 @@ export default function MatchCard({
         </div>
         <div className="px-3 py-1">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_b_name || "Team B"}</div>
-          <div className="flex flex-wrap gap-1">
+          <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
             {teamB.length > 0 ? teamB.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
                 {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}

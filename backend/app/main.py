@@ -1906,6 +1906,32 @@ async def delete_demo(
     return {"status": "deleted", "demo_id": demo_id}
 
 
+@app.post("/api/demos/{demo_id}/delete-file")
+async def delete_demo_file(demo_id: int):
+    """从磁盘删除 .dem 文件（如有同名 .zip 也一并删除），同时删除库内记录。"""
+    demo = await demo_db.get_demo_by_id(demo_id)
+    if not demo:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+    disk_path = str(demo["path"])
+    import os as _os
+    deleted_files: list[str] = []
+    errors: list[str] = []
+    for target in (disk_path, disk_path.rsplit(".", 1)[0] + ".zip" if "." in _os.path.basename(disk_path) else None):
+        if target is None:
+            continue
+        try:
+            _os.remove(target)
+            deleted_files.append(target)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            errors.append(f"{target}: {e}")
+    # 无论文件删除成功与否，都删除库内记录
+    await demo_db.delete_demo(demo_id, rescan="skip")
+    await demo_library_hub.notify("deleted")
+    return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
+
+
 class BatchIngestBody(BaseModel):
     demo_ids: list[int] = Field(..., min_length=1, max_length=200)
 

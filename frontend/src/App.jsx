@@ -190,7 +190,7 @@ export default function App() {
   });
   const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
   /** Demo 库列表每页条数（与 GET /demos limit 一致） */
-  const [libraryPageSize, setLibraryPageSize] = useState(10);
+  const [libraryPageSize, setLibraryPageSize] = useState(12);
   const libraryPageSizeEffectSkipRef = useRef(false);
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
@@ -524,6 +524,20 @@ export default function App() {
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
         setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
+      }
+    },
+    [refreshDemoLibrary, libraryPage]
+  );
+
+  const handleDeleteDemoFile = useCallback(
+    async (id) => {
+      try {
+        await API.post(`/demos/${id}/delete-file`);
+        setLibraryDeletePrompt(null);
+        setProgressText("已从磁盘删除 .dem 文件（如有同名 .zip 也一并删除）。");
+        await refreshDemoLibrary(libraryPage, { manageLoading: false });
+      } catch (e) {
+        setProgressText(`删除文件失败: ${e.response?.data?.detail || e.message}`);
       }
     },
     [refreshDemoLibrary, libraryPage]
@@ -2303,6 +2317,7 @@ export default function App() {
     hasLibraryAdvancedFilters,
     handleLoadDemoFromLibrary,
     handleDeleteDemo,
+    handleDeleteDemoFile,
     handleLibraryBatchDelete,
     setProgressText,
     handleSaveLibraryRename,

@@ -47,9 +47,9 @@
   --cs2-surface-3: #333333;
 
   /* 滚动条 */
-  --cs2-scrollbar-track: #111111;
-  --cs2-scrollbar-thumb: #333333;
-  --cs2-scrollbar-thumb-hover: #555555;
+  --cs2-scrollbar-track: #1a1a1a;
+  --cs2-scrollbar-thumb: #555555;
+  --cs2-scrollbar-thumb-hover: #777777;
 
   /* 状态色 surface（badge/tag 背景） */
   --cs2-rose-surface: rgba(248,113,113,0.12);
@@ -246,6 +246,16 @@ html {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
+  background: var(--cs2-scrollbar-thumb-hover);
+}
+
+.scrollbar-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.scrollbar-hover:hover::-webkit-scrollbar-thumb {
+  background: var(--cs2-scrollbar-thumb);
+}
+.scrollbar-hover:hover::-webkit-scrollbar-thumb:hover {
   background: var(--cs2-scrollbar-thumb-hover);
 }
 

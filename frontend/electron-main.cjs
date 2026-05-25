@@ -49,13 +49,13 @@ function resolveWindowIconPath() {
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const initWidth = Math.min(1600, Math.floor(width * 0.8));
+  const initWidth = Math.min(1700, Math.floor(width * 0.8));
   const initHeight = Math.min(900, Math.floor(height * 0.8));
 
   mainWindow = new BrowserWindow({
     width: initWidth,
     height: initHeight,
-    minWidth: 1440,
+    minWidth: 1540,
     minHeight: 900,
     frame: false, // 移除原生菜单和标题栏
     titleBarStyle: 'hidden',

@@ -121,7 +121,7 @@ export default function Sidebar({
   const isLocal = llmBaseUrlLooksLocal(llmConfig.base_url);
 
   return (
-    <aside className="w-72 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
+    <aside className="w-60 bg-cs2-bg-sidebar border-r border-cs2-border flex flex-col overflow-y-auto shrink-0">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-cs2-border">
         <div className="flex items-center gap-2">
