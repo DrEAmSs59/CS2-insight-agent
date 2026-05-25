@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -685,6 +686,75 @@ def detect_obs_path() -> Optional[str]:
     if found:
         return str(Path(found).resolve())
     return None
+
+
+def minimize_obs_window() -> None:
+    """最小化 OBS 主窗口。仅 Windows 生效；非 Windows 为 no-op。
+
+    先通过 tasklist 找 obs64.exe/obs32.exe 的 PID，再按 PID + 可见窗口匹配。
+    OBS 进程起来后需要一点时间才创建窗口，因此内部带重试。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import subprocess as _sp
+        import time as _t
+
+        SW_MINIMIZE = 2
+
+        def _get_obs_pids() -> set[int]:
+            obs_pids: set[int] = set()
+            try:
+                result = _sp.run(
+                    ["tasklist", "/FI", "IMAGENAME eq obs64.exe", "/NH", "/FO", "CSV"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                for line in result.stdout.splitlines():
+                    parts = [p.strip().strip('"') for p in line.split(",")]
+                    if len(parts) >= 2 and parts[0] and parts[1].isdigit():
+                        obs_pids.add(int(parts[1]))
+            except Exception:
+                pass
+            return obs_pids
+
+        def _find_visible_hwnd(obs_pids: set[int]):
+            found = None
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_long
+            )
+
+            def enum_callback(hwnd, _lparam):
+                nonlocal found
+                if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                    return True
+                pid_buf = ctypes.c_ulong(0)
+                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_buf))
+                if pid_buf.value not in obs_pids:
+                    return True
+                found = hwnd
+                return False
+
+            ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+            return found
+
+        # 重试最多 5 次，每 0.5 秒一次，给 OBS 时间创建窗口
+        for _attempt in range(5):
+            obs_pids = _get_obs_pids()
+            if not obs_pids:
+                logger.warning("OBS process not found for minimization")
+                return
+            hwnd = _find_visible_hwnd(obs_pids)
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, SW_MINIMIZE)
+                logger.info("Minimized OBS window (hwnd=%d, pid=%d)", hwnd, list(obs_pids)[0])
+                return
+            _t.sleep(0.5)
+
+        logger.warning("No visible OBS window found after retries (PIDs: %s)", obs_pids)
+    except Exception as e:
+        logger.warning("Failed to minimize OBS window: %s", e)
 
 
 def ensure_cs2_path(cfg: AppConfig) -> AppConfig:

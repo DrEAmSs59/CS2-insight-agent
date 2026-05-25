@@ -36,6 +36,7 @@ from .env_utils import (
     detect_cs2_path,
     detect_ffmpeg_path,
     detect_obs_path,
+    minimize_obs_window,
     resolve_config_path,
     llm_api_key_configured,
     llm_base_url_is_local_host,
@@ -294,6 +295,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
+# 防止并发请求同时拉起多个 OBS（React StrictMode 双重挂载导致请求发两次）
+import threading
+
+_obs_launch_lock = threading.Lock()
 
 def _resolve_web_dist_dir() -> Optional[Path]:
     """
@@ -1111,27 +1116,29 @@ def obs_config_check(payload: OBSConfig | None = Body(default=None)):
     logger.info("[OBS config-check] obs_path=%r", obs_path)
 
     if obs_path and Path(obs_path).is_file():
-        running = _is_obs_process_running(obs_path)
-        logger.info("[OBS config-check] Path OK, OBS already running=%s", running)
-        if not running:
-            logger.info("[OBS config-check] Launching OBS: %s", obs_path)
-            try:
-                subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
-                launched_obs = True
+        with _obs_launch_lock:
+            # 双重检查：第一个请求可能已经拉起了 OBS
+            running = _is_obs_process_running(obs_path)
+            logger.info("[OBS config-check] Path OK, OBS already running=%s", running)
+            if not running:
+                logger.info("[OBS config-check] Launching OBS: %s", obs_path)
+                try:
+                    subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+                    launched_obs = True
+                    path_ok = True
+                    # 轮询等待 OBS 进程出现，最多 15 秒
+                    for _attempt in range(30):
+                        if _is_obs_process_running(obs_path):
+                            break
+                        _time.sleep(0.5)
+                    else:
+                        logger.warning("[OBS config-check] OBS did not appear after 15s; continuing anyway")
+                    _time.sleep(1)
+                except Exception as e:
+                    logger.error("[OBS config-check] Failed to launch OBS: %s", e)
+                    return {"path_ok": False, "error": f"无法启动 OBS: {e}"}
+            else:
                 path_ok = True
-                # 轮询等待 OBS 进程出现，最多 15 秒
-                for _attempt in range(30):
-                    if _is_obs_process_running(obs_path):
-                        break
-                    _time.sleep(0.5)
-                else:
-                    logger.warning("[OBS config-check] OBS did not appear after 15s; continuing anyway")
-                _time.sleep(1)
-            except Exception as e:
-                logger.error("[OBS config-check] Failed to launch OBS: %s", e)
-                return {"path_ok": False, "error": f"无法启动 OBS: {e}"}
-        else:
-            path_ok = True
     elif obs_path:
         logger.warning("[OBS config-check] Path configured but file not found: %s", obs_path)
         return {"path_ok": False, "error": "OBS 路径不存在"}
@@ -1145,12 +1152,10 @@ def obs_config_check(payload: OBSConfig | None = Body(default=None)):
         director = OBSDirector(obs_use, cfg.cs2_path)
 
         connected = False
-        obs_version = None
         for _attempt in range(15):
             result = director.test_obs_connection()
             if result.get("ok"):
                 connected = True
-                obs_version = result.get("obs_version")
                 break
             _time.sleep(1)
         else:
@@ -1160,14 +1165,17 @@ def obs_config_check(payload: OBSConfig | None = Body(default=None)):
             _normalize_obs_path_auto_detect(cfg)
             cfg.obs.obs_config_verified = True
             save_config(cfg)
-    except Exception:
+    except Exception as e:
+        logger.warning("[OBS config-check] OBS connection test exception: %s", e)
         connected = False
-        obs_version = None
+
+    # 连接成功后最小化 OBS 窗口（放在 try 外确保执行）
+    if connected:
+        minimize_obs_window()
 
     return {
         "path_ok": path_ok,
         "connected": connected,
-        "obs_version": obs_version,
         "launched_obs": launched_obs,
     }
 

@@ -1614,35 +1614,22 @@ export default function App() {
       );
       return;
     }
-    // 1) 检查 OBS 进程是否在运行
+    // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
+    setProgressText("正在检测 OBS 连接…");
     try {
-      const { data: runData } = await API.post("/obs/is-running");
-      if (!runData.running) {
-        setProgressText("检测到 OBS 未运行，正在自动启动…");
-        await API.post("/obs/launch");
-        await new Promise((r) => setTimeout(r, 3000));
-        setProgressText("OBS 已启动，正在检测连接…");
-      }
-    } catch (e) {
-      setProgressText(`OBS 启动失败: ${e.response?.data?.detail || e.message}`);
-      return;
-    }
-    // 2) 测试 WebSocket 连接
-    try {
-      const { data } = await API.get("/status/setup");
-      if (!data?.obs_connected) {
-        setProgressText(
-          "无法连接 OBS。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
-        );
+      const { data } = await API.post("/obs/config-check", obsConfig);
+      if (!data?.connected) {
+        setProgressText("无法连接 OBS。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。");
         return;
       }
     } catch (e) {
-      setProgressText("OBS 连通性检测失败，请稍后重试。");
+      setProgressText(`OBS 连接检测失败: ${e.response?.data?.detail || e.message}`);
       return;
     }
     setQueueDrawerOpen(false);
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
+    setProgressText("");
   }, [queue.length, configBackupStatus?.restore_required, setProgressText]);
 
   const handleWarmupConfirm = useCallback(
@@ -1706,6 +1693,7 @@ export default function App() {
           if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
+          setProgressText("", { autoDismissMs: 100 });
         } catch (e) {
           const detail = formatRecordingApiError(e);
           if (e.response?.status === 409 || e.response?.status === 422) {
@@ -2409,7 +2397,7 @@ export default function App() {
             <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
               <ProgressBar
                 text={progressText || (batchRecording ? "正在批量录制…" : "")}
-                active={anyDemoParsing}
+                active={anyDemoParsing || (progressText && !batchRecording && !progressToastMeta?.autoDismissMs)}
                 batchRecording={batchRecording}
                 onAbortBatch={handleAbortBatchRecording}
                 dismissible={Boolean(progressText?.trim())}

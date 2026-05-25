@@ -1989,11 +1989,7 @@ class OBSDirector:
             ws.connect()
             ver = ws.call(obs_requests.GetVersion())
             ws.disconnect()
-            return {
-                "ok": True,
-                "obs_version": ver.getObsVersion(),
-                "ws_version": ver.getObsWebSocketVersion(),
-            }
+            return {"ok": True}
         except Exception as e:
             logger.warning("OBS WebSocket test failed: %s", e, exc_info=True)
             return {"ok": False, "error": _friendly_obs_websocket_test_error(e)}
