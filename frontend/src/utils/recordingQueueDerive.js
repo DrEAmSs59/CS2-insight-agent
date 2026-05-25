@@ -71,10 +71,21 @@ const _KILLER_POV_POST_DEFAULT = 1.5;
 export function estimateItemRecordSeconds(item, globalPacing) {
   const clip = item.clipData || {};
   const po = item.pacing_override && typeof item.pacing_override === "object" ? item.pacing_override : {};
+  const gp = globalPacing && typeof globalPacing === "object" ? globalPacing : {};
   const { pre_first_sec, post_last_sec, max_gap_sec } = mergedPacingForItem(item, globalPacing);
-  const pre = Math.max(0.5, pre_first_sec);
-  const post = Math.max(0.5, post_last_sec);
+  let pre = Math.max(0.5, pre_first_sec);
+  let post = Math.max(0.5, post_last_sec);
   const thresholdTicks = max_gap_sec * DEMO_TICK_RATE;
+
+  // 时间线击杀：后端用 timeline_kill_pre_sec(3.0) / timeline_kill_post_sec(2.0)，
+  // 与 BACKEND_DEFAULT_PACING(2/1) 不同。若用户未显式配置 pacing，改用后端真实默认值。
+  const isTimelineKillEvent =
+    String(clip.timeline_source || "") === "round_timeline_event" &&
+    String(clip.timeline_record_kind || "") === "kill";
+  if (isTimelineKillEvent) {
+    if (po.pre_first_sec == null && gp.pre_first_sec == null) pre = 3.0;
+    if (po.post_last_sec == null && gp.post_last_sec == null) post = 2.0;
+  }
 
   const compilationKind = String(clip.compilation_kind || "");
   const isKillCompilation = compilationKind === "rival_kills" || compilationKind === "all_kills";

@@ -1739,9 +1739,9 @@ export default function App() {
     try {
       const { data } = await API.post("/config-backup/restore");
       if (data?.ok) {
-        setProgressText(data.message || "玩家配置已恢复");
+        setProgressText(data.message || "玩家配置已恢复", { autoDismissMs: 3000 });
       } else {
-        setProgressText(data?.message || "部分配置恢复失败");
+        setProgressText(data?.message || "部分配置恢复失败", { autoDismissMs: 4000 });
       }
       await refreshConfigBackupStatus();
     } catch (e) {
@@ -1752,7 +1752,7 @@ export default function App() {
           "CS2 正在运行，无法覆盖配置文件。\n请先关闭 CS2，然后再次点击一键恢复。",
         );
       } else {
-        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`);
+        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`, { autoDismissMs: 5000 });
       }
       await refreshConfigBackupStatus();
     }

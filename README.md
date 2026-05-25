@@ -1,8 +1,8 @@
 # CS2 Insight Agent
 
-[License](LICENSE)
-[Version](https://github.com/DrEAmSs59/CS2-insight-agent/releases)
-[Player Guide](PLAYER_GUIDE.md)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/LICENSE)
+[![Version](https://img.shields.io/github/v/release/DrEAmSs59/CS2-insight-agent)](https://github.com/DrEAmSs59/CS2-insight-agent/releases)
+[![Player Guide](https://img.shields.io/badge/📖-玩家使用指南-orange)](https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/PLAYER_GUIDE.md)
 
 **CS2 洞察智能体** — 专为 CS2 玩家打造的桌面端智能电竞终端。
 
@@ -12,20 +12,18 @@
 
 ## Tech Stack
 
-
-| Layer    | Technology                                                                 |
-| -------- | ---------------------------------------------------------------------------- |
-| Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand                   |
-| Desktop  | Electron 42（Windows 安装包 / `electron-updater` 自动更新）                        |
-| Backend  | Python 3.12 + FastAPI + uvicorn                                               |
-| 解析引擎     | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程）                            |
-| AI 网关    | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等）           |
-| 录制管线     | `RecordingRequestDTO` → `plan_builder` → `RecordingExecutor`；CS2 启停与批量队列由 `obs_director` 编排 |
-| OBS 控制   | obs-websocket-py（分段 `StartRecord` / `PauseRecord` jump-cut；可选场景转场淡入淡出）      |
-| 合辑导出     | FFmpeg（`montage_encoder` 自动探测 NVENC / QSV / AMF / libx264）                   |
-| Demo 库   | aiosqlite + watchdog（目录监听 + SSE 推送）                                        |
-| CS2 集成   | Game State Integration（录制就绪门控）+ `win_cs2_console` 控制台注入                     |
-
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand |
+| Desktop | Electron 42（Windows 安装包 / `electron-updater` 程序内自动更新） |
+| Backend | Python 3.12 + FastAPI + uvicorn |
+| 解析引擎 | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程） |
+| AI 网关 | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等） |
+| 录制管线 | `RecordingRequestDTO` → `plan_builder` → `RecordingExecutor`；CS2 启停与批量队列由 `obs_director` 编排 |
+| OBS 控制 | obs-websocket-py（分段 `StartRecord` / `PauseRecord` jump-cut；可选场景转场淡入淡出） |
+| 合辑导出 | FFmpeg（`montage_encoder` 自动探测 NVENC / QSV / AMF / libx264） |
+| Demo 库 | aiosqlite + watchdog（目录监听 + SSE 推送） |
+| CS2 集成 | Game State Integration（录制就绪门控）+ `win_cs2_console` 控制台注入 |
 
 ---
 
@@ -97,108 +95,56 @@ CS2-insight-agent/
 
 ## Quick Start
 
-### 1. Backend
+### 方式一：安装包（普通用户推荐）
+
+前往 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载最新的 `CS2-Insight-Agent-Setup-x.x.x.exe`，双击运行安装包，按提示完成安装。
+
+安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**，Electron 主进程会自动在内部启动 Python 后端服务。
+
+程序内置**在线更新**功能：启动时会自动检测是否有新版本，有更新时右上角会弹出提示，点击即可在程序内完成下载和安装，无需手动重新下载安装包。
+
+> **建议安装路径不含中文字符。** 例如 `D:\CS2-Insight-Agent\` ✅，`D:\游戏工具\CS2洞察\` ❌
+
+---
+
+### 方式二：源码开发（开发者）
+
+#### 1. Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000 or python -m uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000
+# 或
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-实际发放版本内置的 Python 运行时为 `3.12`。
+发行版内置的 Python 运行时为 `3.12`。
 
-### 2. Frontend
+#### 2. Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev or npm run electron:dev // start frontend dev server
-```
-前端打包：
-```bash
-npm run build
-```
-Electron 打包：
-```bash
-npm run electron:build
-```
-Electron打包位置：`frontend/dist_electron/`
 
+# 仅启动前端开发服务器（不含 Electron 壳）
+npm run dev
 
+# 启动 Electron 开发模式（内嵌前端 + 自动重载）
+npm run electron:dev
+```
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
 
-### Windows 安装包（预编译）
+#### 3. 打包
 
-**官方发布页**：[Releases · DrEAmSs59/CS2-insight-agent](https://github.com/DrEAmSs59/CS2-insight-agent/releases)。每个符合 `v*` 的 **git tag** 会触发 GitHub Actions 工作流 **Release Windows**，在对应 Release 下上传构建产物（无需自己从源码打包即可安装）。
-
-**每个版本通常包含**：
-
-| 文件 | 说明 |
-|------|------|
-| `CS2InsightAgent-<版本号>-Setup.exe` | **推荐**：Inno Setup 安装包（内置 Python 运行时、后端与已构建的前端静态资源）。`<版本号>` 与 tag 一致，例如 tag `v1.2.3` → 安装包内版本为 `1.2.3`。 |
-| `CS2InsightAgent-<版本号>-windows-amd64.zip` | **便携版**：解压到任意目录即可运行（需路径可写）；适合不想走安装向导的用户。 |
-| `SHA256SUMS` | 上述文件的 SHA256 列表，可用 `Get-FileHash` 或 `sha256sum` 对照校验。 |
-
-若在 **fork** 或预发布渠道获取 CI 构建，请到该仓库的 **Releases** 页面下载与 **tag 名称** 对应的资源（流程与上游相同）。
-
-**安装步骤（Setup.exe）**：
-
-1. **双击** `CS2InsightAgent-*-Setup.exe` 按向导安装。**不要**安装到 `Program Files` 等无写权限目录；安装器默认使用 `%LocalAppData%\CS2InsightAgent`，便于写入配置与 SQLite 数据库。
-2. 向导最后一页可**按需勾选**「下载 FFmpeg」：勾选后会在安装结束时联网下载 FFmpeg 到安装目录下的 `third_party\ffmpeg\`（用于部分视频能力）；不勾选也可后装。
-3. 安装完成后用「开始」菜单或**桌面快捷方式**启动 **CS2 Insight Agent**。会先出现 PowerShell 控制台窗口并启动本地服务（默认 `http://127.0.0.1:8000/`），就绪后会尝试自动打开浏览器。**启动脚本会在运行前执行 `chcp 65001` 并统一控制台为 UTF-8**，减少中文与日志乱码。
-4. 首次运行会在安装目录的 `data\` 下生成 `cs2-insight.config.json`（由示例配置复制）；CS2 路径、Demo 监听目录、LLM、OBS 等均在应用内「设置」中配置。玩法说明见 [PLAYER_GUIDE.md](PLAYER_GUIDE.md)。
-
-**便携版（zip）**：解压到**可写**文件夹后，运行目录中的 **`CS2 Insight Agent.cmd`**（或 `Launch-CS2Insight.ps1`，需本机允许 PowerShell 执行策略）。
-
-### 本地开发：重新打包 Windows（开发者）
-
-在 **Windows x64** 本机或虚拟机里操作（macOS / Linux 无法打出该 Inno 安装包，只能改代码后在 Windows 上打包）。
-
-**依赖**
-
-| 依赖 | 说明 |
-|------|------|
-| Node.js | 建议 **20+**（CI 使用 22）；用于 `npm run build` |
-| Inno Setup **6** | [官方下载](https://jrsoftware.org/isdl.php)，或 `choco install innosetup -y` |
-| PowerShell | 5.1 即可（仓库根目录执行下列命令） |
-
-**推荐流程**（仓库根目录 → `frontend` 构建 → 可选写入版本号 → `bootstrap-staging` → `ISCC`）
-
-```powershell
-cd frontend
-npm ci          # 日常开发若已 npm install 可省略，发布前建议 ci
+```bash
+# 仅打包前端静态资源
 npm run build
-cd ..
 
-# 可选：写入安装包/关于界面用的版本字符串（与下面 /DMyAppVersion 保持一致）
-.\packaging\windows\write-release-version.ps1 -Version "0.0.0-dev"
-
-# 生成 dist\staging（嵌入 Python、pip 依赖、后端与前端静态文件，通常需数分钟）
-.\packaging\windows\bootstrap-staging.ps1
-
-# 与 CI 一致的自检（可选）
-& "dist\staging\python\python.exe" -c "import demoparser2, fastapi; print('imports-ok')"
-
-# 编译安装包；/DMyAppVersion 须与 write-release-version 写入的版本一致（未跑 stamp 时可用任意与文件名一致的测试号）
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.0.0-dev .\packaging\windows\CS2InsightAgent.iss
+# 打包 Electron 安装包（输出至 frontend/dist_electron/）
+npm run electron:build
 ```
-
-**产物**
-
-- **安装包**：`dist\CS2InsightAgent-<版本>-Setup.exe`（`<版本>` 即 `/DMyAppVersion` 的值）。
-- **便携 zip**（与 Release 中 `*-windows-amd64.zip` 同结构，可选）：
-
-```powershell
-$ver = "0.0.0-dev"
-Compress-Archive -Path "dist\staging\*" -DestinationPath "CS2InsightAgent-$ver-windows-amd64.zip" -Force
-```
-
-**提示**
-
-- `CS2InsightAgent.iss` 的 `SourceDir` 已指向 `dist\staging`，无需手改。
-- 本地一般**不做** Authenticode 签名；CI、证书与 tag 发版流程见 [packaging/windows/RELEASE-WINDOWS.md](packaging/windows/RELEASE-WINDOWS.md)。
-- 修改了 `packaging/windows/install-optional-ffmpeg.ps1` 等安装期脚本后，需重新执行 **bootstrap + ISCC** 才会打进新的 `Setup.exe`。
 
 ---
 
@@ -249,6 +195,7 @@ Compress-Archive -Path "dist\staging\*" -DestinationPath "CS2InsightAgent-$ver-w
 ### 🎞️ 合辑工作台（可选）
 
 - 录制成功的片段自动入库 `recorded_clips`，可在合辑工作台拖拽排序、配 BGM / 转场主题，经 FFmpeg 导出 MP4。
+- **使用前需配置 FFmpeg**：前往 [FFmpeg 官网](https://ffmpeg.org/download.html) 或 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载 Windows 构建包，解压后在程序设置页面的「FFmpeg 路径」中填入 `ffmpeg.exe` 的完整路径。`montage_encoder` 会自动探测可用的硬件编码器（NVENC / QSV / AMF），无硬件加速时回退到 libx264。
 
 ### 📚 Demo 库
 
@@ -258,7 +205,7 @@ Compress-Archive -Path "dist\staging\*" -DestinationPath "CS2InsightAgent-$ver-w
 
 ### 🎨 UI / UX
 
-- 暗黑磨砂黑底 + CS2 经典亮橙强调色，原生电竞风。
+- 暗黑磨砂黑底 + CS2 经典亮橙强调色，原生电竞风，Electron 桌面应用无需浏览器。
 - 录制队列页支持跨场次跨玩家管理、计划预览与节奏微调（pre-roll / post-kill / jump-cut 阈值等，队列项可 per-clip 覆盖）。
 - 阻断弹窗根据后端返回 detail 自动判断「CS2 占用 / GSI 未就绪 / 录制任务进行中」并切换副标题。
 
@@ -266,42 +213,40 @@ Compress-Archive -Path "dist\staging\*" -DestinationPath "CS2InsightAgent-$ver-w
 
 ## API Endpoints（节选）
 
-
-| Method | Path                        | Description          |
-| ------ | --------------------------- | -------------------- |
-| GET    | `/api/health`               | 健康检查                 |
-| GET    | `/api/config`               | 获取配置                 |
-| PUT    | `/api/config`               | 更新配置                 |
-| POST   | `/api/config/detect-cs2`    | 自动探测 cs2.exe 路径      |
-| POST   | `/api/obs/test`             | 测试 OBS WebSocket 连接  |
-| POST   | `/api/demo/upload`          | 单文件上传                |
-| POST   | `/api/demo/upload-multiple` | 多文件上传                |
-| POST   | `/api/demo/parse`           | 单玩家解析                |
-| POST   | `/api/demo/parse-multi`     | 同 Demo 多玩家解析         |
-| POST   | `/api/demo/parse-batch`     | 跨 Demo 批量解析          |
-| GET    | `/api/demos`                | Demo 库列表（分页）         |
-| GET    | `/api/demos/stream`         | 库变更 SSE 流            |
-| POST   | `/api/demos/scan`           | 手动扫描监听目录             |
-| POST   | `/api/demos/{id}/parse`     | 重新解析                 |
-| POST   | `/api/demos/{id}/analyze`   | 直接对库内 Demo 出片段       |
-| GET    | `/api/demos/{id}/players`   | 库内 Demo 玩家名册         |
-| POST   | `/api/recording/queue`      | 批量录制：`RecordingRequestDTO[]` → `plan_builder` → `execute_plan_queue` |
-| POST   | `/api/recording/plan`       | 预览 `RecordingPlan`（active / disabled 段、warnings、末回合元数据） |
-| POST   | `/api/recording/execute`    | 单条 DTO 即时执行（调试用，不经队列编排） |
-| POST   | `/api/recording/abort`      | 中止当前进行中的批量录制队列 |
-| GET    | `/api/recorded-clips`       | 已录片段列表（合辑工作台） |
-| POST   | `/api/montage/projects`     | 保存合辑工程 |
-| POST   | `/api/montage/export`       | FFmpeg 合辑导出 |
-| POST   | `/api/gsi/cs2`              | CS2 GSI Sink（录制就绪门控） |
-| GET    | `/api/gsi/status`           | 查看最近 GSI 状态          |
-
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查 |
+| GET | `/api/config` | 获取配置 |
+| PUT | `/api/config` | 更新配置 |
+| POST | `/api/config/detect-cs2` | 自动探测 cs2.exe 路径 |
+| POST | `/api/obs/test` | 测试 OBS WebSocket 连接 |
+| POST | `/api/demo/upload` | 单文件上传 |
+| POST | `/api/demo/upload-multiple` | 多文件上传 |
+| POST | `/api/demo/parse` | 单玩家解析 |
+| POST | `/api/demo/parse-multi` | 同 Demo 多玩家解析 |
+| POST | `/api/demo/parse-batch` | 跨 Demo 批量解析 |
+| GET | `/api/demos` | Demo 库列表（分页） |
+| GET | `/api/demos/stream` | 库变更 SSE 流 |
+| POST | `/api/demos/scan` | 手动扫描监听目录 |
+| POST | `/api/demos/{id}/parse` | 重新解析 |
+| POST | `/api/demos/{id}/analyze` | 直接对库内 Demo 出片段 |
+| GET | `/api/demos/{id}/players` | 库内 Demo 玩家名册 |
+| POST | `/api/recording/queue` | 批量录制：`RecordingRequestDTO[]` → `plan_builder` → `execute_plan_queue` |
+| POST | `/api/recording/plan` | 预览 `RecordingPlan`（active / disabled 段、warnings、末回合元数据） |
+| POST | `/api/recording/execute` | 单条 DTO 即时执行（调试用，不经队列编排） |
+| POST | `/api/recording/abort` | 中止当前进行中的批量录制队列 |
+| GET | `/api/recorded-clips` | 已录片段列表（合辑工作台） |
+| POST | `/api/montage/projects` | 保存合辑工程 |
+| POST | `/api/montage/export` | FFmpeg 合辑导出 |
+| POST | `/api/gsi/cs2` | CS2 GSI Sink（录制就绪门控） |
+| GET | `/api/gsi/status` | 查看最近 GSI 状态 |
 
 ---
 
 ## Roadmap
 
-- **V1.x.x** — 高光引擎 + AI 锐评 + OBS 全自动导播 ✅ *Current*
-- **V2.x.x** — 编辑切片合成视频，开场动画，BGM，AI Agent 一句话自动录制视频，外网数据挂载（5E / 完美世界），作为 AI 上下文增强点评深度
+- **V1.x.x** — 高光引擎 + AI 锐评 + OBS 全自动导播 ✅ *已完成*
+- **V2.x.x** — Electron 桌面端、程序内在线更新、V3 录制管线（Plan/Execute 分离）、合辑工作台（FFmpeg 导出）、POV HUD 实验性功能 ✅ *Current*
 - **V3.x.x** — 战术教练（投掷物轨迹分析 / 首杀热力图 / 路线复盘）
 
 ---
@@ -325,7 +270,9 @@ Counter-Strike 2、CS2、Counter-Strike、Steam、Valve 等名称、商标和标
 
 - **默认录制流程**调用 CS2 时使用 `-insecure` 仅用于本地 Demo 回放，不存在 DLL 注入或 Hook；不会对磁盘上的 `.dem` 做修改，不连接、不修改、不干预任何官方游戏服务器、匹配服务或反作弊系统，也不提供任何作弊、绕过检测或破坏公平竞技的功能，**不要在已登录匹配服务器的 CS2 客户端中并行使用**，以免触发反作弊系统的不必要警示。
 - 若你在「常用参数管理 → 实验性功能」中**主动开启 POV**，程序会临时向 CS2 的 `game/csgo` 目录写入 `pov.vpk`，并**增量修改** `gameinfo.gi` 的 `SearchPaths` 以加载 POV HUD 资源；录制结束或异常收尾时会自动恢复。该模式同样**强制**使用 `-insecure` 启动 CS2，**不要用于连接 VAC 安全服务器**。
-- 录制期间会临时修改若干 CS2 archive cvar 与按键绑定。本项目会在启动录制时在仓库根目录的 `.cs2_config_backup`中**自动备份**玩家原始的 `config.cfg` / `video.txt` / `user_convars_*.vcfg`，录制结束后会回滚；如遇异常退出或未知错误导致的设置被覆盖，可在该目录手动取回原始文件。
+- 录制期间会临时修改若干 CS2 archive cvar 与按键绑定。本项目会在启动录制时在程序数据目录的 `.cs2_config_backup` 中**自动备份**玩家原始的 `config.cfg` / `video.txt` / `user_convars_*.vcfg`，录制结束后会回滚；如遇异常退出导致设置被覆盖，可在该目录手动取回原始文件。
+
+---
 
 ## 支持项目
 
