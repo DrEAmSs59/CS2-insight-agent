@@ -441,6 +441,7 @@ export default function RecordWarmupModal({
                     step={1}
                     value={opts.fov_cs_debug}
                     onChange={(e) => {
+                      if (e.target.value === "") return;
                       const n = parseInt(e.target.value, 10);
                       set({ fov_cs_debug: Number.isNaN(n) ? 90 : Math.min(120, Math.max(60, n)) });
                     }}

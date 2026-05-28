@@ -325,7 +325,7 @@ export function MontageStyleConsole({
                   type="number"
                   min={0}
                   step={1}
-                  value={bgmStartSec ?? 0}
+                  value={bgmStartSec || ""}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value);
                     onBgmStartSecChange?.(Number.isFinite(v) && v >= 0 ? v : 0);

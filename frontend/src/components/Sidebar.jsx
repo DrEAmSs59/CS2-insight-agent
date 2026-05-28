@@ -257,7 +257,7 @@ export default function Sidebar({
         {obsOpen && (
           <div className="px-4 pb-4 space-y-3">
             <Input label="主机地址" value={obsConfig.host} onChange={(v) => onObsConfigChange({ ...obsConfig, host: v })} />
-            <Input label="端口" value={obsConfig.port} type="number" onChange={(v) => onObsConfigChange({ ...obsConfig, port: Number(v) })} />
+            <Input label="端口" value={obsConfig.port || ""} type="number" onChange={(v) => onObsConfigChange({ ...obsConfig, port: Number(v) })} />
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
                 密码

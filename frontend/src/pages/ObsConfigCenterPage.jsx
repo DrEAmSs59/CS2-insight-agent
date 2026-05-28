@@ -240,7 +240,7 @@ export default function ObsConfigCenterPage() {
                 </label>
                 <input
                   type="number"
-                  value={obsConfig.port ?? 4455}
+                  value={obsConfig.port || ""}
                   onChange={(e) => setObsConfig({ ...obsConfig, port: Number(e.target.value) })}
                   className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
                 />

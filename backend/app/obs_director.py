@@ -422,6 +422,7 @@ _WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = (
     "engine_no_focus_sleep 0",
     "cl_demo_predict 0",
     "fps_max 0",
+    "cl_trueview_show_status 0",
 )
 # 录制开始时把玩家所有按键解绑并恢复到一组最小默认绑定。配合下面的「文件级用户配置
 # 快照 + 恢复」机制使用：本次 CS2 进程内按键还原为下方默认，让玩家自定义的奇葩 bind

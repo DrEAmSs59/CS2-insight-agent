@@ -554,6 +554,7 @@ export default function CommonParamsModal({
                     step={1}
                     value={warmupOpts.fov_cs_debug}
                     onChange={(e) => {
+                      if (e.target.value === "") return;
                       const n = parseInt(e.target.value, 10);
                       patchWarmup({
                         fov_cs_debug: Number.isNaN(n) ? 90 : Math.min(120, Math.max(60, n)),
@@ -623,7 +624,7 @@ export default function CommonParamsModal({
                       min={0}
                       max={2000}
                       step={50}
-                      value={obsTransDurationMs}
+                      value={obsTransDurationMs || ""}
                       onChange={(e) => setObsTransDurationMs(Number(e.target.value))}
                       disabled={!obsTransEnabled}
                       className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"

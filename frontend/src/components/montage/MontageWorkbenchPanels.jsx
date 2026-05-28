@@ -14,6 +14,7 @@ import {
   X,
   Zap,
   ArrowUpDown,
+  ArrowDownUp,
 } from "lucide-react";
 import { AiScoreBadge } from "../ClipCard";
 import {
@@ -86,7 +87,7 @@ export function CollapsibleSection({ title, hint, defaultOpen = false, children 
   );
 }
 
-function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort }) {
+function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort, onReverseOrder }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -102,6 +103,7 @@ function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort }
     { label: "时间线顺序", icon: History, desc: "按回合与 tick 升序", fn: onTimelineSort },
     { label: "节奏优先", icon: Waves, desc: "高光与下饭交错", fn: onRhythmSort },
     { label: "随机", icon: Shuffle, desc: "随机打乱", fn: onRandomSort },
+    { label: "倒序", icon: ArrowDownUp, desc: "反转当前片段顺序", fn: onReverseOrder },
   ];
 
   return (
@@ -143,6 +145,7 @@ export function MontageWorkbenchToolbar({
   onTimelineSort,
   onRhythmSort,
   onRandomSort,
+  onReverseOrder,
   onSaveDraft,
   savingDraft,
   onHistory,
@@ -169,6 +172,7 @@ export function MontageWorkbenchToolbar({
           onTimelineSort={onTimelineSort}
           onRhythmSort={onRhythmSort}
           onRandomSort={onRandomSort}
+          onReverseOrder={onReverseOrder}
         />
         <ToolbarMiniButton onClick={onHistory} title="查看历史合集记录">
           <History className="h-3.5 w-3.5" />

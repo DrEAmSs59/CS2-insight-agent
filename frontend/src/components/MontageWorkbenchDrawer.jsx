@@ -561,6 +561,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     [orderedIds, byId],
   );
 
+  const handleReverseOrder = useCallback(() => {
+    if (orderedIds.length < 2) return;
+    setOrderedIds((prev) => [...prev].reverse());
+    showToast("已倒序排列编排片段");
+  }, [orderedIds.length, showToast]);
+
   const applyGlobalTransitionTemplate = useCallback(
     (styleId, label) => {
       if (orderedIds.length < 2) {
@@ -1058,6 +1064,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           onTimelineSort={() => handleSort("timeline")}
           onRhythmSort={() => handleSort("rhythm")}
           onRandomSort={() => handleSort("random")}
+          onReverseOrder={handleReverseOrder}
           onSaveDraft={() => void saveDraft()}
           savingDraft={savingDraft}
           onHistory={() => setHistoryOpen(true)}
