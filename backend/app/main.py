@@ -50,6 +50,11 @@ from .file_hash import file_md5_hex
 from .gsi_ready import gsi_status, notify_gsi_payload
 from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
+from .name_card_meta import (
+    build_name_card_tags_and_result,
+    resolve_name_card_category,
+    resolve_name_card_eyebrow,
+)
 from . import obs_config_center
 from .recording.api import router as recording_router
 from .cs2_config_backup import (
@@ -2384,18 +2389,10 @@ async def montage_export(body: MontageExportBody):
         if matched_pa is None or not matched_pa.enabled:
             name_cards_list.append(None)
         else:
-            display_name   = matched_pa.player_name or str(row.get("player_name") or "")
-            category       = str(row.get("category") or "")
-            eyebrow        = _CATEGORY_EYEBROW.get(category, "")
-            context_tags: list[str] = list(row.get("context_tags") or [])
-            # 高光片段：提取杀数 tag 作为 RESULT 块，其余留给 chips
-            result_tag: str | None = None
-            if category == "highlight":
-                result_tag = next((t for t in context_tags if t in _KILL_COUNT_TAGS), None)
-                chips = [t for t in context_tags if t != result_tag]
-            else:
-                chips = list(context_tags)
-            tags = [t for t in chips if t]
+            display_name = matched_pa.player_name or str(row.get("player_name") or "")
+            category = resolve_name_card_category(row)
+            eyebrow = resolve_name_card_eyebrow(row, category)
+            tags, result_tag = build_name_card_tags_and_result(row, category)
             name_cards_list.append(
                 {
                     "avatar_path": matched_pa.avatar_path,

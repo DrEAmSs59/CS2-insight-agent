@@ -767,36 +767,88 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
     return cfg
 
 
-def resolve_name_card_font() -> Optional[Path]:
-    """查找可用于名牌烧录的中文字体文件，按优先级返回第一个存在的路径；若全部缺失返回 None。
-
-    搜索顺序：
-    1. 用户自备字体槽 ``data/fonts/NotoSansSC-Regular.otf``
-    2. 用户自备可变字体 ``data/fonts/NotoSansSC-VF.ttf``
-    3. Windows 系统 NotoSansSC-VF.ttf
-    4. Windows 系统微软雅黑 msyh.ttc
-    5. Windows 系统宋体 simsun.ttc
-    6. macOS PingFang.ttc
-    7. Linux NotoSansCJK-Regular.ttc
-    """
+def _name_card_fonts_dir() -> Path:
     fonts_dir = get_data_dir() / "fonts"
     fonts_dir.mkdir(parents=True, exist_ok=True)
+    return fonts_dir
 
-    candidates: list[Path] = [
-        # 用户自备标准 OTF（优先，非可变字体，FFmpeg 兼容性最好）
+
+def _name_card_cjk_medium_candidates() -> list[Path]:
+    """CJK 600：Noto Sans SC Medium，眉标 / RESULT 标签。"""
+    fonts_dir = _name_card_fonts_dir()
+    return [
+        fonts_dir / "NotoSansSC-Medium.ttf",
+        fonts_dir / "NotoSansSC-SemiBold.ttf",
         fonts_dir / "NotoSansSC-Regular.otf",
-        # Windows 系统字体（标准 TTC，FFmpeg 完全支持）
-        Path("C:/Windows/Fonts/msyh.ttc"),        # 微软雅黑
-        Path("C:/Windows/Fonts/simsun.ttc"),      # 宋体
-        # macOS / Linux
+        Path("C:/Windows/Fonts/msyh.ttc"),
         Path("/System/Library/Fonts/PingFang.ttc"),
         Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-        # 可变字体（部分旧版 FFmpeg/FreeType 不支持，降为最后备选）
-        fonts_dir / "NotoSansSC-VF.ttf",
-        Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
     ]
-    for candidate in candidates:
-        if candidate.is_file():
+
+
+def _name_card_cjk_bold_candidates() -> list[Path]:
+    """CJK 700：Noto Sans SC Bold，名字 / 战绩数值 / chip。"""
+    fonts_dir = _name_card_fonts_dir()
+    return [
+        fonts_dir / "NotoSansSC-Bold.ttf",
+        fonts_dir / "NotoSansSC-SemiBold.ttf",
+        Path("C:/Windows/Fonts/msyhbd.ttc"),
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("/System/Library/Fonts/PingFang.ttc"),
+    ]
+
+
+def _name_card_font_candidates() -> list[Path]:
+    """CJK 字体候选（默认 Medium 档）。"""
+    return _name_card_cjk_medium_candidates()
+
+
+def _font_file_renders_cjk(font_path: Path) -> bool:
+    """Pillow 能否用该字体文件正确绘制中文（避免残缺 OTF/VF 导致方框）。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
+    except ImportError:
+        return font_path.is_file()
+
+    ext = font_path.suffix.lower()
+    load_attempts: list[dict[str, int]] = []
+    if ext == ".ttc":
+        load_attempts = [{"index": i} for i in range(4)]
+    else:
+        load_attempts = [{}]
+
+    for kw in load_attempts:
+        try:
+            font = ImageFont.truetype(str(font_path), 28, **kw)
+        except Exception:
+            continue
+        try:
+            bb = font.getbbox("高光")
+            if bb is None or (bb[2] - bb[0]) < 12:
+                continue
+            probe = Image.new("L", (64, 48), 0)
+            draw = ImageDraw.Draw(probe)
+            draw.text((2, 4), "高光", font=font, fill=255)
+            if probe.getbbox() is None:
+                continue
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def resolve_name_card_font() -> Optional[Path]:
+    """名牌 CJK Medium（600）路径。"""
+    for candidate in _name_card_cjk_medium_candidates():
+        if candidate.is_file() and _font_file_renders_cjk(candidate):
+            return candidate
+    return None
+
+
+def resolve_name_card_font_bold() -> Optional[Path]:
+    """名牌 CJK Bold（700）路径。"""
+    for candidate in _name_card_cjk_bold_candidates():
+        if candidate.is_file() and _font_file_renders_cjk(candidate):
             return candidate
     return None
 

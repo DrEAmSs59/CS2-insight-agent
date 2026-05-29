@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
-from .env_utils import resolve_name_card_font, resolve_rajdhani_fonts
+from .env_utils import (
+    resolve_name_card_font,
+    resolve_name_card_font_bold,
+    resolve_rajdhani_fonts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +425,24 @@ _NAME_CARD_DISPLAY_SECS: float = 4.0
 _NAME_CARD_FADE_SECS: float = 0.4
 # Pixels above the very bottom of the video frame
 _NAME_CARD_BOTTOM_MARGIN: int = 120
+# 名牌相对 1080p 设计稿的整体缩放（0.65 缩小 35% 后再 ×1.05 放大 5%）
+_NAME_CARD_LAYOUT_SCALE: float = 0.65 * 1.05
+
+# Rajdhani typography @ 1080p（字号 px；字距为 em，乘字号后得 px）
+_TYPO_EYEBROW_PX = 13
+_TYPO_EYEBROW_TRACK_EM = 0.22
+_TYPO_NAME_PX = 28
+_TYPO_NAME_TRACK_EM = 0.04
+_TYPO_NAME_LINE_HEIGHT = 0.9
+_TYPO_CHIP_PX = 14
+_TYPO_CHIP_TRACK_EM = 0.04
+_TYPO_CHIP_TEXT_OPACITY = 0.84
+_TYPO_RESULT_LABEL_PX = 14
+_TYPO_RESULT_LABEL_TRACK_EM = 0.24
+_TYPO_RESULT_LABEL_OPACITY = 0.45
+_TYPO_RESULT_VAL_PX = 30
+_TYPO_RESULT_VAL_TRACK_EM = 0.02
+_TYPO_RESULT_VAL_SHEAR_DEG = 12.0
 
 # Regex that matches emoji / non-BMP characters msyh.ttc cannot render
 import re as _re
@@ -443,6 +465,81 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
 
 
+def _text_needs_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _load_truetype_font(font_path: Path, size: int) -> Any:
+    """加载 TrueType/OpenType/TTC，自动尝试 face index；失败则抛出。"""
+    from PIL import ImageFont  # type: ignore[import]
+
+    ext = font_path.suffix.lower()
+    attempts: list[dict[str, int]] = []
+    if ext == ".ttc":
+        attempts = [{"index": i} for i in range(4)]
+    else:
+        attempts = [{}, {"index": 0}]
+
+    last_err: Exception | None = None
+    for kw in attempts:
+        try:
+            return ImageFont.truetype(str(font_path), size, **kw)
+        except Exception as exc:
+            last_err = exc
+    if last_err is not None:
+        raise last_err
+    raise OSError(f"无法加载字体: {font_path}")
+
+
+def _load_cjk_font(font_path: Optional[Path], size: int) -> Any:
+    """CJK 常规/600：微软雅黑等 Regular；失败时回退候选列表。"""
+    from PIL import ImageFont  # type: ignore[import]
+
+    from .env_utils import _font_file_renders_cjk, _name_card_cjk_medium_candidates
+
+    paths: list[Path] = []
+    if font_path and font_path.is_file():
+        paths.append(font_path)
+    for candidate in _name_card_cjk_medium_candidates():
+        if candidate not in paths:
+            paths.append(candidate)
+
+    for path in paths:
+        if not path.is_file():
+            continue
+        if not _font_file_renders_cjk(path):
+            continue
+        try:
+            return _load_truetype_font(path, size)
+        except Exception:
+            continue
+
+    logger.warning("名牌 CJK 字体不可用，中文可能显示为方框")
+    return ImageFont.load_default()
+
+
+def _load_cjk_font_bold(font_path: Optional[Path], size: int) -> Any:
+    """CJK 700 Bold：优先 data/fonts/NotoSansSC-Bold，否则系统粗体。"""
+    from .env_utils import _font_file_renders_cjk, _name_card_cjk_bold_candidates
+
+    paths: list[Path] = []
+    if font_path and font_path.is_file():
+        paths.append(font_path)
+    for candidate in _name_card_cjk_bold_candidates():
+        if candidate not in paths:
+            paths.append(candidate)
+
+    for path in paths:
+        if not path.is_file() or not _font_file_renders_cjk(path):
+            continue
+        try:
+            return _load_truetype_font(path, size)
+        except Exception:
+            continue
+    bump = max(2, int(round(size * 0.1)))
+    return _load_cjk_font(font_path, size + bump)
+
+
 def _text_w(font: Any, text: str) -> int:
     try:
         bb = font.getbbox(text)
@@ -451,17 +548,266 @@ def _text_w(font: Any, text: str) -> int:
         return len(text) * 8
 
 
-def _chip_render_w(font: Any, text: str) -> int:
-    # padding 7+7, bracket "[" gap 3 text gap 3 bracket "]"
-    return 14 + _text_w(font, "[") + 3 + _text_w(font, text) + 3 + _text_w(font, "]")
+def _typo_px(scale: float, design_px: int) -> int:
+    return max(1, int(round(design_px * scale)))
 
 
-def _wrap_chips_rows(chips: list[str], font: Any, max_w: int, gap: int = 6) -> list[list[str]]:
+def _typo_track_px(font_px: int, em: float) -> float:
+    return font_px * em
+
+
+def _white_rgba(opacity: float) -> tuple[int, int, int, int]:
+    a = int(round(255 * max(0.0, min(1.0, opacity))))
+    return (255, 255, 255, a)
+
+
+def _text_width_tracked(font: Any, text: str, tracking_px: float) -> int:
+    if not text:
+        return 0
+    total = 0.0
+    for i, ch in enumerate(text):
+        total += _text_w(font, ch)
+        if i < len(text) - 1:
+            total += tracking_px
+    return int(round(total))
+
+
+def _tracked_text_bbox(font: Any, text: str, tracking_px: float) -> tuple[int, int, int, int]:
+    """跟踪字距后的整体 bbox：(x0, y0, x1, y1)，原点为绘制起点。"""
+    if not text:
+        return (0, 0, 0, 0)
+    x_cur = 0.0
+    y0, y1 = 10**9, -10**9
+    for i, ch in enumerate(text):
+        bb = font.getbbox(ch)
+        y0 = min(y0, bb[1])
+        y1 = max(y1, bb[3])
+        x_cur += _text_w(font, ch) + (tracking_px if i < len(text) - 1 else 0)
+    return (0, y0, int(round(x_cur)), y1)
+
+
+def _font_line_height(font: Any, text: str) -> int:
+    try:
+        bb = font.getbbox(text or "Ay")
+        return max(1, bb[3] - bb[1])
+    except Exception:
+        return getattr(font, "size", 12)
+
+
+def _draw_text_tracked(
+    draw: Any,
+    x: int,
+    y: int,
+    text: str,
+    font: Any,
+    fill: Any,
+    tracking_px: float,
+) -> None:
+    x_cur = x
+    for i, ch in enumerate(text):
+        draw.text((x_cur, y), ch, font=font, fill=fill)
+        x_cur += _text_w(font, ch) + (tracking_px if i < len(text) - 1 else 0)
+
+
+def _draw_text_tracked_center(
+    draw: Any,
+    cx: int,
+    cy: int,
+    text: str,
+    font: Any,
+    fill: Any,
+    tracking_px: float,
+) -> None:
+    if not text:
+        return
+    bb = _tracked_text_bbox(font, text, tracking_px)
+    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    x0 = cx - tw // 2
+    y0 = cy - th // 2 - bb[1]
+    _draw_text_tracked(draw, x0, y0, text, font, fill, tracking_px)
+
+
+def _draw_text_tracked_middle(
+    draw: Any,
+    x: int,
+    cy: int,
+    text: str,
+    font: Any,
+    fill: Any,
+    tracking_px: float,
+) -> None:
+    """左对齐绘制，整行相对 cy 垂直居中。"""
+    if not text:
+        return
+    bb = _tracked_text_bbox(font, text, tracking_px)
+    th = bb[3] - bb[1]
+    y0 = cy - th // 2 - bb[1]
+    _draw_text_tracked(draw, x, y0, text, font, fill, tracking_px)
+
+
+def _paste_sheared_text(
+    img: Any,
+    pos: tuple[int, int],
+    text: str,
+    font: Any,
+    fill: tuple[int, int, int, int],
+    tracking_px: float,
+    shear_deg: float = _TYPO_RESULT_VAL_SHEAR_DEG,
+) -> tuple[int, int]:
+    """在 RGBA 图层上绘制右倾伪斜体文字，返回占用宽高。"""
+    from PIL import Image, ImageDraw  # type: ignore[import]
+
+    if not text:
+        return (0, 0)
+    pad = 4
+    text_w = _text_width_tracked(font, text, tracking_px)
+    lh = _font_line_height(font, text)
+    layer_w = text_w + pad * 2
+    layer_h = lh + pad * 2
+    layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    _draw_text_tracked(ld, pad, pad - font.getbbox(text[0])[1], text, font, fill, tracking_px)
+    shear = math.tan(math.radians(shear_deg))
+    out_w = int(layer_w + abs(shear) * layer_h) + 2
+    out_h = layer_h
+    sheared = layer.transform(
+        (out_w, out_h),
+        Image.AFFINE,
+        (1, shear, -shear * pad, 0, 1, 0),
+        Image.BICUBIC,
+    )
+    img.alpha_composite(sheared, dest=pos)
+    return (out_w, out_h)
+
+
+def _chip_label(text: str) -> str:
+    return f"[{text}]"
+
+
+def _chip_render_w(
+    font: Any,
+    text: str,
+    pad_x: int = 14,
+    tracking_px: float = 0.0,
+) -> int:
+    return pad_x * 2 + _text_width_tracked(font, _chip_label(text), tracking_px)
+
+
+def _blend_rgb(
+    base: tuple[int, int, int],
+    accent: tuple[int, int, int],
+    *,
+    alpha: float,
+) -> tuple[int, int, int]:
+    """accent 叠到 base 上，alpha∈[0,1]。"""
+    t = max(0.0, min(1.0, alpha))
+    return tuple(
+        int(base[i] * (1.0 - t) + accent[i] * t) for i in range(3)
+    )
+
+
+def _apply_name_card_background(
+    img: Any,
+    card_w: int,
+    card_h: int,
+    scale: float,
+) -> None:
+    """整体深色半透明底 + 扫描线纹理（透明层，1px 白线 / 3px 步进 / alpha 6）。"""
+    from PIL import Image, ImageDraw  # type: ignore[import]
+
+    s = max(1.0, float(scale))
+
+    # 整体卡片底：比初版略黑
+    panel = Image.new("RGBA", (card_w, card_h), (6, 8, 6, 232))
+
+    # 扫描线：透明底上画线，再叠到深色底（E2 规格：每 3px 一条 1px 白线 @ alpha 6）
+    scan = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(scan)
+    step = max(3, int(round(3 * s)))
+    for sy in range(0, card_h, step):
+        sd.line([(0, sy), (card_w - 1, sy)], fill=(255, 255, 255, 6), width=1)
+
+    panel = Image.alpha_composite(panel, scan)
+    img.paste(panel, (0, 0))
+
+
+def _draw_corner_brackets_with_glow(
+    img: Any,
+    card_w: int,
+    card_h: int,
+    accent_rgb: tuple[int, int, int],
+    scale: float,
+) -> None:
+    from PIL import Image, ImageDraw, ImageFilter  # type: ignore[import]
+
+    ar, ag, ab = accent_rgb
+    s = max(1.0, float(scale))
+    B = max(13, int(15 * s))
+    arm = max(2, int(2 * s))
+
+    corners = [
+        ((0, 0), (1, 0), (0, 1)),
+        ((card_w - 1, 0), (-1, 0), (0, 1)),
+        ((0, card_h - 1), (1, 0), (0, -1)),
+        ((card_w - 1, card_h - 1), (-1, 0), (0, -1)),
+    ]
+
+    glow = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(glow)
+    for (bx, by), (hx, hy), (vx, vy) in corners:
+        for t in range(arm):
+            gdraw.line(
+                [(bx, by + vy * t), (bx + hx * (B - 1), by + vy * t)],
+                fill=(ar, ag, ab, 255),
+                width=arm,
+            )
+            gdraw.line(
+                [(bx + hx * t, by), (bx + hx * t, by + vy * (B - 1))],
+                fill=(ar, ag, ab, 255),
+                width=arm,
+            )
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=max(6, int(9 * s))))
+    bloom = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    bloom.paste(glow, (0, 0))
+    bloom = bloom.filter(ImageFilter.GaussianBlur(radius=max(4, int(7 * s))))
+    try:
+        from PIL import ImageEnhance  # type: ignore[import]
+
+        glow = ImageEnhance.Brightness(glow).enhance(1.65)
+        bloom = ImageEnhance.Brightness(bloom).enhance(1.35)
+    except Exception:
+        pass
+    img.alpha_composite(bloom)
+    img.alpha_composite(glow)
+
+    draw = ImageDraw.Draw(img)
+    for (bx, by), (hx, hy), (vx, vy) in corners:
+        for t in range(arm):
+            draw.line(
+                [(bx, by + vy * t), (bx + hx * (B - 1), by + vy * t)],
+                fill=(ar, ag, ab, 255),
+                width=1,
+            )
+            draw.line(
+                [(bx + hx * t, by), (bx + hx * t, by + vy * (B - 1))],
+                fill=(ar, ag, ab, 255),
+                width=1,
+            )
+
+
+def _wrap_chips_rows(
+    chips: list[str],
+    font: Any,
+    max_w: int,
+    gap: int = 6,
+    pad_x: int = 14,
+    tracking_px: float = 0.0,
+) -> list[list[str]]:
     rows: list[list[str]] = []
     row: list[str] = []
     row_w = 0
     for chip in chips:
-        cw = _chip_render_w(font, chip)
+        cw = _chip_render_w(font, chip, pad_x, tracking_px)
         needed = cw + (gap if row else 0)
         if row and row_w + needed > max_w:
             rows.append(row)
@@ -486,6 +832,7 @@ def _make_name_card_png(
     result: Optional[str] = None,
     font_bold_path: Optional[Path] = None,
     font_semi_path: Optional[Path] = None,
+    scale: float = 1.0,
 ) -> bool:
     """使用 Pillow 渲染名牌 PNG，返回是否成功。
 
@@ -501,60 +848,64 @@ def _make_name_card_png(
 
     ar, ag, ab = accent_rgb
 
-    # Layout constants (E2 HUD 支架规格)
-    CARD_W   = 480
-    PAD_X    = 18
-    PAD_Y    = 15
-    COL_GAP  = 14
-    AV_SIZE  = 58
+    # Layout constants（1080p 基准 × 整体缩放；scale 随输出分辨率放大）
+    s = max(1.0, min(float(scale), 2.25)) * _NAME_CARD_LAYOUT_SCALE
+    CARD_W   = int(820 * s)
+    PAD_X    = int(28 * s)
+    PAD_Y    = int(22 * s)
+    COL_GAP  = int(22 * s)
+    AV_SIZE  = int(96 * s)
 
-    # Font sizes
-    EYEBROW_PX     = 12
-    NAME_PX        = 26
-    CHIP_PX        = 13
-    RES_LABEL_PX   = 10
-    RES_VAL_PX     = 22
+    # Typography @ 1080p 设计稿 × s
+    EYEBROW_PX = _typo_px(s, _TYPO_EYEBROW_PX)
+    NAME_PX = _typo_px(s, _TYPO_NAME_PX)
+    CHIP_PX = _typo_px(s, _TYPO_CHIP_PX)
+    RES_LABEL_PX = _typo_px(s, _TYPO_RESULT_LABEL_PX)
+    RES_VAL_PX = _typo_px(s, _TYPO_RESULT_VAL_PX)
+    EYEBROW_TRACK = _typo_track_px(EYEBROW_PX, _TYPO_EYEBROW_TRACK_EM)
+    NAME_TRACK = _typo_track_px(NAME_PX, _TYPO_NAME_TRACK_EM)
+    CHIP_TRACK = _typo_track_px(CHIP_PX, _TYPO_CHIP_TRACK_EM)
+    RES_LABEL_TRACK = _typo_track_px(RES_LABEL_PX, _TYPO_RESULT_LABEL_TRACK_EM)
+    RES_VAL_TRACK = _typo_track_px(RES_VAL_PX, _TYPO_RESULT_VAL_TRACK_EM)
 
     has_av     = bool(avatar_path and avatar_path.is_file())
     has_result = bool(result)
 
     # ── font loaders ────────────────────────────────────────────────────────
-    def _load_cjk(size: int) -> Any:
-        if font_path and font_path.is_file():
-            kw: dict = {"font_index": 0} if font_path.suffix.lower() == ".ttc" else {}
-            try:
-                return ImageFont.truetype(str(font_path), size, **kw)
-            except Exception:
-                pass
-        return ImageFont.load_default()
-
     def _load_latin(path: Optional[Path], size: int) -> Any:
         if path and path.is_file():
             try:
-                return ImageFont.truetype(str(path), size)
+                return _load_truetype_font(path, size)
             except Exception:
                 pass
-        return _load_cjk(size)
+        return _load_cjk_font(font_path, size)
 
     def _font_for(text: str, latin: Any, cjk: Any) -> Any:
-        return latin if text.isascii() else cjk
+        return cjk if _text_needs_cjk(text) else latin
 
-    f_semi_cjk  = _load_cjk(EYEBROW_PX)
-    f_semi      = _load_latin(font_semi_path, EYEBROW_PX)
-    f_bold_cjk  = _load_cjk(NAME_PX)
-    f_bold      = _load_latin(font_bold_path, NAME_PX)
-    f_chip_cjk  = _load_cjk(CHIP_PX)
-    f_chip_lat  = _load_latin(font_semi_path, CHIP_PX)
-    f_rlabel    = _load_latin(font_semi_path, RES_LABEL_PX)
-    f_rval_cjk  = _load_cjk(RES_VAL_PX)
-    f_rval_lat  = _load_latin(font_bold_path, RES_VAL_PX)
+    # 字重：眉标/chip/RESULT 标签 → 600 SemiBold；名字/战绩数值 → 700 Bold
+    _cjk_medium = font_path or resolve_name_card_font()
+    _cjk_bold = resolve_name_card_font_bold() or _cjk_medium
+    _latin_semi = font_semi_path
+    _latin_bold = font_bold_path or font_semi_path
+    f_semi_cjk = _load_cjk_font(_cjk_medium, EYEBROW_PX)
+    f_semi = _load_latin(_latin_semi, EYEBROW_PX)
+    f_bold_cjk = _load_cjk_font_bold(_cjk_bold, NAME_PX)
+    f_bold = _load_latin(_latin_bold, NAME_PX)
+    f_chip_cjk = _load_cjk_font(_cjk_medium, CHIP_PX)
+    f_chip_lat = _load_latin(_latin_semi, CHIP_PX)
+    f_rlabel = _load_latin(_latin_semi, RES_LABEL_PX)
+    f_rval_cjk = _load_cjk_font_bold(_cjk_bold, RES_VAL_PX)
+    f_rval_lat = _load_latin(_latin_bold, RES_VAL_PX)
 
     # ── measure helpers ─────────────────────────────────────────────────────
     def _chip_font(text: str) -> Any:
         return _font_for(text, f_chip_lat, f_chip_cjk)
 
+    chip_pad_x = max(8, int(8 * s))
+
     def _chip_w(text: str) -> int:
-        return _chip_render_w(_chip_font(text), text)
+        return _chip_render_w(_chip_font(text), text, chip_pad_x, CHIP_TRACK)
 
     # ── text layout x-origin ────────────────────────────────────────────────
     text_x = PAD_X + (AV_SIZE + COL_GAP if has_av else 0)
@@ -564,41 +915,72 @@ def _make_name_card_png(
     if has_result and result:
         clean_r = _strip_emoji(result)
         rv_font = _font_for(clean_r, f_rval_lat, f_rval_cjk)
+        rv_w = _text_width_tracked(rv_font, clean_r, RES_VAL_TRACK)
+        rv_h_est = int(RES_VAL_PX * 1.4)
+        rv_w_shear = int(
+            rv_w + abs(math.tan(math.radians(_TYPO_RESULT_VAL_SHEAR_DEG))) * rv_h_est
+        )
         result_block_w = (
-            1                                    # divider
-            + COL_GAP                            # inner left gap
-            + max(
-                _text_w(f_rlabel, "RESULT"),
-                _text_w(rv_font, clean_r),
-            )
-            + PAD_X                              # right padding
+            1
+            + COL_GAP
+            + max(_text_width_tracked(f_rlabel, "RESULT", RES_LABEL_TRACK), rv_w_shear)
+            + PAD_X
         )
 
     # ── chip wrapping ────────────────────────────────────────────────────────
-    chip_gap     = 6
-    chip_row_h   = CHIP_PX + 2 + 4              # font + pad_v*2 + leading
+    chip_gap = max(6, int(7 * s))
+    chip_v_pad = max(4, int(5 * s))
+    chip_row_h = _font_line_height(f_chip_cjk, "[标签]") + chip_v_pad * 2
     chips_area_w = CARD_W - text_x - (result_block_w if has_result else PAD_X)
     clean_chips  = [_strip_emoji(t) for t in tags if t]
     clean_chips  = [t for t in clean_chips if t]
-    chip_rows    = _wrap_chips_rows(clean_chips, f_chip_cjk, chips_area_w, chip_gap)
+    chip_rows = _wrap_chips_rows(
+        clean_chips,
+        f_chip_cjk,
+        chips_area_w,
+        chip_gap,
+        chip_pad_x,
+        CHIP_TRACK,
+    )
 
-    # ── content height ───────────────────────────────────────────────────────
-    eyebrow_h      = EYEBROW_PX + 4
-    name_h         = NAME_PX + 4
-    chips_total_h  = len(chip_rows) * (chip_row_h + chip_gap) - chip_gap if chip_rows else 0
-    text_content_h = eyebrow_h + 6 + name_h + (6 + chips_total_h if chip_rows else 0)
-    card_h         = max(text_content_h + PAD_Y * 2, AV_SIZE + PAD_Y * 2, 88)
+    # ── content height（title / name / tags 等距留白）────────────────────────
+    block_gap = max(6, int(8 * s))
+    clean_eb_pre = _strip_emoji(eyebrow).upper()
+    eb_font_pre = _font_for(clean_eb_pre, f_semi, f_semi_cjk) if clean_eb_pre else f_semi
+    if clean_eb_pre:
+        eb_bb_pre = _tracked_text_bbox(eb_font_pre, clean_eb_pre, EYEBROW_TRACK)
+        eyebrow_h = (eb_bb_pre[3] - eb_bb_pre[1]) + int(4 * s)
+    else:
+        eyebrow_h = EYEBROW_PX + int(4 * s)
+    clean_n_pre = _strip_emoji(display_name)
+    name_upper = clean_n_pre.upper() if clean_n_pre else ""
+    n_font_pre = _font_for(name_upper, f_bold, f_bold_cjk) if name_upper else f_bold
+    if name_upper:
+        n_bb_pre = n_font_pre.getbbox(name_upper[0])
+        for ch in name_upper[1:]:
+            bb = n_font_pre.getbbox(ch)
+            n_bb_pre = (
+                min(n_bb_pre[0], bb[0]),
+                min(n_bb_pre[1], bb[1]),
+                max(n_bb_pre[2], bb[2]),
+                max(n_bb_pre[3], bb[3]),
+            )
+        name_glyph_h = max(1, n_bb_pre[3] - n_bb_pre[1])
+    else:
+        n_bb_pre = (0, 0, 0, NAME_PX)
+        name_glyph_h = NAME_PX
+    name_zone_h = max(name_glyph_h, int(round(NAME_PX * _TYPO_NAME_LINE_HEIGHT)))
+
+    chips_total_h = len(chip_rows) * (chip_row_h + chip_gap) - chip_gap if chip_rows else 0
+    text_content_h = eyebrow_h + block_gap + name_zone_h + block_gap
+    if chip_rows:
+        text_content_h += chips_total_h
+    card_h = max(text_content_h + PAD_Y * 2, AV_SIZE + PAD_Y * 2, int(108 * s))
 
     # ── create canvas ─────────────────────────────────────────────────────
-    img  = Image.new("RGBA", (CARD_W, card_h), (0, 0, 0, 0))
+    img = Image.new("RGBA", (CARD_W, card_h), (0, 0, 0, 0))
+    _apply_name_card_background(img, CARD_W, card_h, s)
     draw = ImageDraw.Draw(img)
-
-    # Background
-    draw.rectangle([0, 0, CARD_W - 1, card_h - 1], fill=(8, 10, 8, 219))
-
-    # Scanline texture: 1px white lines every 3px @ alpha 6
-    for sy in range(0, card_h, 3):
-        draw.line([(0, sy), (CARD_W - 1, sy)], fill=(255, 255, 255, 6))
 
     # Outer border: accent @ alpha 71
     draw.rectangle([0, 0, CARD_W - 1, card_h - 1], outline=(ar, ag, ab, 71), width=1)
@@ -627,39 +1009,69 @@ def _make_name_card_png(
     # ── text block (vertically centered) ─────────────────────────────────
     ty0 = (card_h - text_content_h) // 2
 
-    # Eyebrow bar (14×2) + text
-    bar_y = ty0 + (eyebrow_h - 2) // 2
-    draw.rectangle([text_x, bar_y, text_x + 13, bar_y + 1], fill=(ar, ag, ab, 255))
-    clean_eb = _strip_emoji(eyebrow)
-    eb_font  = _font_for(clean_eb, f_semi, f_semi_cjk)
-    draw.text((text_x + 14 + 7, ty0), clean_eb.upper(), font=eb_font, fill=(ar, ag, ab, 255))
+    # Eyebrow bar + text（同一垂直中心线）
+    clean_eb = _strip_emoji(eyebrow).upper()
+    eb_font = _font_for(clean_eb, f_semi, f_semi_cjk)
+    eb_row_cy = ty0 + eyebrow_h // 2
+    bar_w = max(14, int(16 * s))
+    bar_h_px = max(2, int(2 * s))
+    bar_y = eb_row_cy - bar_h_px // 2
+    draw.rectangle(
+        [text_x, bar_y, text_x + bar_w - 1, bar_y + bar_h_px - 1],
+        fill=(ar, ag, ab, 255),
+    )
+    _draw_text_tracked_middle(
+        draw,
+        text_x + bar_w + int(7 * s),
+        eb_row_cy,
+        clean_eb,
+        eb_font,
+        (ar, ag, ab, 255),
+        EYEBROW_TRACK,
+    )
 
-    # Name
-    ny      = ty0 + eyebrow_h + 6
-    clean_n = _strip_emoji(display_name)
-    n_font  = _font_for(clean_n, f_bold, f_bold_cjk)
-    draw.text((text_x, ny), clean_n.upper(), font=n_font, fill=(255, 255, 255, 255))
+    # Name — line-height 0.9 行框内垂直居中
+    clean_n = name_upper
+    n_font = n_font_pre
+    n_bb = n_bb_pre
+    title_bottom = ty0 + eyebrow_h
+    chips_top = title_bottom + block_gap + name_zone_h + block_gap
+    name_draw_y = title_bottom + block_gap + (name_zone_h - name_glyph_h) // 2 - n_bb[1]
+    _draw_text_tracked(
+        draw,
+        text_x,
+        name_draw_y,
+        clean_n,
+        n_font,
+        (255, 255, 255, 255),
+        NAME_TRACK,
+    )
 
-    # Chips
-    cy = ny + name_h + 6
+    # Chips：低调底色 + 标签文字在框内居中
+    chip_fill = _blend_rgb((10, 12, 9), (ar, ag, ab), alpha=0.12)
+    chip_border = _blend_rgb((18, 20, 16), (ar, ag, ab), alpha=0.28)
+    cy = chips_top
     for row in chip_rows:
         cx = text_x
         for chip_text in row:
             cw = _chip_w(chip_text)
             cf = _chip_font(chip_text)
-            bw = _text_w(cf, "[")
-            # background + border
-            draw.rectangle(
-                [cx, cy, cx + cw - 1, cy + chip_row_h - 3],
-                fill=(ar, ag, ab, 15), outline=(ar, ag, ab, 56), width=1,
+            label = _chip_label(chip_text)
+            chip_box = [cx, cy, cx + cw - 1, cy + chip_row_h - 1]
+            draw.rectangle(chip_box, fill=chip_fill, outline=chip_border, width=1)
+            bb = _tracked_text_bbox(cf, label, CHIP_TRACK)
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            tx = cx + (cw - tw) // 2
+            ty = cy + (chip_row_h - th) // 2 - bb[1]
+            _draw_text_tracked(
+                draw,
+                tx,
+                ty,
+                label,
+                cf,
+                _white_rgba(_TYPO_CHIP_TEXT_OPACITY),
+                CHIP_TRACK,
             )
-            # "[" bracket
-            draw.text((cx + 7, cy + 1), "[", font=cf, fill=(ar, ag, ab, 216))
-            # chip text
-            draw.text((cx + 7 + bw + 3, cy + 1), chip_text, font=cf, fill=(255, 255, 255, 214))
-            # "]" bracket
-            tw = _text_w(cf, chip_text)
-            draw.text((cx + 7 + bw + 3 + tw + 3, cy + 1), "]", font=cf, fill=(ar, ag, ab, 216))
             cx += cw + chip_gap
         cy += chip_row_h + chip_gap
 
@@ -671,36 +1083,31 @@ def _make_name_card_png(
         draw.line([(div_x, PAD_Y), (div_x, card_h - PAD_Y)], fill=(ar, ag, ab, 64), width=1)
         rx = div_x + COL_GAP
         # "RESULT" label
-        rl_h    = RES_LABEL_PX + 4
+        rl_h = _font_line_height(f_rlabel, "RESULT") + int(4 * s)
         rv_font = _font_for(clean_r, f_rval_lat, f_rval_cjk)
-        rv_h    = RES_VAL_PX + 4
-        block_h = rl_h + 4 + rv_h
-        ry0     = (card_h - block_h) // 2
-        draw.text((rx, ry0), "RESULT", font=f_rlabel, fill=(255, 255, 255, 115))
-        # value
-        draw.text((rx, ry0 + rl_h + 4), clean_r, font=rv_font, fill=(ar, ag, ab, 255))
+        rv_shear_h = int(RES_VAL_PX * 1.5)
+        block_h = rl_h + int(4 * s) + rv_shear_h
+        ry0 = (card_h - block_h) // 2
+        _draw_text_tracked(
+            draw,
+            rx,
+            ry0,
+            "RESULT",
+            f_rlabel,
+            _white_rgba(_TYPO_RESULT_LABEL_OPACITY),
+            RES_LABEL_TRACK,
+        )
+        _paste_sheared_text(
+            img,
+            (rx, ry0 + rl_h + int(4 * s)),
+            clean_r,
+            rv_font,
+            (ar, ag, ab, 255),
+            RES_VAL_TRACK,
+            _TYPO_RESULT_VAL_SHEAR_DEG,
+        )
 
-    # ── corner brackets (13×13, 2px, accent) ─────────────────────────────
-    B = 13
-    for (bx, by), (hx, hy), (vx, vy) in [
-        # (corner pos, h-arm direction offsets, v-arm direction offsets)
-        ((0,         0),         (1, 0),  (0, 1)),   # top-left
-        ((CARD_W-1,  0),         (-1, 0), (0, 1)),   # top-right
-        ((0,         card_h-1),  (1, 0),  (0, -1)),  # bottom-left
-        ((CARD_W-1,  card_h-1),  (-1, 0), (0, -1)),  # bottom-right
-    ]:
-        # horizontal arm (2px thick)
-        for t in range(2):
-            draw.line(
-                [(bx, by + vy * t), (bx + hx * (B - 1), by + vy * t)],
-                fill=(ar, ag, ab, 255), width=1,
-            )
-        # vertical arm (2px thick)
-        for t in range(2):
-            draw.line(
-                [(bx + hx * t, by), (bx + hx * t, by + vy * (B - 1))],
-                fill=(ar, ag, ab, 255), width=1,
-            )
+    _draw_corner_brackets_with_glow(img, CARD_W, card_h, accent_rgb, s)
 
     img.save(str(out_path), "PNG")
     return True
@@ -774,6 +1181,7 @@ def compose_montage(
         w, h, fps = int(ref["width"]), int(ref["height"]), float(ref["fps"])
         if w <= 0 or h <= 0:
             raise MontageComposerError("无法读取首段视频分辨率")
+        _name_card_scale = max(1.0, min(h / 1080.0, 2.25))
         fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
 
         segments: list[Path] = []
@@ -857,6 +1265,7 @@ def compose_montage(
                     result=result_str,
                     font_bold_path=_font_bold_path,
                     font_semi_path=_font_semi_path,
+                    scale=_name_card_scale,
                 )
                 if ok:
                     card_png = card_png_path
@@ -883,7 +1292,7 @@ def compose_montage(
                     f"fade=t=in:st=0:d={_fade}:alpha=1,"
                     f"fade=t=out:st={_fade_out_st:.3f}:d={_fade}:alpha=1"
                 )
-                _card_y = card_h + _NAME_CARD_BOTTOM_MARGIN
+                _card_y = card_h + int(_NAME_CARD_BOTTOM_MARGIN * _name_card_scale)
                 overlay_opts = f"0:H-{_card_y}:enable='between(t,0,{_display})'"
                 if info["has_audio"]:
                     fc = (

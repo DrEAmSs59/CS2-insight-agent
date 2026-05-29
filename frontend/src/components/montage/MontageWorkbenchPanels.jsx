@@ -24,11 +24,13 @@ import {
   getMontageBlockShortLabel,
   getMontageClipFactLine,
   getMontageTimelineVariant,
+  isTimelineSourceClip,
   getRecordedClipPerspectiveZh,
   getRecordedClipPerspectivePrimaryZh,
   mapNameFromClip,
   getMontageScorePair,
   mapNameAccentDotClass,
+  getMontageExtraVictimPovCount,
   getVictimPovSegmentsTooltip,
   getClipComment,
   getClipScore,
@@ -374,10 +376,8 @@ export function MontageOrchestrationTimeline({
       const factLine = getMontageClipFactLine(clip);
       const scorePair = getMontageScorePair(clip);
       const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
-      const povTip = getVictimPovSegmentsTooltip(clip);
-      const victimSegCount = Array.isArray(clip.victim_pov_segments)
-        ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
-        : 0;
+      const victimSegCount = getMontageExtraVictimPovCount(clip);
+      const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip) : "";
       return {
         clip,
         next,
@@ -537,7 +537,7 @@ export function MontageOrchestrationTimeline({
               const dragging = dragId === clip.id;
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = getMontageBlockShortLabel(clip);
-              const suppressMontageAi = variant === "timeline" || variant === "compilation";
+              const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
               const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip);
               const outBase = pathBasenameQuick(clip?.output_path);
               return (
@@ -757,13 +757,11 @@ export function MontageMaterialPoolCard({
   const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
   const killBadge = getMontageBlockShortLabel(clip);
   const variant = getMontageTimelineVariant(clip);
-  const suppressMontageAi = variant === "timeline" || variant === "compilation";
+  const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
   const scorePair = getMontageScorePair(clip);
   const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
-  const povTip = getVictimPovSegmentsTooltip(clip);
-  const victimSegCount = Array.isArray(clip.victim_pov_segments)
-    ? clip.victim_pov_segments.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length
-    : 0;
+  const victimSegCount = getMontageExtraVictimPovCount(clip);
+  const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip) : "";
   const aiExplain = suppressMontageAi ? "" : montageAiExplainText(clip);
   const demoLabel = demoShortLabel(clip);
 

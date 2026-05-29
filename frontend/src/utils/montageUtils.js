@@ -540,10 +540,15 @@ export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
       : "";
   const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
   const cat = String(clip.category || "").toLowerCase();
+  const kind = String(clip.timeline_record_kind || "").trim();
+  const wck = String(clip.workbench_clip_kind || clip.recording_request_type || "").trim();
   const victims = Array.isArray(clip.victims) ? clip.victims.map((v) => String(v || "").trim()).filter(Boolean) : [];
   const kc = Number(clip.kill_count);
   let action = "";
-  if (cat === "fail") {
+  const qsl = String(clip.queue_summary_line || "").trim();
+  if (isTimelineSourceClip(clip) && qsl) {
+    action = qsl;
+  } else if (cat === "fail" || kind === "death" || wck === "timeline_death") {
     const killer = String(clip.killer_name || "").trim();
     action = killer ? `被 ${killer} 击杀` : "死亡";
   } else if (victims.length) {
@@ -558,7 +563,14 @@ export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
 
 export function getMontageTimelineVariant(clip) {
   if (!clip || typeof clip !== "object") return "neutral";
-  if (isTimelineSourceClip(clip)) return "timeline";
+  if (isTimelineSourceClip(clip)) {
+    const kind = String(clip.timeline_record_kind || "").trim();
+    const wck = String(clip.workbench_clip_kind || clip.recording_request_type || "").trim();
+    if (kind === "death" || wck === "timeline_death") return "fail";
+    if (kind === "round" || wck === "timeline_round") return "compilation";
+    if (kind === "kill" || wck === "timeline_kill") return "highlight";
+    return "timeline";
+  }
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "fail" || cat === "meme_death") return "fail";
   if (cat === "compilation") return "compilation";
@@ -603,10 +615,12 @@ export function mapNameFromClip(clip) {
   return df || "";
 }
 
-/** 编排时间线徽标：时间线 | 高光 | 下饭 | 合集 */
+/** 编排/素材池徽标文案（时间线片段保留「时间线击杀/死亡/整回合」标识） */
 export function getMontageBlockShortLabel(clip) {
   if (!clip || typeof clip !== "object") return "高光";
-  if (isTimelineSourceClip(clip)) return "时间线";
+  if (isTimelineSourceClip(clip)) {
+    return normalizeClipType(clip);
+  }
   const cat = String(clip.category || "").toLowerCase();
   if (cat === "compilation") return "合集";
   if (cat === "fail" || cat === "meme_death") return "下饭";
@@ -646,6 +660,32 @@ export function mapNameAccentDotClass(mapName) {
   return palette[h % palette.length];
 }
 
+/**
+ * 时间线死亡/下饭等：主段跟拍目标玩家（UI 仍标「玩家视角」），落库的 victim 段是主视角而非追加 POV。
+ * 仅用于隐藏合辑里重复的「受害者视角 ×N」徽标。
+ */
+export function isPrimaryClipVictimPerspective(clip) {
+  if (!clip || typeof clip !== "object") return false;
+  const wck = String(clip.workbench_clip_kind || clip.recording_request_type || "").trim();
+  if (wck === "timeline_death" || wck === "fail") return true;
+  if (isTimelineSourceClip(clip) && String(clip.timeline_record_kind || "").trim() === "death") return true;
+  const tag = normalizeClipType(clip);
+  if (tag === "时间线死亡" || tag === "下饭") return true;
+  const planned = Array.isArray(clip.planned_segments) ? clip.planned_segments : [];
+  if (planned.length === 1) {
+    const p = String(planned[0]?.perspective || "").toLowerCase();
+    if (p === "victim") return true;
+  }
+  return false;
+}
+
+/** 合辑 UI：仅统计追加的受害者 POV 段（高光等），不含死亡/下饭主视角 */
+export function getMontageExtraVictimPovCount(clip) {
+  if (isPrimaryClipVictimPerspective(clip)) return 0;
+  const segs = Array.isArray(clip?.victim_pov_segments) ? clip.victim_pov_segments : [];
+  return segs.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length;
+}
+
 /** 受害者/击杀者 POV 段 tooltip：逐段玩家名 */
 export function getVictimPovSegmentsTooltip(clip) {
   const segs = Array.isArray(clip?.victim_pov_segments) ? clip.victim_pov_segments : [];
@@ -673,9 +713,8 @@ export function getRecordedClipPerspectiveZh(clip) {
     spectator: "观战视角",
   }[rp];
 
-  const segs = Array.isArray(clip.victim_pov_segments) ? clip.victim_pov_segments : [];
-  const nVictim = segs.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length;
-  const victimSuffix = nVictim > 0 ? `含 ${nVictim} 段受害者视角` : "";
+  const extraVictim = getMontageExtraVictimPovCount(clip);
+  const victimSuffix = extraVictim > 0 ? `含 ${extraVictim} 段受害者视角` : "";
 
   if (fromEnum) {
     return victimSuffix ? `${fromEnum} · ${victimSuffix}` : fromEnum;
@@ -693,7 +732,8 @@ export function getRecordedClipPerspectiveZh(clip) {
   const matchesKiller = pnNorm && killerNorm && pnNorm === killerNorm;
 
   let legacy = "";
-  if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
+  if (isPrimaryClipVictimPerspective(clip)) legacy = pn ? "玩家视角" : "观战视角";
+  else if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
   else if (matchesVictim) legacy = "受害者视角";
   else if (matchesKiller) legacy = "击杀者视角";
   else if (Array.isArray(clip.planned_segments) && clip.planned_segments.length > 1) legacy = "含受害者视角";
