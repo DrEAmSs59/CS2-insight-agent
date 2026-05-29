@@ -33,8 +33,8 @@ def _assemble_zip(raw: dict[str, Any], dem_path: str, demo_hash: str) -> bytes:
     team_map    = _build_team_map(players)         # steamId64 -> teamKey
     rounds, side_map = _build_rounds(raw, team_map) # side_map: (roundNumber, teamKey) -> side
     match_json  = _build_match(raw, rounds)
-    player_stats = _build_player_stats(raw, team_map, side_map, rounds)
     kills       = _build_kills(raw, team_map, side_map)
+    player_stats = _build_player_stats(raw, team_map, side_map, rounds, kills_list=kills)
     damages     = _build_damages(raw, team_map, side_map)
     blinds_json = _build_blinds(raw, team_map, side_map)
     bombs       = _build_bombs(raw, team_map, side_map)
@@ -158,16 +158,29 @@ def _build_rounds(
     out: list[dict] = []
     side_map: dict[tuple[int, str], str] = {}
 
-    for r in raw.get("round_ends", []):
+    # compute halftime boundary dynamically from actual round data
+    round_ends_sorted = sorted(
+        raw.get("round_ends", []),
+        key=lambda r: _rn(r)
+    )
+    all_round_nums = [_rn(r) for r in round_ends_sorted if _rn(r) > 0]
+    half = max(all_round_nums) // 2 if all_round_nums else 12
+
+    for r in round_ends_sorted:
         n = _rn(r)
         if n <= 0:
             continue
 
         end_tick = int(r.get("tick") or 0)
-        # side: teamA starts T (team_num 2)
-        # halftime is round 13 (MR12), or 16 (MR15), switch sides then
-        team_a_side = "t" if n <= 12 else "ct"
-        team_b_side = "ct" if n <= 12 else "t"
+        # side: teamA starts T (team_num 2); switch at halftime boundary
+        team_a_side = "t" if n <= half else "ct"
+        team_b_side = "ct" if n <= half else "t"
+        # overtime: switch every 3 rounds within OT
+        if n > half * 2:
+            ot_round = n - half * 2
+            ot_half = ((ot_round - 1) // 3) % 2  # 0 or 1
+            team_a_side = "t" if ot_half == 0 else "ct"
+            team_b_side = "ct" if ot_half == 0 else "t"
 
         winner_raw = str(r.get("winner") or "").lower()
         # winner is "t" or "ct" or "2" / "3"
@@ -557,7 +570,8 @@ def _build_economies(
 # ── player-stats ──────────────────────────────────────────────────────────────
 
 def _build_player_stats(
-    raw: dict, team_map: dict, side_map: dict, rounds: list[dict]
+    raw: dict, team_map: dict, side_map: dict, rounds: list[dict],
+    kills_list: list[dict] | None = None,
 ) -> list[dict]:
     total_rounds = len(rounds)
     kills_by = _kills_per_round_per_player(raw.get("deaths", []))
@@ -615,7 +629,8 @@ def _build_player_stats(
             a["_rounds_with_assist"].add(n)
 
     # trade annotations (re-use kill list built above)
-    kills_list = _build_kills(raw, team_map, side_map)
+    if kills_list is None:
+        kills_list = _build_kills(raw, team_map, side_map)
     for k in kills_list:
         if k["tradeKill"] and k["killerSteamId64"]:
             _get(k["killerSteamId64"])["tradeKillCount"] += 1
@@ -743,17 +758,9 @@ def _build_clutches(
         if not rnd_kills:
             continue
 
-        # simulate alive counts: start with 5 per team
+        # simulate alive counts: start with all known players per team
         alive: dict[str, set[str]] = {"teamA": set(), "teamB": set()}
-        # pre-populate from players actually seen in this round
-        seen_sids: set[str] = set()
-        for k in rnd_kills:
-            if k["killerSteamId64"]:
-                seen_sids.add(k["killerSteamId64"])
-            if k["victimSteamId64"]:
-                seen_sids.add(k["victimSteamId64"])
-        for sid in seen_sids:
-            tk = team_map.get(sid, "unknown")
+        for sid, tk in team_map.items():
             if tk in alive:
                 alive[tk].add(sid)
 
