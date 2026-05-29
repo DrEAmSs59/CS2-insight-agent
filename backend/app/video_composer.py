@@ -510,7 +510,9 @@ def compose_montage(
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={fps_s},setsar=1,format=yuv420p"
             )
 
-            # Determine whether this segment gets a name card overlay
+            # Determine whether this segment gets a name card overlay.
+            # "有卡"（_use_card）只要有名字即可；"有头像"（_has_avatar）需头像文件存在。
+            # 无头像时仍烧名字框，只是文字左移填满卡片。
             _clip_index = i - intro_n
             _is_clip_seg = (name_cards is not None and 0 <= _clip_index < len(name_cards))
             _card = name_cards[_clip_index] if _is_clip_seg else None
@@ -518,12 +520,15 @@ def compose_montage(
                 _card is not None
                 and isinstance(_card, dict)
                 and _card.get("enabled")
-                and _card.get("avatar_path")
+                and str(_card.get("display_name") or "").strip()
+            )
+            _has_avatar = (
+                _use_card
+                and bool(_card.get("avatar_path"))
                 and Path(str(_card["avatar_path"])).is_file()
             )
 
             if _use_card:
-                av_path_esc    = _fg_escape_path(Path(str(_card["avatar_path"])))
                 name_text_esc  = _fg_escape_text(str(_card.get("display_name") or ""))
                 sub_text_esc   = _fg_escape_text(str(_card.get("subtitle") or ""))
                 category_val   = str(_card.get("category") or "")
@@ -533,26 +538,36 @@ def compose_montage(
                 # than this the card is visible throughout (between evaluates true
                 # for every frame when clip duration < display window).
                 t_enable = f"enable='between(t,0,{_NAME_CARD_DISPLAY_SECS})'"
-                vf_chain = (
-                    # 1. Normalize video
-                    f"[0:v]{vf}[_scaled];"
-                    # 2. Semi-transparent black background box (full card area)
-                    f"[_scaled]drawbox=x=0:y=H-100:w=240:h=100:color=black@0.65:t=fill:{t_enable}[_v_bg];"
-                    # 3. Colored left-stripe accent (4px wide, category-specific)
-                    f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
-                    # 4. Load and scale avatar
-                    f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
-                    # 5. Overlay avatar (box top H-100, avatar 80px → y=H-90 gives 10px margin)
-                    f"[_v_stripe][_avt]overlay=8:H-90:{t_enable}[_v_av];"
-                    # 6. Player name — line 1, white
-                    f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
-                )
+
+                if _has_avatar:
+                    # 有头像：黑底 → 色条 → 头像 → 名字（x=96）→ 副标签
+                    av_path_esc = _fg_escape_path(Path(str(_card["avatar_path"])))
+                    vf_chain = (
+                        f"[0:v]{vf}[_scaled];"
+                        f"[_scaled]drawbox=x=0:y=H-100:w=240:h=100:color=black@0.65:t=fill:{t_enable}[_v_bg];"
+                        f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
+                        f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
+                        f"[_v_stripe][_avt]overlay=8:H-90:{t_enable}[_v_av];"
+                        f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
+                    )
+                    text_x = 96
+                else:
+                    # 无头像：黑底 → 色条 → 名字从左侧开始（x=14）
+                    vf_chain = (
+                        f"[0:v]{vf}[_scaled];"
+                        f"[_scaled]drawbox=x=0:y=H-70:w=240:h=70:color=black@0.65:t=fill:{t_enable}[_v_bg];"
+                        f"[_v_bg]drawbox=x=0:y=H-70:w=4:h=70:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
+                        f"[_v_stripe]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=14:y=H-55:{t_enable}[_v_name];"
+                    )
+                    text_x = 14
+
                 # Subtitle line is optional — skip the drawtext node when empty
                 # to avoid a zero-glyph render pass on every frame.
                 if sub_text_esc:
+                    sub_y = "H-52" if _has_avatar else "H-28"
                     vf_chain += (
                         f"[_v_name]drawtext{font_part}:text='{sub_text_esc}':fontcolor=0xCCCCCC"
-                        f":fontsize=14:x=96:y=H-52:{t_enable}[v]"
+                        f":fontsize=14:x={text_x}:y={sub_y}:{t_enable}[v]"
                     )
                 else:
                     vf_chain += "[_v_name]null[v]"
