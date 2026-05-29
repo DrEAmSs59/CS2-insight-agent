@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import API from "../api/api";
-import { LayoutGrid, List } from "lucide-react";
+import { LayoutGrid, List, Loader2, AlertCircle, CheckCircle2, X } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
@@ -18,8 +18,7 @@ import {
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
-import { exportRivalHubBatch } from "../utils/rivalHubExport";
-import RivalHubExportToast from "../components/demoLibrary/RivalHubExportToast";
+import { exportRivalHubBatch, downloadBlob } from "../utils/rivalHubExport";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -51,8 +50,7 @@ export default function DemoLibraryPage() {
   const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
 
-  // rivalHubToasts: { id: number, label: string, phase: string, blob?: Blob, filename?: string, error?: string }[]
-  const [rivalHubToasts, setRivalHubToasts] = useState([]);
+  const [rivalHubExport, setRivalHubExport] = useState({ phase: "idle", error: "" });
 
   const queuedClientClipUids = useMemo(
     () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
@@ -231,43 +229,27 @@ export default function DemoLibraryPage() {
     [s]
   );
 
-  const handleExportRivalHub = useCallback(() => {
+  const handleExportRivalHub = useCallback(async () => {
     const selectedIds = Array.from(s.selectedLibraryDemoIds);
-    // RivalHub export re-parses the .dem in isolation — no Insight parse/result required.
-    const exportItems = selectedIds
-      .map((id) => s.demoLibraryItems.find((it) => it.id === id))
-      .filter(Boolean);
-    if (!exportItems.length) return;
+    if (!selectedIds.length) return;
 
-    // filter out demos already being exported
-    setRivalHubToasts((prev) => {
-      const inFlight = new Set(prev.filter(t => t.phase === "loading").map(t => t.id));
-      const newItems = exportItems.filter(it => !inFlight.has(it.id));
-      if (!newItems.length) return prev;
-
-      const ids = newItems.map((it) => it.id);
-      void exportRivalHubBatch(ids, (demoId, status) => {
-        setRivalHubToasts((p) =>
-          p.map((t) => (t.id === demoId ? { ...t, ...status } : t))
-        );
+    setRivalHubExport({ phase: "loading", error: "" });
+    try {
+      const { blob, filename, exported, skipped } = await exportRivalHubBatch(selectedIds);
+      downloadBlob(blob, filename);
+      setRivalHubExport({
+        phase: "done",
+        error: skipped.length ? `跳过 ${skipped.length} 个（解析失败），成功 ${exported} 个` : `成功导出 ${exported} 个`,
       });
-
-      return [
-        ...prev,
-        ...newItems.map((it) => ({
-          id: it.id,
-          label:
-            (it.display_name && String(it.display_name).trim()) ||
-            it.filename ||
-            `Demo #${it.id}`,
-          phase: "loading",
-        })),
-      ];
-    });
+      setTimeout(() => setRivalHubExport({ phase: "idle", error: "" }), 10_000);
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || "导出失败";
+      setRivalHubExport({ phase: "error", error: String(msg) });
+    }
   }, [s]);
 
-  const handleCloseToast = useCallback((id) => {
-    setRivalHubToasts((prev) => prev.filter((t) => t.id !== id));
+  const handleCloseToast = useCallback(() => {
+    setRivalHubExport({ phase: "idle", error: "" });
   }, []);
 
   return (
@@ -527,20 +509,30 @@ export default function DemoLibraryPage() {
         onIngest={handleBatchIngest}
         onUpload={s.handleUpload}
       />
-      {rivalHubToasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-          {rivalHubToasts.map((t) => (
-            <RivalHubExportToast
-              key={t.id}
-              id={t.id}
-              label={t.label}
-              phase={t.phase}
-              blob={t.blob}
-              filename={t.filename}
-              error={t.error}
-              onClose={handleCloseToast}
-            />
-          ))}
+      {rivalHubExport.phase !== "idle" && (
+        <div className="fixed bottom-4 right-4 z-50">
+          {rivalHubExport.phase === "loading" ? (
+            <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur-sm text-[12px] text-cs2-text-secondary">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-cs2-accent" />
+              正在批量导出 RivalHub…
+            </div>
+          ) : (
+            <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-lg backdrop-blur-sm text-[12px] max-w-[360px] ${
+              rivalHubExport.phase === "error"
+                ? "border-cs2-fail/40 text-cs2-red-on-surface"
+                : "border-cs2-highlight/40 text-cs2-text-primary"
+            }`}>
+              {rivalHubExport.phase === "error" ? (
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cs2-fail" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cs2-highlight" />
+              )}
+              <span className="flex-1">{rivalHubExport.error}</span>
+              <button type="button" onClick={handleCloseToast} className="shrink-0 text-cs2-text-muted hover:text-cs2-text-primary">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </PageContainer>
