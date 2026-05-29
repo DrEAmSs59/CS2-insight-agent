@@ -63,6 +63,28 @@ export function validateWarmupResolution(opts) {
   return { ok: true };
 }
 
+/** CS2 默认观战闪光弹亮度 */
+export const SPECTATOR_FLASHBANG_OPACITY_DEFAULT = 0.6;
+
+/** @param {unknown} n */
+export function clampSpectatorFlashbangOpacity(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return SPECTATOR_FLASHBANG_OPACITY_DEFAULT;
+  return Math.min(1, Math.max(0.2, x));
+}
+
+/**
+ * POV 录制强制 1.0；否则仅在勾选应用时返回钳制后的值。
+ * @param {Record<string, unknown>} opts
+ * @param {boolean} povEnabled
+ * @returns {number | null}
+ */
+export function effectiveSpectatorFlashbangOpacity(opts, povEnabled) {
+  if (povEnabled) return 1;
+  if (!opts.apply_spectator_flashbang_opacity) return null;
+  return clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity);
+}
+
 /**
  * 将「录制前观战」UI 状态（与 RecordWarmupModal DEFAULT_OPTIONS 对齐）转为写入配置的扁平对象。
  * @param {Record<string, unknown>} opts
@@ -72,6 +94,7 @@ export function warmupUiOptsToPersisted(opts) {
   const rh = opts.resolution_height;
   const fov = opts.fov_cs_debug;
   const hasFov = !!opts.apply_fov && fov != null && Number.isFinite(Number(fov));
+  const hasFlash = !!opts.apply_spectator_flashbang_opacity;
   return {
     cl_draw_only_deathnotices: !!opts.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!opts.hud_showtargetid_hide,
@@ -83,6 +106,10 @@ export function warmupUiOptsToPersisted(opts) {
     apply_fov: hasFov,
     fov_cs_debug: hasFov ? Number(fov) : 90,
     viewmodel_fov_68: !!opts.viewmodel_fov_68,
+    apply_spectator_flashbang_opacity: hasFlash,
+    spectator_flashbang_opacity: hasFlash
+      ? clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity)
+      : SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
     voice_filter: ["off", "open", "team", "enemy", "mute"].includes(opts.voice_filter)
       ? opts.voice_filter
       : opts.voice_filter === "all" ? "mute"  // old value compat
@@ -106,6 +133,9 @@ export function warmupApiPayloadToPersisted(warmup) {
   const rh = warmup.resolution_height;
   const fov = warmup.fov_cs_debug;
   const hasFov = fov != null && Number.isFinite(Number(fov));
+  const fb = warmup.spectator_flashbang_opacity;
+  const hasFlash =
+    fb != null && Number.isFinite(Number(fb)) && Number(fb) >= 0.2 && Number(fb) <= 1;
   return {
     cl_draw_only_deathnotices: !!warmup.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!warmup.hud_showtargetid_hide,
@@ -117,6 +147,10 @@ export function warmupApiPayloadToPersisted(warmup) {
     apply_fov: hasFov,
     fov_cs_debug: hasFov ? Number(fov) : 90,
     viewmodel_fov_68: !!warmup.viewmodel_fov_68,
+    apply_spectator_flashbang_opacity: hasFlash,
+    spectator_flashbang_opacity: hasFlash
+      ? clampSpectatorFlashbangOpacity(fb)
+      : SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
     voice_filter: ["off", "open", "team", "enemy", "mute"].includes(warmup.voice_filter)
       ? warmup.voice_filter
       : warmup.voice_filter === "all" ? "mute"  // old value compat

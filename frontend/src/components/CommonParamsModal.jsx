@@ -9,6 +9,7 @@ import {
   aspectExportHint,
   aspectHint,
   formatResolutionSummary,
+  SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
   warmupUiOptsToPersisted,
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
@@ -567,7 +568,7 @@ export default function CommonParamsModal({
                 </div>
                 {warmupOpts.apply_fov ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感。
+                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感，影响狙击枪的缩放效果。
                   </p>
                 ) : null}
               </div>
@@ -582,6 +583,59 @@ export default function CommonParamsModal({
                   成片预期：手臂与枪械模型更贴近画面边缘，竞技剪辑常见「拉伸持枪」观感。
                 </p>
               ) : null}
+              <div className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-3">
+                <label
+                  className={`flex cursor-pointer items-center gap-3 ${
+                    povEnabled ? "cursor-not-allowed opacity-60" : ""
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={povEnabled || warmupOpts.apply_spectator_flashbang_opacity}
+                    disabled={povEnabled || batchRecording}
+                    onChange={(e) =>
+                      patchWarmup({ apply_spectator_flashbang_opacity: e.target.checked })
+                    }
+                    className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+                  />
+                  <span className="text-sm text-cs2-text-primary">
+                    调整闪光弹亮度（
+                    <code className="text-xs text-cs2-accent">r_spectator_flashbang_opacity</code>）
+                  </span>
+                </label>
+                <div className="mt-2 flex items-center gap-2 pl-7">
+                  <input
+                    type="number"
+                    min={0.2}
+                    max={1}
+                    step={0.1}
+                    value={povEnabled ? 1 : warmupOpts.spectator_flashbang_opacity}
+                    onChange={(e) => {
+                      if (e.target.value === "") return;
+                      const n = parseFloat(e.target.value, 10);
+                      patchWarmup({
+                        spectator_flashbang_opacity: Number.isNaN(n)
+                          ? SPECTATOR_FLASHBANG_OPACITY_DEFAULT
+                          : Math.min(1, Math.max(0.2, n)),
+                      });
+                    }}
+                    disabled={
+                      povEnabled || batchRecording || !warmupOpts.apply_spectator_flashbang_opacity
+                    }
+                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
+                  />
+                  <span className="text-xs text-cs2-text-muted">0.2–1.0，默认 0.6</span>
+                </div>
+                {povEnabled ? (
+                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-amber-on-surface">
+                    已启用 POV HUD：录制时将强制注入亮度 1.0，更接近实战第一人称观感。
+                  </p>
+                ) : warmupOpts.apply_spectator_flashbang_opacity ? (
+                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
+                    成片预期：数值越低闪光致盲越弱，越高越接近游戏实战白屏强度。
+                  </p>
+                ) : null}
+              </div>
             </div>
           </WorkflowSection>
 

@@ -34,6 +34,7 @@ import {
   applySessionObsTransitionToRequests,
 } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
+import { progressToastShowsBusy } from "./utils/progressToast";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
@@ -547,13 +548,13 @@ export default function App() {
     async (ids, rescan = "skip") => {
       const list = [...ids];
       if (!list.length) return;
-      setProgressText(`正在批量删除（0 / ${list.length}）…`);
+      setProgressText(`正在批量删除（0 / ${list.length}）…`, { loading: true });
       let done = 0;
       for (const id of list) {
         try {
           await API.delete(`/demos/${id}`, { params: { rescan } });
           done += 1;
-          setProgressText(`正在批量删除（${done} / ${list.length}）…`);
+          setProgressText(`正在批量删除（${done} / ${list.length}）…`, { loading: true });
         } catch (e) {
           setProgressText(`批量删除失败: ${e.response?.data?.detail || e.message}`);
           await refreshDemoLibrary(libraryPage, { manageLoading: false });
@@ -946,7 +947,7 @@ export default function App() {
     const list = Array.isArray(files) ? files : [files];
     if (!list.length) return;
 
-    setProgressText("正在上传 Demo 文件...");
+    setProgressText("正在上传 Demo 文件...", { loading: true });
     setParsing(true);
 
     try {
@@ -1629,7 +1630,7 @@ export default function App() {
       return;
     }
     // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
-    setProgressText("正在检测 OBS 连接…");
+    setProgressText("正在检测 OBS 连接…", { loading: true });
     try {
       const { data } = await API.post("/obs/config-check", obsConfig);
       if (!data?.connected) {
@@ -1656,7 +1657,7 @@ export default function App() {
         setWarmupIntent(null);
         if (!queue.length) return;
         setBatchRecording(true);
-        setProgressText("正在执行批量 OBS 导播…");
+        setProgressText("正在执行批量 OBS 导播…", { loading: true });
         try {
           let requests = buildRecordingQueueRequestsFromQueue(
             queue,
@@ -1735,7 +1736,7 @@ export default function App() {
   );
 
   const handleRestorePlayerConfig = useCallback(async () => {
-    setProgressText("正在恢复玩家配置…");
+    setProgressText("正在恢复玩家配置…", { loading: true });
     try {
       const { data } = await API.post("/config-backup/restore");
       if (data?.ok) {
@@ -1931,7 +1932,7 @@ export default function App() {
       const { data } = await API.post("config/detect-cs2");
       if (data.cs2_path) {
         setCs2Path(data.cs2_path);
-        setProgressText(`已自动找到 CS2：${data.cs2_path}`);
+        setProgressText(`已自动找到 CS2：${data.cs2_path}`, { autoDismissMs: 4500 });
       }
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
@@ -1944,7 +1945,7 @@ export default function App() {
       const { data } = await API.post("config/detect-ffmpeg");
       if (data.ffmpeg_path) {
         setFfmpegPath(data.ffmpeg_path);
-        setProgressText(`已自动找到 FFmpeg：${data.ffmpeg_path}`);
+        setProgressText(`已自动找到 FFmpeg：${data.ffmpeg_path}`, { autoDismissMs: 4500 });
       }
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
@@ -2412,7 +2413,10 @@ export default function App() {
             <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
               <ProgressBar
                 text={progressText || (batchRecording ? "正在批量录制…" : "")}
-                active={anyDemoParsing || (progressText && !batchRecording && !progressToastMeta?.autoDismissMs)}
+                active={progressToastShowsBusy(progressText, {
+                  parsing: anyDemoParsing,
+                  loading: progressToastMeta?.loading === true,
+                })}
                 batchRecording={batchRecording}
                 onAbortBatch={handleAbortBatchRecording}
                 dismissible={Boolean(progressText?.trim())}

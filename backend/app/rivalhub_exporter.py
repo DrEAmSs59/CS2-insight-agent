@@ -12,7 +12,7 @@ from typing import Any
 from .demo_parse_isolation import run_parse_worker
 from .file_hash import file_md5_hex
 
-SCHEMA_VERSION = "rivalhub-demo-export/1"
+SCHEMA_VERSION = "cs2-demo-format/1.0"
 EXPORTER_NAME = "CS2 Insight Agent"
 
 
@@ -97,6 +97,29 @@ def _rn(row: dict) -> int:
     return int(row.get("total_rounds_played") or 0)
 
 
+def _event_steamid(row: dict) -> str | None:
+    """Steam64 from demoparser2 player extras (not raw userid entity slot)."""
+    return _sid(
+        row.get("user_steamid")
+        or row.get("steamid")
+        or row.get("attacker_steamid")
+    )
+
+
+_WEAPON_TO_GRENADE_TYPE = {
+    "smokegrenade": "smoke",
+    "flashbang": "flashbang",
+    "hegrenade": "hegrenade",
+    "molotov": "molotov",
+    "incgrenade": "molotov",
+    "decoy": "decoy",
+}
+
+
+def _weapon_to_grenade_type(weapon: str) -> str | None:
+    return _WEAPON_TO_GRENADE_TYPE.get(str(weapon or "").strip().lower())
+
+
 # ── players ───────────────────────────────────────────────────────────────────
 
 def _build_players(raw: dict) -> list[dict]:
@@ -131,6 +154,42 @@ _ROUND_END_REASON_MAP = {
     9: "t_win",        # CT eliminated
     12: "round_draw",
 }
+
+# demoparser2 CS2 exports snake_case strings (awpy-compatible), not legacy byte codes.
+_ROUND_END_REASON_STR_MAP = {
+    "t_killed": "ct_win",
+    "ct_killed": "t_win",
+    "t_eliminated": "ct_win",
+    "ct_eliminated": "t_win",
+    "bomb_exploded": "target_bombed",
+    "target_bombed": "target_bombed",
+    "bomb_defused": "bomb_defused",
+    "draw": "round_draw",
+    "round_draw": "round_draw",
+}
+
+
+def _normalize_round_end_reason(raw: Any) -> str:
+    """Map demoparser2 round_end.reason (int or str) to RivalHub endReason."""
+    if raw is None or raw == "":
+        return "unknown"
+    if isinstance(raw, bool):
+        return "unknown"
+    if isinstance(raw, (int, float)):
+        return _ROUND_END_REASON_MAP.get(int(raw), str(int(raw)))
+    text = str(raw).strip()
+    if not text:
+        return "unknown"
+    key = text.lower().replace(" ", "_")
+    if key in _ROUND_END_REASON_STR_MAP:
+        return _ROUND_END_REASON_STR_MAP[key]
+    if key in ("ct_win", "t_win", "target_bombed", "bomb_defused", "round_draw"):
+        return key
+    try:
+        code = int(text)
+    except ValueError:
+        return text
+    return _ROUND_END_REASON_MAP.get(code, text)
 
 
 def _build_rounds(
@@ -194,8 +253,7 @@ def _build_rounds(
             winner_side = "unknown"
             winner_key = "unknown"
 
-        reason_code = int(r.get("reason") or 0)
-        end_reason = _ROUND_END_REASON_MAP.get(reason_code, str(reason_code))
+        end_reason = _normalize_round_end_reason(r.get("reason"))
 
         side_map[(n, "teamA")] = team_a_side
         side_map[(n, "teamB")] = team_b_side
@@ -377,39 +435,52 @@ def _build_bombs(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
 # ── grenades ─────────────────────────────────────────────────────────────────
 
 def _build_grenades(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
-    # build throw-time positions from grenade_throws (keyed by userid + tick proximity)
-    throw_pos_by_sid: dict[str, list[dict]] = {}
+    throws: list[dict] = []
     for r in raw.get("grenade_throws", []):
-        sid = _sid(r.get("steamid") or r.get("userid"))
-        if sid:
-            throw_pos_by_sid.setdefault(sid, []).append({
-                "tick": int(r.get("tick") or 0),
-                "pos": _pos(r),
-                "weapon": str(r.get("weapon") or ""),
-                "rn": _rn(r),
-            })
+        if _rn(r) <= 0:
+            continue
+        gtype = _weapon_to_grenade_type(str(r.get("weapon") or ""))
+        if not gtype:
+            continue
+        throws.append({
+            "rn": _rn(r),
+            "tick": int(r.get("tick") or 0),
+            "gtype": gtype,
+            "sid": _event_steamid(r),
+            "pos": _pos(r),
+        })
+    throws.sort(key=lambda t: t["tick"])
+
+    def _match_throw(round_num: int, gtype: str, effect_tick: int, thrower_sid: str | None) -> dict | None:
+        pool = [
+            t for t in throws
+            if t["rn"] == round_num
+            and t["gtype"] == gtype
+            and t["tick"] <= effect_tick
+            and (thrower_sid is None or t["sid"] == thrower_sid)
+        ]
+        if not pool:
+            return None
+        return max(pool, key=lambda t: t["tick"])
 
     out = []
     for r in raw.get("grenade_detonations", []):
         n = _rn(r)
-        thrower_sid = _sid(r.get("steamid") or r.get("userid"))
-        thrower_key = team_map.get(thrower_sid or "", "unknown") if thrower_sid else None
+        if n <= 0:
+            continue
         tick = int(r.get("tick") or 0)
         gtype = str(r.get("_grenade_type") or "unknown")
+        thrower_sid = _event_steamid(r)
+        matched = _match_throw(n, gtype, tick, thrower_sid)
+        if matched:
+            thrower_sid = thrower_sid or matched["sid"]
+            throw_pos = matched["pos"]
+            throw_tick = matched["tick"]
+        else:
+            throw_pos = _pos(r)
+            throw_tick = tick
 
-        # find best matching throw event for this player
-        throw_pos = {"x": 0.0, "y": 0.0, "z": 0.0}
-        throw_tick = tick
-        if thrower_sid and thrower_sid in throw_pos_by_sid:
-            candidates = [
-                t for t in throw_pos_by_sid[thrower_sid]
-                if t["rn"] == n and t["tick"] <= tick
-            ]
-            if candidates:
-                best = max(candidates, key=lambda x: x["tick"])
-                throw_pos = best["pos"]
-                throw_tick = best["tick"]
-
+        thrower_key = team_map.get(thrower_sid or "", "unknown") if thrower_sid else None
         out.append({
             "roundNumber": n,
             "throwTick": throw_tick,
@@ -582,6 +653,7 @@ def _build_player_stats(
             stats[sid] = {
                 "steamId64": sid,
                 "teamKey": team_map.get(sid, "unknown"),
+                "rounds": total_rounds,
                 "kills": 0, "deaths": 0, "assists": 0,
                 "damageHealth": 0, "damageArmor": 0,
                 "utilityDamage": 0,

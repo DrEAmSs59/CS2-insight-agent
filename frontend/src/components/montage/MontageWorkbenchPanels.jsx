@@ -619,16 +619,6 @@ export function MontageOrchestrationTimeline({
                           <span className="rounded bg-cs2-cyan-surface px-2 py-0.5 text-xs font-bold text-cs2-cyan-on-surface">HUD</span>
                         ) : null}
                       </div>
-                      {povTip ? (
-                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
-                          {povTip}
-                        </p>
-                      ) : null}
-                      {perspectiveZh !== perspectivePrimary ? (
-                        <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted break-words">
-                          录制视角：{perspectiveZh}
-                        </p>
-                      ) : null}
                       {aiLine ? (
                         <p className="mt-1.5 text-[11px] leading-relaxed italic text-cs2-text-muted break-words">
                           {aiLine}

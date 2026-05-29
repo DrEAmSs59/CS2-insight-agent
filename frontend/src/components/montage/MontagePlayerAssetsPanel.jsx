@@ -58,8 +58,8 @@ export function MontagePlayerAssetsPanel({
 
   return (
     <CollapsibleSection
-      title="玩家头像"
-      hint="为每位玩家配置头像和名字信息卡"
+      title="玩家信息卡"
+      hint="开启后在每段视频左下角显示玩家名与标签；头像可选，不上传则仅显示文字"
       defaultOpen
     >
       {/* Total enable/disable toggle */}
@@ -71,14 +71,19 @@ export function MontagePlayerAssetsPanel({
           type="button"
           role="switch"
           aria-checked={nameCardsEnabled}
+          aria-label={nameCardsEnabled ? "关闭玩家信息卡" : "开启玩家信息卡"}
           onClick={() => onNameCardsEnabledChange?.(!nameCardsEnabled)}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent ${
-            nameCardsEnabled ? "bg-cs2-accent" : "bg-cs2-surface-2"
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cs2-surface-1 ${
+            nameCardsEnabled
+              ? "border-cs2-accent bg-cs2-accent"
+              : "border-cs2-border-subtle bg-cs2-bg-input shadow-[inset_0_1px_2px_rgba(0,0,0,0.35)]"
           }`}
         >
           <span
-            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition-transform ${
-              nameCardsEnabled ? "translate-x-4" : "translate-x-0"
+            className={`pointer-events-none absolute top-0.5 left-0.5 inline-block h-4 w-4 rounded-full shadow-md ring-1 transition-transform ${
+              nameCardsEnabled
+                ? "translate-x-5 bg-white ring-white/20"
+                : "translate-x-0 bg-cs2-text-secondary ring-cs2-border-subtle"
             }`}
           />
         </button>
@@ -176,7 +181,7 @@ export function MontagePlayerAssetsPanel({
                       ) : (
                         <>
                           <Upload className="h-3 w-3" />
-                          上传头像
+                          上传头像（可选）
                         </>
                       )}
                     </button>

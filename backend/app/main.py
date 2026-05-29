@@ -2384,26 +2384,25 @@ async def montage_export(body: MontageExportBody):
         if matched_pa is None or not matched_pa.enabled:
             name_cards_list.append(None)
         else:
-            display_name = matched_pa.player_name or str(row.get("player_name") or "")
-            category = str(row.get("category") or "")
-            # tags 列表：类别标签 → 杀数 → 所有 context_tags
-            cat_label = _CATEGORY_SUBTITLE.get(category, "")
-            kill_count_val = row.get("kill_count")
-            try:
-                kc = int(kill_count_val)
-                kill_tag = f"{kc}K" if kc > 0 else ""
-            except (TypeError, ValueError):
-                # 兜底：从 clip_id 里提取（如 _3K_）
-                clip_id_str = str(row.get("clip_id") or "")
-                m = re.search(r"_(\d+)K_", clip_id_str, re.IGNORECASE)
-                kill_tag = (m.group(1) + "K") if m else ""
+            display_name   = matched_pa.player_name or str(row.get("player_name") or "")
+            category       = str(row.get("category") or "")
+            eyebrow        = _CATEGORY_EYEBROW.get(category, "")
             context_tags: list[str] = list(row.get("context_tags") or [])
-            tags: list[str] = [t for t in [cat_label, kill_tag] + context_tags if t]
+            # 高光片段：提取杀数 tag 作为 RESULT 块，其余留给 chips
+            result_tag: str | None = None
+            if category == "highlight":
+                result_tag = next((t for t in context_tags if t in _KILL_COUNT_TAGS), None)
+                chips = [t for t in context_tags if t != result_tag]
+            else:
+                chips = list(context_tags)
+            tags = [t for t in chips if t]
             name_cards_list.append(
                 {
                     "avatar_path": matched_pa.avatar_path,
                     "display_name": display_name,
                     "category": category,
+                    "eyebrow": eyebrow,
+                    "result": result_tag,
                     "tags": tags,
                     "enabled": True,
                 }
@@ -2481,6 +2480,18 @@ _CATEGORY_SUBTITLE: dict[str, str] = {
     "meme_death": "梗死亡",
     "compilation": "合集",
 }
+
+_CATEGORY_EYEBROW: dict[str, str] = {
+    "highlight":   "HIGHLIGHT · 高光",
+    "fail":        "LOWLIGHT · 下饭",
+    "meme_death":  "MEME · 梗死亡",
+    "compilation": "ROUND · 合集",
+}
+
+# 高光片段 RESULT 块显示的杀数 tag 集合
+_KILL_COUNT_TAGS: frozenset[str] = frozenset({
+    "五杀 (ACE)", "四杀", "三杀", "双杀",
+})
 
 
 @app.post("/api/montage/avatars")

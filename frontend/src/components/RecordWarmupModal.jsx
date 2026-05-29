@@ -3,7 +3,9 @@ import { X } from "lucide-react";
 import {
   aspectExportHint,
   aspectHint,
+  effectiveSpectatorFlashbangOpacity,
   formatResolutionSummary,
+  SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
 import ExperimentalPovSection from "./ExperimentalPovSection";
@@ -17,6 +19,7 @@ export function buildWarmupConsoleCommands(o) {
     "engine_no_focus_sleep 0",
     "cl_demo_predict 0",
     "fps_max 0",
+    "cl_trueview_show_status 0",
   ];
   lines.push(
     o.cl_draw_only_deathnotices
@@ -36,6 +39,13 @@ export function buildWarmupConsoleCommands(o) {
   }
   if (o.viewmodel_fov_68) {
     lines.push("viewmodel_fov 68");
+  }
+  const flashOpacity = effectiveSpectatorFlashbangOpacity(
+    o,
+    !!(o.pov_hud_enabled || o.experimental_pov_enabled),
+  );
+  if (flashOpacity != null) {
+    lines.push(`r_spectator_flashbang_opacity ${flashOpacity}`);
   }
   const vf = o.voice_filter ?? "mute";
   if (vf === "mute" || vf === "all") {
@@ -67,6 +77,8 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   apply_fov: false,
   fov_cs_debug: 90,
   viewmodel_fov_68: false,
+  apply_spectator_flashbang_opacity: false,
+  spectator_flashbang_opacity: SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
   voice_filter: "mute",
   hide_demo_playback_ui: true,
   hide_grenade_trajectory_pip: true,
@@ -236,6 +248,7 @@ export default function RecordWarmupModal({
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
       viewmodel_fov_68: opts.viewmodel_fov_68,
+      spectator_flashbang_opacity: effectiveSpectatorFlashbangOpacity(opts, sessionPovEnabled),
       voice_filter: opts.voice_filter ?? "mute",
       hide_demo_playback_ui: opts.hide_demo_playback_ui,
       hide_grenade_trajectory_pip: opts.hide_grenade_trajectory_pip,
@@ -248,6 +261,7 @@ export default function RecordWarmupModal({
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
       spec_show_xray: !!opts.spec_show_xray,
+      experimental_pov_enabled: sessionPovEnabled,
     });
 
     onConfirm({
@@ -452,7 +466,7 @@ export default function RecordWarmupModal({
                 </div>
                 {opts.apply_fov ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感。
+                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感，影响狙击枪的缩放效果。
                   </p>
                 ) : null}
               </div>
@@ -467,6 +481,55 @@ export default function RecordWarmupModal({
                   成片预期：手臂与枪械模型更贴近画面边缘，竞技剪辑常见「拉伸持枪」观感。
                 </p>
               ) : null}
+              <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
+                <label
+                  className={`flex items-center gap-3 ${
+                    sessionPovEnabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={sessionPovEnabled || opts.apply_spectator_flashbang_opacity}
+                    disabled={sessionPovEnabled}
+                    onChange={(e) => set({ apply_spectator_flashbang_opacity: e.target.checked })}
+                    className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+                  />
+                  <span className="text-sm text-cs2-text-primary">
+                    调整闪光弹亮度（
+                    <code className="text-xs text-cs2-accent">r_spectator_flashbang_opacity</code>）
+                  </span>
+                </label>
+                <div className="mt-2 flex items-center gap-2 pl-7">
+                  <input
+                    type="number"
+                    min={0.2}
+                    max={1}
+                    step={0.1}
+                    value={sessionPovEnabled ? 1 : opts.spectator_flashbang_opacity}
+                    onChange={(e) => {
+                      if (e.target.value === "") return;
+                      const n = parseFloat(e.target.value, 10);
+                      set({
+                        spectator_flashbang_opacity: Number.isNaN(n)
+                          ? SPECTATOR_FLASHBANG_OPACITY_DEFAULT
+                          : Math.min(1, Math.max(0.2, n)),
+                      });
+                    }}
+                    disabled={sessionPovEnabled || !opts.apply_spectator_flashbang_opacity}
+                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
+                  />
+                  <span className="text-xs text-cs2-text-muted">0.2–1.0，默认 0.6</span>
+                </div>
+                {sessionPovEnabled ? (
+                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-amber-on-surface">
+                    已启用 POV HUD：预热将强制注入亮度 1.0，更接近实战第一人称观感。
+                  </p>
+                ) : opts.apply_spectator_flashbang_opacity ? (
+                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
+                    成片预期：数值越低闪光致盲越弱，越高越接近游戏实战白屏强度。
+                  </p>
+                ) : null}
+              </div>
             </div>
           </section>
           </div>

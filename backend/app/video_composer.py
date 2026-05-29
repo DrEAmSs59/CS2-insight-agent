@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
-from .env_utils import resolve_name_card_font
+from .env_utils import resolve_name_card_font, resolve_rajdhani_fonts
 
 logger = logging.getLogger(__name__)
 
@@ -400,19 +400,27 @@ def _montage_xfade_chain_to_ts(
         )
 
 
-_CATEGORY_ACCENT: dict[str, str] = {
-    "highlight":   "0xF97316@0.85",   # orange
-    "fail":        "0x6B7280@0.85",   # grey
-    "meme_death":  "0xA855F7@0.85",   # purple
-    "compilation": "0x3B82F6@0.85",   # blue
+# E2 HUD 支架配色（RGB 三元组）
+_CATEGORY_ACCENT_RGB: dict[str, tuple[int, int, int]] = {
+    "highlight":   (196, 240,  66),   # green  #C4F042
+    "fail":        (255,  91,  91),   # red    #FF5B5B
+    "meme_death":  (255,  91,  91),   # red    #FF5B5B
+    "compilation": (255, 157,  46),   # orange #FF9D2E
 }
-_DEFAULT_ACCENT = "0x222244@0.85"
+_DEFAULT_ACCENT_RGB: tuple[int, int, int] = (196, 240, 66)
+
+_CATEGORY_EYEBROW: dict[str, str] = {
+    "highlight":   "HIGHLIGHT · 高光",
+    "fail":        "LOWLIGHT · 下饭",
+    "meme_death":  "MEME · 梗死亡",
+    "compilation": "ROUND · 合集",
+}
 # How many seconds the name card stays visible at the start of each clip
-_NAME_CARD_DISPLAY_SECS: float = 3.0
+_NAME_CARD_DISPLAY_SECS: float = 4.0
 # Fade-in / fade-out duration (seconds)
 _NAME_CARD_FADE_SECS: float = 0.4
 # Pixels above the very bottom of the video frame
-_NAME_CARD_BOTTOM_MARGIN: int = 48
+_NAME_CARD_BOTTOM_MARGIN: int = 120
 
 # Regex that matches emoji / non-BMP characters msyh.ttc cannot render
 import re as _re
@@ -435,41 +443,49 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
 
 
-def _wrap_tags(tags: list[str], font: Any, max_width: int) -> list[str]:
-    """把 tags 列表按 max_width 宽度折行，返回每行的字符串列表。"""
-    lines: list[str] = []
-    current: list[str] = []
-    current_w = 0
-    sep = "  "
+def _text_w(font: Any, text: str) -> int:
     try:
-        sep_w = int(font.getlength(sep))
+        bb = font.getbbox(text)
+        return max(0, bb[2] - bb[0])
     except Exception:
-        sep_w = 8
-    for tag in tags:
-        try:
-            tw = int(font.getlength(tag))
-        except Exception:
-            tw = len(tag) * 13
-        needed = tw + (sep_w + current_w if current else 0)
-        if current and needed > max_width:
-            lines.append(sep.join(current))
-            current = [tag]
-            current_w = tw
+        return len(text) * 8
+
+
+def _chip_render_w(font: Any, text: str) -> int:
+    # padding 7+7, bracket "[" gap 3 text gap 3 bracket "]"
+    return 14 + _text_w(font, "[") + 3 + _text_w(font, text) + 3 + _text_w(font, "]")
+
+
+def _wrap_chips_rows(chips: list[str], font: Any, max_w: int, gap: int = 6) -> list[list[str]]:
+    rows: list[list[str]] = []
+    row: list[str] = []
+    row_w = 0
+    for chip in chips:
+        cw = _chip_render_w(font, chip)
+        needed = cw + (gap if row else 0)
+        if row and row_w + needed > max_w:
+            rows.append(row)
+            row = [chip]
+            row_w = cw
         else:
-            current.append(tag)
-            current_w = needed
-    if current:
-        lines.append(sep.join(current))
-    return lines
+            row.append(chip)
+            row_w += needed
+    if row:
+        rows.append(row)
+    return rows
 
 
 def _make_name_card_png(
     display_name: str,
     tags: list[str],
-    accent_hex: str,
+    accent_rgb: tuple[int, int, int],
     font_path: Optional[Path],
     avatar_path: Optional[Path],
     out_path: Path,
+    eyebrow: str = "",
+    result: Optional[str] = None,
+    font_bold_path: Optional[Path] = None,
+    font_semi_path: Optional[Path] = None,
 ) -> bool:
     """使用 Pillow 渲染名牌 PNG，返回是否成功。
 
@@ -483,91 +499,208 @@ def _make_name_card_png(
     except ImportError:
         return False
 
-    has_av = bool(avatar_path and avatar_path.is_file())
-    card_w = 520
-    avatar_size = 110
-    pad_top = 14
-    name_size = 34
-    tag_size = 22
-    line_gap = 8   # 行间距
-    pad_bottom = 14
-    stripe_w = 6
-    text_x = (avatar_size + stripe_w + 12) if has_av else (stripe_w + 14)
-    text_area_w = card_w - text_x - 10
+    ar, ag, ab = accent_rgb
 
-    # 字体：.ttc 文件需要 index=0，否则部分 Pillow 版本回退到 10px 位图默认字体
-    def _load_font(size: int) -> Any:
-        if not (font_path and font_path.is_file()):
-            return ImageFont.load_default()
-        suffix = font_path.suffix.lower()
-        for idx in ([0] if suffix == ".ttc" else [None]):
+    # Layout constants (E2 HUD 支架规格)
+    CARD_W   = 480
+    PAD_X    = 18
+    PAD_Y    = 15
+    COL_GAP  = 14
+    AV_SIZE  = 58
+
+    # Font sizes
+    EYEBROW_PX     = 12
+    NAME_PX        = 26
+    CHIP_PX        = 13
+    RES_LABEL_PX   = 10
+    RES_VAL_PX     = 22
+
+    has_av     = bool(avatar_path and avatar_path.is_file())
+    has_result = bool(result)
+
+    # ── font loaders ────────────────────────────────────────────────────────
+    def _load_cjk(size: int) -> Any:
+        if font_path and font_path.is_file():
+            kw: dict = {"font_index": 0} if font_path.suffix.lower() == ".ttc" else {}
             try:
-                kw = {"font_index": idx} if idx is not None else {}
                 return ImageFont.truetype(str(font_path), size, **kw)
             except Exception:
-                try:
-                    return ImageFont.truetype(str(font_path), size)
-                except Exception:
-                    return ImageFont.load_default()
+                pass
         return ImageFont.load_default()
 
-    fn = _load_font(name_size)
-    fs = _load_font(tag_size)
+    def _load_latin(path: Optional[Path], size: int) -> Any:
+        if path and path.is_file():
+            try:
+                return ImageFont.truetype(str(path), size)
+            except Exception:
+                pass
+        return _load_cjk(size)
 
-    # 折行后的 tag 行
-    # 去掉 emoji 前缀（msyh.ttc 没有 emoji 字形，会显示为方块）
-    clean_tags = [_strip_emoji(t) for t in tags]
-    clean_tags = [t for t in clean_tags if t]  # 过滤掉纯 emoji 的 tag
-    tag_lines = _wrap_tags(clean_tags, fs, text_area_w) if clean_tags else []
+    def _font_for(text: str, latin: Any, cjk: Any) -> Any:
+        return latin if text.isascii() else cjk
 
-    # 计算卡高：名字 + 若干 tag 行
-    name_h = name_size + 4
-    tags_h = len(tag_lines) * (tag_size + line_gap) if tag_lines else 0
-    content_h = name_h + tags_h
-    # 若有头像，最小高度取头像高度
-    min_h = (avatar_size + pad_top + pad_bottom) if has_av else 0
-    card_h = max(min_h, content_h + pad_top + pad_bottom)
+    f_semi_cjk  = _load_cjk(EYEBROW_PX)
+    f_semi      = _load_latin(font_semi_path, EYEBROW_PX)
+    f_bold_cjk  = _load_cjk(NAME_PX)
+    f_bold      = _load_latin(font_bold_path, NAME_PX)
+    f_chip_cjk  = _load_cjk(CHIP_PX)
+    f_chip_lat  = _load_latin(font_semi_path, CHIP_PX)
+    f_rlabel    = _load_latin(font_semi_path, RES_LABEL_PX)
+    f_rval_cjk  = _load_cjk(RES_VAL_PX)
+    f_rval_lat  = _load_latin(font_bold_path, RES_VAL_PX)
 
-    img = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    # ── measure helpers ─────────────────────────────────────────────────────
+    def _chip_font(text: str) -> Any:
+        return _font_for(text, f_chip_lat, f_chip_cjk)
+
+    def _chip_w(text: str) -> int:
+        return _chip_render_w(_chip_font(text), text)
+
+    # ── text layout x-origin ────────────────────────────────────────────────
+    text_x = PAD_X + (AV_SIZE + COL_GAP if has_av else 0)
+
+    # ── result block width ──────────────────────────────────────────────────
+    result_block_w = 0
+    if has_result and result:
+        clean_r = _strip_emoji(result)
+        rv_font = _font_for(clean_r, f_rval_lat, f_rval_cjk)
+        result_block_w = (
+            1                                    # divider
+            + COL_GAP                            # inner left gap
+            + max(
+                _text_w(f_rlabel, "RESULT"),
+                _text_w(rv_font, clean_r),
+            )
+            + PAD_X                              # right padding
+        )
+
+    # ── chip wrapping ────────────────────────────────────────────────────────
+    chip_gap     = 6
+    chip_row_h   = CHIP_PX + 2 + 4              # font + pad_v*2 + leading
+    chips_area_w = CARD_W - text_x - (result_block_w if has_result else PAD_X)
+    clean_chips  = [_strip_emoji(t) for t in tags if t]
+    clean_chips  = [t for t in clean_chips if t]
+    chip_rows    = _wrap_chips_rows(clean_chips, f_chip_cjk, chips_area_w, chip_gap)
+
+    # ── content height ───────────────────────────────────────────────────────
+    eyebrow_h      = EYEBROW_PX + 4
+    name_h         = NAME_PX + 4
+    chips_total_h  = len(chip_rows) * (chip_row_h + chip_gap) - chip_gap if chip_rows else 0
+    text_content_h = eyebrow_h + 6 + name_h + (6 + chips_total_h if chip_rows else 0)
+    card_h         = max(text_content_h + PAD_Y * 2, AV_SIZE + PAD_Y * 2, 88)
+
+    # ── create canvas ─────────────────────────────────────────────────────
+    img  = Image.new("RGBA", (CARD_W, card_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # 解析类别色
-    try:
-        hex_part = accent_hex.split("@")[0]
-        ar = int(hex_part[2:4], 16)
-        ag = int(hex_part[4:6], 16)
-        ab_val = int(hex_part[6:8], 16)
-    except (ValueError, IndexError):
-        ar, ag, ab_val = 0x22, 0x22, 0x44
+    # Background
+    draw.rectangle([0, 0, CARD_W - 1, card_h - 1], fill=(8, 10, 8, 219))
 
-    # 半透明黑底
-    draw.rectangle([0, 0, card_w - 1, card_h - 1], fill=(0, 0, 0, 165))
-    # 类别色竖条
-    draw.rectangle([0, 0, stripe_w - 1, card_h - 1], fill=(ar, ag, ab_val, 220))
+    # Scanline texture: 1px white lines every 3px @ alpha 6
+    for sy in range(0, card_h, 3):
+        draw.line([(0, sy), (CARD_W - 1, sy)], fill=(255, 255, 255, 6))
 
-    # 头像（居中于卡高）
+    # Outer border: accent @ alpha 71
+    draw.rectangle([0, 0, CARD_W - 1, card_h - 1], outline=(ar, ag, ab, 71), width=1)
+
+    # ── avatar ────────────────────────────────────────────────────────────
     if has_av:
         try:
             av_img = Image.open(str(avatar_path)).convert("RGBA").resize(
-                (avatar_size, avatar_size)
+                (AV_SIZE, AV_SIZE), Image.LANCZOS
             )
-            av_y = (card_h - avatar_size) // 2
-            img.paste(av_img, (stripe_w + 4, av_y), av_img)
+            av_y = (card_h - AV_SIZE) // 2
+            img.paste(av_img, (PAD_X, av_y), av_img)
+            # 1px border accent@153
+            draw.rectangle(
+                [PAD_X - 1, av_y - 1, PAD_X + AV_SIZE, av_y + AV_SIZE],
+                outline=(ar, ag, ab, 153), width=1,
+            )
+            # Right-bottom corner tick (10×10, 2px)
+            tx = PAD_X + AV_SIZE
+            ty = av_y + AV_SIZE
+            draw.line([(tx, ty - 10), (tx, ty)], fill=(ar, ag, ab, 255), width=2)
+            draw.line([(tx - 10, ty), (tx, ty)], fill=(ar, ag, ab, 255), width=2)
         except Exception:
             pass
 
-    # 文字垂直居中
-    text_block_h = content_h
-    text_start_y = (card_h - text_block_h) // 2
+    # ── text block (vertically centered) ─────────────────────────────────
+    ty0 = (card_h - text_content_h) // 2
 
-    # 名字
-    draw.text((text_x, text_start_y), display_name, font=fn, fill=(255, 255, 255, 255))
+    # Eyebrow bar (14×2) + text
+    bar_y = ty0 + (eyebrow_h - 2) // 2
+    draw.rectangle([text_x, bar_y, text_x + 13, bar_y + 1], fill=(ar, ag, ab, 255))
+    clean_eb = _strip_emoji(eyebrow)
+    eb_font  = _font_for(clean_eb, f_semi, f_semi_cjk)
+    draw.text((text_x + 14 + 7, ty0), clean_eb.upper(), font=eb_font, fill=(ar, ag, ab, 255))
 
-    # Tag 行
-    y_cursor = text_start_y + name_h
-    for line in tag_lines:
-        draw.text((text_x, y_cursor), line, font=fs, fill=(200, 200, 200, 230))
-        y_cursor += tag_size + line_gap
+    # Name
+    ny      = ty0 + eyebrow_h + 6
+    clean_n = _strip_emoji(display_name)
+    n_font  = _font_for(clean_n, f_bold, f_bold_cjk)
+    draw.text((text_x, ny), clean_n.upper(), font=n_font, fill=(255, 255, 255, 255))
+
+    # Chips
+    cy = ny + name_h + 6
+    for row in chip_rows:
+        cx = text_x
+        for chip_text in row:
+            cw = _chip_w(chip_text)
+            cf = _chip_font(chip_text)
+            bw = _text_w(cf, "[")
+            # background + border
+            draw.rectangle(
+                [cx, cy, cx + cw - 1, cy + chip_row_h - 3],
+                fill=(ar, ag, ab, 15), outline=(ar, ag, ab, 56), width=1,
+            )
+            # "[" bracket
+            draw.text((cx + 7, cy + 1), "[", font=cf, fill=(ar, ag, ab, 216))
+            # chip text
+            draw.text((cx + 7 + bw + 3, cy + 1), chip_text, font=cf, fill=(255, 255, 255, 214))
+            # "]" bracket
+            tw = _text_w(cf, chip_text)
+            draw.text((cx + 7 + bw + 3 + tw + 3, cy + 1), "]", font=cf, fill=(ar, ag, ab, 216))
+            cx += cw + chip_gap
+        cy += chip_row_h + chip_gap
+
+    # ── RESULT block (highlight only) ────────────────────────────────────
+    if has_result and result:
+        clean_r = _strip_emoji(result)
+        div_x   = CARD_W - result_block_w
+        # divider line
+        draw.line([(div_x, PAD_Y), (div_x, card_h - PAD_Y)], fill=(ar, ag, ab, 64), width=1)
+        rx = div_x + COL_GAP
+        # "RESULT" label
+        rl_h    = RES_LABEL_PX + 4
+        rv_font = _font_for(clean_r, f_rval_lat, f_rval_cjk)
+        rv_h    = RES_VAL_PX + 4
+        block_h = rl_h + 4 + rv_h
+        ry0     = (card_h - block_h) // 2
+        draw.text((rx, ry0), "RESULT", font=f_rlabel, fill=(255, 255, 255, 115))
+        # value
+        draw.text((rx, ry0 + rl_h + 4), clean_r, font=rv_font, fill=(ar, ag, ab, 255))
+
+    # ── corner brackets (13×13, 2px, accent) ─────────────────────────────
+    B = 13
+    for (bx, by), (hx, hy), (vx, vy) in [
+        # (corner pos, h-arm direction offsets, v-arm direction offsets)
+        ((0,         0),         (1, 0),  (0, 1)),   # top-left
+        ((CARD_W-1,  0),         (-1, 0), (0, 1)),   # top-right
+        ((0,         card_h-1),  (1, 0),  (0, -1)),  # bottom-left
+        ((CARD_W-1,  card_h-1),  (-1, 0), (0, -1)),  # bottom-right
+    ]:
+        # horizontal arm (2px thick)
+        for t in range(2):
+            draw.line(
+                [(bx, by + vy * t), (bx + hx * (B - 1), by + vy * t)],
+                fill=(ar, ag, ab, 255), width=1,
+            )
+        # vertical arm (2px thick)
+        for t in range(2):
+            draw.line(
+                [(bx + hx * t, by), (bx + hx * t, by + vy * (B - 1))],
+                fill=(ar, ag, ab, 255), width=1,
+            )
 
     img.save(str(out_path), "PNG")
     return True
@@ -627,6 +760,7 @@ def compose_montage(
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
     _font_path = resolve_name_card_font()
+    _font_semi_path, _font_bold_path = resolve_rajdhani_fonts()
 
     intro_n = 1 if intro_path is not None else 0
     n_clips = len(clip_paths)
@@ -704,20 +838,25 @@ def compose_montage(
             card_png: Optional[Path] = None
             card_h = 70  # 实际高度由 _make_name_card_png 动态计算后写回
             if _use_card:
-                name_str     = str(_card.get("display_name") or "")
-                # tags 列表：类别标签 + 战绩 + 所有 context_tags
+                name_str      = str(_card.get("display_name") or "")
                 card_tags: list[str] = [t for t in _card.get("tags") or [] if t]
-                category_val = str(_card.get("category") or "")
-                accent_color = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
-                av_path      = Path(str(_card["avatar_path"])) if _has_avatar else None
+                category_val  = str(_card.get("category") or "")
+                accent_rgb    = _CATEGORY_ACCENT_RGB.get(category_val, _DEFAULT_ACCENT_RGB)
+                eyebrow_str   = str(_card.get("eyebrow") or _CATEGORY_EYEBROW.get(category_val, ""))
+                result_str    = _card.get("result") or None
+                av_path       = Path(str(_card["avatar_path"])) if _has_avatar else None
                 card_png_path = Path(tmpdir) / f"nc_card_{i:03d}.png"
                 ok = _make_name_card_png(
                     display_name=name_str,
                     tags=card_tags,
-                    accent_hex=accent_color,
+                    accent_rgb=accent_rgb,
                     font_path=_font_path,
                     avatar_path=av_path,
                     out_path=card_png_path,
+                    eyebrow=eyebrow_str,
+                    result=result_str,
+                    font_bold_path=_font_bold_path,
+                    font_semi_path=_font_semi_path,
                 )
                 if ok:
                     card_png = card_png_path

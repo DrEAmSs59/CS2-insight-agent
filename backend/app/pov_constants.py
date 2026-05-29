@@ -19,6 +19,7 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "cl_draw_only_deathnotices false",
     "cl_trueview_show_status 0",
     "cl_spec_show_bindings 0",
+    "r_spectator_flashbang_opacity 1",
 ]
 
 # 兼容旧引用（测试或外部导入）
@@ -31,6 +32,7 @@ POV_CONFLICT_CVAR_NAMES: frozenset[str] = frozenset(
         "cl_spec_show_bindings",
         "cl_teamcounter_playercount_instead_of_avatars",
         "cl_drawhud_force_radar",
+        "r_spectator_flashbang_opacity",
     },
 )
 

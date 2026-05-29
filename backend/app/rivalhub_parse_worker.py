@@ -26,13 +26,74 @@ def _rows(result: Any) -> list[dict]:
     return list(result)
 
 
-def _safe_event(parser: DemoParser, event: str, other: list[str] | None = None) -> list[dict]:
+def _safe_event(
+    parser: DemoParser,
+    event: str,
+    other: list[str] | None = None,
+    player: list[str] | None = None,
+) -> list[dict]:
     try:
+        kwargs: dict[str, list[str]] = {}
         if other is not None:
-            return _rows(parser.parse_event(event, other=other))
+            kwargs["other"] = other
+        if player is not None:
+            kwargs["player"] = player
+        if kwargs:
+            return _rows(parser.parse_event(event, **kwargs))
         return _rows(parser.parse_event(event))
     except Exception:
         return []
+
+
+# userid on grenade events is an entity slot — resolve thrower via player extras.
+_GRENADE_PLAYER_FIELDS = ["steamid", "X", "Y", "Z"]
+
+
+def _steam_cell(val: Any) -> str:
+    s = str(val or "").strip()
+    return s if s and s not in ("0", "nan", "None") else ""
+
+
+def _enrich_grenade_throw_positions(parser: DemoParser, throws: list[dict]) -> None:
+    """Sample thrower XYZ at exact throw ticks; grenade_thrown events lack real coords."""
+    throw_ticks = sorted({
+        int(r["tick"])
+        for r in throws
+        if int(r.get("tick") or 0) > 0 and int(r.get("total_rounds_played") or 0) > 0
+    })
+    if not throw_ticks:
+        return
+    try:
+        tick_rows = _rows(parser.parse_ticks(["steamid", "X", "Y", "Z"], ticks=throw_ticks))
+    except BaseException:
+        return
+
+    index: dict[tuple[int, str], tuple[float, float, float]] = {}
+    for row in tick_rows:
+        t = int(row.get("tick") or 0)
+        sid = _steam_cell(row.get("steamid"))
+        if t <= 0 or not sid:
+            continue
+        try:
+            index[(t, sid)] = (
+                float(row.get("X") or 0),
+                float(row.get("Y") or 0),
+                float(row.get("Z") or 0),
+            )
+        except (TypeError, ValueError):
+            continue
+
+    for r in throws:
+        if int(r.get("total_rounds_played") or 0) <= 0:
+            continue
+        t = int(r.get("tick") or 0)
+        sid = _steam_cell(r.get("user_steamid")) or _steam_cell(r.get("steamid"))
+        if t <= 0 or not sid:
+            continue
+        pos = index.get((t, sid))
+        if pos is None:
+            continue
+        r["X"], r["Y"], r["Z"] = pos[0], pos[1], pos[2]
 
 
 def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
@@ -82,12 +143,23 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     bomb_exploded = _safe_event(p, "bomb_exploded", other=["total_rounds_played"])
 
     # ── grenades ─────────────────────────────────────────────────
-    grenade_throws = _safe_event(p, "grenade_thrown", other=["weapon", "total_rounds_played"])
+    grenade_throws = _safe_event(
+        p,
+        "grenade_thrown",
+        other=["weapon", "total_rounds_played"],
+        player=_GRENADE_PLAYER_FIELDS,
+    )
     grenade_detonations: list[dict] = []
     for ev_name, gtype in _GRENADE_EVENTS:
-        rows = _safe_event(p, ev_name, other=["total_rounds_played"])
+        rows = _safe_event(
+            p,
+            ev_name,
+            other=["total_rounds_played"],
+            player=_GRENADE_PLAYER_FIELDS,
+        )
         rows = [{**r, "_grenade_type": gtype} for r in rows]
         grenade_detonations.extend(rows)
+    _enrich_grenade_throw_positions(p, grenade_throws)
 
     # ── player info at match start ───────────────────────────────
     announce_rows = _safe_event(p, "round_announce_match_start")

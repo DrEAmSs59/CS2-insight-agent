@@ -801,6 +801,23 @@ def resolve_name_card_font() -> Optional[Path]:
     return None
 
 
+def resolve_rajdhani_fonts() -> tuple[Optional[Path], Optional[Path]]:
+    """返回 (SemiBold, Bold) Rajdhani 字体路径；未安装则返回 (None, None)。
+    用户需将 Rajdhani-SemiBold.ttf / Rajdhani-Bold.ttf 放到 data/fonts/ 下。
+    """
+    fonts_dir = get_data_dir() / "fonts"
+    def _first(*names: str) -> Optional[Path]:
+        for name in names:
+            p = fonts_dir / name
+            if p.is_file():
+                return p
+        return None
+
+    semi = _first("Rajdhani-SemiBold.ttf", "Rajdhani-Medium.ttf")
+    bold = _first("Rajdhani-Bold.ttf", "Rajdhani-SemiBold.ttf")
+    return semi, bold
+
+
 def get_primary_monitor_resolution() -> tuple[int, int]:
     """返回主显示器物理分辨率 (width, height)，忽略 DPI 缩放。非 Windows 返回 (1920, 1080) 作为 fallback。"""
     try:

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import API from "../api/api";
 import { useMontageStore } from "../stores/montageStore";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
+import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
 import { Loader2 } from "lucide-react";
 import {
   MontageWorkbenchToolbar,
@@ -246,8 +248,20 @@ function humanizeExportError(err) {
   return s;
 }
 
+const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
+
+function ffmpegGateSubtitle(reason) {
+  if (reason === "not_configured") return "FFmpeg 尚未配置";
+  if (reason === "path_not_found") return "FFmpeg 路径无效";
+  if (reason === "not_usable") return "FFmpeg 不可执行";
+  return "FFmpeg 未就绪";
+}
+
 export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer" }) {
   const isPage = layout === "page";
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [ffmpegGate, setFfmpegGate] = useState(FFMPEG_GATE_IDLE);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [orderedIds, setOrderedIds] = useState([]);
@@ -288,6 +302,45 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
 
   const toastTimer = useRef(null);
+
+  const checkFfmpegGate = useCallback(async () => {
+    if (!open && !isPage) return;
+    setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    try {
+      const { data } = await API.get("config/ffmpeg-check");
+      if (data?.ok) {
+        setFfmpegGate({ loading: false, blocked: false, subtitle: "", message: "" });
+        return;
+      }
+      setFfmpegGate({
+        loading: false,
+        blocked: true,
+        subtitle: ffmpegGateSubtitle(data?.reason),
+        message:
+          typeof data?.message === "string" && data.message.trim()
+            ? data.message
+            : "FFmpeg 未配置或不可用，请前往设置页配置后再使用合辑工作台。",
+      });
+    } catch {
+      setFfmpegGate({
+        loading: false,
+        blocked: true,
+        subtitle: "检测失败",
+        message: "无法连接后端检测 FFmpeg 配置，请确认程序服务已启动后刷新页面。",
+      });
+    }
+  }, [open, isPage]);
+
+  useEffect(() => {
+    void checkFfmpegGate();
+  }, [checkFfmpegGate, location.pathname]);
+
+  useEffect(() => {
+    if (!open && !isPage) return;
+    const onFocus = () => void checkFfmpegGate();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [open, isPage, checkFfmpegGate]);
 
   const showToast = useCallback((msg) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -330,8 +383,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   useEffect(() => {
     if (!open && !isPage) return;
+    if (ffmpegGate.loading || ffmpegGate.blocked) return;
     void loadClips();
-  }, [open, loadClips, isPage]);
+  }, [open, loadClips, isPage, ffmpegGate.loading, ffmpegGate.blocked]);
 
   useEffect(() => {
     if (!open && !isPage) return;
@@ -1110,6 +1164,25 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const inner = (
     <>
+      {ffmpegGate.loading ? (
+        <div
+          className="fixed inset-0 z-[125] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          aria-busy="true"
+          aria-label="正在检测 FFmpeg"
+        >
+          <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 text-sm text-cs2-text-secondary">
+            <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
+            正在检测 FFmpeg…
+          </div>
+        </div>
+      ) : null}
+      {ffmpegGate.blocked ? (
+        <FfmpegRequiredDialog
+          subtitle={ffmpegGate.subtitle}
+          message={ffmpegGate.message}
+          onGoSettings={() => navigate("/settings")}
+        />
+      ) : null}
     <div className={shellClass}>
         <MontageWorkbenchToolbar
           isPage={isPage}

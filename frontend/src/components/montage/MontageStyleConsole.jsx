@@ -196,13 +196,14 @@ export function MontageStyleConsole({
   const bgmFilled = Boolean(String(bgmPath || "").trim());
   const introFilled = Boolean(String(introPath || "").trim());
   const outroFilled = Boolean(String(outroPath || "").trim());
+  const nameCardsFilled = Boolean(nameCardsEnabled);
   const readyTag =
     exportReady !== undefined && exportReady !== null ? Boolean(exportReady) : dirOk && nameOk && Number(clipCount) > 0;
 
   const [activeTab, setActiveTab] = useState("media");
   const tabItems = [
     { id: "media", label: "媒体资源" },
-    { id: "players", label: "玩家头像" },
+    { id: "players", label: "玩家信息卡" },
     { id: "export", label: "导出设置" },
   ];
 
@@ -491,6 +492,7 @@ export function MontageStyleConsole({
                 <ExportCheckRow ok={bgmFilled} optional label="定制背景音乐混流" />
                 <ExportCheckRow ok={introFilled} optional label="前置片头包装挂载" />
                 <ExportCheckRow ok={outroFilled} optional label="收尾片尾包装挂载" />
+                <ExportCheckRow ok={nameCardsFilled} optional label="左下角玩家信息卡" />
               </div>
             </div>
 

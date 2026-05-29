@@ -424,6 +424,26 @@ _WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = (
     "fps_max 0",
     "cl_trueview_show_status 0",
 )
+
+
+def _warmup_console_cvar_name(line: str) -> str:
+    s = str(line).strip()
+    if not s or s.startswith("//"):
+        return ""
+    return s.split()[0].lower()
+
+
+def _merge_recording_warmup_console_cmds(user_cmds: list[str]) -> list[str]:
+    """前端传入 console_cmds 时仍补齐全部固定预热 cvar（旧逻辑只保证首条）。"""
+    fixed_names = {_warmup_console_cvar_name(x) for x in _WARMUP_FIXED_CONSOLE_LINES}
+    fixed_names.discard("")
+    out: list[str] = list(_WARMUP_FIXED_CONSOLE_LINES)
+    for cmd in user_cmds:
+        cvar = _warmup_console_cvar_name(cmd)
+        if cvar and cvar in fixed_names:
+            continue
+        out.append(cmd)
+    return out
 # 录制开始时把玩家所有按键解绑并恢复到一组最小默认绑定。配合下面的「文件级用户配置
 # 快照 + 恢复」机制使用：本次 CS2 进程内按键还原为下方默认，让玩家自定义的奇葩 bind
 # 不会在 demo 回放/控制台注入期间触发；录制结束（或异常杀进程后下次启动）时再用
@@ -1777,6 +1797,8 @@ class RecordingWarmupExtras:
     hud_showtargetid_hide: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
+    # Demo 观战闪光弹亮度；None 表示不注入。POV HUD 录制时由 pov_constants 强制 1.0
+    spectator_flashbang_opacity: Optional[float] = None
     # "mute"=全部静音, "open"=所有玩家, "team"=只听主角队伍, "enemy"=只听对方队伍, "off"=不注入
     voice_filter: str = "mute"
     # Demo 底部时间轴 / 回放控制条：社区常用需先 sv_cheats 1 再 demoui false
@@ -3259,10 +3281,10 @@ class OBSDirector:
         """
         if w.console_cmds:
             cmds = [str(x).strip() for x in w.console_cmds if str(x).strip()]
-            fix0 = _WARMUP_FIXED_CONSOLE_LINES[0]
-            if cmds and cmds[0].strip() == fix0.strip():
-                return self._append_config_warmup_console_lines([*_RECORDING_KEYBIND_RESET_LINES, *cmds])
-            return self._append_config_warmup_console_lines([*_RECORDING_KEYBIND_RESET_LINES, fix0, *cmds])
+            merged = _merge_recording_warmup_console_cmds(cmds)
+            return self._append_config_warmup_console_lines(
+                [*_RECORDING_KEYBIND_RESET_LINES, *merged]
+            )
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
         lines.extend(_WARMUP_FIXED_CONSOLE_LINES)
@@ -3287,6 +3309,14 @@ class OBSDirector:
             lines.append(f"fov_cs_debug {float(w.fov_cs_debug)}")
         if w.viewmodel_fov_68:
             lines.append("viewmodel_fov 68")
+        _fb = getattr(w, "spectator_flashbang_opacity", None)
+        if _fb is not None and not getattr(w, "pov_hud_enabled", False):
+            try:
+                _fb_f = float(_fb)
+            except (TypeError, ValueError):
+                _fb_f = 0.6
+            _fb_f = max(0.2, min(1.0, _fb_f))
+            lines.append(f"r_spectator_flashbang_opacity {_fb_f:g}")
         _vf = getattr(w, "voice_filter", "mute")
         if _vf in ("mute", "all"):  # "all" 为旧值向后兼容
             lines.append("snd_voipvolume 0")
