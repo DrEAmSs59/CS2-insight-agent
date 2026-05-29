@@ -2325,13 +2325,6 @@ async def montage_export(body: MontageExportBody):
     # Build a lookup from player_key → PlayerAvatar for fast matching
     _pa_lookup: dict[str, PlayerAvatar] = {pa.player_key: pa for pa in player_avatars_eff}
 
-    _CATEGORY_SUBTITLE = {
-        "highlight": "高光",
-        "fail": "下饭",
-        "meme_death": "梗死亡",
-        "compilation": "合集",
-    }
-
     name_cards_list: list[Optional[dict]] = []
     for cid in clip_ids:
         row = rows.get(int(cid))
@@ -2429,6 +2422,14 @@ async def montage_export(body: MontageExportBody):
 
 _AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 _ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+# Subtitle label displayed under the player name in the burned-in name card
+_CATEGORY_SUBTITLE: dict[str, str] = {
+    "highlight": "高光",
+    "fail": "下饭",
+    "meme_death": "梗死亡",
+    "compilation": "合集",
+}
 
 
 @app.post("/api/montage/avatars")

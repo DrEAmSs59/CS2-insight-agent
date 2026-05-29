@@ -407,6 +407,8 @@ _CATEGORY_ACCENT: dict[str, str] = {
     "compilation": "0x3B82F6@0.85",   # blue
 }
 _DEFAULT_ACCENT = "0x222244@0.85"
+# How many seconds the name card stays visible at the start of each clip
+_NAME_CARD_DISPLAY_SECS: int = 4
 
 
 def _fg_escape_path(p: Path) -> str:
@@ -527,23 +529,33 @@ def compose_montage(
                 category_val   = str(_card.get("category") or "")
                 accent_color   = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
                 font_part      = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
-                t_enable       = "enable='between(t,0,4)'"
+                # Card shows for _NAME_CARD_DISPLAY_SECS seconds; for clips shorter
+                # than this the card is visible throughout (between evaluates true
+                # for every frame when clip duration < display window).
+                t_enable = f"enable='between(t,0,{_NAME_CARD_DISPLAY_SECS})'"
                 vf_chain = (
                     # 1. Normalize video
                     f"[0:v]{vf}[_scaled];"
                     # 2. Semi-transparent black background box (full card area)
                     f"[_scaled]drawbox=x=0:y=H-100:w=240:h=100:color=black@0.65:t=fill:{t_enable}[_v_bg];"
-                    # 3. Colored left-stripe accent (4px wide)
+                    # 3. Colored left-stripe accent (4px wide, category-specific)
                     f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
                     # 4. Load and scale avatar
                     f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
-                    # 5. Overlay avatar on card (centered vertically: box top = H-100, avatar h=80 → y = H-90)
+                    # 5. Overlay avatar (box top H-100, avatar 80px → y=H-90 gives 10px margin)
                     f"[_v_stripe][_avt]overlay=8:H-90:{t_enable}[_v_av];"
-                    # 6. Player name (line 1) — larger, white
+                    # 6. Player name — line 1, white
                     f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
-                    # 7. Subtitle (line 2) — smaller, muted
-                    f"[_v_name]drawtext{font_part}:text='{sub_text_esc}':fontcolor=0xCCCCCC:fontsize=14:x=96:y=H-52:{t_enable}[v]"
                 )
+                # Subtitle line is optional — skip the drawtext node when empty
+                # to avoid a zero-glyph render pass on every frame.
+                if sub_text_esc:
+                    vf_chain += (
+                        f"[_v_name]drawtext{font_part}:text='{sub_text_esc}':fontcolor=0xCCCCCC"
+                        f":fontsize=14:x=96:y=H-52:{t_enable}[v]"
+                    )
+                else:
+                    vf_chain += "[_v_name]null[v]"
                 if info["has_audio"]:
                     fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
                 else:
