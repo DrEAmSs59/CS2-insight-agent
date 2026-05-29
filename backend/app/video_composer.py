@@ -412,7 +412,27 @@ _NAME_CARD_DISPLAY_SECS: float = 3.0
 # Fade-in / fade-out duration (seconds)
 _NAME_CARD_FADE_SECS: float = 0.4
 # Pixels above the very bottom of the video frame
-_NAME_CARD_BOTTOM_MARGIN: int = 24
+_NAME_CARD_BOTTOM_MARGIN: int = 48
+
+# Regex that matches emoji / non-BMP characters msyh.ttc cannot render
+import re as _re
+_EMOJI_RE = _re.compile(
+    "[\U00010000-\U0010FFFF"          # Non-BMP (most emoji)
+    "\U00002600-\U000027BF"           # Misc Symbols, Dingbats
+    "\U00002B50-\U00002B55"           # Stars
+    "\U0000231A-\U0000231B"           # Watch, Hourglass
+    "\U000023E9-\U000023F3"           # Arrows, Timers
+    "\U000025AA-\U000025FE"           # Geometric shapes
+    "\U00002614-\U00002615"           # Umbrella, Coffee
+    "️"                          # Variation selector
+    "]+",
+    flags=_re.UNICODE,
+)
+
+
+def _strip_emoji(text: str) -> str:
+    """去掉 msyh.ttc 无法渲染的 emoji 字符，保留中文和 ASCII 内容。"""
+    return _EMOJI_RE.sub("", text).strip()
 
 
 def _wrap_tags(tags: list[str], font: Any, max_width: int) -> list[str]:
@@ -464,7 +484,7 @@ def _make_name_card_png(
         return False
 
     has_av = bool(avatar_path and avatar_path.is_file())
-    card_w = 420
+    card_w = 520
     avatar_size = 110
     pad_top = 14
     name_size = 34
@@ -495,7 +515,10 @@ def _make_name_card_png(
     fs = _load_font(tag_size)
 
     # 折行后的 tag 行
-    tag_lines = _wrap_tags(tags, fs, text_area_w) if tags else []
+    # 去掉 emoji 前缀（msyh.ttc 没有 emoji 字形，会显示为方块）
+    clean_tags = [_strip_emoji(t) for t in tags]
+    clean_tags = [t for t in clean_tags if t]  # 过滤掉纯 emoji 的 tag
+    tag_lines = _wrap_tags(clean_tags, fs, text_area_w) if clean_tags else []
 
     # 计算卡高：名字 + 若干 tag 行
     name_h = name_size + 4
