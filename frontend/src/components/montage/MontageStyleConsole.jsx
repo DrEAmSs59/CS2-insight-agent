@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
+import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
 
 function pathBasename(path) {
   const s = String(path || "").trim();
@@ -183,6 +184,12 @@ export function MontageStyleConsole({
   exportDirForButton,
   onCopyText,
   onDismissExportSuccess,
+  // player assets
+  clips,
+  playerAvatars,
+  nameCardsEnabled,
+  onPlayerAvatarChange,
+  onNameCardsEnabledChange,
 }) {
   const dirOk = Boolean(String(outputDir || "").trim()) || Boolean(String(effectiveOutputDirHint || "").trim());
   const nameOk = Boolean(String(outputFilename || "").trim());
@@ -195,6 +202,7 @@ export function MontageStyleConsole({
   const [activeTab, setActiveTab] = useState("media");
   const tabItems = [
     { id: "media", label: "媒体资源" },
+    { id: "players", label: "玩家头像" },
     { id: "export", label: "导出设置" },
   ];
 
@@ -392,6 +400,16 @@ export function MontageStyleConsole({
               onImageDurationChange={onOutroDurationChange}
             />
           </CollapsibleSection>)}
+
+          {activeTab === "players" && (
+            <MontagePlayerAssetsPanel
+              clips={clips || []}
+              playerAvatars={playerAvatars || {}}
+              nameCardsEnabled={nameCardsEnabled || false}
+              onPlayerAvatarChange={onPlayerAvatarChange}
+              onNameCardsEnabledChange={onNameCardsEnabledChange}
+            />
+          )}
 
           {activeTab === "export" && (<CollapsibleSection
             title={

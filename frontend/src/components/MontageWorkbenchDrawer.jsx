@@ -283,6 +283,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [draftDirty, setDraftDirty] = useState(false);
   const [lastDraftSavedAt, setLastDraftSavedAt] = useState(null);
   const draftDirtyBoot = useRef(true);
+  const [playerAvatars, setPlayerAvatars] = useState({}); // { [player_key]: { avatar_path } }
+  const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
 
   const toastTimer = useRef(null);
 
@@ -293,6 +295,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setToast(null);
       toastTimer.current = null;
     }, 3200);
+  }, []);
+
+  const handlePlayerAvatarChange = useCallback((playerKey, avatarPath) => {
+    setPlayerAvatars((prev) => ({
+      ...prev,
+      [playerKey]: { ...(prev[playerKey] || {}), avatar_path: avatarPath },
+    }));
   }, []);
 
   const pickFile = useCallback(async (fileType, onResult) => {
@@ -1283,6 +1292,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 exportDirForButton={exportDirForButton}
                 onCopyText={copyText}
                 onDismissExportSuccess={() => setLastExport(null)}
+                clips={orderedClips}
+                playerAvatars={playerAvatars}
+                nameCardsEnabled={nameCardsEnabled}
+                onPlayerAvatarChange={handlePlayerAvatarChange}
+                onNameCardsEnabledChange={setNameCardsEnabled}
               />
             </div>
 

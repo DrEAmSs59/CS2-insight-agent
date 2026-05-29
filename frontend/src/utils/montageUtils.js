@@ -770,3 +770,60 @@ export function clipMatchesFilter(clip, filterKey, orderedIdSet) {
   if (filterKey === "时间线") return t === "时间线" || t === "时间线击杀" || t === "时间线死亡" || t === "时间线整回合";
   return true;
 }
+
+/**
+ * Derive a deduplicated player list from ordered montage clips.
+ * Returns one entry per unique identity key, with the most recent
+ * player_name used for display.
+ *
+ * Identity key rules (mirroring the backend):
+ *   - Has steamid  → player_key = "sid:<steamid64>"
+ *   - No steamid   → player_key = "name:<normalised_name>"
+ *     where normalised = name.toLowerCase() with all whitespace removed
+ *
+ * @param {Array} clips — ordered montage clips (from orderedClips)
+ * @returns {Array<{player_key, steamid64, display_name, segment_count, no_steamid}>}
+ */
+export function derivePlayerAssetsFromClips(clips) {
+  if (!Array.isArray(clips) || clips.length === 0) return [];
+
+  // Map: player_key → { player_key, steamid64, display_name, segment_count, no_steamid }
+  const map = new Map();
+
+  for (const clip of clips) {
+    const sid =
+      String(clip?.target_steamid64 || clip?.target_steam_id || clip?.steamid || "").trim();
+    const name = String(clip?.player_name || "").trim();
+    const normName = name.toLowerCase().replace(/\s+/g, "");
+
+    let player_key, steamid64, no_steamid;
+    if (sid && sid !== "0") {
+      player_key = `sid:${sid}`;
+      steamid64 = sid;
+      no_steamid = false;
+    } else {
+      player_key = normName ? `name:${normName}` : null;
+      steamid64 = null;
+      no_steamid = true;
+    }
+
+    if (!player_key) continue;
+
+    if (map.has(player_key)) {
+      const existing = map.get(player_key);
+      existing.segment_count += 1;
+      // Use the most recent name (later clip wins)
+      if (name) existing.display_name = name;
+    } else {
+      map.set(player_key, {
+        player_key,
+        steamid64,
+        display_name: name || player_key,
+        segment_count: 1,
+        no_steamid,
+      });
+    }
+  }
+
+  return [...map.values()];
+}
