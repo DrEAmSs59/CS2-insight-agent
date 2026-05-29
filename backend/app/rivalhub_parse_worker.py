@@ -126,10 +126,13 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     freeze_ticks = sorted({int(r["tick"]) for r in round_freeze_ends if r.get("tick")})
     economy_raw: list[dict] = []
     if freeze_ticks:
-        economy_raw = _rows(p.parse_ticks(
-            ["steamid", "team_num", "cash_spent_this_round", "current_equip_value", "starting_money"],
-            ticks=freeze_ticks,
-        ))
+        try:
+            economy_raw = _rows(p.parse_ticks(
+                ["steamid", "team_num", "cash_spent_this_round", "current_equip_value", "starting_money"],
+                ticks=freeze_ticks,
+            ))
+        except BaseException:
+            economy_raw = []
 
     return {
         "header": header,

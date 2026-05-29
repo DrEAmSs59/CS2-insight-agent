@@ -243,24 +243,30 @@ export default function DemoLibraryPage() {
     }
     if (!doneItems.length) return;
 
-    // initialize toasts
-    setRivalHubToasts((prev) => [
-      ...prev,
-      ...doneItems.map((it) => ({
-        id: it.id,
-        label:
-          (it.display_name && String(it.display_name).trim()) ||
-          it.filename ||
-          `Demo #${it.id}`,
-        phase: "loading",
-      })),
-    ]);
+    // filter out demos already being exported
+    setRivalHubToasts((prev) => {
+      const inFlight = new Set(prev.filter(t => t.phase === "loading").map(t => t.id));
+      const newItems = doneItems.filter(it => !inFlight.has(it.id));
+      if (!newItems.length) return prev;
 
-    const ids = doneItems.map((it) => it.id);
-    void exportRivalHubBatch(ids, (demoId, status) => {
-      setRivalHubToasts((prev) =>
-        prev.map((t) => (t.id === demoId ? { ...t, ...status } : t))
-      );
+      const ids = newItems.map((it) => it.id);
+      void exportRivalHubBatch(ids, (demoId, status) => {
+        setRivalHubToasts((p) =>
+          p.map((t) => (t.id === demoId ? { ...t, ...status } : t))
+        );
+      });
+
+      return [
+        ...prev,
+        ...newItems.map((it) => ({
+          id: it.id,
+          label:
+            (it.display_name && String(it.display_name).trim()) ||
+            it.filename ||
+            `Demo #${it.id}`,
+          phase: "loading",
+        })),
+      ];
     });
   }, [s]);
 
