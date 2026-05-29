@@ -2411,7 +2411,20 @@ async def upload_montage_avatar(file: UploadFile = File(...)):
         p.write_bytes(d)
 
     await asyncio.to_thread(_write, dest, data)
-    return {"path": str(dest)}
+    return {"path": str(dest), "url": f"/api/montage/avatars/{dest.name}"}
+
+
+@app.get("/api/montage/avatars/{filename}")
+async def serve_montage_avatar(filename: str):
+    import re
+    # Reject path traversal attempts
+    if not re.fullmatch(r"[a-zA-Z0-9_\-\.]+", filename):
+        raise HTTPException(400, "Invalid filename")
+    avatar_dir = get_data_dir() / "montage_avatars"
+    file_path = avatar_dir / filename
+    if not file_path.is_file() or not str(file_path.resolve()).startswith(str(avatar_dir.resolve())):
+        raise HTTPException(404, "Avatar not found")
+    return FileResponse(str(file_path))
 
 
 class FilePickerBody(BaseModel):

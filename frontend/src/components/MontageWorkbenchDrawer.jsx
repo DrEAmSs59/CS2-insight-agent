@@ -283,7 +283,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [draftDirty, setDraftDirty] = useState(false);
   const [lastDraftSavedAt, setLastDraftSavedAt] = useState(null);
   const draftDirtyBoot = useRef(true);
-  const [playerAvatars, setPlayerAvatars] = useState({}); // { [player_key]: { avatar_path } }
+  const [playerAvatars, setPlayerAvatars] = useState({}); // { [player_key]: { avatar_path, avatar_url } }
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
 
   const toastTimer = useRef(null);
@@ -297,10 +297,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     }, 3200);
   }, []);
 
-  const handlePlayerAvatarChange = useCallback((playerKey, avatarPath) => {
+  const handlePlayerAvatarChange = useCallback((playerKey, avatarPath, avatarUrl) => {
     setPlayerAvatars((prev) => ({
       ...prev,
-      [playerKey]: { ...(prev[playerKey] || {}), avatar_path: avatarPath },
+      [playerKey]: { ...(prev[playerKey] || {}), avatar_path: avatarPath, avatar_url: avatarUrl },
     }));
   }, []);
 

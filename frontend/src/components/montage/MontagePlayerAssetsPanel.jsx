@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { Upload, Loader2, User } from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import { Upload, Loader2 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import API from "../../api/api";
 import { derivePlayerAssetsFromClips } from "../../utils/montageUtils";
@@ -11,8 +11,9 @@ export function MontagePlayerAssetsPanel({
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
 }) {
-  const players = derivePlayerAssetsFromClips(clips);
+  const players = useMemo(() => derivePlayerAssetsFromClips(clips), [clips]);
   const [uploadingKeys, setUploadingKeys] = useState(() => new Set());
+  const [uploadErrors, setUploadErrors] = useState({}); // { [player_key]: errorMsg }
   // one hidden file input ref per player_key; keyed by player_key string
   const fileInputRefs = useRef({});
 
@@ -23,18 +24,25 @@ export function MontagePlayerAssetsPanel({
   async function handleFileSelected(playerKey, file) {
     if (!file) return;
     setUploadingKeys((prev) => new Set([...prev, playerKey]));
+    // clear any previous error for this player
+    setUploadErrors((prev) => {
+      const n = { ...prev };
+      delete n[playerKey];
+      return n;
+    });
     try {
       const formData = new FormData();
       formData.append("file", file);
       const res = await API.post("/montage/avatars", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      const path = res?.data?.path;
+      const { path, url } = res?.data ?? {};
       if (path) {
-        onPlayerAvatarChange?.(playerKey, path);
+        onPlayerAvatarChange?.(playerKey, path, url);
       }
     } catch (err) {
       console.error("[MontagePlayerAssetsPanel] avatar upload error", err);
+      setUploadErrors((prev) => ({ ...prev, [playerKey]: "上传失败，请重试" }));
     } finally {
       setUploadingKeys((prev) => {
         const next = new Set(prev);
@@ -93,8 +101,9 @@ export function MontagePlayerAssetsPanel({
         >
           <div className="space-y-1">
             {players.map((player) => {
-              const avatarPath = playerAvatars[player.player_key]?.avatar_path;
+              const avatarUrl = playerAvatars[player.player_key]?.avatar_url;
               const isUploading = uploadingKeys.has(player.player_key);
+              const uploadError = uploadErrors[player.player_key];
               const initials = player.display_name
                 ? player.display_name.charAt(0).toUpperCase()
                 : "?";
@@ -105,9 +114,9 @@ export function MontagePlayerAssetsPanel({
                   className="flex items-center gap-3 py-2"
                 >
                   {/* Avatar preview */}
-                  {avatarPath ? (
+                  {avatarUrl ? (
                     <img
-                      src={avatarPath}
+                      src={avatarUrl}
                       alt={player.display_name}
                       className="h-10 w-10 shrink-0 rounded-full object-cover"
                     />
@@ -138,7 +147,8 @@ export function MontagePlayerAssetsPanel({
                   <div className="shrink-0">
                     <input
                       ref={(el) => {
-                        fileInputRefs.current[player.player_key] = el;
+                        if (el) fileInputRefs.current[player.player_key] = el;
+                        else delete fileInputRefs.current[player.player_key];
                       }}
                       type="file"
                       accept="image/jpeg,image/png,image/webp,image/gif"
@@ -170,6 +180,9 @@ export function MontagePlayerAssetsPanel({
                         </>
                       )}
                     </button>
+                    {uploadError && (
+                      <p className="mt-1 text-xs text-rose-400">{uploadError}</p>
+                    )}
                   </div>
                 </div>
               );
