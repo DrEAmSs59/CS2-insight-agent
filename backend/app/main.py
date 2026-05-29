@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -2121,10 +2122,8 @@ async def save_montage_project(body: MontageProjectBody):
     }
     if body.transitions is not None:
         proj_body["transitions"] = body.transitions
-    if body.player_avatars:
-        proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
-    if body.name_cards_enabled:
-        proj_body["name_cards_enabled"] = True
+    proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
+    proj_body["name_cards_enabled"] = body.name_cards_enabled
     # 后期 FFmpeg 雷达叠层已下线；忽略客户端传入的旧开关，写入占位以兼容旧前端读取。
     proj_body["radar_overlay"] = {"enabled": False}
     if body.theme_id is not None:
@@ -2348,10 +2347,8 @@ async def montage_export(body: MontageExportBody):
         snap["intro_image_duration"] = intro_img_dur_eff
     if outro_img_dur_eff is not None:
         snap["outro_image_duration"] = outro_img_dur_eff
-    if player_avatars_eff:
-        snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
-    if name_cards_enabled_eff:
-        snap["name_cards_enabled"] = True
+    snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
+    snap["name_cards_enabled"] = name_cards_enabled_eff
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -2387,27 +2384,27 @@ async def montage_export(body: MontageExportBody):
 
 
 _AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
 @app.post("/api/montage/avatars")
 async def upload_montage_avatar(file: UploadFile = File(...)):
     """接收玩家头像图片上传，存储到 data/montage_avatars/，返回绝对路径。"""
     content_type = file.content_type or ""
-    if not content_type.startswith("image/"):
-        raise HTTPException(400, "仅支持图片文件（image/*）")
+    if content_type not in _ALLOWED_AVATAR_TYPES:
+        raise HTTPException(400, "仅支持 JPEG / PNG / WebP / GIF 格式图片")
 
     data = await file.read()
     if len(data) > _AVATAR_MAX_BYTES:
         raise HTTPException(400, "图片文件大小不能超过 5MB")
-
-    from .env_utils import get_data_dir
-    import uuid
 
     avatars_dir = get_data_dir() / "montage_avatars"
     avatars_dir.mkdir(parents=True, exist_ok=True)
 
     original_name = file.filename or ""
     suffix = Path(original_name).suffix if original_name else ""
+    if not suffix:
+        suffix = ".jpg"
     dest = avatars_dir / (str(uuid.uuid4()) + suffix)
 
     def _write(p: Path, d: bytes) -> None:
