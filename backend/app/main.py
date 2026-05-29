@@ -1043,6 +1043,43 @@ def config_quick_check():
     }
 
 
+@app.get("/api/config/ffmpeg-check")
+def ffmpeg_montage_gate_check():
+    """合辑工作台门控：须配置 ffmpeg_path，且与合辑导出相同的解析逻辑可找到可执行文件。"""
+    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
+
+    cfg = load_config()
+    raw = (cfg.ffmpeg_path or "").strip()
+    if not raw:
+        return {
+            "ok": False,
+            "reason": "not_configured",
+            "message": (
+                "尚未在设置中配置 FFmpeg 可执行文件路径。\n"
+                "合辑导出需要 FFmpeg，请填写 ffmpeg.exe 的完整路径，"
+                "或在设置页点击「自动探测 FFmpeg」。"
+            ),
+            "ffmpeg_path": "",
+        }
+    if not Path(raw).is_file():
+        return {
+            "ok": False,
+            "reason": "path_not_found",
+            "message": f"所配置的 FFmpeg 路径不存在或不是文件：\n{raw}",
+            "ffmpeg_path": raw,
+        }
+    try:
+        resolved = resolve_ffmpeg_binary(raw)
+        return {"ok": True, "ffmpeg_path": str(resolved)}
+    except MontageComposerError as exc:
+        return {
+            "ok": False,
+            "reason": "not_usable",
+            "message": str(exc),
+            "ffmpeg_path": raw,
+        }
+
+
 @app.get("/api/status/setup")
 def setup_status():
     """快速核查四项配置是否就绪，供录制启动前调用（含 OBS 真实连接检测）。"""
@@ -2348,12 +2385,18 @@ async def montage_export(body: MontageExportBody):
         else:
             display_name = matched_pa.player_name or str(row.get("player_name") or "")
             category = str(row.get("category") or "")
+            # 副标签：类别标签 + 从 clip_id 提取的战绩标记（如 3K、4K）
+            cat_label = _CATEGORY_SUBTITLE.get(category, "")
+            clip_id_str = str(row.get("clip_id") or "")
+            tag_m = re.search(r"_(\d+K)_", clip_id_str, re.IGNORECASE)
+            clip_tag = tag_m.group(1).upper() if tag_m else ""
+            subtitle_parts = [p for p in [cat_label, clip_tag] if p]
             name_cards_list.append(
                 {
                     "avatar_path": matched_pa.avatar_path,
                     "display_name": display_name,
                     "category": category,
-                    "subtitle": _CATEGORY_SUBTITLE.get(category, ""),
+                    "subtitle": " · ".join(subtitle_parts),
                     "enabled": True,
                 }
             )

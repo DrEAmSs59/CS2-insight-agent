@@ -408,7 +408,9 @@ _CATEGORY_ACCENT: dict[str, str] = {
 }
 _DEFAULT_ACCENT = "0x222244@0.85"
 # How many seconds the name card stays visible at the start of each clip
-_NAME_CARD_DISPLAY_SECS: int = 4
+_NAME_CARD_DISPLAY_SECS: float = 5.0
+# Fade-in / fade-out duration (seconds)
+_NAME_CARD_FADE_SECS: float = 0.5
 
 
 def _make_name_card_png(
@@ -635,16 +637,32 @@ def compose_montage(
             if card_png is not None:
                 # 名牌 PNG 作为 input[1]，用 -loop 1 让单帧图持续供给整段时长。
                 # filtergraph 里无路径字符串，彻底规避 Windows 路径冒号转义问题。
+                #
+                # 渐入渐出：fade 滤镜对 alpha 通道操作（alpha=1），让名牌透明地
+                # 淡入淡出，而非黑场过渡。
+                # 时间窗：overlay 的 enable='between(t,0,N)' 控制显示时长；
+                # 此处 overlay 选项里无 Windows 路径，不会触发之前的解析 bug。
+                _display = _NAME_CARD_DISPLAY_SECS
+                _fade    = _NAME_CARD_FADE_SECS
+                # 渐出起点：如果片段比显示窗短，渐出从 (dur-fade) 开始，避免越界
+                _fade_out_st = max(0.0, min(_display - _fade, float(dur) - _fade))
+                fade_flt = (
+                    f"fade=t=in:st=0:d={_fade}:alpha=1,"
+                    f"fade=t=out:st={_fade_out_st:.3f}:d={_fade}:alpha=1"
+                )
+                overlay_opts = f"0:H-{card_h}:enable='between(t,0,{_display})'"
                 if info["has_audio"]:
                     fc = (
                         f"[0:v]{vf}[_scaled];"
-                        f"[_scaled][1:v]overlay=0:H-{card_h}[v];"
+                        f"[1:v]{fade_flt}[_card];"
+                        f"[_scaled][_card]overlay={overlay_opts}[v];"
                         f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
                     )
                 else:
                     fc = (
                         f"[0:v]{vf}[_scaled];"
-                        f"[_scaled][1:v]overlay=0:H-{card_h}[v];"
+                        f"[1:v]{fade_flt}[_card];"
+                        f"[_scaled][_card]overlay={overlay_opts}[v];"
                         f"anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
                     )
             else:
