@@ -2051,6 +2051,14 @@ class RadarOverlayOptions(BaseModel):
     lens_overlay: bool = False
 
 
+class PlayerAvatar(BaseModel):
+    player_key: str
+    steamid64: Optional[str] = None
+    player_name: str = ""
+    avatar_path: Optional[str] = None
+    enabled: bool = True
+
+
 class MontageProjectBody(BaseModel):
     project_id: Optional[int] = None
     name: str = ""
@@ -2066,6 +2074,8 @@ class MontageProjectBody(BaseModel):
     transitions: Optional[dict[str, Any]] = None
     radar_overlay: Optional[RadarOverlayOptions] = None
     theme_id: Optional[str] = Field(default=None, max_length=64)
+    player_avatars: list[PlayerAvatar] = Field(default_factory=list)
+    name_cards_enabled: bool = False
 
 
 @app.get("/api/recorded-clips")
@@ -2111,6 +2121,10 @@ async def save_montage_project(body: MontageProjectBody):
     }
     if body.transitions is not None:
         proj_body["transitions"] = body.transitions
+    if body.player_avatars:
+        proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
+    if body.name_cards_enabled:
+        proj_body["name_cards_enabled"] = True
     # 后期 FFmpeg 雷达叠层已下线；忽略客户端传入的旧开关，写入占位以兼容旧前端读取。
     proj_body["radar_overlay"] = {"enabled": False}
     if body.theme_id is not None:
@@ -2162,6 +2176,8 @@ class MontageExportBody(BaseModel):
     theme_id: Optional[str] = Field(default=None, max_length=64)
     transitions: Optional[dict[str, Any]] = None
     radar_overlay: Optional[RadarOverlayOptions] = None
+    player_avatars: list[PlayerAvatar] = Field(default_factory=list)
+    name_cards_enabled: bool = False
 
 
 @app.post("/api/montage/export")
@@ -2234,6 +2250,23 @@ async def montage_export(body: MontageExportBody):
     if transitions_eff is None and isinstance(extras, dict):
         transitions_eff = extras.get("transitions")
 
+    # player_avatars / name_cards_enabled — coalesce from request or project extras
+    player_avatars_eff: list[PlayerAvatar]
+    if body.player_avatars:
+        player_avatars_eff = body.player_avatars
+    else:
+        raw_pas = extras.get("player_avatars") if isinstance(extras, dict) else None
+        if isinstance(raw_pas, list):
+            player_avatars_eff = [PlayerAvatar(**pa) for pa in raw_pas if isinstance(pa, dict)]
+        else:
+            player_avatars_eff = []
+
+    name_cards_enabled_eff: bool
+    if body.name_cards_enabled:
+        name_cards_enabled_eff = True
+    else:
+        name_cards_enabled_eff = bool(extras.get("name_cards_enabled")) if isinstance(extras, dict) else False
+
     try:
         from .video_composer import MontageComposerError, validate_output_path
 
@@ -2252,6 +2285,44 @@ async def montage_export(body: MontageExportBody):
     intro_p = Path(intro_s).expanduser() if intro_s else None
     outro_p = Path(outro_s).expanduser() if outro_s else None
     bgm_p = Path(bgm_s).expanduser() if bgm_s else None
+
+    # Build name_cards list parallel to clip_paths
+    # Build a lookup from player_key → PlayerAvatar for fast matching
+    _pa_lookup: dict[str, PlayerAvatar] = {pa.player_key: pa for pa in player_avatars_eff}
+
+    name_cards_list: list[Optional[dict]] = []
+    for cid in clip_ids:
+        row = rows.get(int(cid))
+        if row is None:
+            name_cards_list.append(None)
+            continue
+        # Determine player_key for this clip row (steamid takes priority)
+        steamid_val = (
+            row.get("target_steamid64")
+            or row.get("target_steam_id")
+            or row.get("steamid")
+        )
+        if steamid_val:
+            pk = "sid:" + str(steamid_val)
+        else:
+            pk = "name:" + _norm_player_key(str(row.get("player_name") or ""))
+
+        matched_pa = _pa_lookup.get(pk)
+        if matched_pa is None or not matched_pa.enabled:
+            name_cards_list.append(None)
+        else:
+            display_name = matched_pa.player_name or str(row.get("player_name") or "")
+            category = str(row.get("category") or "")
+            name_cards_list.append(
+                {
+                    "avatar_path": matched_pa.avatar_path,
+                    "display_name": display_name,
+                    "category": category,
+                    "enabled": True,
+                }
+            )
+
+    name_cards_arg = name_cards_list if name_cards_enabled_eff else None
 
     snap = {
         "recorded_clip_ids": clip_ids,
@@ -2277,6 +2348,10 @@ async def montage_export(body: MontageExportBody):
         snap["intro_image_duration"] = intro_img_dur_eff
     if outro_img_dur_eff is not None:
         snap["outro_image_duration"] = outro_img_dur_eff
+    if player_avatars_eff:
+        snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
+    if name_cards_enabled_eff:
+        snap["name_cards_enabled"] = True
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -2301,6 +2376,7 @@ async def montage_export(body: MontageExportBody):
             intro_image_duration=intro_img_dur_eff,
             outro_image_duration=outro_img_dur_eff,
             montage_encoder=cfg.montage_encoder or "auto",
+            name_cards=name_cards_arg,
         )
     except MontageComposerError as e:
         await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)
@@ -2308,6 +2384,37 @@ async def montage_export(body: MontageExportBody):
 
     await montage_db.update_export(export_id, status="done", error_msg="", output_path=str(out))
     return {"export_id": export_id, "status": "done", "output_path": str(out)}
+
+
+_AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+@app.post("/api/montage/avatars")
+async def upload_montage_avatar(file: UploadFile = File(...)):
+    """接收玩家头像图片上传，存储到 data/montage_avatars/，返回绝对路径。"""
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "仅支持图片文件（image/*）")
+
+    data = await file.read()
+    if len(data) > _AVATAR_MAX_BYTES:
+        raise HTTPException(400, "图片文件大小不能超过 5MB")
+
+    from .env_utils import get_data_dir
+    import uuid
+
+    avatars_dir = get_data_dir() / "montage_avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+
+    original_name = file.filename or ""
+    suffix = Path(original_name).suffix if original_name else ""
+    dest = avatars_dir / (str(uuid.uuid4()) + suffix)
+
+    def _write(p: Path, d: bytes) -> None:
+        p.write_bytes(d)
+
+    await asyncio.to_thread(_write, dest, data)
+    return {"path": str(dest)}
 
 
 class FilePickerBody(BaseModel):

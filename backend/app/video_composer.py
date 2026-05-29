@@ -414,6 +414,7 @@ def compose_montage(
     intro_image_duration: Optional[float] = None,
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
+    name_cards: Optional[list] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
