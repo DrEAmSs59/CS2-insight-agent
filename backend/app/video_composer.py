@@ -413,9 +413,37 @@ _NAME_CARD_DISPLAY_SECS: float = 5.0
 _NAME_CARD_FADE_SECS: float = 0.5
 
 
+def _wrap_tags(tags: list[str], font: Any, max_width: int) -> list[str]:
+    """把 tags 列表按 max_width 宽度折行，返回每行的字符串列表。"""
+    lines: list[str] = []
+    current: list[str] = []
+    current_w = 0
+    sep = "  "
+    try:
+        sep_w = int(font.getlength(sep))
+    except Exception:
+        sep_w = 8
+    for tag in tags:
+        try:
+            tw = int(font.getlength(tag))
+        except Exception:
+            tw = len(tag) * 13
+        needed = tw + (sep_w + current_w if current else 0)
+        if current and needed > max_width:
+            lines.append(sep.join(current))
+            current = [tag]
+            current_w = tw
+        else:
+            current.append(tag)
+            current_w = needed
+    if current:
+        lines.append(sep.join(current))
+    return lines
+
+
 def _make_name_card_png(
     display_name: str,
-    subtitle: str,
+    tags: list[str],
     accent_hex: str,
     font_path: Optional[Path],
     avatar_path: Optional[Path],
@@ -426,6 +454,7 @@ def _make_name_card_png(
     用 Python/Pillow 生成图片，完全绕开 FFmpeg drawtext 在 Windows 上的
     filtergraph 解析 bug（textfile= / fontfile= 路径中的冒号导致 filterchain
     边界解析失败）。PNG 随后作为第二路 -i 输入叠加到视频。
+    tags 列表会自动按宽度折行。
     """
     try:
         from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
@@ -433,53 +462,78 @@ def _make_name_card_png(
         return False
 
     has_av = bool(avatar_path and avatar_path.is_file())
-    card_h = 100 if has_av else 70
     card_w = 240
-
-    img = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    # 半透明黑底
-    draw.rectangle([0, 0, card_w - 1, card_h - 1], fill=(0, 0, 0, 165))
-
-    # 类别色竖条（左4px）
-    try:
-        hex_part = accent_hex.split("@")[0]   # e.g. "0xF97316"
-        ar = int(hex_part[2:4], 16)
-        ag = int(hex_part[4:6], 16)
-        ab_val = int(hex_part[6:8], 16)
-    except (ValueError, IndexError):
-        ar, ag, ab_val = 0x22, 0x22, 0x44
-    draw.rectangle([0, 0, 3, card_h - 1], fill=(ar, ag, ab_val, 220))
-
-    # 头像
-    text_x = 14
-    if has_av:
-        try:
-            av_img = Image.open(str(avatar_path)).convert("RGBA").resize((80, 80))
-            img.paste(av_img, (8, 10), av_img)
-            text_x = 96
-        except Exception:
-            pass  # 头像加载失败时退化为无头像布局
+    avatar_size = 80
+    pad_top = 10
+    name_size = 20
+    tag_size = 13
+    line_gap = 4   # 行间距
+    pad_bottom = 10
+    stripe_w = 4
+    text_x = (avatar_size + stripe_w + 8) if has_av else (stripe_w + 10)
+    text_area_w = card_w - text_x - 6
 
     # 字体
     if font_path and font_path.is_file():
         try:
-            fn = ImageFont.truetype(str(font_path), 20)
-            fs = ImageFont.truetype(str(font_path), 14)
+            fn = ImageFont.truetype(str(font_path), name_size)
+            fs = ImageFont.truetype(str(font_path), tag_size)
         except Exception:
             fn = fs = ImageFont.load_default()
     else:
         fn = fs = ImageFont.load_default()
 
-    # 名字（第1行）
-    name_y = 12 if card_h == 70 else 16
-    draw.text((text_x, name_y), display_name, font=fn, fill=(255, 255, 255, 255))
+    # 折行后的 tag 行
+    tag_lines = _wrap_tags(tags, fs, text_area_w) if tags else []
 
-    # 副标签（第2行）
-    if subtitle:
-        sub_y = 40 if card_h == 70 else 48
-        draw.text((text_x, sub_y), subtitle, font=fs, fill=(204, 204, 204, 255))
+    # 计算卡高：名字 + 若干 tag 行
+    name_h = name_size + 4
+    tags_h = len(tag_lines) * (tag_size + line_gap) if tag_lines else 0
+    content_h = name_h + tags_h
+    # 若有头像，最小高度取头像高度
+    min_h = (avatar_size + pad_top + pad_bottom) if has_av else 0
+    card_h = max(min_h, content_h + pad_top + pad_bottom)
+
+    img = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # 解析类别色
+    try:
+        hex_part = accent_hex.split("@")[0]
+        ar = int(hex_part[2:4], 16)
+        ag = int(hex_part[4:6], 16)
+        ab_val = int(hex_part[6:8], 16)
+    except (ValueError, IndexError):
+        ar, ag, ab_val = 0x22, 0x22, 0x44
+
+    # 半透明黑底
+    draw.rectangle([0, 0, card_w - 1, card_h - 1], fill=(0, 0, 0, 165))
+    # 类别色竖条
+    draw.rectangle([0, 0, stripe_w - 1, card_h - 1], fill=(ar, ag, ab_val, 220))
+
+    # 头像（居中于卡高）
+    if has_av:
+        try:
+            av_img = Image.open(str(avatar_path)).convert("RGBA").resize(
+                (avatar_size, avatar_size)
+            )
+            av_y = (card_h - avatar_size) // 2
+            img.paste(av_img, (stripe_w + 4, av_y), av_img)
+        except Exception:
+            pass
+
+    # 文字垂直居中
+    text_block_h = content_h
+    text_start_y = (card_h - text_block_h) // 2
+
+    # 名字
+    draw.text((text_x, text_start_y), display_name, font=fn, fill=(255, 255, 255, 255))
+
+    # Tag 行
+    y_cursor = text_start_y + name_h
+    for line in tag_lines:
+        draw.text((text_x, y_cursor), line, font=fs, fill=(200, 200, 200, 230))
+        y_cursor += tag_size + line_gap
 
     img.save(str(out_path), "PNG")
     return True
@@ -614,25 +668,31 @@ def compose_montage(
             # 完全避开 FFmpeg drawtext 在 Windows 8.1 构建上的 filtergraph 解析 bug
             # （textfile= / fontfile= 路径中的冒号导致 filterchain 边界解析失败）。
             card_png: Optional[Path] = None
+            card_h = 70  # 实际高度由 _make_name_card_png 动态计算后写回
             if _use_card:
                 name_str     = str(_card.get("display_name") or "")
-                sub_str      = str(_card.get("subtitle") or "")
+                # tags 列表：类别标签 + 战绩 + 所有 context_tags
+                card_tags: list[str] = [t for t in _card.get("tags") or [] if t]
                 category_val = str(_card.get("category") or "")
                 accent_color = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
                 av_path      = Path(str(_card["avatar_path"])) if _has_avatar else None
-                card_png     = Path(tmpdir) / f"nc_card_{i:03d}.png"
+                card_png_path = Path(tmpdir) / f"nc_card_{i:03d}.png"
                 ok = _make_name_card_png(
                     display_name=name_str,
-                    subtitle=sub_str,
+                    tags=card_tags,
                     accent_hex=accent_color,
                     font_path=_font_path,
                     avatar_path=av_path,
-                    out_path=card_png,
+                    out_path=card_png_path,
                 )
-                if not ok:
-                    card_png = None   # Pillow 不可用时退化为无卡
-
-            card_h = 100 if _has_avatar else 70
+                if ok:
+                    card_png = card_png_path
+                    # 读取实际渲染高度（用于 overlay 定位）
+                    try:
+                        from PIL import Image as _PILImage  # type: ignore[import]
+                        card_h = _PILImage.open(str(card_png)).size[1]
+                    except Exception:
+                        card_h = 100 if _has_avatar else 70
 
             if card_png is not None:
                 # 名牌 PNG 作为 input[1]，用 -loop 1 让单帧图持续供给整段时长。

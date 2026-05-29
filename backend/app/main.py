@@ -2385,18 +2385,25 @@ async def montage_export(body: MontageExportBody):
         else:
             display_name = matched_pa.player_name or str(row.get("player_name") or "")
             category = str(row.get("category") or "")
-            # 副标签：类别标签 + 从 clip_id 提取的战绩标记（如 3K、4K）
+            # tags 列表：类别标签 → 杀数 → 所有 context_tags
             cat_label = _CATEGORY_SUBTITLE.get(category, "")
-            clip_id_str = str(row.get("clip_id") or "")
-            tag_m = re.search(r"_(\d+K)_", clip_id_str, re.IGNORECASE)
-            clip_tag = tag_m.group(1).upper() if tag_m else ""
-            subtitle_parts = [p for p in [cat_label, clip_tag] if p]
+            kill_count_val = row.get("kill_count")
+            try:
+                kc = int(kill_count_val)
+                kill_tag = f"{kc}K" if kc > 0 else ""
+            except (TypeError, ValueError):
+                # 兜底：从 clip_id 里提取（如 _3K_）
+                clip_id_str = str(row.get("clip_id") or "")
+                m = re.search(r"_(\d+)K_", clip_id_str, re.IGNORECASE)
+                kill_tag = (m.group(1) + "K") if m else ""
+            context_tags: list[str] = list(row.get("context_tags") or [])
+            tags: list[str] = [t for t in [cat_label, kill_tag] + context_tags if t]
             name_cards_list.append(
                 {
                     "avatar_path": matched_pa.avatar_path,
                     "display_name": display_name,
                     "category": category,
-                    "subtitle": " · ".join(subtitle_parts),
+                    "tags": tags,
                     "enabled": True,
                 }
             )
