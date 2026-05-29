@@ -2027,6 +2027,7 @@ async def export_rivalhub_batch(body: BatchExportRivalHubBody):
     exported = 0
     skipped: list[int] = []
 
+    name_counter: dict[str, int] = {}
     with zipfile.ZipFile(batch_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for demo_id in body.demo_ids:
             item = await demo_db.get_demo_by_id(demo_id)
@@ -2047,7 +2048,10 @@ async def export_rivalhub_batch(body: BatchExportRivalHubBody):
                 continue
             map_name = str(item.get("map_name") or "unknown").replace(" ", "_")
             date_str = (item.get("match_date") or "")[:10] or "unknown"
-            entry_name = f"rivalhub-{map_name}-{date_str}.zip"
+            base = f"rivalhub-{map_name}-{date_str}"
+            n = name_counter.get(base, 0) + 1
+            name_counter[base] = n
+            entry_name = f"{base}.zip" if n == 1 else f"{base}-{n}.zip"
             zf.writestr(entry_name, zip_bytes)
             exported += 1
 
