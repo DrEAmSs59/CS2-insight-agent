@@ -767,10 +767,14 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
     return cfg
 
 
+def _backend_dir() -> Path:
+    """``backend/`` 根目录（与 ``radar_map_assets._backend_dir`` 一致）。"""
+    return Path(__file__).resolve().parents[1]
+
+
 def _name_card_fonts_dir() -> Path:
-    fonts_dir = get_data_dir() / "fonts"
-    fonts_dir.mkdir(parents=True, exist_ok=True)
-    return fonts_dir
+    """名牌烧录内置字体：``backend/assets/fonts``（随仓库 / 便携包分发）。"""
+    return _backend_dir() / "assets" / "fonts"
 
 
 def _name_card_cjk_medium_candidates() -> list[Path]:
@@ -855,9 +859,9 @@ def resolve_name_card_font_bold() -> Optional[Path]:
 
 def resolve_rajdhani_fonts() -> tuple[Optional[Path], Optional[Path]]:
     """返回 (SemiBold, Bold) Rajdhani 字体路径；未安装则返回 (None, None)。
-    用户需将 Rajdhani-SemiBold.ttf / Rajdhani-Bold.ttf 放到 data/fonts/ 下。
+    字体文件位于 ``backend/assets/fonts/``。
     """
-    fonts_dir = get_data_dir() / "fonts"
+    fonts_dir = _name_card_fonts_dir()
     def _first(*names: str) -> Optional[Path]:
         for name in names:
             p = fonts_dir / name

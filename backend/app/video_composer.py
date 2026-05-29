@@ -519,7 +519,7 @@ def _load_cjk_font(font_path: Optional[Path], size: int) -> Any:
 
 
 def _load_cjk_font_bold(font_path: Optional[Path], size: int) -> Any:
-    """CJK 700 Bold：优先 data/fonts/NotoSansSC-Bold，否则系统粗体。"""
+    """CJK 700 Bold：优先 backend/assets/fonts/NotoSansSC-Bold，否则系统粗体。"""
     from .env_utils import _font_file_renders_cjk, _name_card_cjk_bold_candidates
 
     paths: list[Path] = []
