@@ -399,6 +399,16 @@ def _montage_xfade_chain_to_ts(
         )
 
 
+def _fg_escape_path(p: Path) -> str:
+    """Escape a path for use inside an FFmpeg filtergraph option value."""
+    return str(p).replace('\\', '/').replace(':', '\\:')
+
+
+def _fg_escape_text(s: str) -> str:
+    """Escape text for FFmpeg drawtext text= option."""
+    return s.replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'").replace('\n', ' ')
+
+
 def compose_montage(
     *,
     ffmpeg_bin: Path,
@@ -433,6 +443,12 @@ def compose_montage(
     video_encode_fast = h264_encode_cli_args(_codec, "fast")
 
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
+
+    from .env_utils import resolve_name_card_font
+    _font_path = resolve_name_card_font()
+
+    intro_n = 1 if intro_path is not None else 0
+    n_clips = len(clip_paths)
 
     tmpdir = tempfile.mkdtemp(prefix="cs2_montage_", dir=str(output_path.parent))
     try:
@@ -482,57 +498,68 @@ def compose_montage(
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={fps_s},setsar=1,format=yuv420p"
             )
-            if info["has_audio"]:
-                fc = f"[0:v]{vf}[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
-                cmd = [
-                    str(ffmpeg_bin),
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-i",
-                    str(seg),
-                    "-filter_complex",
-                    fc,
-                    "-map",
-                    "[v]",
-                    "-map",
-                    "[a]",
-                    *video_encode_quality,
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-shortest",
-                    str(out_ts),
-                ]
-            else:
-                fc = (
-                    f"[0:v]{vf}[v];"
-                    f"anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
+
+            # Determine whether this segment gets a name card overlay
+            _clip_index = i - intro_n
+            _is_clip_seg = (name_cards is not None and 0 <= _clip_index < len(name_cards))
+            _card = name_cards[_clip_index] if _is_clip_seg else None
+            _use_card = bool(
+                _card is not None
+                and isinstance(_card, dict)
+                and _card.get("enabled")
+                and _card.get("avatar_path")
+                and Path(str(_card["avatar_path"])).is_file()
+            )
+
+            if _use_card:
+                av_path_esc = _fg_escape_path(Path(str(_card["avatar_path"])))
+                name_text_esc = _fg_escape_text(str(_card.get("display_name") or ""))
+                font_part = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
+                vf_chain = (
+                    f"[0:v]{vf}[_scaled];"
+                    f"movie={av_path_esc},scale=75:75[_avt];"
+                    f"[_scaled][_avt]overlay=3:H-78[_v_av];"
+                    f"[_v_av]drawbox=x=0:y=H-80:w=220:h=80:color=black@0.6:t=fill[_v_box];"
+                    f"[_v_box]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=83:y=H-50[v]"
                 )
-                cmd = [
-                    str(ffmpeg_bin),
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-i",
-                    str(seg),
-                    "-filter_complex",
-                    fc,
-                    "-map",
-                    "[v]",
-                    "-map",
-                    "[a]",
-                    *video_encode_quality,
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-shortest",
-                    str(out_ts),
-                ]
+                if info["has_audio"]:
+                    fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+                else:
+                    fc = (
+                        vf_chain
+                        + f";anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
+                    )
+            else:
+                if info["has_audio"]:
+                    fc = f"[0:v]{vf}[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+                else:
+                    fc = (
+                        f"[0:v]{vf}[v];"
+                        f"anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
+                    )
+
+            cmd = [
+                str(ffmpeg_bin),
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(seg),
+                "-filter_complex",
+                fc,
+                "-map",
+                "[v]",
+                "-map",
+                "[a]",
+                *video_encode_quality,
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-shortest",
+                str(out_ts),
+            ]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
             if r.returncode != 0:
                 raise MontageComposerError(
@@ -540,8 +567,6 @@ def compose_montage(
                 )
             normed.append(out_ts)
 
-        intro_n = 1 if intro_path is not None else 0
-        n_clips = len(clip_paths)
         has_transitions = bool(
             transitions is not None
             and isinstance(transitions, dict)

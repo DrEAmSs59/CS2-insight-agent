@@ -767,6 +767,36 @@ def ensure_cs2_path(cfg: AppConfig) -> AppConfig:
     return cfg
 
 
+def resolve_name_card_font() -> Optional[Path]:
+    """查找可用于名牌烧录的中文字体文件，按优先级返回第一个存在的路径；若全部缺失返回 None。
+
+    搜索顺序：
+    1. 用户自备字体槽 ``data/fonts/NotoSansSC-Regular.otf``
+    2. 用户自备可变字体 ``data/fonts/NotoSansSC-VF.ttf``
+    3. Windows 系统 NotoSansSC-VF.ttf
+    4. Windows 系统微软雅黑 msyh.ttc
+    5. Windows 系统宋体 simsun.ttc
+    6. macOS PingFang.ttc
+    7. Linux NotoSansCJK-Regular.ttc
+    """
+    fonts_dir = get_data_dir() / "fonts"
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+
+    candidates: list[Path] = [
+        fonts_dir / "NotoSansSC-Regular.otf",
+        fonts_dir / "NotoSansSC-VF.ttf",
+        Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("C:/Windows/Fonts/simsun.ttc"),
+        Path("/System/Library/Fonts/PingFang.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def get_primary_monitor_resolution() -> tuple[int, int]:
     """返回主显示器物理分辨率 (width, height)，忽略 DPI 缩放。非 Windows 返回 (1920, 1080) 作为 fallback。"""
     try:
