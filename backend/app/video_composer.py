@@ -400,6 +400,15 @@ def _montage_xfade_chain_to_ts(
         )
 
 
+_CATEGORY_ACCENT: dict[str, str] = {
+    "highlight":   "0xF97316@0.85",   # orange
+    "fail":        "0x6B7280@0.85",   # grey
+    "meme_death":  "0xA855F7@0.85",   # purple
+    "compilation": "0x3B82F6@0.85",   # blue
+}
+_DEFAULT_ACCENT = "0x222244@0.85"
+
+
 def _fg_escape_path(p: Path) -> str:
     """Escape a path for use inside an FFmpeg filtergraph option value."""
     return str(p).replace('\\', '/').replace(':', '\\:')
@@ -512,15 +521,28 @@ def compose_montage(
             )
 
             if _use_card:
-                av_path_esc = _fg_escape_path(Path(str(_card["avatar_path"])))
-                name_text_esc = _fg_escape_text(str(_card.get("display_name") or ""))
-                font_part = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
+                av_path_esc    = _fg_escape_path(Path(str(_card["avatar_path"])))
+                name_text_esc  = _fg_escape_text(str(_card.get("display_name") or ""))
+                sub_text_esc   = _fg_escape_text(str(_card.get("subtitle") or ""))
+                category_val   = str(_card.get("category") or "")
+                accent_color   = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
+                font_part      = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
+                t_enable       = "enable='between(t,0,4)'"
                 vf_chain = (
+                    # 1. Normalize video
                     f"[0:v]{vf}[_scaled];"
-                    f"[_scaled]drawbox=x=0:y=H-80:w=220:h=80:color=black@0.6:t=fill[_v_box];"
-                    f"movie={av_path_esc}:loop=0,scale=75:75[_avt];"
-                    f"[_v_box][_avt]overlay=3:H-78[_v_av];"
-                    f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=83:y=H-50[v]"
+                    # 2. Semi-transparent black background box (full card area)
+                    f"[_scaled]drawbox=x=0:y=H-100:w=240:h=100:color=black@0.65:t=fill:{t_enable}[_v_bg];"
+                    # 3. Colored left-stripe accent (4px wide)
+                    f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
+                    # 4. Load and scale avatar
+                    f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
+                    # 5. Overlay avatar on card (centered vertically: box top = H-100, avatar h=80 → y = H-90)
+                    f"[_v_stripe][_avt]overlay=8:H-90:{t_enable}[_v_av];"
+                    # 6. Player name (line 1) — larger, white
+                    f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
+                    # 7. Subtitle (line 2) — smaller, muted
+                    f"[_v_name]drawtext{font_part}:text='{sub_text_esc}':fontcolor=0xCCCCCC:fontsize=14:x=96:y=H-52:{t_enable}[v]"
                 )
                 if info["has_audio"]:
                     fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
