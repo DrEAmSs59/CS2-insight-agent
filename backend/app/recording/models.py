@@ -109,6 +109,7 @@ class RecordingOptions(BaseModel):
 
 class SourceRef(BaseModel):
     original_clip_id: Optional[str] = None
+    context_tags: list[str] = []
     timeline_event_id: Optional[str] = None
     queue_item_id: Optional[str] = None
     group_id: Optional[str] = None

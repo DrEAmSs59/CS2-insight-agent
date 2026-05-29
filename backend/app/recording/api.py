@@ -163,7 +163,7 @@ def build_v3_recorded_clip_meta(
         "source_rounds": source_rounds,
         "kill_count": kill_count,
         "kill_ticks": kill_ticks,
-        "context_tags": result.get("context_tags") or [],
+        "context_tags": list(source_ref.context_tags) if (source_ref and source_ref.context_tags) else (result.get("context_tags") or []),
         "victims": victims,
         "killers": killers,
         "killer_name": killer_name,

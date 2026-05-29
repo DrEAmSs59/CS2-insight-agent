@@ -92,6 +92,7 @@ function buildSourceRef(clipData, queueItem) {
     timeline_event_id: clipData.timeline_event_id || null,
     queue_item_id: queueItem.id || null,
     group_id: null,
+    context_tags: Array.isArray(clipData.context_tags) ? clipData.context_tags : [],
   };
 }
 
