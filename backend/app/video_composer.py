@@ -529,8 +529,17 @@ def compose_montage(
             )
 
             if _use_card:
-                name_text_esc  = _fg_escape_text(str(_card.get("display_name") or ""))
-                sub_text_esc   = _fg_escape_text(str(_card.get("subtitle") or ""))
+                # 把名字和副标签写入临时文本文件（UTF-8），用 textfile= 代替 text=
+                # 避免中文字符经 Windows 命令行参数传递时的编码乱码问题。
+                name_str  = str(_card.get("display_name") or "")
+                sub_str   = str(_card.get("subtitle") or "")
+                name_file = Path(tmpdir) / f"nc_name_{i:03d}.txt"
+                sub_file  = Path(tmpdir) / f"nc_sub_{i:03d}.txt"
+                name_file.write_text(name_str, encoding="utf-8")
+                sub_file.write_text(sub_str, encoding="utf-8")
+                name_file_esc = _fg_escape_path(name_file)
+                sub_file_esc  = _fg_escape_path(sub_file)
+
                 category_val   = str(_card.get("category") or "")
                 accent_color   = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
                 font_part      = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
@@ -548,7 +557,7 @@ def compose_montage(
                         f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
                         f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
                         f"[_v_stripe][_avt]overlay=8:H-90:{t_enable}[_v_av];"
-                        f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
+                        f"[_v_av]drawtext{font_part}:textfile={name_file_esc}:fontcolor=white:fontsize=20:x=96:y=H-78:{t_enable}[_v_name];"
                     )
                     text_x = 96
                 else:
@@ -557,16 +566,15 @@ def compose_montage(
                         f"[0:v]{vf}[_scaled];"
                         f"[_scaled]drawbox=x=0:y=H-70:w=240:h=70:color=black@0.65:t=fill:{t_enable}[_v_bg];"
                         f"[_v_bg]drawbox=x=0:y=H-70:w=4:h=70:color={accent_color}:t=fill:{t_enable}[_v_stripe];"
-                        f"[_v_stripe]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=14:y=H-55:{t_enable}[_v_name];"
+                        f"[_v_stripe]drawtext{font_part}:textfile={name_file_esc}:fontcolor=white:fontsize=20:x=14:y=H-55:{t_enable}[_v_name];"
                     )
                     text_x = 14
 
-                # Subtitle line is optional — skip the drawtext node when empty
-                # to avoid a zero-glyph render pass on every frame.
-                if sub_text_esc:
+                # Subtitle line is optional — skip the drawtext node when empty.
+                if sub_str:
                     sub_y = "H-52" if _has_avatar else "H-28"
                     vf_chain += (
-                        f"[_v_name]drawtext{font_part}:text='{sub_text_esc}':fontcolor=0xCCCCCC"
+                        f"[_v_name]drawtext{font_part}:textfile={sub_file_esc}:fontcolor=0xCCCCCC"
                         f":fontsize=14:x={text_x}:y={sub_y}:{t_enable}[v]"
                     )
                 else:
