@@ -18,6 +18,8 @@ import {
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
+import { exportRivalHubBatch } from "../utils/rivalHubExport";
+import RivalHubExportToast from "../components/demoLibrary/RivalHubExportToast";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -48,6 +50,9 @@ export default function DemoLibraryPage() {
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
   const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
+
+  // rivalHubToasts: { id: number, label: string, phase: string, blob?: Blob, filename?: string, error?: string }[]
+  const [rivalHubToasts, setRivalHubToasts] = useState([]);
 
   const queuedClientClipUids = useMemo(
     () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
@@ -226,6 +231,43 @@ export default function DemoLibraryPage() {
     [s]
   );
 
+  const handleExportRivalHub = useCallback(() => {
+    const selectedIds = Array.from(s.selectedLibraryDemoIds);
+    const doneItems = selectedIds
+      .map((id) => s.demoLibraryItems.find((it) => it.id === id))
+      .filter((it) => it && it.result);
+
+    const skipped = selectedIds.length - doneItems.length;
+    if (skipped > 0) {
+      s.setProgressText(`${skipped} 个未解析的 Demo 已跳过导出。`);
+    }
+    if (!doneItems.length) return;
+
+    // initialize toasts
+    setRivalHubToasts((prev) => [
+      ...prev,
+      ...doneItems.map((it) => ({
+        id: it.id,
+        label:
+          (it.display_name && String(it.display_name).trim()) ||
+          it.filename ||
+          `Demo #${it.id}`,
+        phase: "loading",
+      })),
+    ]);
+
+    const ids = doneItems.map((it) => it.id);
+    void exportRivalHubBatch(ids, (demoId, status) => {
+      setRivalHubToasts((prev) =>
+        prev.map((t) => (t.id === demoId ? { ...t, ...status } : t))
+      );
+    });
+  }, [s]);
+
+  const handleCloseToast = useCallback((id) => {
+    setRivalHubToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   return (
     <PageContainer className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
       <DemoLibraryToolbar
@@ -338,6 +380,7 @@ export default function DemoLibraryPage() {
         onOpenBatchModal={() => s.setLibraryBatchModalOpen(true)}
         onBatchDelete={handleBatchDelete}
         onClearSelection={s.clearLibrarySelection}
+        onExportRivalHub={handleExportRivalHub}
       />
 
       {s.libraryDeletePrompt ? (
@@ -482,6 +525,22 @@ export default function DemoLibraryPage() {
         onIngest={handleBatchIngest}
         onUpload={s.handleUpload}
       />
+      {rivalHubToasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+          {rivalHubToasts.map((t) => (
+            <RivalHubExportToast
+              key={t.id}
+              id={t.id}
+              label={t.label}
+              phase={t.phase}
+              blob={t.blob}
+              filename={t.filename}
+              error={t.error}
+              onClose={handleCloseToast}
+            />
+          ))}
+        </div>
+      )}
     </PageContainer>
   );
 }
