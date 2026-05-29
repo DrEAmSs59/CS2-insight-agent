@@ -233,20 +233,16 @@ export default function DemoLibraryPage() {
 
   const handleExportRivalHub = useCallback(() => {
     const selectedIds = Array.from(s.selectedLibraryDemoIds);
-    const doneItems = selectedIds
+    // RivalHub export re-parses the .dem in isolation — no Insight parse/result required.
+    const exportItems = selectedIds
       .map((id) => s.demoLibraryItems.find((it) => it.id === id))
-      .filter((it) => it && it.result);
-
-    const skipped = selectedIds.length - doneItems.length;
-    if (skipped > 0) {
-      s.setProgressText(`${skipped} 个未解析的 Demo 已跳过导出。`);
-    }
-    if (!doneItems.length) return;
+      .filter(Boolean);
+    if (!exportItems.length) return;
 
     // filter out demos already being exported
     setRivalHubToasts((prev) => {
       const inFlight = new Set(prev.filter(t => t.phase === "loading").map(t => t.id));
-      const newItems = doneItems.filter(it => !inFlight.has(it.id));
+      const newItems = exportItems.filter(it => !inFlight.has(it.id));
       if (!newItems.length) return prev;
 
       const ids = newItems.map((it) => it.id);
