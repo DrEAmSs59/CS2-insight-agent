@@ -1933,6 +1933,42 @@ async def delete_demo_file(demo_id: int):
     return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
 
 
+@app.post("/api/demos/{demo_id}/export-rivalhub")
+async def export_demo_rivalhub(demo_id: int):
+    """Export a parsed demo as a RivalHub-format zip. Requires demo file on disk."""
+    from .rivalhub_exporter import export_demo as _export_rivalhub_demo
+    from .demo_parse_isolation import IsolatedParseError
+
+    item = await demo_db.get_demo_by_id(demo_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Demo not found")
+
+    dem_path = item.get("path") or ""
+    if not dem_path or not Path(dem_path).exists():
+        raise HTTPException(
+            status_code=422,
+            detail="Demo file not found on disk. Cannot export.",
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+        zip_bytes = await loop.run_in_executor(
+            None, _export_rivalhub_demo, dem_path
+        )
+    except IsolatedParseError as e:
+        raise HTTPException(status_code=500, detail=f"Demo parse failed: {e}") from e
+
+    map_name = str(item.get("map_name") or "unknown").replace(" ", "_")
+    date_str = (item.get("match_date") or "")[:10] or datetime.utcnow().strftime("%Y-%m-%d")
+    filename = f"rivalhub-{map_name}-{date_str}.zip"
+
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 class BatchIngestBody(BaseModel):
     demo_ids: list[int] = Field(..., min_length=1, max_length=200)
 
@@ -2289,6 +2325,13 @@ async def montage_export(body: MontageExportBody):
     # Build a lookup from player_key → PlayerAvatar for fast matching
     _pa_lookup: dict[str, PlayerAvatar] = {pa.player_key: pa for pa in player_avatars_eff}
 
+    _CATEGORY_SUBTITLE = {
+        "highlight": "高光",
+        "fail": "下饭",
+        "meme_death": "梗死亡",
+        "compilation": "合集",
+    }
+
     name_cards_list: list[Optional[dict]] = []
     for cid in clip_ids:
         row = rows.get(int(cid))
@@ -2317,6 +2360,7 @@ async def montage_export(body: MontageExportBody):
                     "avatar_path": matched_pa.avatar_path,
                     "display_name": display_name,
                     "category": category,
+                    "subtitle": _CATEGORY_SUBTITLE.get(category, ""),
                     "enabled": True,
                 }
             )
