@@ -408,9 +408,11 @@ _CATEGORY_ACCENT: dict[str, str] = {
 }
 _DEFAULT_ACCENT = "0x222244@0.85"
 # How many seconds the name card stays visible at the start of each clip
-_NAME_CARD_DISPLAY_SECS: float = 5.0
+_NAME_CARD_DISPLAY_SECS: float = 3.0
 # Fade-in / fade-out duration (seconds)
-_NAME_CARD_FADE_SECS: float = 0.5
+_NAME_CARD_FADE_SECS: float = 0.4
+# Pixels above the very bottom of the video frame
+_NAME_CARD_BOTTOM_MARGIN: int = 24
 
 
 def _wrap_tags(tags: list[str], font: Any, max_width: int) -> list[str]:
@@ -462,16 +464,16 @@ def _make_name_card_png(
         return False
 
     has_av = bool(avatar_path and avatar_path.is_file())
-    card_w = 240
-    avatar_size = 80
-    pad_top = 10
-    name_size = 20
-    tag_size = 13
-    line_gap = 4   # 行间距
-    pad_bottom = 10
-    stripe_w = 4
-    text_x = (avatar_size + stripe_w + 8) if has_av else (stripe_w + 10)
-    text_area_w = card_w - text_x - 6
+    card_w = 320
+    avatar_size = 96
+    pad_top = 12
+    name_size = 26
+    tag_size = 17
+    line_gap = 6   # 行间距
+    pad_bottom = 12
+    stripe_w = 5
+    text_x = (avatar_size + stripe_w + 10) if has_av else (stripe_w + 12)
+    text_area_w = card_w - text_x - 8
 
     # 字体
     if font_path and font_path.is_file():
@@ -710,7 +712,8 @@ def compose_montage(
                     f"fade=t=in:st=0:d={_fade}:alpha=1,"
                     f"fade=t=out:st={_fade_out_st:.3f}:d={_fade}:alpha=1"
                 )
-                overlay_opts = f"0:H-{card_h}:enable='between(t,0,{_display})'"
+                _card_y = card_h + _NAME_CARD_BOTTOM_MARGIN
+                overlay_opts = f"0:H-{_card_y}:enable='between(t,0,{_display})'"
                 if info["has_audio"]:
                     fc = (
                         f"[0:v]{vf}[_scaled];"
