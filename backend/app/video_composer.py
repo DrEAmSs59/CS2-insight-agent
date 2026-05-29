@@ -412,8 +412,16 @@ _NAME_CARD_DISPLAY_SECS: int = 4
 
 
 def _fg_escape_path(p: Path) -> str:
-    """Escape a path for use inside an FFmpeg filtergraph option value."""
-    return str(p).replace('\\', '/').replace(':', '\\:')
+    """Wrap a path in single quotes for use in an FFmpeg filtergraph option value.
+
+    Single-quote wrapping protects ':' in Windows drive letters (e.g. C:/) from
+    being misinterpreted as an FFmpeg option separator.  Using \\: backslash
+    escaping instead was found to cause filterchain parse failures in FFmpeg 8.1
+    on Windows (the parser incorrectly merges subsequent filter chains).
+    Any literal single quotes in the path are backslash-escaped before wrapping.
+    """
+    safe = str(p).replace('\\', '/').replace("'", "\\'")
+    return f"'{safe}'"
 
 
 def _fg_escape_text(s: str) -> str:
