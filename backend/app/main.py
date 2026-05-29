@@ -2176,7 +2176,7 @@ class MontageExportBody(BaseModel):
     transitions: Optional[dict[str, Any]] = None
     radar_overlay: Optional[RadarOverlayOptions] = None
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
-    name_cards_enabled: bool = False
+    name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
 
 
 @app.post("/api/montage/export")
@@ -2261,8 +2261,8 @@ async def montage_export(body: MontageExportBody):
             player_avatars_eff = []
 
     name_cards_enabled_eff: bool
-    if body.name_cards_enabled:
-        name_cards_enabled_eff = True
+    if body.name_cards_enabled is not None:
+        name_cards_enabled_eff = bool(body.name_cards_enabled)
     else:
         name_cards_enabled_eff = bool(extras.get("name_cards_enabled")) if isinstance(extras, dict) else False
 

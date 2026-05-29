@@ -396,6 +396,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     selectedThemeId,
     draftName,
     bgmVolume,
+    playerAvatars,
+    nameCardsEnabled,
   ]);
 
   const byId = useMemo(() => {
