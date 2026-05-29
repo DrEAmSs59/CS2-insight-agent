@@ -529,20 +529,19 @@ def compose_montage(
             )
 
             if _use_card:
-                # 把名字和副标签写入临时文本文件（UTF-8），用 textfile= 代替 text=
-                # 避免中文字符经 Windows 命令行参数传递时的编码乱码问题。
-                name_str  = str(_card.get("display_name") or "")
-                sub_str   = str(_card.get("subtitle") or "")
-                name_file = Path(tmpdir) / f"nc_name_{i:03d}.txt"
-                sub_file  = Path(tmpdir) / f"nc_sub_{i:03d}.txt"
-                name_file.write_text(name_str, encoding="utf-8")
-                sub_file.write_text(sub_str, encoding="utf-8")
-                name_file_esc = _fg_escape_path(name_file)
-                sub_file_esc  = _fg_escape_path(sub_file)
+                # 把名字（第一行）和副标签（第二行）合并写入一个文本文件，用 \n 分隔。
+                # 单个 drawtext 渲染两行，避免两个 drawtext 串联在该版本 FFmpeg 上的
+                # "Invalid argument" 问题，同时绕过中文命令行参数编码问题。
+                name_str = str(_card.get("display_name") or "")
+                sub_str  = str(_card.get("subtitle") or "")
+                text_content = name_str + ("\n" + sub_str if sub_str else "")
+                text_file = Path(tmpdir) / f"nc_text_{i:03d}.txt"
+                text_file.write_text(text_content, encoding="utf-8")
+                text_file_esc = _fg_escape_path(text_file)
 
-                category_val   = str(_card.get("category") or "")
-                accent_color   = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
-                font_part      = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
+                category_val = str(_card.get("category") or "")
+                accent_color = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
+                font_part    = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
                 # NOTE: enable='between(t,0,N)' causes "Invalid argument" on some
                 # Windows FFmpeg builds due to filtergraph expression quoting issues.
                 # Card is shown for the full clip duration until a reliable cross-
@@ -550,7 +549,7 @@ def compose_montage(
                 # kept as a named constant for a future fix.
 
                 if _has_avatar:
-                    # 有头像：黑底 → 色条 → 头像 → 名字（x=96）→ 副标签
+                    # 有头像：黑底（100px）→ 色条 → 头像 → 名字+副标签（x=96）
                     av_path_esc = _fg_escape_path(Path(str(_card["avatar_path"])))
                     vf_chain = (
                         f"[0:v]{vf}[_scaled];"
@@ -558,28 +557,18 @@ def compose_montage(
                         f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill[_v_stripe];"
                         f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
                         f"[_v_stripe][_avt]overlay=8:H-90[_v_av];"
-                        f"[_v_av]drawtext{font_part}:textfile={name_file_esc}:fontcolor=white:fontsize=20:x=96:y=H-78[_v_name];"
+                        f"[_v_av]drawtext{font_part}:textfile={text_file_esc}"
+                        f":fontcolor=white:fontsize=18:line_spacing=4:x=96:y=H-82[v]"
                     )
-                    text_x = 96
                 else:
-                    # 无头像：黑底 → 色条 → 名字从左侧开始（x=14）
+                    # 无头像：黑底（70px）→ 色条 → 名字+副标签（x=14）
                     vf_chain = (
                         f"[0:v]{vf}[_scaled];"
                         f"[_scaled]drawbox=x=0:y=H-70:w=240:h=70:color=black@0.65:t=fill[_v_bg];"
                         f"[_v_bg]drawbox=x=0:y=H-70:w=4:h=70:color={accent_color}:t=fill[_v_stripe];"
-                        f"[_v_stripe]drawtext{font_part}:textfile={name_file_esc}:fontcolor=white:fontsize=20:x=14:y=H-55[_v_name];"
+                        f"[_v_stripe]drawtext{font_part}:textfile={text_file_esc}"
+                        f":fontcolor=white:fontsize=18:line_spacing=4:x=14:y=H-62[v]"
                     )
-                    text_x = 14
-
-                # Subtitle line is optional — skip the drawtext node when empty.
-                if sub_str:
-                    sub_y = "H-52" if _has_avatar else "H-28"
-                    vf_chain += (
-                        f"[_v_name]drawtext{font_part}:textfile={sub_file_esc}:fontcolor=0xCCCCCC"
-                        f":fontsize=14:x={text_x}:y={sub_y}[v]"
-                    )
-                else:
-                    vf_chain += "[_v_name]null[v]"
                 if info["has_audio"]:
                     fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
                 else:
