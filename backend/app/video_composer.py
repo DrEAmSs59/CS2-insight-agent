@@ -411,6 +411,78 @@ _DEFAULT_ACCENT = "0x222244@0.85"
 _NAME_CARD_DISPLAY_SECS: int = 4
 
 
+def _make_name_card_png(
+    display_name: str,
+    subtitle: str,
+    accent_hex: str,
+    font_path: Optional[Path],
+    avatar_path: Optional[Path],
+    out_path: Path,
+) -> bool:
+    """使用 Pillow 渲染名牌 PNG，返回是否成功。
+
+    用 Python/Pillow 生成图片，完全绕开 FFmpeg drawtext 在 Windows 上的
+    filtergraph 解析 bug（textfile= / fontfile= 路径中的冒号导致 filterchain
+    边界解析失败）。PNG 随后作为第二路 -i 输入叠加到视频。
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore[import]
+    except ImportError:
+        return False
+
+    has_av = bool(avatar_path and avatar_path.is_file())
+    card_h = 100 if has_av else 70
+    card_w = 240
+
+    img = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # 半透明黑底
+    draw.rectangle([0, 0, card_w - 1, card_h - 1], fill=(0, 0, 0, 165))
+
+    # 类别色竖条（左4px）
+    try:
+        hex_part = accent_hex.split("@")[0]   # e.g. "0xF97316"
+        ar = int(hex_part[2:4], 16)
+        ag = int(hex_part[4:6], 16)
+        ab_val = int(hex_part[6:8], 16)
+    except (ValueError, IndexError):
+        ar, ag, ab_val = 0x22, 0x22, 0x44
+    draw.rectangle([0, 0, 3, card_h - 1], fill=(ar, ag, ab_val, 220))
+
+    # 头像
+    text_x = 14
+    if has_av:
+        try:
+            av_img = Image.open(str(avatar_path)).convert("RGBA").resize((80, 80))
+            img.paste(av_img, (8, 10), av_img)
+            text_x = 96
+        except Exception:
+            pass  # 头像加载失败时退化为无头像布局
+
+    # 字体
+    if font_path and font_path.is_file():
+        try:
+            fn = ImageFont.truetype(str(font_path), 20)
+            fs = ImageFont.truetype(str(font_path), 14)
+        except Exception:
+            fn = fs = ImageFont.load_default()
+    else:
+        fn = fs = ImageFont.load_default()
+
+    # 名字（第1行）
+    name_y = 12 if card_h == 70 else 16
+    draw.text((text_x, name_y), display_name, font=fn, fill=(255, 255, 255, 255))
+
+    # 副标签（第2行）
+    if subtitle:
+        sub_y = 40 if card_h == 70 else 48
+        draw.text((text_x, sub_y), subtitle, font=fs, fill=(204, 204, 204, 255))
+
+    img.save(str(out_path), "PNG")
+    return True
+
+
 def _fg_escape_path(p: Path) -> str:
     """Wrap a path in single quotes for use in an FFmpeg filtergraph option value.
 
@@ -536,53 +608,44 @@ def compose_montage(
                 and Path(str(_card["avatar_path"])).is_file()
             )
 
+            # 名牌覆层：用 Pillow 预渲染 PNG，作为第二路 -i 输入叠加。
+            # 完全避开 FFmpeg drawtext 在 Windows 8.1 构建上的 filtergraph 解析 bug
+            # （textfile= / fontfile= 路径中的冒号导致 filterchain 边界解析失败）。
+            card_png: Optional[Path] = None
             if _use_card:
-                # 把名字（第一行）和副标签（第二行）合并写入一个文本文件，用 \n 分隔。
-                # 单个 drawtext 渲染两行，避免两个 drawtext 串联在该版本 FFmpeg 上的
-                # "Invalid argument" 问题，同时绕过中文命令行参数编码问题。
-                name_str = str(_card.get("display_name") or "")
-                sub_str  = str(_card.get("subtitle") or "")
-                text_content = name_str + ("\n" + sub_str if sub_str else "")
-                text_file = Path(tmpdir) / f"nc_text_{i:03d}.txt"
-                text_file.write_text(text_content, encoding="utf-8")
-                text_file_esc = _fg_escape_path(text_file)
-
+                name_str     = str(_card.get("display_name") or "")
+                sub_str      = str(_card.get("subtitle") or "")
                 category_val = str(_card.get("category") or "")
                 accent_color = _CATEGORY_ACCENT.get(category_val, _DEFAULT_ACCENT)
-                font_part    = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
-                # NOTE: enable='between(t,0,N)' causes "Invalid argument" on some
-                # Windows FFmpeg builds due to filtergraph expression quoting issues.
-                # Card is shown for the full clip duration until a reliable cross-
-                # platform enable= syntax is confirmed.  _NAME_CARD_DISPLAY_SECS is
-                # kept as a named constant for a future fix.
+                av_path      = Path(str(_card["avatar_path"])) if _has_avatar else None
+                card_png     = Path(tmpdir) / f"nc_card_{i:03d}.png"
+                ok = _make_name_card_png(
+                    display_name=name_str,
+                    subtitle=sub_str,
+                    accent_hex=accent_color,
+                    font_path=_font_path,
+                    avatar_path=av_path,
+                    out_path=card_png,
+                )
+                if not ok:
+                    card_png = None   # Pillow 不可用时退化为无卡
 
-                if _has_avatar:
-                    # 有头像：黑底（100px）→ 色条 → 头像 → 名字+副标签（x=96）
-                    av_path_esc = _fg_escape_path(Path(str(_card["avatar_path"])))
-                    vf_chain = (
-                        f"[0:v]{vf}[_scaled];"
-                        f"[_scaled]drawbox=x=0:y=H-100:w=240:h=100:color=black@0.65:t=fill[_v_bg];"
-                        f"[_v_bg]drawbox=x=0:y=H-100:w=4:h=100:color={accent_color}:t=fill[_v_stripe];"
-                        f"movie={av_path_esc}:loop=0,scale=80:80[_avt];"
-                        f"[_v_stripe][_avt]overlay=8:H-90[_v_av];"
-                        f"[_v_av]drawtext{font_part}:textfile={text_file_esc}"
-                        f":fontcolor=white:fontsize=18:line_spacing=4:x=96:y=H-82[v]"
-                    )
-                else:
-                    # 无头像：黑底（70px）→ 色条 → 名字+副标签（x=14）
-                    vf_chain = (
-                        f"[0:v]{vf}[_scaled];"
-                        f"[_scaled]drawbox=x=0:y=H-70:w=240:h=70:color=black@0.65:t=fill[_v_bg];"
-                        f"[_v_bg]drawbox=x=0:y=H-70:w=4:h=70:color={accent_color}:t=fill[_v_stripe];"
-                        f"[_v_stripe]drawtext{font_part}:textfile={text_file_esc}"
-                        f":fontcolor=white:fontsize=18:line_spacing=4:x=14:y=H-62[v]"
-                    )
+            card_h = 100 if _has_avatar else 70
+
+            if card_png is not None:
+                # 名牌 PNG 作为 input[1]，用 -loop 1 让单帧图持续供给整段时长。
+                # filtergraph 里无路径字符串，彻底规避 Windows 路径冒号转义问题。
                 if info["has_audio"]:
-                    fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+                    fc = (
+                        f"[0:v]{vf}[_scaled];"
+                        f"[_scaled][1:v]overlay=0:H-{card_h}[v];"
+                        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
+                    )
                 else:
                     fc = (
-                        vf_chain
-                        + f";anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
+                        f"[0:v]{vf}[_scaled];"
+                        f"[_scaled][1:v]overlay=0:H-{card_h}[v];"
+                        f"anullsrc=r=48000:cl=stereo,atrim=0:{float(dur):.6f},asetpts=N/SR/TB[a]"
                     )
             else:
                 if info["has_audio"]:
@@ -601,6 +664,11 @@ def compose_montage(
                 "error",
                 "-i",
                 str(seg),
+            ]
+            if card_png is not None:
+                # -loop 1: 将单帧 PNG 循环成无限长流，匹配视频时长
+                cmd += ["-loop", "1", "-i", str(card_png)]
+            cmd += [
                 "-filter_complex",
                 fc,
                 "-map",
