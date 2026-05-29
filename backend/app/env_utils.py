@@ -783,13 +783,17 @@ def resolve_name_card_font() -> Optional[Path]:
     fonts_dir.mkdir(parents=True, exist_ok=True)
 
     candidates: list[Path] = [
+        # 用户自备标准 OTF（优先，非可变字体，FFmpeg 兼容性最好）
         fonts_dir / "NotoSansSC-Regular.otf",
-        fonts_dir / "NotoSansSC-VF.ttf",
-        Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
-        Path("C:/Windows/Fonts/msyh.ttc"),
-        Path("C:/Windows/Fonts/simsun.ttc"),
+        # Windows 系统字体（标准 TTC，FFmpeg 完全支持）
+        Path("C:/Windows/Fonts/msyh.ttc"),        # 微软雅黑
+        Path("C:/Windows/Fonts/simsun.ttc"),      # 宋体
+        # macOS / Linux
         Path("/System/Library/Fonts/PingFang.ttc"),
         Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        # 可变字体（部分旧版 FFmpeg/FreeType 不支持，降为最后备选）
+        fonts_dir / "NotoSansSC-VF.ttf",
+        Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
     ]
     for candidate in candidates:
         if candidate.is_file():
