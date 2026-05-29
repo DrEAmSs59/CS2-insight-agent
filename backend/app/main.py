@@ -2047,7 +2047,7 @@ async def export_rivalhub_batch(body: BatchExportRivalHubBody):
                 skipped.append(demo_id)
                 continue
             map_name = str(item.get("map_name") or "unknown").replace(" ", "_")
-            date_str = (item.get("match_date") or "")[:10] or "unknown"
+            date_str = (item.get("match_date") or item.get("added_at") or "")[:10] or "unknown"
             base = f"rivalhub-{map_name}-{date_str}"
             n = name_counter.get(base, 0) + 1
             name_counter[base] = n
