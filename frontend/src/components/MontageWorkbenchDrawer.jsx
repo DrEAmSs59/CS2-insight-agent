@@ -20,6 +20,7 @@ import {
   mapNameFromClip,
   getMontageTimelineVariant,
   isTimelineSourceClip,
+  derivePlayerAssetsFromClips,
 } from "../utils/montageUtils";
 
 const FILTER_TABS = [
@@ -715,6 +716,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     }
     setSavingDraft(true);
     try {
+      const playerList = derivePlayerAssetsFromClips(orderedClips);
+      const playerAvatarsPayload = playerList.map((p) => ({
+        player_key: p.player_key,
+        steamid64: p.steamid64 || null,
+        player_name: p.display_name || "",
+        avatar_path: playerAvatars[p.player_key]?.avatar_path || null,
+        enabled: true,
+      }));
       const { data } = await API.post("/montage/projects", {
         project_id: projectId,
         name: effectiveName,
@@ -729,6 +738,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         transitions: transitionsPayload,
         theme_id: selectedThemeId,
         bgm_volume: bgmVolume / 100,
+        player_avatars: playerAvatarsPayload,
+        name_cards_enabled: nameCardsEnabled,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -740,6 +751,25 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       const bv = data?.body?.bgm_volume;
       if (bv != null && Number.isFinite(Number(bv))) {
         setBgmVolume(Math.round(Number(bv) * 100));
+      }
+      if (Array.isArray(data?.body?.player_avatars)) {
+        const restored = {};
+        for (const pa of data.body.player_avatars) {
+          if (pa?.player_key) {
+            const filename = String(pa.avatar_path || "")
+              .replace(/\\/g, "/")
+              .split("/")
+              .pop();
+            restored[pa.player_key] = {
+              avatar_path: pa.avatar_path || null,
+              avatar_url: filename ? `/api/montage/avatars/${filename}` : null,
+            };
+          }
+        }
+        setPlayerAvatars(restored);
+      }
+      if (typeof data?.body?.name_cards_enabled === "boolean") {
+        setNameCardsEnabled(data.body.name_cards_enabled);
       }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
@@ -754,6 +784,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     draftName,
     outputFilename,
     orderedIds,
+    orderedClips,
     bgmPath,
     bgmStartSec,
     introPath,
@@ -764,6 +795,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     transitionsPayload,
     selectedThemeId,
     bgmVolume,
+    playerAvatars,
+    nameCardsEnabled,
   ]);
 
   const runExport = useCallback(async () => {
@@ -779,6 +812,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     setExporting(true);
     setLastExport(null);
     try {
+      const playerList = derivePlayerAssetsFromClips(orderedClips);
+      const playerAvatarsPayload = playerList.map((p) => ({
+        player_key: p.player_key,
+        steamid64: p.steamid64 || null,
+        player_name: p.display_name || "",
+        avatar_path: playerAvatars[p.player_key]?.avatar_path || null,
+        enabled: true,
+      }));
       const { data } = await API.post("/montage/export", {
         project_id: projectId,
         recorded_clip_ids: orderedIds.length ? orderedIds : undefined,
@@ -793,6 +834,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         ...(outroPath.trim() ? { outro_image_duration: outroDuration } : {}),
         output_path: outPath,
         theme_id: selectedThemeId,
+        player_avatars: playerAvatarsPayload,
+        name_cards_enabled: nameCardsEnabled,
       });
       setLastExport({ ok: true, ...data });
       showToast("合辑导出完成");
@@ -808,6 +851,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     validateExport,
     projectId,
     orderedIds,
+    orderedClips,
     orderedIdsAsStrings,
     transitionsPayload,
     bgmPath,
@@ -820,6 +864,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outputFilename,
     selectedThemeId,
     bgmVolume,
+    playerAvatars,
+    nameCardsEnabled,
     showToast,
   ]);
 
