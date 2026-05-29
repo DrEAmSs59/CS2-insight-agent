@@ -464,26 +464,35 @@ def _make_name_card_png(
         return False
 
     has_av = bool(avatar_path and avatar_path.is_file())
-    card_w = 320
-    avatar_size = 96
-    pad_top = 12
-    name_size = 26
-    tag_size = 17
-    line_gap = 6   # 行间距
-    pad_bottom = 12
-    stripe_w = 5
-    text_x = (avatar_size + stripe_w + 10) if has_av else (stripe_w + 12)
-    text_area_w = card_w - text_x - 8
+    card_w = 420
+    avatar_size = 110
+    pad_top = 14
+    name_size = 34
+    tag_size = 22
+    line_gap = 8   # 行间距
+    pad_bottom = 14
+    stripe_w = 6
+    text_x = (avatar_size + stripe_w + 12) if has_av else (stripe_w + 14)
+    text_area_w = card_w - text_x - 10
 
-    # 字体
-    if font_path and font_path.is_file():
-        try:
-            fn = ImageFont.truetype(str(font_path), name_size)
-            fs = ImageFont.truetype(str(font_path), tag_size)
-        except Exception:
-            fn = fs = ImageFont.load_default()
-    else:
-        fn = fs = ImageFont.load_default()
+    # 字体：.ttc 文件需要 index=0，否则部分 Pillow 版本回退到 10px 位图默认字体
+    def _load_font(size: int) -> Any:
+        if not (font_path and font_path.is_file()):
+            return ImageFont.load_default()
+        suffix = font_path.suffix.lower()
+        for idx in ([0] if suffix == ".ttc" else [None]):
+            try:
+                kw = {"font_index": idx} if idx is not None else {}
+                return ImageFont.truetype(str(font_path), size, **kw)
+            except Exception:
+                try:
+                    return ImageFont.truetype(str(font_path), size)
+                except Exception:
+                    return ImageFont.load_default()
+        return ImageFont.load_default()
+
+    fn = _load_font(name_size)
+    fs = _load_font(tag_size)
 
     # 折行后的 tag 行
     tag_lines = _wrap_tags(tags, fs, text_area_w) if tags else []
