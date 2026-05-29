@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
+from .env_utils import resolve_name_card_font
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +425,7 @@ def compose_montage(
     intro_image_duration: Optional[float] = None,
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
-    name_cards: Optional[list] = None,
+    name_cards: Optional[list[dict | None]] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("片段列表为空")
@@ -444,7 +445,6 @@ def compose_montage(
 
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
-    from .env_utils import resolve_name_card_font
     _font_path = resolve_name_card_font()
 
     intro_n = 1 if intro_path is not None else 0
@@ -517,10 +517,10 @@ def compose_montage(
                 font_part = f":fontfile={_fg_escape_path(_font_path)}" if _font_path else ""
                 vf_chain = (
                     f"[0:v]{vf}[_scaled];"
-                    f"movie={av_path_esc},scale=75:75[_avt];"
-                    f"[_scaled][_avt]overlay=3:H-78[_v_av];"
-                    f"[_v_av]drawbox=x=0:y=H-80:w=220:h=80:color=black@0.6:t=fill[_v_box];"
-                    f"[_v_box]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=83:y=H-50[v]"
+                    f"[_scaled]drawbox=x=0:y=H-80:w=220:h=80:color=black@0.6:t=fill[_v_box];"
+                    f"movie={av_path_esc}:loop=0,scale=75:75[_avt];"
+                    f"[_v_box][_avt]overlay=3:H-78[_v_av];"
+                    f"[_v_av]drawtext{font_part}:text='{name_text_esc}':fontcolor=white:fontsize=20:x=83:y=H-50[v]"
                 )
                 if info["has_audio"]:
                     fc = vf_chain + ";[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]"
