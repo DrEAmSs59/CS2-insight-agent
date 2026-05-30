@@ -641,7 +641,7 @@ def _build_economies(
         key = team_map.get(sid, "unknown")
         spent = int(r.get("cash_spent_this_round") or 0)
         equip = int(r.get("current_equip_value") or 0)
-        start_money = int(r.get("starting_money") or 0)
+        start_money = int(r.get("start_balance") or 0)
         eco_type = _economy_type(spent, start_money, equip, n, total_rounds)
         out.append({
             "roundNumber": n,

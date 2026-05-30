@@ -223,7 +223,7 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     if freeze_ticks:
         try:
             economy_raw = _rows(p.parse_ticks(
-                ["steamid", "team_num", "cash_spent_this_round", "current_equip_value", "starting_money"],
+                ["steamid", "team_num", "cash_spent_this_round", "current_equip_value", "start_balance"],
                 ticks=freeze_ticks,
             ))
         except BaseException:
