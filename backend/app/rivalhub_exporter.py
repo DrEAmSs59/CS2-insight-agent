@@ -288,14 +288,16 @@ def _build_match(raw: dict, rounds: list[dict]) -> dict:
     hdr = raw.get("header", {})
     team_a_score = sum(1 for r in rounds if r["winnerTeamKey"] == "teamA")
     team_b_score = sum(1 for r in rounds if r["winnerTeamKey"] == "teamB")
+    team_a_name = raw.get("team_a_name") or str(hdr.get("team_name_t") or "Team A")
+    team_b_name = raw.get("team_b_name") or str(hdr.get("team_name_ct") or "Team B")
     return {
         "mapName": str(hdr.get("map_name") or "unknown"),
         "tickrate": raw.get("tickrate", 64),
         "durationSeconds": float(hdr.get("playback_time") or 0),
         "serverName": str(hdr.get("server_name") or ""),
         "source": "demo",
-        "teamA": {"teamKey": "teamA", "name": str(hdr.get("team_name_t") or "Team A"), "score": team_a_score},
-        "teamB": {"teamKey": "teamB", "name": str(hdr.get("team_name_ct") or "Team B"), "score": team_b_score},
+        "teamA": {"teamKey": "teamA", "name": team_a_name, "score": team_a_score},
+        "teamB": {"teamKey": "teamB", "name": team_b_name, "score": team_b_score},
     }
 
 

@@ -170,6 +170,26 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     else:
         match_start_tick = 1
 
+    # ── team names from CCSTeam entity ──────────────────────────
+    team_a_name: str | None = None
+    team_b_name: str | None = None
+    try:
+        team_rows = _rows(p.parse_ticks(
+            ["CCSTeam.m_szClanTeamname", "CCSTeam.m_iTeamNum"],
+            ticks=[match_start_tick],
+        ))
+        for row in team_rows:
+            tn = row.get("CCSTeam.m_iTeamNum")
+            name = str(row.get("CCSTeam.m_szClanTeamname") or "").strip()
+            if not name or name.lower() in ("ct", "terrorist", "t"):
+                continue
+            if tn == 2:
+                team_a_name = name
+            elif tn == 3:
+                team_b_name = name
+    except BaseException:
+        pass
+
     try:
         player_info = _rows(p.parse_ticks(
             ["name", "steamid", "team_num", "team_name"],
@@ -210,6 +230,8 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
         "header": header,
         "tickrate": tickrate,
         "match_start_tick": match_start_tick,
+        "team_a_name": team_a_name,
+        "team_b_name": team_b_name,
         "player_info": player_info,
         "round_starts": round_starts,
         "round_freeze_ends": round_freeze_ends,
