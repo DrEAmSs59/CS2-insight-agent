@@ -117,13 +117,16 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     round_ends     = _safe_event(p, "round_end",          ["winner", "reason", "total_rounds_played", "legacy"])
 
     # ── player deaths ────────────────────────────────────────────
-    deaths = _safe_event(p, "player_death", other=[
-        "headshot", "noscope", "thrusmoke", "penetrated", "penetrated_objects",
-        "assistedflash", "attackerblind",
-        "attacker_X", "attacker_Y", "attacker_Z",
-        "user_X", "user_Y", "user_Z",
-        "total_rounds_played",
-    ])
+    # X/Y/Z are player entity props — pass via player= so demoparser2
+    # prefixes them as attacker_X/Y/Z and user_X/Y/Z automatically.
+    deaths = _safe_event(p, "player_death",
+        other=[
+            "headshot", "noscope", "thrusmoke", "penetrated", "penetrated_objects",
+            "assistedflash", "attackerblind",
+            "total_rounds_played",
+        ],
+        player=["X", "Y", "Z"],
+    )
 
     # ── damages ──────────────────────────────────────────────────
     hurts = _safe_event(p, "player_hurt", other=[
