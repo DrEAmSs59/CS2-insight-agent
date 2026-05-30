@@ -23,7 +23,7 @@ export default function DashboardPage() {
     { to: "/analysis", label: "解析分析", desc: "上传、选玩家、看片段", icon: Microscope, hint: nDemos ? `已导入 ${nDemos} 个` : "上传 .dem 开始" },
     { to: "/queue", label: "录制队列", desc: "批量 OBS 录制", icon: Package, hint: `${q} 条待录` },
     { to: "/montage", label: "合辑工作台", desc: "已录片段拼接导出", icon: Clapperboard, hint: "时间线与主题" },
-    { to: "/params", label: "常用参数", desc: "全局节奏与观战默认", icon: SlidersHorizontal, hint: "写入配置文件" },
+    { to: "/params", label: "录制参数配置", desc: "全局节奏与观战默认", icon: SlidersHorizontal, hint: "写入配置文件" },
     {
       to: "/player-game-config",
       label: "玩家游戏配置",

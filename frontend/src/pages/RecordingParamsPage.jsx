@@ -1,7 +1,7 @@
 import CommonParamsModal from "../components/CommonParamsModal";
 import { useAppShell } from "../context/AppShellContext";
 
-export default function CommonParamsPage() {
+export default function RecordingParamsPage() {
   const s = useAppShell();
   return (
     <CommonParamsModal

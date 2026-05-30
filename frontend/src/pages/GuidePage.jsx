@@ -273,7 +273,7 @@ const NAV_CARDS = [
   { to: "/queue", label: "录制队列", desc: "批量 OBS 全自动录制", icon: Package },
   { to: "/montage", label: "合辑工作台", desc: "已录片段时间线拼接导出", icon: Clapperboard },
   { to: "/obs-config-center", label: "OBS 配置中心", desc: "WebSocket 连接与场景配置", icon: RadioTower },
-  { to: "/params", label: "常用参数", desc: "全局节奏与观战默认", icon: SlidersHorizontal },
+  { to: "/params", label: "录制参数配置", desc: "全局节奏与观战默认", icon: SlidersHorizontal },
   { to: "/player-game-config", label: "玩家游戏配置", desc: "CFG 备份与异常恢复", icon: Gamepad2 },
   { to: "/settings", label: "设置", desc: "OBS · CS2 路径 · FFmpeg · AI", icon: Settings },
 ];

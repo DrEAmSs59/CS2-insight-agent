@@ -13,7 +13,7 @@ import DemoLibraryPage from "./pages/DemoLibraryPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import RecordingQueuePage from "./pages/RecordingQueuePage";
 import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
-import CommonParamsPage from "./pages/CommonParamsPage";
+import RecordingParamsPage from "./pages/RecordingParamsPage";
 import ObsConfigCenterPage from "./pages/ObsConfigCenterPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
@@ -2394,7 +2394,7 @@ export default function App() {
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
-                <Route path="/params" element={<CommonParamsPage />} />
+                <Route path="/params" element={<RecordingParamsPage />} />
                 <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />

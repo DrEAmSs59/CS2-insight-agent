@@ -945,7 +945,7 @@ export default function CommonParamsModal({
         <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-sm sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">常用参数</h1>
+              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">录制参数配置</h1>
               <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
                 录制时的常用参数设置，修改后请点击「保存到配置文件」。
               </p>

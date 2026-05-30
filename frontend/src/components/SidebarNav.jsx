@@ -87,7 +87,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         <SectionLabel>工具</SectionLabel>
         <NavLink to="/params" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <SlidersHorizontal className="h-4 w-4 shrink-0 opacity-90" />
-          常用参数
+          录制参数配置
         </NavLink>
         <NavLink to="/obs-config-center" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <RadioTower className="h-4 w-4 shrink-0 opacity-90" />
