@@ -1,8 +1,8 @@
 # 🎮 CS2 Insight Agent — 玩家使用指南
 
-> **CS2 洞察智能体** — 你的私人 CS2 高光导演 & AI 赛博教练。
+> **CS2 洞察智能体** — 你的私人 CS2 高光导演 & 视频编排工具。
 >
-> 自动解析 Demo 录像，提取你的高光 / 下饭名场面，支持 AI 锐评打分，一键控制 OBS 全自动录制精彩片段。
+> 自动解析 Demo 录像，提取你的高光 / 下饭名场面，支持 AI 锐评打分，一键控制 OBS 全自动录制精彩片段，拖拉拽形式添加BGM/片头/片尾/玩家信息卡生成视频合集。
 
 ---
 
@@ -16,8 +16,9 @@
 6. [核心玩法：解析 Demo](#6-核心玩法解析-demo)
 7. [一键自动录制](#7-一键自动录制)
 8. [合辑工作台（可选）](#8-合辑工作台可选)
-9. [Demo 库功能](#9-demo-库功能)
-10. [常见问题 FAQ](#10-常见问题-faq)
+9. [成片展示](#成片展示)
+10. [Demo 库功能](#10-demo-库功能)
+11. [常见问题 FAQ](#11-常见问题-faq)
 
 ---
 
@@ -30,6 +31,7 @@
 | Windows 10/11 电脑 | ✅ 必需 | 目前仅支持 Windows |
 | 已安装 CS2 (Steam) | ✅ 必需 | 需要通过 Steam 安装正版 CS2 |
 | OBS Studio | 🎬 录制时必需 | 用于自动录制高光片段，免费下载 |
+| FFmpeg | 🎬 生成合集时必须 | 用于合集工作台合成视频，免费下载 |
 | AI 大模型 API Key | 💡 可选 | 用于开启 AI 锐评模式（推荐 DeepSeek，价格便宜） |
 
 ---
@@ -38,7 +40,7 @@
 
 ### 第一步：下载安装包
 
-前往项目的 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases)，找到最新版本，点击下载 **`CS2-Insight-Agent-Setup-x.x.x.exe`**。
+前往项目的 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases)，找到最新版本，点击下载 **`CS2-Insight-Agent-Setup-x.x.x.exe`**，或者下载直链 baigei.pro/cia 复制到浏览器打开。
 
 ### 第二步：运行安装包
 
@@ -336,7 +338,29 @@ D:\ffmpeg\bin\ffmpeg.exe
 
 ---
 
-## 9. Demo 库功能
+## 🎬 成片展示
+
+以下是社区 UP 主使用 CS2 Insight Agent 制作的成片示例，供参考最终效果：
+
+### 游戏片段自动剪辑
+
+- [▶ BV1ZkGi6YENF](https://www.bilibili.com/video/BV1ZkGi6YENF/)
+- [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
+
+> [!NOTE]
+> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 CS2 Insight Agent 自动剪辑。
+
+### 全链路剪辑合成
+
+- [▶ BV1KF5s6nEed](https://www.bilibili.com/video/BV1KF5s6nEed/)
+- [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
+
+> [!NOTE]
+> 上述成片的片头片尾 BGM 及游戏片段**均由 CS2 Insight Agent 剪辑合成产出**。
+
+---
+
+## 10. Demo 库功能
 
 ### 监听目录
 
@@ -351,7 +375,7 @@ D:\ffmpeg\bin\ffmpeg.exe
 
 ---
 
-## 10. 常见问题 FAQ
+## 11. 常见问题 FAQ
 
 **Q：程序打不开 / 安装后没有快捷方式？**
 
@@ -406,21 +430,53 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 - 不要用于连接官方匹配服务器
 - 若异常退出导致修改未恢复，可在同一页面点击「恢复 POV 修改」（需先关闭 CS2）
 
+**Q：OBS/websocket连不上？**
+
+- 不管agent内自动探测的OBS路径正确与否，自己复制一下OBS路径手动粘贴到agent中
+- 示例OBS路径:
+`E:\Steam\steamapps\common\OBS Studio\bin\64bit\obs64.exe`
+- 连接配置内的主机地址为`localhost`，默认端口为`4455`，这两个不要乱动，默认端口在冲突可进行更改
+- 检查OBS → 工具 → websocket 服务器设置 → 启用
+- 确保agent内的端口与obs的websocket端口保持一致
+- 确保agent内与obs的websocket密码保持一致，必要时可取消身份验证或自己手填密码，不用随机生成的。
+
 **Q：录制时 CS2 没有画面 / OBS 录到黑屏？**
 
-- 确保 OBS 的「游戏捕获」来源设置正确（捕获 `cs2.exe` 的窗口）
-- 尝试在 OBS 的「游戏捕获」属性中把模式改为「捕获任何全屏应用程序」
-- 确认 CS2 没有被最小化到后台
+- 重新 OBS 校准，**校准完毕后重启OBS(必须!)**
+- OBS 和 Agent 权限保持一致；必要时 OBS 管理员启动；
+- 检查 `CS2 Insight Recording` 场景的游戏捕获源；右键捕获源检查属性。
 - 如果使用了多显示器，确保 CS2 和 OBS 捕获的是同一个屏幕
 
-**Q：成片有黑边？**
+**Q：录制没声音 / CS2 没声音？**
+
+- 检查OBS 音频捕获源，OBS中是否有桌面音频捕获或应用音频捕获，这两个捕获只能保留一个
+- 检查是否存在多音轨，确保音轨只有一条
+
+**Q：导出的视频打不开 / 视频文件异常 / 发群失败?**
+
+- Windows 权限或Agent 管理员启动导致输出文件权限异常
+- 尝试不以管理员身份启动 Agent
+- 尝试关掉 Agent/OBS 后再移动文件
+- 尝试将视频拖到其他文件夹再打开
+
+**Q：成片有黑边/游戏画面被裁切？**
 
 - 你的 CS2 是 4:3 显示时，有可能发生该情况
 - 确保在 OBS 的「游戏捕获」中右键 → 变换 → 拉伸到全屏
+- 如果游戏画面被裁切，请确保游戏在全屏模式**(并非全屏窗口模式)**下，游戏存在你录制时设置的分辨率。
+解决方案：
+①如果全屏模式不存在这个分辨率，而全屏窗口模式存在这个分辨率
+请在agent里→常用参数→额外启动参数中将`-fullscreen`删除，并确保自己游戏启动为全屏窗口模式
+②自行查找怎么给自己的显示器添加自定义分辨率，N卡可在N卡控制面板自行添加，I卡A卡未知。
 
-**Q：最终效果把控制台录进去了？**
+**Q：最终效果没录全或者把控制台录进去了？**
 
+- 重新 OBS 校准，**校准完毕后重启OBS(必须!)**
 - OBS「设置 → 输出 → 录像质量」不能选「与串流画质相同」，请单独设置录像质量
+- 如果你的OBS输出模式为高级，校准OBS会校准不全
+解决方案：
+①将OBS输出模式从高级改为简单，再通过agent进行OBS校准，校准完毕后重启OBS
+②OBS输出模式为高级的情况下，点击录制菜单，**视频编码器不要选择（使用直播编码器）**。
 
 **Q：录制时 CS2 停留在游戏主菜单？**
 
@@ -477,4 +533,4 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 <img src="asset/wx.jpg" alt="赞助方式1" style="zoom:33%;" />
 <img src="asset/ali.jpg" alt="赞助方式2" style="zoom:33%;" />
 
-> **CS2 Insight Agent** v1.1.0 · Made with ❤️ for CS2 Players
+> **CS2 Insight Agent** v2.1.2 · Made with ❤️ for CS2 Players

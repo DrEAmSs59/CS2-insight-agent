@@ -37,6 +37,19 @@
 
 ![screenshot](./asset/output-1080.gif)
 
+<h4 align="center">成片展示</h4>
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1ZkGi6YENF/">▶ BV1ZkGi6YENF</a> ·
+  <a href="https://www.bilibili.com/video/BV1TPGq67EFS/">▶ BV1TPGq67EFS</a>
+</p>
+<p align="center"><sub>片头片尾 BGM、战队 Logo 由 UP 主自行合成；游戏片段由本项目自动剪辑</sub></p>
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1KF5s6nEed/">▶ BV1KF5s6nEed</a> ·
+  <a href="https://www.bilibili.com/video/BV1G198BkEHd/">▶ BV1G198BkEHd</a>
+</p>
+<p align="center"><sub>片头片尾 BGM 及游戏片段均由本项目剪辑合成产出</sub></p>
 
 ---
 
