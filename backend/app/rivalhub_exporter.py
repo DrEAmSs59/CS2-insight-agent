@@ -346,8 +346,8 @@ def _annotate_trades(kills: list[dict], trade_window_ticks: int = 384) -> None:
             prev = kills[j]
             if kill["tick"] - prev["tick"] > trade_window_ticks:
                 break
-            # kill.killerSteamId64 died in prev → trade kill
-            if prev["victimSteamId64"] == kill["killerSteamId64"]:
+            # prev killer (A) is the current victim → A killed B, then A was killed (trade)
+            if prev["killerSteamId64"] == kill["victimSteamId64"]:
                 kills[i]["tradeKill"] = True
                 kills[j]["tradeDeath"] = True
                 break
@@ -585,21 +585,34 @@ def _build_tick_to_round(raw: dict) -> dict[int, int]:
 
 # ── economies ─────────────────────────────────────────────────────────────────
 
-_ECO_TYPES = [
-    (0, 1999, "eco"),
-    (2000, 4999, "force"),
-    (5000, 10000, "full_buy"),
-]
+# Conservative-first order for majority-vote tie-breaking
+_ECO_ORDER = ["pistol", "eco", "semi", "force", "full"]
 
 
-def _economy_type(spent: int, round_number: int, total_rounds: int) -> str:
+def _economy_type(money_spent: int, start_money: int, equipment_value: int,
+                  round_number: int, total_rounds: int) -> str:
     half = total_rounds // 2 + 1
     if round_number == 1 or round_number == half:
         return "pistol"
-    for lo, hi, label in _ECO_TYPES:
-        if lo <= spent <= hi:
-            return label
-    return "full_buy"
+    if equipment_value >= 4000:
+        return "full"
+    if money_spent < 1000 and equipment_value < 2000:
+        return "eco"
+    if start_money > 0 and money_spent / start_money > 0.75:
+        return "force"
+    return "semi"
+
+
+def _team_economy_vote(types: list[str]) -> str:
+    """Majority vote across players; tie-break picks the most conservative type."""
+    if not types:
+        return "semi"
+    counts = {t: types.count(t) for t in _ECO_ORDER}
+    max_count = max(counts.values())
+    for t in _ECO_ORDER:
+        if counts[t] == max_count:
+            return t
+    return "semi"
 
 
 def _build_economies(
@@ -615,6 +628,8 @@ def _build_economies(
 
     total_rounds = len(rounds)
     out = []
+    team_round_types: dict[tuple[int, str], list[str]] = {}
+
     for r in raw.get("economy_raw", []):
         tick = int(r.get("tick") or 0)
         n = freeze_tick_to_round.get(tick, 0)
@@ -627,6 +642,7 @@ def _build_economies(
         spent = int(r.get("cash_spent_this_round") or 0)
         equip = int(r.get("current_equip_value") or 0)
         start_money = int(r.get("starting_money") or 0)
+        eco_type = _economy_type(spent, start_money, equip, n, total_rounds)
         out.append({
             "roundNumber": n,
             "steamId64": sid,
@@ -635,8 +651,22 @@ def _build_economies(
             "startMoney": start_money,
             "moneySpent": spent,
             "equipmentValue": equip,
-            "type": _economy_type(spent, n, total_rounds),
+            "type": eco_type,
         })
+        team_round_types.setdefault((n, key), []).append(eco_type)
+
+    # fill teamAEconomy / teamBEconomy on each round via majority vote
+    round_by_number = {r["roundNumber"]: r for r in rounds}
+    for (rn, key), types in team_round_types.items():
+        rd = round_by_number.get(rn)
+        if rd is None:
+            continue
+        vote = _team_economy_vote(types)
+        if key == "teamA":
+            rd["teamAEconomy"] = vote
+        elif key == "teamB":
+            rd["teamBEconomy"] = vote
+
     return out
 
 
@@ -662,6 +692,8 @@ def _build_player_stats(
                 "headshotCount": 0,
                 "firstKillCount": 0, "firstDeathCount": 0,
                 "tradeKillCount": 0, "tradeDeathCount": 0,
+                "noScopeKillCount": 0,
+                "bombPlantCount": 0, "bombDefuseCount": 0,
                 "oneKillCount": 0, "twoKillCount": 0, "threeKillCount": 0,
                 "fourKillCount": 0, "fiveKillCount": 0,
                 "vsOneCount": 0, "vsOneWonCount": 0, "vsOneLostCount": 0,
@@ -702,7 +734,7 @@ def _build_player_stats(
             a["assists"] += 1
             a["_rounds_with_assist"].add(n)
 
-    # trade annotations (re-use kill list built above)
+    # trade annotations + no-scope kills (re-use kill list built above)
     if kills_list is None:
         kills_list = _build_kills(raw, team_map, side_map)
     for k in kills_list:
@@ -710,6 +742,18 @@ def _build_player_stats(
             _get(k["killerSteamId64"])["tradeKillCount"] += 1
         if k["tradeDeath"] and k["victimSteamId64"]:
             _get(k["victimSteamId64"])["tradeDeathCount"] += 1
+        if k["noScope"] and k["killerSteamId64"]:
+            _get(k["killerSteamId64"])["noScopeKillCount"] += 1
+
+    # bomb plant / defuse counts
+    for r in raw.get("bomb_planted", []):
+        sid = _sid(r.get("steamid") or r.get("userid"))
+        if sid:
+            _get(sid)["bombPlantCount"] += 1
+    for r in raw.get("bomb_defused", []):
+        sid = _sid(r.get("steamid") or r.get("userid"))
+        if sid:
+            _get(sid)["bombDefuseCount"] += 1
 
     # first kill / first death per round
     first_kills: dict[int, str] = {}
