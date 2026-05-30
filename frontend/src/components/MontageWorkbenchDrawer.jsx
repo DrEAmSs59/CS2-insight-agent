@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import API from "../api/api";
+import API, { API_BASE_URL } from "../api/api";
 import { useMontageStore } from "../stores/montageStore";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
@@ -818,7 +818,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
               .pop();
             restored[pa.player_key] = {
               avatar_path: pa.avatar_path || null,
-              avatar_url: filename ? `/api/montage/avatars/${filename}` : null,
+              avatar_url: filename ? `${API_BASE_URL}/api/montage/avatars/${filename}` : null,
             };
           }
         }

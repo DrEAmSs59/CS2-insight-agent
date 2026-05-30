@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { Upload, Loader2 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
-import API from "../../api/api";
+import API, { API_BASE_URL } from "../../api/api";
 import { derivePlayerAssetsFromClips } from "../../utils/montageUtils";
 
 export function MontagePlayerAssetsPanel({
@@ -38,7 +38,8 @@ export function MontagePlayerAssetsPanel({
       });
       const { path, url } = res?.data ?? {};
       if (path) {
-        onPlayerAvatarChange?.(playerKey, path, url);
+        const fullUrl = url ? (API_BASE_URL ? `${API_BASE_URL}${url}` : url) : null;
+        onPlayerAvatarChange?.(playerKey, path, fullUrl);
       }
     } catch (err) {
       console.error("[MontagePlayerAssetsPanel] avatar upload error", err);
