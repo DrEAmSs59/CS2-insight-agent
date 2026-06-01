@@ -138,6 +138,11 @@ export const useRecordingQueue = create((set, get) => ({
     set((s) => ({ queue: s.queue.filter((q) => q.id !== id) }));
   },
 
+  removeByClientClipUid(cuid) {
+    const toUid = (q) => q.clientClipUid || `legacy:${q.demoFilename}:${q.clipId}`;
+    set((s) => ({ queue: s.queue.filter((q) => toUid(q) !== cuid) }));
+  },
+
   /**
    * 拖拽重排：将 `fromIndex` 移至 `toIndex`（0-based，与列表渲染顺序一致）。
    * @param {number} fromIndex
