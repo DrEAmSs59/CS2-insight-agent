@@ -11,6 +11,8 @@ import RoundTimelineItem from "./RoundTimelineItem";
  *   onAddEvent?: (event: Record<string, unknown>, roundRow: Record<string, unknown>) => void,
  *   onAddRound?: (roundRow: Record<string, unknown>) => void,
  *   onAddEventsBatch?: (events: Record<string, unknown>[]) => void,
+ *   onRemoveEvent?: (event: Record<string, unknown>, roundRow: Record<string, unknown>) => void,
+ *   onRemoveRound?: (roundRow: Record<string, unknown>) => void,
  *   suppressSummaryHeader?: boolean,
  * }} props
  */
@@ -23,6 +25,8 @@ export default function RoundTimelineView({
   onAddEvent,
   onAddRound,
   onAddEventsBatch,
+  onRemoveEvent,
+  onRemoveRound,
   suppressSummaryHeader = false,
 }) {
   const rounds = Array.isArray(roundTimeline) ? roundTimeline : [];
@@ -73,6 +77,8 @@ export default function RoundTimelineView({
                 onAddEvent={onAddEvent}
                 onAddRound={onAddRound}
                 onAddEventsBatch={onAddEventsBatch}
+                onRemoveEvent={onRemoveEvent}
+                onRemoveRound={onRemoveRound}
               />
             ))}
           </div>
