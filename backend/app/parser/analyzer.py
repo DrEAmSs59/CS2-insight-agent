@@ -1154,7 +1154,7 @@ class DemoAnalyzer:
         timeline: Optional[dict] = None
         round_timeline: Optional[list] = None
         try:
-            from .round_timeline import build_round_timeline, build_round_timeline_error_fallback
+            from ..round_timeline import build_round_timeline, build_round_timeline_error_fallback
 
             round_scores_tbl = build_round_scores(self.parser, match_start_tick)
             re_df_tl = _re_df_cached
@@ -1190,7 +1190,7 @@ class DemoAnalyzer:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
                 raise
             logger.exception("build_round_timeline failed for %s", self.dem_path)
-            from .round_timeline import build_round_timeline_error_fallback
+            from ..round_timeline import build_round_timeline_error_fallback
             fb = build_round_timeline_error_fallback(
                 demo_path=str(self.dem_path), map_name=map_name, target_player=target_player,
                 target_steam_id=target_steam_id, target_player_user_id=target_player_user_id,
