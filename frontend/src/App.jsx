@@ -8,6 +8,7 @@ import RecordingResultModal from "./components/recordingQueue/RecordingResultMod
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
+import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
 import GuidePage from "./pages/GuidePage";
 import DemoLibraryPage from "./pages/DemoLibraryPage";
 import AnalysisPage from "./pages/AnalysisPage";
@@ -194,6 +195,7 @@ export default function App() {
   const [libraryPageSize, setLibraryPageSize] = useState(12);
   const libraryPageSizeEffectSkipRef = useRef(false);
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
+  const [batchLoadError, setBatchLoadError] = useState({ open: false, failed: [] });
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
   llmConfigRef.current = llmConfig;
@@ -592,7 +594,11 @@ export default function App() {
       const list = Array.isArray(items) ? items : [items];
       const loaded = await Promise.all(
         list.map(async (item) => {
-          const { data } = await API.get(`/demos/${item.id}/players`);
+          const playersResult =
+            item.players != null
+              ? { players: item.players, match_meta: item.match_meta }
+              : (await API.get(`/demos/${item.id}/players`)).data;
+          const data = playersResult;
           const cachedResult = item?.result || null;
           const cachedMeta = cachedResult?.match_meta || null;
           const ordered =
@@ -744,12 +750,17 @@ export default function App() {
     if (!ids.length) return;
     try {
       ids.sort((a, b) => Number(a) - Number(b));
-      const items = await Promise.all(ids.map((id) => API.get(`/demos/${id}`).then((r) => r.data)));
-      await handleLoadDemoFromLibrary(items);
+      const { data } = await API.post("/demos/batch-summary", { ids });
+      await handleLoadDemoFromLibrary(data.items);
     } catch (e) {
-      setProgressText(`载入选中失败: ${e.response?.data?.detail || e.message}`);
+      const failed = e.response?.data?.detail?.failed;
+      if (Array.isArray(failed) && failed.length) {
+        setBatchLoadError({ open: true, failed });
+      } else {
+        setProgressText(`载入选中失败: ${e.response?.data?.detail?.message || e.response?.data?.detail || e.message}`);
+      }
     }
-  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary]);
+  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText]);
 
   const selectLibraryPage = useCallback(() => {
     setSelectedLibraryDemoIds((prev) => {
@@ -2498,6 +2509,11 @@ export default function App() {
             setLibraryBatchModalOpen(false);
             void runLibraryBatchLoad(payload);
           }}
+        />
+        <BatchLoadErrorModal
+          open={batchLoadError.open}
+          failed={batchLoadError.failed}
+          onClose={() => setBatchLoadError({ open: false, failed: [] })}
         />
 
         <RecordingResultModal
