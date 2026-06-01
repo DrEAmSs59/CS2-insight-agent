@@ -16,6 +16,8 @@ import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../../..
  *   onAddEvent?: (event: Record<string, unknown>, roundRow: Record<string, unknown>) => void,
  *   onAddRound?: (roundRow: Record<string, unknown>) => void,
  *   onAddEventsBatch?: (events: Record<string, unknown>[]) => void,
+ *   onRemoveEvent?: (event: Record<string, unknown>, roundRow: Record<string, unknown>) => void,
+ *   onRemoveRound?: (roundRow: Record<string, unknown>) => void,
  * }} props
  */
 export default function RoundTimelineItem({
@@ -27,6 +29,8 @@ export default function RoundTimelineItem({
   onAddEvent,
   onAddRound,
   onAddEventsBatch,
+  onRemoveEvent,
+  onRemoveRound,
 }) {
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const events = Array.isArray(roundRow?.events) ? roundRow.events : [];
@@ -172,6 +176,11 @@ export default function RoundTimelineItem({
                     ? () => onAddEvent(ev, roundRow)
                     : undefined
                 }
+                onRowRemove={
+                  onRemoveEvent && isQueued(ev)
+                    ? () => onRemoveEvent(ev, roundRow)
+                    : undefined
+                }
               />
             </div>
           ))}
@@ -203,6 +212,11 @@ export default function RoundTimelineItem({
           }
           onAddDeaths={
             deathsOnly.length && onAddEventsBatch ? () => onAddEventsBatch(deathsOnly) : undefined
+          }
+          onRemoveRound={
+            onRemoveRound && roundQueued
+              ? () => onRemoveRound(roundRow)
+              : undefined
           }
         />
       </div>
