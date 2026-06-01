@@ -46,6 +46,23 @@ def _run(payload: dict) -> object:
                     raise ValueError(f"freeze_to_death_rounds must be integers: {x!r}") from e
             ftd_list = out_ftd
         return DemoAnalyzer(dem_path).analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
+    if action == "analyze_batch":
+        raw_players = payload.get("target_players") or []
+        if not isinstance(raw_players, list) or not raw_players:
+            raise ValueError("target_players must be a non-empty list")
+        target_players = [str(p).strip() for p in raw_players if str(p).strip()]
+        if not target_players:
+            raise ValueError("target_players contains no valid player names")
+        ftd_raw = payload.get("freeze_to_death_rounds")
+        ftd_list: Optional[list[int]] = None
+        if ftd_raw is not None:
+            if not isinstance(ftd_raw, list):
+                raise ValueError("freeze_to_death_rounds must be a list of integers or null")
+            ftd_list = [int(x) for x in ftd_raw]
+        results = DemoAnalyzer(dem_path).analyze_multi_players(
+            target_players, freeze_to_death_rounds=ftd_list
+        )
+        return {player: result.to_dict() for player, result in results.items()}
     if action == "players":
         return get_player_list(dem_path)
     if action == "summary":
