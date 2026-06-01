@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import API from "../api/api";
-import { LayoutGrid, List, Loader2, AlertCircle, CheckCircle2, X } from "lucide-react";
+import { LayoutGrid, List, Loader2, AlertCircle, CheckCircle2, X, Play } from "lucide-react";
 import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
@@ -51,6 +51,8 @@ export default function DemoLibraryPage() {
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
 
   const [rivalHubExport, setRivalHubExport] = useState({ phase: "idle", error: "" });
+  const [playToast, setPlayToast] = useState(null); // { ok: bool, label: string } | null
+  const playToastTimer = useRef(null);
 
   const queuedClientClipUids = useMemo(
     () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
@@ -81,10 +83,24 @@ export default function DemoLibraryPage() {
     }
   }, [s]);
 
-  const handleCardPlay = useCallback((demoId) => {
+  const showPlayToast = useCallback((ok, label) => {
+    clearTimeout(playToastTimer.current);
+    setPlayToast({ ok, label });
+    playToastTimer.current = setTimeout(() => setPlayToast(null), 4000);
+  }, []);
+
+  useEffect(() => () => clearTimeout(playToastTimer.current), []);
+
+  const handleCardPlay = useCallback(async (demoId) => {
     const item = s.demoLibraryItems.find((it) => it.id === demoId);
-    if (item) void s.handleLoadDemoFromLibrary([item]);
-  }, [s]);
+    const label = (item?.display_name && String(item.display_name).trim()) || item?.filename || `#${demoId}`;
+    try {
+      await API.post(`/demos/${demoId}/play`);
+      showPlayToast(true, label);
+    } catch (e) {
+      showPlayToast(false, e.response?.data?.detail || e.message);
+    }
+  }, [s, showPlayToast]);
 
   const handleOpenFile = useCallback(
     async (demoId) => {
@@ -446,6 +462,31 @@ export default function DemoLibraryPage() {
         onDemoWatchPathsChange={s.setDemoWatchPaths}
         onSaveConfig={s.handleSaveConfig}
       />
+
+      {playToast && (
+        <div className="fixed bottom-6 right-6 z-[200] flex items-start gap-3 rounded-lg border bg-cs2-bg-card px-4 py-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200"
+          style={{ borderColor: playToast.ok ? "rgb(52 211 153 / 0.4)" : "rgb(248 113 113 / 0.4)" }}
+        >
+          <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${playToast.ok ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "bg-cs2-red-surface text-cs2-red-on-surface"}`}>
+            {playToast.ok ? <Play className="h-3 w-3 fill-current" /> : <AlertCircle className="h-3 w-3" />}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className={`text-[12px] font-semibold ${playToast.ok ? "text-cs2-emerald-on-surface" : "text-cs2-red-on-surface"}`}>
+              {playToast.ok ? "正在启动 CS2 播放 Demo" : "启动失败"}
+            </span>
+            <span className="max-w-[260px] truncate font-mono text-[11px] text-cs2-text-muted" title={playToast.label}>
+              {playToast.label}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="ml-2 mt-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
+            onClick={() => setPlayToast(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {s.libraryRename ? (
         <div

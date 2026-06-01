@@ -228,7 +228,7 @@ export function MatchListRow({
           >
             <MessageSquare className="h-4 w-4" />
           </button>
-          <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title="观看">
+          <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title="启动 CS2 播放 Demo">
             <Play className="h-4 w-4 fill-current" />
           </button>
           <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-text-secondary hover:bg-cs2-bg-input/50 rounded-md transition-colors" title="定位">
@@ -391,7 +391,7 @@ export default function MatchCard({
             </div>
 
             <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all"><Play className="h-4 w-4 fill-current" /></button>
+              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title="启动 CS2 播放 Demo"><Play className="h-4 w-4 fill-current" /></button>
               <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all"><FolderSearch className="h-4 w-4" /></button>
               <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all"><Trash2 className="h-4 w-4" /></button>
             </div>

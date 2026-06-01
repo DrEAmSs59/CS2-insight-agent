@@ -1951,6 +1951,52 @@ async def delete_demo(
     return {"status": "deleted", "demo_id": demo_id}
 
 
+@app.post("/api/demos/{demo_id}/play")
+async def play_demo_in_cs2(demo_id: int):
+    """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+
+    cfg = load_config()
+    cs2_path = cfg.cs2_path
+    if not cs2_path or not Path(cs2_path).is_file():
+        raise HTTPException(400, "CS2 路径未配置或文件不存在，请先在设置中配置 CS2 路径。")
+
+    dem_path = row.get("path") or ""
+    if not dem_path or not Path(dem_path).is_file():
+        raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
+
+    try:
+        cs2_bin = Path(cs2_path)
+        # 约定路径结构: …/game/bin/win64/cs2.exe → game/
+        game_root = cs2_bin.parents[2]
+        csgo_dir = game_root / "csgo"
+        dest = csgo_dir / "cs2_insight_preview.dem"
+        shutil.copy2(dem_path, dest)
+        logger.info("Launch CS2 for playback: cwd=%s demo=%s", game_root, dest)
+        import subprocess as _sp
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = (
+                getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(_sp, "DETACHED_PROCESS", 0)
+            )
+        _sp.Popen(
+            [str(cs2_bin), "-steam", "-insecure", "-novid", "-console",
+             "+playdemo", "cs2_insight_preview.dem"],
+            cwd=str(game_root),
+            stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            close_fds=True,
+            creationflags=creationflags,
+        )
+    except Exception as e:
+        logger.exception("Failed to launch CS2 for playback")
+        raise HTTPException(500, f"启动 CS2 失败: {e}") from e
+
+    return {"ok": True}
+
+
 @app.post("/api/demos/{demo_id}/delete-file")
 async def delete_demo_file(demo_id: int):
     """从磁盘删除 .dem 文件（如有同名 .zip 也一并删除），同时删除库内记录。"""
