@@ -1,4 +1,4 @@
-import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
+import { Flame, Skull, Check, Clapperboard, Film, X } from "lucide-react";
 import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
 import { describeTag } from "../utils/tagDescriptions";
 import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
@@ -93,6 +93,7 @@ export default function ClipCard({
   onToggle,
   aiMode = false,
   inQueue = false,
+  onDequeue,
   matchTotalRounds = 24,
   freezeToDeathDraft = { picked: [] },
   onFreezeToDeathDraftChange,
@@ -161,23 +162,34 @@ export default function ClipCard({
       )}
 
       {/* Selection / 队列状态 */}
-      <div
-        className={`absolute right-3 top-3 z-10 flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-md px-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${
-          inQueue
-            ? "border border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary"
-            : selected
-              ? "bg-cs2-accent"
-              : "border border-cs2-border bg-cs2-bg-input group-hover:border-cs2-accent/40"
-        }`}
-      >
-        {inQueue ? (
-          "队列"
-        ) : ftdEnqueueBlocked ? (
-          <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
-        ) : selected ? (
-          <Check className="h-3 w-3 text-cs2-text-on-accent" />
-        ) : null}
-      </div>
+      {inQueue && onDequeue ? (
+        <button
+          type="button"
+          aria-label="从队列移除"
+          onClick={(e) => { e.stopPropagation(); onDequeue(); }}
+          className="absolute right-3 top-3 z-10 flex min-h-[1.25rem] items-center gap-0.5 rounded-md border border-cs2-border bg-cs2-bg-elevated px-1 text-[9px] font-bold uppercase tracking-wide text-cs2-text-secondary transition-colors hover:border-rose-500/60 hover:text-rose-400"
+        >
+          队列<X className="h-2.5 w-2.5" />
+        </button>
+      ) : (
+        <div
+          className={`absolute right-3 top-3 z-10 flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-md px-1 text-[9px] font-bold uppercase tracking-wide transition-colors ${
+            inQueue
+              ? "border border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary"
+              : selected
+                ? "bg-cs2-accent"
+                : "border border-cs2-border bg-cs2-bg-input group-hover:border-cs2-accent/40"
+          }`}
+        >
+          {inQueue ? (
+            "队列"
+          ) : ftdEnqueueBlocked ? (
+            <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
+          ) : selected ? (
+            <Check className="h-3 w-3 text-cs2-text-on-accent" />
+          ) : null}
+        </div>
+      )}
 
       <div className="p-5 pt-4">
         <div className="flex items-start gap-4">
