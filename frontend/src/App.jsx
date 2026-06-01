@@ -748,11 +748,14 @@ export default function App() {
   const handleLoadSelectedLibraryDemos = useCallback(async () => {
     const ids = Array.from(selectedLibraryDemoIds);
     if (!ids.length) return;
+    setLibraryLoadingOverlay(true);
+    setLibraryLoadingText("正在加载 Demo ...");
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
-      await handleLoadDemoFromLibrary(data.items);
+      await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
     } catch (e) {
+      setLibraryLoadingOverlay(false);
       const failed = e.response?.data?.detail?.failed;
       if (Array.isArray(failed) && failed.length) {
         setBatchLoadError({ open: true, failed });
