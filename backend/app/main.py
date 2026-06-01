@@ -214,11 +214,6 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
                     await demo_db.update_demo_content_md5_if_absent(demo_path, fill, origin_zip)
                 except OSError:
                     pass
-            cfg_dup = load_config()
-            if _normalized_expected_parse_players(cfg_dup):
-                row_dup = await demo_db.get_demo_by_path(demo_path)
-                if row_dup and not (row_dup.get("display_name") or "").strip():
-                    await _auto_tag_library_demo_for_expected_players(demo_path)
             return
 
         # 轻量解析：只提取地图与记分板元数据，避免重量级玩家片段解析。
@@ -232,9 +227,6 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
         except Exception:
             logger.exception("Lightweight meta parse failed for %s", demo_path)
         await demo_db.update_status(demo_path, "pending", error_msg=None, parsed_at=None)
-        cfg_now = load_config()
-        if _normalized_expected_parse_players(cfg_now):
-            await _auto_tag_library_demo_for_expected_players(demo_path)
         if can_store_md5:
             try:
                 fill = md5_hex if md5_hex else await asyncio.to_thread(file_md5_hex, path)
@@ -250,14 +242,11 @@ async def lifespan(_: FastAPI):
     仅初始化 DB 与 DemoWatcher 实例（不启动 watchdog Observer，也不做启动时扫描）。
 
     **为什么不再自动扫描**：watchdog Observer 会在目录出现新 .dem 时立刻触发
-    ``_enqueue_demo_path``，其中包含 ``get_demo_match_summary`` 的轻量解析，以及
-    若配置了 ``expected_parse_players``，会在入库流程内 **await**
-    ``_auto_tag_library_demo_for_expected_players``，用 roster 同步写好库内展示名（不做高光解析），
-    避免列表先显示文件名再异步更名。录制期我们会 ``shutil.copy2`` 一个 ``_insight_<uuid>.dem`` 到
-    CS2 的 ``csgo/``；若用户的监听目录与 ``csgo/`` 有重叠（常见：就是把 CS2 的
-    replay 目录作为监听目录），**每次录制都会在后台触发入库与轻量读盘**（记分板
-    元数据等），仍可能与录制争用磁盘；历史上还曾叠加「名单自动深度解析」加重负载，
-    故默认不在启动时全量扫描。
+    ``_enqueue_demo_path``，其中包含 ``get_demo_match_summary`` 的轻量解析。录制期我们会
+    ``shutil.copy2`` 一个 ``_insight_<uuid>.dem`` 到 CS2 的 ``csgo/``；若用户的监听目录与
+    ``csgo/`` 有重叠（常见：就是把 CS2 的 replay 目录作为监听目录），**每次录制都会在后台触发
+    入库与轻量读盘**（记分板元数据等），仍可能与录制争用磁盘；历史上还曾叠加「名单自动深度解析」
+    加重负载，故默认不在启动时全量扫描。
     保留 ``DemoWatcher`` 实例只是为 ``POST /api/demos/scan`` 这一条手动扫描接口
     服务；页面上改为用户点"刷新"按钮时主动扫描。
     """
@@ -421,9 +410,6 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
-_auto_expected_tag_sem = asyncio.Semaphore(1)
-
-
 def _normalized_expected_parse_players(cfg: AppConfig) -> list[str]:
     raw = getattr(cfg, "expected_parse_players", None) or []
     seen: set[str] = set()
@@ -489,38 +475,6 @@ def _matched_demo_players_in_order(expected: list[str], dem_path: str) -> list[d
     return out
 
 
-def _build_auto_display_name_from_roster(matched_rows: list[dict]) -> str:
-    """多名时用「 · 」拼接，与库列表单行展示名一致。"""
-    parts: list[str] = []
-    for r in matched_rows:
-        name = (r.get("name") or "").strip()
-        if not name:
-            continue
-        k = int(r.get("kills") or 0)
-        d = int(r.get("deaths") or 0)
-        a = int(r.get("assists") or 0)
-        parts.append(f"{name} {k}/{d}/{a}")
-    s = " · ".join(parts)
-    return s[:512] if s else ""
-
-
-async def _maybe_update_library_display_for_expected(demo_id: int, dem_path: str) -> None:
-    cfg = load_config()
-    exp = _normalized_expected_parse_players(cfg)
-    if not exp:
-        return
-    try:
-        matched = await asyncio.to_thread(_matched_demo_players_in_order, exp, dem_path)
-    except BaseException as e:
-        if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
-            raise
-        logger.exception("Expected-player display name roster scan failed for %s", dem_path)
-        return
-    label = _build_auto_display_name_from_roster(matched)
-    if label:
-        await demo_db.update_display_name(demo_id, label)
-        await demo_library_hub.notify("display_name")
-
 
 async def _run_library_demo_analyze(
     demo_id: int,
@@ -544,16 +498,21 @@ async def _run_library_demo_analyze(
     await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
     try:
-        from .demo_parse_isolation import IsolatedParseError
+        from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
 
-        for player in target_players:
-            parsed = await asyncio.to_thread(
-                _analyze_demo_sync,
-                dem_path,
-                player,
-                freeze_to_death_rounds,
+        batch_result = await asyncio.to_thread(
+            analyze_multi_isolated,
+            dem_path,
+            target_players,
+            freeze_to_death_rounds,
+        )
+        players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
+        missing = [p for p in target_players if p not in players_out]
+        if missing:
+            logger.warning(
+                "analyze_multi_isolated missing players demo_id=%s missing=%s",
+                demo_id, missing,
             )
-            players_out[player] = parsed
     except IsolatedParseError as e:
         msg = f"Demo 解析失败：{e}"
         logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, dem_path, e)
@@ -605,31 +564,9 @@ async def _run_library_demo_analyze(
         if isinstance(pdata, dict):
             await demo_db.replace_timeline_events(dem_path, player, pdata)
     await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
-    await _maybe_update_library_display_for_expected(demo_id, dem_path)
     await demo_library_hub.notify("analyzed")
     return {"players": players_out, "demo_path": dem_path}
 
-
-async def _auto_tag_library_demo_for_expected_players(demo_path: str) -> None:
-    """名单命中时只更新库内展示名（ roster K/D/A ），不做每位玩家的片段解析。"""
-    async with _auto_expected_tag_sem:
-        try:
-            cfg0 = load_config()
-            exp = _normalized_expected_parse_players(cfg0)
-            if not exp:
-                return
-            row = await demo_db.get_demo_by_path(demo_path)
-            if not row:
-                return
-            demo_id = int(row["id"])
-            if (row.get("display_name") or "").strip():
-                return
-            await _maybe_update_library_display_for_expected(demo_id, demo_path)
-            logger.info("Expected-player library display tag path=%s", demo_path)
-        except BaseException as e:
-            if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
-                raise
-            logger.exception("Expected-player library display tag failed for %s", demo_path)
 
 
 # ─── Config endpoints ─────────────────────────────────────────
@@ -2200,7 +2137,6 @@ async def batch_ingest_demos(body: BatchIngestBody):
                 await demo_db.update_lightweight_meta(dem_path, meta, source=refined_source)
             await index_demo_player_stats(demo_id, dem_path)
             await demo_db.update_status(dem_path, "loaded", error_msg=None, parsed_at=utc_now_iso())
-            await _maybe_update_library_display_for_expected(demo_id, dem_path)
             ingested += 1
         except Exception as e:
             logger.exception("Ingest failed demo_id=%s path=%s", demo_id, dem_path)
