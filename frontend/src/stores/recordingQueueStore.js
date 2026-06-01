@@ -140,7 +140,7 @@ export const useRecordingQueue = create((set, get) => ({
 
   removeByClientClipUid(cuid) {
     const toUid = (q) => q.clientClipUid || `legacy:${q.demoFilename}:${q.clipId}`;
-    set((s) => ({ queue: s.queue.filter((q) => toUid(q) !== cuid) }));
+    set((s) => ({ queue: s.queue.filter((q) => toUid(q) !== cuid && q.sourceClientClipUid !== cuid) }));
   },
 
   /**

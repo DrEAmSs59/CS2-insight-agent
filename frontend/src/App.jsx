@@ -265,11 +265,13 @@ export default function App() {
   const currentDemoFilename = currentParsed?.demo_filename ?? currentUpload?.filename ?? "";
   const queuedClientClipUidsForCurrentDemo = useMemo(() => {
     if (!currentDemoFilename) return new Set();
-    return new Set(
-      queue
-        .filter((q) => q.demoFilename === currentDemoFilename)
-        .map((q) => queueItemClientUid(q))
-    );
+    const uids = new Set();
+    for (const q of queue) {
+      if (q.demoFilename !== currentDemoFilename) continue;
+      uids.add(queueItemClientUid(q));
+      if (q.sourceClientClipUid) uids.add(q.sourceClientClipUid);
+    }
+    return uids;
   }, [queue, currentDemoFilename]);
 
   const queuedClientClipUidsGlobal = useMemo(
@@ -1334,6 +1336,7 @@ export default function App() {
         toAdd.push({
           ...row,
           clientClipUid: sliced.clip.client_clip_uid,
+          sourceClientClipUid: c.client_clip_uid,
           clipData: sliced.clip,
           freezeToDeathQueueRounds: [...ftdPicksSorted],
         });
