@@ -200,8 +200,9 @@ export default function App() {
 
   const queue           = useRecordingQueue((s) => s.queue);
   const addToQueue      = useRecordingQueue((s) => s.addToQueue);
-  const removeFromQueue = useRecordingQueue((s) => s.removeFromQueue);
-  const clearQueue      = useRecordingQueue((s) => s.clearQueue);
+  const removeFromQueue        = useRecordingQueue((s) => s.removeFromQueue);
+  const removeByClientClipUid  = useRecordingQueue((s) => s.removeByClientClipUid);
+  const clearQueue             = useRecordingQueue((s) => s.clearQueue);
   const globalPacing    = useRecordingQueue((s) => s.globalPacing);
 
   const currentUpload = uploadedDemos?.[currentMatchIndex] ?? null;
@@ -1535,6 +1536,44 @@ export default function App() {
     ],
   );
 
+  const handleDequeueClip = useCallback(
+    (clientClipUid) => {
+      removeByClientClipUid(clientClipUid);
+    },
+    [removeByClientClipUid],
+  );
+
+  const handleRemoveTimelineEventFromQueue = useCallback(
+    (event, roundRow) => {
+      if (!currentParsed) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const mapName = matchMeta?.map_name || "";
+      const clipData = buildTimelineEventClipData({
+        event,
+        mapName,
+        targetPlayer: meta.targetPlayer,
+        round: roundRow?.round ?? event?.round,
+      });
+      removeByClientClipUid(clipData.client_clip_uid);
+    },
+    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid],
+  );
+
+  const handleRemoveTimelineRoundFromQueue = useCallback(
+    (roundRow) => {
+      if (!currentParsed || !roundRow) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const mapName = matchMeta?.map_name || "";
+      const clipData = buildTimelineRoundClipData({
+        roundRow,
+        mapName,
+        targetPlayer: meta.targetPlayer,
+      });
+      removeByClientClipUid(clipData.client_clip_uid);
+    },
+    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid],
+  );
+
   const persistCs2RecordExtras = useCallback(async (payload) => {
     try {
       await API.put("config", payload);
@@ -2270,6 +2309,9 @@ export default function App() {
     handleAddTimelineEventToQueue,
     handleAddTimelineRoundToQueue,
     handleAddTimelineEventsBatchToQueue,
+    handleDequeueClip,
+    handleRemoveTimelineEventFromQueue,
+    handleRemoveTimelineRoundFromQueue,
     selectedClientClipUids,
     handleToggleClip,
     queuedClientClipUidsForCurrentDemo,
