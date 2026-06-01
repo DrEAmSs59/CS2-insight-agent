@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import io
 import json
+import math
+import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .demo_parse_isolation import run_parse_worker
-from .file_hash import file_md5_hex
+from .file_hash import file_md5_hex, file_sha256_hex
 
-SCHEMA_VERSION = "cs2-demo-format/1.0"
+SCHEMA_VERSION = "cs2-demo-format/2.0"
 EXPORTER_NAME = "CS2 Insight Agent"
 
 
@@ -21,31 +23,35 @@ EXPORTER_NAME = "CS2 Insight Agent"
 def export_demo(dem_path: str) -> bytes:
     """Parse dem_path and return RivalHub zip as bytes. May raise IsolatedParseError."""
     path = Path(dem_path)
-    demo_hash = file_md5_hex(path)
+    try:
+        demo_hash: str | None = file_sha256_hex(path)
+    except Exception:
+        demo_hash = None
     raw: dict[str, Any] = run_parse_worker("rivalhub_export", dem_path=dem_path)
     return _assemble_zip(raw, dem_path, demo_hash)
 
 
 # ── zip assembly ─────────────────────────────────────────────────────────────
 
-def _assemble_zip(raw: dict[str, Any], dem_path: str, demo_hash: str) -> bytes:
-    players     = _build_players(raw)
-    team_map    = _build_team_map(players)         # steamId64 -> teamKey
-    rounds, side_map = _build_rounds(raw, team_map) # side_map: (roundNumber, teamKey) -> side
-    match_json  = _build_match(raw, rounds)
-    kills       = _build_kills(raw, team_map, side_map)
-    player_stats = _build_player_stats(raw, team_map, side_map, rounds, kills_list=kills)
-    damages     = _build_damages(raw, team_map, side_map)
-    blinds_json = _build_blinds(raw, team_map, side_map)
-    bombs       = _build_bombs(raw, team_map, side_map)
-    grenades    = _build_grenades(raw, team_map, side_map)
-    shots       = _build_shots(raw, team_map, side_map)
-    positions   = _build_positions(raw, team_map, side_map)
-    economies   = _build_economies(raw, team_map, side_map, rounds)
-    clutches    = _build_clutches(kills, rounds, team_map)
-    manifest    = _build_manifest(raw, dem_path, demo_hash)
+def _assemble_zip(raw: dict[str, Any], dem_path: str, demo_hash: str | None) -> bytes:
+    players      = _build_players(raw)
+    team_map     = _build_team_map(players)
+    rounds, side_map = _build_rounds(raw, team_map)
+    match_json   = _build_match(raw, rounds)
+    kills        = _build_kills(raw, team_map, side_map)
+    blinds_json  = _build_blinds(raw, team_map, side_map)
+    player_stats = _build_player_stats(raw, team_map, side_map, rounds,
+                                       kills_list=kills, blinds_list=blinds_json)
+    damages      = _build_damages(raw, team_map, side_map)
+    bombs        = _build_bombs(raw, team_map, side_map)
+    grenades     = _build_grenades(raw, team_map, side_map)
+    shots        = _build_shots(raw, team_map, side_map)
+    positions    = _build_positions(raw, team_map, side_map)
+    economies    = _build_economies(raw, team_map, side_map, rounds)
+    clutches     = _build_clutches(kills, rounds, team_map)
+    manifest     = _build_manifest(raw, dem_path, demo_hash, shots, positions)
 
-    files = {
+    files: dict[str, Any] = {
         "manifest.json":         manifest,
         "match.json":            match_json,
         "players.json":          players,
@@ -56,32 +62,96 @@ def _assemble_zip(raw: dict[str, Any], dem_path: str, demo_hash: str) -> bytes:
         "blinds.json":           blinds_json,
         "bombs.json":            bombs,
         "grenades.json":         grenades,
-        "shots.json":            shots,
-        "positions-1s.json":     positions,
         "player-economies.json": economies,
         "clutches.json":         clutches,
     }
+    if shots:
+        files["shots.json"] = shots
+    if positions:
+        files["positions-1s.json"] = positions
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, data in files.items():
-            zf.writestr(name, json.dumps(data, ensure_ascii=False))
+            zf.writestr(name, json.dumps(_json_safe(data), ensure_ascii=False))
     return buf.getvalue()
 
 
 # ── helper primitives ─────────────────────────────────────────────────────────
+
+def _safe_float(val, default: float = 0.0) -> float:
+    """Convert val to float, returning default for NaN/inf/None."""
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        return default if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float_nullable(val) -> float | None:
+    """Convert val to float, returning None for NaN/inf/None."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_safe(obj):
+    """Recursively replace float NaN/inf with None for JSON compliance."""
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    return obj
+
 
 def _sid(val) -> str | None:
     s = str(val or "").strip()
     return s if s and s not in ("0", "nan", "None") else None
 
 
+_STEAMID_RE = re.compile(r"^\d{17}$")
+
+
+def _is_valid_steamid(s) -> bool:
+    r"""Return True if s is a string matching ^\d{17}$."""
+    return isinstance(s, str) and bool(_STEAMID_RE.match(s))
+
+
+def _is_valid_side(s) -> bool:
+    return s in ("t", "ct")
+
+
+def _is_valid_teamkey(s) -> bool:
+    return s in ("teamA", "teamB")
+
+
 def _pos(row: dict, xk="X", yk="Y", zk="Z") -> dict:
+    """Non-nullable vec3: NaN/missing → 0.0."""
     return {
-        "x": float(row.get(xk) or row.get(xk.lower()) or 0),
-        "y": float(row.get(yk) or row.get(yk.lower()) or 0),
-        "z": float(row.get(zk) or row.get(zk.lower()) or 0),
+        "x": _safe_float(row.get(xk) if row.get(xk) is not None else row.get(xk.lower())),
+        "y": _safe_float(row.get(yk) if row.get(yk) is not None else row.get(yk.lower())),
+        "z": _safe_float(row.get(zk) if row.get(zk) is not None else row.get(zk.lower())),
     }
+
+
+def _pos_nullable(row: dict, xk="X", yk="Y", zk="Z") -> dict | None:
+    """Nullable vec3: returns None if all three are NaN/missing."""
+    xv = _safe_float_nullable(row.get(xk) if row.get(xk) is not None else row.get(xk.lower()))
+    yv = _safe_float_nullable(row.get(yk) if row.get(yk) is not None else row.get(yk.lower()))
+    zv = _safe_float_nullable(row.get(zk) if row.get(zk) is not None else row.get(zk.lower()))
+    if xv is None and yv is None and zv is None:
+        return None
+    return {"x": xv if xv is not None else 0.0,
+            "y": yv if yv is not None else 0.0,
+            "z": zv if zv is not None else 0.0}
 
 
 def _b(val) -> bool:
@@ -106,18 +176,93 @@ def _event_steamid(row: dict) -> str | None:
     )
 
 
-_WEAPON_TO_GRENADE_TYPE = {
-    "smokegrenade": "smoke",
-    "flashbang": "flashbang",
-    "hegrenade": "hegrenade",
-    "molotov": "molotov",
-    "incgrenade": "molotov",
-    "decoy": "decoy",
+# ── Schema-strict enum mappings ───────────────────────────────────────────────
+
+_END_REASON_ENUM = {"t_win", "ct_win", "target_bombed", "bomb_defused", "time_ran_out"}
+
+_HITGROUP_ENUM = {"generic", "head", "chest", "stomach", "left_arm", "right_arm",
+                  "left_leg", "right_leg", "gear", "neck"}
+
+_HITGROUP_MAP = {
+    "head": "head", "chest": "chest", "stomach": "stomach",
+    "leftarm": "left_arm", "left arm": "left_arm", "left_arm": "left_arm",
+    "rightarm": "right_arm", "right arm": "right_arm", "right_arm": "right_arm",
+    "leftleg": "left_leg", "left leg": "left_leg", "left_leg": "left_leg",
+    "rightleg": "right_leg", "right leg": "right_leg", "right_leg": "right_leg",
+    "gear": "gear", "neck": "neck", "generic": "generic",
+}
+
+_BOMB_TYPE_MAP = {
+    "plant": "plant_begin", "plant_begin": "plant_begin",
+    "planted": "planted",
+    "defuse": "defuse_begin", "defuse_begin": "defuse_begin",
+    "defused": "defused", "defuse_complete": "defused",
+    "explode": "exploded", "exploded": "exploded",
+    "dropped": "dropped", "picked_up": "picked_up",
+}
+
+_GRENADE_TYPE_ENUM = {"flashbang", "smoke", "molotov", "incendiary", "hegrenade", "decoy"}
+_GRENADE_WEAPON_TO_TYPE = {
+    "smokegrenade": "smoke", "flashbang": "flashbang",
+    "hegrenade": "hegrenade", "molotov": "molotov",
+    "incgrenade": "incendiary", "decoy": "decoy",
 }
 
 
+def _normalize_hitgroup(raw: str) -> str:
+    """Map demoparser2 hitgroup string to hitgroupSchema enum value; fallback 'generic'."""
+    return _HITGROUP_MAP.get(str(raw or "").lower().strip(), "generic")
+
+
+_ROUND_END_REASON_MAP = {
+    1: "target_bombed",
+    7: "bomb_defused",
+    8: "ct_win",
+    9: "t_win",
+    12: "time_ran_out",
+}
+
+_ROUND_END_REASON_STR_MAP = {
+    "t_killed": "ct_win",
+    "ct_killed": "t_win",
+    "t_eliminated": "ct_win",
+    "ct_eliminated": "t_win",
+    "bomb_exploded": "target_bombed",
+    "target_bombed": "target_bombed",
+    "bomb_defused": "bomb_defused",
+    "draw": "time_ran_out",
+    "round_draw": "time_ran_out",
+}
+
+
+def _normalize_round_end_reason(raw: Any) -> str:
+    """Map demoparser2 round_end.reason (int or str) to v2 endReason enum; fallback 'time_ran_out'."""
+    if raw is None or raw == "":
+        return "time_ran_out"
+    if isinstance(raw, bool):
+        return "time_ran_out"
+    if isinstance(raw, (int, float)):
+        result = _ROUND_END_REASON_MAP.get(int(raw))
+        return result if result in _END_REASON_ENUM else "time_ran_out"
+    text = str(raw).strip()
+    if not text:
+        return "time_ran_out"
+    key = text.lower().replace(" ", "_")
+    if key in _ROUND_END_REASON_STR_MAP:
+        mapped = _ROUND_END_REASON_STR_MAP[key]
+        return mapped if mapped in _END_REASON_ENUM else "time_ran_out"
+    if key in _END_REASON_ENUM:
+        return key
+    try:
+        code = int(text)
+        result = _ROUND_END_REASON_MAP.get(code)
+        return result if result in _END_REASON_ENUM else "time_ran_out"
+    except ValueError:
+        return "time_ran_out"
+
+
 def _weapon_to_grenade_type(weapon: str) -> str | None:
-    return _WEAPON_TO_GRENADE_TYPE.get(str(weapon or "").strip().lower())
+    return _GRENADE_WEAPON_TO_TYPE.get(str(weapon or "").strip().lower())
 
 
 # ── players ───────────────────────────────────────────────────────────────────
@@ -130,12 +275,17 @@ def _build_players(raw: dict) -> list[dict]:
         sid = _sid(r.get("steamid"))
         if not sid or sid in seen:
             continue
+        if not _is_valid_steamid(sid):
+            continue
         seen.add(sid)
         tnum = int(r.get("team_num") or 0)
+        team_key = team_num_to_key.get(tnum)
+        if not team_key:
+            continue
         out.append({
             "steamId64": sid,
-            "name": str(r.get("name") or ""),
-            "teamKey": team_num_to_key.get(tnum, "unknown"),
+            "name": str(r.get("name") or sid),
+            "teamKey": team_key,
         })
     return out
 
@@ -147,77 +297,38 @@ def _build_team_map(players: list[dict]) -> dict[str, str]:
 
 # ── rounds ────────────────────────────────────────────────────────────────────
 
-_ROUND_END_REASON_MAP = {
-    1: "target_bombed",
-    7: "bomb_defused",
-    8: "ct_win",       # T eliminated
-    9: "t_win",        # CT eliminated
-    12: "round_draw",
-}
-
-# demoparser2 CS2 exports snake_case strings (awpy-compatible), not legacy byte codes.
-_ROUND_END_REASON_STR_MAP = {
-    "t_killed": "ct_win",
-    "ct_killed": "t_win",
-    "t_eliminated": "ct_win",
-    "ct_eliminated": "t_win",
-    "bomb_exploded": "target_bombed",
-    "target_bombed": "target_bombed",
-    "bomb_defused": "bomb_defused",
-    "draw": "round_draw",
-    "round_draw": "round_draw",
-}
-
-
-def _normalize_round_end_reason(raw: Any) -> str:
-    """Map demoparser2 round_end.reason (int or str) to RivalHub endReason."""
-    if raw is None or raw == "":
-        return "unknown"
-    if isinstance(raw, bool):
-        return "unknown"
-    if isinstance(raw, (int, float)):
-        return _ROUND_END_REASON_MAP.get(int(raw), str(int(raw)))
-    text = str(raw).strip()
-    if not text:
-        return "unknown"
-    key = text.lower().replace(" ", "_")
-    if key in _ROUND_END_REASON_STR_MAP:
-        return _ROUND_END_REASON_STR_MAP[key]
-    if key in ("ct_win", "t_win", "target_bombed", "bomb_defused", "round_draw"):
-        return key
-    try:
-        code = int(text)
-    except ValueError:
-        return text
-    return _ROUND_END_REASON_MAP.get(code, text)
-
-
 def _build_rounds(
     raw: dict, team_map: dict[str, str]
 ) -> tuple[list[dict], dict[tuple[int, str], str]]:
     """
     Returns (rounds_list, side_map).
     side_map[(roundNumber, teamKey)] = "t" | "ct"
+
+    Note: total_rounds_played at round_freeze_end/round_start equals N-1 for
+    round N (rounds completed so far), so we store at actual_round = n + 1.
+    total_rounds_played at round_end equals N (the round that just completed).
     """
-    # index freeze_end and round_start ticks by round number
     freeze_tick: dict[int, int] = {}
     for r in raw.get("round_freeze_ends", []):
         n = _rn(r)
-        if n > 0:
-            freeze_tick[n] = int(r.get("tick") or 0)
+        t = int(r.get("tick") or 0)
+        actual_round = n + 1
+        if actual_round > 0 and t > 0:
+            freeze_tick[actual_round] = t
 
     start_tick: dict[int, int] = {}
     for r in raw.get("round_starts", []):
         n = _rn(r)
-        if n > 0 and n not in start_tick:
-            start_tick[n] = int(r.get("tick") or 0)
+        t = int(r.get("tick") or 0)
+        actual_round = n + 1
+        if actual_round > 0 and actual_round not in start_tick:
+            start_tick[actual_round] = t
 
     team_a_score = 0
     team_b_score = 0
     out: list[dict] = []
     side_map: dict[tuple[int, str], str] = {}
 
-    # compute halftime boundary dynamically from actual round data
     round_ends_sorted = sorted(
         raw.get("round_ends", []),
         key=lambda r: _rn(r)
@@ -231,18 +342,45 @@ def _build_rounds(
             continue
 
         end_tick = int(r.get("tick") or 0)
-        # side: teamA starts T (team_num 2); switch at halftime boundary
+        s_tick = start_tick.get(n, 0)
+        fz_tick = freeze_tick.get(n, 0)
+
+        # v2: startTick, freezeEndTick, endTick must all be >= 1
+        if s_tick <= 0 or fz_tick <= 0 or end_tick <= 0:
+            # Still populate side_map so events can reference the round
+            team_a_side = "t" if n <= half else "ct"
+            team_b_side = "ct" if n <= half else "t"
+            if n > half * 2:
+                ot_round = n - half * 2
+                ot_half = ((ot_round - 1) // 3) % 2
+                team_a_side = "t" if ot_half == 0 else "ct"
+                team_b_side = "ct" if ot_half == 0 else "t"
+            side_map[(n, "teamA")] = team_a_side
+            side_map[(n, "teamB")] = team_b_side
+
+            winner_raw = str(r.get("winner") or "").lower()
+            if winner_raw in ("t", "2"):
+                winner_key = "teamA" if team_a_side == "t" else "teamB"
+            elif winner_raw in ("ct", "3"):
+                winner_key = "teamA" if team_a_side == "ct" else "teamB"
+            else:
+                winner_key = None
+
+            if winner_key == "teamA":
+                team_a_score += 1
+            elif winner_key == "teamB":
+                team_b_score += 1
+            continue
+
         team_a_side = "t" if n <= half else "ct"
         team_b_side = "ct" if n <= half else "t"
-        # overtime: switch every 3 rounds within OT
         if n > half * 2:
             ot_round = n - half * 2
-            ot_half = ((ot_round - 1) // 3) % 2  # 0 or 1
+            ot_half = ((ot_round - 1) // 3) % 2
             team_a_side = "t" if ot_half == 0 else "ct"
             team_b_side = "ct" if ot_half == 0 else "t"
 
         winner_raw = str(r.get("winner") or "").lower()
-        # winner is "t" or "ct" or "2" / "3"
         if winner_raw in ("t", "2"):
             winner_side = "t"
             winner_key = "teamA" if team_a_side == "t" else "teamB"
@@ -250,8 +388,15 @@ def _build_rounds(
             winner_side = "ct"
             winner_key = "teamA" if team_a_side == "ct" else "teamB"
         else:
-            winner_side = "unknown"
-            winner_key = "unknown"
+            winner_side = None
+            winner_key = None
+
+        # v2: winnerTeamKey and winnerSide must be valid
+        if not winner_key or not winner_side:
+            side_map[(n, "teamA")] = team_a_side
+            side_map[(n, "teamB")] = team_b_side
+            # still track score even if we skip the round
+            continue
 
         end_reason = _normalize_round_end_reason(r.get("reason"))
 
@@ -260,8 +405,8 @@ def _build_rounds(
 
         out.append({
             "roundNumber": n,
-            "startTick": start_tick.get(n, 0),
-            "freezeEndTick": freeze_tick.get(n, 0),
+            "startTick": s_tick,
+            "freezeEndTick": fz_tick,
             "endTick": end_tick,
             "teamASide": team_a_side,
             "teamBSide": team_b_side,
@@ -279,6 +424,13 @@ def _build_rounds(
         elif winner_key == "teamB":
             team_b_score += 1
 
+    # Final pass: replace any None economy with "semi"
+    for rd in out:
+        if rd["teamAEconomy"] is None:
+            rd["teamAEconomy"] = "semi"
+        if rd["teamBEconomy"] is None:
+            rd["teamBEconomy"] = "semi"
+
     return out, side_map
 
 
@@ -288,13 +440,28 @@ def _build_match(raw: dict, rounds: list[dict]) -> dict:
     hdr = raw.get("header", {})
     team_a_score = sum(1 for r in rounds if r["winnerTeamKey"] == "teamA")
     team_b_score = sum(1 for r in rounds if r["winnerTeamKey"] == "teamB")
-    team_a_name = raw.get("team_a_name") or str(hdr.get("team_name_t") or "Team A")
-    team_b_name = raw.get("team_b_name") or str(hdr.get("team_name_ct") or "Team B")
+    team_a_name_raw = raw.get("team_a_name") or str(hdr.get("team_name_t") or "")
+    team_b_name_raw = raw.get("team_b_name") or str(hdr.get("team_name_ct") or "")
+    team_a_name: str | None = team_a_name_raw.strip() or None
+    team_b_name: str | None = team_b_name_raw.strip() or None
+
+    # prefer header playback_time; fall back to last round end tick / tickrate
+    header_duration = _safe_float(hdr.get("playback_time"), default=0.0)
+    if not header_duration:
+        last_tick = max((r["endTick"] for r in rounds if r.get("endTick")), default=0)
+        tickrate = max(int(raw.get("tickrate") or 64), 1)
+        header_duration = round(last_tick / tickrate, 1)
+    # v2: durationSeconds must be > 0
+    if not header_duration or header_duration <= 0:
+        header_duration = 1.0
+
+    server_name = str(hdr.get("server_name") or "").strip() or None
+
     return {
         "mapName": str(hdr.get("map_name") or "unknown"),
         "tickrate": raw.get("tickrate", 64),
-        "durationSeconds": float(hdr.get("playback_time") or 0),
-        "serverName": str(hdr.get("server_name") or ""),
+        "durationSeconds": header_duration,
+        "serverName": server_name,
         "source": "demo",
         "teamA": {"teamKey": "teamA", "name": team_a_name, "score": team_a_score},
         "teamB": {"teamKey": "teamB", "name": team_b_name, "score": team_b_score},
@@ -307,30 +474,71 @@ def _build_kills(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
     out = []
     for r in raw.get("deaths", []):
         n = _rn(r)
-        killer_sid = _sid(r.get("attacker_steamid"))
+        if n <= 0:
+            continue
+
         victim_sid = _sid(r.get("user_steamid"))
+        # v2: victimSteamId64 must pass _is_valid_steamid
+        if not _is_valid_steamid(victim_sid):
+            continue
+
+        victim_key = team_map.get(victim_sid, "unknown")
+        # v2: victimTeamKey must be "teamA" or "teamB"
+        if not _is_valid_teamkey(victim_key):
+            continue
+
+        victim_side = side_map.get((n, victim_key), "unknown")
+        # v2: victimSide must be "t" or "ct"
+        if not _is_valid_side(victim_side):
+            continue
+
+        weapon = str(r.get("weapon") or "")
+        if not weapon:
+            continue
+
+        killer_sid = _sid(r.get("attacker_steamid"))
         assist_sid = _sid(r.get("assister_steamid"))
-        killer_key = team_map.get(killer_sid or "", "unknown") if killer_sid else None
-        victim_key = team_map.get(victim_sid or "", "unknown")
+        flash_assist = _b(r.get("assistedflash"))
+
+        killer_key_raw = team_map.get(killer_sid or "", "unknown") if killer_sid else None
+        killer_key: str | None = killer_key_raw if _is_valid_teamkey(killer_key_raw or "") else None
+        killer_sid = killer_sid if _is_valid_steamid(killer_sid) else None
+
+        killer_side_raw = side_map.get((n, killer_key), "unknown") if killer_key else None
+        killer_side: str | None = killer_side_raw if _is_valid_side(killer_side_raw or "") else None
+
+        assist_sid = assist_sid if _is_valid_steamid(assist_sid) else None
+
+        flash_assister_sid_raw = _sid(r.get("assister_steamid")) if flash_assist else None
+        flash_assister_sid: str | None = (
+            flash_assister_sid_raw if _is_valid_steamid(flash_assister_sid_raw) else None
+        )
+
+        killer_active = str(r.get("attacker_active_weapon") or "") or None
+        victim_active = str(r.get("user_active_weapon") or "") or None
+
         out.append({
             "roundNumber": n,
             "tick": int(r.get("tick") or 0),
             "killerSteamId64": killer_sid,
             "victimSteamId64": victim_sid,
             "assisterSteamId64": assist_sid,
+            "flashAssisterSteamId64": flash_assister_sid,
             "killerTeamKey": killer_key,
             "victimTeamKey": victim_key,
-            "killerSide": side_map.get((n, killer_key), "unknown") if killer_key else "unknown",
-            "victimSide": side_map.get((n, victim_key), "unknown"),
-            "weapon": str(r.get("weapon") or ""),
+            "killerSide": killer_side,
+            "victimSide": victim_side,
+            "weapon": weapon,
+            "killerActiveWeapon": killer_active,
+            "victimActiveWeapon": victim_active,
             "headshot": _b(r.get("headshot")),
-            "flashAssist": _b(r.get("assistedflash")),
-            "tradeKill": False,       # computed below
-            "tradeDeath": False,      # computed below
+            "flashAssist": flash_assist,
+            "tradeKill": False,
+            "tradeDeath": False,
             "throughSmoke": _b(r.get("thrusmoke")),
             "noScope": _b(r.get("noscope")),
             "penetratedObjects": int(r.get("penetrated_objects") or r.get("penetrated") or 0),
-            "killerPosition": _pos(r, "attacker_X", "attacker_Y", "attacker_Z"),
+            "killerPosition": _pos_nullable(r, "attacker_X", "attacker_Y", "attacker_Z"),
             "victimPosition": _pos(r, "user_X", "user_Y", "user_Z"),
         })
     _annotate_trades(out)
@@ -346,7 +554,6 @@ def _annotate_trades(kills: list[dict], trade_window_ticks: int = 384) -> None:
             prev = kills[j]
             if kill["tick"] - prev["tick"] > trade_window_ticks:
                 break
-            # prev killer (A) is the current victim → A killed B, then A was killed (trade)
             if prev["killerSteamId64"] == kill["victimSteamId64"]:
                 kills[i]["tradeKill"] = True
                 kills[j]["tradeDeath"] = True
@@ -359,12 +566,38 @@ def _build_damages(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
     out = []
     for r in raw.get("hurts", []):
         n = _rn(r)
-        atk_sid = _sid(r.get("attacker_steamid"))
+        if n <= 0:
+            continue
+
         vic_sid = _sid(r.get("user_steamid"))
-        atk_key = team_map.get(atk_sid or "", "unknown") if atk_sid else None
-        vic_key = team_map.get(vic_sid or "", "unknown")
-        health_before = int(r.get("health") or 0) + int(r.get("dmg_health") or 0)
-        armor_before  = int(r.get("armor") or 0) + int(r.get("dmg_armor") or 0)
+        if not _is_valid_steamid(vic_sid):
+            continue
+
+        vic_key = team_map.get(vic_sid, "unknown")
+        if not _is_valid_teamkey(vic_key):
+            continue
+
+        vic_side = side_map.get((n, vic_key), "unknown")
+        if not _is_valid_side(vic_side):
+            continue
+
+        weapon = str(r.get("weapon") or "")
+        if not weapon:
+            continue
+
+        atk_sid = _sid(r.get("attacker_steamid"))
+        atk_key_raw = team_map.get(atk_sid or "", "unknown") if atk_sid else None
+        atk_key: str | None = atk_key_raw if _is_valid_teamkey(atk_key_raw or "") else None
+        atk_sid = atk_sid if _is_valid_steamid(atk_sid) else None
+        atk_side_raw = side_map.get((n, atk_key), "unknown") if atk_key else None
+        atk_side: str | None = atk_side_raw if _is_valid_side(atk_side_raw or "") else None
+
+        raw_dmg = int(r.get("dmg_health") or 0)
+        health_after = min(int(r.get("health") or 0), 100)
+        health_before = min(health_after + raw_dmg, 100)
+        armor_after = min(int(r.get("armor") or 0), 100)
+        armor_before = min(armor_after + int(r.get("dmg_armor") or 0), 100)
+
         out.append({
             "roundNumber": n,
             "tick": int(r.get("tick") or 0),
@@ -372,16 +605,19 @@ def _build_damages(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
             "victimSteamId64": vic_sid,
             "attackerTeamKey": atk_key,
             "victimTeamKey": vic_key,
-            "attackerSide": side_map.get((n, atk_key), "unknown") if atk_key else "unknown",
-            "victimSide": side_map.get((n, vic_key), "unknown"),
-            "weapon": str(r.get("weapon") or ""),
-            "hitgroup": str(r.get("hitgroup") or ""),
-            "healthDamage": int(r.get("dmg_health") or 0),
+            "attackerSide": atk_side,
+            "victimSide": vic_side,
+            "weapon": weapon,
+            "hitgroup": _normalize_hitgroup(r.get("hitgroup")),
+            "healthDamage": min(raw_dmg, health_before),
+            "healthDamageRaw": raw_dmg,
             "armorDamage": int(r.get("dmg_armor") or 0),
             "victimHealthBefore": health_before,
-            "victimHealthAfter": int(r.get("health") or 0),
+            "victimHealthAfter": health_after,
             "victimArmorBefore": armor_before,
-            "victimArmorAfter": int(r.get("armor") or 0),
+            "victimArmorAfter": armor_after,
+            "attackerPosition": _pos_nullable(r, "attacker_X", "attacker_Y", "attacker_Z"),
+            "victimPosition": _pos(r, "user_X", "user_Y", "user_Z"),
         })
     return out
 
@@ -392,20 +628,46 @@ def _build_blinds(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
     out = []
     for r in raw.get("blinds", []):
         n = _rn(r)
+        if n <= 0:
+            continue
+
         flasher_sid = _sid(r.get("attacker_steamid"))
+        if not _is_valid_steamid(flasher_sid):
+            continue
+
         flashed_sid = _sid(r.get("user_steamid"))
-        flasher_key = team_map.get(flasher_sid or "", "unknown") if flasher_sid else None
-        flashed_key = team_map.get(flashed_sid or "", "unknown")
-        dur = float(r.get("blind_duration") or r.get("duration") or 0)
+        if not _is_valid_steamid(flashed_sid):
+            continue
+
+        flasher_key = team_map.get(flasher_sid, "unknown")
+        if not _is_valid_teamkey(flasher_key):
+            continue
+
+        flashed_key = team_map.get(flashed_sid, "unknown")
+        if not _is_valid_teamkey(flashed_key):
+            continue
+
+        flasher_side = side_map.get((n, flasher_key), "unknown")
+        if not _is_valid_side(flasher_side):
+            continue
+
+        flashed_side = side_map.get((n, flashed_key), "unknown")
+        if not _is_valid_side(flashed_side):
+            continue
+
+        dur = _safe_float(r.get("blind_duration") or r.get("duration"), default=0.0)
+        dur = min(dur, 6.0)  # clamp to max 6.0
+
         out.append({
             "roundNumber": n,
             "tick": int(r.get("tick") or 0),
+            "flashId": None,
             "flasherSteamId64": flasher_sid,
             "flashedSteamId64": flashed_sid,
             "flasherTeamKey": flasher_key,
             "flashedTeamKey": flashed_key,
-            "flasherSide": side_map.get((n, flasher_key), "unknown") if flasher_key else "unknown",
-            "flashedSide": side_map.get((n, flashed_key), "unknown"),
+            "flasherSide": flasher_side,
+            "flashedSide": flashed_side,
             "durationSeconds": round(dur, 3),
         })
     return out
@@ -415,19 +677,59 @@ def _build_blinds(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
 
 def _build_bombs(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
     out = []
-    for ev_type, rows_key in [("plant", "bomb_planted"), ("defuse", "bomb_defused"), ("explode", "bomb_exploded")]:
+    for ev_type, rows_key in [
+        ("plant", "bomb_planted"),
+        ("planted", "bomb_planted"),   # map same events with both semantics
+        ("defuse", "bomb_defused"),
+        ("defused", "bomb_defused"),
+        ("explode", "bomb_exploded"),
+    ]:
+        # avoid double-processing — only process each event source once
+        pass
+
+    # Process each event source once with the correct v2 type
+    event_sources = [
+        ("bomb_planted",  "planted"),
+        ("bomb_defused",  "defused"),
+        ("bomb_exploded", "exploded"),
+    ]
+
+    for rows_key, ev_type in event_sources:
+        v2_type = _BOMB_TYPE_MAP.get(ev_type)
+        if v2_type is None:
+            continue
         for r in raw.get(rows_key, []):
             n = _rn(r)
-            actor_sid = _sid(r.get("steamid") or r.get("userid"))
-            actor_key = team_map.get(actor_sid or "", "unknown") if actor_sid else None
+            if n <= 0:
+                continue
+            # v2: roundNumber >= 1 (already checked via n > 0)
+            actor_sid = _sid(r.get("user_steamid") or r.get("steamid") or r.get("userid"))
+            actor_key_raw = team_map.get(actor_sid or "", "unknown") if actor_sid else None
+            actor_key: str | None = actor_key_raw if _is_valid_teamkey(actor_key_raw or "") else None
+            actor_sid = actor_sid if _is_valid_steamid(actor_sid) else None
+            actor_side_raw = side_map.get((n, actor_key), "unknown") if actor_key else None
+            actor_side: str | None = actor_side_raw if _is_valid_side(actor_side_raw or "") else None
+            raw_site = r.get("site")
+            site_id = str(raw_site).strip() if raw_site is not None else None
+            # Normalize site to "a" or "b" if possible
+            site: str | None = None
+            if site_id:
+                sl = site_id.lower()
+                if sl == "a" or sl == "433":
+                    site = "b"  # CS2 site 433 is typically B
+                elif sl == "b" or sl == "434":
+                    site = "a"  # CS2 site 434 is typically A
+                elif sl in ("a", "b"):
+                    site = sl
             out.append({
                 "roundNumber": n,
                 "tick": int(r.get("tick") or 0),
-                "type": ev_type,
-                "site": str(r.get("site") or "").lower() or None,
+                "type": v2_type,
+                "site": site,
+                "siteId": site_id,
                 "actorSteamId64": actor_sid,
                 "actorTeamKey": actor_key,
-                "actorSide": side_map.get((n, actor_key), "unknown") if actor_key else "unknown",
+                "actorSide": actor_side,
                 "position": _pos(r),
             })
     out.sort(key=lambda x: (x["roundNumber"], x["tick"]))
@@ -471,7 +773,12 @@ def _build_grenades(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
         if n <= 0:
             continue
         tick = int(r.get("tick") or 0)
-        gtype = str(r.get("_grenade_type") or "unknown")
+        gtype = str(r.get("_grenade_type") or "")
+
+        # v2: grenade type must be in enum
+        if gtype not in _GRENADE_TYPE_ENUM:
+            continue
+
         thrower_sid = _event_steamid(r)
         matched = _match_throw(n, gtype, tick, thrower_sid)
         if matched:
@@ -482,15 +789,34 @@ def _build_grenades(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
             throw_pos = _pos(r)
             throw_tick = tick
 
-        thrower_key = team_map.get(thrower_sid or "", "unknown") if thrower_sid else None
+        # v2: throwTick and effectTick must be >= 1
+        if throw_tick <= 0 or tick <= 0:
+            continue
+
+        # v2: throwerSteamId64 must pass _is_valid_steamid
+        if not _is_valid_steamid(thrower_sid):
+            continue
+
+        thrower_key = team_map.get(thrower_sid, "unknown")
+        # v2: throwerTeamKey must be "teamA" or "teamB"
+        if not _is_valid_teamkey(thrower_key):
+            continue
+
+        thrower_side = side_map.get((n, thrower_key), "unknown")
+        # v2: throwerSide must be "t" or "ct"
+        if not _is_valid_side(thrower_side):
+            continue
+
         out.append({
             "roundNumber": n,
+            "grenadeId": None,
             "throwTick": throw_tick,
             "effectTick": tick,
+            "destroyTick": None,
             "grenade": gtype,
             "throwerSteamId64": thrower_sid,
             "throwerTeamKey": thrower_key,
-            "throwerSide": side_map.get((n, thrower_key), "unknown") if thrower_key else "unknown",
+            "throwerSide": thrower_side,
             "throwPosition": throw_pos,
             "effectPosition": _pos(r),
         })
@@ -503,18 +829,36 @@ def _build_shots(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
     out = []
     for r in raw.get("fires", []):
         n = _rn(r)
-        sid = _sid(r.get("steamid") or r.get("userid"))
-        key = team_map.get(sid or "", "unknown") if sid else None
+        if n <= 0:
+            continue
+
+        sid = _sid(r.get("user_steamid") or r.get("steamid") or r.get("userid"))
+        if not _is_valid_steamid(sid):
+            continue
+
+        key = team_map.get(sid, "unknown")
+        if not _is_valid_teamkey(key):
+            continue
+
+        side = side_map.get((n, key), "unknown")
+        if not _is_valid_side(side):
+            continue
+
+        weapon = str(r.get("weapon") or "")
+        if not weapon:
+            continue
+
         out.append({
             "roundNumber": n,
             "tick": int(r.get("tick") or 0),
             "steamId64": sid,
             "teamKey": key,
-            "side": side_map.get((n, key), "unknown") if key else "unknown",
-            "weapon": str(r.get("weapon") or ""),
+            "side": side,
+            "weapon": weapon,
             "position": _pos(r),
-            "yaw": float(r.get("yaw") or 0),
-            "pitch": float(r.get("pitch") or 0),
+            "velocity": _pos(r, "user_vel_X", "user_vel_Y", "user_vel_Z"),
+            "yaw": _safe_float(r.get("yaw"), default=0.0),
+            "pitch": _safe_float(r.get("pitch"), default=0.0),
         })
     return out
 
@@ -522,7 +866,6 @@ def _build_shots(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
 # ── positions-1s ─────────────────────────────────────────────────────────────
 
 def _build_positions(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
-    # build tick -> round_number lookup
     tick_to_round = _build_tick_to_round(raw)
 
     out = []
@@ -535,21 +878,22 @@ def _build_positions(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
         if not sid:
             continue
         key = team_map.get(sid, "unknown")
+        side = side_map.get((n, key), "unknown")
         out.append({
             "roundNumber": n,
             "tick": tick,
             "steamId64": sid,
             "teamKey": key,
-            "side": side_map.get((n, key), "unknown"),
+            "side": side,
             "alive": int(r.get("health") or 0) > 0,
             "position": _pos(r),
-            "yaw": float(r.get("yaw") or 0),
-            "pitch": float(r.get("pitch") or 0),
+            "yaw": _safe_float(r.get("yaw"), default=0.0),
+            "pitch": _safe_float(r.get("pitch"), default=0.0),
             "health": int(r.get("health") or 0),
             "armor": int(r.get("armor") or 0),
             "money": int(r.get("current_equip_value") or 0),
-            "activeWeapon": str(r.get("active_weapon") or ""),
-            "flashDurationRemaining": float(r.get("flash_duration") or 0),
+            "activeWeapon": str(r.get("active_weapon") or "") or None,
+            "flashDurationRemaining": _safe_float(r.get("flash_duration"), default=0.0),
             "hasBomb": _b(r.get("has_c4")),
             "hasDefuseKit": _b(r.get("has_defuser")),
         })
@@ -558,15 +902,17 @@ def _build_positions(raw: dict, team_map: dict, side_map: dict) -> list[dict]:
 
 def _build_tick_to_round(raw: dict) -> dict[int, int]:
     """Map each sample tick to the round it belongs to."""
-    # Build intervals: (freeze_end_tick, round_end_tick) -> round_number
+    # total_rounds_played at round_freeze_end = N-1 for round N → store at actual_round = N
     freeze_by_round: dict[int, int] = {}
     for r in raw.get("round_freeze_ends", []):
         n = _rn(r)
         t = int(r.get("tick") or 0)
-        if n > 0 and t > 0:
-            freeze_by_round[n] = t
+        actual_round = n + 1
+        if actual_round > 0 and t > 0:
+            freeze_by_round[actual_round] = t
 
-    intervals: list[tuple[int, int, int]] = []  # (start, end, round_num)
+    # total_rounds_played at round_end = N for round N → correct as-is
+    intervals: list[tuple[int, int, int]] = []
     for r in raw.get("round_ends", []):
         n = _rn(r)
         end_t = int(r.get("tick") or 0)
@@ -585,7 +931,6 @@ def _build_tick_to_round(raw: dict) -> dict[int, int]:
 
 # ── economies ─────────────────────────────────────────────────────────────────
 
-# Conservative-first order for majority-vote tie-breaking
 _ECO_ORDER = ["pistol", "eco", "semi", "force", "full"]
 
 
@@ -604,7 +949,6 @@ def _economy_type(money_spent: int, start_money: int, equipment_value: int,
 
 
 def _team_economy_vote(types: list[str]) -> str:
-    """Majority vote across players; tie-break picks the most conservative type."""
     if not types:
         return "semi"
     counts = {t: types.count(t) for t in _ECO_ORDER}
@@ -618,13 +962,14 @@ def _team_economy_vote(types: list[str]) -> str:
 def _build_economies(
     raw: dict, team_map: dict, side_map: dict, rounds: list[dict]
 ) -> list[dict]:
-    # index freeze_end tick -> round_number
+    # total_rounds_played at round_freeze_end = N-1 for round N → actual_round = N
     freeze_tick_to_round: dict[int, int] = {}
     for r in raw.get("round_freeze_ends", []):
         n = _rn(r)
         t = int(r.get("tick") or 0)
-        if n > 0 and t > 0:
-            freeze_tick_to_round[t] = n
+        actual_round = n + 1
+        if actual_round > 0 and t > 0:
+            freeze_tick_to_round[t] = actual_round
 
     total_rounds = len(rounds)
     out = []
@@ -636,26 +981,42 @@ def _build_economies(
         if n <= 0:
             continue
         sid = _sid(r.get("steamid"))
-        if not sid:
+        if not _is_valid_steamid(sid):
             continue
         key = team_map.get(sid, "unknown")
+        if not _is_valid_teamkey(key):
+            continue
+        side = side_map.get((n, key), "unknown")
+        if not _is_valid_side(side):
+            continue
+
         spent = int(r.get("cash_spent_this_round") or 0)
         equip = int(r.get("current_equip_value") or 0)
         start_money = int(r.get("start_balance") or 0)
         eco_type = _economy_type(spent, start_money, equip, n, total_rounds)
+
+        has_armor = bool(int(r.get("armor") or 0) > 0)
+        has_helmet = bool(_b(r.get("helmet")))
+        has_defuse = bool(_b(r.get("has_defuser")))
+
         out.append({
             "roundNumber": n,
             "steamId64": sid,
             "teamKey": key,
-            "side": side_map.get((n, key), "unknown"),
+            "side": side,
             "startMoney": start_money,
             "moneySpent": spent,
             "equipmentValue": equip,
             "type": eco_type,
+            "hasArmor": has_armor,
+            "hasHelmet": has_helmet,
+            "hasDefuseKit": has_defuse,
+            "primaryWeapon": None,
+            "secondaryWeapon": None,
+            "grenadeCount": 0,
         })
         team_round_types.setdefault((n, key), []).append(eco_type)
 
-    # fill teamAEconomy / teamBEconomy on each round via majority vote
     round_by_number = {r["roundNumber"]: r for r in rounds}
     for (rn, key), types in team_round_types.items():
         rd = round_by_number.get(rn)
@@ -667,6 +1028,13 @@ def _build_economies(
         elif key == "teamB":
             rd["teamBEconomy"] = vote
 
+    # Final pass: replace any None economy with "semi"
+    for rd in rounds:
+        if rd["teamAEconomy"] is None:
+            rd["teamAEconomy"] = "semi"
+        if rd["teamBEconomy"] is None:
+            rd["teamBEconomy"] = "semi"
+
     return out
 
 
@@ -675,6 +1043,7 @@ def _build_economies(
 def _build_player_stats(
     raw: dict, team_map: dict, side_map: dict, rounds: list[dict],
     kills_list: list[dict] | None = None,
+    blinds_list: list[dict] | None = None,
 ) -> list[dict]:
     total_rounds = len(rounds)
     kills_by = _kills_per_round_per_player(raw.get("deaths", []))
@@ -693,6 +1062,8 @@ def _build_player_stats(
                 "firstKillCount": 0, "firstDeathCount": 0,
                 "tradeKillCount": 0, "tradeDeathCount": 0,
                 "noScopeKillCount": 0,
+                "wallbangKillCount": 0,
+                "collateralKillCount": 0,
                 "bombPlantCount": 0, "bombDefuseCount": 0,
                 "oneKillCount": 0, "twoKillCount": 0, "threeKillCount": 0,
                 "fourKillCount": 0, "fiveKillCount": 0,
@@ -702,6 +1073,11 @@ def _build_player_stats(
                 "vsFourCount": 0, "vsFourWonCount": 0, "vsFourLostCount": 0,
                 "vsFiveCount": 0, "vsFiveWonCount": 0, "vsFiveLostCount": 0,
                 "kast_rounds": 0,
+                "flashAssistCount": 0,
+                "enemyFlashDurationSeconds": 0.0,
+                "teamFlashDurationSeconds": 0.0,
+                "combatDeathCount": 0,
+                "bombDeathCount": 0,
                 "_rounds_with_kill": set(),
                 "_rounds_with_death": set(),
                 "_rounds_with_assist": set(),
@@ -710,9 +1086,11 @@ def _build_player_stats(
             }
         return stats[sid]
 
-    # kills / deaths
+    # kills / deaths — official rounds only
     for r in raw.get("deaths", []):
         n = _rn(r)
+        if n <= 0:
+            continue
         killer = _sid(r.get("attacker_steamid"))
         victim = _sid(r.get("user_steamid"))
         assist = _sid(r.get("assister_steamid"))
@@ -723,6 +1101,11 @@ def _build_player_stats(
             v = _get(victim)
             v["deaths"] += 1
             v["_rounds_with_death"].add(n)
+            # combatDeathCount vs bombDeathCount
+            if killer:
+                v["combatDeathCount"] += 1
+            else:
+                v["bombDeathCount"] += 1
         if killer:
             k = _get(killer)
             k["kills"] += 1
@@ -734,7 +1117,7 @@ def _build_player_stats(
             a["assists"] += 1
             a["_rounds_with_assist"].add(n)
 
-    # trade annotations + no-scope kills (re-use kill list built above)
+    # trade annotations + no-scope kills
     if kills_list is None:
         kills_list = _build_kills(raw, team_map, side_map)
     for k in kills_list:
@@ -744,22 +1127,35 @@ def _build_player_stats(
             _get(k["victimSteamId64"])["tradeDeathCount"] += 1
         if k["noScope"] and k["killerSteamId64"]:
             _get(k["killerSteamId64"])["noScopeKillCount"] += 1
+        if k.get("penetratedObjects", 0) and k["killerSteamId64"]:
+            _get(k["killerSteamId64"])["wallbangKillCount"] += 1
 
-    # bomb plant / defuse counts
+    # flashAssistCount from kills_list
+    for k in (kills_list or []):
+        if k.get("flashAssist") and k.get("assisterSteamId64"):
+            _get(k["assisterSteamId64"])["flashAssistCount"] += 1
+
+    # bomb plant / defuse — official rounds only
     for r in raw.get("bomb_planted", []):
-        sid = _sid(r.get("steamid") or r.get("userid"))
+        if _rn(r) <= 0:
+            continue
+        sid = _sid(r.get("user_steamid") or r.get("steamid") or r.get("userid"))
         if sid:
             _get(sid)["bombPlantCount"] += 1
     for r in raw.get("bomb_defused", []):
-        sid = _sid(r.get("steamid") or r.get("userid"))
+        if _rn(r) <= 0:
+            continue
+        sid = _sid(r.get("user_steamid") or r.get("steamid") or r.get("userid"))
         if sid:
             _get(sid)["bombDefuseCount"] += 1
 
-    # first kill / first death per round
+    # first kill / first death per round — official rounds only
     first_kills: dict[int, str] = {}
     first_deaths: dict[int, str] = {}
     for r in sorted(raw.get("deaths", []), key=lambda x: int(x.get("tick") or 0)):
         n = _rn(r)
+        if n <= 0:
+            continue
         killer = _sid(r.get("attacker_steamid"))
         victim = _sid(r.get("user_steamid"))
         if killer and n not in first_kills:
@@ -781,11 +1177,20 @@ def _build_player_stats(
             elif count == 4: s["fourKillCount"] += 1
             elif count >= 5: s["fiveKillCount"] += 1
 
-    # damages
-    util_weapons = {"hegrenade", "molotov", "incgrenade", "flashbang", "smokegrenade", "decoy"}
+    # damages — official rounds, anti-enemy only (exclude self-damage and team damage)
+    util_weapons = {"hegrenade", "molotov", "incgrenade", "flashbang", "smokegrenade", "decoy",
+                    "inferno"}
     for r in raw.get("hurts", []):
+        n = _rn(r)
+        if n <= 0:
+            continue
         atk = _sid(r.get("attacker_steamid"))
-        if not atk:
+        vic = _sid(r.get("user_steamid"))
+        if not atk or atk == vic:
+            continue
+        atk_team = team_map.get(atk, "unknown")
+        vic_team = team_map.get(vic or "", "unknown")
+        if atk_team == "unknown" or atk_team == vic_team:
             continue
         s = _get(atk)
         dmg_h = int(r.get("dmg_health") or 0)
@@ -795,6 +1200,21 @@ def _build_player_stats(
         if str(r.get("weapon") or "").lower() in util_weapons:
             s["utilityDamage"] += dmg_h
 
+    # flash duration from blinds_list
+    for blind in (blinds_list or []):
+        flasher = blind.get("flasherSteamId64")
+        flashed = blind.get("flashedSteamId64")
+        dur = float(blind.get("durationSeconds") or 0)
+        if not flasher or not flashed:
+            continue
+        flasher_team = team_map.get(flasher)
+        flashed_team = team_map.get(flashed)
+        if flasher_team and flashed_team:
+            if flasher_team != flashed_team:
+                _get(flasher)["enemyFlashDurationSeconds"] += dur
+            else:
+                _get(flasher)["teamFlashDurationSeconds"] += dur
+
     # survived rounds (not in deaths)
     all_sids = set(stats.keys())
     all_rounds = {r["roundNumber"] for r in rounds}
@@ -802,7 +1222,7 @@ def _build_player_stats(
         s = stats[sid]
         s["_rounds_survived"] = all_rounds - s["_rounds_with_death"]
 
-    # KAST: rounds with Kill / Assist / Survived / Traded
+    # KAST
     for sid in all_sids:
         s = stats[sid]
         kast = (
@@ -813,7 +1233,7 @@ def _build_player_stats(
         )
         s["kast_rounds"] = len(kast & all_rounds)
 
-    # clutches (use pre-built clutch list)
+    # clutches
     clutches = _build_clutches(kills_list, rounds, team_map)
     for c in clutches:
         sid = c["clutcherSteamId64"]
@@ -833,25 +1253,29 @@ def _build_player_stats(
         kast_pct = round(s["kast_rounds"] / max(total_rounds, 1) * 100, 1)
         ud_per_round = round(s["utilityDamage"] / max(total_rounds, 1), 2)
 
-        # clean internal tracking fields
         row = {k: v for k, v in s.items() if not k.startswith("_")}
         row["adr"] = adr
         row["kast"] = kast_pct
         row["averageUtilityDamagePerRound"] = ud_per_round
+        # round flash durations for cleanliness
+        row["enemyFlashDurationSeconds"] = round(row["enemyFlashDurationSeconds"], 3)
+        row["teamFlashDurationSeconds"] = round(row["teamFlashDurationSeconds"], 3)
         out.append(row)
 
     return out
 
 
 def _kills_per_round_per_player(deaths: list[dict]) -> dict[str, dict[int, int]]:
-    """Returns {steamId64: {roundNumber: kill_count}}"""
+    """Returns {steamId64: {roundNumber: kill_count}} for official rounds only."""
     result: dict[str, dict[int, int]] = {}
     for r in deaths:
+        n = _rn(r)
+        if n <= 0:
+            continue
         killer = _sid(r.get("attacker_steamid"))
         victim = _sid(r.get("user_steamid"))
         if not killer or killer == victim:
             continue
-        n = _rn(r)
         result.setdefault(killer, {})
         result[killer][n] = result[killer].get(n, 0) + 1
     return result
@@ -866,7 +1290,6 @@ def _build_clutches(
     out: list[dict] = []
     rounds_by_n = {r["roundNumber"]: r for r in rounds}
 
-    # group kills by round
     kills_by_round: dict[int, list[dict]] = {}
     for k in kills:
         kills_by_round.setdefault(k["roundNumber"], []).append(k)
@@ -876,7 +1299,6 @@ def _build_clutches(
         if not rnd_kills:
             continue
 
-        # simulate alive counts: start with all known players per team
         alive: dict[str, set[str]] = {"teamA": set(), "teamB": set()}
         for sid, tk in team_map.items():
             if tk in alive:
@@ -893,10 +1315,17 @@ def _build_clutches(
             a_alive = alive["teamA"] - dead
             b_alive = alive["teamB"] - dead
 
-            # check 1vN for teamA
             if len(a_alive) == 1 and len(b_alive) >= 1:
                 sid = next(iter(a_alive))
                 if sid not in clutch_detected:
+                    # v2: clutcherSteamId64 must pass _is_valid_steamid
+                    if not _is_valid_steamid(sid):
+                        clutch_detected[sid] = True
+                        continue
+                    clutch_side = rnd["teamASide"]
+                    if not _is_valid_side(clutch_side):
+                        clutch_detected[sid] = True
+                        continue
                     clutch_detected[sid] = True
                     n_opp = len(b_alive)
                     remaining_kills = sum(
@@ -910,17 +1339,23 @@ def _build_clutches(
                         "tick": k["tick"],
                         "clutcherSteamId64": sid,
                         "clutcherTeamKey": "teamA",
-                        "clutcherSide": rnd["teamASide"],
+                        "clutcherSide": clutch_side,
                         "opponentCount": n_opp,
                         "won": won,
                         "survived": survived,
                         "killCount": remaining_kills,
                     })
 
-            # check 1vN for teamB
             if len(b_alive) == 1 and len(a_alive) >= 1:
                 sid = next(iter(b_alive))
                 if sid not in clutch_detected:
+                    if not _is_valid_steamid(sid):
+                        clutch_detected[sid] = True
+                        continue
+                    clutch_side = rnd["teamBSide"]
+                    if not _is_valid_side(clutch_side):
+                        clutch_detected[sid] = True
+                        continue
                     clutch_detected[sid] = True
                     n_opp = len(a_alive)
                     remaining_kills = sum(
@@ -934,7 +1369,7 @@ def _build_clutches(
                         "tick": k["tick"],
                         "clutcherSteamId64": sid,
                         "clutcherTeamKey": "teamB",
-                        "clutcherSide": rnd["teamBSide"],
+                        "clutcherSide": clutch_side,
                         "opponentCount": n_opp,
                         "won": won,
                         "survived": survived,
@@ -946,15 +1381,39 @@ def _build_clutches(
 
 # ── manifest ──────────────────────────────────────────────────────────────────
 
-def _build_manifest(raw: dict, dem_path: str, demo_hash: str) -> dict:
+def _build_manifest(
+    raw: dict, dem_path: str, demo_hash: str | None,
+    shots: list | None = None, positions: list | None = None,
+) -> dict:
     try:
         from . import __version__ as _ver
     except ImportError:
         _ver = "unknown"
+    # v2: version must be non-empty string; "unknown" is OK but "0.0.0" is cleaner
+    exporter_version = _ver if _ver and _ver != "unknown" else "0.0.0"
     hdr = raw.get("header", {})
+
+    files_map: dict[str, str] = {
+        "match": "match.json",
+        "players": "players.json",
+        "rounds": "rounds.json",
+        "playerStats": "player-stats.json",
+        "playerEconomies": "player-economies.json",
+        "kills": "kills.json",
+        "damages": "damages.json",
+        "blinds": "blinds.json",
+        "bombs": "bombs.json",
+        "grenades": "grenades.json",
+        "clutches": "clutches.json",
+    }
+    if shots:
+        files_map["shots"] = "shots.json"
+    if positions:
+        files_map["positions1s"] = "positions-1s.json"
+
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "exporter": {"name": EXPORTER_NAME, "version": _ver},
+        "exporter": {"name": EXPORTER_NAME, "version": exporter_version},
         "parser": {"name": "demoparser2", "version": "unknown"},
         "demo": {
             "hash": demo_hash,
@@ -963,19 +1422,5 @@ def _build_manifest(raw: dict, dem_path: str, demo_hash: str) -> dict:
         "mapName": str(hdr.get("map_name") or "unknown"),
         "tickrate": raw.get("tickrate", 64),
         "exportedAt": datetime.now(timezone.utc).isoformat(),
-        "files": {
-            "match": "match.json",
-            "players": "players.json",
-            "rounds": "rounds.json",
-            "playerStats": "player-stats.json",
-            "playerEconomies": "player-economies.json",
-            "kills": "kills.json",
-            "damages": "damages.json",
-            "blinds": "blinds.json",
-            "bombs": "bombs.json",
-            "grenades": "grenades.json",
-            "shots": "shots.json",
-            "positions1s": "positions-1s.json",
-            "clutches": "clutches.json",
-        },
+        "files": files_map,
     }

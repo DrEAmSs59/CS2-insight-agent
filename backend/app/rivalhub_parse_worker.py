@@ -119,31 +119,36 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     # ── player deaths ────────────────────────────────────────────
     # X/Y/Z are player entity props — pass via player= so demoparser2
     # prefixes them as attacker_X/Y/Z and user_X/Y/Z automatically.
+    # active_weapon gives attacker_active_weapon and user_active_weapon.
     deaths = _safe_event(p, "player_death",
         other=[
             "headshot", "noscope", "thrusmoke", "penetrated", "penetrated_objects",
             "assistedflash", "attackerblind",
             "total_rounds_played",
         ],
-        player=["X", "Y", "Z"],
+        player=["X", "Y", "Z", "active_weapon"],
     )
 
     # ── damages ──────────────────────────────────────────────────
+    # player= gives attacker_X/Y/Z and user_X/Y/Z for attacker/victim positions.
     hurts = _safe_event(p, "player_hurt", other=[
         "weapon", "hitgroup", "dmg_health", "dmg_armor", "health", "armor",
         "total_rounds_played",
-    ])
+    ], player=["X", "Y", "Z"])
 
     # ── shots ────────────────────────────────────────────────────
-    fires = _safe_event(p, "weapon_fire", other=["weapon", "total_rounds_played"])
+    # player= gives user_vel_X/Y/Z for shooter velocity.
+    fires = _safe_event(p, "weapon_fire", other=["weapon", "total_rounds_played"],
+                        player=["vel_X", "vel_Y", "vel_Z"])
 
     # ── blinds ───────────────────────────────────────────────────
     blinds = _safe_event(p, "player_blind", other=["blind_duration", "total_rounds_played"])
 
     # ── bombs ────────────────────────────────────────────────────
-    bomb_planted  = _safe_event(p, "bomb_planted",  other=["site", "total_rounds_played"])
-    bomb_defused  = _safe_event(p, "bomb_defused",  other=["site", "total_rounds_played"])
-    bomb_exploded = _safe_event(p, "bomb_exploded", other=["total_rounds_played"])
+    # player=["steamid"] adds user_steamid to identify the actor (planter/defuser)
+    bomb_planted  = _safe_event(p, "bomb_planted",  other=["site", "total_rounds_played"], player=["steamid"])
+    bomb_defused  = _safe_event(p, "bomb_defused",  other=["site", "total_rounds_played"], player=["steamid"])
+    bomb_exploded = _safe_event(p, "bomb_exploded", other=["total_rounds_played"],          player=["steamid"])
 
     # ── grenades ─────────────────────────────────────────────────
     grenade_throws = _safe_event(
@@ -223,7 +228,10 @@ def parse_for_rivalhub(dem_path: str) -> dict[str, Any]:
     if freeze_ticks:
         try:
             economy_raw = _rows(p.parse_ticks(
-                ["steamid", "team_num", "cash_spent_this_round", "current_equip_value", "start_balance"],
+                [
+                    "steamid", "team_num", "cash_spent_this_round", "current_equip_value",
+                    "start_balance", "armor", "helmet", "has_defuser",
+                ],
                 ticks=freeze_ticks,
             ))
         except BaseException:
@@ -260,19 +268,25 @@ def _build_sample_ticks(
     round_freeze_ends: list[dict],
     tickrate: int,
 ) -> list[int]:
-    """Return sorted unique sample ticks at ~1s intervals within active play."""
+    """Return sorted unique sample ticks at ~1s intervals within active play.
+
+    total_rounds_played at round_freeze_end = N-1 for round N, so store
+    at actual_round = rn + 1. total_rounds_played at round_end = N, which
+    then matches actual_round for the correct freeze tick lookup.
+    """
     freeze_by_round: dict[int, int] = {}
     for r in round_freeze_ends:
         rn = int(r.get("total_rounds_played") or 0)
         t = int(r.get("tick") or 0)
-        if rn > 0 and t > 0:
-            freeze_by_round[rn] = t
+        actual_round = rn + 1
+        if actual_round > 0 and t > 0:
+            freeze_by_round[actual_round] = t
 
     ticks: list[int] = []
     for r in round_ends:
         rn = int(r.get("total_rounds_played") or 0)
         end_t = int(r.get("tick") or 0)
-        start_t = freeze_by_round.get(rn, 0)
+        start_t = freeze_by_round.get(rn, 0)  # rn == actual_round for round_end
         if start_t <= 0 or end_t <= start_t:
             continue
         t = start_t

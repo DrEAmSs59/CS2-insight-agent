@@ -17,3 +17,14 @@ def file_md5_hex(path: Path, *, chunk_size: int = _DEFAULT_CHUNK) -> str:
                 break
             h.update(block)
     return h.hexdigest()
+
+
+def file_sha256_hex(path: Path, *, chunk_size: int = 65536) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            block = f.read(chunk_size)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()

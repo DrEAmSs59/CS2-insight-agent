@@ -27,6 +27,7 @@
 
 <p align="center">
   <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/PLAYER_GUIDE.md">使用指南</a> •
+  <a href="https://www.bilibili.com/video/BV1PcVj69ExZ/">视频教程</a> •
   <a href="#核心功能">核心功能</a> •
   <a href="#安装">快速安装</a> •
   <a href="#支持项目">支持项目</a> •
@@ -36,6 +37,10 @@
 
 
 ![screenshot](./asset/output-1080.gif)
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1PcVj69ExZ/">▶ 视频教程 BV1PcVj69ExZ</a>
+</p>
 
 <h4 align="center">成片展示</h4>
 

@@ -6,6 +6,50 @@
 
 ---
 
+## ⚠️ 使用前声明
+
+> [!CAUTION]
+> - **完全开源、永久免费**：本项目 100% 开源，不收取任何费用，也不会对核心功能设置付费门槛。
+> - **请先仔细阅读说明**：使用前请务必通读本指南，并留意程序内各功能页面的描述、提示与注意事项。
+> - **实在解决不了再联系**：遇到问题请先查阅本文 [常见问题 FAQ](#10-常见问题-faq) 及相关章节；确认已自行排查仍无法解决时，再向开发者提问或反馈。
+> - **关于回复时效**：开发者有本职工作，业余维护本项目，日常较忙，回复可能不够即时；看到消息后会尽量回复，感谢理解。
+> - **自愿支持**：程序永久免费；若觉得好用，文末可 [请我喝杯咖啡 ☕](#支持项目)，完全自愿。
+
+---
+
+## 📺 视频教程
+
+不熟悉文字说明？可以先观看 B 站视频教程：
+
+- [▶ BV1PcVj69ExZ — CS2 Insight Agent 使用教程](https://www.bilibili.com/video/BV1PcVj69ExZ/)
+
+> [!TIP]
+> 建议新手先看完视频教程，再按下方目录逐步配置 OBS、FFmpeg 等功能。
+
+---
+
+## 🎬 成片展示
+
+以下是社区 UP 主使用 CS2 Insight Agent 制作的成片示例，供参考最终效果：
+
+### 游戏片段自动剪辑
+
+- [▶ BV1ZkGi6YENF](https://www.bilibili.com/video/BV1ZkGi6YENF/)
+- [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
+
+> [!NOTE]
+> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 CS2 Insight Agent 自动剪辑。
+
+### 全链路剪辑合成
+
+- [▶ BV1KF5s6nEed](https://www.bilibili.com/video/BV1KF5s6nEed/)
+- [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
+
+> [!NOTE]
+> 上述成片的片头片尾 BGM 及游戏片段**均由 CS2 Insight Agent 剪辑合成产出**。
+
+---
+
 ## 📖 目录
 
 1. [你需要准备什么](#1-你需要准备什么)
@@ -16,9 +60,8 @@
 6. [核心玩法：解析 Demo](#6-核心玩法解析-demo)
 7. [一键自动录制](#7-一键自动录制)
 8. [合辑工作台（可选）](#8-合辑工作台可选)
-9. [成片展示](#成片展示)
-10. [Demo 库功能](#10-demo-库功能)
-11. [常见问题 FAQ](#11-常见问题-faq)
+9. [Demo 库功能](#9-demo-库功能)
+10. [常见问题 FAQ](#10-常见问题-faq)
 
 ---
 
@@ -338,29 +381,7 @@ D:\ffmpeg\bin\ffmpeg.exe
 
 ---
 
-## 🎬 成片展示
-
-以下是社区 UP 主使用 CS2 Insight Agent 制作的成片示例，供参考最终效果：
-
-### 游戏片段自动剪辑
-
-- [▶ BV1ZkGi6YENF](https://www.bilibili.com/video/BV1ZkGi6YENF/)
-- [▶ BV1TPGq67EFS](https://www.bilibili.com/video/BV1TPGq67EFS/)
-
-> [!NOTE]
-> 上述成片的片头片尾 BGM、战队 Logo 由 UP 主自行合成；**游戏片段**由 CS2 Insight Agent 自动剪辑。
-
-### 全链路剪辑合成
-
-- [▶ BV1KF5s6nEed](https://www.bilibili.com/video/BV1KF5s6nEed/)
-- [▶ BV1G198BkEHd](https://www.bilibili.com/video/BV1G198BkEHd/)
-
-> [!NOTE]
-> 上述成片的片头片尾 BGM 及游戏片段**均由 CS2 Insight Agent 剪辑合成产出**。
-
----
-
-## 10. Demo 库功能
+## 9. Demo 库功能
 
 ### 监听目录
 
@@ -375,7 +396,7 @@ D:\ffmpeg\bin\ffmpeg.exe
 
 ---
 
-## 11. 常见问题 FAQ
+## 10. 常见问题 FAQ
 
 **Q：程序打不开 / 安装后没有快捷方式？**
 
