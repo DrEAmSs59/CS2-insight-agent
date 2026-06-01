@@ -28,6 +28,7 @@ const COMPILATION_ORDER = {
  *   onFreezeToDeathDraftChange?: (next: { picked: number[] }) => void,
  *   roundMontagePickerDisabled?: boolean,
  *   suppressSummaryHeader?: boolean,
+ *   onDequeue?: (clientClipUid: string) => void,
  * }} props
  */
 export default function ClipList({
@@ -46,6 +47,7 @@ export default function ClipList({
   onFreezeToDeathDraftChange,
   roundMontagePickerDisabled = false,
   suppressSummaryHeader = false,
+  onDequeue,
 }) {
   const queued = queuedClientClipUids ?? NO_QUEUED;
   // 顺序：高光 / 下饭 / 坐牢（已在上游过滤掉）按原顺序混排，合集永远排最后
@@ -129,6 +131,11 @@ export default function ClipList({
               onToggle={onToggle}
               aiMode={aiMode}
               inQueue={Boolean(clip.client_clip_uid && queued.has(clip.client_clip_uid))}
+              onDequeue={
+                onDequeue && clip.client_clip_uid
+                  ? () => onDequeue(clip.client_clip_uid)
+                  : undefined
+              }
               matchTotalRounds={matchTotalRounds}
               freezeToDeathDraft={freezeToDeathDraft}
               onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}
