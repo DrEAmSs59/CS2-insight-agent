@@ -1869,6 +1869,7 @@ async def batch_demo_summary(body: BatchSummaryBody):
         row = await demo_db.get_demo_list_item(demo_id)
         if not row:
             raise ValueError(f"Demo {demo_id} 不存在")
+        row = dict(row)
         dem_path = row.get("path", "")
         async with sem:
             players = await asyncio.to_thread(get_player_list_isolated, dem_path)
@@ -1880,6 +1881,7 @@ async def batch_demo_summary(body: BatchSummaryBody):
             "duration_mins": row.get("duration_mins"),
             "match_date": row.get("match_date"),
         }
+        row.pop("players", None)
         return {**row, "players": players, "match_meta": match_meta}
 
     results = await asyncio.gather(
