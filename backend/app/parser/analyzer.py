@@ -153,6 +153,97 @@ class DemoAnalyzer:
         except Exception:
             return pd.DataFrame()
 
+    def _parse_shared_events(self, match_start_tick: int) -> dict:
+        """
+        Parse all player-independent events once. Returns a dict with keys:
+          events, fire_df, hurt_df, equip_df, pickup_df,
+          planted_df, defused_df, bomb_exploded_df, begindefuse_df,
+          nade_batch, re_df_cached
+        All DataFrames are already warmup-filtered and name-stripped.
+        """
+        def _filter_ms(df: pd.DataFrame) -> pd.DataFrame:
+            if df is None or df.empty or "tick" not in df.columns:
+                return df
+            if match_start_tick <= 0:
+                return df
+            return df.loc[
+                pd.to_numeric(df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
+            ].copy()
+
+        _NAME_COLS = (
+            "attacker_name", "user_name", "player_name", "assister_name",
+            "defuser", "defuser_name",
+        )
+
+        # Bomb events batch
+        _bomb_batch = safe_parse_events_batch(
+            self.parser,
+            ["bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse"],
+            other=["site", "total_rounds_played"],
+            player=["steamid", "X", "Y", "Z", "last_place_name"],
+        )
+        planted_df    = _filter_ms(_bomb_batch["bomb_planted"])
+        defused_df    = _filter_ms(_bomb_batch["bomb_defused"])
+        bomb_exploded = _filter_ms(_bomb_batch["bomb_exploded"])
+        begindefuse   = _filter_ms(_bomb_batch["bomb_begindefuse"])
+
+        # Equipment batch
+        _equip_batch = safe_parse_events_batch(
+            self.parser,
+            ["item_equip", "item_pickup"],
+            player=["steamid", "name", "team_num"],
+            other=["total_rounds_played"],
+        )
+        equip_df  = _filter_ms(_equip_batch["item_equip"])
+        pickup_df = _filter_ms(_equip_batch["item_pickup"])
+
+        # player_death (largest event)
+        _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
+        events = _filter_ms(_to_pandas_df(self.parser.parse_event("player_death", other=_death_other)))
+
+        # weapon_fire + player_hurt
+        fire_df  = _filter_ms(self._safe_parse_event("weapon_fire"))
+        hurt_df  = _filter_ms(self._safe_parse_event("player_hurt"))
+
+        # Grenade batch
+        nade_batch = safe_parse_events_batch(
+            self.parser,
+            ["hegrenade_detonate", "inferno_startburn", "molotov_detonate"],
+        )
+
+        # round_end (cache for reuse)
+        re_df = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
+        if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
+            re_df = re_df.loc[
+                pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
+            ].copy()
+
+        # Name strip on all relevant DataFrames
+        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df):
+            if _df is None or _df.empty:
+                continue
+            for _col in _NAME_COLS:
+                if _col in _df.columns:
+                    _df[_col] = _df[_col].astype(str).str.strip()
+
+        # pickup_df user_name strip (needed separately)
+        if not pickup_df.empty and "user_name" in pickup_df.columns:
+            pickup_df["user_name"] = pickup_df["user_name"].astype(str).str.strip()
+
+        return {
+            "events":           events,
+            "fire_df":          fire_df,
+            "hurt_df":          hurt_df,
+            "equip_df":         equip_df,
+            "pickup_df":        pickup_df,
+            "planted_df":       planted_df,
+            "defused_df":       defused_df,
+            "bomb_exploded_df": bomb_exploded,
+            "begindefuse_df":   begindefuse,
+            "nade_batch":       nade_batch,
+            "re_df_cached":     re_df,
+        }
+
     def analyze(
         self,
         target_player: str,
@@ -181,78 +272,20 @@ class DemoAnalyzer:
                 elif opp_after > opp_before:
                     round_result_map[rnd] = False
 
-        # ── P0 批量解析：炸弹事件（1 次扫描替换 4 次）──
-        _bomb_batch = safe_parse_events_batch(
-            self.parser,
-            ["bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse"],
-            other=["site", "total_rounds_played"],
-            player=["steamid", "X", "Y", "Z", "last_place_name"],
-        )
-        planted_df = _bomb_batch["bomb_planted"]
-        defused_df = _bomb_batch["bomb_defused"]
-        _bomb_exploded_df = _bomb_batch["bomb_exploded"]
-        _begindefuse_df = _bomb_batch["bomb_begindefuse"]
-
-        # ── P0 批量解析：装备事件（1 次扫描替换 2 次）──
-        _equip_batch = safe_parse_events_batch(
-            self.parser,
-            ["item_equip", "item_pickup"],
-            player=["steamid", "name", "team_num"],
-            other=["total_rounds_played"],
-        )
-        equip_df = _equip_batch["item_equip"]
-        pickup_df = _equip_batch["item_pickup"]
-
-        # ── player_death（字段最大，单独解析）──
-        _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
-        events = _to_pandas_df(self.parser.parse_event("player_death", other=_death_other))
-
-        # ── weapon_fire + player_hurt（单独解析）──
-        fire_df = self._safe_parse_event("weapon_fire")
-        hurt_df = self._safe_parse_event("player_hurt")
-
-        # ── P0 批量解析：手雷爆点（1 次扫描替换 3 次）──
-        _nade_batch = safe_parse_events_batch(
-            self.parser,
-            ["hegrenade_detonate", "inferno_startburn", "molotov_detonate"],
-        )
-
-        tcol = "tick"
-        if match_start_tick > 0:
-            for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df):
-                if _df is None or _df.empty or tcol not in _df.columns:
-                    continue
-                mask = pd.to_numeric(_df[tcol], errors="coerce").fillna(0).astype(int) >= match_start_tick
-                _df = _df.loc[mask].copy()
-                # reassign is needed since DataFrames are immutable slices
-            # Apply in-place via reindex approach
-            def _filter_ms(df: pd.DataFrame) -> pd.DataFrame:
-                if df is None or df.empty or tcol not in df.columns:
-                    return df
-                if match_start_tick <= 0:
-                    return df
-                return df.loc[
-                    pd.to_numeric(df[tcol], errors="coerce").fillna(0).astype(int) >= match_start_tick
-                ].copy()
-
-            events = _filter_ms(events)
-            equip_df = _filter_ms(equip_df)
-            fire_df = _filter_ms(fire_df)
-            hurt_df = _filter_ms(hurt_df)
-            planted_df = _filter_ms(planted_df)
-            defused_df = _filter_ms(defused_df)
+        _shared = self._parse_shared_events(match_start_tick)
+        events            = _shared["events"]
+        fire_df           = _shared["fire_df"]
+        hurt_df           = _shared["hurt_df"]
+        equip_df          = _shared["equip_df"]
+        pickup_df         = _shared["pickup_df"]
+        planted_df        = _shared["planted_df"]
+        defused_df        = _shared["defused_df"]
+        _bomb_exploded_df = _shared["bomb_exploded_df"]
+        _begindefuse_df   = _shared["begindefuse_df"]
+        _nade_batch       = _shared["nade_batch"]
+        _re_df_cached     = _shared["re_df_cached"]
 
         target_player = str(target_player or "").strip()
-        _NAME_COLS = (
-            "attacker_name", "user_name", "player_name", "assister_name",
-            "defuser", "defuser_name",
-        )
-        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df):
-            if _df is None or _df.empty:
-                continue
-            for _col in _NAME_COLS:
-                if _col in _df.columns:
-                    _df[_col] = _df[_col].astype(str).str.strip()
 
         _fire_index_full = build_fire_index(target_player, fire_df)
 
@@ -508,14 +541,7 @@ class DemoAnalyzer:
                 if _bt > 0 and _rn > 0 and _rn not in bomb_explode_tick_map:
                     bomb_explode_tick_map[_rn] = _bt
 
-        # round_end_tick_map — 解析一次，复用于后续所有 round_end 需求
-        _re_df_cached = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
-        if match_start_tick > 0 and not _re_df_cached.empty and "tick" in _re_df_cached.columns:
-            _re_df_cached = _re_df_cached.loc[
-                pd.to_numeric(_re_df_cached["tick"], errors="coerce").fillna(0).astype(int)
-                >= match_start_tick
-            ].copy()
-
+        # round_end_tick_map — 复用 _parse_shared_events 缓存的 round_end DataFrame
         round_end_tick_map: dict[int, int] = {}
         if not _re_df_cached.empty and "tick" in _re_df_cached.columns:
             _seq = 0
