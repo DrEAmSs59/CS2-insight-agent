@@ -120,3 +120,21 @@ def get_demo_match_summary_isolated(dem_path: str) -> dict:
 def extract_radar_timeline_isolated(**kwargs: Any) -> Any:
     """parse_ticks 雷达时间线（子进程隔离，避免 demoparser 原生崩溃拖垮服务）。"""
     return run_parse_worker("radar_timeline", **kwargs)
+
+
+def analyze_multi_isolated(
+    dem_path: str,
+    target_players: list[str],
+    freeze_to_death_rounds: Optional[list[int]] = None,
+) -> dict:
+    """
+    Run multi-player shared parsing in an isolated subprocess.
+    Returns {player_name: ParseResult.to_dict()} for all players.
+    ~10x fewer demo file scans vs calling analyze_demo_isolated per player.
+    """
+    return run_parse_worker(
+        "analyze_batch",
+        dem_path=dem_path,
+        target_players=target_players,
+        freeze_to_death_rounds=freeze_to_death_rounds,
+    )
