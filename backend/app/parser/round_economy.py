@@ -18,35 +18,29 @@ from .parse_utils import (
 from .tag_constants import TICK_RATE, _EXTRA_EVENT_FIELDS
 
 
-def build_round_economy(
+def build_round_economy_shared(
     parser: DemoParser,
-    target_player: str,
     match_start_tick: int = 0,
-) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int]]:
+) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int], pd.DataFrame]:
     """
-    解析 round_freeze_end，汇总 Team 2 / Team 3 存活玩家 current_equip_value。
+    Player-independent part of round economy — call once per demo.
 
-    返回四元组:
-        economy_map               {round_num: {2: equip, 3: equip}}
-        target_team_map           {round_num: team_num}
-        round_freeze_end_ticks    {round_num: freeze_end_tick}
-        round_freeze_start_ticks  {round_num: freeze_start_tick}
+    Returns (economy_map, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, economy_ticks_df).
+    Pass economy_ticks_df + tick_to_round to extract_target_team_map() per player.
     """
-    economy_map: dict[int, dict[int, int]] = {}
-    target_team_map: dict[int, int] = {}
-    round_freeze_end_ticks: dict[int, int] = {}
-    round_freeze_start_ticks: dict[int, int] = {}
+    _empty: tuple = ({}, {}, {}, {}, pd.DataFrame())
     fr = _safe_parse_event(parser, "round_freeze_end", other=list(_EXTRA_EVENT_FIELDS))
     if fr.shape[0] == 0 or "tick" not in fr.columns:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
+        return _empty
     if match_start_tick > 0:
         fr = fr.loc[pd.to_numeric(fr["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
     if fr.shape[0] == 0:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
+        return _empty
     trc = "total_rounds_played" if "total_rounds_played" in fr.columns else None
     if trc is None:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
+        return _empty
 
+    round_freeze_end_ticks: dict[int, int] = {}
     tick_to_round: dict[int, int] = {}
     for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
         tick = _int(row.get("tick"))
@@ -57,6 +51,7 @@ def build_round_economy(
         if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
             round_freeze_end_ticks[rn_here] = tick
 
+    round_freeze_start_ticks: dict[int, int] = {}
     try:
         rs_df = _safe_parse_event(parser, "round_start")
         if not rs_df.empty and "tick" in rs_df.columns:
@@ -79,33 +74,30 @@ def build_round_economy(
 
     ticks = sorted(tick_to_round.keys())
     if not ticks:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
+        return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
     try:
         raw = parser.parse_ticks(
             ["team_num", "current_equip_value", "is_alive", "name"],
             ticks=ticks,
         )
-        pdf = _to_pandas_df(raw)
+        economy_ticks_df = _to_pandas_df(raw)
     except Exception:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
-    if pdf.empty or "tick" not in pdf.columns:
-        return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
+        return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
-    tp = str(target_player or "").strip().lower()
-    name_col = "name" if "name" in pdf.columns else None
+    if economy_ticks_df.empty or "tick" not in economy_ticks_df.columns:
+        return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
-    for tick, grp in pdf.groupby("tick", sort=False):
+    economy_map: dict[int, dict[int, int]] = {}
+    for tick, grp in economy_ticks_df.groupby("tick", sort=False):
         tick_i = int(tick)
         rn = tick_to_round.get(tick_i)
         if rn is None:
             continue
-
         if "is_alive" in grp.columns:
             alive = grp[grp["is_alive"].astype(bool)]
         else:
             alive = grp
-
         sums: dict[int, int] = {2: 0, 3: 0}
         if "team_num" in alive.columns and "current_equip_value" in alive.columns:
             for _, r in alive.iterrows():
@@ -120,26 +112,65 @@ def build_round_economy(
                 except (TypeError, ValueError):
                     continue
                 sums[tm] += v
-
         economy_map[rn] = sums
 
-        if name_col and tp:
-            search_groups = [alive, grp] if (
-                "is_alive" in grp.columns and len(alive) < len(grp)
-            ) else [alive]
-            for sg in search_groups:
-                if rn in target_team_map:
-                    break
-                for _, r in sg.iterrows():
-                    nm = str(r.get(name_col) or "").strip().lower()
-                    if nm != tp:
-                        continue
-                    try:
-                        target_team_map[rn] = int(float(r["team_num"]))
-                    except (TypeError, ValueError):
-                        pass
-                    break
+    return economy_map, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, economy_ticks_df
 
+
+def extract_target_team_map(
+    economy_ticks_df: pd.DataFrame,
+    tick_to_round: dict[int, int],
+    target_player: str,
+) -> dict[int, int]:
+    """Per-player: which team the player was on each round, derived from the shared economy_ticks_df."""
+    target_team_map: dict[int, int] = {}
+    if economy_ticks_df.empty or "tick" not in economy_ticks_df.columns:
+        return target_team_map
+    tp = str(target_player or "").strip().lower()
+    if not tp:
+        return target_team_map
+    name_col = "name" if "name" in economy_ticks_df.columns else None
+    if name_col is None:
+        return target_team_map
+
+    for tick, grp in economy_ticks_df.groupby("tick", sort=False):
+        tick_i = int(tick)
+        rn = tick_to_round.get(tick_i)
+        if rn is None or rn in target_team_map:
+            continue
+        if "is_alive" in grp.columns:
+            alive = grp[grp["is_alive"].astype(bool)]
+        else:
+            alive = grp
+        search_groups = [alive, grp] if (
+            "is_alive" in grp.columns and len(alive) < len(grp)
+        ) else [alive]
+        for sg in search_groups:
+            if rn in target_team_map:
+                break
+            for _, r in sg.iterrows():
+                nm = str(r.get(name_col) or "").strip().lower()
+                if nm != tp:
+                    continue
+                try:
+                    target_team_map[rn] = int(float(r["team_num"]))
+                except (TypeError, ValueError):
+                    pass
+                break
+
+    return target_team_map
+
+
+def build_round_economy(
+    parser: DemoParser,
+    target_player: str,
+    match_start_tick: int = 0,
+) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int]]:
+    """Kept for callers outside analyze_multi_players. Delegates to the two shared helpers."""
+    economy_map, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, economy_ticks_df = (
+        build_round_economy_shared(parser, match_start_tick)
+    )
+    target_team_map = extract_target_team_map(economy_ticks_df, tick_to_round, target_player)
     return economy_map, target_team_map, round_freeze_end_ticks, round_freeze_start_ticks
 
 
@@ -186,16 +217,23 @@ def build_round_scores_team_based(
     parser: DemoParser,
     round_target_team_map: dict[int, int],
     match_start_tick: int = 0,
+    *,
+    re_df: Optional[pd.DataFrame] = None,
 ) -> dict[int, tuple[int, int]]:
     """
     按**队伍身份**（而非 T/CT 阵营角色）累计胜场。
     返回 {round_num: (own_wins_before_round, opp_wins_before_round)}
+
+    re_df: 已过滤 warmup 的 round_end DataFrame，有则直接用，省一次 parse_event。
     """
-    re = _safe_parse_event(parser, "round_end", other=list(_EXTRA_EVENT_FIELDS))
-    if match_start_tick > 0 and not re.empty and "tick" in re.columns:
-        re = re.loc[
-            pd.to_numeric(re["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
-        ]
+    if re_df is not None:
+        re = re_df
+    else:
+        re = _safe_parse_event(parser, "round_end", other=list(_EXTRA_EVENT_FIELDS))
+        if match_start_tick > 0 and not re.empty and "tick" in re.columns:
+            re = re.loc[
+                pd.to_numeric(re["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
+            ]
     if re.empty or "winner" not in re.columns:
         return {}
     if "tick" in re.columns:

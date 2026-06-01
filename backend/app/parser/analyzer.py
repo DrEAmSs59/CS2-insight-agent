@@ -30,7 +30,8 @@ from .parse_utils import (
     _count_team_wins_from_round_end_df, _infer_total_rounds_from_round_end,
 )
 from .round_economy import (
-    build_round_economy, build_round_scores, build_round_scores_team_based,
+    build_round_economy, build_round_economy_shared, extract_target_team_map,
+    build_round_scores, build_round_scores_team_based,
     _scoreline_by_starting_roster, _extract_team_names_from_demo,
 )
 from .player_roster import (
@@ -219,6 +220,24 @@ class DemoAnalyzer:
                 pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
             ].copy()
 
+        # player_blind (shared across all players; per-player filter happens in second pass)
+        blind_df = self._safe_parse_event("player_blind")
+        if not blind_df.empty and "user_name" in blind_df.columns:
+            blind_df["user_name"] = blind_df["user_name"].astype(str).str.strip()
+        if match_start_tick > 0 and not blind_df.empty and "tick" in blind_df.columns:
+            blind_df = blind_df.loc[
+                pd.to_numeric(blind_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
+            ].copy()
+
+        # Round economy — parse once: freeze_end + round_start events + parse_ticks at freeze ticks
+        (
+            economy_map_shared,
+            round_freeze_end_ticks_shared,
+            round_freeze_start_ticks_shared,
+            tick_to_round_shared,
+            economy_ticks_df,
+        ) = build_round_economy_shared(self.parser, match_start_tick)
+
         # Name strip on all relevant DataFrames
         for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
             if _df is None or _df.empty:
@@ -232,17 +251,23 @@ class DemoAnalyzer:
             pickup_df["user_name"] = pickup_df["user_name"].astype(str).str.strip()
 
         return {
-            "events":           events,
-            "fire_df":          fire_df,
-            "hurt_df":          hurt_df,
-            "equip_df":         equip_df,
-            "pickup_df":        pickup_df,
-            "planted_df":       planted_df,
-            "defused_df":       defused_df,
-            "bomb_exploded_df": bomb_exploded,
-            "begindefuse_df":   begindefuse,
-            "nade_batch":       nade_batch,
-            "re_df_cached":     re_df,
+            "events":                        events,
+            "fire_df":                       fire_df,
+            "hurt_df":                       hurt_df,
+            "equip_df":                      equip_df,
+            "pickup_df":                     pickup_df,
+            "planted_df":                    planted_df,
+            "defused_df":                    defused_df,
+            "bomb_exploded_df":              bomb_exploded,
+            "begindefuse_df":               begindefuse,
+            "nade_batch":                    nade_batch,
+            "re_df_cached":                  re_df,
+            "blind_df":                      blind_df,
+            "economy_map_shared":            economy_map_shared,
+            "round_freeze_end_ticks_shared": round_freeze_end_ticks_shared,
+            "round_freeze_start_ticks_shared": round_freeze_start_ticks_shared,
+            "tick_to_round_shared":          tick_to_round_shared,
+            "economy_ticks_df":              economy_ticks_df,
         }
 
     def analyze_multi_players(
@@ -280,8 +305,10 @@ class DemoAnalyzer:
         per_player_ctx: dict[str, dict] = {}
 
         # Build AWP indexes once — keyed by player name, shared across all players
-        fire_df   = _shared["fire_df"]
-        pickup_df = _shared["pickup_df"]
+        fire_df    = _shared["fire_df"]
+        pickup_df  = _shared["pickup_df"]
+        planted_df = _shared["planted_df"]
+        defused_df = _shared["defused_df"]
 
         _awp_fire_index: dict[str, list[int]] = {}
         if not fire_df.empty and "user_name" in fire_df.columns and "weapon" in fire_df.columns:
@@ -304,15 +331,16 @@ class DemoAnalyzer:
         c4_world_cluster_keys = _world_self_kill_cluster_c4_surrogate_keys(events, match_start_tick)
 
         for target_player in players:
-            (
-                round_economy_map,
-                round_target_team_map,
-                round_freeze_end_ticks,
-                round_freeze_start_ticks,
-            ) = build_round_economy(self.parser, target_player, match_start_tick)
+            round_economy_map      = _shared["economy_map_shared"]
+            round_freeze_end_ticks = _shared["round_freeze_end_ticks_shared"]
+            round_freeze_start_ticks = _shared["round_freeze_start_ticks_shared"]
+            round_target_team_map  = extract_target_team_map(
+                _shared["economy_ticks_df"], _shared["tick_to_round_shared"], target_player,
+            )
 
             round_team_score_map = build_round_scores_team_based(
                 self.parser, round_target_team_map, match_start_tick,
+                re_df=_shared["re_df_cached"],
             )
             round_result_map: dict[int, bool] = {}
             for rnd, (own_before, opp_before) in round_team_score_map.items():
@@ -504,6 +532,7 @@ class DemoAnalyzer:
                 begindefuse_df=_shared["begindefuse_df"],
                 nade_batch=_shared["nade_batch"],
                 re_df_cached=_shared["re_df_cached"],
+                blind_df=_shared["blind_df"],
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
 
@@ -537,6 +566,7 @@ class DemoAnalyzer:
         begindefuse_df: "pd.DataFrame",
         nade_batch: dict,
         re_df_cached: "pd.DataFrame",
+        blind_df: "Optional[pd.DataFrame]" = None,
         freeze_to_death_rounds: "Optional[list[int]]" = None,
     ) -> "ParseResult":
         bomb_highlights = analyze_bomb_defuse_highlights(
@@ -548,18 +578,12 @@ class DemoAnalyzer:
 
         # ── 额外辅助事件 ──
 
-        # player_blind
+        # player_blind — use pre-parsed shared DataFrame (already warmup-filtered, user_name stripped)
         flash_on_target_index: list[tuple[int, float]] = []
         try:
-            blind_df = self._safe_parse_event("player_blind")
-            if not blind_df.empty and "user_name" in blind_df.columns:
-                blind_df["user_name"] = blind_df["user_name"].astype(str).str.strip()
-                bdf = blind_df.loc[blind_df["user_name"] == target_player]
-                if match_start_tick > 0 and "tick" in bdf.columns:
-                    bdf = bdf.loc[
-                        pd.to_numeric(bdf["tick"], errors="coerce").fillna(0).astype(int)
-                        >= match_start_tick
-                    ]
+            _bdf_src = blind_df if (blind_df is not None and not blind_df.empty) else pd.DataFrame()
+            if not _bdf_src.empty and "user_name" in _bdf_src.columns:
+                bdf = _bdf_src.loc[_bdf_src["user_name"] == target_player]
                 dur_col = None
                 for _c in ("blind_duration", "duration"):
                     if _c in bdf.columns:

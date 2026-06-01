@@ -755,13 +755,14 @@ export default function App() {
       const { data } = await API.post("/demos/batch-summary", { ids });
       await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
     } catch (e) {
-      setLibraryLoadingOverlay(false);
       const failed = e.response?.data?.detail?.failed;
       if (Array.isArray(failed) && failed.length) {
         setBatchLoadError({ open: true, failed });
       } else {
         setProgressText(`载入选中失败: ${e.response?.data?.detail?.message || e.response?.data?.detail || e.message}`);
       }
+    } finally {
+      setLibraryLoadingOverlay(false);
     }
   }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText]);
 
