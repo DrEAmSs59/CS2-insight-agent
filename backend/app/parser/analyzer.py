@@ -324,13 +324,6 @@ class DemoAnalyzer:
                     elif opp_after > opp_before:
                         round_result_map[rnd] = False
 
-            events   = _shared["events"]
-            fire_df  = _shared["fire_df"]
-            equip_df = _shared["equip_df"]
-            pickup_df = _shared["pickup_df"]
-            planted_df = _shared["planted_df"]
-            defused_df = _shared["defused_df"]
-
             _fire_index_full = build_fire_index(target_player, fire_df)
 
             # Extract kills/deaths for this player from shared events DataFrame
