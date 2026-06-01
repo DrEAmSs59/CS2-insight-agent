@@ -210,6 +210,7 @@ class DemoAnalyzer:
             self.parser,
             ["hegrenade_detonate", "inferno_startburn", "molotov_detonate"],
         )
+        nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
         # round_end (cache for reuse)
         re_df = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
@@ -219,7 +220,7 @@ class DemoAnalyzer:
             ].copy()
 
         # Name strip on all relevant DataFrames
-        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df):
+        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
             if _df is None or _df.empty:
                 continue
             for _col in _NAME_COLS:
@@ -511,11 +512,6 @@ class DemoAnalyzer:
         for _ev, _gdf in _nade_batch.items():
             if _gdf.empty:
                 continue
-            if match_start_tick > 0 and "tick" in _gdf.columns:
-                _gdf = _gdf.loc[
-                    pd.to_numeric(_gdf["tick"], errors="coerce").fillna(0).astype(int)
-                    >= match_start_tick
-                ]
             xcol = "x" if "x" in _gdf.columns else ("X" if "X" in _gdf.columns else None)
             ycol = "y" if "y" in _gdf.columns else ("Y" if "Y" in _gdf.columns else None)
             if xcol is None or ycol is None:
