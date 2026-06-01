@@ -1,3 +1,5 @@
+import { X } from "lucide-react";
+
 /**
  * @param {{
  *   kills: number,
@@ -11,6 +13,7 @@
  *   onAddRound?: () => void,
  *   onAddKills?: () => void,
  *   onAddDeaths?: () => void,
+ *   onRemoveRound?: () => void,
  * }} props
  */
 export default function RoundSummaryPanel({
@@ -25,6 +28,7 @@ export default function RoundSummaryPanel({
   onAddRound,
   onAddKills,
   onAddDeaths,
+  onRemoveRound,
 }) {
   const showKillsBtn = Array.isArray(killsOnly) && killsOnly.length > 0;
   const showDeathsBtn = Array.isArray(deathsOnly) && deathsOnly.length > 0;
@@ -73,14 +77,24 @@ export default function RoundSummaryPanel({
       ) : null}
 
       <div className="mt-auto flex w-full flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={onAddRound}
-          disabled={!onAddRound || roundQueued}
-          className="w-full rounded-md border border-cs2-border bg-cs2-bg-input/50 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-35"
-        >
-          {roundQueued ? "整回合已入队" : "加入本回合"}
-        </button>
+        {roundQueued && onRemoveRound ? (
+          <button
+            type="button"
+            onClick={onRemoveRound}
+            className="flex w-full items-center justify-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 py-2 text-[12px] font-semibold text-cs2-rose-on-surface transition-colors hover:border-rose-400/70"
+          >
+            整回合已入队<X className="h-3 w-3" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAddRound}
+            disabled={!onAddRound || roundQueued}
+            className="w-full rounded-md border border-cs2-border bg-cs2-bg-input/50 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-35"
+          >
+            {roundQueued ? "整回合已入队" : "加入本回合"}
+          </button>
+        )}
         {showKillsBtn ? (
           <button
             type="button"
