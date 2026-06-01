@@ -1823,6 +1823,10 @@ class BatchResolvePlayersBody(BaseModel):
     manual_lines: Optional[list[str]] = None
 
 
+class BatchSummaryBody(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=100)
+
+
 @app.post("/api/demos/batch-resolve-players")
 async def batch_resolve_players(body: BatchResolvePlayersBody):
     if body.mode == "none":
@@ -1852,6 +1856,57 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
         names = [str(r.get("name") or "").strip() for r in matched if r.get("name")]
         resolved[str(did)] = names
     return {"resolved": resolved}
+
+
+@app.post("/api/demos/batch-summary")
+async def batch_demo_summary(body: BatchSummaryBody):
+    """批量加载 Demo 元数据 + 玩家列表，并发数上限 5。任一失败返回 400。"""
+    from .demo_parse_isolation import get_player_list_isolated
+
+    sem = asyncio.Semaphore(5)
+
+    async def fetch_one(demo_id: int) -> dict:
+        row = await demo_db.get_demo_list_item(demo_id)
+        if not row:
+            raise ValueError(f"Demo {demo_id} 不存在")
+        dem_path = row.get("path", "")
+        async with sem:
+            players = await asyncio.to_thread(get_player_list_isolated, dem_path)
+        match_meta = {
+            "map_name": row.get("map_name"),
+            "total_rounds": row.get("total_rounds"),
+            "team_a_score": row.get("team_a_score"),
+            "team_b_score": row.get("team_b_score"),
+            "duration_mins": row.get("duration_mins"),
+            "match_date": row.get("match_date"),
+        }
+        return {**row, "players": players, "match_meta": match_meta}
+
+    results = await asyncio.gather(
+        *[fetch_one(did) for did in body.ids],
+        return_exceptions=True,
+    )
+
+    errors: list[dict] = []
+    items: list[dict] = []
+    for did, res in zip(body.ids, results):
+        if isinstance(res, Exception):
+            try:
+                row = await demo_db.get_demo_list_item(did)
+                fname = (row.get("display_name") and str(row["display_name"]).strip()) or row.get("filename") or str(did)
+            except Exception:
+                fname = str(did)
+            errors.append({"id": did, "filename": fname, "reason": str(res)})
+        else:
+            items.append(res)
+
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "部分 Demo 加载失败", "failed": errors},
+        )
+
+    return {"items": items}
 
 
 class DemoDisplayNamePatch(BaseModel):
