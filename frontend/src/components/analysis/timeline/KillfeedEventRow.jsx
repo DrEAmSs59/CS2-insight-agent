@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
 
 function assisterDisplayName(raw) {
@@ -48,6 +49,7 @@ function modifierBadges(mods, flashAssistLine) {
  *   focusedPlayer?: string,
  *   queued?: boolean,
  *   onRowClick?: () => void,
+ *   onRowRemove?: () => void,
  *   roundNumber?: number,
  *   variant?: "default" | "timeline",
  * }} props
@@ -57,6 +59,7 @@ export default function KillfeedEventRow({
   focusedPlayer = "",
   queued = false,
   onRowClick,
+  onRowRemove,
   roundNumber,
   variant = "default",
 }) {
@@ -171,9 +174,20 @@ export default function KillfeedEventRow({
           {vic}
         </span>
         {queued ? (
-          <span className="ml-auto shrink-0 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent">
-            已入队
-          </span>
+          onRowRemove ? (
+            <button
+              type="button"
+              aria-label="从队列移除"
+              onClick={(e) => { e.stopPropagation(); onRowRemove(); }}
+              className="ml-auto shrink-0 flex items-center gap-0.5 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent transition-colors hover:border-rose-400/55 hover:text-rose-400"
+            >
+              已入队<X className="h-2.5 w-2.5" />
+            </button>
+          ) : (
+            <span className="ml-auto shrink-0 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent">
+              已入队
+            </span>
+          )
         ) : null}
       </div>
       {flashAssistLine ? (
