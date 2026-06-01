@@ -199,6 +199,7 @@ export default function AnalysisPage() {
                 onToggle={s.handleToggleClip}
                 aiMode={s.aiMode}
                 queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                onDequeue={s.handleDequeueClip}
                 playerTabs={s.parsedPlayerNames}
                 activePlayerTab={s.currentActivePlayer}
                 onPlayerTabChange={(name) =>
@@ -259,6 +260,8 @@ export default function AnalysisPage() {
                   onAddEvent={s.handleAddTimelineEventToQueue}
                   onAddRound={s.handleAddTimelineRoundToQueue}
                   onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue}
+                  onRemoveEvent={s.handleRemoveTimelineEventFromQueue}
+                  onRemoveRound={s.handleRemoveTimelineRoundFromQueue}
                   suppressSummaryHeader
                 />
               </div>
