@@ -279,6 +279,30 @@ class DemoAnalyzer:
         all_spatial_ticks: set[int] = set()
         per_player_ctx: dict[str, dict] = {}
 
+        # Build AWP indexes once — keyed by player name, shared across all players
+        fire_df   = _shared["fire_df"]
+        pickup_df = _shared["pickup_df"]
+
+        _awp_fire_index: dict[str, list[int]] = {}
+        if not fire_df.empty and "user_name" in fire_df.columns and "weapon" in fire_df.columns:
+            for _, _fr in fire_df.iterrows():
+                _fp = str(_fr.get("user_name", "")).strip()
+                _fw = _normalize_item(str(_fr.get("weapon", "") or ""))
+                if _fw == "awp":
+                    _awp_fire_index.setdefault(_fp, []).append(_int(_fr["tick"]))
+
+        _awp_pickup_index: dict[str, list[int]] = {}
+        if not pickup_df.empty and "user_name" in pickup_df.columns and "item" in pickup_df.columns:
+            for _, _pk in pickup_df.iterrows():
+                _pp = str(_pk.get("user_name", "")).strip()
+                _pi = _normalize_item(str(_pk.get("item", "") or ""))
+                if _pi == "awp":
+                    _awp_pickup_index.setdefault(_pp, []).append(_int(_pk["tick"]))
+
+        # C4 world cluster keys — invariant across players
+        events = _shared["events"]
+        c4_world_cluster_keys = _world_self_kill_cluster_c4_surrogate_keys(events, match_start_tick)
+
         for target_player in players:
             (
                 round_economy_map,
@@ -306,23 +330,6 @@ class DemoAnalyzer:
             pickup_df = _shared["pickup_df"]
             planted_df = _shared["planted_df"]
             defused_df = _shared["defused_df"]
-
-            # Build per-player AWP fire index from shared DataFrames
-            _awp_fire_index: dict[str, list[int]] = {}
-            if not fire_df.empty and "user_name" in fire_df.columns and "weapon" in fire_df.columns:
-                for _, _fr in fire_df.iterrows():
-                    _fp = str(_fr.get("user_name", "")).strip()
-                    _fw = _normalize_item(str(_fr.get("weapon", "") or ""))
-                    if _fw == "awp":
-                        _awp_fire_index.setdefault(_fp, []).append(_int(_fr["tick"]))
-
-            _awp_pickup_index: dict[str, list[int]] = {}
-            if not pickup_df.empty and "user_name" in pickup_df.columns and "item" in pickup_df.columns:
-                for _, _pk in pickup_df.iterrows():
-                    _pp = str(_pk.get("user_name", "")).strip()
-                    _pi = _normalize_item(str(_pk.get("item", "") or ""))
-                    if _pi == "awp":
-                        _awp_pickup_index.setdefault(_pp, []).append(_int(_pk["tick"]))
 
             _fire_index_full = build_fire_index(target_player, fire_df)
 
@@ -387,7 +394,6 @@ class DemoAnalyzer:
                     })
 
             # C4 world cluster fixup
-            c4_world_cluster_keys = _world_self_kill_cluster_c4_surrogate_keys(events, match_start_tick)
             _apply_c4_world_cluster_weapon_fixup(death_records, c4_world_cluster_keys)
 
             # Bomb round correction
@@ -546,11 +552,6 @@ class DemoAnalyzer:
         )
 
         enrich_kill_action_tags_spatial(round_kills, spatial_cache, target_player)
-
-        round_target_kill_ticks: dict[int, list[int]] = {
-            rn: sorted({_int(k["tick"]) for k in ks})
-            for rn, ks in round_kills.items()
-        }
 
         # ── 额外辅助事件 ──
 
