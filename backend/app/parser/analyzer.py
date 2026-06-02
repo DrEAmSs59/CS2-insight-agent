@@ -225,11 +225,11 @@ class DemoAnalyzer:
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
         # round_end + player_blind — 合并为单次 demo 扫描
-        # player_blind 没有 total_rounds_played 字段，会得到 NaN 列，无影响
+        # blind_duration 只在 player_blind 行有效；round_end 行会得到 NaN，无影响
         _round_blind_batch = safe_parse_events_batch(
             self.parser,
             ["round_end", "player_blind"],
-            other=list(_EXTRA_EVENT_FIELDS),
+            other=list(_EXTRA_EVENT_FIELDS) + ["blind_duration"],
         )
         re_df = _round_blind_batch["round_end"]
         if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
