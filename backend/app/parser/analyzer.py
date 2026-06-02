@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from bisect import bisect_left, bisect_right
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +23,7 @@ from .tag_constants import (
     _ZOMBIE_STEP_PRE_TICKS, _STROLL_PRE_TICKS,
     _SHOULDER_SAMPLE_INTERVAL, _FLYING_SNIPER_LOOKBACK_TICKS,
     _KEQIAO_WEAPONS,
+    _FLASH_GOOD_DUR_SEC,
 )
 from .parse_utils import (
     _to_pandas_df, _safe_parse_event, safe_parse_events_batch,
@@ -222,26 +224,19 @@ class DemoAnalyzer:
         )
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
-        # round_end + player_blind — 合并为单次 demo 扫描
-        # round_end + player_blind — 合并为单次 demo 扫描
-        _round_blind_batch = safe_parse_events_batch(
-            self.parser,
-            ["round_end", "player_blind"],
-            other=list(_EXTRA_EVENT_FIELDS),
-        )
-        re_df = _round_blind_batch["round_end"]
+        # round_end
+        re_df = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
         if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
             re_df = re_df.loc[
                 pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
             ].copy()
 
-        blind_df = _round_blind_batch["player_blind"]
+        # player_blind — 单独解析以确保 blind_duration 字段可用（与其他事件混批时该字段会丢失）
+        blind_df = _filter_ms(_to_pandas_df(
+            self.parser.parse_event("player_blind", other=["blind_duration"])
+        ))
         if not blind_df.empty and "user_name" in blind_df.columns:
             blind_df["user_name"] = blind_df["user_name"].astype(str).str.strip()
-        if match_start_tick > 0 and not blind_df.empty and "tick" in blind_df.columns:
-            blind_df = blind_df.loc[
-                pd.to_numeric(blind_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
-            ].copy()
 
         # Round economy — parse once: freeze_end + round_start events + parse_ticks at freeze ticks
         (
@@ -623,6 +618,46 @@ class DemoAnalyzer:
 
         enrich_kill_action_tags_spatial(round_kills, spatial_cache, target_player)
 
+        # 好闪配好人质量门控：从 blind_df 查受害者盲化时长，< 阈值则移除 tag
+        _victim_blind_index: dict[str, list[tuple[int, float]]] = {}
+        if blind_df is not None and not blind_df.empty:
+            _dur_col = next(
+                (c for c in ("blind_duration", "duration") if c in blind_df.columns),
+                None,
+            )
+            _vname_col = "user_name" if "user_name" in blind_df.columns else None
+            if _dur_col and _vname_col:
+                for _, _brow in blind_df.iterrows():
+                    _bname = str(_brow.get(_vname_col) or "").strip()
+                    _btick = _int(_brow.get("tick"))
+                    try:
+                        _bdur = float(_brow.get(_dur_col) or 0.0)
+                    except (TypeError, ValueError):
+                        _bdur = 0.0
+                    if _bname and _btick > 0:
+                        _victim_blind_index.setdefault(_bname, []).append((_btick, _bdur))
+                for _vn in _victim_blind_index:
+                    _victim_blind_index[_vn].sort()
+
+        _FLASH_WINDOW_TICKS = int(TICK_RATE * 3.0)
+        for _kills in round_kills.values():
+            for _k in _kills:
+                if not _k.get("assistedflash") or "🤝 好闪配好人" not in _k.get("tags", []):
+                    continue
+                _vic = str(_k.get("victim") or "").strip()
+                _kt = _int(_k.get("tick"))
+                _arr = _victim_blind_index.get(_vic, [])
+                if not _arr:
+                    continue
+                _ticks = [t for t, _ in _arr]
+                _lo = bisect_left(_ticks, _kt - _FLASH_WINDOW_TICKS)
+                _hi = bisect_right(_ticks, _kt)
+                _best_dur = max(
+                    (_arr[i][1] for i in range(_lo, _hi)),
+                    default=0.0,
+                )
+                if _best_dur < _FLASH_GOOD_DUR_SEC:
+                    _k["tags"] = [t for t in _k["tags"] if t != "🤝 好闪配好人"]
 
         # ── 额外辅助事件 ──
 
