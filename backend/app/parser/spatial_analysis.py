@@ -168,14 +168,15 @@ def parse_spatial_snapshots(
             [
                 "X", "Y", "Z",
                 "vel_x", "vel_y", "vel_z",
-                "yaw", "name", "is_alive", "team_num", "health",
+                "yaw", "pitch",
+                "name", "is_alive", "team_num", "health", "armor",
             ],
             ticks=unique_ticks,
         )
     except Exception:
         try:
             result = parser.parse_ticks(
-                ["X", "Y", "Z", "vel_z", "yaw", "name", "is_alive", "team_num", "health"],
+                ["X", "Y", "Z", "vel_z", "yaw", "pitch", "name", "is_alive", "team_num", "health", "armor"],
                 ticks=unique_ticks,
             )
         except Exception:
