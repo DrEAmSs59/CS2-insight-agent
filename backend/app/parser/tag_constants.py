@@ -37,7 +37,9 @@ _TAG_COVERAGE_RULES: tuple[tuple[str, str], ...] = (
     ("爆头",        "枪枪爆头"),
     ("🫵 贴脸超度", "👃 零距离"),
     ("🧱 穿墙杀",   "🎯 超远穿墙"),
+    ("🧱 穿墙杀",   "🔀 连穿"),
     ("🙈 盲狙",     "✈️ 飞天盲狙"),
+    ("🔙 偷背身",   "🔙 背刺"),
 )
 
 
@@ -99,8 +101,8 @@ _RUNGUN_VEL_MIN           = 120.0
 _RUNGUN_VEL_MAX           = 220.0
 _RUNGUN_IMMEDIATE_VEL_MIN = 70.0
 _WALLBANG_DIST_MIN        = 400.0
-_QUICKSCOPE_YAW_DELTA_MIN  = 40.0
-_QUICKSCOPE_LOOKBACK_OFFSETS = (8, 16)
+_QUICKSCOPE_YAW_DELTA_MIN  = 25.0
+_QUICKSCOPE_LOOKBACK_OFFSETS = (8, 16, 24, 32)
 _AIRBORNE_VEL_Z_MIN       = 80.0
 _AIRBORNE_LOOKBACK_TICKS  = 16
 _SLIDE_VEL_XY_MIN         = 150.0

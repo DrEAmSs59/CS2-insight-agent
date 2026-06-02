@@ -572,6 +572,9 @@ def detect_kill_action_tags(
     penetrated: int,
     thrusmoke: bool,
     attackerblind: bool,
+    assistedflash: bool = False,
+    attacker_in_air: bool = False,
+    penetrated_objects: int = 0,
 ) -> list[str]:
     """单次击杀的基础动作标签（不依赖空间快照）。"""
     tags: list[str] = []
@@ -583,10 +586,16 @@ def detect_kill_action_tags(
         tags.append("🌫️ 混烟")
     if attackerblind:
         tags.append("😎 全白反杀")
+    if assistedflash:
+        tags.append("🤝 好闪配好人")
     if headshot:
         tags.append("爆头")
     if weapon in PISTOL_WEAPONS and headshot:
         tags.append("🔫 手枪哥")
+    if attacker_in_air:
+        tags.append("🛸 乌鸦坐飞机")
+    if penetrated > 0 and penetrated_objects >= 2:
+        tags.append("🔀 连穿")
     return tags
 
 
@@ -600,125 +609,108 @@ def enrich_kill_action_tags_spatial(
         for k in kills:
             kt = _int(k.get("tick"))
             extra: list[str] = []
+            weapon   = str(k.get("weapon") or "").strip()
+            headshot = _bool(k.get("headshot"))
+            penetrated = _int(k.get("penetrated"), 0)
+            vic_name = str(k.get("victim") or "").strip()
+
             snap = spatial_cache.get(kt)
-            if snap is not None and not snap.empty:
-                atk = _spatial_player_row(snap, target_player)
-                vic = _spatial_player_row(snap, str(k.get("victim") or "").strip())
-                headshot = _bool(k.get("headshot"))
-                weapon = str(k.get("weapon") or "").strip()
-                penetrated = _int(k.get("penetrated"), 0)
+            atk  = _spatial_player_row(snap, target_player) if snap is not None and not snap.empty else None
 
-                dist: Optional[float] = None
-                if atk is not None and vic is not None:
-                    try:
-                        ax, ay = float(atk["X"]), float(atk["Y"])
-                        vx, vy = float(vic["X"]), float(vic["Y"])
-                        dist = math.hypot(ax - vx, ay - vy)
-                    except (TypeError, ValueError, KeyError):
-                        dist = None
-                if dist is not None:
-                    if dist <= _PB_DIST_EXECUTION and headshot:
-                        extra.append("👃 零距离")
-                    elif dist <= _PB_DIST_POINT_BLANK:
-                        extra.append("🫵 贴脸超度")
-                    if penetrated >= 1 and dist > _WALLBANG_DIST_MIN:
-                        extra.append("🎯 超远穿墙")
+            # ── 距离：优先用 player_death 事件自带坐标，fallback 到 spatial_cache ──
+            ax: Optional[float] = k.get("atk_x")
+            ay: Optional[float] = k.get("atk_y")
+            az: Optional[float] = k.get("atk_z")
+            vx: Optional[float] = k.get("vic_x")
+            vy: Optional[float] = k.get("vic_y")
+            vz: Optional[float] = k.get("vic_z")
+            if ax is None and atk is not None:
+                try: ax, ay, az = float(atk["X"]), float(atk["Y"]), float(atk["Z"])
+                except (TypeError, ValueError, KeyError): pass
+            if vx is None and snap is not None:
+                vic_row = _spatial_player_row(snap, vic_name)
+                if vic_row is not None:
+                    try: vx, vy, vz = float(vic_row["X"]), float(vic_row["Y"]), float(vic_row["Z"])
+                    except (TypeError, ValueError, KeyError): pass
 
-                vxy: Optional[float] = None
-                vxy_imm: Optional[float] = None
-                if atk is not None and "X" in atk.index and "Y" in atk.index:
-                    ax, ay = float(atk["X"]), float(atk["Y"])
-                    snap_prev8 = spatial_cache.get(kt - 8)
-                    prev_row8 = (
-                        _spatial_player_row(snap_prev8, target_player)
-                        if snap_prev8 is not None else None
-                    )
-                    try:
-                        if prev_row8 is not None and "X" in prev_row8.index and "Y" in prev_row8.index:
-                            px8, py8 = float(prev_row8["X"]), float(prev_row8["Y"])
-                            vxy = math.hypot(ax - px8, ay - py8) * 8
-                    except (TypeError, ValueError):
-                        vxy = None
-                    snap_prev2 = spatial_cache.get(kt - 2)
-                    prev_row2 = (
-                        _spatial_player_row(snap_prev2, target_player)
-                        if snap_prev2 is not None else None
-                    )
-                    try:
-                        if prev_row2 is not None and "X" in prev_row2.index and "Y" in prev_row2.index:
-                            px2, py2 = float(prev_row2["X"]), float(prev_row2["Y"])
-                            vxy_imm = math.hypot(ax - px2, ay - py2) * 32
-                    except (TypeError, ValueError):
-                        vxy_imm = None
+            dist: Optional[float] = None
+            if ax is not None and vx is not None:
+                try:
+                    dz = (az - vz) if (az is not None and vz is not None) else 0.0
+                    dist = math.sqrt((ax - vx) ** 2 + (ay - vy) ** 2 + dz ** 2)
+                except (TypeError, ValueError):
+                    pass
+            if dist is not None:
+                if dist <= _PB_DIST_EXECUTION and headshot:
+                    extra.append("👃 零距离")
+                elif dist <= _PB_DIST_POINT_BLANK:
+                    extra.append("🫵 贴脸超度")
+                if penetrated >= 1 and dist > _WALLBANG_DIST_MIN:
+                    extra.append("🎯 超远穿墙")
 
-                _is_jump = is_jump_kill(spatial_cache, kt, target_player)
-                if vxy is not None:
-                    if vxy > _RUSH_VEL_MIN:
-                        extra.append("🚀 上去就是干")
-                    elif (_RUNGUN_VEL_MIN <= vxy <= _RUNGUN_VEL_MAX
-                          and not _is_jump
-                          and not _bool(k.get("noscope"))
-                          and (vxy_imm is None or vxy_imm >= _RUNGUN_IMMEDIATE_VEL_MIN)):
-                        extra.append("🏃‍♂️ 跑打")
+            # ── 偷背身（枪版）：受害者背对攻击者 ──
+            if weapon not in KNIFE_WEAPONS and vic_name and snap is not None:
+                if not _victim_facing_attacker(snap, target_player, vic_name):
+                    extra.append("🔙 偷背身")
 
-                if (atk is not None and "X" in atk.index and "Y" in atk.index
-                        and "yaw" in atk.index and not _is_jump):
-                    snap_prev = spatial_cache.get(kt - 16)
-                    prev_row = (
-                        _spatial_player_row(snap_prev, target_player)
-                        if snap_prev is not None else None
-                    )
+            # ── 速度：直接读 vel_x/vel_y（比位置差更准，消除方向性误差）──
+            vxy: Optional[float] = None
+            if atk is not None and "vel_x" in atk.index and "vel_y" in atk.index:
+                try:
+                    vxy = math.hypot(float(atk["vel_x"]), float(atk["vel_y"]))
+                except (TypeError, ValueError):
+                    pass
+
+            _is_jump = is_jump_kill(spatial_cache, kt, target_player)
+            if vxy is not None:
+                if vxy > _RUSH_VEL_MIN:
+                    extra.append("🚀 上去就是干")
+                elif (_RUNGUN_VEL_MIN <= vxy <= _RUNGUN_VEL_MAX
+                      and not _is_jump
+                      and not _bool(k.get("noscope"))):
+                    extra.append("🏃‍♂️ 跑打")
+
+            # ── 一个大拉：用 vel_x/vel_y 方向与 yaw 夹角 ──
+            if (atk is not None and "yaw" in atk.index and not _is_jump
+                    and vxy is not None and vxy > _SLIDE_VEL_XY_MIN
+                    and "vel_x" in atk.index and "vel_y" in atk.index):
+                try:
+                    move_angle   = math.degrees(math.atan2(float(atk["vel_y"]), float(atk["vel_x"])))
+                    strafe_angle = _smallest_angle_diff_deg(move_angle, float(atk["yaw"]))
+                    if strafe_angle >= 45.0:
+                        extra.append("🎿 一个大拉")
+                except (TypeError, ValueError):
+                    pass
+
+            # ── 乌鸦坐飞机：优先用事件字段，vel_z 作兜底（事件字段缺失时）──
+            if "🛸 乌鸦坐飞机" not in (k.get("tags") or []):
+                if atk is not None and "vel_z" in atk.index:
                     try:
-                        if prev_row is not None:
-                            ax, ay = float(atk["X"]), float(atk["Y"])
-                            px, py = float(prev_row["X"]), float(prev_row["Y"])
-                            disp = math.hypot(ax - px, ay - py)
-                            vxy_approx = disp * 4
-                            if vxy_approx > _SLIDE_VEL_XY_MIN:
-                                move_angle = math.degrees(math.atan2(ay - py, ax - px))
-                                yaw = float(atk["yaw"])
-                                strafe_angle = _smallest_angle_diff_deg(move_angle, yaw)
-                                if strafe_angle >= 45.0:
-                                    extra.append("🎿 一个大拉")
+                        if float(atk["vel_z"]) > _AIRBORNE_VEL_Z_MIN:
+                            extra.append("🛸 乌鸦坐飞机")
                     except (TypeError, ValueError):
                         pass
 
-                if atk is not None and "Z" in atk.index:
-                    snap_prev = spatial_cache.get(kt - _AIRBORNE_LOOKBACK_TICKS)
-                    prev_row = (
-                        _spatial_player_row(snap_prev, target_player)
-                        if snap_prev is not None else None
-                    )
-                    try:
-                        if prev_row is not None and "Z" in prev_row.index:
-                            z_now = float(atk["Z"])
-                            z_prev = float(prev_row["Z"])
-                            z_delta = z_now - z_prev
-                            if z_delta > _AIRBORNE_VEL_Z_MIN:
-                                extra.append("🛸 乌鸦坐飞机")
-                    except (TypeError, ValueError):
-                        pass
-
-                if (weapon in SNIPER_WEAPONS and atk is not None and "yaw" in atk.index):
-                    _flick_max_yd = 0.0
+            # ── 甩狙：扩展 lookback 到 32 ticks（0.5s），阈值 25°──
+            if weapon in SNIPER_WEAPONS and atk is not None and "yaw" in atk.index:
+                _flick_max_yd = 0.0
+                try:
+                    _cur_yaw = float(atk["yaw"])
                     for _flick_off in _QUICKSCOPE_LOOKBACK_OFFSETS:
                         _snap_p = spatial_cache.get(kt - _flick_off)
-                        _prev_r = (
-                            _spatial_player_row(_snap_p, target_player)
-                            if _snap_p is not None else None
-                        )
+                        _prev_r = _spatial_player_row(_snap_p, target_player) if _snap_p is not None else None
                         if _prev_r is not None and "yaw" in _prev_r.index:
                             try:
                                 _flick_max_yd = max(
                                     _flick_max_yd,
-                                    _smallest_angle_diff_deg(
-                                        float(atk["yaw"]), float(_prev_r["yaw"]),
-                                    ),
+                                    _smallest_angle_diff_deg(_cur_yaw, float(_prev_r["yaw"])),
                                 )
                             except (TypeError, ValueError):
                                 pass
-                    if _flick_max_yd >= _QUICKSCOPE_YAW_DELTA_MIN:
-                        extra.append("🌪️ 甩狙")
+                except (TypeError, ValueError):
+                    pass
+                if _flick_max_yd >= _QUICKSCOPE_YAW_DELTA_MIN:
+                    extra.append("🌪️ 甩狙")
 
             base = list(k.get("tags") or [])
             seen = set(base)

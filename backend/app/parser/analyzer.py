@@ -419,6 +419,8 @@ class DemoAnalyzer:
                         weapon=weapon, headshot=headshot, noscope=noscope,
                         penetrated=penetrated, thrusmoke=thrusmoke, attackerblind=attackerblind,
                         assistedflash=assistedflash,
+                        attacker_in_air=attacker_in_air,
+                        penetrated_objects=penetrated_objs,
                     )
                     shots_to_kill = count_shots_before(
                         _fire_index_full, tick, weapon, window_ticks=int(TICK_RATE * 2.0),
