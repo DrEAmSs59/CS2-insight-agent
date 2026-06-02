@@ -204,9 +204,13 @@ class DemoAnalyzer:
             "player_death", other=_death_other, player=["X", "Y", "Z"],
         )))
 
-        # weapon_fire + player_hurt
-        fire_df  = _filter_ms(self._safe_parse_event("weapon_fire"))
-        hurt_df  = _filter_ms(self._safe_parse_event("player_hurt"))
+        # weapon_fire + player_hurt — 合并为单次 demo 扫描
+        _fire_hurt_batch = safe_parse_events_batch(
+            self.parser,
+            ["weapon_fire", "player_hurt"],
+        )
+        fire_df = _filter_ms(_fire_hurt_batch["weapon_fire"])
+        hurt_df = _filter_ms(_fire_hurt_batch["player_hurt"])
 
         # Grenade batch
         nade_batch = safe_parse_events_batch(
@@ -218,15 +222,20 @@ class DemoAnalyzer:
         )
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
-        # round_end (cache for reuse)
-        re_df = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
+        # round_end + player_blind — 合并为单次 demo 扫描
+        # player_blind 没有 total_rounds_played 字段，会得到 NaN 列，无影响
+        _round_blind_batch = safe_parse_events_batch(
+            self.parser,
+            ["round_end", "player_blind"],
+            other=list(_EXTRA_EVENT_FIELDS),
+        )
+        re_df = _round_blind_batch["round_end"]
         if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
             re_df = re_df.loc[
                 pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
             ].copy()
 
-        # player_blind (shared across all players; per-player filter happens in second pass)
-        blind_df = self._safe_parse_event("player_blind")
+        blind_df = _round_blind_batch["player_blind"]
         if not blind_df.empty and "user_name" in blind_df.columns:
             blind_df["user_name"] = blind_df["user_name"].astype(str).str.strip()
         if match_start_tick > 0 and not blind_df.empty and "tick" in blind_df.columns:
