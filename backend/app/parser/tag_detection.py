@@ -597,79 +597,6 @@ def build_highlight_tags(
             ):
                 tags.append("🔪 手撕大狙")
 
-    if n >= 2:
-        dirty = False
-
-        if not dirty:
-            backstab_count = 0
-            for kill in kills_sorted:
-                kt       = _int(kill.get("tick"))
-                sk_at    = spatial_cache.get(kt)
-                vic_name = str(kill.get("victim") or "").strip()
-
-                atk_row     = _spatial_player_row(sk_at, target_player)
-                vic_pos_row = _spatial_player_row(sk_at, vic_name) if vic_name else None
-
-                if atk_row is None or vic_pos_row is None:
-                    continue
-
-                try:
-                    ax, ay = float(atk_row["X"]),     float(atk_row["Y"])
-                    vx, vy = float(vic_pos_row["X"]), float(vic_pos_row["Y"])
-
-                    dist = math.hypot(ax - vx, ay - vy)
-                    if dist >= 1200.0:
-                        continue
-
-                    patience_ok = True
-                    for _pw_off in (64, 128):
-                        _pw_snap = spatial_cache.get(kt - _pw_off)
-                        if _pw_snap is None:
-                            continue
-                        _pw_vic = _spatial_player_row(_pw_snap, vic_name)
-                        _pw_atk = _spatial_player_row(_pw_snap, target_player)
-                        if _pw_vic is None or _pw_atk is None:
-                            continue
-                        try:
-                            vex = float(_pw_vic["X"])
-                            vey = float(_pw_vic["Y"])
-                            aex = float(_pw_atk["X"])
-                            aey = float(_pw_atk["Y"])
-
-                            vic_disp  = math.hypot(vx - vex, vy - vey)
-                            ang_early = math.degrees(math.atan2(vey - aey, vex - aex))
-                            ang_kill  = math.degrees(math.atan2(vy - ay, vx - ax))
-                            ang_delta = _smallest_angle_diff_deg(ang_early, ang_kill)
-
-                            moving_toward_atk = False
-                            if vic_disp > 5.0:
-                                victim_move_ang  = math.degrees(math.atan2(vy - vey, vx - vex))
-                                vic_to_atk_ang   = math.degrees(math.atan2(ay - vy, ax - vx))
-                                moving_toward_atk = _smallest_angle_diff_deg(victim_move_ang, vic_to_atk_ang) < 45.0
-
-                            atk_disp = math.hypot(ax - aex, ay - aey)
-                            _atk_patience_units = 160.0 * (_pw_off / 64.0)
-                            atk_was_patient = atk_disp < _atk_patience_units
-                            atk_flanked = ang_delta >= 80.0
-
-                            patience_ok = (
-                                (vic_disp >= 100.0 or ang_delta >= 1.0)
-                                and not moving_toward_atk
-                                and (atk_was_patient or atk_flanked)
-                            )
-                        except (TypeError, ValueError):
-                            patience_ok = True
-                        break
-
-                    if patience_ok:
-                        backstab_count += 1
-                except (TypeError, ValueError, KeyError):
-                    pass
-
-            need = 1 if n == 2 else 2
-            if backstab_count >= need:
-                tags.append("🥷 智斗")
-
     long_added = False
     for kill in kills_sorted:
         if long_added:
@@ -779,3 +706,13 @@ def build_highlight_tags(
             tags.append("⛰️ 天王山饮恨")
 
     return tags
+
+
+def check_victim_in_air(death: dict) -> list[str]:
+    """🪂 空中遇难：受害者腾空时被击杀（非刀/道具/自爆）。"""
+    if not death.get("victim_in_air"):
+        return []
+    weapon = _normalize_item(str(death.get("weapon") or ""))
+    if weapon in KNIFE_WEAPONS or weapon in WORLD_KILL_WEAPONS or weapon in SUICIDE_WEAPONS:
+        return []
+    return ["🪂 空中遇难"]

@@ -43,6 +43,7 @@ from .tag_detection import (
     check_magnet_nade,
     check_flash_send,
     _fail_killer_display_name,
+    check_victim_in_air,
 )
 
 
@@ -391,6 +392,7 @@ def build_fail_clips(
             tags.extend(check_stroll(death, spatial_cache, target_player))
             tags.extend(check_magnet_nade(death, spatial_cache, target_player, grenade_detonate_points))
         tags.extend(check_flash_send(death, death["round"], round_freeze_end_ticks))
+        tags.extend(check_victim_in_air(death))
 
         seen: set[str] = set()
         unique_tags = [t for t in tags if not (t in seen or seen.add(t))]  # type: ignore[func-returns-value]
