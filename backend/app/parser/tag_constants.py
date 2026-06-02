@@ -40,6 +40,7 @@ _TAG_COVERAGE_RULES: tuple[tuple[str, str], ...] = (
     ("🧱 穿墙杀",   "🔀 连穿"),
     ("🙈 盲狙",     "✈️ 飞天盲狙"),
     ("🔙 偷背身",   "🔙 背刺"),
+    ("🤝 好闪配好人", "💫 精准闪辅"),
 )
 
 
@@ -139,6 +140,9 @@ _FLASH_SEND_MIN_DUR       = 2.5
 _FLASH_SEND_WINDOW_TICKS  = int(TICK_RATE * 3.0)
 
 # 合集类
+# 闪光辅助质量判定：受害者盲化持续 ≥ 本秒数 → 升级为「精准闪辅」
+_FLASH_GOOD_DUR_SEC = 2.5
+
 _RIVAL_KILL_THRESHOLD     = 8
 _NEMESIS_DEATH_THRESHOLD  = 8
 

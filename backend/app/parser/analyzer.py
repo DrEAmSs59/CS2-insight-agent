@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from bisect import bisect_left, bisect_right
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +23,7 @@ from .tag_constants import (
     _ZOMBIE_STEP_PRE_TICKS, _STROLL_PRE_TICKS,
     _SHOULDER_SAMPLE_INTERVAL, _FLYING_SNIPER_LOOKBACK_TICKS,
     _KEQIAO_WEAPONS,
+    _FLASH_GOOD_DUR_SEC,
 )
 from .parse_utils import (
     _to_pandas_df, _safe_parse_event, safe_parse_events_batch,
@@ -622,6 +624,51 @@ class DemoAnalyzer:
         )
 
         enrich_kill_action_tags_spatial(round_kills, spatial_cache, target_player)
+
+        # 受害者盲化时长索引：{victim_name: [(blind_tick, duration), ...]}（sorted by tick）
+        _victim_blind_index: dict[str, list[tuple[int, float]]] = {}
+        if blind_df is not None and not blind_df.empty:
+            _dur_col = next(
+                (c for c in ("blind_duration", "duration", "flashduration") if c in blind_df.columns),
+                None,
+            )
+            _vname_col = "user_name" if "user_name" in blind_df.columns else None
+            if _dur_col and _vname_col:
+                for _, _brow in blind_df.iterrows():
+                    _bname = str(_brow.get(_vname_col) or "").strip()
+                    _btick = _int(_brow.get("tick"))
+                    try:
+                        _bdur = float(_brow.get(_dur_col) or 0.0)
+                    except (TypeError, ValueError):
+                        _bdur = 0.0
+                    if _bname and _btick > 0:
+                        _victim_blind_index.setdefault(_bname, []).append((_btick, _bdur))
+            for _vn in _victim_blind_index:
+                _victim_blind_index[_vn].sort()
+
+        # 升级 好闪配好人 → 精准闪辅（受害者盲化 ≥ 2.5s 时）
+        _FLASH_WINDOW_TICKS = int(TICK_RATE * 3.0)
+        for _kills in round_kills.values():
+            for _k in _kills:
+                if not _k.get("assistedflash"):
+                    continue
+                _vic = str(_k.get("victim") or "").strip()
+                _kt = _int(_k.get("tick"))
+                _arr = _victim_blind_index.get(_vic, [])
+                if not _arr:
+                    continue
+                _ticks = [t for t, _ in _arr]
+                _lo = bisect_left(_ticks, _kt - _FLASH_WINDOW_TICKS)
+                _hi = bisect_right(_ticks, _kt)
+                _best_dur = max(
+                    (_arr[i][1] for i in range(_lo, _hi)),
+                    default=0.0,
+                )
+                if _best_dur >= _FLASH_GOOD_DUR_SEC and "🤝 好闪配好人" in _k.get("tags", []):
+                    _k["tags"] = [
+                        "💫 精准闪辅" if t == "🤝 好闪配好人" else t
+                        for t in _k["tags"]
+                    ]
 
         # ── 额外辅助事件 ──
 
