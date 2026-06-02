@@ -211,7 +211,10 @@ class DemoAnalyzer:
         # Grenade batch
         nade_batch = safe_parse_events_batch(
             self.parser,
-            ["hegrenade_detonate", "inferno_startburn", "molotov_detonate"],
+            [
+                "hegrenade_detonate", "inferno_startburn", "molotov_detonate",
+                "smokegrenade_detonate", "flashbang_detonate",
+            ],
         )
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
