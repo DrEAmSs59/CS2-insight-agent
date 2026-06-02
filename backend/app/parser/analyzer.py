@@ -646,17 +646,15 @@ class DemoAnalyzer:
             for _vn in _victim_blind_index:
                 _victim_blind_index[_vn].sort()
 
-        # 升级 好闪配好人 → 精准闪辅（受害者盲化 ≥ 2.5s 时）
+        # 好闪配好人质量门控：受害者盲化 < 2.5s 时移除该 tag（低质量闪辅不计）
         _FLASH_WINDOW_TICKS = int(TICK_RATE * 3.0)
         for _kills in round_kills.values():
             for _k in _kills:
-                if not _k.get("assistedflash"):
+                if not _k.get("assistedflash") or "🤝 好闪配好人" not in _k.get("tags", []):
                     continue
                 _vic = str(_k.get("victim") or "").strip()
                 _kt = _int(_k.get("tick"))
                 _arr = _victim_blind_index.get(_vic, [])
-                if not _arr:
-                    continue
                 _ticks = [t for t, _ in _arr]
                 _lo = bisect_left(_ticks, _kt - _FLASH_WINDOW_TICKS)
                 _hi = bisect_right(_ticks, _kt)
@@ -664,11 +662,8 @@ class DemoAnalyzer:
                     (_arr[i][1] for i in range(_lo, _hi)),
                     default=0.0,
                 )
-                if _best_dur >= _FLASH_GOOD_DUR_SEC and "🤝 好闪配好人" in _k.get("tags", []):
-                    _k["tags"] = [
-                        "💫 精准闪辅" if t == "🤝 好闪配好人" else t
-                        for t in _k["tags"]
-                    ]
+                if _best_dur < _FLASH_GOOD_DUR_SEC:
+                    _k["tags"] = [t for t in _k["tags"] if t != "🤝 好闪配好人"]
 
         # ── 额外辅助事件 ──
 
