@@ -198,9 +198,11 @@ class DemoAnalyzer:
         equip_df  = _filter_ms(_equip_batch["item_equip"])
         pickup_df = _filter_ms(_equip_batch["item_pickup"])
 
-        # player_death (largest event)
+        # player_death (largest event) — player=["X","Y","Z"] 附带攻击者/受害者击杀瞬间坐标
         _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
-        events = _filter_ms(_to_pandas_df(self.parser.parse_event("player_death", other=_death_other)))
+        events = _filter_ms(_to_pandas_df(self.parser.parse_event(
+            "player_death", other=_death_other, player=["X", "Y", "Z"],
+        )))
 
         # weapon_fire + player_hurt
         fire_df  = _filter_ms(self._safe_parse_event("weapon_fire"))
@@ -378,6 +380,25 @@ class DemoAnalyzer:
                 assistedflash  = _bool(row.get("assistedflash"))
                 attacker_team  = row.get("attackerteam")
                 victim_team    = row.get("userteam")
+                attacker_in_air = _bool(row.get("attackerinair")) or _bool(row.get("attacker_in_air"))
+                victim_in_air   = _bool(row.get("inair"))
+                penetrated_objs = _int(row.get("penetrated_objects"))
+
+                def _safe_coord(v) -> Optional[float]:
+                    try:
+                        import math as _m
+                        f = float(v)
+                        return None if _m.isnan(f) else f
+                    except (TypeError, ValueError):
+                        return None
+
+                # 事件自带的击杀瞬间坐标（player_death with player=["X","Y","Z"]）
+                _atk_x = _safe_coord(row.get("attacker_X"))
+                _atk_y = _safe_coord(row.get("attacker_Y"))
+                _atk_z = _safe_coord(row.get("attacker_Z"))
+                _vic_x = _safe_coord(row.get("user_X"))
+                _vic_y = _safe_coord(row.get("user_Y"))
+                _vic_z = _safe_coord(row.get("user_Z"))
 
                 is_attacker = (attacker == target_player)
                 is_victim   = (victim   == target_player)
@@ -389,6 +410,7 @@ class DemoAnalyzer:
                         "attacker_steamid": str(row.get("attacker_steamid") or ""),
                         "attacker_team": attacker_team, "victim_team": victim_team,
                         "attackerblind": attackerblind, "assistedflash": assistedflash,
+                        "victim_in_air": victim_in_air,
                     })
 
                 if is_attacker and attacker != victim:
@@ -396,6 +418,7 @@ class DemoAnalyzer:
                     per_kill_tags = detect_kill_action_tags(
                         weapon=weapon, headshot=headshot, noscope=noscope,
                         penetrated=penetrated, thrusmoke=thrusmoke, attackerblind=attackerblind,
+                        assistedflash=assistedflash,
                     )
                     shots_to_kill = count_shots_before(
                         _fire_index_full, tick, weapon, window_ticks=int(TICK_RATE * 2.0),
@@ -412,6 +435,12 @@ class DemoAnalyzer:
                         "thrusmoke": thrusmoke, "penetrated": penetrated,
                         "shots_to_kill": shots_to_kill,
                         "victim_had_awp": _vic_fired or _vic_picked,
+                        "assistedflash": assistedflash,
+                        "attacker_in_air": attacker_in_air,
+                        "penetrated_objects": penetrated_objs,
+                        "flash_assister": str(row.get("assister_name") or "").strip() if assistedflash else "",
+                        "atk_x": _atk_x, "atk_y": _atk_y, "atk_z": _atk_z,
+                        "vic_x": _vic_x, "vic_y": _vic_y, "vic_z": _vic_z,
                     })
 
             # C4 world cluster fixup
@@ -454,14 +483,17 @@ class DemoAnalyzer:
                 planted_df, defused_df, target_player, match_start_tick,
             )
             flying_ticks: list[int] = []
+            quickscope_ticks: list[int] = []
             for kills in round_kills.values():
                 for k in kills:
                     w = str(k.get("weapon") or "")
                     if w not in SNIPER_WEAPONS:
                         continue
+                    kt = _int(k.get("tick"))
+                    # 甩狙需要 kt-24 / kt-32（jump_sample_ticks 只到 kt-16）
+                    quickscope_ticks.extend([max(0, kt - off) for off in (24, 32)])
                     if not (_bool(k.get("noscope")) or "盲狙" in (k.get("tags") or [])):
                         continue
-                    kt = _int(k.get("tick"))
                     flying_ticks.extend([kt, max(0, kt - _FLYING_SNIPER_LOOKBACK_TICKS)])
             jump_sample_ticks = [
                 max(0, _int(k["tick"]) - off)
@@ -482,7 +514,8 @@ class DemoAnalyzer:
 
             all_spatial_ticks.update(
                 hs_ticks + backstab_ticks + highlight_ticks + bomb_def_ticks
-                + flying_ticks + jump_sample_ticks + fail_lookback_ticks + shoulder_ticks
+                + flying_ticks + quickscope_ticks + jump_sample_ticks
+                + fail_lookback_ticks + shoulder_ticks
             )
 
             per_player_ctx[target_player] = {
@@ -859,6 +892,10 @@ class DemoAnalyzer:
             victims_list = [str(k.get("victim") or "") for k in kills_sorted]
             victim_steamids_list = [str(k.get("victim_steamid") or "") for k in kills_sorted]
             kill_ticks_sorted = [_int(k["tick"]) for k in kills_sorted]
+            flash_assisters_list = list(dict.fromkeys(
+                k["flash_assister"] for k in kills_sorted
+                if k.get("assistedflash") and k.get("flash_assister")
+            ))
             so, se = round_start_scores_for_target(rnd, round_team_score_map)
 
             _rnd_death_tick = round_death_tick_map.get(rnd)
@@ -892,6 +929,7 @@ class DemoAnalyzer:
                 round_won=round_result_map.get(rnd),
                 clip_min_tick=round_freeze_end_ticks.get(rnd),
                 death_tick=_rnd_death_tick,
+                flash_assisters=flash_assisters_list,
             ))
 
         # 刀杀单杀
