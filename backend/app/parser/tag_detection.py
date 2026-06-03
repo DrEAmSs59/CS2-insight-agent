@@ -113,7 +113,7 @@ def detect_fail_tags(
 
 def check_knife_backstab_tag(
     kills_sorted: list[dict],
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
 ) -> bool:
     """🔙 背刺：任一刀杀中，攻击者与受害者朝向夹角 < 45°。"""
@@ -122,14 +122,14 @@ def check_knife_backstab_tag(
             continue
         kt = _int(k.get("tick"))
         snap = spatial_cache.get(kt)
-        if snap is None or snap.empty:
+        if not snap:
             continue
         atk = _spatial_player_row(snap, target_player)
         vic = _spatial_player_row(snap, str(k.get("victim") or "").strip())
         if atk is None or vic is None:
             continue
         try:
-            if "yaw" not in atk.index or "yaw" not in vic.index:
+            if "yaw" not in atk or "yaw" not in vic:
                 continue
             ya = float(atk["yaw"])
             yv = float(vic["yaw"])
@@ -231,16 +231,16 @@ def check_barefoot_tag(
 def check_comeback_lowhp_tag(
     n: int,
     first_tick: int,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
 ) -> bool:
     """❤️‍🩹 残血绝地反击：多杀 (n≥2) 起始 HP ≤ 20。"""
     if n < 2:
         return False
     snap = spatial_cache.get(int(first_tick))
-    if snap is None:
+    if not snap:
         snap = spatial_cache.get(int(first_tick) - 8)
-    if snap is None or snap.empty:
+    if not snap:
         return False
     row = _spatial_player_row(snap, target_player)
     if row is None:
@@ -295,7 +295,7 @@ def check_defuse_open_tag(
 
 def check_zombie_step(
     death: dict,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
 ) -> list[str]:
     """🗿 僵尸步：死前 3s 位移 < 20 且被爆头。"""
@@ -322,7 +322,7 @@ def check_zombie_step(
 
 def check_stroll(
     death: dict,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
 ) -> list[str]:
     """🐢 散步流：死前 1s 平均 |vel_xy| ≥ 150 且被爆头。"""
@@ -351,7 +351,7 @@ def check_stroll(
 
 def check_magnet_nade(
     death: dict,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
     grenade_detonate_points: Optional[list[tuple[int, float, float]]],
 ) -> list[str]:
@@ -416,7 +416,7 @@ def build_highlight_tags(
     last_tick: int,
     round_num: int,
     round_first_death_tick: dict[int, int],
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
     round_economy_map: dict[int, dict[int, int]],
     target_team_at_freeze: Optional[int],
@@ -642,7 +642,7 @@ def build_highlight_tags(
         row_p = _spatial_player_row(snap_prev, target_player)
         if row_c is None or row_p is None:
             continue
-        if "Z" not in row_c.index or "Z" not in row_p.index:
+        if "Z" not in row_c or "Z" not in row_p:
             continue
         try:
             zc = float(row_c["Z"])

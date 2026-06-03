@@ -209,50 +209,36 @@ def collect_target_defuse_ticks_for_spatial(
     return out
 
 
-def _ninja_defuse_ok(snapshot: pd.DataFrame, defuser: str, target_player: str) -> bool:
-    if snapshot is None or snapshot.empty:
+def _ninja_defuse_ok(tick_dict: "dict[str, dict]", defuser: str, target_player: str) -> bool:
+    if not tick_dict or not defuser:
         return False
-    if not defuser or defuser.strip().lower() != str(target_player or "").strip().lower():
+    if defuser.strip().lower() != str(target_player or "").strip().lower():
         return False
-    for col in ("X", "Y", "Z"):
-        if col not in snapshot.columns:
-            return False
-    name_col = "name" if "name" in snapshot.columns else None
-    if name_col is None or "team_num" not in snapshot.columns or "is_alive" not in snapshot.columns:
-        return False
-    alive_df = snapshot[snapshot["is_alive"].astype(bool)]
-    def_row = _spatial_player_row(alive_df, defuser)
+    from .spatial_analysis import _spatial_player_row
+    def_row = _spatial_player_row(tick_dict, defuser)
     if def_row is None:
         return False
     try:
-        dx = float(def_row["X"])
-        dy = float(def_row["Y"])
-        dz = float(def_row["Z"])
+        dx, dy, dz = float(def_row["X"]), float(def_row["Y"]), float(def_row["Z"])
         def_team = int(float(def_row["team_num"]))
     except (TypeError, ValueError, KeyError):
         return False
-
     enemies: list[tuple[float, float, float]] = []
-    for _, r in alive_df.iterrows():
-        nm = str(r.get(name_col) or "").strip()
-        if not nm or nm.strip().lower() == defuser.strip().lower():
+    for name, row in tick_dict.items():
+        if name.strip().lower() == defuser.strip().lower():
+            continue
+        if not row.get("is_alive"):
             continue
         try:
-            tm = int(float(r["team_num"]))
-        except (TypeError, ValueError):
-            continue
-        if tm == def_team:
-            continue
-        try:
-            enemies.append((float(r["X"]), float(r["Y"]), float(r["Z"])))
+            if int(float(row["team_num"])) == def_team:
+                continue
+            enemies.append((float(row["X"]), float(row["Y"]), float(row["Z"])))
         except (TypeError, ValueError, KeyError):
             return False
-
     if len(enemies) < 2:
         return False
     for ex, ey, ez in enemies:
-        d3 = math.sqrt((ex - dx) ** 2 + (ey - dy) ** 2 + (ez - dz) ** 2)
-        if d3 >= _NINJA_ENEMY_MAX_DIST_3D:
+        if math.sqrt((ex-dx)**2 + (ey-dy)**2 + (ez-dz)**2) >= _NINJA_ENEMY_MAX_DIST_3D:
             return False
     return True
 
@@ -262,7 +248,7 @@ def analyze_bomb_defuse_highlights(
     defused_df: pd.DataFrame,
     target_player: str,
     match_start_tick: int,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     round_freeze_end_ticks: dict[int, int],
 ) -> list[dict]:
     """目标玩家拆包：极限拆包时间 + 忍者偷包。"""
@@ -296,7 +282,7 @@ def analyze_bomb_defuse_highlights(
         rnd = 0
         if trc is not None:
             rnd = _int(row.get(trc)) + 1
-        elif "round" in row.index:
+        elif "round" in row:
             rnd = _int(row.get("round"))
         if rnd <= 0 and round_freeze_end_ticks:
             for rn, ft_tick in sorted(round_freeze_end_ticks.items(), reverse=True):
@@ -324,7 +310,7 @@ def build_fail_clips(
     equip_df: pd.DataFrame,
     fire_df: pd.DataFrame,
     hurt_df: pd.DataFrame,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     round_target_kill_ticks: dict[int, list[int]],
     round_team_score_map: dict[int, tuple[int, int]],
     round_result_map: dict[int, bool],
@@ -422,7 +408,7 @@ def build_fail_clips(
 
 def detect_shoulder_clips(
     *,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
     round_freeze_end_ticks: dict[int, int],
     round_result_map: dict[int, bool | None],
@@ -456,13 +442,13 @@ def detect_shoulder_clips(
         tick = freeze_start
         while tick < round_end:
             snap = spatial_cache.get(tick)
-            if snap is None or snap.empty:
+            if not snap:
                 cur_start = None
                 tick += _SHOULDER_SAMPLE_INTERVAL
                 continue
 
             tgt_row = _spatial_player_row(snap, target_player)
-            if tgt_row is None or not _bool(tgt_row.get("is_alive")):
+            if tgt_row is None or not tgt_row.get("is_alive"):
                 cur_start = None
                 tick += _SHOULDER_SAMPLE_INTERVAL
                 continue
@@ -478,11 +464,10 @@ def detect_shoulder_clips(
 
             closest_dist: float = float("inf")
             closest_name: str | None = None
-            for _, erow in snap.iterrows():
-                ename = str(erow.get("name") or "").strip()
+            for ename, erow in snap.items():
                 if not ename or ename == target_player:
                     continue
-                if not _bool(erow.get("is_alive")):
+                if not erow.get("is_alive"):
                     continue
                 try:
                     eteam = int(float(erow["team_num"]))

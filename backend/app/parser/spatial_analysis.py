@@ -54,34 +54,44 @@ def _smallest_angle_diff_deg(a: float, b: float) -> float:
     return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
 
 
-def _spatial_player_row(snapshot: Optional[pd.DataFrame], player: str) -> Optional[pd.Series]:
-    if snapshot is None or snapshot.empty or not str(player).strip():
+def _is_nan(v) -> bool:
+    """NaN/None 检测，兼容 float / pandas NA。"""
+    if v is None:
+        return True
+    try:
+        return math.isnan(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _spatial_player_row(
+    tick_dict: "Optional[dict[str, dict]]",
+    player: str,
+) -> "Optional[dict]":
+    """O(1) 名称查找；大小写不匹配时做一次线性扫描兜底。"""
+    if not tick_dict or not player:
         return None
-    nc = "name" if "name" in snapshot.columns else None
-    if nc is None:
-        return None
-    m = snapshot[snapshot[nc] == player]
-    if m.empty:
-        pl = str(player).strip().lower()
-        for cand in snapshot[nc].astype(str).unique():
-            if str(cand).strip().lower() == pl:
-                m = snapshot[snapshot[nc] == cand]
-                break
-    if m.empty:
-        return None
-    return m.iloc[0]
+    player = str(player).strip()
+    row = tick_dict.get(player)
+    if row is not None:
+        return row
+    pl = player.lower()
+    for k, v in tick_dict.items():
+        if k.lower() == pl:
+            return v
+    return None
 
 
 def _victim_facing_attacker(
-    snapshot: Optional[pd.DataFrame],
+    tick_dict: "Optional[dict[str, dict]]",
     attacker: str,
     victim: str,
     *,
     max_angle_deg: float = 45.0,
 ) -> bool:
     """死亡瞬间受害者的 yaw 是否指向攻击者（±max_angle_deg 内）。"""
-    v = _spatial_player_row(snapshot, victim)
-    a = _spatial_player_row(snapshot, attacker)
+    v = _spatial_player_row(tick_dict, victim)
+    a = _spatial_player_row(tick_dict, attacker)
     if v is None or a is None:
         return False
     try:
@@ -95,12 +105,12 @@ def _victim_facing_attacker(
     return abs(diff) <= max_angle_deg
 
 
-def _row_health(row: pd.Series) -> Optional[int]:
+def _row_health(row: dict) -> Optional[int]:
     for k in ("health", "m_iHealth"):
-        if k not in row.index:
+        if k not in row:
             continue
         v = row[k]
-        if pd.isna(v):
+        if _is_nan(v):
             continue
         try:
             h = int(float(v))
@@ -111,52 +121,56 @@ def _row_health(row: pd.Series) -> Optional[int]:
 
 
 def _spatial_snap_pre_kill(
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     kill_tick: int,
-) -> Optional[pd.DataFrame]:
+) -> "Optional[dict[str, dict]]":
     """击杀 tick 前几帧的快照，避免该 tick 上受害者已被标为 is_alive=False。"""
     kt = int(kill_tick)
     for off in (8, 16, 24, 32):
         s = spatial_cache.get(kt - off)
-        if s is not None and not s.empty:
+        if s:
             return s
     s = spatial_cache.get(kt)
-    return s if s is not None and not s.empty else None
+    return s if s else None
 
 
 def _alive_mates_and_enemies(
-    snap: pd.DataFrame,
+    tick_dict: "dict[str, dict]",
     target_player: str,
 ) -> Optional[tuple[int, int]]:
     """返回 (同队存活队友数不含自己, 敌方存活人数)；无法统计时返回 None。"""
-    row_self = _spatial_player_row(snap, target_player)
+    row_self = _spatial_player_row(tick_dict, target_player)
     if row_self is None:
         return None
-    name_col = "name" if "name" in snap.columns else None
-    if not name_col or "is_alive" not in snap.columns or "team_num" not in snap.columns:
-        return None
     tgt_team = row_self.get("team_num")
-    if tgt_team is None or (isinstance(tgt_team, float) and pd.isna(tgt_team)):
+    if tgt_team is None or _is_nan(tgt_team):
         return None
     try:
         tgt_team_i = int(float(tgt_team))
     except (TypeError, ValueError):
         return None
-    alive_df = snap[snap["is_alive"].astype(bool)]
-    tm = pd.to_numeric(alive_df["team_num"], errors="coerce")
-    mates = alive_df[
-        tm.notna()
-        & (tm == float(tgt_team_i))
-        & (alive_df[name_col].astype(str) != target_player)
-    ]
-    enems = alive_df[tm.notna() & (tm != float(tgt_team_i))]
-    return len(mates), len(enems)
+    mates = enems = 0
+    for name, row in tick_dict.items():
+        if not row.get("is_alive"):
+            continue
+        tm = row.get("team_num")
+        if tm is None or _is_nan(tm):
+            continue
+        try:
+            tm_i = int(float(tm))
+        except (TypeError, ValueError):
+            continue
+        if tm_i == tgt_team_i and name != target_player:
+            mates += 1
+        elif tm_i != tgt_team_i:
+            enems += 1
+    return mates, enems
 
 
 def parse_spatial_snapshots(
     parser: DemoParser,
     ticks: list[int],
-) -> dict[int, pd.DataFrame]:
+) -> "dict[int, dict[str, dict]]":
     """解析指定 tick 的玩家坐标与偏航（原 DemoAnalyzer._parse_spatial_snapshots）。"""
     if not ticks:
         return {}
@@ -183,7 +197,15 @@ def parse_spatial_snapshots(
         df = _to_pandas_df(result)
         if df.empty:
             return {}
-        return {tick: group for tick, group in df.groupby("tick")}
+        cache: dict[int, dict[str, dict]] = {}
+        for tick, group in df.groupby("tick"):
+            tick_dict: dict[str, dict] = {}
+            for _, row in group.iterrows():
+                name = str(row.get("name") or "").strip()
+                if name:
+                    tick_dict[name] = row.to_dict()
+            cache[int(tick)] = tick_dict
+        return cache
     except Exception:
         return {}
 
@@ -237,89 +259,85 @@ def check_timing_law(
 def check_human_magnet(
     death: dict,
     target_player: str,
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
 ) -> list[str]:
     """判定: 被爆头时, ≥2 名存活队友比自己更靠近敌人（距离 < 60%）。"""
     tick = death["tick"]
     attacker_name = death["attacker"]
-
-    snapshot = spatial_cache.get(tick)
-    if snapshot is None or snapshot.empty:
+    tick_dict = spatial_cache.get(tick)
+    if not tick_dict:
         return []
-
-    name_col = "name" if "name" in snapshot.columns else None
-    if name_col is None:
+    atk_row = _spatial_player_row(tick_dict, attacker_name)
+    vic_row = _spatial_player_row(tick_dict, target_player)
+    if atk_row is None or vic_row is None:
         return []
-
-    attacker_rows = snapshot[snapshot[name_col] == attacker_name]
-    victim_rows = snapshot[snapshot[name_col] == target_player]
-    if attacker_rows.empty or victim_rows.empty:
+    try:
+        ax, ay = float(atk_row["X"]), float(atk_row["Y"])
+        vx, vy = float(vic_row["X"]), float(vic_row["Y"])
+    except (TypeError, ValueError, KeyError):
         return []
-
-    ax, ay = float(attacker_rows.iloc[0]["X"]), float(attacker_rows.iloc[0]["Y"])
-    vx, vy = float(victim_rows.iloc[0]["X"]), float(victim_rows.iloc[0]["Y"])
-
     d_victim = math.hypot(ax - vx, ay - vy)
     if d_victim < 1.0:
         return []
-
-    victim_team = victim_rows.iloc[0].get("team_num")
+    victim_team = vic_row.get("team_num")
     if victim_team is None:
         return []
-
-    teammates = snapshot[
-        (snapshot["team_num"] == victim_team)
-        & (snapshot[name_col] != target_player)
-        & (snapshot[name_col] != attacker_name)
-        & (snapshot["is_alive"].astype(bool))
-    ]
-
+    try:
+        victim_team_i = int(float(victim_team))
+    except (TypeError, ValueError):
+        return []
     threshold = d_victim * _MAGNET_RATIO
-    closer = sum(
-        1 for _, tm in teammates.iterrows()
-        if math.hypot(ax - float(tm["X"]), ay - float(tm["Y"])) < threshold
-    )
-
+    closer = 0
+    for name, row in tick_dict.items():
+        if name == target_player or name == attacker_name:
+            continue
+        if not row.get("is_alive"):
+            continue
+        tm = row.get("team_num")
+        if tm is None:
+            continue
+        try:
+            if int(float(tm)) != victim_team_i:
+                continue
+        except (TypeError, ValueError):
+            continue
+        try:
+            if math.hypot(ax - float(row["X"]), ay - float(row["Y"])) < threshold:
+                closer += 1
+        except (TypeError, ValueError, KeyError):
+            pass
     if closer >= _MAGNET_MIN_CLOSER:
         return ["人肉吸铁石", "保镖无用"]
     return []
 
 
 def _backstab_spatial_ok_at_snapshot(
-    snapshot: pd.DataFrame,
+    tick_dict: "dict[str, dict]",
     *,
     killer: str,
     target_player: str,
-    name_col: str,
-    yaw_col: str,
 ) -> bool:
     """目标在击杀者背后架住背身：击杀者朝向背对目标，且目标朝向大致指向击杀者。"""
-    attacker_rows = snapshot[snapshot[name_col] == killer]
-    victim_rows = snapshot[snapshot[name_col] == target_player]
-    if attacker_rows.empty or victim_rows.empty:
+    atk_row = _spatial_player_row(tick_dict, killer)
+    vic_row = _spatial_player_row(tick_dict, target_player)
+    if atk_row is None or vic_row is None:
         return False
-
-    ax = float(attacker_rows.iloc[0]["X"])
-    ay = float(attacker_rows.iloc[0]["Y"])
-    vx = float(victim_rows.iloc[0]["X"])
-    vy = float(victim_rows.iloc[0]["Y"])
-    attacker_yaw = float(attacker_rows.iloc[0][yaw_col])
-    victim_yaw = float(victim_rows.iloc[0][yaw_col])
-
+    try:
+        ax, ay = float(atk_row["X"]), float(atk_row["Y"])
+        vx, vy = float(vic_row["X"]), float(vic_row["Y"])
+        attacker_yaw = float(atk_row["yaw"])
+        victim_yaw   = float(vic_row["yaw"])
+    except (TypeError, ValueError, KeyError):
+        return False
     if math.hypot(ax - vx, ay - vy) < 1.0:
         return False
-
     angle_atk_toward_vic = math.degrees(math.atan2(vy - ay, vx - ax))
-    atk_facing_vs_line = _smallest_angle_diff_deg(attacker_yaw, angle_atk_toward_vic)
+    atk_facing_vs_line   = _smallest_angle_diff_deg(attacker_yaw, angle_atk_toward_vic)
     if atk_facing_vs_line < (180.0 - _BACKSTAB_ATTACKER_BACK_DEG):
         return False
-
     angle_vic_toward_atk = math.degrees(math.atan2(ay - vy, ax - vx))
-    vic_aim_vs_line = _smallest_angle_diff_deg(victim_yaw, angle_vic_toward_atk)
-    if vic_aim_vs_line > _BACKSTAB_VICTIM_AIM_DEG:
-        return False
-
-    return True
+    vic_aim_vs_line      = _smallest_angle_diff_deg(victim_yaw, angle_vic_toward_atk)
+    return vic_aim_vs_line <= _BACKSTAB_VICTIM_AIM_DEG
 
 
 def any_kill_tick_in_round_shield(
@@ -344,7 +362,7 @@ def check_backstab_fail(
     death: dict,
     fire_index: list[tuple[int, str]],
     hurt_index: list[tuple[int, str, int]],
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
     round_target_kill_ticks: dict[int, list[int]],
 ) -> list[str]:
@@ -399,18 +417,12 @@ def check_backstab_fail(
 
     def _spatial_pass_at_tick(tick: int) -> bool:
         snapshot = spatial_cache.get(tick)
-        if snapshot is None or snapshot.empty:
-            return False
-        name_col = "name" if "name" in snapshot.columns else None
-        yaw_col = "yaw" if "yaw" in snapshot.columns else None
-        if name_col is None or yaw_col is None:
+        if not snapshot:
             return False
         return _backstab_spatial_ok_at_snapshot(
             snapshot,
             killer=killer,
             target_player=target_player,
-            name_col=name_col,
-            yaw_col=yaw_col,
         )
 
     passes = sum(1 for tick in sample_ticks_ordered if _spatial_pass_at_tick(tick))
@@ -452,7 +464,7 @@ def build_fire_index(
 
 
 def is_jump_kill(
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     kill_tick: int,
     player_name: str,
 ) -> bool:
@@ -469,21 +481,21 @@ def is_jump_kill(
         if s is None:
             continue
         r = _spatial_player_row(s, player_name)
-        if r is None or "vel_z" not in r.index:
+        if r is None or "vel_z" not in r:
             continue
         try:
             vz = r["vel_z"]
-            if vz is not None and not (isinstance(vz, float) and pd.isna(vz)):
+            if not _is_nan(vz):
                 if abs(float(vz)) > 80.0:
                     return True
         except (TypeError, ValueError):
             pass
 
-    if "Z" in row.index:
+    if "Z" in row:
         snap_before = spatial_cache.get(kill_tick - 16)
         if snap_before is not None:
             row_before = _spatial_player_row(snap_before, player_name)
-            if row_before is not None and "Z" in row_before.index:
+            if row_before is not None and "Z" in row_before:
                 try:
                     z_now = float(row["Z"])
                     z_before = float(row_before["Z"])
@@ -600,7 +612,7 @@ def detect_kill_action_tags(
 
 def enrich_kill_action_tags_spatial(
     round_kills: dict[int, list[dict]],
-    spatial_cache: dict[int, pd.DataFrame],
+    spatial_cache: "dict[int, dict[str, dict]]",
     target_player: str,
 ) -> None:
     """把依赖位置/朝向/速度的击杀动作子标回填到每个 kill['tags']（就地修改）。"""
@@ -614,7 +626,7 @@ def enrich_kill_action_tags_spatial(
             vic_name = str(k.get("victim") or "").strip()
 
             snap = spatial_cache.get(kt)
-            atk  = _spatial_player_row(snap, target_player) if snap is not None and not snap.empty else None
+            atk  = _spatial_player_row(snap, target_player) if snap else None
 
             # ── 距离：优先用 player_death 事件自带坐标，fallback 到 spatial_cache ──
             ax: Optional[float] = k.get("atk_x")
@@ -626,7 +638,7 @@ def enrich_kill_action_tags_spatial(
             if ax is None and atk is not None:
                 try: ax, ay, az = float(atk["X"]), float(atk["Y"]), float(atk["Z"])
                 except (TypeError, ValueError, KeyError): pass
-            if vx is None and snap is not None:
+            if vx is None and snap:
                 vic_row = _spatial_player_row(snap, vic_name)
                 if vic_row is not None:
                     try: vx, vy, vz = float(vic_row["X"]), float(vic_row["Y"]), float(vic_row["Z"])
@@ -648,13 +660,13 @@ def enrich_kill_action_tags_spatial(
                     extra.append("🎯 超远穿墙")
 
             # ── 偷背身（枪版）：受害者背对攻击者 ──
-            if weapon not in KNIFE_WEAPONS and vic_name and snap is not None:
+            if weapon not in KNIFE_WEAPONS and vic_name and snap:
                 if not _victim_facing_attacker(snap, target_player, vic_name):
                     extra.append("🔙 偷背身")
 
             # ── 速度：直接读 vel_x/vel_y（比位置差更准，消除方向性误差）──
             vxy: Optional[float] = None
-            if atk is not None and "vel_x" in atk.index and "vel_y" in atk.index:
+            if atk is not None and "vel_x" in atk and "vel_y" in atk:
                 try:
                     vxy = math.hypot(float(atk["vel_x"]), float(atk["vel_y"]))
                 except (TypeError, ValueError):
@@ -670,9 +682,9 @@ def enrich_kill_action_tags_spatial(
                     extra.append("🏃‍♂️ 跑打")
 
             # ── 一个大拉：用 vel_x/vel_y 方向与 yaw 夹角 ──
-            if (atk is not None and "yaw" in atk.index and not _is_jump
+            if (atk is not None and "yaw" in atk and not _is_jump
                     and vxy is not None and vxy > _SLIDE_VEL_XY_MIN
-                    and "vel_x" in atk.index and "vel_y" in atk.index):
+                    and "vel_x" in atk and "vel_y" in atk):
                 try:
                     move_angle   = math.degrees(math.atan2(float(atk["vel_y"]), float(atk["vel_x"])))
                     strafe_angle = _smallest_angle_diff_deg(move_angle, float(atk["yaw"]))
@@ -683,7 +695,7 @@ def enrich_kill_action_tags_spatial(
 
             # ── 乌鸦坐飞机：优先用事件字段，vel_z 作兜底（事件字段缺失时）──
             if "🛸 乌鸦坐飞机" not in (k.get("tags") or []):
-                if atk is not None and "vel_z" in atk.index:
+                if atk is not None and "vel_z" in atk:
                     try:
                         if float(atk["vel_z"]) > _AIRBORNE_VEL_Z_MIN:
                             extra.append("🛸 乌鸦坐飞机")
@@ -691,14 +703,14 @@ def enrich_kill_action_tags_spatial(
                         pass
 
             # ── 甩狙：扩展 lookback 到 32 ticks（0.5s），阈值 25°──
-            if weapon in SNIPER_WEAPONS and atk is not None and "yaw" in atk.index:
+            if weapon in SNIPER_WEAPONS and atk is not None and "yaw" in atk:
                 _flick_max_yd = 0.0
                 try:
                     _cur_yaw = float(atk["yaw"])
                     for _flick_off in _QUICKSCOPE_LOOKBACK_OFFSETS:
                         _snap_p = spatial_cache.get(kt - _flick_off)
-                        _prev_r = _spatial_player_row(_snap_p, target_player) if _snap_p is not None else None
-                        if _prev_r is not None and "yaw" in _prev_r.index:
+                        _prev_r = _spatial_player_row(_snap_p, target_player) if _snap_p else None
+                        if _prev_r is not None and "yaw" in _prev_r:
                             try:
                                 _flick_max_yd = max(
                                     _flick_max_yd,
