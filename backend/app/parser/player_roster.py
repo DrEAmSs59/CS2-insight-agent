@@ -424,15 +424,34 @@ def get_player_list(dem_path: str | Path) -> list[dict]:
     """扫描 Demo 所有在 player_death 出现过的玩家，汇总 K/D/A 与队伍。"""
     parser = DemoParser(str(dem_path))
     match_start_tick = _get_match_start_tick(parser)
-    name_to_uid = build_player_name_to_user_id(parser, match_start_tick)
-    name_to_sid = build_player_name_to_steam_id(parser, match_start_tick)
-    events = pd.DataFrame()
+    # 单次扫描同时取 user_id + steamid + 所有默认列（3次扫描合1次）
     try:
-        events = _to_pandas_df(parser.parse_event("player_death"))
+        events = _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
         return []
+
+    # 从同一 df 派生 name→uid 和 name→steamid，无需额外扫描
+    name_to_uid: dict[str, int] = {}
+    name_to_sid: dict[str, int] = {}
+    for _, row in events.iterrows():
+        vn = _cell_str(row.get("user_name"))
+        vu = _user_id_cell(row.get("user_user_id") or row.get("user_id"))
+        vs = _steam_id_cell(row.get("user_steamid"))
+        if vn:
+            if vu is not None:
+                name_to_uid[vn] = vu
+            if vs is not None:
+                name_to_sid[vn] = vs
+        an = _cell_str(row.get("attacker_name"))
+        au = _user_id_cell(row.get("attacker_user_id") or row.get("attacker_id"))
+        ast = _steam_id_cell(row.get("attacker_steamid"))
+        if an:
+            if au is not None:
+                name_to_uid[an] = au
+            if ast is not None:
+                name_to_sid[an] = ast
 
     if events.empty:
         return []
