@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #kb {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 33vh;
+    display: flex;
+    gap: 14px;
+    align-items: flex-end;
+    opacity: .92;
+    font-family: Consolas, monospace;
+  }
+  .col { display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; gap: 6px; justify-content: center; }
+  .key {
+    height: 40px;
+    border-radius: 6px;
+    background: #2A2D34;
+    border: 1px solid #3F434D;
+    color: #8A8F99;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .04s, color .04s, box-shadow .04s;
+  }
+  .key.on {
+    background: #E8B23A;
+    color: #1A1A1A;
+    border-color: #F5C85A;
+    box-shadow: 0 0 7px rgba(232,178,58,.55);
+  }
+  .k44 { width: 40px; }
+  .kw  { width: 144px; }
+  .mouse {
+    width: 60px;
+    height: 92px;
+    border: 1px solid #3F434D;
+    border-radius: 30px 30px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #23262d;
+  }
+  .mtop { display: flex; height: 46px; border-bottom: 1px solid #3F434D; }
+  .mbtn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #8A8F99;
+  }
+  .mbtn.lb { border-right: 1px solid #3F434D; }
+  .mbtn.on { background: #E8B23A; color: #1A1A1A; box-shadow: inset 0 0 8px rgba(232,178,58,.5); }
+  .mbody { flex: 1; background: #2A2D34; }
+  #kb.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="kb" class="hidden">
+  <div class="col">
+    <div class="row">
+      <div class="key k44" data-k="W">W</div>
+    </div>
+    <div class="row">
+      <div class="key k44" data-k="A">A</div>
+      <div class="key k44" data-k="S">S</div>
+      <div class="key k44" data-k="D">D</div>
+    </div>
+    <div class="row">
+      <div class="key kw" data-k="jump">JUMP</div>
+    </div>
+    <div class="row">
+      <div class="key k44" data-k="crouch">CTRL</div>
+      <div class="key k44" data-k="walk">SHIFT</div>
+      <div class="key k44" data-k="reload">R</div>
+    </div>
+  </div>
+  <div class="mouse">
+    <div class="mtop">
+      <div class="mbtn lb" data-k="fire">L</div>
+      <div class="mbtn rb" data-k="scope">R</div>
+    </div>
+    <div class="mbody"></div>
+  </div>
+</div>
+
+<script>
+const PORT = location.port || "8000";
+const els = {};
+document.querySelectorAll("[data-k]").forEach(e => els[e.dataset.k] = e);
+const kb = document.getElementById("kb");
+
+let track = [], tickRate = 64, startTick = 0, offset = 0;
+let byTick = new Map(), tickList = [];
+let running = false, resumeAt = 0, activeMs = 0;
+
+function loadTrack(msg) {
+  track = msg.frames || [];
+  tickRate = msg.tick_rate || 64;
+  startTick = msg.start_tick || 0;
+  offset = msg.offset_ticks || 0;
+  byTick = new Map(track.map(f => [f.tick, f]));
+  tickList = track.map(f => f.tick);
+  activeMs = 0;
+  running = false;
+  kb.classList.remove("hidden");
+  render(startTick);
+}
+
+function nearest(tick) {
+  if (byTick.has(tick)) return byTick.get(tick);
+  if (!tickList.length) return null;
+  let lo = 0, hi = tickList.length - 1;
+  if (tick <= tickList[0]) return track[0];
+  if (tick >= tickList[hi]) return track[hi];
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (tickList[m] < tick) lo = m + 1; else hi = m;
+  }
+  return track[lo];
+}
+
+function render(tick) {
+  const f = nearest(tick) || {};
+  for (const k in els) els[k].classList.toggle("on", !!f[k]);
+}
+
+function loop() {
+  if (running) {
+    const elapsedMs = activeMs + (performance.now() - resumeAt);
+    render(startTick + offset + Math.round(elapsedMs / 1000 * tickRate));
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function connect() {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws/kb-overlay`);
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if      (m.type === "load")   loadTrack(m);
+    else if (m.type === "resume") { resumeAt = performance.now(); running = true; }
+    else if (m.type === "pause")  { if (running) { activeMs += performance.now() - resumeAt; running = false; } }
+    else if (m.type === "end")    { running = false; activeMs = 0; kb.classList.add("hidden"); }
+  };
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+connect();
+</script>
+</body>
+</html>
