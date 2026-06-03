@@ -3551,6 +3551,27 @@ class OBSDirector:
                         })
                         continue
 
+                    # ── kb_track: 为 overlay 填充逐 tick 按键状态 ────────────────
+                    from .env_utils import load_config as _load_cfg
+                    _kb_enabled_cfg = _load_cfg()
+                    if _kb_enabled_cfg.kb_overlay_enabled:
+                        from .parser.input_track import extract_input_track as _extract_kb
+                        for _seg in plan.segments:
+                            try:
+                                _seg.metadata["kb_track"] = _extract_kb(
+                                    plan.demo_path,
+                                    steamid=_seg.target_steamid64,
+                                    player_name=_seg.target_player_name,
+                                    start_tick=_seg.start_tick,
+                                    end_tick=_seg.end_tick,
+                                )
+                            except Exception as _kb_e:
+                                logger.warning(
+                                    "[RecordingV3] kb_track extraction failed seg=%d: %s",
+                                    _seg.segment_index, _kb_e,
+                                )
+                                _seg.metadata["kb_track"] = []
+
                     # ── voice_filter: patch segment masks before execution ────────
                     _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"
                     if _vf in ("off", "open", "mute", "all"):

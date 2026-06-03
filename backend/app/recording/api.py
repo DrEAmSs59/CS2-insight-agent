@@ -367,6 +367,25 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # kb_track: 为 overlay 填充逐 tick 按键状态
+    _kb_cfg = load_config()
+    if _kb_cfg.kb_overlay_enabled:
+        from ..parser.input_track import extract_input_track as _extract_kb
+        for _seg in plan.segments:
+            try:
+                _seg.metadata["kb_track"] = _extract_kb(
+                    plan.demo_path,
+                    steamid=_seg.target_steamid64,
+                    player_name=_seg.target_player_name,
+                    start_tick=_seg.start_tick,
+                    end_tick=_seg.end_tick,
+                )
+            except Exception as _kb_e:
+                logger.warning(
+                    "kb_track extraction failed seg=%d: %s", _seg.segment_index, _kb_e,
+                )
+                _seg.metadata["kb_track"] = []
+
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
     obs_client = OBSClient(obs_cfg)
