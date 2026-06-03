@@ -254,11 +254,15 @@ export default function ClipCard({
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
               {clip.context_tags?.map((tag, ti) => {
                 const desc = describeTag(tag);
+                const flashNames = tag === "🤝 好闪配好人" && clip.flash_assisters?.length
+                  ? `闪光助攻：${clip.flash_assisters.join("、")}`
+                  : null;
+                const title = [desc, flashNames].filter(Boolean).join("\n") || undefined;
                 return (
                   <span
                     key={`${ti}-${tag}`}
-                    title={desc || undefined}
-                    className={`rounded border px-2 py-0.5 text-[10px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${desc ? "cursor-help" : ""}`}
+                    title={title}
+                    className={`rounded border px-2 py-0.5 text-[10px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${title ? "cursor-help" : ""}`}
                   >
                     {tag}
                   </span>

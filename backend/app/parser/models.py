@@ -113,6 +113,8 @@ class Clip:
     freeze_to_death_round_filter: Optional[list[int]] = None
     # 每合规回合一条精确 [start_tick,end_tick]（与 source_ticks 合并段不同）；前端按勾选子集合并连续回合入队，无需重新解析。
     freeze_to_death_round_windows: Optional[list[dict[str, Any]]] = None
+    # 本片段中因 assistedflash=True 的击杀对应的助攻闪光手玩家名（去重保序），供前端 hover 展示
+    flash_assisters: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
