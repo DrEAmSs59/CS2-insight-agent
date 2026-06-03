@@ -34,6 +34,7 @@ import {
   getVictimPovSegmentsTooltip,
   getClipComment,
   getClipScore,
+  stripTagEmoji,
 } from "../../utils/montageUtils";
 
 function montageAiExplainText(clip) {
@@ -641,7 +642,7 @@ export function MontageOrchestrationTimeline({
                               key={t}
                               className="rounded-md bg-cs2-bg-input px-2 py-0.5 text-xs font-medium text-cs2-text-secondary"
                             >
-                              {t}
+                              {stripTagEmoji(t)}
                             </span>
                           ))}
                         </div>
@@ -862,7 +863,7 @@ export function MontageMaterialPoolCard({
                   key={t}
                   className="truncate rounded-md bg-cs2-bg-input px-2 py-0.5 text-[11px] font-medium text-cs2-text-secondary"
                 >
-                  {t}
+                  {stripTagEmoji(t)}
                 </span>
               ))}
             </div>

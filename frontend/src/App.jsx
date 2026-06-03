@@ -33,6 +33,7 @@ import {
   runWithConcurrency,
   buildRecordingQueueRequestsFromQueue,
   applySessionObsTransitionToRequests,
+  applySessionKbOverlayToRequests,
 } from "./utils/recordingBatch";
 import { formatRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
@@ -149,6 +150,7 @@ export default function App() {
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
+  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -825,6 +827,9 @@ export default function App() {
     }
     if (typeof data.kb_overlay_enabled === "boolean") {
       setKbOverlayEnabled(data.kb_overlay_enabled);
+    }
+    if (typeof data.kb_overlay_tick_offset === "number") {
+      setKbOverlayTickOffset(data.kb_overlay_tick_offset);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -1673,6 +1678,7 @@ export default function App() {
       obs_transition_name: payload?.obs_transition_name ?? "Fade",
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
       kb_overlay_enabled: !!payload?.kb_overlay_enabled,
+      kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1726,6 +1732,10 @@ export default function App() {
       if (typeof session.kb_overlay_enabled === "boolean") {
         void persistKbOverlay(session.kb_overlay_enabled);
       }
+      if (typeof session.kb_overlay_tick_offset === "number") {
+        setKbOverlayTickOffset(session.kb_overlay_tick_offset);
+        void API.put("config", { kb_overlay_tick_offset: session.kb_overlay_tick_offset }).catch(() => {});
+      }
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
@@ -1746,6 +1756,7 @@ export default function App() {
             return;
           }
           requests = applySessionObsTransitionToRequests(requests, session);
+          requests = applySessionKbOverlayToRequests(requests, session);
           const povHud = session.experimental_pov_enabled
             ? {
                 enabled: true,
@@ -2413,6 +2424,7 @@ export default function App() {
     obsTransitionName,
     obsTransitionDurationMs,
     kbOverlayEnabled,
+    kbOverlayTickOffset,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2522,6 +2534,7 @@ export default function App() {
           initObsTransName={obsTransitionName}
           initObsTransDurationMs={obsTransitionDurationMs}
           initKbOverlayEnabled={kbOverlayEnabled}
+          initKbOverlayTickOffset={kbOverlayTickOffset}
         />
 
         <LibraryLoadModeModal

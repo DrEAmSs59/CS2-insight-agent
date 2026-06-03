@@ -1,5 +1,5 @@
 fastapi>=0.115.0
-uvicorn>=0.32.0
+uvicorn[standard]>=0.32.0
 python-multipart>=0.0.12
 demoparser2>=0.41.2
 numpy>=1.24.0

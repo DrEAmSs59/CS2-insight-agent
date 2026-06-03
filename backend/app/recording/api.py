@@ -367,9 +367,11 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # kb_track: 为 overlay 填充逐 tick 按键状态
-    _kb_cfg = load_config()
-    if _kb_cfg.kb_overlay_enabled:
+    # kb_track: 为 overlay 填充逐 tick 按键状态（请求参数优先，否则读全局配置）
+    _kb_overlay_req = dto.options.kb_overlay_enabled
+    if _kb_overlay_req is None:
+        _kb_overlay_req = load_config().kb_overlay_enabled
+    if _kb_overlay_req:
         from ..parser.input_track import extract_input_track as _extract_kb
         for _seg in plan.segments:
             try:
@@ -513,6 +515,24 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     try:
         _pre_obs_client = OBSClient(obs_cfg)
         _pre_obs_client.connect()
+        try:
+            # Auto-setup kb overlay Browser Source if any request has kb_overlay_enabled.
+            _kb_overlay_requested = any(
+                getattr(dto.options, "kb_overlay_enabled", False)
+                for dto in req.requests
+            )
+            if _kb_overlay_requested:
+                _scene = _pre_obs_client.get_current_program_scene()
+                if _scene:
+                    import os as _os
+                    _port = int(_os.environ.get("PORT", 8000))
+                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html"
+                    ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
+                    logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
+                else:
+                    logger.warning("[RecordingV3] kb overlay: could not get current scene name, skipping auto-setup")
+        except Exception as _kb_e:
+            logger.warning("[RecordingV3] kb overlay auto-setup failed (non-fatal): %s", _kb_e)
         try:
             _pre_obs_client.disconnect()
         except Exception:

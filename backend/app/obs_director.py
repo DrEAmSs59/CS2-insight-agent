@@ -3551,19 +3551,29 @@ class OBSDirector:
                         })
                         continue
 
-                    # ── kb_track: 为 overlay 填充逐 tick 按键状态 ────────────────
-                    from .env_utils import load_config as _load_cfg
-                    _kb_enabled_cfg = _load_cfg()
-                    if _kb_enabled_cfg.kb_overlay_enabled:
+                    # ── kb_track: 为 overlay 填充逐 tick 按键状态（请求参数优先，否则读全局配置）────
+                    _kb_overlay_req = dto.options.kb_overlay_enabled if dto.options else None
+                    logger.info("[kb_overlay] dto.options.kb_overlay_enabled=%s", _kb_overlay_req)
+                    if _kb_overlay_req is None:
+                        from .env_utils import load_config as _load_cfg
+                        _kb_overlay_req = _load_cfg().kb_overlay_enabled
+                        logger.info("[kb_overlay] fallback to config: kb_overlay_enabled=%s", _kb_overlay_req)
+                    if _kb_overlay_req:
                         from .parser.input_track import extract_input_track as _extract_kb
                         for _seg in plan.segments:
                             try:
-                                _seg.metadata["kb_track"] = _extract_kb(
+                                _frames = _extract_kb(
                                     plan.demo_path,
                                     steamid=_seg.target_steamid64,
                                     player_name=_seg.target_player_name,
                                     start_tick=_seg.start_tick,
                                     end_tick=_seg.end_tick,
+                                )
+                                _seg.metadata["kb_track"] = _frames
+                                logger.info(
+                                    "[kb_overlay] seg=%d extracted %d frames (ticks %d-%d steamid=%s)",
+                                    _seg.segment_index, len(_frames),
+                                    _seg.start_tick, _seg.end_tick, _seg.target_steamid64,
                                 )
                             except Exception as _kb_e:
                                 logger.warning(
@@ -3571,6 +3581,8 @@ class OBSDirector:
                                     _seg.segment_index, _kb_e,
                                 )
                                 _seg.metadata["kb_track"] = []
+                    else:
+                        logger.info("[kb_overlay] kb_overlay disabled, skipping extraction")
 
                     # ── voice_filter: patch segment masks before execution ────────
                     _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"

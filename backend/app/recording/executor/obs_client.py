@@ -385,6 +385,114 @@ class OBSClient:
             except OBSRecordError as exc:
                 logger.warning("OBSClient: apply game capture settings failed (non-fatal): %s", exc)
 
+    def get_current_program_scene(self) -> Optional[str]:
+        """GetCurrentProgramScene → scene name string, or None on failure."""
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "GetCurrentProgramScene", None)
+            if req is None:
+                return None
+            resp = self._ws.call(req())
+            data = getattr(resp, "datain", None) or {}
+            return str(data.get("currentProgramSceneName") or "") or None
+        except Exception as exc:
+            logger.warning("OBSClient: get_current_program_scene failed: %s", exc)
+            return None
+
+    def ensure_kb_overlay_in_scene(
+        self,
+        scene_name: str,
+        overlay_url: str,
+        source_name: str = "CS2 Keyboard Overlay",
+    ) -> bool:
+        """确保当前场景中存在键盘 Overlay Browser Source。
+
+        - 如果已存在同名 source，仅更新 URL（幂等）。
+        - 如果不存在，创建并全屏对齐到场景画布。
+        返回 True 表示操作成功（或已存在）。
+        """
+        self._require_connected()
+        try:
+            video = self.get_video_settings()
+            width = video.get("base_width") or 1920
+            height = video.get("base_height") or 1080
+
+            browser_settings = {
+                "url": overlay_url,
+                "width": width,
+                "height": height,
+                "fps": 60,
+                "reroute_audio": False,
+                "restart_when_active": True,
+            }
+
+            already_in_scene = self.scene_has_source(scene_name, source_name)
+
+            if already_in_scene:
+                # 仅刷新 URL，其余设置不变
+                try:
+                    self.set_input_settings(source_name, {"url": overlay_url}, overlay=True)
+                    logger.info("OBSClient: kb overlay %r already in scene %r — URL updated", source_name, scene_name)
+                except Exception as e:
+                    logger.warning("OBSClient: kb overlay URL update failed (non-fatal): %s", e)
+                return True
+
+            # 检查是否全局已有同名 input（只是不在当前场景）
+            input_exists = False
+            try:
+                req = getattr(obs_requests, "GetInputList", None)
+                if req is not None:
+                    resp = self._ws.call(req())
+                    inputs = (getattr(resp, "datain", None) or {}).get("inputs") or []
+                    input_exists = any(
+                        isinstance(it, dict) and str(it.get("inputName") or "") == source_name
+                        for it in inputs
+                    )
+            except Exception:
+                pass
+
+            if input_exists:
+                # 已有 input，只需添加到场景
+                req = getattr(obs_requests, "CreateSceneItem", None)
+                if req:
+                    self._ws.call(req(sceneName=scene_name, sourceName=source_name))
+                self.set_input_settings(source_name, browser_settings, overlay=True)
+            else:
+                # 全新创建
+                req = getattr(obs_requests, "CreateInput", None)
+                if req is None:
+                    raise OBSRecordError("CreateInput not available")
+                self._ws.call(req(
+                    sceneName=scene_name,
+                    inputName=source_name,
+                    inputKind="browser_source",
+                    inputSettings=browser_settings,
+                    sceneItemEnabled=True,
+                ))
+
+            # 全屏铺满画布
+            try:
+                item_id = self.get_scene_item_id(scene_name, source_name)
+                if item_id is not None:
+                    self.set_scene_item_transform(scene_name, item_id, {
+                        "positionX": 0, "positionY": 0,
+                        "scaleX": 1.0, "scaleY": 1.0,
+                        "boundsWidth": float(width), "boundsHeight": float(height),
+                        "boundsType": "OBS_BOUNDS_STRETCH",
+                    })
+            except Exception as te:
+                logger.warning("OBSClient: kb overlay transform failed (non-fatal): %s", te)
+
+            logger.info(
+                "OBSClient: kb overlay Browser Source %r created in scene %r (%dx%d)",
+                source_name, scene_name, width, height,
+            )
+            return True
+
+        except Exception as exc:
+            logger.warning("OBSClient: ensure_kb_overlay_in_scene failed: %s", exc)
+            return False
+
     def get_video_settings(self) -> dict:
         """GetVideoSettings → dict with base_width, base_height, output_width, output_height."""
         self._require_connected()

@@ -10,7 +10,7 @@ from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .obs_fade_controller import OBSFadeController
 from .demo_controller import (
     gototick, demo_resume, demo_pause,
-    demo_pause_silent_strict, demo_resume_silent_strict,
+    demo_pause_silent, demo_pause_silent_attempt, demo_pause_silent_strict, demo_resume_silent_strict,
     DemoSeekError, inject_console_sequence,
 )
 from .spec_controller import spec_by_slot
@@ -18,9 +18,22 @@ from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
 
-def _kb_bus():
-    """Return (bus, tick_offset) when kb_overlay_enabled, else (None, 0)."""
+def _kb_bus(segment=None):
+    """Return (bus, tick_offset) when kb overlay should fire, else (None, 0).
+
+    Priority: if the segment carries kb_track data (injected by the queue handler
+    when dto.options.kb_overlay_enabled=True), activate the bus unconditionally.
+    Otherwise fall back to the global AppConfig flag.
+    """
     try:
+        if segment is not None and segment.metadata.get("kb_track") is not None:
+            from .kb_overlay_bus import kb_overlay_bus
+            try:
+                from ...env_utils import load_config
+                tick_off = load_config().kb_overlay_tick_offset
+            except Exception:
+                tick_off = 0
+            return kb_overlay_bus, tick_off
         from ...env_utils import load_config
         cfg = load_config()
         if cfg.kb_overlay_enabled:
@@ -618,14 +631,28 @@ class RecordingExecutor:
                 if remaining_wait > 0.05:
                     await asyncio.sleep(remaining_wait)
 
-                await demo_pause()
-                # Wait for CS2 to fully close the console (hideconsole animation).
-                # demo_pause() injects via the developer console; without this gap
-                # OBS captures the closing console animation at the start of each clip.
-                await asyncio.sleep(0.35)
+                # 优先用 KP_5 静默暂停（不打开控制台），避免控制台注入期间 demo 继续跑约
+                # 300ms / 19 tick 导致 overlay 偏移。KP_5 tap 约 50ms，overshoot < 2 tick。
+                # 失败时降级到 console pause（仍需要 0.35s 等控制台动画关闭）。
+                _silent_ok = await demo_pause_silent_attempt()
+                if _silent_ok:
+                    # 无控制台：只需等 CS2 处理完按键（通常 < 1 game tick = 15ms）
+                    await asyncio.sleep(0.05)
+                else:
+                    await demo_pause()
+                    # 等控制台关闭动画，防止 OBS 录到控制台画面
+                    await asyncio.sleep(0.35)
                 logger.info("[RecordingV3] reached effective start_tick; starting OBS")
                 # ── kb overlay: load ────────────────────────────────────────
-                _bus, _tick_off = _kb_bus()
+                _kb_frames = segment.metadata.get("kb_track")
+                logger.info(
+                    "[kb_overlay] seg=%d metadata keys=%s kb_track_len=%s",
+                    segment.segment_index,
+                    list(segment.metadata.keys()),
+                    len(_kb_frames) if _kb_frames is not None else "None(key missing)",
+                )
+                _bus, _tick_off = _kb_bus(segment)
+                logger.info("[kb_overlay] seg=%d bus=%s tick_off=%s", segment.segment_index, _bus, _tick_off)
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -634,12 +661,14 @@ class RecordingExecutor:
                         "end_tick": segment.end_tick,
                         "tick_rate": plan.tick_rate,
                         "offset_ticks": _tick_off,
-                        "frames": segment.metadata.get("kb_track", []),
+                        "frames": _kb_frames or [],
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
+                _bus_resume, _ = _kb_bus(segment)
+
                 if not obs_recording_started:
                     logger.info(
                         "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
@@ -651,7 +680,14 @@ class RecordingExecutor:
                     # so the global Desktop Audio track is never cross-faded at clip edges.
                     await self._ctrl.start_record_safe()
                     obs_recording_started = True
-                    resume_ok = await demo_resume_silent_strict()
+                    # ── kb overlay: resume 与 demo_resume 并发，消除 50ms sleep 带来的偏移 ──
+                    if _bus_resume:
+                        (resume_ok, _) = await asyncio.gather(
+                            demo_resume_silent_strict(),
+                            _bus_resume.broadcast({"type": "resume"}),
+                        )
+                    else:
+                        resume_ok = await demo_resume_silent_strict()
                     self._obs_on_black = False
                 else:
                     logger.info(
@@ -666,26 +702,19 @@ class RecordingExecutor:
                         await self._fade.prime_fade_to_game()
                     await self._ctrl.resume_record_safe()
 
-                    # ── 5b. Resume demo concurrently with fade-in (ResumeRecord) ─
-                    # execute_primed_fade_to_game uses the pre-warmed WS connection so
-                    # the scene switch fires within ~2 ms of ResumeRecord returning —
-                    # the 200 ms animation then covers CS2 keypress processing latency.
+                    # ── 5b. Resume demo / fade-in / kb overlay 三路并发 ─────────
+                    tasks = [demo_resume_silent_strict()]
                     if self._fade is not None:
-                        (resume_ok, fade_ok) = await asyncio.gather(
-                            demo_resume_silent_strict(),
-                            self._fade.execute_primed_fade_to_game(),
-                        )
+                        tasks.append(self._fade.execute_primed_fade_to_game())
+                    if _bus_resume:
+                        tasks.append(_bus_resume.broadcast({"type": "resume"}))
+                    results_gather = await asyncio.gather(*tasks, return_exceptions=True)
+                    resume_ok = results_gather[0] if not isinstance(results_gather[0], Exception) else False
+                    if self._fade is not None:
+                        fade_ok = results_gather[1] if not isinstance(results_gather[1], Exception) else False
                         if not fade_ok:
                             logger.warning("[RecordingV3] fade_to_game after ResumeRecord failed; hard-cut")
-                    else:
-                        resume_ok = await demo_resume_silent_strict()
                     self._obs_on_black = False
-
-                # ── kb overlay: resume ──────────────────────────────────────
-                if resume_ok:
-                    _bus, _ = _kb_bus()
-                    if _bus:
-                        await _bus.broadcast({"type": "resume"})
 
                 # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.
@@ -774,12 +803,12 @@ class RecordingExecutor:
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
                     # ── kb overlay: end ─────────────────────────────────────
-                    _bus, _ = _kb_bus()
+                    _bus, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "end"})
                 else:
                     # ── kb overlay: pause ───────────────────────────────────
-                    _bus, _ = _kb_bus()
+                    _bus, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "pause"})
 

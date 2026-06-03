@@ -12,14 +12,10 @@ from .tag_constants import (
     TICK_RATE,
     PISTOL_WEAPONS,
     _BACKSTAB_WINDOW_TICKS,
-    _BACKSTAB_SKIP_IF_DAMAGE,
-    _BACKSTAB_MIN_FIRES,
     _BACKSTAB_ATTACKER_BACK_DEG,
     _BACKSTAB_VICTIM_AIM_DEG,
     _BACKSTAB_BACKAIM_MIN_PASS_RATIO,
-    _BACKSTAB_DEAGLE_MIN_SPATIAL_PASSES,
     _backstab_aim_sample_offsets_sec,
-    _BACKSTAB_SPRAY_WEAPONS,
     _TIMING_SWITCH_WINDOW,
     _TIMING_HOLD_MIN,
     _OUTLINE_WINDOW,
@@ -397,7 +393,11 @@ def check_backstab_fail(
     target_player: str,
     round_target_kill_ticks: dict[int, list[int]],
 ) -> list[str]:
-    """死前在「对方背身」位架枪 + 死前 3s 内开枪并被反杀。"""
+    """先开枪被反杀的下饭场景。
+
+    人体描边：任意武器 ≥5 发，未秒杀手，无背向要求，本回合无击杀免疫。
+    NiKo Play：背对杀手，≥1 发，未秒杀手，被反杀。
+    """
     death_tick = _int(death.get("tick"))
     killer = str(death.get("attacker") or "")
     if not killer or killer == target_player:
@@ -411,9 +411,6 @@ def check_backstab_fail(
     fires_in_window = [fire_index[i] for i in range(lo, hi)]
 
     total_fire_count = len(fires_in_window)
-    deagle_fire_count = sum(1 for _, w in fires_in_window if w == "deagle")
-    spray_fire_count = sum(1 for _, w in fires_in_window if w in _BACKSTAB_SPRAY_WEAPONS)
-
     lo_h = bisect_left(hurt_index, w_start, key=lambda e: e[0])
     hi_h = bisect_right(hurt_index, w_end, key=lambda e: e[0])
     total_damage = sum(
@@ -422,9 +419,7 @@ def check_backstab_fail(
         if hurt_index[i][1] == killer
     )
 
-    if total_damage >= _BACKSTAB_SKIP_IF_DAMAGE:
-        return []
-    if total_fire_count < _BACKSTAB_MIN_FIRES:
+    if total_fire_count < 1:
         return []
 
     aim_secs = _backstab_aim_sample_offsets_sec()
@@ -458,26 +453,24 @@ def check_backstab_fail(
 
     passes = sum(1 for tick in sample_ticks_ordered if _spatial_pass_at_tick(tick))
 
-    is_deagle_meme = deagle_fire_count >= 3 and total_damage == 0
-    is_spray_meme = spray_fire_count >= 4 and total_damage <= 27
+    result: list[str] = []
 
-    if is_deagle_meme:
-        need_deagle_spatial = min(_BACKSTAB_DEAGLE_MIN_SPATIAL_PASSES, n_samples)
-        if passes < need_deagle_spatial:
-            return []
-        return ["NiKo附体", "沙鹰背身三发"]
-    if is_spray_meme:
-        if passes < min_pass:
-            return []
-        if any_kill_tick_in_round_shield(
+    # 人体描边：≥5 发但没秒杀手，无背向要求
+    if total_fire_count >= 5 and total_damage < 100:
+        if not any_kill_tick_in_round_shield(
             _int(death.get("round")),
             death_tick,
             w_start,
             round_target_kill_ticks,
         ):
-            return []
-        return ["背身打不死", "人体描边"]
-    return []
+            result.append("人体描边")
+
+    # NiKo Play：背对杀手，开枪但没秒，被反杀
+    if total_fire_count >= 1 and total_damage < 100:
+        if passes >= min_pass:
+            result.append("NiKo Play")
+
+    return result
 
 
 def build_fire_index(

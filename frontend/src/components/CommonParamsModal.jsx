@@ -114,6 +114,7 @@ export default function CommonParamsModal({
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
   kbOverlayEnabled: initKbOverlayEnabled = false,
+  kbOverlayTickOffset: initKbOverlayTickOffset = 6,
   configRefreshKey = 0,
 }) {
   const isPage = variant === "page";
@@ -146,6 +147,7 @@ export default function CommonParamsModal({
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
+  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(() => Number(initKbOverlayTickOffset));
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
@@ -181,6 +183,7 @@ export default function CommonParamsModal({
     setObsTransName(initObsTransitionName);
     setObsTransDurationMs(Number(initObsTransitionDurationMs));
     setKbOverlayEnabled(!!initKbOverlayEnabled);
+    setKbOverlayTickOffset(Number(initKbOverlayTickOffset));
     setPovEnabled(!!experimentalPovEnabled);
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
@@ -225,6 +228,7 @@ export default function CommonParamsModal({
       obs_transition_name: obsTransName,
       obs_transition_duration_ms: obsTransDurationMs,
       kb_overlay_enabled: kbOverlayEnabled,
+      kb_overlay_tick_offset: kbOverlayTickOffset,
       experimental_pov_enabled: povEnabled,
     });
     setSaveState(result?.ok ? "saved" : "error");
@@ -708,10 +712,30 @@ export default function CommonParamsModal({
                   <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
                 </label>
                 <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                  开启后 OBS Browser Source 加载{" "}
-                  <code className="font-mono text-cs2-orange">http://127.0.0.1:8000/overlay/keyboard.html</code>
-                  ，宽 500 × 高 300，勾选透明背景，图层置于游戏画面源之上。
+                    开启后可在成片画面中显示按键状态（以默认键位显示前进/后退/左移/右移、跳、蹲、鼠标左右键、更换弹匣）。
                 </p>
+                {kbOverlayEnabled && (
+                  <div className="mt-3 pl-7 flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
+                      <input
+                        type="number"
+                        value={kbOverlayTickOffset}
+                        onChange={(e) => setKbOverlayTickOffset(Number(e.target.value))}
+                        min="-30"
+                        max="30"
+                        step="1"
+                        className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
+                      />
+                      <span className="text-xs text-cs2-text-muted tabular-nums">
+                        ≈ {Math.round(Math.abs(kbOverlayTickOffset) / 64 * 1000)} ms{kbOverlayTickOffset > 0 ? "（提前）" : kbOverlayTickOffset < 0 ? "（延后）" : "（无补偿）"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-cs2-text-muted leading-relaxed">
+                      按键显示与画面可能存在偏差，不同机器表现不同，可手动微调。正值提前显示、负值延后显示。
+                    </p>
+                  </div>
+                )}
               </WorkflowSection>
 
               <WorkflowSection

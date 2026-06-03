@@ -182,3 +182,17 @@ export function applySessionObsTransitionToRequests(requests, session) {
     options: { ...(r.options || {}), ...patch },
   }));
 }
+
+/**
+ * 将录制前弹窗中的虚拟键盘 Overlay 开关写入各 request.options（仅本次队列，不写配置）。
+ * @param {object[]} requests
+ * @param {{ kb_overlay_enabled?: boolean }} session
+ */
+export function applySessionKbOverlayToRequests(requests, session) {
+  if (!Array.isArray(requests) || !requests.length || !session) return requests;
+  if (typeof session.kb_overlay_enabled !== "boolean") return requests;
+  return requests.map((r) => ({
+    ...r,
+    options: { ...(r.options || {}), kb_overlay_enabled: session.kb_overlay_enabled },
+  }));
+}

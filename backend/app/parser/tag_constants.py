@@ -31,7 +31,7 @@ _TAG_COVERAGE_RULES: tuple[tuple[str, str], ...] = (
     ("🔫 手枪哥",   "🔫 ECO特种兵"),
     ("爆头",        "🔫 手枪哥"),
     ("爆头",        "👃 零距离"),
-    ("爆头",        "NiKo附体"),
+    ("爆头",        "NiKo Play"),
     ("爆头",        "沙鹰爆头"),
     ("爆头",        "💥 颗秒"),
     ("爆头",        "枪枪爆头"),
@@ -82,16 +82,13 @@ _OUTLINE_MAX_DAMAGE   = 25                       # 造成伤害 ≤ 25
 _MAGNET_RATIO         = 0.6                      # 队友距敌 < 60% × 你距敌
 _MAGNET_MIN_CLOSER    = 2                        # 至少 2 个队友更近
 
-# ── 背身打不死 / NiKo 沙鹰背身 ──
+# ── 人体描边 / NiKo Play ──
 _BACKSTAB_WINDOW_TICKS = int(TICK_RATE * 3)
-_BACKSTAB_SKIP_IF_DAMAGE = 50
-_BACKSTAB_MIN_FIRES = 2
 _BACKSTAB_ATTACKER_BACK_DEG = 60.0
 _BACKSTAB_VICTIM_AIM_DEG = 55.0
 _BACKSTAB_BACKAIM_STEP_SEC = 0.5
 _BACKSTAB_BACKAIM_MAX_SEC = 6.0
-_BACKSTAB_BACKAIM_MIN_PASS_RATIO = 0.78
-_BACKSTAB_DEAGLE_MIN_SPATIAL_PASSES = 3
+_BACKSTAB_BACKAIM_MIN_PASS_RATIO = 0.5   # 6s 采样窗口内 ≥50% tick 背对杀手即满足（覆盖「走位背身→转身打」模式）
 
 # ── 击杀风格 / 回合级 / 合集 标签阈值 ──
 _PB_DIST_POINT_BLANK      = 120.0
@@ -157,12 +154,6 @@ _SHOULDER_POST_SECS       = 7.0
 _KEQIAO_SEMI_SNIPERS = frozenset({"scar20", "g3sg1"})
 _KEQIAO_RIFLES       = frozenset(PRIMARY_WEAPONS) - SNIPER_WEAPONS - _KEQIAO_SEMI_SNIPERS
 _KEQIAO_WEAPONS      = _KEQIAO_RIFLES | DEAGLE_VARIANTS
-
-# 步枪 + 微冲，用于「背身打不死」武器门槛
-_BACKSTAB_SPRAY_WEAPONS = (
-    (PRIMARY_WEAPONS - SNIPER_WEAPONS - {"scar20", "g3sg1", "negev", "m249"})
-    | {"mac10", "mp9", "mp7", "mp5sd", "ump45", "p90", "bizon"}
-)
 
 _EXTRA_EVENT_FIELDS = ["total_rounds_played"]
 _PLAYER_DEATH_GAME_KEYS = [

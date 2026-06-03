@@ -86,6 +86,20 @@ async def demo_resume_silent() -> None:
         logger.warning("demo_resume_silent failed: %s", e)
 
 
+async def demo_pause_silent_attempt() -> bool:
+    """尝试用 KP_5 静默暂停 demo（不打开控制台）。
+
+    成功返回 True，失败返回 False（调用方应降级到 demo_pause()）。
+    用于预录制暂停：避免控制台注入期间 demo 继续跑 ~300ms 导致 overlay 偏移。
+    """
+    try:
+        ok = await asyncio.to_thread(send_cs2_vk_tap, _VK_NUMPAD5)
+        return bool(ok)
+    except Exception as e:
+        logger.warning("demo_pause_silent_attempt failed: %s", e)
+        return False
+
+
 async def demo_pause_silent_strict() -> bool:
     """Send KP_5 key tap to pause demo. No console fallback — safe while OBS is recording.
 

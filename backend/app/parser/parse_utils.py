@@ -45,21 +45,34 @@ def safe_parse_events_batch(
     一次 demo 扫描获取多个事件类型的数据（P0 批量优化）。
     返回 {event_name: DataFrame}，缺失字段列自动为 NaN，失败时各事件返回空 DataFrame。
 
-    demoparser2 的 parse_events(list, ...) 单次扫描返回所有事件行，
-    带 'event_name' 列区分类型，比逐个 parse_event() 快 N 倍（N = 事件类型数）。
+    兼容两种 demoparser2 返回格式：
+    - 旧版：单个合并 DataFrame，带 'event_name' 列区分类型
+    - 新版：[(event_name, DataFrame), ...] 元组列表
     """
     try:
-        raw = _to_pandas_df(
-            parser.parse_events(event_names, player=player or [], other=other or [])
-        )
-        if raw.empty or "event_name" not in raw.columns:
+        raw = parser.parse_events(event_names, player=player or [], other=other or [])
+
+        # 新版格式：list of (event_name, DataFrame) tuples
+        if isinstance(raw, list) and raw and isinstance(raw[0], tuple):
+            result: dict[str, pd.DataFrame] = {}
+            for item in raw:
+                if isinstance(item, tuple) and len(item) == 2:
+                    name, df = item
+                    result[str(name)] = df if isinstance(df, pd.DataFrame) else _to_pandas_df(df)
+            for name in event_names:
+                result.setdefault(name, pd.DataFrame())
+            return result
+
+        # 旧版格式：合并 DataFrame 带 event_name 列
+        df = _to_pandas_df(raw)
+        if df.empty or "event_name" not in df.columns:
             return {name: pd.DataFrame() for name in event_names}
-        result: dict[str, pd.DataFrame] = {}
+        result2: dict[str, pd.DataFrame] = {}
         for name in event_names:
-            subset = raw[raw["event_name"] == name].copy()
+            subset = df[df["event_name"] == name].copy()
             subset = subset.drop(columns=["event_name"], errors="ignore")
-            result[name] = subset.reset_index(drop=True)
-        return result
+            result2[name] = subset.reset_index(drop=True)
+        return result2
     except _DEMOPARSER_RE_RAISE:
         raise
     except Exception as e:

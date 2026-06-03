@@ -371,6 +371,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const loadClips = useCallback(async () => {
     setLoading(true);
     try {
+      await API.post("/recorded-clips/purge-missing");
+    } catch {
+      // purge failure is non-fatal; continue to load list
+    }
+    try {
       const { data } = await API.get("/recorded-clips", { params: { limit: 500, offset: 0 } });
       setItems(data.items || []);
     } catch {

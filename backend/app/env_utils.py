@@ -399,7 +399,7 @@ class AppConfig(BaseModel):
     match_count: int = 20         # 20 / 50 / 100
     # 虚拟键盘 overlay（OBS Browser Source 实时合成）
     kb_overlay_enabled: bool = False
-    kb_overlay_tick_offset: int = 0   # 标定值：正=overlay超前需减，负=overlay滞后需加
+    kb_overlay_tick_offset: int = 6   # 补偿 OBS CEF 渲染流水线延迟；正=overlay提前显示，负=延迟显示
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:

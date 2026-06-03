@@ -154,6 +154,7 @@ export default function RecordWarmupModal({
   initObsTransName = "Fade",
   initObsTransDurationMs = 200,
   initKbOverlayEnabled = false,
+  initKbOverlayTickOffset = 6,
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
@@ -161,6 +162,7 @@ export default function RecordWarmupModal({
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
+  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
@@ -186,6 +188,7 @@ export default function RecordWarmupModal({
     setObsTransName(initObsTransName || "Fade");
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
     setKbOverlayEnabled(!!initKbOverlayEnabled);
+    setKbOverlayTickOffset(Number(initKbOverlayTickOffset) || 6);
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
@@ -197,6 +200,7 @@ export default function RecordWarmupModal({
     initObsTransDurationMs,
     experimentalPovEnabled,
     initKbOverlayEnabled,
+    initKbOverlayTickOffset,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -275,6 +279,7 @@ export default function RecordWarmupModal({
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
         kb_overlay_enabled: kbOverlayEnabled,
+        kb_overlay_tick_offset: kbOverlayTickOffset,
         experimental_pov_enabled: sessionPovEnabled,
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
@@ -388,8 +393,30 @@ export default function RecordWarmupModal({
                 <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
               </label>
               <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                实时在 OBS 画面中显示按键状态（W/A/S/D、跳、蹲、鼠标左右键等）。
+                  开启后可在成片画面中显示按键状态（以默认键位显示前进/后退/左移/右移、跳、蹲、鼠标左右键、更换弹匣）。
               </p>
+              {kbOverlayEnabled && (
+                <div className="mt-3 pl-7 flex flex-col gap-1">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
+                    <input
+                      type="number"
+                      value={kbOverlayTickOffset}
+                      onChange={(e) => setKbOverlayTickOffset(Number(e.target.value))}
+                      min="-30"
+                      max="30"
+                      step="1"
+                      className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
+                    />
+                    <span className="text-xs text-cs2-text-muted tabular-nums">
+                      ≈ {Math.round(Math.abs(kbOverlayTickOffset) / 64 * 1000)} ms{kbOverlayTickOffset > 0 ? "（提前）" : kbOverlayTickOffset < 0 ? "（延后）" : "（无补偿）"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-cs2-text-muted leading-relaxed">
+                    按键显示与画面可能存在偏差，不同机器表现不同，可手动微调。正值提前显示、负值延后显示。
+                  </p>
+                </div>
+              )}
             </div>
           </section>
 

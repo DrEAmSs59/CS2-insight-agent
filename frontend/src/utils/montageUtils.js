@@ -2,6 +2,15 @@
 
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
 
+/** 移除字符串中的 emoji 及变体选择符，避免在部分环境下渲染为方块。 */
+export function stripTagEmoji(str) {
+  if (typeof str !== "string") return str;
+  return str
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+    .replace(/️/gu, "")
+    .trim();
+}
+
 export const MONTAGE_THEMES = [
   {
     id: "highlight",

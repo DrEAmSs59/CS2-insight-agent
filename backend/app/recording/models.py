@@ -105,6 +105,7 @@ class RecordingOptions(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
+    kb_overlay_enabled: Optional[bool] = None
 
 
 class SourceRef(BaseModel):

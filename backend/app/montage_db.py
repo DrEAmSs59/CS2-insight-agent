@@ -182,6 +182,27 @@ class MontageDB:
             await conn.commit()
         return {"id": cid, "output_path": str(out), "removed_file": removed_file}
 
+    async def purge_missing_recorded_clips(self) -> dict[str, Any]:
+        """删除 output_path 文件已不存在的 recorded_clips 行（用户手动删除文件后清理孤儿记录）。不尝试删除文件。"""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute("SELECT id, output_path FROM recorded_clips")
+            rows = await cur.fetchall()
+        purged_ids: list[int] = []
+        for row in rows:
+            out = row["output_path"]
+            if out and not Path(str(out)).expanduser().is_file():
+                purged_ids.append(int(row["id"]))
+        if purged_ids:
+            placeholders = ",".join("?" * len(purged_ids))
+            async with aiosqlite.connect(self.db_path) as conn:
+                await conn.execute(
+                    f"DELETE FROM recorded_clips WHERE id IN ({placeholders})",
+                    tuple(purged_ids),
+                )
+                await conn.commit()
+        return {"purged_ids": purged_ids, "count": len(purged_ids)}
+
     async def delete_recorded_clips_batch(self, clip_ids: list[int]) -> dict[str, Any]:
         """按 id 列表依次删除入库片段（与单条 delete 行为一致：删库行并尝试删本地文件）。"""
         ordered: list[int] = []

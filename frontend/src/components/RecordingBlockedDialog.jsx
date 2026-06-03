@@ -1,4 +1,5 @@
 import { ShieldAlert, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 /**
  * 推断对话框副标题：根据后端返回的 detail 文本判定具体阻断场景。
@@ -30,9 +31,16 @@ function recordingBlockedSubtitle(message) {
   return "录制启动条件未满足";
 }
 
+function isConfigBackupMessage(message) {
+  const m = String(message || "");
+  return m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复") || m.includes("玩家配置");
+}
+
 export default function RecordingBlockedDialog({ message, onClose }) {
+  const navigate = useNavigate();
   if (!message) return null;
   const subtitle = recordingBlockedSubtitle(message);
+  const showConfigLink = isConfigBackupMessage(message);
   return (
     <div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
@@ -69,7 +77,16 @@ export default function RecordingBlockedDialog({ message, onClose }) {
           <p className="text-sm leading-6 text-cs2-text-secondary whitespace-pre-wrap break-words">{message}</p>
         </div>
 
-        <div className="flex justify-end border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
+        <div className="flex justify-end gap-2.5 border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
+          {showConfigLink ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); navigate("/player-game-config"); }}
+              className="rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-4 py-2 text-sm font-bold text-cs2-accent transition-colors hover:bg-cs2-accent/20"
+            >
+              前往玩家配置
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

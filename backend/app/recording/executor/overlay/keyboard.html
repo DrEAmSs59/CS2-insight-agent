@@ -7,8 +7,9 @@
   #kb {
     position: fixed;
     left: 50%;
-    transform: translateX(-50%);
-    bottom: 33vh;
+    transform: translateX(-50%) scale(1.3);
+    transform-origin: bottom center;
+    bottom: 16vh;
     display: flex;
     gap: 14px;
     align-items: flex-end;
@@ -146,10 +147,18 @@ function connect() {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws/kb-overlay`);
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if      (m.type === "load")   loadTrack(m);
-    else if (m.type === "resume") { resumeAt = performance.now(); running = true; }
-    else if (m.type === "pause")  { if (running) { activeMs += performance.now() - resumeAt; running = false; } }
-    else if (m.type === "end")    { running = false; activeMs = 0; kb.classList.add("hidden"); }
+    if (m.type === "load") {
+      loadTrack(m);
+    } else if (m.type === "resume") {
+      // elapsed_ms 由服务端在晚连接时注入，用于同步当前播放位置
+      if (typeof m.elapsed_ms === "number") activeMs = m.elapsed_ms;
+      resumeAt = performance.now();
+      running = true;
+    } else if (m.type === "pause") {
+      if (running) { activeMs += performance.now() - resumeAt; running = false; }
+    } else if (m.type === "end") {
+      running = false; activeMs = 0; kb.classList.add("hidden");
+    }
   };
   ws.onclose = () => setTimeout(connect, 1000);
 }

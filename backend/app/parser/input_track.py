@@ -77,22 +77,44 @@ def extract_input_track(
             f"片段内未匹配到玩家 sid={steamid} name={player_name!r}；在场={names}"
         )
 
-    masks = pd.to_numeric(pdf[c_mask], errors="coerce").fillna(0).astype("int64")
+    # 把 buttons 列转成 Python int 列表，兼容 object/uint64/float64/int64 等各种 dtype
+    def _to_int_list(series: "pd.Series") -> list[int]:
+        out = []
+        for v in series:
+            try:
+                out.append(int(v))
+            except (TypeError, ValueError):
+                out.append(0)
+        return out
 
-    def bvec(bit: int) -> "pd.Series":
-        return ((masks >> bit) & 1).astype(bool)
+    mask_ints = _to_int_list(pdf[c_mask])
 
-    frame = {
-        "tick":   pdf["tick"].astype(int),
-        "W":      bvec(BIT_FWD),
-        "A":      bvec(BIT_LEFT),
-        "S":      bvec(BIT_BACK),
-        "D":      bvec(BIT_RIGHT),
-        "jump":   bvec(BIT_JUMP),
-        "fire":   bvec(BIT_ATTACK),
-        "crouch": pd.to_numeric(pdf[c_duck],   errors="coerce").fillna(0).astype(bool) if c_duck   else False,
-        "walk":   pd.to_numeric(pdf[c_walk],   errors="coerce").fillna(0).astype(bool) if c_walk   else False,
-        "reload": pd.to_numeric(pdf[c_reload], errors="coerce").fillna(0).astype(bool) if c_reload else False,
-        "scope":  pd.to_numeric(pdf[c_scope],  errors="coerce").fillna(0).astype(bool) if c_scope  else False,
-    }
-    return pd.DataFrame(frame).sort_values("tick").to_dict("records")
+    def bvec(bit: int) -> list[bool]:
+        return [bool((m >> bit) & 1) for m in mask_ints]
+
+    def bcol(series_col) -> list[bool]:
+        if series_col is None:
+            return [False] * len(mask_ints)
+        return [bool(int(v)) if pd.notna(v) else False
+                for v in pd.to_numeric(series_col, errors="coerce")]
+
+    ticks = [int(t) for t in pdf["tick"]]
+
+    records = [
+        {
+            "tick":   ticks[i],
+            "W":      bvec(BIT_FWD)[i],
+            "A":      bvec(BIT_LEFT)[i],
+            "S":      bvec(BIT_BACK)[i],
+            "D":      bvec(BIT_RIGHT)[i],
+            "jump":   bvec(BIT_JUMP)[i],
+            "fire":   bvec(BIT_ATTACK)[i],
+            "crouch": bcol(pdf[c_duck]   if c_duck   else None)[i],
+            "walk":   bcol(pdf[c_walk]   if c_walk   else None)[i],
+            "reload": bcol(pdf[c_reload] if c_reload else None)[i],
+            "scope":  bcol(pdf[c_scope]  if c_scope  else None)[i],
+        }
+        for i in range(len(ticks))
+    ]
+    records.sort(key=lambda r: r["tick"])
+    return records

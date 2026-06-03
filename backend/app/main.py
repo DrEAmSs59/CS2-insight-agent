@@ -611,6 +611,8 @@ class ConfigPayload(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
+    kb_overlay_enabled: Optional[bool] = None
+    kb_overlay_tick_offset: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
@@ -879,6 +881,13 @@ async def update_config(payload: ConfigPayload):
     if payload.obs_transition_duration_ms is not None:
         try:
             cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
+        except (TypeError, ValueError):
+            pass
+    if payload.kb_overlay_enabled is not None:
+        cfg.kb_overlay_enabled = bool(payload.kb_overlay_enabled)
+    if payload.kb_overlay_tick_offset is not None:
+        try:
+            cfg.kb_overlay_tick_offset = int(payload.kb_overlay_tick_offset)
         except (TypeError, ValueError):
             pass
     if payload.experimental is not None:
@@ -2303,6 +2312,12 @@ async def batch_delete_recorded_clips(body: BatchDeleteRecordedClipsBody):
         raise HTTPException(500, str(e)) from e
 
 
+@app.post("/api/recorded-clips/purge-missing")
+async def purge_missing_recorded_clips():
+    """删除 output_path 文件已不存在的孤儿记录，进入合集工作台时调用。"""
+    return await montage_db.purge_missing_recorded_clips()
+
+
 @app.post("/api/montage/projects")
 async def save_montage_project(body: MontageProjectBody):
     proj_body = {
@@ -2838,10 +2853,20 @@ def index():
     return FileResponse(str(WEB_DIST_DIR / "index.html"))
 
 
+@app.get("/overlay/{filename:path}")
+def serve_kb_overlay(filename: str):
+    """直接提供虚拟键盘 Overlay 静态文件，避免被 SPA fallback 拦截。"""
+    from fastapi.responses import FileResponse as _FR
+    fp = (_overlay_dir / filename).resolve()
+    if fp.is_file() and str(fp).startswith(str(_overlay_dir.resolve())):
+        return _FR(str(fp))
+    raise HTTPException(404, "Not Found")
+
+
 @app.get("/{path:path}")
 def spa_fallback(path: str):
-    # API 路径保持 404/原路由处理，不进入前端 fallback。
-    if path.startswith("api/"):
+    # API 路径和 overlay 路径保持 404/原路由处理，不进入前端 fallback。
+    if path.startswith("api/") or path.startswith("overlay/"):
         raise HTTPException(404, "Not Found")
     if WEB_DIST_DIR is None:
         raise HTTPException(404, "Not Found")
