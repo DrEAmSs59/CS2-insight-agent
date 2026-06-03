@@ -525,7 +525,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
                 _scene = _pre_obs_client.get_current_program_scene()
                 if _scene:
                     import os as _os
-                    _port = int(_os.environ.get("PORT", 8000))
+                    _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
                     _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html"
                     ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
                     logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
