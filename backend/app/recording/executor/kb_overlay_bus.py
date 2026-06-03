@@ -14,9 +14,10 @@ class KbOverlayBus:
     async def register(self, ws) -> None:
         async with self._lock:
             self._clients.add(ws)
-        if self._last_load is not None:
+            last = self._last_load
+        if last is not None:
             try:
-                await ws.send_text(json.dumps(self._last_load))
+                await ws.send_text(json.dumps(last))
             except Exception:
                 pass
 
@@ -25,10 +26,10 @@ class KbOverlayBus:
             self._clients.discard(ws)
 
     async def broadcast(self, msg: dict) -> None:
-        if msg.get("type") == "load":
-            self._last_load = msg
         data = json.dumps(msg)
         async with self._lock:
+            if msg.get("type") == "load":
+                self._last_load = msg
             dead = []
             for ws in self._clients:
                 try:
