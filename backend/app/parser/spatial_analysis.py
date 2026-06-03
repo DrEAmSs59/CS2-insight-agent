@@ -55,9 +55,15 @@ def _smallest_angle_diff_deg(a: float, b: float) -> float:
 
 
 def _is_nan(v) -> bool:
-    """NaN/None 检测，兼容 float / pandas NA。"""
+    """NaN/None/pd.NA 检测，兼容 float / pandas NA / numpy NaN。"""
     if v is None:
         return True
+    try:
+        import pandas as _pd
+        if _pd.isna(v):
+            return True
+    except (TypeError, ValueError):
+        pass
     try:
         return math.isnan(float(v))
     except (TypeError, ValueError):
