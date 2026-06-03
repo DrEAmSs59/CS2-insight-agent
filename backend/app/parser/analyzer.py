@@ -339,6 +339,59 @@ class DemoAnalyzer:
         events = _shared["events"]
         c4_world_cluster_keys = _world_self_kill_cluster_c4_surrogate_keys(events, match_start_tick)
 
+        # ── 单遍预处理：按 attacker/victim 分桶，O(D) 替代 O(P×D) iterrows ──
+        _bucket_kills: dict[str, list[dict]] = {}
+        _bucket_deaths: dict[str, list[dict]] = {}
+        _first_death_tick_shared: dict[int, int] = {}
+
+        def _safe_coord_bucket(v) -> "Optional[float]":
+            import math as _m
+            try:
+                f = float(v)
+                return None if _m.isnan(f) else f
+            except (TypeError, ValueError):
+                return None
+
+        for _, _brow in events.iterrows():
+            _rn   = _int(_brow.get("total_rounds_played")) + 1
+            _atk  = str(_brow.get("attacker_name", "") or "").strip()
+            _vic  = str(_brow.get("user_name", "") or "").strip()
+            _wpn  = _normalize_item(_brow.get("weapon", ""))
+            _tick = _int(_brow.get("tick"))
+
+            if _atk and _atk != _vic and _rn not in _first_death_tick_shared:
+                _first_death_tick_shared[_rn] = _tick
+
+            _evt: dict = {
+                "round": _rn, "tick": _tick, "weapon": _wpn,
+                "attacker": _atk, "victim": _vic,
+                "headshot":        _bool(_brow.get("headshot")),
+                "noscope":         _bool(_brow.get("noscope")),
+                "penetrated":      _int(_brow.get("penetrated")),
+                "thrusmoke":       _bool(_brow.get("thrusmoke")),
+                "attackerblind":   _bool(_brow.get("attackerblind")),
+                "assistedflash":   _bool(_brow.get("assistedflash")),
+                "attacker_in_air": (_bool(_brow.get("attackerinair")) or
+                                    _bool(_brow.get("attacker_in_air"))),
+                "victim_in_air":   _bool(_brow.get("inair")),
+                "penetrated_objs": _int(_brow.get("penetrated_objects")),
+                "attacker_team":   _brow.get("attackerteam"),
+                "victim_team":     _brow.get("userteam"),
+                "attacker_steamid": str(_brow.get("attacker_steamid") or ""),
+                "user_steamid":    str(_brow.get("user_steamid") or ""),
+                "assister_name":   str(_brow.get("assister_name") or "").strip(),
+                "atk_x": _safe_coord_bucket(_brow.get("attacker_X")),
+                "atk_y": _safe_coord_bucket(_brow.get("attacker_Y")),
+                "atk_z": _safe_coord_bucket(_brow.get("attacker_Z")),
+                "vic_x": _safe_coord_bucket(_brow.get("user_X")),
+                "vic_y": _safe_coord_bucket(_brow.get("user_Y")),
+                "vic_z": _safe_coord_bucket(_brow.get("user_Z")),
+            }
+            if _atk and _atk != _vic:
+                _bucket_kills.setdefault(_atk, []).append(_evt)
+            if _vic:
+                _bucket_deaths.setdefault(_vic, []).append(_evt)
+
         for target_player in players:
             round_economy_map      = _shared["economy_map_shared"]
             round_freeze_end_ticks = _shared["round_freeze_end_ticks_shared"]
@@ -363,96 +416,63 @@ class DemoAnalyzer:
 
             _fire_index_full = build_fire_index(target_player, fire_df)
 
-            # Extract kills/deaths for this player from shared events DataFrame
+            # ── 从预算好的桶直接消费 ──
             round_kills: dict[int, list[dict]] = {}
             death_records: list[dict] = []
             target_total_kills = 0
-            round_first_death_tick: dict[int, int] = {}
+            round_first_death_tick: dict[int, int] = dict(_first_death_tick_shared)
 
-            for _, row in events.iterrows():
-                round_num = _int(row.get("total_rounds_played")) + 1
-                attacker  = str(row.get("attacker_name", "") or "").strip()
-                victim    = str(row.get("user_name", "") or "").strip()
-                weapon    = _normalize_item(row.get("weapon", ""))
-                tick      = _int(row.get("tick"))
+            for _evt in _bucket_kills.get(target_player, []):
+                target_total_kills += 1
+                per_kill_tags = detect_kill_action_tags(
+                    weapon=_evt["weapon"], headshot=_evt["headshot"],
+                    noscope=_evt["noscope"], penetrated=_evt["penetrated"],
+                    thrusmoke=_evt["thrusmoke"], attackerblind=_evt["attackerblind"],
+                    assistedflash=_evt["assistedflash"],
+                    attacker_in_air=_evt["attacker_in_air"],
+                    penetrated_objects=_evt["penetrated_objs"],
+                )
+                _rnd_lo = round_freeze_end_ticks.get(_evt["round"], 0)
+                _awp_lo = max(_rnd_lo, _evt["tick"] - int(TICK_RATE * 5.0))
+                _vic_str = _evt["victim"]
+                shots_to_kill = count_shots_before(
+                    _fire_index_full, _evt["tick"], _evt["weapon"],
+                    window_ticks=int(TICK_RATE * 2.0),
+                )
+                _vic_fired  = any(_awp_lo <= _t <= _evt["tick"]
+                                  for _t in _awp_fire_index.get(_vic_str, []))
+                _vic_picked = any(_awp_lo <= _t <= _evt["tick"]
+                                  for _t in _awp_pickup_index.get(_vic_str, []))
+                round_kills.setdefault(_evt["round"], []).append({
+                    "weapon": _evt["weapon"], "tick": _evt["tick"],
+                    "headshot": _evt["headshot"], "noscope": _evt["noscope"],
+                    "tags": per_kill_tags, "victim": _evt["victim"],
+                    "victim_steamid": _evt["user_steamid"],
+                    "thrusmoke": _evt["thrusmoke"], "penetrated": _evt["penetrated"],
+                    "shots_to_kill": shots_to_kill,
+                    "victim_had_awp": _vic_fired or _vic_picked,
+                    "assistedflash": _evt["assistedflash"],
+                    "flash_assister": _evt["assister_name"] if _evt["assistedflash"] else "",
+                    "attacker_in_air": _evt["attacker_in_air"],
+                    "penetrated_objects": _evt["penetrated_objs"],
+                    "atk_x": _evt["atk_x"], "atk_y": _evt["atk_y"], "atk_z": _evt["atk_z"],
+                    "vic_x": _evt["vic_x"], "vic_y": _evt["vic_y"], "vic_z": _evt["vic_z"],
+                })
 
-                if round_num not in round_first_death_tick and attacker and attacker != victim:
-                    round_first_death_tick[round_num] = tick
+            for _evt in _bucket_deaths.get(target_player, []):
+                death_records.append({
+                    "round": _evt["round"], "tick": _evt["tick"],
+                    "weapon": _evt["weapon"], "headshot": _evt["headshot"],
+                    "attacker": _evt["attacker"],
+                    "attacker_steamid": _evt["attacker_steamid"],
+                    "attacker_team": _evt["attacker_team"],
+                    "victim_team":   _evt["victim_team"],
+                    "attackerblind": _evt["attackerblind"],
+                    "assistedflash": _evt["assistedflash"],
+                    "victim_in_air": _evt["victim_in_air"],
+                })
 
-                headshot     = _bool(row.get("headshot"))
-                noscope      = _bool(row.get("noscope"))
-                penetrated   = _int(row.get("penetrated"))
-                thrusmoke    = _bool(row.get("thrusmoke"))
-                attackerblind  = _bool(row.get("attackerblind"))
-                assistedflash  = _bool(row.get("assistedflash"))
-                attacker_team  = row.get("attackerteam")
-                victim_team    = row.get("userteam")
-                attacker_in_air = _bool(row.get("attackerinair")) or _bool(row.get("attacker_in_air"))
-                victim_in_air   = _bool(row.get("inair"))
-                penetrated_objs = _int(row.get("penetrated_objects"))
-
-                def _safe_coord(v) -> Optional[float]:
-                    try:
-                        import math as _m
-                        f = float(v)
-                        return None if _m.isnan(f) else f
-                    except (TypeError, ValueError):
-                        return None
-
-                # 事件自带的击杀瞬间坐标（player_death with player=["X","Y","Z"]）
-                _atk_x = _safe_coord(row.get("attacker_X"))
-                _atk_y = _safe_coord(row.get("attacker_Y"))
-                _atk_z = _safe_coord(row.get("attacker_Z"))
-                _vic_x = _safe_coord(row.get("user_X"))
-                _vic_y = _safe_coord(row.get("user_Y"))
-                _vic_z = _safe_coord(row.get("user_Z"))
-
-                is_attacker = (attacker == target_player)
-                is_victim   = (victim   == target_player)
-
-                if is_victim:
-                    death_records.append({
-                        "round": round_num, "tick": tick, "weapon": weapon,
-                        "headshot": headshot, "attacker": attacker,
-                        "attacker_steamid": str(row.get("attacker_steamid") or ""),
-                        "attacker_team": attacker_team, "victim_team": victim_team,
-                        "attackerblind": attackerblind, "assistedflash": assistedflash,
-                        "victim_in_air": victim_in_air,
-                    })
-
-                if is_attacker and attacker != victim:
-                    target_total_kills += 1
-                    per_kill_tags = detect_kill_action_tags(
-                        weapon=weapon, headshot=headshot, noscope=noscope,
-                        penetrated=penetrated, thrusmoke=thrusmoke, attackerblind=attackerblind,
-                        assistedflash=assistedflash,
-                        attacker_in_air=attacker_in_air,
-                        penetrated_objects=penetrated_objs,
-                    )
-                    shots_to_kill = count_shots_before(
-                        _fire_index_full, tick, weapon, window_ticks=int(TICK_RATE * 2.0),
-                    )
-                    _vic_str   = str(victim).strip()
-                    _rnd_lo    = round_freeze_end_ticks.get(round_num, 0)
-                    _awp_lo    = max(_rnd_lo, tick - int(TICK_RATE * 5.0))
-                    _vic_fired = any(_awp_lo <= _t <= tick for _t in _awp_fire_index.get(_vic_str, []))
-                    _vic_picked = any(_awp_lo <= _t <= tick for _t in _awp_pickup_index.get(_vic_str, []))
-                    round_kills.setdefault(round_num, []).append({
-                        "weapon": weapon, "tick": tick, "headshot": headshot,
-                        "noscope": noscope, "tags": per_kill_tags, "victim": victim,
-                        "victim_steamid": str(row.get("user_steamid") or ""),
-                        "thrusmoke": thrusmoke, "penetrated": penetrated,
-                        "shots_to_kill": shots_to_kill,
-                        "victim_had_awp": _vic_fired or _vic_picked,
-                        "assistedflash": assistedflash,
-                        "attacker_in_air": attacker_in_air,
-                        "penetrated_objects": penetrated_objs,
-                        "flash_assister": str(row.get("assister_name") or "").strip() if assistedflash else "",
-                        "atk_x": _atk_x, "atk_y": _atk_y, "atk_z": _atk_z,
-                        "vic_x": _vic_x, "vic_y": _vic_y, "vic_z": _vic_z,
-                    })
-
-            # C4 world cluster fixup
+            # C4 world cluster fixup（保持不变）
             _apply_c4_world_cluster_weapon_fixup(death_records, c4_world_cluster_keys)
 
             # Bomb round correction
