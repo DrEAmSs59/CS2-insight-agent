@@ -397,6 +397,9 @@ class AppConfig(BaseModel):
     steam_id64: str = ""
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
+    # 虚拟键盘 overlay（OBS Browser Source 实时合成）
+    kb_overlay_enabled: bool = False
+    kb_overlay_tick_offset: int = 0   # 标定值：正=overlay超前需减，负=overlay滞后需加
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
