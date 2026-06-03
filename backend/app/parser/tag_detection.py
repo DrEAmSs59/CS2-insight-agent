@@ -522,10 +522,11 @@ def build_highlight_tags(
         sk = _spatial_snap_pre_kill(spatial_cache, kt)
         if sk is None:
             continue
+        # 镜像 _spatial_snap_pre_kill 的偏移顺序：8→16→24→32→0
         _as = alive_summary or {}
         alive_by_team_at_kt = (
-            _as.get(kt) or _as.get(kt - 8) or _as.get(kt - 16)
-            or _as.get(kt - 24) or _as.get(kt - 32)
+            _as.get(kt - 8) or _as.get(kt - 16)
+            or _as.get(kt - 24) or _as.get(kt - 32) or _as.get(kt)
         )
         pair = _alive_mates_and_enemies(sk, target_player, alive_by_team=alive_by_team_at_kt)
         if pair is None:

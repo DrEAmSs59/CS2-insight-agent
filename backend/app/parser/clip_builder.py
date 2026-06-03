@@ -216,7 +216,7 @@ def _ninja_defuse_ok(tick_dict: "dict[str, dict]", defuser: str, target_player: 
         return False
     from .spatial_analysis import _spatial_player_row
     def_row = _spatial_player_row(tick_dict, defuser)
-    if def_row is None:
+    if def_row is None or not def_row.get("is_alive"):
         return False
     try:
         dx, dy, dz = float(def_row["X"]), float(def_row["Y"]), float(def_row["Z"])
