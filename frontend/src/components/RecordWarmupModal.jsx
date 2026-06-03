@@ -153,12 +153,14 @@ export default function RecordWarmupModal({
   initObsTransEnabled = false,
   initObsTransName = "Fade",
   initObsTransDurationMs = 200,
+  initKbOverlayEnabled = false,
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
   const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
+  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
@@ -183,6 +185,7 @@ export default function RecordWarmupModal({
     setObsTransEnabled(!!initObsTransEnabled);
     setObsTransName(initObsTransName || "Fade");
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
+    setKbOverlayEnabled(!!initKbOverlayEnabled);
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
@@ -193,6 +196,7 @@ export default function RecordWarmupModal({
     initObsTransName,
     initObsTransDurationMs,
     experimentalPovEnabled,
+    initKbOverlayEnabled,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -270,6 +274,7 @@ export default function RecordWarmupModal({
         obs_transition_enabled: obsTransEnabled,
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
+        kb_overlay_enabled: kbOverlayEnabled,
         experimental_pov_enabled: sessionPovEnabled,
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
@@ -367,6 +372,24 @@ export default function RecordWarmupModal({
                   className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                 />
               </div>
+            </div>
+          </section>
+
+          <section aria-labelledby="sec-kb-overlay">
+            <SectionHeader en="Keyboard Overlay" zh="虚拟键盘 Overlay" />
+            <div id="sec-kb-overlay" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={kbOverlayEnabled}
+                  onChange={(e) => setKbOverlayEnabled(e.target.checked)}
+                  className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
+                />
+                <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
+              </label>
+              <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
+                实时在 OBS 画面中显示按键状态（W/A/S/D、跳、蹲、鼠标左右键等）。
+              </p>
             </div>
           </section>
 

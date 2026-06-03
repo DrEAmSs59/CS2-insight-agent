@@ -148,6 +148,7 @@ export default function App() {
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
+  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -821,6 +822,9 @@ export default function App() {
     }
     if (typeof data.obs_transition_duration_ms === "number") {
       setObsTransitionDurationMs(data.obs_transition_duration_ms);
+    }
+    if (typeof data.kb_overlay_enabled === "boolean") {
+      setKbOverlayEnabled(data.kb_overlay_enabled);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -1631,6 +1635,15 @@ export default function App() {
     }
   }, []);
 
+  const persistKbOverlay = useCallback(async (enabled) => {
+    setKbOverlayEnabled(!!enabled);
+    try {
+      await API.put("config", { kb_overlay_enabled: !!enabled });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
   const persistExperimentalPov = useCallback(async (enabled) => {
     try {
       await API.put("config", { experimental: { pov_enabled: enabled } });
@@ -1659,6 +1672,7 @@ export default function App() {
       obs_transition_enabled: !!payload?.obs_transition_enabled,
       obs_transition_name: payload?.obs_transition_name ?? "Fade",
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
+      kb_overlay_enabled: !!payload?.kb_overlay_enabled,
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1709,6 +1723,9 @@ export default function App() {
     async (warmupPayload) => {
       const intent = warmupIntent;
       const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
+      if (typeof session.kb_overlay_enabled === "boolean") {
+        void persistKbOverlay(session.kb_overlay_enabled);
+      }
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
@@ -2395,6 +2412,7 @@ export default function App() {
     obsTransitionEnabled,
     obsTransitionName,
     obsTransitionDurationMs,
+    kbOverlayEnabled,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2503,6 +2521,7 @@ export default function App() {
           initObsTransEnabled={obsTransitionEnabled}
           initObsTransName={obsTransitionName}
           initObsTransDurationMs={obsTransitionDurationMs}
+          initKbOverlayEnabled={kbOverlayEnabled}
         />
 
         <LibraryLoadModeModal

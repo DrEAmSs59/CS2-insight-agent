@@ -205,6 +205,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
+    kb_overlay_enabled,
     ...warmupForApi
   } = src;
   return {
@@ -222,6 +223,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,
+      kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
     },
   };
 }

@@ -113,6 +113,7 @@ export default function CommonParamsModal({
   obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
+  kbOverlayEnabled: initKbOverlayEnabled = false,
   configRefreshKey = 0,
 }) {
   const isPage = variant === "page";
@@ -144,6 +145,7 @@ export default function CommonParamsModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(() => !!initObsTransitionEnabled);
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
+  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
@@ -178,6 +180,7 @@ export default function CommonParamsModal({
     setObsTransEnabled(!!initObsTransitionEnabled);
     setObsTransName(initObsTransitionName);
     setObsTransDurationMs(Number(initObsTransitionDurationMs));
+    setKbOverlayEnabled(!!initKbOverlayEnabled);
     setPovEnabled(!!experimentalPovEnabled);
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
@@ -193,6 +196,7 @@ export default function CommonParamsModal({
     initObsTransitionName,
     initObsTransitionDurationMs,
     experimentalPovEnabled,
+    initKbOverlayEnabled,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -220,6 +224,7 @@ export default function CommonParamsModal({
       obs_transition_enabled: obsTransEnabled,
       obs_transition_name: obsTransName,
       obs_transition_duration_ms: obsTransDurationMs,
+      kb_overlay_enabled: kbOverlayEnabled,
       experimental_pov_enabled: povEnabled,
     });
     setSaveState(result?.ok ? "saved" : "error");
@@ -237,6 +242,7 @@ export default function CommonParamsModal({
     obsTransEnabled,
     obsTransName,
     obsTransDurationMs,
+    kbOverlayEnabled,
     povEnabled,
   ]);
 
@@ -685,6 +691,27 @@ export default function CommonParamsModal({
                     />
                   </label>
                 </div>
+              </WorkflowSection>
+
+              <WorkflowSection
+                title="虚拟键盘 Overlay"
+                subtitle="在 OBS Browser Source 实时显示玩家按键状态，与画面同步录入。"
+                defaultOpen
+              >
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={kbOverlayEnabled}
+                    onChange={(e) => setKbOverlayEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
+                  />
+                  <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
+                </label>
+                <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
+                  开启后 OBS Browser Source 加载{" "}
+                  <code className="font-mono text-cs2-orange">http://127.0.0.1:8000/overlay/keyboard.html</code>
+                  ，宽 500 × 高 300，勾选透明背景，图层置于游戏画面源之上。
+                </p>
               </WorkflowSection>
 
               <WorkflowSection

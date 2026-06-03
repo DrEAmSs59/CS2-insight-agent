@@ -326,27 +326,24 @@ if WEB_DIST_DIR is not None:
 else:
     logger.warning("未找到前端静态目录（web/ 或 frontend/dist），仅提供 API 服务")
 
-# ── 虚拟键盘 overlay：仅在 kb_overlay_enabled=True 时注册 WS 端点和静态挂载 ─────
-_kb_cfg = load_config()
-if _kb_cfg.kb_overlay_enabled:
-    from fastapi import WebSocket, WebSocketDisconnect
-    from .recording.executor.kb_overlay_bus import kb_overlay_bus as _kb_overlay_bus
+# ── 虚拟键盘 overlay：无条件注册路由，广播行为由 kb_overlay_enabled 配置项运行时控制 ──
+from fastapi import WebSocket, WebSocketDisconnect
+from .recording.executor.kb_overlay_bus import kb_overlay_bus as _kb_overlay_bus
 
-    _overlay_dir = Path(__file__).parent / "recording" / "executor" / "overlay"
-    app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay-static")
-    logger.info("虚拟键盘 overlay 已启用，Browser Source URL: http://127.0.0.1:<PORT>/overlay/keyboard.html")
+_overlay_dir = Path(__file__).parent / "recording" / "executor" / "overlay"
+app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay-static")
 
-    @app.websocket("/ws/kb-overlay")
-    async def kb_overlay_ws(ws: WebSocket) -> None:
-        await ws.accept()
-        await _kb_overlay_bus.register(ws)
-        try:
-            while True:
-                await ws.receive_text()
-        except WebSocketDisconnect:
-            pass
-        finally:
-            await _kb_overlay_bus.unregister(ws)
+@app.websocket("/ws/kb-overlay")
+async def kb_overlay_ws(ws: WebSocket) -> None:
+    await ws.accept()
+    await _kb_overlay_bus.register(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await _kb_overlay_bus.unregister(ws)
 
 
 def resolve_spectator_for_demo(dem_path: Path, requested: Optional[str]) -> Optional[str]:
