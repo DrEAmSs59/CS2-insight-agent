@@ -2,7 +2,7 @@ from __future__ import annotations
 import pandas as pd
 from demoparser2 import DemoParser
 
-TICK_RATE = 64
+from .parse_utils import _to_pandas_df as _to_df
 
 PROP_BUTTONS = "buttons"
 PROP_WALK    = "is_walking"
@@ -31,14 +31,6 @@ def _resolve_col(df: pd.DataFrame, *candidates: str) -> str | None:
         if c.lower() in low:
             return low[c.lower()]
     return None
-
-
-def _to_df(result) -> pd.DataFrame:
-    if isinstance(result, pd.DataFrame):
-        return result
-    if hasattr(result, "to_pandas"):
-        return result.to_pandas()
-    return pd.DataFrame(result) if result else pd.DataFrame()
 
 
 def extract_input_track(
@@ -85,24 +77,22 @@ def extract_input_track(
             f"片段内未匹配到玩家 sid={steamid} name={player_name!r}；在场={names}"
         )
 
-    def b(mask: int, bit: int) -> bool:
-        return bool((int(mask) >> bit) & 1)
+    masks = pd.to_numeric(pdf[c_mask], errors="coerce").fillna(0).astype("int64")
 
-    out = []
-    for _, r in pdf.iterrows():
-        m = int(pd.to_numeric(r.get(c_mask), errors="coerce") or 0)
-        out.append({
-            "tick":   int(r.get("tick", 0)),
-            "W":      b(m, BIT_FWD),
-            "A":      b(m, BIT_LEFT),
-            "S":      b(m, BIT_BACK),
-            "D":      b(m, BIT_RIGHT),
-            "jump":   b(m, BIT_JUMP),
-            "fire":   b(m, BIT_ATTACK),
-            "crouch": bool(pd.to_numeric(r.get(c_duck),   errors="coerce") or 0) if c_duck   else False,
-            "walk":   bool(pd.to_numeric(r.get(c_walk),   errors="coerce") or 0) if c_walk   else False,
-            "reload": bool(pd.to_numeric(r.get(c_reload), errors="coerce") or 0) if c_reload else False,
-            "scope":  bool(pd.to_numeric(r.get(c_scope),  errors="coerce") or 0) if c_scope  else False,
-        })
-    out.sort(key=lambda d: d["tick"])
-    return out
+    def bvec(bit: int) -> "pd.Series":
+        return ((masks >> bit) & 1).astype(bool)
+
+    frame = {
+        "tick":   pdf["tick"].astype(int),
+        "W":      bvec(BIT_FWD),
+        "A":      bvec(BIT_LEFT),
+        "S":      bvec(BIT_BACK),
+        "D":      bvec(BIT_RIGHT),
+        "jump":   bvec(BIT_JUMP),
+        "fire":   bvec(BIT_ATTACK),
+        "crouch": pd.to_numeric(pdf[c_duck],   errors="coerce").fillna(0).astype(bool) if c_duck   else False,
+        "walk":   pd.to_numeric(pdf[c_walk],   errors="coerce").fillna(0).astype(bool) if c_walk   else False,
+        "reload": pd.to_numeric(pdf[c_reload], errors="coerce").fillna(0).astype(bool) if c_reload else False,
+        "scope":  pd.to_numeric(pdf[c_scope],  errors="coerce").fillna(0).astype(bool) if c_scope  else False,
+    }
+    return pd.DataFrame(frame).sort_values("tick").to_dict("records")
