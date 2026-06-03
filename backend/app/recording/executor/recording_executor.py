@@ -18,6 +18,18 @@ from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
 
+def _kb_bus():
+    """Return (bus, tick_offset) when kb_overlay_enabled, else (None, 0)."""
+    try:
+        from ...env_utils import load_config
+        cfg = load_config()
+        if cfg.kb_overlay_enabled:
+            from .kb_overlay_bus import kb_overlay_bus
+            return kb_overlay_bus, cfg.kb_overlay_tick_offset
+    except Exception:
+        pass
+    return None, 0
+
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
 PREPARE_PREROLL_SEC: float = 5.0
@@ -612,6 +624,18 @@ class RecordingExecutor:
                 # OBS captures the closing console animation at the start of each clip.
                 await asyncio.sleep(0.35)
                 logger.info("[RecordingV3] reached effective start_tick; starting OBS")
+                # ── kb overlay: load ────────────────────────────────────────
+                _bus, _tick_off = _kb_bus()
+                if _bus:
+                    await _bus.broadcast({
+                        "type": "load",
+                        "segment_index": segment.segment_index,
+                        "start_tick": segment.start_tick,
+                        "end_tick": segment.end_tick,
+                        "tick_rate": plan.tick_rate,
+                        "offset_ticks": _tick_off,
+                        "frames": segment.metadata.get("kb_track", []),
+                    })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
@@ -656,6 +680,12 @@ class RecordingExecutor:
                     else:
                         resume_ok = await demo_resume_silent_strict()
                     self._obs_on_black = False
+
+                # ── kb overlay: resume ──────────────────────────────────────
+                if resume_ok:
+                    _bus, _ = _kb_bus()
+                    if _bus:
+                        await _bus.broadcast({"type": "resume"})
 
                 # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.
@@ -743,6 +773,15 @@ class RecordingExecutor:
                     result.recording_stopped_at = time.time()
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
+                    # ── kb overlay: end ─────────────────────────────────────
+                    _bus, _ = _kb_bus()
+                    if _bus:
+                        await _bus.broadcast({"type": "end"})
+                else:
+                    # ── kb overlay: pause ───────────────────────────────────
+                    _bus, _ = _kb_bus()
+                    if _bus:
+                        await _bus.broadcast({"type": "pause"})
 
                 # ── 5b. OBS pause confirmation before next segment's console ─
                 # After pause_record_safe returns "ok" or "ok_recovered", OBS is
