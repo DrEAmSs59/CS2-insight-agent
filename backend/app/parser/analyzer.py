@@ -579,7 +579,7 @@ class DemoAnalyzer:
             }
 
         # Phase 3: Parse spatial ticks ONCE (union of all players)
-        spatial_cache = parse_spatial_snapshots(self.parser, sorted(all_spatial_ticks))
+        spatial_cache, alive_summary = parse_spatial_snapshots(self.parser, sorted(all_spatial_ticks))
 
         # Phase 4: Per-player second pass using shared spatial cache
         results: dict[str, ParseResult] = {}
@@ -601,6 +601,7 @@ class DemoAnalyzer:
                 round_target_kill_ticks=ctx["round_target_kill_ticks"],
                 target_total_kills=ctx["target_total_kills"],
                 spatial_cache=spatial_cache,
+                alive_summary=alive_summary,
                 events=_shared["events"],
                 fire_df=_shared["fire_df"],
                 hurt_df=_shared["hurt_df"],
@@ -635,6 +636,7 @@ class DemoAnalyzer:
         round_target_kill_ticks: dict,
         target_total_kills: int,
         spatial_cache: dict,
+        alive_summary: "Optional[dict[int, dict[int, frozenset]]]" = None,
         events: "pd.DataFrame",
         fire_df: "pd.DataFrame",
         hurt_df: "pd.DataFrame",
@@ -953,6 +955,7 @@ class DemoAnalyzer:
                 round_hurt_on_target_index=round_hurt_on_target_index,
                 round_death_tick_map=round_death_tick_map,
                 defuse_window_map=defuse_window_map,
+                alive_summary=alive_summary,
             )
 
             if round_result_map.get(rnd) is False:

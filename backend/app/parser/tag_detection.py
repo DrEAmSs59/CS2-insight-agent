@@ -431,6 +431,7 @@ def build_highlight_tags(
     round_hurt_on_target_index: Optional[dict[int, list[tuple[int, int, str]]]] = None,
     round_death_tick_map: Optional[dict[int, int]] = None,
     defuse_window_map: Optional[dict[int, tuple[int, int]]] = None,
+    alive_summary: "Optional[dict[int, dict[int, frozenset]]]" = None,
 ) -> list[str]:
     tags: list[str] = []
     n = len(kills_sorted)
@@ -521,7 +522,8 @@ def build_highlight_tags(
         sk = _spatial_snap_pre_kill(spatial_cache, kt)
         if sk is None:
             continue
-        pair = _alive_mates_and_enemies(sk, target_player)
+        alive_by_team_at_kt = (alive_summary or {}).get(kt) or (alive_summary or {}).get(kt - 8)
+        pair = _alive_mates_and_enemies(sk, target_player, alive_by_team=alive_by_team_at_kt)
         if pair is None:
             continue
         n_mates, n_enems = pair

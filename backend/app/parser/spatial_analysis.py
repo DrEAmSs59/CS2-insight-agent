@@ -143,7 +143,8 @@ def _spatial_snap_pre_kill(
 def _alive_mates_and_enemies(
     tick_dict: "dict[str, dict]",
     target_player: str,
-) -> Optional[tuple[int, int]]:
+    alive_by_team: "Optional[dict[int, frozenset]]" = None,
+) -> "Optional[tuple[int, int]]":
     """返回 (同队存活队友数不含自己, 敌方存活人数)；无法统计时返回 None。"""
     row_self = _spatial_player_row(tick_dict, target_player)
     if row_self is None:
@@ -155,6 +156,19 @@ def _alive_mates_and_enemies(
         tgt_team_i = int(float(tgt_team))
     except (TypeError, ValueError):
         return None
+
+    if alive_by_team is not None:
+        # O(1) path using pre-computed summary
+        my_team_alive = alive_by_team.get(tgt_team_i, frozenset())
+        mates = len(my_team_alive) - (1 if target_player in my_team_alive else 0)
+        enems = sum(
+            len(names)
+            for tm, names in alive_by_team.items()
+            if tm != tgt_team_i
+        )
+        return mates, enems
+
+    # Fallback: iterate tick_dict (O(n))
     mates = enems = 0
     for name, row in tick_dict.items():
         if not row.get("is_alive"):
@@ -176,10 +190,10 @@ def _alive_mates_and_enemies(
 def parse_spatial_snapshots(
     parser: DemoParser,
     ticks: list[int],
-) -> "dict[int, dict[str, dict]]":
+) -> "tuple[dict[int, dict[str, dict]], dict[int, dict[int, frozenset]]]":
     """解析指定 tick 的玩家坐标与偏航（原 DemoAnalyzer._parse_spatial_snapshots）。"""
     if not ticks:
-        return {}
+        return {}, {}
     unique_ticks = sorted(set(ticks))
     try:
         result = parser.parse_ticks(
@@ -198,22 +212,33 @@ def parse_spatial_snapshots(
                 ticks=unique_ticks,
             )
         except Exception:
-            return {}
+            return {}, {}
     try:
         df = _to_pandas_df(result)
         if df.empty:
-            return {}
+            return {}, {}
         cache: dict[int, dict[str, dict]] = {}
+        alive_summary: dict[int, dict[int, frozenset]] = {}
         for tick, group in df.groupby("tick"):
             tick_dict: dict[str, dict] = {}
+            by_team: dict[int, set] = {}
             for _, row in group.iterrows():
                 name = str(row.get("name") or "").strip()
                 if name:
-                    tick_dict[name] = row.to_dict()
-            cache[int(tick)] = tick_dict
-        return cache
+                    row_d = row.to_dict()
+                    tick_dict[name] = row_d
+                    if row_d.get("is_alive"):
+                        try:
+                            tm = int(float(row_d["team_num"]))
+                            by_team.setdefault(tm, set()).add(name)
+                        except (TypeError, ValueError, KeyError):
+                            pass
+            tick_i = int(tick)
+            cache[tick_i] = tick_dict
+            alive_summary[tick_i] = {tm: frozenset(names) for tm, names in by_team.items()}
+        return cache, alive_summary
     except Exception:
-        return {}
+        return {}, {}
 
 
 def build_equip_timeline(
