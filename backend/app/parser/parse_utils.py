@@ -288,10 +288,18 @@ def _duration_mins_from_tick_span(match_start_tick: int, max_tick: int) -> int:
     return int(max(0, max_tick - start) / float(TICK_RATE) / 60.0)
 
 
-def _get_match_start_tick(parser: DemoParser) -> int:
+def _get_match_start_tick(
+    parser: DemoParser,
+    *,
+    precomputed_df: "Optional[pd.DataFrame]" = None,
+) -> int:
     """获取比赛正式开始的 Tick（过滤拼刀局和多次 Restart）。"""
     try:
-        df = _to_pandas_df(parser.parse_event("round_announce_match_start"))
+        df = (
+            precomputed_df
+            if (precomputed_df is not None and not precomputed_df.empty)
+            else _to_pandas_df(parser.parse_event("round_announce_match_start"))
+        )
         if not df.empty and "tick" in df.columns:
             return int(df["tick"].max())
     except BaseException as e:

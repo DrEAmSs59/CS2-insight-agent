@@ -21,15 +21,25 @@ from .tag_constants import TICK_RATE, _EXTRA_EVENT_FIELDS
 def build_round_economy_shared(
     parser: DemoParser,
     match_start_tick: int = 0,
+    *,
+    freeze_end_df: "Optional[pd.DataFrame]" = None,
+    round_start_df: "Optional[pd.DataFrame]" = None,
 ) -> tuple[dict[int, dict[int, int]], dict[int, int], dict[int, int], dict[int, int], pd.DataFrame]:
     """
     Player-independent part of round economy — call once per demo.
 
     Returns (economy_map, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, economy_ticks_df).
     Pass economy_ticks_df + tick_to_round to extract_target_team_map() per player.
+
+    freeze_end_df / round_start_df: pre-parsed DataFrames from a batch call; when provided and
+    non-empty the function skips the corresponding parse_event() calls.
     """
     _empty: tuple = ({}, {}, {}, {}, pd.DataFrame())
-    fr = _safe_parse_event(parser, "round_freeze_end", other=list(_EXTRA_EVENT_FIELDS))
+    fr = (
+        freeze_end_df
+        if (freeze_end_df is not None and not freeze_end_df.empty)
+        else _safe_parse_event(parser, "round_freeze_end", other=list(_EXTRA_EVENT_FIELDS))
+    )
     if fr.shape[0] == 0 or "tick" not in fr.columns:
         return _empty
     if match_start_tick > 0:
@@ -53,7 +63,11 @@ def build_round_economy_shared(
 
     round_freeze_start_ticks: dict[int, int] = {}
     try:
-        rs_df = _safe_parse_event(parser, "round_start")
+        rs_df = (
+            round_start_df
+            if (round_start_df is not None and not round_start_df.empty)
+            else _safe_parse_event(parser, "round_start")
+        )
         if not rs_df.empty and "tick" in rs_df.columns:
             rs_ticks = sorted(
                 pd.to_numeric(rs_df["tick"], errors="coerce").dropna().astype(int).tolist()

@@ -224,8 +224,17 @@ class DemoAnalyzer:
         )
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
-        # round_end
-        re_df = self._safe_parse_event("round_end", other=list(_EXTRA_EVENT_FIELDS))
+        # round 边界事件合批（4 个事件一次 demo 扫描）
+        _round_batch = safe_parse_events_batch(
+            self.parser,
+            ["round_end", "round_freeze_end", "round_start", "round_announce_match_start"],
+            other=list(_EXTRA_EVENT_FIELDS) + ["winner", "reason"],
+        )
+        re_df           = _round_batch["round_end"]
+        freeze_end_df   = _round_batch["round_freeze_end"]
+        round_start_df  = _round_batch["round_start"]
+        match_start_df  = _round_batch["round_announce_match_start"]
+
         if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
             re_df = re_df.loc[
                 pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
@@ -238,14 +247,19 @@ class DemoAnalyzer:
         if not blind_df.empty and "user_name" in blind_df.columns:
             blind_df["user_name"] = blind_df["user_name"].astype(str).str.strip()
 
-        # Round economy — parse once: freeze_end + round_start events + parse_ticks at freeze ticks
+        # Round economy — reuse pre-parsed freeze_end + round_start from the batch above
         (
             economy_map_shared,
             round_freeze_end_ticks_shared,
             round_freeze_start_ticks_shared,
             tick_to_round_shared,
             economy_ticks_df,
-        ) = build_round_economy_shared(self.parser, match_start_tick)
+        ) = build_round_economy_shared(
+            self.parser,
+            match_start_tick,
+            freeze_end_df=freeze_end_df,
+            round_start_df=round_start_df,
+        )
 
         # Name strip on all relevant DataFrames
         for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
@@ -277,6 +291,9 @@ class DemoAnalyzer:
             "round_freeze_start_ticks_shared": round_freeze_start_ticks_shared,
             "tick_to_round_shared":          tick_to_round_shared,
             "economy_ticks_df":              economy_ticks_df,
+            "freeze_end_df":                 freeze_end_df,
+            "round_start_df":                round_start_df,
+            "match_start_df":                match_start_df,
         }
 
     def analyze_multi_players(
