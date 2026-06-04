@@ -115,6 +115,7 @@ export default function CommonParamsModal({
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
   kbOverlayEnabled: initKbOverlayEnabled = false,
   kbOverlayTickOffset: initKbOverlayTickOffset = 6,
+  kbOverlayPosition: initKbOverlayPosition = "bottom_center",
   configRefreshKey = 0,
 }) {
   const isPage = variant === "page";
@@ -148,6 +149,7 @@ export default function CommonParamsModal({
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(() => Number(initKbOverlayTickOffset));
+  const [kbOverlayPosition, setKbOverlayPosition] = useState(() => initKbOverlayPosition || "bottom_center");
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
@@ -184,6 +186,7 @@ export default function CommonParamsModal({
     setObsTransDurationMs(Number(initObsTransitionDurationMs));
     setKbOverlayEnabled(!!initKbOverlayEnabled);
     setKbOverlayTickOffset(Number(initKbOverlayTickOffset));
+    setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
     setPovEnabled(!!experimentalPovEnabled);
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
@@ -200,6 +203,7 @@ export default function CommonParamsModal({
     initObsTransitionDurationMs,
     experimentalPovEnabled,
     initKbOverlayEnabled,
+    initKbOverlayPosition,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -229,6 +233,7 @@ export default function CommonParamsModal({
       obs_transition_duration_ms: obsTransDurationMs,
       kb_overlay_enabled: kbOverlayEnabled,
       kb_overlay_tick_offset: kbOverlayTickOffset,
+      kb_overlay_position: kbOverlayPosition,
       experimental_pov_enabled: povEnabled,
     });
     setSaveState(result?.ok ? "saved" : "error");
@@ -247,6 +252,7 @@ export default function CommonParamsModal({
     obsTransName,
     obsTransDurationMs,
     kbOverlayEnabled,
+    kbOverlayPosition,
     povEnabled,
   ]);
 
@@ -716,7 +722,27 @@ export default function CommonParamsModal({
                     录制开始前会预构建按键数据，片段较多或时长较长时可能需要等待数十秒。
                 </p>
                 {kbOverlayEnabled && (
-                  <div className="mt-3 pl-7 flex flex-col gap-1">
+                  <div className="mt-3 pl-7 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">显示位置</span>
+                      {[
+                        { value: "bottom_center", label: "画面底部居中" },
+                        { value: "minimap_below", label: "左侧小地图下方" },
+                        { value: "weapon_right", label: "右侧武器栏上方" },
+                      ].map(({ value, label }) => (
+                        <label key={value} className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="kb-pos-common"
+                            value={value}
+                            checked={kbOverlayPosition === value}
+                            onChange={() => setKbOverlayPosition(value)}
+                            className="accent-cs2-orange"
+                          />
+                          <span className="text-xs text-cs2-text-primary">{label}</span>
+                        </label>
+                      ))}
+                    </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
                       <input

@@ -156,18 +156,22 @@ async def _record_until_tick_round_segment(
     seg_idx = segment.segment_index
     meta = segment.metadata or {}
 
-    # Defensive cap for alive-round segments: never let the wall-clock estimate
-    # run past next_round_start_tick (when the next round's freeze phase begins).
-    # This is the same boundary the planner targets for alive rounds.
+    # Defensive cap for alive-round segments: never let the wall-clock estimate run past
+    # next_round_start_tick - _ALIVE_END_GUARD_TICKS (the planner's alive-round end guard).
+    # The planner already bakes this guard into end_tick, so under normal circumstances
+    # end_tick < meta_next_round_start - guard and the min() is a no-op.  This cap exists
+    # as a secondary safety net in case a stale plan or edge case bypasses the planner guard.
+    # Must mirror round_pov_planner._ALIVE_END_GUARD_SEC = 0.5 s.
+    _ALIVE_END_GUARD_TICKS = int(0.5 * tick_rate)
     meta_death_tick = meta.get("target_death_tick")
     meta_next_round_start = meta.get("next_round_start_tick")
     if meta_death_tick is None and meta_next_round_start is not None:
-        effective_end_tick = min(end_tick, int(meta_next_round_start))
+        effective_end_tick = min(end_tick, int(meta_next_round_start) - _ALIVE_END_GUARD_TICKS)
         if effective_end_tick != end_tick:
             logger.info(
                 "[RecordingV3][TickWatcher] segment=%d capping end_tick %d → %d "
-                "(next_round_start_tick from metadata)",
-                seg_idx, end_tick, effective_end_tick,
+                "(next_round_start_tick %d - guard %d ticks)",
+                seg_idx, end_tick, effective_end_tick, int(meta_next_round_start), _ALIVE_END_GUARD_TICKS,
             )
     else:
         effective_end_tick = end_tick
@@ -238,12 +242,19 @@ async def _record_until_tick_round_segment(
         elif phase_guard_armed:
             # is_final_alive: disable GSI phase stop — see comment above t0.
             if not is_final_alive:
-                stop_phases = ("freezetime",) if is_alive_round else ("over", "freezetime")
+                # Both alive and death rounds stop only on "freezetime":
+                # - Alive rounds: "over" fires during the round-end scoreboard, which
+                #   we want to include in the clip; "freezetime" = next_round_start_tick.
+                # - Death rounds: "over" fires almost immediately after the kill, which
+                #   would cut the clip before round_death_post_sec elapses. The wall-clock
+                #   timer (effective_end_tick = death_tick + post_sec) handles the cutoff;
+                #   "freezetime" is only the safety net against drifting into the next freeze.
+                stop_phases = ("freezetime",)
                 if gsi_phase in stop_phases:
                     logger.info(
                         "[RecordingV3][TickWatcher] segment=%d GSI round.phase=%s at estimated_tick=%d; "
-                        "stopping OBS (alive_round=%s)",
-                        seg_idx, gsi_phase, estimated_tick, is_alive_round,
+                        "stopping OBS",
+                        seg_idx, gsi_phase, estimated_tick,
                     )
                     return "done"
 

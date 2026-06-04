@@ -62,13 +62,23 @@ _REQUEST_TYPE_TO_COMPILATION_KIND: dict[str, str] = {
 
 
 def _resolve_fade_config(options: RecordingOptions, cfg: AppConfig) -> FadeConfig:
-    """Merge per-request RecordingOptions fade overrides with AppConfig global defaults."""
+    """Merge per-request RecordingOptions fade overrides with AppConfig global defaults.
+
+    Opt-in semantics for obs_transition_enabled:
+      - True  → fade enabled for this recording session
+      - False → fade disabled
+      - None  → fade disabled (not "inherit from config")
+
+    The AppConfig value is intentionally NOT used as a fallback for enabled: if the
+    request didn't explicitly set it to True, the session runs without fade.  This
+    prevents a globally-enabled config from silently activating fade when the frontend
+    sends null (the default for "user did not toggle this setting").
+
+    transition_name and duration_ms still fall back to config so users don't need to
+    re-enter those values every time — they only matter when enabled=True anyway.
+    """
     return FadeConfig(
-        enabled=(
-            options.obs_transition_enabled
-            if options.obs_transition_enabled is not None
-            else cfg.obs_transition_enabled
-        ),
+        enabled=bool(options.obs_transition_enabled),  # None / False → disabled
         transition_name=(
             options.obs_transition_name
             if options.obs_transition_name is not None
@@ -437,6 +447,13 @@ class QueueRecordingRequest(BaseModel):
     record_inject_console_lines: Optional[str] = None
 
 
+@router.get("/kb-prebuild-status")
+def get_kb_prebuild_status() -> dict:
+    """轮询虚拟键盘 kb_track 预构建进度，供前端 loading 状态展示。"""
+    from .kb_prebuild_state import get as _kbp_get
+    return _kbp_get()
+
+
 @router.post("/queue", response_model=list[dict])
 async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     """
@@ -526,7 +543,17 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
                 if _scene:
                     import os as _os
                     _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
-                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html"
+                    # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
+                    _kb_pos = next(
+                        (
+                            getattr(dto.options, "kb_overlay_position", None)
+                            for dto in req.requests
+                            if getattr(dto.options, "kb_overlay_enabled", False)
+                            and getattr(dto.options, "kb_overlay_position", None)
+                        ),
+                        None,
+                    ) or load_config().kb_overlay_position or "bottom_center"
+                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
                     ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
                     logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
                 else:

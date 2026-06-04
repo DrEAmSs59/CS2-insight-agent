@@ -423,18 +423,29 @@ class OBSClient:
                 "height": height,
                 "fps": 60,
                 "reroute_audio": False,
-                "restart_when_active": True,
+                "restart_when_active": False,  # 保持 WebSocket 常连，避免录制开始时刷新导致错过 load/resume 广播
             }
 
             already_in_scene = self.scene_has_source(scene_name, source_name)
 
             if already_in_scene:
-                # 仅刷新 URL，其余设置不变
+                # 更新 URL 并确保 restart_when_active=False（保持 WebSocket 常连）
                 try:
-                    self.set_input_settings(source_name, {"url": overlay_url}, overlay=True)
-                    logger.info("OBSClient: kb overlay %r already in scene %r — URL updated", source_name, scene_name)
+                    self.set_input_settings(source_name, {
+                        "url": overlay_url,
+                        "restart_when_active": False,
+                    }, overlay=True)
+                    logger.info("OBSClient: kb overlay %r already in scene %r — settings updated", source_name, scene_name)
                 except Exception as e:
-                    logger.warning("OBSClient: kb overlay URL update failed (non-fatal): %s", e)
+                    logger.warning("OBSClient: kb overlay settings update failed (non-fatal): %s", e)
+                # URL 改变后 OBS Browser Source 不会自动重载，手动触发刷新
+                try:
+                    req_refresh = getattr(obs_requests, "PressInputPropertiesButton", None)
+                    if req_refresh is not None:
+                        self._ws.call(req_refresh(inputName=source_name, propertyName="refreshnocache"))
+                        logger.info("OBSClient: kb overlay %r refreshed", source_name)
+                except Exception as e:
+                    logger.warning("OBSClient: kb overlay refresh failed (non-fatal): %s", e)
                 return True
 
             # 检查是否全局已有同名 input（只是不在当前场景）
@@ -586,6 +597,14 @@ class _BoundedHandshakeOBSWS(obsws):
                 self._handshake_timeout_sec,
             )
             self.ws.connect(url, timeout=self._handshake_timeout_sec)
+
+            # 握手完成后将 socket 超时改为 None（阻塞模式），避免 receive thread 在
+            # kb_track 提取等长时间操作期间因无数据而抛出 WebSocketTimeoutException
+            try:
+                if self.ws.sock:
+                    self.ws.sock.settimeout(None)
+            except Exception:
+                pass
 
             # Perform authentication (obsws v5 protocol)
             if getattr(self, "legacy", None):

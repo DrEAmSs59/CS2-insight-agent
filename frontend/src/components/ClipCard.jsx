@@ -106,8 +106,13 @@ export default function ClipCard({
   const cat = CLIP_CATEGORY_CONFIG[clip.category] || CLIP_CATEGORY_CONFIG.highlight;
   const Icon = cat.icon;
 
+  const _killerStr = String(clip.killer_name ?? "").trim().toLowerCase();
   const showKillerBadge =
-    clip.category === "fail" && String(clip.killer_name ?? "").trim() !== "";
+    clip.category === "fail" &&
+    _killerStr !== "" &&
+    _killerStr !== "nan" &&
+    _killerStr !== "null" &&
+    _killerStr !== "undefined";
 
   const victimsList = Array.isArray(clip.victims) ? clip.victims.filter(Boolean) : [];
   const showVictimsBadge = clip.category === "highlight" && victimsList.length > 0;
@@ -293,7 +298,7 @@ export default function ClipCard({
             </div>
 
             <div className="font-mono text-[11px] text-cs2-text-secondary">
-              帧 {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}
+              tick {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}
             </div>
 
             {isRoundMontage && typeof onFreezeToDeathDraftChange === "function" && (

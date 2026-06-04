@@ -155,6 +155,7 @@ export default function RecordWarmupModal({
   initObsTransDurationMs = 200,
   initKbOverlayEnabled = false,
   initKbOverlayTickOffset = 6,
+  initKbOverlayPosition = "bottom_center",
 }) {
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
@@ -163,6 +164,7 @@ export default function RecordWarmupModal({
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
+  const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
@@ -189,6 +191,7 @@ export default function RecordWarmupModal({
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
     setKbOverlayEnabled(!!initKbOverlayEnabled);
     setKbOverlayTickOffset(Number(initKbOverlayTickOffset) || 6);
+    setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
@@ -201,6 +204,7 @@ export default function RecordWarmupModal({
     experimentalPovEnabled,
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
+    initKbOverlayPosition,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -280,6 +284,7 @@ export default function RecordWarmupModal({
         obs_transition_duration_ms: obsTransDurationMs,
         kb_overlay_enabled: kbOverlayEnabled,
         kb_overlay_tick_offset: kbOverlayTickOffset,
+        kb_overlay_position: kbOverlayPosition,
         experimental_pov_enabled: sessionPovEnabled,
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
@@ -397,7 +402,27 @@ export default function RecordWarmupModal({
                   录制开始前会预构建按键数据，片段较多或时长较长时可能需要等待数十秒。
               </p>
               {kbOverlayEnabled && (
-                <div className="mt-3 pl-7 flex flex-col gap-1">
+                <div className="mt-3 pl-7 flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">显示位置</span>
+                    {[
+                      { value: "bottom_center", label: "画面底部居中" },
+                      { value: "minimap_below", label: "左侧小地图下方" },
+                      { value: "weapon_right", label: "右侧武器栏上方" },
+                    ].map(({ value, label }) => (
+                      <label key={value} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="kb-pos-warmup"
+                          value={value}
+                          checked={kbOverlayPosition === value}
+                          onChange={() => setKbOverlayPosition(value)}
+                          className="accent-cs2-orange"
+                        />
+                        <span className="text-xs text-cs2-text-primary">{label}</span>
+                      </label>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
                     <input

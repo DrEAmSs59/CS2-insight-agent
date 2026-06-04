@@ -109,10 +109,10 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
         <div className="flex items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-3">
           {killBadge ? (
             <div
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold leading-tight ${killBadgeColorClass(cd)}`}
+              className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center overflow-hidden rounded-md border text-[10px] font-bold leading-tight ${killBadgeColorClass(cd)}`}
               title={killBadge}
             >
-              {killBadge}
+              <span className="break-all text-center">{killBadge}</span>
             </div>
           ) : null}
           <div className="min-w-0 flex-1">

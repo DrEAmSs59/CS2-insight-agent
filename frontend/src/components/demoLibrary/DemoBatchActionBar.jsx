@@ -4,7 +4,6 @@ export default function DemoBatchActionBar({
   onOpenBatchModal,
   onBatchDelete,
   onClearSelection,
-  onExportRivalHub,
 }) {
   if (count <= 0) return null;
 
@@ -17,9 +16,6 @@ export default function DemoBatchActionBar({
   const btnDanger =
     "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-red-500/55";
 
-  const btnExport =
-    "rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-400 hover:border-emerald-500/55";
-
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-cs2-border bg-cs2-bg-card/90 px-3 py-2 backdrop-blur-[1px]">
       <span className="text-[12px] font-semibold tabular-nums text-cs2-text-secondary">
@@ -31,13 +27,6 @@ export default function DemoBatchActionBar({
         </button>
         <button type="button" className={btnPrimary} onClick={onOpenBatchModal}>
           载入并解析…
-        </button>
-        <button
-          type="button"
-          className={btnExport}
-          onClick={() => void onExportRivalHub?.()}
-        >
-          导出 RivalHub
         </button>
         <button type="button" className={btnDanger} onClick={() => void onBatchDelete()}>
           批量删除

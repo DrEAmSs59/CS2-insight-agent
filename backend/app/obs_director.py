@@ -3194,6 +3194,8 @@ class OBSDirector:
             kill_part = f"{max(1, source_count)}D"
         elif category == "meme_death":
             kill_part = "1D"
+        elif category == "timeline_round":
+            kill_part = "round"
         else:
             kill_part = f"{kills}K" if kills > 0 else (category or "clip")
         clip_id = str(clip.get("clip_id") or "clip").strip()
@@ -3387,6 +3389,75 @@ class OBSDirector:
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
 
         try:
+            # ── Phase 0: 预构建 plan + 提取 kb_track（CS2 启动前完成，避免进游戏后卡顿）────
+            _plan_cache: dict = {}   # {request_id: RecordingPlan}
+            _kb_any = any(getattr(dto.options, "kb_overlay_enabled", False) for dto in requests)
+            logger.info("[RecordingV3] Pre-building %d plans (kb_overlay=%s)", len(requests), _kb_any)
+            for dto in requests:
+                if self._abort_requested():
+                    break
+                try:
+                    _plan_cache[dto.request_id] = build_plan(dto)
+                except Exception as _bp_e:
+                    logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
+
+            if _kb_any and _plan_cache and not self._abort_requested():
+                from .parser.input_track import extract_input_track as _pre_extract_kb
+
+                async def _extract_seg_pre(_seg, _demo_path):
+                    if self._abort_requested():
+                        _seg.metadata["kb_track"] = []
+                        return
+                    try:
+                        _frames = await asyncio.to_thread(
+                            _pre_extract_kb,
+                            _demo_path,
+                            steamid=_seg.target_steamid64,
+                            player_name=_seg.target_player_name,
+                            start_tick=_seg.start_tick,
+                            end_tick=_seg.end_tick,
+                        )
+                        _seg.metadata["kb_track"] = _frames
+                        logger.info(
+                            "[kb_overlay] pre-extract seg=%d %d frames (ticks %d-%d)",
+                            _seg.segment_index, len(_frames), _seg.start_tick, _seg.end_tick,
+                        )
+                    except Exception as _e:
+                        logger.warning("[kb_overlay] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
+                        _seg.metadata["kb_track"] = []
+
+                # 收集所有需要提取的任务
+                _kb_tasks = []
+                for _dto in requests:
+                    if not getattr(_dto.options, "kb_overlay_enabled", False):
+                        continue
+                    _plan = _plan_cache.get(_dto.request_id)
+                    if _plan:
+                        for _seg in _plan.segments:
+                            _kb_tasks.append((_seg, _plan.demo_path))
+
+                # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时
+                _BATCH = 8
+                _kb_total = len(_kb_tasks)
+                _kb_done = 0
+                logger.info("[kb_overlay] Pre-extracting %d segments before CS2 launch", _kb_total)
+
+                from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
+                _kbp_start(_kb_total)
+
+                for _bi in range(0, _kb_total, _BATCH):
+                    if self._abort_requested():
+                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _bi // _BATCH)
+                        _kbp_reset()
+                        break
+                    _batch = _kb_tasks[_bi: _bi + _BATCH]
+                    await asyncio.gather(*[_extract_seg_pre(s, p) for s, p in _batch])
+                    _kb_done += len(_batch)
+                    _kbp_update(_kb_done, _kb_total)
+                else:
+                    _kbp_finish()
+                logger.info("[kb_overlay] Pre-extraction done")
+
             # ── POV HUD install (before first CS2 launch) ─────────────────────
             if pov_on_v3:
                 try:
@@ -3532,57 +3603,30 @@ class OBSDirector:
                         })
                         continue
 
-                    logger.info("[RecordingV3] build plan: request_id=%s type=%s",
-                                dto.request_id, dto.request_type.value)
-                    try:
-                        plan = build_plan(dto)
-                    except NormalizationError as e:
-                        logger.warning("[RecordingV3] Normalization failed: %s", e)
-                        all_results.append({
-                            "request_id": dto.request_id, "success": False,
-                            "error": str(e), "segment_results": [], "warnings": [],
-                        })
-                        continue
-                    except Exception as e:
-                        logger.error("[RecordingV3] build_plan error: %s", e)
-                        all_results.append({
-                            "request_id": dto.request_id, "success": False,
-                            "error": str(e), "segment_results": [], "warnings": [],
-                        })
-                        continue
-
-                    # ── kb_track: 为 overlay 填充逐 tick 按键状态（请求参数优先，否则读全局配置）────
-                    _kb_overlay_req = dto.options.kb_overlay_enabled if dto.options else None
-                    logger.info("[kb_overlay] dto.options.kb_overlay_enabled=%s", _kb_overlay_req)
-                    if _kb_overlay_req is None:
-                        from .env_utils import load_config as _load_cfg
-                        _kb_overlay_req = _load_cfg().kb_overlay_enabled
-                        logger.info("[kb_overlay] fallback to config: kb_overlay_enabled=%s", _kb_overlay_req)
-                    if _kb_overlay_req:
-                        from .parser.input_track import extract_input_track as _extract_kb
-                        for _seg in plan.segments:
-                            try:
-                                _frames = _extract_kb(
-                                    plan.demo_path,
-                                    steamid=_seg.target_steamid64,
-                                    player_name=_seg.target_player_name,
-                                    start_tick=_seg.start_tick,
-                                    end_tick=_seg.end_tick,
-                                )
-                                _seg.metadata["kb_track"] = _frames
-                                logger.info(
-                                    "[kb_overlay] seg=%d extracted %d frames (ticks %d-%d steamid=%s)",
-                                    _seg.segment_index, len(_frames),
-                                    _seg.start_tick, _seg.end_tick, _seg.target_steamid64,
-                                )
-                            except Exception as _kb_e:
-                                logger.warning(
-                                    "[RecordingV3] kb_track extraction failed seg=%d: %s",
-                                    _seg.segment_index, _kb_e,
-                                )
-                                _seg.metadata["kb_track"] = []
+                    # 优先使用预构建的 plan（已含 kb_track 数据），避免重复 build_plan
+                    plan = _plan_cache.get(dto.request_id)
+                    if plan is None:
+                        logger.info("[RecordingV3] build plan (fallback): request_id=%s type=%s",
+                                    dto.request_id, dto.request_type.value)
+                        try:
+                            plan = build_plan(dto)
+                        except NormalizationError as e:
+                            logger.warning("[RecordingV3] Normalization failed: %s", e)
+                            all_results.append({
+                                "request_id": dto.request_id, "success": False,
+                                "error": str(e), "segment_results": [], "warnings": [],
+                            })
+                            continue
+                        except Exception as e:
+                            logger.error("[RecordingV3] build_plan error: %s", e)
+                            all_results.append({
+                                "request_id": dto.request_id, "success": False,
+                                "error": str(e), "segment_results": [], "warnings": [],
+                            })
+                            continue
                     else:
-                        logger.info("[kb_overlay] kb_overlay disabled, skipping extraction")
+                        logger.info("[RecordingV3] using pre-built plan: request_id=%s type=%s",
+                                    dto.request_id, dto.request_type.value)
 
                     # ── voice_filter: patch segment masks before execution ────────
                     _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"
@@ -3820,7 +3864,8 @@ def _v3_clip_dict_for_rename(dto: "Any") -> dict:
 
     kill_events = [e for e in events if getattr(getattr(e, "event_type", None), "value", None) == "kill"]
     kill_count = len(kill_events)
-    round_no = events[0].round if events else None
+    rounds = getattr(dto, "rounds", None) or []
+    round_no = events[0].round if events else (rounds[0].round if rounds else None)
     request_type = getattr(getattr(dto, "request_type", None), "value", None) or "clip"
     request_id = str(getattr(dto, "request_id", None) or "")
     demo = getattr(dto, "demo", None)

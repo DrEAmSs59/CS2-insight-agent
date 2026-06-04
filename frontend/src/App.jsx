@@ -151,6 +151,7 @@ export default function App() {
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
+  const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -830,6 +831,9 @@ export default function App() {
     }
     if (typeof data.kb_overlay_tick_offset === "number") {
       setKbOverlayTickOffset(data.kb_overlay_tick_offset);
+    }
+    if (typeof data.kb_overlay_position === "string") {
+      setKbOverlayPosition(data.kb_overlay_position);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -1679,6 +1683,7 @@ export default function App() {
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
       kb_overlay_enabled: !!payload?.kb_overlay_enabled,
       kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
+      kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1752,13 +1757,37 @@ export default function App() {
         setKbOverlayTickOffset(session.kb_overlay_tick_offset);
         void API.put("config", { kb_overlay_tick_offset: session.kb_overlay_tick_offset }).catch(() => {});
       }
+      if (typeof session.kb_overlay_position === "string") {
+        setKbOverlayPosition(session.kb_overlay_position);
+        void API.put("config", { kb_overlay_position: session.kb_overlay_position }).catch(() => {});
+      }
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
         setWarmupIntent(null);
         if (!queue.length) return;
         setBatchRecording(true);
-        setProgressText("正在执行批量 OBS 导播…", { loading: true });
+        setProgressText("正在准备录制…", { loading: true });
+
+        // 如果启用了虚拟键盘 Overlay，轮询预构建进度并更新提示文字
+        const _kbOverlayOn = session.kb_overlay_enabled;
+        let _kbPollTimer = null;
+        if (_kbOverlayOn) {
+          _kbPollTimer = setInterval(async () => {
+            try {
+              const { data: kbst } = await API.get("recording/kb-prebuild-status");
+              if (kbst?.active) {
+                setProgressText(
+                  `正在预构建虚拟键盘按键数据 ${kbst.done}/${kbst.total}，请稍候…`,
+                  { loading: true }
+                );
+              } else if (kbst?.done > 0 && !kbst?.active) {
+                setProgressText("虚拟键盘数据就绪，正在启动 CS2…", { loading: true });
+              }
+            } catch { /* ignore */ }
+          }, 1000);
+        }
+
         try {
           let requests = buildRecordingQueueRequestsFromQueue(
             queue,
@@ -1818,6 +1847,7 @@ export default function App() {
           }
           setProgressText(`批量录制失败: ${detail}`);
         } finally {
+          if (_kbPollTimer) clearInterval(_kbPollTimer);
           setBatchRecording(false);
           void refreshConfigBackupStatus();
         }
@@ -2441,6 +2471,7 @@ export default function App() {
     obsTransitionDurationMs,
     kbOverlayEnabled,
     kbOverlayTickOffset,
+    kbOverlayPosition,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2551,6 +2582,7 @@ export default function App() {
           initObsTransDurationMs={obsTransitionDurationMs}
           initKbOverlayEnabled={kbOverlayEnabled}
           initKbOverlayTickOffset={kbOverlayTickOffset}
+          initKbOverlayPosition={kbOverlayPosition}
         />
 
         <LibraryLoadModeModal

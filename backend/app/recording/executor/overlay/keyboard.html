@@ -6,15 +6,29 @@
   html, body { margin: 0; background: transparent; overflow: hidden; }
   #kb {
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%) scale(1.3);
-    transform-origin: bottom center;
-    bottom: 16vh;
     display: flex;
     gap: 14px;
     align-items: flex-end;
     opacity: .92;
     font-family: Consolas, monospace;
+  }
+  #kb.pos-bottom-center {
+    left: 50%;
+    bottom: 14vh;
+    transform: translateX(-50%) scale(1.3);
+    transform-origin: bottom center;
+  }
+  #kb.pos-minimap-below {
+    left: 5vh;
+    bottom: 48vh;
+    transform: scale(1.3);
+    transform-origin: top left;
+  }
+  #kb.pos-weapon-right {
+    right: 5vh;
+    bottom: 48vh;
+    transform: scale(1.3);
+    transform-origin: bottom right;
   }
   .col { display: flex; flex-direction: column; gap: 6px; }
   .row { display: flex; gap: 6px; justify-content: center; }
@@ -98,6 +112,10 @@ const PORT = location.port || "19871";
 const els = {};
 document.querySelectorAll("[data-k]").forEach(e => els[e.dataset.k] = e);
 const kb = document.getElementById("kb");
+
+const _pos = new URLSearchParams(location.search).get("pos") || "bottom_center";
+const _posClass = { minimap_below: "pos-minimap-below", weapon_right: "pos-weapon-right" }[_pos] ?? "pos-bottom-center";
+kb.classList.add(_posClass);
 
 let track = [], tickRate = 64, startTick = 0, offset = 0;
 let byTick = new Map(), tickList = [];

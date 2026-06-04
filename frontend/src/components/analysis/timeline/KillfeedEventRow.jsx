@@ -68,7 +68,8 @@ export default function KillfeedEventRow({
   const isKill = typ === "kill" || event?.record_type === "kill";
   const isDeath = typ === "death" || event?.record_type === "death";
   const timeText = String(event?.time_text || "--:--");
-  const atk = String(event?.attacker_name || "").trim() || "—";
+  const atkRaw = String(event?.attacker_name || "").trim();
+  const atk = (atkRaw && !["nan", "undefined", "null"].includes(atkRaw.toLowerCase())) ? atkRaw : "—";
   const vic = String(event?.victim_name || "").trim() || "—";
   const weapon = String(event?.weapon_name || "").trim() || "—";
   const weaponKey = String(event?.weapon_key || "").trim();

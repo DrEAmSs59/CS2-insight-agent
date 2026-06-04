@@ -9,7 +9,7 @@ import {
   EyeOff,
   OctagonX,
 } from "lucide-react";
-import { useRecordingQueue, BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
+import { useRecordingQueue, BACKEND_DEFAULT_PACING, clipHasNoKillerPovTags, clipKillerPovEnqueueEligible } from "../stores/recordingQueueStore";
 import {
   formatClipCombatSummaryLine,
   isTimelineSourceClip,
@@ -193,7 +193,10 @@ export function PovSection({ item, updateItemPacing }) {
   const killerName = item.clipData?.killer_name;
 
   const isHighlight = clipCategory === "highlight" && victimsList.length > 0;
-  const isFail = clipCategory === "fail" && Boolean(killerName);
+  const noKillerPovReason = clipCategory === "fail" && clipHasNoKillerPovTags(item.clipData)
+    ? "C4 爆炸 / 摔死无真实攻击者，不支持击杀者视角"
+    : null;
+  const isFail = clipCategory === "fail" && Boolean(killerName) && !noKillerPovReason;
   const isCompilation = clipCategory === "compilation";
   const compilationKind = item.clipData?.compilation_kind;
   const isKillCompilation = isCompilation && ["rival_kills", "all_kills"].includes(compilationKind);
@@ -201,7 +204,7 @@ export function PovSection({ item, updateItemPacing }) {
   const canVictimPov = (isHighlight || isKillCompilation) && victimsList.some((v) => String(v ?? "").trim());
   const canKillerPov = isFail || (isDeathCompilation && killersList.some((v) => String(v ?? "").trim()));
 
-  if (!canVictimPov && !canKillerPov) return null;
+  if (!canVictimPov && !canKillerPov && !noKillerPovReason) return null;
 
   const gNum = (key) => {
     const v = gp[key];
@@ -251,6 +254,13 @@ export function PovSection({ item, updateItemPacing }) {
               </span>
             )}
           </button>
+        )}
+        {noKillerPovReason && (
+          <div className="flex w-full items-center gap-1.5 rounded border border-cs2-border bg-cs2-bg-hover px-2 py-1.5 text-[10px] text-cs2-text-muted cursor-not-allowed select-none">
+            <EyeOff className="h-3 w-3 shrink-0 opacity-40" />
+            <span className="opacity-60">击杀者视角不可用</span>
+            <span className="ml-1 opacity-40">· {noKillerPovReason}</span>
+          </div>
         )}
         {canKillerPov && (
           <button
@@ -349,16 +359,7 @@ function countVictimPovEligibleHighlights(queue) {
 }
 
 function countKillerPovEligible(queue) {
-  return queue.filter((q) => {
-    const killers = Array.isArray(q.clipData?.killers) ? q.clipData.killers : [];
-    const kind = q.clipData?.compilation_kind;
-    return (
-      (q.clipData?.category === "compilation" &&
-        ["nemesis_deaths", "all_deaths"].includes(kind) &&
-        killers.some((v) => String(v ?? "").trim().length > 0)) ||
-      (q.clipData?.category === "fail" && String(q.clipData?.killer_name ?? "").trim().length > 0)
-    );
-  }).length;
+  return queue.filter((q) => clipKillerPovEnqueueEligible(q.clipData)).length;
 }
 
 /** 符合条件的高光是否已全部打开「受害者视角」 */
@@ -377,16 +378,7 @@ function allEligibleVictimPovEnabled(queue) {
 }
 
 function allEligibleKillerPovEnabled(queue) {
-  const eligible = queue.filter((q) => {
-    const killers = Array.isArray(q.clipData?.killers) ? q.clipData.killers : [];
-    const kind = q.clipData?.compilation_kind;
-    return (
-      (q.clipData?.category === "compilation" &&
-        ["nemesis_deaths", "all_deaths"].includes(kind) &&
-        killers.some((v) => String(v ?? "").trim().length > 0)) ||
-      (q.clipData?.category === "fail" && String(q.clipData?.killer_name ?? "").trim().length > 0)
-    );
-  });
+  const eligible = queue.filter((q) => clipKillerPovEnqueueEligible(q.clipData));
   if (eligible.length === 0) return false;
   return eligible.every((q) => Boolean(q.pacing_override?.killer_pov));
 }

@@ -56,6 +56,14 @@ export function clipVictimPovEnqueueEligible(clipData) {
   );
 }
 
+/** C4 爆炸 / 摔死等无真实攻击者的 tag，这类片段不开放击杀者视角。 */
+const NO_KILLER_POV_TAGS = ["惨遭C4洗礼", "摔死"];
+
+export function clipHasNoKillerPovTags(clipData) {
+  const tags = Array.isArray(clipData?.context_tags) ? clipData.context_tags : [];
+  return tags.some((t) => NO_KILLER_POV_TAGS.some((bad) => String(t).includes(bad)));
+}
+
 /** 与队列抽屉「击杀者视角」资格判定一致 */
 export function clipKillerPovEnqueueEligible(clipData) {
   if (!clipData || typeof clipData !== "object") return false;
@@ -66,6 +74,7 @@ export function clipKillerPovEnqueueEligible(clipData) {
   ) {
     return false;
   }
+  if (clipHasNoKillerPovTags(clipData)) return false;
   const killers = Array.isArray(clipData.killers) ? clipData.killers : [];
   const hasKillerList = killers.some((v) => String(v ?? "").trim().length > 0);
   const kind = clipData.compilation_kind;
@@ -268,17 +277,7 @@ export const useRecordingQueue = create((set, get) => ({
 
   toggleKillerPovForAllEligibleInQueue() {
     set((s) => {
-      const isEligible = (q) => {
-        const killers = Array.isArray(q.clipData?.killers) ? q.clipData.killers : [];
-        const hasKillerList = killers.some((v) => String(v ?? "").trim().length > 0);
-        const kind = q.clipData?.compilation_kind;
-        return (
-          (q.clipData?.category === "compilation" &&
-            ["nemesis_deaths", "all_deaths"].includes(kind) &&
-            hasKillerList) ||
-          (q.clipData?.category === "fail" && String(q.clipData?.killer_name ?? "").trim().length > 0)
-        );
-      };
+      const isEligible = (q) => clipKillerPovEnqueueEligible(q.clipData);
       const eligible = s.queue.filter(isEligible);
       if (eligible.length === 0) return s;
       const allOn = eligible.every((q) => Boolean(q.pacing_override?.killer_pov));

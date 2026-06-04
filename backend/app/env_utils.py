@@ -400,6 +400,7 @@ class AppConfig(BaseModel):
     # 虚拟键盘 overlay（OBS Browser Source 实时合成）
     kb_overlay_enabled: bool = False
     kb_overlay_tick_offset: int = 6   # 补偿 OBS CEF 渲染流水线延迟；正=overlay提前显示，负=延迟显示
+    kb_overlay_position: str = "bottom_center"  # bottom_center | minimap_below
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:

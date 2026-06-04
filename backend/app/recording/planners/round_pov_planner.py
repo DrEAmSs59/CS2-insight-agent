@@ -24,6 +24,28 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
     _mask_enemy = compute_voice_listen_mask_enemy(req.demo.all_players, req.target_player.steamid64, _offset)
     default_freeze_ticks = int(15 * tick_rate)
 
+    # Guard applied to alive-round end boundaries that use next_round_start_tick.
+    # next_round_start_tick is the very first tick of the next round's freeze phase.  We must
+    # stop the segment well before that tick to avoid capturing a freeze-phase frame.
+    #
+    # Failure mode without a sufficient guard:
+    #   The tick-watcher poll loop checks GSI phase BEFORE the wall-clock estimate.  When a
+    #   poll cycle fires slightly late (~100 ms overshoot), the GSI may already report
+    #   "freezetime" (demo reached next_round_start_tick) before the wall-clock check runs.
+    #   This causes OBS to stop AFTER the demo has entered the next round's freeze phase,
+    #   so the last recorded frame shows the buy-phase overlay.
+    #
+    # Guard budget:
+    #   poll_latency ≈ 100 ms  (two poll cycles of 100 ms each to guarantee wall-clock wins)
+    #   t0_offset    ≈  50 ms  (demo resumes ~50 ms before t0 is set)
+    #   KP-5 → CS2  ≈  16 ms  (key delivery + one game frame for demo to freeze)
+    #   Total        ≈ 366 ms  → use 500 ms to have comfortable headroom.
+    #
+    # Cost: recording ends 0.5 s before the next round's freeze.  The round-end scoreboard
+    # is shown for ~5 s (round_end → freeze), so the user still sees ~4.5 s of scoreboard.
+    _ALIVE_END_GUARD_SEC = 0.5
+    alive_end_guard_ticks = sec_to_ticks(_ALIVE_END_GUARD_SEC, tick_rate)
+
     for segment_index, round_info in enumerate(req.rounds):
         # --- Compute start_tick ---
         if round_info.freeze_end_tick is not None:
@@ -52,28 +74,30 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
             # Case A: player alive this round.
-            # Stop at next_round_start_tick — the demo tick when the next round's freeze
-            # phase begins (= the moment the round-over/scoreboard screen appears).
-            # Priority: reliable round_end_tick → next_round_start_tick
+            # Stop just before next_round_start_tick — the demo tick when the next round's
+            # freeze phase begins.  We subtract alive_end_guard_ticks so OBS stops cleanly
+            # before the freeze frame appears (poll latency + OBS stop latency ≈ 0.15 s).
+            # Priority: reliable round_end_tick → next_round_start_tick - guard
             #            → next_round_freeze_start_tick → demo_end
             if reliable_round_end:
                 end_tick = round_info.round_end_tick  # type: ignore[assignment]
                 end_reason = "round_end"
             elif round_info.next_round_start_tick is not None:
-                end_tick = round_info.next_round_start_tick
+                end_tick = round_info.next_round_start_tick - alive_end_guard_ticks
                 end_reason = "fallback_next_round_start"
             elif round_info.next_round_freeze_start_tick is not None:
-                end_tick = round_info.next_round_freeze_start_tick
+                end_tick = round_info.next_round_freeze_start_tick - alive_end_guard_ticks
                 end_reason = "fallback_next_round_freeze_start"
             else:
                 end_tick = req.demo.demo_end_tick
                 end_reason = "fallback_demo_end"
 
-            # Clamp to next_round_start_tick to avoid recording into the next round's
+            # Clamp to next_round_start_tick - guard to avoid recording into the next round's
             # freeze / buy phase.
             if round_info.next_round_start_tick is not None:
-                if end_tick > round_info.next_round_start_tick:
-                    end_tick = round_info.next_round_start_tick
+                alive_end_cap = round_info.next_round_start_tick - alive_end_guard_ticks
+                if end_tick > alive_end_cap:
+                    end_tick = alive_end_cap
                     end_reason = "round_end_clamped_to_next_round_start"
         else:
             # Case B: player died this round.

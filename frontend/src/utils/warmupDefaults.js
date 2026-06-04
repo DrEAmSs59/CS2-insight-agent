@@ -208,6 +208,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
     obs_transition_duration_ms,
     kb_overlay_enabled,
     kb_overlay_tick_offset,
+    kb_overlay_position,
     ...warmupForApi
   } = src;
   return {
@@ -227,6 +228,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_duration_ms,
       kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
       kb_overlay_tick_offset: typeof kb_overlay_tick_offset === "number" ? kb_overlay_tick_offset : undefined,
+      kb_overlay_position: typeof kb_overlay_position === "string" ? kb_overlay_position : undefined,
     },
   };
 }

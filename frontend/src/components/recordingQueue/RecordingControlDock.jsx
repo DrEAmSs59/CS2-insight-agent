@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-import { Play, Square, Trash2, Layers, Timer, Settings2 } from "lucide-react";
+import { Play, Square, Trash2, Layers, Timer } from "lucide-react";
 
 /**
  * @param {{
@@ -86,15 +85,6 @@ export default function RecordingControlDock({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-cs2-border pt-2 sm:ml-auto sm:border-t-0 sm:pt-0">
-        <Link
-          to="/settings"
-          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-2 py-1.5 text-[11px] font-semibold text-cs2-text-muted transition-colors hover:border-cs2-accent/35 hover:text-cs2-text-secondary"
-        >
-          <Settings2 className="h-3 w-3" />
-          OBS / 输出
-        </Link>
-      </div>
     </div>
   );
 }

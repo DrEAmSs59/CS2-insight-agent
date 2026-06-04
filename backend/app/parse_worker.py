@@ -11,14 +11,12 @@ from typing import Any, Optional
 if __package__:
     from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list
     from .radar.radar_data_extractor import extract_radar_timeline_impl
-    from .rivalhub_parse_worker import parse_for_rivalhub
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
     from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list
     from app.radar.radar_data_extractor import extract_radar_timeline_impl
-    from app.rivalhub_parse_worker import parse_for_rivalhub
 
 
 def _run(payload: dict) -> object:
@@ -67,8 +65,6 @@ def _run(payload: dict) -> object:
         return get_player_list(dem_path)
     if action == "summary":
         return get_demo_match_summary(dem_path)
-    if action == "rivalhub_export":
-        return parse_for_rivalhub(dem_path)
     raise ValueError(f"unknown parse worker action: {action!r}")
 
 

@@ -46,7 +46,12 @@ def extract_input_track(
     steamid 为主键；缺失时用 player_name 兜底（存在 steamid 缺失的真实片段）。
     """
     parser = DemoParser(demo_path)
-    ticks = list(range(int(start_tick), int(end_tick) + 1))
+    # 限制每个片段最多解析 2000 个 tick（降采样），超长片段（如回合合集）按等比缩减，
+    # 保证解析时间可控（40s → 数秒），32fps 精度对键盘显示已足够。
+    _MAX_TICKS = 2000
+    _total = int(end_tick) - int(start_tick) + 1
+    _stride = max(1, (_total + _MAX_TICKS - 1) // _MAX_TICKS)
+    ticks = list(range(int(start_tick), int(end_tick) + 1, _stride))
     df = _to_df(parser.parse_ticks(
         [PROP_BUTTONS, PROP_WALK, PROP_SCOPE, PROP_DUCKING, PROP_RELOAD, "name", "steamid"],
         ticks=ticks,

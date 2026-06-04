@@ -613,6 +613,7 @@ class ConfigPayload(BaseModel):
     obs_transition_duration_ms: Optional[int] = None
     kb_overlay_enabled: Optional[bool] = None
     kb_overlay_tick_offset: Optional[int] = None
+    kb_overlay_position: Optional[str] = None
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
@@ -890,6 +891,9 @@ async def update_config(payload: ConfigPayload):
             cfg.kb_overlay_tick_offset = int(payload.kb_overlay_tick_offset)
         except (TypeError, ValueError):
             pass
+    if payload.kb_overlay_position is not None:
+        if str(payload.kb_overlay_position) in ("bottom_center", "minimap_below", "weapon_right"):
+            cfg.kb_overlay_position = str(payload.kb_overlay_position)
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
@@ -2043,96 +2047,6 @@ async def delete_demo_file(demo_id: int):
     await demo_db.delete_demo(demo_id, rescan="skip")
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
-
-
-@app.post("/api/demos/{demo_id}/export-rivalhub")
-async def export_demo_rivalhub(demo_id: int):
-    """Export a parsed demo as a RivalHub-format zip. Requires demo file on disk."""
-    from .rivalhub_exporter import export_demo as _export_rivalhub_demo
-    from .demo_parse_isolation import IsolatedParseError
-
-    item = await demo_db.get_demo_by_id(demo_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Demo not found")
-
-    dem_path = item.get("path") or ""
-    if not dem_path or not Path(dem_path).exists():
-        raise HTTPException(
-            status_code=422,
-            detail="Demo file not found on disk. Cannot export.",
-        )
-
-    try:
-        loop = asyncio.get_running_loop()
-        zip_bytes = await loop.run_in_executor(
-            None, _export_rivalhub_demo, dem_path
-        )
-    except IsolatedParseError as e:
-        raise HTTPException(status_code=500, detail=f"Demo parse failed: {e}") from e
-
-    map_name = str(item.get("map_name") or "unknown").replace(" ", "_")
-    date_str = (item.get("match_date") or "")[:10] or datetime.utcnow().strftime("%Y-%m-%d")
-    filename = f"rivalhub-{map_name}-{date_str}.zip"
-
-    return StreamingResponse(
-        io.BytesIO(zip_bytes),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-class BatchExportRivalHubBody(BaseModel):
-    demo_ids: list[int]
-
-
-@app.post("/api/demos/export-rivalhub-batch")
-async def export_rivalhub_batch(body: BatchExportRivalHubBody):
-    """批量导出多个 demo 为 RivalHub 格式，合并为一个 zip 返回。"""
-    from .rivalhub_exporter import export_demo as _export_rivalhub_demo
-    from .demo_parse_isolation import IsolatedParseError
-
-    batch_buf = io.BytesIO()
-    exported = 0
-    skipped: list[int] = []
-
-    name_counter: dict[str, int] = {}
-    with zipfile.ZipFile(batch_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for demo_id in body.demo_ids:
-            item = await demo_db.get_demo_by_id(demo_id)
-            if item is None:
-                skipped.append(demo_id)
-                continue
-            dem_path = item.get("path") or ""
-            if not dem_path or not Path(dem_path).exists():
-                skipped.append(demo_id)
-                continue
-            try:
-                loop = asyncio.get_running_loop()
-                zip_bytes = await loop.run_in_executor(
-                    None, _export_rivalhub_demo, dem_path
-                )
-            except IsolatedParseError:
-                skipped.append(demo_id)
-                continue
-            map_name = str(item.get("map_name") or "unknown").replace(" ", "_")
-            date_str = (item.get("match_date") or item.get("added_at") or "")[:10] or "unknown"
-            base = f"rivalhub-{map_name}-{date_str}"
-            n = name_counter.get(base, 0) + 1
-            name_counter[base] = n
-            entry_name = f"{base}.zip" if n == 1 else f"{base}-{n}.zip"
-            zf.writestr(entry_name, zip_bytes)
-            exported += 1
-
-    batch_buf.seek(0)
-    detail = {"exported": exported, "skipped": skipped}
-    return StreamingResponse(
-        batch_buf,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": 'attachment; filename="rivalhub-exports.zip"',
-            "X-Export-Detail": json.dumps(detail),
-        },
-    )
 
 
 class BatchIngestBody(BaseModel):
