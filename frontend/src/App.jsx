@@ -1701,11 +1701,27 @@ export default function App() {
 
   const openBatchWarmup = useCallback(async () => {
     if (!queue.length) return;
-    if (configBackupStatus?.restore_required) {
-      setRecordingBlockedMessage(
-        "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
-      );
-      return;
+    // 每次点击开始录制时现场拉取最新状态，避免程序刚启动时 state 尚未加载而漏检
+    setProgressText("正在检查玩家配置状态…", { loading: true });
+    try {
+      const { data: cfgStatus } = await API.get("/config-backup/status");
+      setConfigBackupStatus(cfgStatus && typeof cfgStatus === "object" ? cfgStatus : null);
+      if (cfgStatus?.restore_required) {
+        setProgressText("");
+        setRecordingBlockedMessage(
+          "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
+        );
+        return;
+      }
+    } catch {
+      // 获取失败时退回本地缓存，不阻断流程
+      if (configBackupStatus?.restore_required) {
+        setProgressText("");
+        setRecordingBlockedMessage(
+          "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
+        );
+        return;
+      }
     }
     // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
     setProgressText("正在检测 OBS 连接…", { loading: true });
@@ -1723,7 +1739,7 @@ export default function App() {
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
     setProgressText("");
-  }, [queue.length, configBackupStatus?.restore_required, setProgressText]);
+  }, [queue.length, configBackupStatus, setConfigBackupStatus, setProgressText]);
 
   const handleWarmupConfirm = useCallback(
     async (warmupPayload) => {
