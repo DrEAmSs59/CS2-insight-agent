@@ -80,9 +80,10 @@ export function clampSpectatorFlashbangOpacity(n) {
  * @returns {number | null}
  */
 export function effectiveSpectatorFlashbangOpacity(opts, povEnabled) {
-  if (povEnabled) return 1;
-  if (!opts.apply_spectator_flashbang_opacity) return null;
-  return clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity);
+  if (povEnabled || opts.apply_spectator_flashbang_opacity) {
+    return clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity);
+  }
+  return null;
 }
 
 /**

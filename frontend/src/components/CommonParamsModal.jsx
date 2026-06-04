@@ -530,7 +530,12 @@ export default function CommonParamsModal({
               <ExperimentalPovSection
                 visible={open || isPage}
                 experimentalPovEnabled={povEnabled}
-                onExperimentalPovChange={setPovEnabled}
+                onExperimentalPovChange={(enabled) => {
+                  setPovEnabled(enabled);
+                  if (enabled) {
+                    patchWarmup({ apply_spectator_flashbang_opacity: true, spectator_flashbang_opacity: 1 });
+                  }
+                }}
                 checkboxDisabled={batchRecording}
                 povRadarMode={warmupOpts.pov_radar_mode}
                 onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
@@ -619,7 +624,7 @@ export default function CommonParamsModal({
                     min={0.2}
                     max={1}
                     step={0.1}
-                    value={povEnabled ? 1 : warmupOpts.spectator_flashbang_opacity}
+                    value={warmupOpts.spectator_flashbang_opacity}
                     onChange={(e) => {
                       if (e.target.value === "") return;
                       const n = parseFloat(e.target.value, 10);
@@ -630,7 +635,7 @@ export default function CommonParamsModal({
                       });
                     }}
                     disabled={
-                      povEnabled || batchRecording || !warmupOpts.apply_spectator_flashbang_opacity
+                      batchRecording || (!povEnabled && !warmupOpts.apply_spectator_flashbang_opacity)
                     }
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
@@ -638,7 +643,7 @@ export default function CommonParamsModal({
                 </div>
                 {povEnabled ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-amber-on-surface">
-                    已启用 POV HUD：录制时将强制注入亮度 1.0，更接近实战第一人称观感。
+                    已启用 POV HUD：默认注入亮度 1.0 以接近实战第一人称观感，可手动调整。
                   </p>
                 ) : warmupOpts.apply_spectator_flashbang_opacity ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
