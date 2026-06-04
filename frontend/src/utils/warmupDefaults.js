@@ -80,10 +80,9 @@ export function clampSpectatorFlashbangOpacity(n) {
  * @returns {number | null}
  */
 export function effectiveSpectatorFlashbangOpacity(opts, povEnabled) {
-  if (povEnabled || opts.apply_spectator_flashbang_opacity) {
-    return clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity);
-  }
-  return null;
+  if (povEnabled) return 1;
+  if (!opts.apply_spectator_flashbang_opacity) return null;
+  return clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity);
 }
 
 /**
@@ -91,13 +90,12 @@ export function effectiveSpectatorFlashbangOpacity(opts, povEnabled) {
  * @param {Record<string, unknown>} opts
  * @param {{ povEnabled?: boolean }} [extra]
  */
-export function warmupUiOptsToPersisted(opts, { povEnabled = false } = {}) {
+export function warmupUiOptsToPersisted(opts) {
   const rw = opts.resolution_width;
   const rh = opts.resolution_height;
   const fov = opts.fov_cs_debug;
   const hasFov = !!opts.apply_fov && fov != null && Number.isFinite(Number(fov));
-  // POV 开启时，闪光设置视为始终应用（值可由用户修改，默认为 1.0）
-  const hasFlash = povEnabled || !!opts.apply_spectator_flashbang_opacity;
+  const hasFlash = !!opts.apply_spectator_flashbang_opacity;
   return {
     cl_draw_only_deathnotices: !!opts.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!opts.hud_showtargetid_hide,

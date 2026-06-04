@@ -220,7 +220,7 @@ export default function CommonParamsModal({
     setSaveError("");
     setSaveState("saving");
     const result = await onSaveAllCommonParams({
-      default_record_warmup: warmupUiOptsToPersisted(warmupOpts, { povEnabled }),
+      default_record_warmup: warmupUiOptsToPersisted(warmupOpts),
       recording_global_pacing: globalPacing,
       cs2_extra_launch_args: localCs2ExtraLaunchArgs,
       record_inject_console_lines: localRecordInjectLines,
@@ -530,12 +530,7 @@ export default function CommonParamsModal({
               <ExperimentalPovSection
                 visible={open || isPage}
                 experimentalPovEnabled={povEnabled}
-                onExperimentalPovChange={(enabled) => {
-                  setPovEnabled(enabled);
-                  if (enabled) {
-                    patchWarmup({ apply_spectator_flashbang_opacity: true, spectator_flashbang_opacity: 1 });
-                  }
-                }}
+                onExperimentalPovChange={setPovEnabled}
                 checkboxDisabled={batchRecording}
                 povRadarMode={warmupOpts.pov_radar_mode}
                 onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
@@ -624,7 +619,7 @@ export default function CommonParamsModal({
                     min={0.2}
                     max={1}
                     step={0.1}
-                    value={warmupOpts.spectator_flashbang_opacity}
+                    value={povEnabled ? 1 : warmupOpts.spectator_flashbang_opacity}
                     onChange={(e) => {
                       if (e.target.value === "") return;
                       const n = parseFloat(e.target.value, 10);
@@ -635,7 +630,7 @@ export default function CommonParamsModal({
                       });
                     }}
                     disabled={
-                      batchRecording || (!povEnabled && !warmupOpts.apply_spectator_flashbang_opacity)
+                      povEnabled || batchRecording || !warmupOpts.apply_spectator_flashbang_opacity
                     }
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
@@ -643,7 +638,7 @@ export default function CommonParamsModal({
                 </div>
                 {povEnabled ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-amber-on-surface">
-                    已启用 POV HUD：默认注入亮度 1.0 以接近实战第一人称观感，可手动调整。
+                    已启用 POV HUD：录制时将强制注入亮度 1.0，更接近实战第一人称观感。
                   </p>
                 ) : warmupOpts.apply_spectator_flashbang_opacity ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
@@ -718,6 +713,7 @@ export default function CommonParamsModal({
                 </label>
                 <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
                     开启后可在成片画面中显示按键状态（以默认键位显示前进/后退/左移/右移、跳、蹲、鼠标左右键、更换弹匣）。
+                    录制开始前会预构建按键数据，片段较多或时长较长时可能需要等待数十秒。
                 </p>
                 {kbOverlayEnabled && (
                   <div className="mt-3 pl-7 flex flex-col gap-1">
