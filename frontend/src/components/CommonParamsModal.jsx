@@ -220,7 +220,7 @@ export default function CommonParamsModal({
     setSaveError("");
     setSaveState("saving");
     const result = await onSaveAllCommonParams({
-      default_record_warmup: warmupUiOptsToPersisted(warmupOpts),
+      default_record_warmup: warmupUiOptsToPersisted(warmupOpts, { povEnabled }),
       recording_global_pacing: globalPacing,
       cs2_extra_launch_args: localCs2ExtraLaunchArgs,
       record_inject_console_lines: localRecordInjectLines,

@@ -89,13 +89,15 @@ export function effectiveSpectatorFlashbangOpacity(opts, povEnabled) {
 /**
  * 将「录制前观战」UI 状态（与 RecordWarmupModal DEFAULT_OPTIONS 对齐）转为写入配置的扁平对象。
  * @param {Record<string, unknown>} opts
+ * @param {{ povEnabled?: boolean }} [extra]
  */
-export function warmupUiOptsToPersisted(opts) {
+export function warmupUiOptsToPersisted(opts, { povEnabled = false } = {}) {
   const rw = opts.resolution_width;
   const rh = opts.resolution_height;
   const fov = opts.fov_cs_debug;
   const hasFov = !!opts.apply_fov && fov != null && Number.isFinite(Number(fov));
-  const hasFlash = !!opts.apply_spectator_flashbang_opacity;
+  // POV 开启时，闪光设置视为始终应用（值可由用户修改，默认为 1.0）
+  const hasFlash = povEnabled || !!opts.apply_spectator_flashbang_opacity;
   return {
     cl_draw_only_deathnotices: !!opts.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!opts.hud_showtargetid_hide,
