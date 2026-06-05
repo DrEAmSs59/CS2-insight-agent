@@ -116,6 +116,21 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                     end_tick = round_info.next_round_start_tick
                     end_reason = "target_death_post_clamped_to_next_round_start"
 
+        is_final_round = (round_info.round == req.demo.final_round)
+
+        # Final round where the target SURVIVED: extend past round_end into the
+        # post-round so the match-winning moment / scoreboard beat doesn't cut
+        # abruptly. A mid-round death keeps its fixed death+post tail (no extra) —
+        # spectating-after-death footage isn't worth lingering on. The demo_end_tick
+        # clamp below and the final_round_guard bound this to the real demo end.
+        if (
+            is_final_round
+            and round_info.target_death_tick is None
+            and opts.final_round_extra_post_sec > 0
+        ):
+            end_tick = end_tick + sec_to_ticks(opts.final_round_extra_post_sec, tick_rate)
+            end_reason = f"{end_reason}+final_round_alive_extra"
+
         # Final clamp to demo_end_tick
         end_tick = min(end_tick, req.demo.demo_end_tick)
 
@@ -123,8 +138,6 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
             "[RecordingV3][RoundPlan] round=%d start=%d end=%d end_reason=%s",
             round_info.round, start_tick, end_tick, end_reason,
         )
-
-        is_final_round = (round_info.round == req.demo.final_round)
 
         segment = RecordingSegment(
             segment_index=segment_index,

@@ -549,6 +549,7 @@ def build_rival_compilations(
     round_freeze_start_ticks: Optional[dict[int, int]] = None,
     map_name: str,
     demo_max_tick: int = 0,
+    round_end_tick_map: Optional[dict[int, int]] = None,
 ) -> list[Clip]:
     compilations: list[Clip] = []
     _done_rounds, _final_line = match_metrics_from_round_scores(round_team_score_map)
@@ -820,6 +821,13 @@ def build_rival_compilations(
                 e = max(s + 1, _ftd_safe_end_alive_round(rnd))
             if _ftd_demo_mx > 0:
                 e = max(s + 1, min(e, _ftd_demo_mx))
+            # round_end_tick: the *real* round_end event tick (when the round was
+            # decided). It is intentionally independent of `end_tick` (which is the
+            # freeze→death+2s recording window). Downstream the planner/guard uses it
+            # to keep a mid-round death clip from being clamped before the death by the
+            # post-round scoreboard guard — critical for the final round, where the
+            # round can run on long after the target dies.
+            _re_tick = (round_end_tick_map or {}).get(rnd)
             ftd_round_windows.append({
                 "round": int(rnd),
                 "freeze_end_tick": int(fe),
@@ -827,6 +835,7 @@ def build_rival_compilations(
                 "end_tick": int(e),
                 "death_tick": int(dt) if dt is not None and int(dt) > 0 else None,
                 "round_start_tick": (round_freeze_start_ticks or {}).get(rnd),
+                "round_end_tick": int(_re_tick) if _re_tick and int(_re_tick) > 0 else None,
             })
 
         ftd_segments: list[tuple[int, int, int, int, Optional[int]]] = []

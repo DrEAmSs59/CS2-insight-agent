@@ -710,6 +710,161 @@ check("23d: anchor_too_close warning emitted",
       f"warnings={plan23.warnings}")
 
 
+# ── Test 24: Final-round compilation, target died mid-round ────────────────
+# Real payload (tyloo-vs-sharks-m3-anubis): final round 23, target died at
+# 190056 while the round ran on to round_end 193250. The frontend used to derive
+# final_round_end_tick/demo_end_tick from the death-truncated window (190184),
+# so final_round_guard subtracted 4s and cut the clip to 189928 — BEFORE the
+# death. With the real round_end_tick propagated, the clip must reach death+2s.
+print("\nTest 24: Final-round compilation — death mid-round, real round_end propagated")
+death24 = 190056
+demo24 = make_demo(final_round=23, final_round_start_tick=0,
+                   final_round_end_tick=190184, demo_end_tick=190184)
+r24 = RoundInfo(
+    round=23,
+    round_start_tick=187587,
+    round_end_tick=193250,          # real round_end event tick (post-fix)
+    freeze_start_tick=None,
+    freeze_end_tick=188867,
+    next_round_start_tick=None,     # final round — no next round
+    next_round_freeze_start_tick=None,
+    next_round_freeze_end_tick=None,
+    target_death_tick=death24,
+)
+# extra=1.0 is enabled, but a DEATH clip must stay fixed at death+2s (no extra).
+opts24 = RecordingOptions(final_round_guard_sec=4.0, round_death_post_sec=2.0,
+                          final_round_demo_exit_guard_sec=1.5,
+                          final_round_extra_post_sec=1.0)
+req24 = dto(
+    request_type=RequestType.round_compilation,
+    source_type=SourceType.round,
+    demo=demo24,
+    options=opts24,
+    rounds=[r24],
+)
+plan24 = build_plan(req24)
+check("24a: 1 segment", len(plan24.segments) == 1, f"got {len(plan24.segments)}")
+if plan24.segments:
+    seg24 = plan24.segments[0]
+    exp_end24 = death24 + int(opts24.round_death_post_sec * TICK_RATE)  # 190184
+    check("24b: death clip fixed at death+2s (no extra), not cut before death",
+          seg24.end_tick == exp_end24,
+          f"got {seg24.end_tick}, want {exp_end24}")
+    check("24c: end is after the death tick", seg24.end_tick > death24,
+          f"end={seg24.end_tick}, death={death24}")
+
+
+# ── Test 25: Same scenario WITHOUT real round_end (legacy parsed data) ──────
+# round_end_tick=None mimics demos parsed before the fix. The final_round_guard
+# defense-in-depth must still not cut before the target's death.
+print("\nTest 25: Final-round compilation — death mid-round, round_end_tick absent (legacy)")
+r25 = RoundInfo(
+    round=23,
+    round_start_tick=187587,
+    round_end_tick=None,            # legacy parsed data, no real round_end
+    freeze_start_tick=None,
+    freeze_end_tick=188867,
+    next_round_start_tick=None,
+    next_round_freeze_start_tick=None,
+    next_round_freeze_end_tick=None,
+    target_death_tick=death24,
+)
+req25 = dto(
+    request_type=RequestType.round_compilation,
+    source_type=SourceType.round,
+    demo=make_demo(final_round=23, final_round_start_tick=0,
+                   final_round_end_tick=190184, demo_end_tick=190184),
+    options=opts24,
+    rounds=[r25],
+)
+plan25 = build_plan(req25)
+check("25a: 1 segment", len(plan25.segments) == 1, f"got {len(plan25.segments)}")
+if plan25.segments:
+    seg25 = plan25.segments[0]
+    check("25b: end not cut before the death (defense-in-depth)",
+          seg25.end_tick > death24,
+          f"end={seg25.end_tick}, death={death24}")
+
+
+# ── Test 26: Final round the target SURVIVED → extra 1s tail past round_end ─
+# Alive final round (target_death_tick=None). The clip should linger 1s past the
+# real round_end to capture the match-winning moment, with demo headroom for it.
+print("\nTest 26: Final-round compilation — alive, extra 1s tail past round_end")
+round_end26 = 193250
+demo26 = make_demo(final_round=23, final_round_start_tick=0,
+                   final_round_end_tick=200000, demo_end_tick=200000)
+r26 = RoundInfo(
+    round=23,
+    round_start_tick=187587,
+    round_end_tick=round_end26,
+    freeze_start_tick=None,
+    freeze_end_tick=188867,
+    next_round_start_tick=None,     # final round — no next round
+    next_round_freeze_start_tick=None,
+    next_round_freeze_end_tick=None,
+    target_death_tick=None,         # target survived the final round
+)
+opts26 = RecordingOptions(final_round_guard_sec=4.0,
+                          final_round_demo_exit_guard_sec=1.5,
+                          final_round_extra_post_sec=1.0)
+req26 = dto(
+    request_type=RequestType.round_compilation,
+    source_type=SourceType.round,
+    demo=demo26,
+    options=opts26,
+    rounds=[r26],
+)
+plan26 = build_plan(req26)
+check("26a: 1 segment", len(plan26.segments) == 1, f"got {len(plan26.segments)}")
+if plan26.segments:
+    seg26 = plan26.segments[0]
+    exp_end26 = round_end26 + int(opts26.final_round_extra_post_sec * TICK_RATE)  # round_end+1s
+    check("26b: end = round_end + 1s (lingers past the win)",
+          seg26.end_tick == exp_end26,
+          f"got {seg26.end_tick}, want {exp_end26}")
+
+
+# ── Test 27: Alive final-round tail bounded by demo-exit guard ──────────────
+# Demo ends shortly after round_end → the extra tail is capped by the demo-exit
+# guard so CS2 never reaches demo end (which would exit to main menu).
+print("\nTest 27: Alive final-round tail bounded by demo-exit guard")
+round_end27 = 193250
+demo_end27 = round_end27 + int(2.0 * TICK_RATE)  # demo ends only 2s after round_end
+demo27 = make_demo(final_round=23, final_round_start_tick=0,
+                   final_round_end_tick=demo_end27, demo_end_tick=demo_end27)
+r27 = RoundInfo(
+    round=23,
+    round_start_tick=187587,
+    round_end_tick=round_end27,
+    freeze_start_tick=None,
+    freeze_end_tick=188867,
+    next_round_start_tick=None,
+    next_round_freeze_start_tick=None,
+    next_round_freeze_end_tick=None,
+    target_death_tick=None,
+)
+req27 = dto(
+    request_type=RequestType.round_compilation,
+    source_type=SourceType.round,
+    demo=demo27,
+    options=RecordingOptions(final_round_extra_post_sec=1.0,
+                             final_round_demo_exit_guard_sec=1.5),
+    rounds=[r27],
+)
+plan27 = build_plan(req27)
+check("27a: 1 segment", len(plan27.segments) == 1, f"got {len(plan27.segments)}")
+if plan27.segments:
+    seg27 = plan27.segments[0]
+    # latest_recordable = demo_end - 1.5s; must not exceed it (stay clear of demo end)
+    latest_recordable27 = demo_end27 - int(1.5 * TICK_RATE)
+    check("27b: tail bounded by demo-exit guard",
+          seg27.end_tick <= latest_recordable27,
+          f"end={seg27.end_tick}, latest_recordable={latest_recordable27}")
+    check("27c: still records past round_end (some tail)",
+          seg27.end_tick > round_end27,
+          f"end={seg27.end_tick}, round_end={round_end27}")
+
+
 # ── Summary ────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 passed = sum(1 for s, *_ in results if s == "PASS")

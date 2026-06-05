@@ -1203,6 +1203,7 @@ class DemoAnalyzer:
             freeze_to_death_rounds=freeze_to_death_rounds,
             round_freeze_start_ticks=round_freeze_start_ticks,
             map_name=map_name, demo_max_tick=_demo_max_tick,
+            round_end_tick_map=round_end_tick_map,
         )
 
         clips = fail_clips + highlight_clips + meme_clips + compilation_clips

@@ -102,6 +102,9 @@ class RecordingOptions(BaseModel):
     final_round_seek_guard_sec: float = 2.0
     final_round_min_duration_sec: float = 0.8
     final_round_demo_exit_guard_sec: float = 1.5
+    # Extra tail for the final round's clip so the match-deciding moment doesn't
+    # cut abruptly. Capped at the real round_end so it never spills into the scoreboard.
+    final_round_extra_post_sec: float = 1.0
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None

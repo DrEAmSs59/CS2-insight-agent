@@ -88,9 +88,35 @@ def apply_final_round_guard(
         # Applying safe_end_tick here would cut INTO the round, so skip the scoreboard guard.
         # Also skip latest_recordable_tick: demo_end_tick may equal round_end_tick when the
         # frontend had no post-round data, so the exit guard would be unnecessarily conservative.
-        meta_round_end = segment.metadata.get("round_end_tick") if segment.metadata else None
-        if meta_round_end is not None and segment.end_tick <= meta_round_end:
+        meta = segment.metadata or {}
+        meta_round_end = meta.get("round_end_tick")
+        meta_death = meta.get("target_death_tick")
+        death_post_ticks = sec_to_ticks(options.round_death_post_sec, tick_rate)
+        # A final round the target SURVIVED may deliberately tail past round_end into
+        # the post-round (the match-winning beat). Allow that much overshoot before the
+        # scoreboard guard kicks in; a death clip gets no such allowance.
+        alive_extra_ticks = (
+            sec_to_ticks(options.final_round_extra_post_sec, tick_rate)
+            if meta_death is None else 0
+        )
+        if meta_round_end is not None and segment.end_tick <= meta_round_end + alive_extra_ticks:
             end_tick = segment.end_tick
+            if alive_extra_ticks > 0:
+                # Recorded into the post-round on purpose — still respect the demo-exit guard.
+                end_tick = min(end_tick, latest_recordable_tick)
+        elif meta_death is not None and segment.end_tick <= int(meta_death) + death_post_ticks:
+            # Defense-in-depth for the final round when round_end_tick is unavailable
+            # (e.g. demos parsed before round_end_tick was propagated): the planner ended
+            # this clip ~death+post while the round is still live, so there is no
+            # scoreboard here. Applying the scoreboard guard (safe_end_tick) would cut
+            # INTO the death payload — the reported "成片还没死就结束了" bug. Skip it and
+            # only honor the demo-exit guard.
+            end_tick = min(segment.end_tick, latest_recordable_tick)
+            if end_tick < segment.end_tick:
+                warnings.append(
+                    f"segment {segment.segment_index}: final_round_death_clip_capped_by_demo_exit_guard "
+                    f"(death={int(meta_death)}, latest_recordable={latest_recordable_tick})"
+                )
         else:
             end_tick = min(segment.end_tick, safe_end_tick)
             end_tick = min(end_tick, latest_recordable_tick)
