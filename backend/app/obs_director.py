@@ -3421,7 +3421,9 @@ class OBSDirector:
                         continue
                     _plan = _plan_cache.get(_dto.request_id)
                     if _plan:
+                        _kb_off_req = getattr(_dto.options, "kb_overlay_tick_offset", None)
                         for _seg in _plan.segments:
+                            _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
                             _kb_tasks.append((_seg, _plan.demo_path))
 
                 # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时

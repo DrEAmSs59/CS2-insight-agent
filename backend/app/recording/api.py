@@ -383,7 +383,9 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
         _kb_overlay_req = load_config().kb_overlay_enabled
     if _kb_overlay_req:
         from ..parser.input_track import extract_input_track as _extract_kb
+        _kb_off_req = dto.options.kb_overlay_tick_offset  # None → executor falls back to global config
         for _seg in plan.segments:
+            _seg.metadata["kb_tick_offset"] = _kb_off_req
             try:
                 _seg.metadata["kb_track"] = _extract_kb(
                     plan.demo_path,

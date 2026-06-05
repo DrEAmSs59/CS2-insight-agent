@@ -109,6 +109,7 @@ class RecordingOptions(BaseModel):
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
     kb_overlay_enabled: Optional[bool] = None
+    kb_overlay_tick_offset: Optional[int] = None
     kb_overlay_position: Optional[str] = None
 
 

@@ -24,21 +24,34 @@ def _kb_bus(segment=None):
     Priority: if the segment carries kb_track data (injected by the queue handler
     when dto.options.kb_overlay_enabled=True), activate the bus unconditionally.
     Otherwise fall back to the global AppConfig flag.
+
+    Tick offset priority: a per-request override stashed on the segment
+    (segment.metadata["kb_tick_offset"], set from dto.options.kb_overlay_tick_offset
+    by the录制前一次性参数) wins; otherwise fall back to the persisted global config.
     """
+    def _resolve_offset(seg, cfg=None):
+        if seg is not None:
+            v = seg.metadata.get("kb_tick_offset")
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    pass
+        try:
+            from ...env_utils import load_config
+            return int((cfg or load_config()).kb_overlay_tick_offset)
+        except Exception:
+            return 0
+
     try:
         if segment is not None and segment.metadata.get("kb_track") is not None:
             from .kb_overlay_bus import kb_overlay_bus
-            try:
-                from ...env_utils import load_config
-                tick_off = load_config().kb_overlay_tick_offset
-            except Exception:
-                tick_off = 0
-            return kb_overlay_bus, tick_off
+            return kb_overlay_bus, _resolve_offset(segment)
         from ...env_utils import load_config
         cfg = load_config()
         if cfg.kb_overlay_enabled:
             from .kb_overlay_bus import kb_overlay_bus
-            return kb_overlay_bus, cfg.kb_overlay_tick_offset
+            return kb_overlay_bus, _resolve_offset(segment, cfg)
     except Exception:
         pass
     return None, 0

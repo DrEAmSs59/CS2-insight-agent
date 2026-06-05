@@ -184,9 +184,9 @@ export function applySessionObsTransitionToRequests(requests, session) {
 }
 
 /**
- * 将录制前弹窗中的虚拟键盘 Overlay 开关和位置写入各 request.options（仅本次队列，不写配置）。
+ * 将录制前弹窗中的虚拟键盘 Overlay 开关、同步微调和位置写入各 request.options（仅本次队列，不写配置）。
  * @param {object[]} requests
- * @param {{ kb_overlay_enabled?: boolean, kb_overlay_position?: string }} session
+ * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string }} session
  */
 export function applySessionKbOverlayToRequests(requests, session) {
   if (!Array.isArray(requests) || !requests.length || !session) return requests;
@@ -196,6 +196,7 @@ export function applySessionKbOverlayToRequests(requests, session) {
     options: {
       ...(r.options || {}),
       kb_overlay_enabled: session.kb_overlay_enabled,
+      ...(typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
       ...(typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
     },
   }));

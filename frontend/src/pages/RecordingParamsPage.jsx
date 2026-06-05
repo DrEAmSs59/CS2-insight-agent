@@ -20,6 +20,8 @@ export default function RecordingParamsPage() {
       obsTransitionName={s.obsTransitionName}
       obsTransitionDurationMs={s.obsTransitionDurationMs}
       kbOverlayEnabled={s.kbOverlayEnabled}
+      kbOverlayTickOffset={s.kbOverlayTickOffset}
+      kbOverlayPosition={s.kbOverlayPosition}
     />
   );
 }

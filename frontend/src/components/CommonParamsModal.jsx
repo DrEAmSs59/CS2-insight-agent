@@ -203,6 +203,7 @@ export default function CommonParamsModal({
     initObsTransitionDurationMs,
     experimentalPovEnabled,
     initKbOverlayEnabled,
+    initKbOverlayTickOffset,
     initKbOverlayPosition,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
@@ -232,7 +233,7 @@ export default function CommonParamsModal({
       obs_transition_name: obsTransName,
       obs_transition_duration_ms: obsTransDurationMs,
       kb_overlay_enabled: kbOverlayEnabled,
-      kb_overlay_tick_offset: kbOverlayTickOffset,
+      kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
       kb_overlay_position: kbOverlayPosition,
       experimental_pov_enabled: povEnabled,
     });
@@ -252,6 +253,7 @@ export default function CommonParamsModal({
     obsTransName,
     obsTransDurationMs,
     kbOverlayEnabled,
+    kbOverlayTickOffset,
     kbOverlayPosition,
     povEnabled,
   ]);
@@ -748,14 +750,22 @@ export default function CommonParamsModal({
                       <input
                         type="number"
                         value={kbOverlayTickOffset}
-                        onChange={(e) => setKbOverlayTickOffset(Number(e.target.value))}
-                        min="-30"
-                        max="30"
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
+                        }}
+                        onBlur={() => {
+                          if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
+                            setKbOverlayTickOffset(0);
+                          }
+                        }}
+                        min="-120"
+                        max="120"
                         step="1"
                         className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
                       />
                       <span className="text-xs text-cs2-text-muted tabular-nums">
-                        ≈ {Math.round(Math.abs(kbOverlayTickOffset) / 64 * 1000)} ms{kbOverlayTickOffset > 0 ? "（提前）" : kbOverlayTickOffset < 0 ? "（延后）" : "（无补偿）"}
+                        ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? "（提前）" : Number(kbOverlayTickOffset) < 0 ? "（延后）" : "（无补偿）"}
                       </span>
                     </div>
                     <p className="text-xs text-cs2-text-muted leading-relaxed">
