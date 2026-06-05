@@ -12,15 +12,11 @@ import ExperimentalPovSection from "./ExperimentalPovSection";
 import Cs2LaunchConsoleFields, { countInjectConsoleLines } from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 
-/** 与后端 `RecordingWarmupExtras._recording_warmup_console_lines` 拼装顺序一致（无 console_cmds 覆盖时） */
+/** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
 export function buildWarmupConsoleCommands(o) {
-  const lines = [
-    "cl_hud_telemetry_frametime_show 0",
-    "engine_no_focus_sleep 0",
-    "cl_demo_predict 0",
-    "fps_max 0",
-    "cl_trueview_show_status 0",
-  ];
+  // 固定性能/预测 cvar 已迁至配置 record_inject_console_lines（可在「附加预热控制台」增删），
+  // 不再随 console_cmds 注入；此处仅拼装随观战选项变化的 cvar。
+  const lines = [];
   lines.push(
     o.cl_draw_only_deathnotices
       ? "cl_draw_only_deathnotices true"

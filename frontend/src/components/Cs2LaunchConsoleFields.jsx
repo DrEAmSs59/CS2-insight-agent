@@ -1,5 +1,14 @@
 import { useCallback, useMemo, useState } from "react";
 
+/** 程序内置、始终生效、不可删除的启动参数（仅展示，不写配置）。 */
+const FIXED_LAUNCH_ARGS = [
+  "-console",
+  "-novid",
+  "-insecure",
+  "-worldwide",
+  "-allow_third_party_software",
+];
+
 export function countInjectConsoleLines(text) {
   return String(text || "")
     .split(/\r?\n/)
@@ -82,6 +91,10 @@ export default function Cs2LaunchConsoleFields({
   );
 
   const launchChips = useMemo(() => launchChipsFromStored(cs2ExtraLaunchArgs), [cs2ExtraLaunchArgs]);
+  const editableLaunchChips = useMemo(
+    () => launchChips.filter((c) => !FIXED_LAUNCH_ARGS.includes(c)),
+    [launchChips],
+  );
   const consoleChips = useMemo(() => consoleChipsFromStored(recordInjectConsoleLines), [recordInjectConsoleLines]);
 
   const addLaunchChip = useCallback(() => {
@@ -131,15 +144,21 @@ export default function Cs2LaunchConsoleFields({
           额外启动参数
         </label>
         <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
-          {launchChips.length === 0 ? (
-            <span className="py-1 text-[12px] text-cs2-text-muted">
-              尚未添加额外启动参数；每条会作为独立参数追加到 cs2.exe
-              <br />
-              例如可添加一条 -threads 8。
-              <br />默认保留 -fullscreen，自行修改可能影响 CS2 启动或录制表现
+          {FIXED_LAUNCH_ARGS.map((line) => (
+            <span
+              key={`fixed-${line}`}
+              title="程序内置，始终生效，不可移除"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input/60 px-2 py-1 text-[11px] font-semibold text-cs2-text-muted"
+            >
+              <span aria-hidden className="shrink-0">🔒</span>
+              <span className="min-w-0 max-w-[min(100%,18rem)] truncate font-mono" title={line}>
+                {line}
+              </span>
             </span>
-          ) : (
-            launchChips.map((line, idx) => (
+          ))}
+          {editableLaunchChips.map((line) => {
+            const idx = launchChips.indexOf(line);
+            return (
               <span
                 key={`lc-${idx}`}
                 className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-accent/30 bg-cs2-accent/10 pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-accent"
@@ -156,8 +175,8 @@ export default function Cs2LaunchConsoleFields({
                   ✕
                 </button>
               </span>
-            ))
-          )}
+            );
+          })}
         </div>
         <TagListAddRow
           draft={launchArgDraft}
@@ -168,7 +187,7 @@ export default function Cs2LaunchConsoleFields({
           disabled={launchChips.length >= 32}
         />
         <p className="text-[11px] leading-relaxed text-cs2-text-muted">
-          与程序内置启动项合并；含空格请用英文双引号包在一整条里。最多 32 条；重复条目会自动忽略。
+          🔒 前 5 条为程序内置启动项，始终生效、不可移除。其余与之合并；含空格请用英文双引号包在一整条里。最多 32 条；重复条目会自动忽略。
         </p>
       </div>
 
@@ -209,7 +228,7 @@ export default function Cs2LaunchConsoleFields({
           disabled={consoleChips.length >= 60}
         />
         <p className="text-[11px] leading-relaxed text-cs2-text-muted">
-          以 # 或 // 开头的行会计入列表但不算入下方统计。条数已合入底部统计（+{injectExtraCount}）。
+          默认已预填 5 条性能/预测 cvar，可自行增删。以 # 或 // 开头的行会计入列表但不算入下方统计。条数已合入底部统计（+{injectExtraCount}）。
         </p>
       </div>
     </div>
