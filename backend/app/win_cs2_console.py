@@ -49,6 +49,9 @@ if sys.platform != "win32":
         skip_console_toggle: bool = False,
         close_console: bool = True,
     ) -> bool:
+        cmds = [str(ln).strip() for ln in lines if ln and str(ln).strip()]
+        if cmds:
+            logger.info("[非Windows] 模拟 CS2 控制台注入 %d 条指令: %s", len(cmds), cmds)
         return False
 
     def send_cs2_vk_tap(vk: int) -> bool:
@@ -383,6 +386,7 @@ else:
         cmds = [ln.strip() for ln in lines if ln and str(ln).strip()]
         if not cmds:
             return True
+        logger.info("CS2 控制台注入 %d 条指令: %s", len(cmds), cmds)
         hwnd = find_cs2_hwnd()
         if not hwnd:
             logger.error("未找到 Counter-Strike 窗口，无法注入控制台命令")
