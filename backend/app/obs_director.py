@@ -416,34 +416,6 @@ TICK_RATE = 64
 PRE_ROLL_TICKS = 300  # ~5 seconds of pre-roll（无 kill_ticks 时的传统 seek）
 # 智能跳跃分段阈值见 ``build_smart_jump_segments`` 内 _env_int 默认值。
 
-# 仅随录制预热（首次 seek 前、与 Space 后控制台批次）注入，段间 jump_cut 不再重复执行
-_WARMUP_FIXED_CONSOLE_LINES: tuple[str, ...] = (
-    "cl_hud_telemetry_frametime_show 0",
-    "engine_no_focus_sleep 0",
-    "cl_demo_predict 0",
-    "fps_max 0",
-    "cl_trueview_show_status 0",
-)
-
-
-def _warmup_console_cvar_name(line: str) -> str:
-    s = str(line).strip()
-    if not s or s.startswith("//"):
-        return ""
-    return s.split()[0].lower()
-
-
-def _merge_recording_warmup_console_cmds(user_cmds: list[str]) -> list[str]:
-    """前端传入 console_cmds 时仍补齐全部固定预热 cvar（旧逻辑只保证首条）。"""
-    fixed_names = {_warmup_console_cvar_name(x) for x in _WARMUP_FIXED_CONSOLE_LINES}
-    fixed_names.discard("")
-    out: list[str] = list(_WARMUP_FIXED_CONSOLE_LINES)
-    for cmd in user_cmds:
-        cvar = _warmup_console_cvar_name(cmd)
-        if cvar and cvar in fixed_names:
-            continue
-        out.append(cmd)
-    return out
 # 录制开始时把玩家所有按键解绑并恢复到一组最小默认绑定。配合下面的「文件级用户配置
 # 快照 + 恢复」机制使用：本次 CS2 进程内按键还原为下方默认，让玩家自定义的奇葩 bind
 # 不会在 demo 回放/控制台注入期间触发；录制结束（或异常杀进程后下次启动）时再用
@@ -3283,13 +3255,11 @@ class OBSDirector:
         """
         if w.console_cmds:
             cmds = [str(x).strip() for x in w.console_cmds if str(x).strip()]
-            merged = _merge_recording_warmup_console_cmds(cmds)
             return self._append_config_warmup_console_lines(
-                [*_RECORDING_KEYBIND_RESET_LINES, *merged]
+                [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
-        lines.extend(_WARMUP_FIXED_CONSOLE_LINES)
         if w.cl_draw_only_deathnotices:
             lines.append("cl_draw_only_deathnotices true")
         else:
