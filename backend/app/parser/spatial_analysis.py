@@ -30,6 +30,7 @@ from .tag_constants import (
     _RUSH_VEL_MIN,
     _RUNGUN_VEL_MIN,
     _RUNGUN_VEL_MAX,
+    _RUNGUN_IMMEDIATE_VEL_MIN,
     _SLIDE_VEL_XY_MIN,
     _AIRBORNE_VEL_Z_MIN,
     _QUICKSCOPE_LOOKBACK_OFFSETS,
@@ -688,13 +689,27 @@ def enrich_kill_action_tags_spatial(
                 if not _victim_facing_attacker(snap, target_player, vic_name):
                     extra.append("🔙 偷背身")
 
-            # ── 速度：直接读 vel_x/vel_y（比位置差更准，消除方向性误差）──
+            # ── 速度：用 X/Y 位置差估算（demoparser2 0.41.2 不暴露 vel_x/vel_y，会静默丢列）──
+            # 跨 tick 取 X/Y 位移并按 tickrate 归一化到 units/秒：
+            #   vxy     用 8-tick 窗口（×8）；vxy_imm 用 2-tick 窗口（×32，更贴近开枪瞬间）。
             vxy: Optional[float] = None
-            if atk is not None and "vel_x" in atk and "vel_y" in atk:
+            vxy_imm: Optional[float] = None
+            if atk is not None and "X" in atk and "Y" in atk:
+                ax, ay = float(atk["X"]), float(atk["Y"])
+                prev_row8 = _spatial_player_row(spatial_cache.get(kt - 8), target_player)
                 try:
-                    vxy = math.hypot(float(atk["vel_x"]), float(atk["vel_y"]))
+                    if prev_row8 is not None and "X" in prev_row8 and "Y" in prev_row8:
+                        px8, py8 = float(prev_row8["X"]), float(prev_row8["Y"])
+                        vxy = math.hypot(ax - px8, ay - py8) * 8
                 except (TypeError, ValueError):
-                    pass
+                    vxy = None
+                prev_row2 = _spatial_player_row(spatial_cache.get(kt - 2), target_player)
+                try:
+                    if prev_row2 is not None and "X" in prev_row2 and "Y" in prev_row2:
+                        px2, py2 = float(prev_row2["X"]), float(prev_row2["Y"])
+                        vxy_imm = math.hypot(ax - px2, ay - py2) * 32
+                except (TypeError, ValueError):
+                    vxy_imm = None
 
             _is_jump = is_jump_kill(spatial_cache, kt, target_player)
             if vxy is not None:
@@ -702,18 +717,25 @@ def enrich_kill_action_tags_spatial(
                     extra.append("🚀 上去就是干")
                 elif (_RUNGUN_VEL_MIN <= vxy <= _RUNGUN_VEL_MAX
                       and not _is_jump
-                      and not _bool(k.get("noscope"))):
+                      and not _bool(k.get("noscope"))
+                      and (vxy_imm is None or vxy_imm >= _RUNGUN_IMMEDIATE_VEL_MIN)):
                     extra.append("🏃‍♂️ 跑打")
 
-            # ── 一个大拉：用 vel_x/vel_y 方向与 yaw 夹角 ──
-            if (atk is not None and "yaw" in atk and not _is_jump
-                    and vxy is not None and vxy > _SLIDE_VEL_XY_MIN
-                    and "vel_x" in atk and "vel_y" in atk):
+            # ── 一个大拉：用 16-tick 位移方向与 yaw 夹角 ──
+            if (atk is not None and "X" in atk and "Y" in atk
+                    and "yaw" in atk and not _is_jump):
+                prev_row = _spatial_player_row(spatial_cache.get(kt - 16), target_player)
                 try:
-                    move_angle   = math.degrees(math.atan2(float(atk["vel_y"]), float(atk["vel_x"])))
-                    strafe_angle = _smallest_angle_diff_deg(move_angle, float(atk["yaw"]))
-                    if strafe_angle >= 45.0:
-                        extra.append("🎿 一个大拉")
+                    if prev_row is not None and "X" in prev_row and "Y" in prev_row:
+                        ax, ay = float(atk["X"]), float(atk["Y"])
+                        px, py = float(prev_row["X"]), float(prev_row["Y"])
+                        disp = math.hypot(ax - px, ay - py)
+                        vxy_approx = disp * 4
+                        if vxy_approx > _SLIDE_VEL_XY_MIN:
+                            move_angle   = math.degrees(math.atan2(ay - py, ax - px))
+                            strafe_angle = _smallest_angle_diff_deg(move_angle, float(atk["yaw"]))
+                            if strafe_angle >= 45.0:
+                                extra.append("🎿 一个大拉")
                 except (TypeError, ValueError):
                     pass
 
