@@ -79,3 +79,6 @@ data/**
 # Electron distribution
 frontend/dist_electron/
 frontend/build/
+
+# Local generated preview artifacts (match report preview, etc.)
+frontend/preview/
