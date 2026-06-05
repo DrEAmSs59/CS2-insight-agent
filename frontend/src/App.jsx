@@ -1644,15 +1644,6 @@ export default function App() {
     }
   }, []);
 
-  const persistKbOverlay = useCallback(async (enabled) => {
-    setKbOverlayEnabled(!!enabled);
-    try {
-      await API.put("config", { kb_overlay_enabled: !!enabled });
-    } catch {
-      /* silent */
-    }
-  }, []);
-
   const persistExperimentalPov = useCallback(async (enabled) => {
     try {
       await API.put("config", { experimental: { pov_enabled: enabled } });
@@ -1750,17 +1741,8 @@ export default function App() {
     async (warmupPayload) => {
       const intent = warmupIntent;
       const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
-      if (typeof session.kb_overlay_enabled === "boolean") {
-        void persistKbOverlay(session.kb_overlay_enabled);
-      }
-      if (typeof session.kb_overlay_tick_offset === "number") {
-        setKbOverlayTickOffset(session.kb_overlay_tick_offset);
-        void API.put("config", { kb_overlay_tick_offset: session.kb_overlay_tick_offset }).catch(() => {});
-      }
-      if (typeof session.kb_overlay_position === "string") {
-        setKbOverlayPosition(session.kb_overlay_position);
-        void API.put("config", { kb_overlay_position: session.kb_overlay_position }).catch(() => {});
-      }
+      // 录制前参数为一次性配置：kb_overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
+      // 不写入配置文件。持久化仅由「录制参数配置」页的 saveAllCommonParams 负责。
 
       setRecordWarmupOpen(false);
       if (intent === "batch") {
