@@ -18,3 +18,16 @@ def test_filter_case_and_whitespace_insensitive():
 
 def test_filter_skips_blank_lines():
     assert _filter_post_spec_console_lines(["", "   ", "cl_demo_predict 1"]) == ["cl_demo_predict 1"]
+
+
+from app.recording.executor.recording_executor import RecordingExecutor
+
+
+def test_executor_stores_post_spec_lines():
+    ex = RecordingExecutor(None, post_spec_console_lines=["cl_demo_predict 1"])
+    assert ex._post_spec_console_lines == ["cl_demo_predict 1"]
+
+
+def test_executor_defaults_post_spec_empty():
+    ex = RecordingExecutor(None)
+    assert ex._post_spec_console_lines == []

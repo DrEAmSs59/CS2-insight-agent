@@ -3580,7 +3580,13 @@ class OBSDirector:
                     continue
 
                 # ── Execute each DTO through build_plan + RecordingExecutor ───
-                executor = RecordingExecutor(obs_client, abort_event=self._abort_event, fade_controller=fade_controller)
+                post_spec_lines = _filter_post_spec_console_lines(self._extra_warmup_console_lines)
+                executor = RecordingExecutor(
+                    obs_client,
+                    abort_event=self._abort_event,
+                    fade_controller=fade_controller,
+                    post_spec_console_lines=post_spec_lines,
+                )
                 for dto in demo_requests:
                     if self._abort_requested():
                         logger.info("[RecordingV3] Abort requested, skipping remaining requests")

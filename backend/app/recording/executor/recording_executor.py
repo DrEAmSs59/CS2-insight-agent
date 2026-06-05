@@ -405,10 +405,13 @@ class RecordingExecutor:
         obs_client: OBSClient,
         abort_event: Optional[asyncio.Event] = None,
         fade_controller: Optional[OBSFadeController] = None,
+        post_spec_console_lines: Optional[list[str]] = None,
     ):
         self._obs = obs_client
         self._abort_event = abort_event
         self._fade: Optional[OBSFadeController] = fade_controller
+        # record_inject 行中需在每片段 spec_player 锁定后补注入的子集（依赖观战目标的 cvar，如 cl_demo_predict）。
+        self._post_spec_console_lines: list[str] = list(post_spec_console_lines or [])
         # Controller is created per-execute call so it always holds the current client.
         self._ctrl: Optional[OBSRecordingController] = None
         # Tracks whether OBS program output is currently on the black scene.
@@ -603,6 +606,16 @@ class RecordingExecutor:
                         except Exception as _e:
                             logger.warning(
                                 "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
+                            )
+
+                    if spec_ok is not False and self._post_spec_console_lines:
+                        try:
+                            await asyncio.to_thread(
+                                inject_console_sequence, list(self._post_spec_console_lines)
+                            )
+                        except Exception as _e:
+                            logger.warning(
+                                "[RecordingV3] post-spec console inject failed: %s", _e
                             )
 
                     if spec_ok is False:
