@@ -36,6 +36,13 @@ _DATA_SUBDIR = "data"
 _BACKUP_DIR_NAME = ".cs2_config_backup"
 _DB_BASENAME = "cs2-insight.db"
 _DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen"
+_DEFAULT_RECORD_INJECT_CONSOLE_LINES = "\n".join((
+    "cl_hud_telemetry_frametime_show 0",
+    "engine_no_focus_sleep 0",
+    "cl_demo_predict 0",
+    "fps_max 0",
+    "cl_trueview_show_status 0",
+))
 
 
 def get_data_dir() -> Path:
@@ -384,7 +391,10 @@ class AppConfig(BaseModel):
     # 此时即便清空也应尊重用户选择，不再自动回填 -fullscreen。
     cs2_extra_launch_args_user_configured: bool = False
     # 首次片段 seek 前、与会话预热 cvar 一并注入的附加控制台行（每行一条，# // 开头为注释）
-    record_inject_console_lines: str = ""
+    record_inject_console_lines: str = _DEFAULT_RECORD_INJECT_CONSOLE_LINES
+    # False 表示仍沿用程序默认预热 cvar；True 表示用户已手动编辑过该字段，
+    # 此时即便删空也尊重用户选择，不再自动回填默认 cvar。
+    record_inject_console_lines_user_configured: bool = False
     # 检查更新：auto=镜像与直连并发；on=仅用镜像；off=仅直连；或以 https:// 开头的自定义镜像前缀
     update_github_mirror: str = "auto"
     obs_transition_enabled: bool = False
@@ -426,6 +436,18 @@ def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = N
         next_args = ensure_fullscreen_arg(current_args)
         if next_args != current_args:
             cfg.cs2_extra_launch_args = next_args
+            changed = True
+
+    if isinstance(raw, dict) and ("record_inject_console_lines_user_configured" not in raw):
+        # 老配置无标记：有非空内容视为用户已配置，空内容视为未配置（待回填种子）
+        cfg.record_inject_console_lines_user_configured = bool(
+            str(cfg.record_inject_console_lines or "").strip()
+        )
+        changed = True
+
+    if not cfg.record_inject_console_lines_user_configured:
+        if cfg.record_inject_console_lines != _DEFAULT_RECORD_INJECT_CONSOLE_LINES:
+            cfg.record_inject_console_lines = _DEFAULT_RECORD_INJECT_CONSOLE_LINES
             changed = True
     return changed
 
