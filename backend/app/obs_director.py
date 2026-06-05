@@ -1842,6 +1842,24 @@ def _parse_record_inject_console_lines(raw: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
+# 依赖"已第一人称观战某玩家"才生效的 cvar：warmup 阶段注入无效，
+# 必须在每片段 spec_player 锁定后再注入一次（参考 tv_listen_voice_indices 处理）。
+_POST_SPEC_CVAR_NAMES: frozenset[str] = frozenset({"cl_demo_predict"})
+
+
+def _filter_post_spec_console_lines(lines) -> list[str]:
+    """从已解析的 record_inject 行中挑出命中 _POST_SPEC_CVAR_NAMES 的行（按首词即 cvar 名匹配，大小写不敏感）。"""
+    out: list[str] = []
+    for ln in lines:
+        s = str(ln).strip()
+        if not s:
+            continue
+        cvar = s.split()[0].lower()
+        if cvar in _POST_SPEC_CVAR_NAMES:
+            out.append(s)
+    return out
+
+
 class OBSDirector:
     """Controls OBS recording and CS2 demo playback for automated clip capture."""
 
