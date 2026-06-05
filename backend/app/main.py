@@ -608,6 +608,7 @@ class ConfigPayload(BaseModel):
     cs2_extra_launch_args: Optional[str] = None
     cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
+    record_inject_console_lines_user_configured: Optional[bool] = None
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
@@ -873,7 +874,19 @@ async def update_config(payload: ConfigPayload):
     elif payload.cs2_extra_launch_args_user_configured is not None:
         cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
     if payload.record_inject_console_lines is not None:
-        cfg.record_inject_console_lines = str(payload.record_inject_console_lines)
+        next_inject_lines = str(payload.record_inject_console_lines)
+        if payload.record_inject_console_lines_user_configured is not None:
+            cfg.record_inject_console_lines = next_inject_lines
+            cfg.record_inject_console_lines_user_configured = bool(
+                payload.record_inject_console_lines_user_configured
+            )
+        elif next_inject_lines != cfg.record_inject_console_lines:
+            cfg.record_inject_console_lines = next_inject_lines
+            cfg.record_inject_console_lines_user_configured = True
+    elif payload.record_inject_console_lines_user_configured is not None:
+        cfg.record_inject_console_lines_user_configured = bool(
+            payload.record_inject_console_lines_user_configured
+        )
     if payload.obs_transition_enabled is not None:
         cfg.obs_transition_enabled = bool(payload.obs_transition_enabled)
     if payload.obs_transition_name is not None:
