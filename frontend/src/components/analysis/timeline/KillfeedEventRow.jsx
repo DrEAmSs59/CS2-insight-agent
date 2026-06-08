@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
+import { useT } from "../../../i18n/useT.js";
 
 function assisterDisplayName(raw) {
   if (raw == null || raw === "") return "";
@@ -27,15 +28,15 @@ function getModifiers(ev) {
   };
 }
 
-/** 仅保留无 HUD 图标修饰的徽章（爆头/穿烟/跳杀等由 KillfeedIconStrip 展示）。 */
-const MOD_BADGES = [
-  { k: "trade_kill", label: "补枪", title: "补枪 / 换人" },
-  { k: "first_kill", label: "首杀", title: "本回合首杀" },
-  { k: "flash_assisted", label: "闪协", title: "闪光助攻参与" },
+/** Keys for MOD_BADGES; labels resolved via t() in the component. */
+const MOD_BADGE_KEYS = [
+  { k: "trade_kill", labelKey: "analysis.modTradekill", titleKey: "analysis.modTradekillTitle" },
+  { k: "first_kill", labelKey: "analysis.modFirstkill", titleKey: "analysis.modFirstkillTitle" },
+  { k: "flash_assisted", labelKey: "analysis.modFlashAssist", titleKey: "analysis.modFlashAssistTitle" },
 ];
 
-function modifierBadges(mods, flashAssistLine) {
-  return MOD_BADGES.filter((b) => {
+function modifierBadgeKeys(mods, flashAssistLine) {
+  return MOD_BADGE_KEYS.filter((b) => {
     if (!mods[b.k]) return false;
     if (b.k === "flash_assisted" && flashAssistLine) return false;
     return true;
@@ -63,6 +64,7 @@ export default function KillfeedEventRow({
   roundNumber,
   variant = "default",
 }) {
+  const t = useT();
   const typ = String(event?.type || "");
   const isAssistOnly = typ === "assist_only";
   const isKill = typ === "kill" || event?.record_type === "kill";
@@ -104,13 +106,13 @@ export default function KillfeedEventRow({
   const badgeRow =
     variant === "timeline"
       ? []
-      : modifierBadges(mods, flashAssistLine).map((b) => (
+      : modifierBadgeKeys(mods, flashAssistLine).map((b) => (
           <span
             key={b.k}
-            title={b.title}
+            title={t(b.titleKey)}
             className="rounded border border-cs2-border bg-cs2-bg-page/85 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-cs2-text-primary"
           >
-            {b.label}
+            {t(b.labelKey)}
           </span>
         ));
 
@@ -121,10 +123,10 @@ export default function KillfeedEventRow({
         <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
           <span className="shrink-0 rounded border border-cyan-500/25 bg-cs2-cyan-surface px-1 py-0 font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
-            第 {roundNumber} 回合
+            {t("analysis.roundLabel", { n: roundNumber })}
           </span>
         ) : null}
-          <span className="text-cs2-text-muted">{String(event?.assist_note || "助攻")}</span>
+          <span className="text-cs2-text-muted">{String(event?.assist_note || t("analysis.assistFallback"))}</span>
         </div>
       </div>
     );
@@ -151,7 +153,7 @@ export default function KillfeedEventRow({
         <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
           <span className="shrink-0 rounded border border-cyan-500/30 bg-cs2-cyan-surface px-1 py-0 font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
-            第 {roundNumber} 回合
+            {t("analysis.roundLabel", { n: roundNumber })}
           </span>
         ) : null}
         <span
@@ -178,27 +180,27 @@ export default function KillfeedEventRow({
           onRowRemove ? (
             <button
               type="button"
-              aria-label="从队列移除"
+              aria-label={t("analysis.ariaRemoveFromQueue")}
               onClick={(e) => { e.stopPropagation(); onRowRemove(); }}
               className="ml-auto shrink-0 flex items-center gap-0.5 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent transition-colors hover:border-rose-400/55 hover:text-rose-400"
             >
-              已入队<X className="h-2.5 w-2.5" />
+              {t("analysis.queued")}<X className="h-2.5 w-2.5" />
             </button>
           ) : (
             <span className="ml-auto shrink-0 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent">
-              已入队
+              {t("analysis.queued")}
             </span>
           )
         ) : null}
       </div>
       {flashAssistLine ? (
         <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">
-          <span className="text-cs2-text-muted">↳</span> 闪光助攻：
+          <span className="text-cs2-text-muted">↳</span> {t("analysis.flashAssist")}
           <span className="font-semibold text-amber-400">{assistName}</span>
         </p>
       ) : normalAssistLine ? (
         <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">
-          <span className="text-cs2-text-muted">↳</span> 助攻：
+          <span className="text-cs2-text-muted">↳</span> {t("analysis.assist")}
           <span className="font-semibold text-amber-400">{assistName}</span>
         </p>
       ) : null}

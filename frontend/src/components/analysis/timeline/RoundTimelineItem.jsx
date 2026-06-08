@@ -5,6 +5,7 @@ import TimelineNode from "./TimelineNode";
 import RoundSummaryPanel from "./RoundSummaryPanel";
 import { queueItemClientUid } from "../../../utils/recordingBatch";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../../../utils/timelineQueue";
+import { useT } from "../../../i18n/useT.js";
 
 /**
  * @param {{
@@ -32,6 +33,7 @@ export default function RoundTimelineItem({
   onRemoveEvent,
   onRemoveRound,
 }) {
+  const t = useT();
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const events = Array.isArray(roundRow?.events) ? roundRow.events : [];
   const sum = roundRow?.summary || {};
@@ -96,15 +98,17 @@ export default function RoundTimelineItem({
       }),
     );
 
-  let outcomeZh = "—";
-  if (res === "win") outcomeZh = "胜利";
-  else if (res === "loss") outcomeZh = "失败";
+  let outcomeLabel = t("analysis.roundNeutral");
+  if (res === "win") outcomeLabel = t("analysis.roundWin");
+  else if (res === "loss") outcomeLabel = t("analysis.roundLoss");
 
   const collapsedSummary = noEvents
-    ? "无事件"
+    ? t("analysis.summaryNoEvents")
     : onlyAssists
-      ? `无击杀 / 无死亡 / ${ta} 助攻`
-      : `${tk} 杀 / ${td} 死 / ${ta} 助攻`;
+      ? t("analysis.summaryAssistsOnly", { ta })
+      : t("analysis.summaryKDA", { tk, td, ta });
+
+  const roundLabelText = t("analysis.roundLabel", { n: Number.isFinite(rn) ? rn : "?" });
 
   if (!expanded) {
     return (
@@ -116,10 +120,10 @@ export default function RoundTimelineItem({
         <TimelineNode result={res} targetKills={tk} targetDeaths={td} glow={hovered} />
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-cs2-text-primary">
-            第 {Number.isFinite(rn) ? rn : "?"} 回合
+            {roundLabelText}
             <span className="ml-2 text-[12px] font-normal text-cs2-text-muted">{collapsedSummary}</span>
           </p>
-          <p className="mt-0.5 text-[12px] text-cs2-text-muted">点击展开</p>
+          <p className="mt-0.5 text-[12px] text-cs2-text-muted">{t("analysis.clickToExpand")}</p>
         </div>
       </button>
     );
@@ -138,7 +142,7 @@ export default function RoundTimelineItem({
       <div className="min-w-0 border-r border-cs2-border pr-3 max-[1279px]:col-span-1 max-[1279px]:border-r-0 max-[1279px]:pr-0">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 gap-y-1 text-[12px] text-cs2-text-secondary">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-bold text-cs2-text-primary">第 {Number.isFinite(rn) ? rn : "?"} 回合</span>
+            <span className="font-bold text-cs2-text-primary">{roundLabelText}</span>
             <span
               className={
                 res === "win"
@@ -148,7 +152,7 @@ export default function RoundTimelineItem({
                     : "rounded border border-cs2-border px-1.5 py-0 text-[10px] font-semibold text-cs2-text-muted"
               }
             >
-              {outcomeZh}
+              {outcomeLabel}
             </span>
             {side ? <span className="font-mono text-[10px] text-cs2-text-muted">{side}</span> : null}
             <span className="font-mono text-[10px] text-cs2-text-secondary">{scoreText}</span>
@@ -192,7 +196,7 @@ export default function RoundTimelineItem({
           className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-cs2-text-muted hover:text-cs2-text-secondary"
         >
           <ChevronDown className="h-3.5 w-3.5 rotate-180" />
-          收起本回合
+          {t("analysis.collapseRound")}
         </button>
       </div>
 

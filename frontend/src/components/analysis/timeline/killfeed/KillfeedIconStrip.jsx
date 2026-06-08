@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { resolveHudWeaponStem } from "./resolveHudWeaponStem";
+import { useT } from "../../../../i18n/useT.js";
 
 const HUD_BASE = "/hud-death-notice";
 
@@ -51,17 +52,18 @@ function WeaponHudImg({ chain, title }) {
  * @param {{ event: Record<string, unknown>, weaponName?: string, weaponKey?: string }} props
  */
 export default function KillfeedIconStrip({ event, weaponName = "", weaponKey = "" }) {
+  const t = useT();
   const wStem = resolveHudWeaponStem(weaponKey, weaponName);
   const weaponChain = useMemo(() => [...new Set([wStem, "knife", "ak47"])], [wStem]);
 
   const parts = [];
-  if (event?.is_blind) parts.push(<HudChainImg key="bl" chain={["blindkill"]} title="盲视野击杀" />);
-  parts.push(<WeaponHudImg key="wpn" chain={weaponChain} title={weaponName || "武器"} />);
-  if (event?.is_headshot) parts.push(<HudChainImg key="hs" chain={["headshot"]} title="爆头" />);
-  if (event?.is_noscope) parts.push(<HudChainImg key="ns" chain={["noscope"]} title="盲狙 / 不开镜" />);
-  if (event?.is_jump_kill) parts.push(<HudChainImg key="air" chain={["jumpkill"]} title="空中击杀" />);
-  if (event?.is_through_smoke) parts.push(<HudChainImg key="sm" chain={["throughsmoke"]} title="穿烟" />);
-  if (event?.is_wallbang) parts.push(<HudChainImg key="wb" chain={["penetrate"]} title="穿墙" />);
+  if (event?.is_blind) parts.push(<HudChainImg key="bl" chain={["blindkill"]} title={t("analysis.iconBlindkill")} />);
+  parts.push(<WeaponHudImg key="wpn" chain={weaponChain} title={weaponName || t("analysis.iconWeapon")} />);
+  if (event?.is_headshot) parts.push(<HudChainImg key="hs" chain={["headshot"]} title={t("analysis.iconHeadshot")} />);
+  if (event?.is_noscope) parts.push(<HudChainImg key="ns" chain={["noscope"]} title={t("analysis.iconNoscope")} />);
+  if (event?.is_jump_kill) parts.push(<HudChainImg key="air" chain={["jumpkill"]} title={t("analysis.iconJumpkill")} />);
+  if (event?.is_through_smoke) parts.push(<HudChainImg key="sm" chain={["throughsmoke"]} title={t("analysis.iconSmoke")} />);
+  if (event?.is_wallbang) parts.push(<HudChainImg key="wb" chain={["penetrate"]} title={t("analysis.iconWallbang")} />);
 
   return (
     <span className="killfeed-icon-strip inline-flex items-center gap-0.5 rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1">

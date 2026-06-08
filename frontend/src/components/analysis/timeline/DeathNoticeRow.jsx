@@ -1,4 +1,5 @@
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
+import { useT } from "../../../i18n/useT.js";
 
 /** 过滤 demo 里可能出现的 NaN / 占位字符串，避免显示「助攻: nan」。 */
 function assisterDisplayName(raw) {
@@ -17,6 +18,7 @@ function assisterDisplayName(raw) {
  * 并以稳定文件名引用；部署站点的 content-hash 变更不会影响本应用。
  */
 export default function DeathNoticeRow({ event, focusedPlayer = "", queued = false, onEnqueue }) {
+  const t = useT();
   const typ = String(event?.type || "");
   const isAssistOnly = typ === "assist_only";
   const isKill = typ === "kill" || event?.record_type === "kill";
@@ -47,7 +49,7 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
     return (
       <div className={rowClass}>
         <span className="font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
-        <span className="text-[12px]">{String(event?.assist_note || "助攻")}</span>
+        <span className="text-[12px]">{String(event?.assist_note || t("analysis.assistFallback"))}</span>
       </div>
     );
   }
@@ -73,7 +75,7 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
       </span>
       {assistName ? (
         <span className="w-full basis-full pl-[3.25rem] text-[11px] text-cs2-text-muted sm:pl-0">
-          助攻：{assistName}
+          {t("analysis.assistLabel")}{assistName}
         </span>
       ) : null}
       {canRec && onEnqueue ? (
@@ -83,7 +85,7 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
           disabled={queued}
           className="death-notice-action ml-auto shrink-0 rounded border border-cs2-accent/40 bg-cs2-accent/15 px-2 py-0.5 text-[12px] font-semibold text-cs2-accent opacity-100 transition-opacity duration-150 disabled:opacity-40 sm:opacity-0 sm:group-hover:opacity-100"
         >
-          {queued ? "已入队" : "加入录制"}
+          {queued ? t("analysis.queued") : t("analysis.btnEnqueue")}
         </button>
       ) : null}
     </div>

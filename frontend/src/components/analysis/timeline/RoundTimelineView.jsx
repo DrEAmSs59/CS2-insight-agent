@@ -1,5 +1,6 @@
 import { Film } from "lucide-react";
 import RoundTimelineItem from "./RoundTimelineItem";
+import { useT } from "../../../i18n/useT.js";
 
 /**
  * @param {{
@@ -29,6 +30,7 @@ export default function RoundTimelineView({
   onRemoveRound,
   suppressSummaryHeader = false,
 }) {
+  const t = useT();
   const rounds = Array.isArray(roundTimeline) ? roundTimeline : [];
   let kc = 0;
   let dc = 0;
@@ -46,18 +48,19 @@ export default function RoundTimelineView({
       {!suppressSummaryHeader && (
         <div className="flex flex-wrap items-center gap-2">
           <Film className="h-4 w-4 text-cs2-accent" />
-          <h2 className="text-sm font-bold uppercase tracking-wide">回合时间线</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wide">{t("analysis.timelineTitle")}</h2>
           <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
-            共 <span className="text-cs2-text-secondary">{rc}</span> 回合 ·{" "}
-            <span className="text-cs2-emerald-on-surface">{kc}</span> 击杀 ·{" "}
-            <span className="text-cs2-rose-on-surface">{dc}</span> 死亡
+            {t("analysis.roundCount", { n: rc })} ·{" "}
+            <span className="text-cs2-emerald-on-surface">{t("analysis.killCount", { n: kc })}</span>{" "}
+            ·{" "}
+            <span className="text-cs2-rose-on-surface">{t("analysis.deathCount", { n: dc })}</span>
           </span>
         </div>
       )}
 
       {rounds.length === 0 ? (
         <div className="rounded-lg border border-dashed border-cs2-border py-10 text-center text-[13px] text-cs2-text-muted">
-          暂无时间线数据（请重新解析该 Demo）
+          {t("analysis.timelineEmpty")}
         </div>
       ) : (
         <div className="timeline-root relative pl-1">

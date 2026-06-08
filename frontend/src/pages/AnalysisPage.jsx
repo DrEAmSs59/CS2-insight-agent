@@ -10,9 +10,11 @@ import MatchSwitcher from "../components/MatchSwitcher";
 import { Loader2, RefreshCw, Film, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAppShell } from "../context/AppShellContext";
+import { useT } from "../i18n/useT.js";
 
 export default function AnalysisPage() {
   const s = useAppShell();
+  const t = useT();
   const [analysisViewMode, setAnalysisViewMode] = useState("clips");
   const timelineRounds = s.timeline?.rounds?.length ?? 0;
   const roundTlLen = s.roundTimeline?.length ?? 0;
@@ -27,14 +29,15 @@ export default function AnalysisPage() {
       {s.hasDemos && (
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cs2-border bg-cs2-bg-page/90 px-5 py-3 backdrop-blur-md sm:px-6">
           <p className="min-w-0 truncate text-[11px] text-cs2-text-muted">
-            <span className="font-mono text-cs2-text-secondary">{s.uploadedDemos.length}</span> 个 Demo 已导入
+            <span className="font-mono text-cs2-text-secondary">{s.uploadedDemos.length}</span>{" "}
+            {t("analysis.demosImportedSuffix")}
           </p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Link
               to="/library"
               className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"
             >
-              Demo 库
+              {t("analysis.linkDemoLibrary")}
             </Link>
             <button
               type="button"
@@ -43,7 +46,7 @@ export default function AnalysisPage() {
               className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-40"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              更换 Demo
+              {t("analysis.btnSwapDemo")}
             </button>
           </div>
         </header>
@@ -55,7 +58,7 @@ export default function AnalysisPage() {
         {!s.hasDemos && s.parsing && (
           <div className="flex flex-col items-center justify-center rounded-xl border border-cs2-border bg-cs2-bg-card py-16 text-center">
             <Loader2 className="h-9 w-9 animate-spin text-cs2-accent" aria-hidden />
-            <p className="mt-4 text-sm font-medium text-cs2-text-secondary">正在处理 Demo…</p>
+            <p className="mt-4 text-sm font-medium text-cs2-text-secondary">{t("analysis.parsing")}</p>
           </div>
         )}
 
@@ -63,18 +66,18 @@ export default function AnalysisPage() {
           <div className="space-y-3">
             <div className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-3">
               <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-cs2-text-secondary">
-                <span className="shrink-0 font-semibold text-cs2-text-secondary">当前场次</span>
+                <span className="shrink-0 font-semibold text-cs2-text-secondary">{t("analysis.currentMatch")}</span>
                 <span className="truncate font-mono text-cs2-text-secondary" title={s.currentFilename}>
                   {s.currentFilename}
                 </span>
                 {s.currentParsed && (
                   <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-cs2-emerald-on-surface">
-                    已解析
+                    {t("analysis.badgeParsed")}
                   </span>
                 )}
                 {s.uploadedDemos.length > 1 && (
                   <span className="rounded border border-cs2-border px-1.5 py-0 text-[10px] text-cs2-text-muted">
-                    共 {s.uploadedDemos.length} 个文件
+                    {t("analysis.fileCount", { n: s.uploadedDemos.length })}
                   </span>
                 )}
               </div>
@@ -115,7 +118,7 @@ export default function AnalysisPage() {
               <ProgressBar
                 text={
                   s.analysisInlineProgress?.text ??
-                  (s.parsingByIndex[s.currentMatchIndex] ? "正在解析…" : "")
+                  (s.parsingByIndex[s.currentMatchIndex] ? t("analysis.parsing") : "")
                 }
                 active={
                   Boolean(s.parsingByIndex[s.currentMatchIndex]) ||
@@ -130,32 +133,35 @@ export default function AnalysisPage() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Film className="h-4 w-4 text-cs2-accent" />
-              <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-primary">解析结果</h2>
+              <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-primary">{t("analysis.resultsTitle")}</h2>
               <span className="ml-auto text-right text-[11px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
                 {analysisViewMode === "clips" ? (
                   <>
-                    共 <span className="text-cs2-text-secondary">{s.clips.filter((c) => c.category !== "meme_death").length}</span>{" "}
-                    条片段
+                    {t("analysis.clipCount", { n: s.clips.filter((c) => c.category !== "meme_death").length })}
                   </>
                 ) : (
                   <>
-                    共{" "}
-                    <span className="text-cs2-text-secondary">
-                      {s.roundTimeline?.length ?? s.timeline?.summary?.round_count ?? timelineRounds}
-                    </span>{" "}
-                    回合 ·{" "}
+                    {t("analysis.roundCount", {
+                      n: s.roundTimeline?.length ?? s.timeline?.summary?.round_count ?? timelineRounds,
+                    })}{" "}
+                    ·{" "}
                     <span className="text-cs2-emerald-on-surface">
-                      {s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.kills) || 0), 0) ||
-                        s.timeline?.summary?.kill_count ||
-                        0}
+                      {t("analysis.killCount", {
+                        n:
+                          s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.kills) || 0), 0) ||
+                          s.timeline?.summary?.kill_count ||
+                          0,
+                      })}
                     </span>{" "}
-                    击杀 ·{" "}
+                    ·{" "}
                     <span className="text-rose-400/90">
-                      {s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.deaths) || 0), 0) ||
-                        s.timeline?.summary?.death_count ||
-                        0}
-                    </span>{" "}
-                    死亡
+                      {t("analysis.deathCount", {
+                        n:
+                          s.roundTimeline?.reduce((a, r) => a + (Number(r?.summary?.deaths) || 0), 0) ||
+                          s.timeline?.summary?.death_count ||
+                          0,
+                      })}
+                    </span>
                   </>
                 )}
               </span>
@@ -172,13 +178,13 @@ export default function AnalysisPage() {
                     : "text-cs2-text-muted hover:text-cs2-text-primary",
                 ].join(" ")}
               >
-                片段卡片
+                {t("analysis.tabClips")}
               </button>
               <button
                 type="button"
                 onClick={() => setAnalysisViewMode("timeline")}
                 disabled={!hasTimeline}
-                title={!hasTimeline ? "请先完成解析以生成时间线" : undefined}
+                title={!hasTimeline ? t("analysis.tabTimelineDisabledTitle") : undefined}
                 className={[
                   "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
                   analysisViewMode === "timeline"
@@ -187,7 +193,7 @@ export default function AnalysisPage() {
                   !hasTimeline ? "cursor-not-allowed opacity-40" : "",
                 ].join(" ")}
               >
-                回合时间线
+                {t("analysis.tabTimeline")}
               </button>
             </div>
 
