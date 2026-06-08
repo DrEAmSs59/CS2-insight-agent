@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Loader2, OctagonX, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useT } from "../i18n/useT.js";
 
 export default function ProgressBar({
   text,
@@ -14,6 +15,7 @@ export default function ProgressBar({
   /** 为 true 时展示跳转录制队列按钮（点击后导航并关闭通知） */
   showQueueNavigate = false,
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
@@ -44,7 +46,7 @@ export default function ProgressBar({
             }}
             className="inline-flex shrink-0 rounded-lg border border-cs2-accent/45 bg-cs2-accent/15 px-3 py-2 text-xs font-semibold text-cs2-accent transition-colors hover:bg-cs2-accent/25"
           >
-            录制队列
+            {t("progressbar.queueBtn")}
           </button>
         ) : null}
         {dismissible && typeof onDismiss === "function" ? (
@@ -52,7 +54,7 @@ export default function ProgressBar({
             type="button"
             onClick={() => onDismiss()}
             className="inline-flex shrink-0 rounded-md border border-cs2-border p-1.5 text-cs2-text-muted transition-colors hover:border-cs2-border hover:text-cs2-text-primary"
-            aria-label="关闭通知"
+            aria-label={t("progressbar.closeAriaLabel")}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -64,7 +66,7 @@ export default function ProgressBar({
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cs2-border-error/50 bg-cs2-rose-surface px-3 py-2 text-xs font-bold text-cs2-rose-on-surface transition-colors hover:bg-cs2-rose-surface"
           >
             <OctagonX className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            中止录制
+            {t("progressbar.abortBtn")}
           </button>
         ) : null}
       </div>

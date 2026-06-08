@@ -1,5 +1,6 @@
 // frontend/src/components/BatchLoadErrorModal.jsx
 import { X, AlertCircle } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 /**
  * @param {{
@@ -9,6 +10,7 @@ import { X, AlertCircle } from "lucide-react";
  * }} props
  */
 export default function BatchLoadErrorModal({ open, failed = [], onClose }) {
+  const t = useT();
   if (!open) return null;
 
   return (
@@ -21,12 +23,12 @@ export default function BatchLoadErrorModal({ open, failed = [], onClose }) {
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-700">
           <div className="flex items-center gap-2 text-red-400">
             <AlertCircle size={18} />
-            <span className="font-semibold text-sm">部分 Demo 加载失败</span>
+            <span className="font-semibold text-sm">{t("dialog.batchLoadErrorTitle")}</span>
           </div>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-300 transition-colors"
-            aria-label="关闭"
+            aria-label={t("dialog.batchLoadErrorClose")}
           >
             <X size={18} />
           </button>
@@ -46,7 +48,7 @@ export default function BatchLoadErrorModal({ open, failed = [], onClose }) {
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-sm text-zinc-200 transition-colors"
           >
-            重新选择
+            {t("dialog.batchLoadErrorReselect")}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Upload, FileCode2 } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 function collectDemFiles(fileList) {
   if (!fileList?.length) return [];
@@ -8,6 +9,7 @@ function collectDemFiles(fileList) {
 
 /** @param {{ onUpload: (files: File[]) => void }} props */
 export default function DemoUpload({ onUpload }) {
+  const t = useT();
   const [dragOver, setDragOver] = useState(false);
 
   const handleDrop = useCallback(
@@ -65,16 +67,16 @@ export default function DemoUpload({ onUpload }) {
 
       <p className="mb-1 text-sm font-semibold">
         {dragOver ? (
-          <span className="text-cs2-accent">松开即可上传</span>
+          <span className="text-cs2-accent">{t("upload.dragReleaseMsg")}</span>
         ) : (
-          "拖拽一个或多个 .dem 到此处"
+          t("upload.dragDropMsg")
         )}
       </p>
-      <p className="text-xs text-cs2-text-secondary">或点击浏览 — 支持多选 / 批量导入</p>
+      <p className="text-xs text-cs2-text-secondary">{t("upload.clickBrowse")}</p>
 
       <div className="mt-6 flex items-center gap-2">
         <div className="h-px w-12 bg-cs2-border" />
-        <span className="font-mono text-[10px] tracking-widest text-cs2-text-secondary">.DEM 批量流水线</span>
+        <span className="font-mono text-[10px] tracking-widest text-cs2-text-secondary">{t("upload.pipelineLabel")}</span>
         <div className="h-px w-12 bg-cs2-border" />
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 /**
  * @param {{
@@ -10,6 +11,7 @@ import { X } from "lucide-react";
  * }} props
  */
 export default function LibraryLoadModeModal({ open, onClose, onConfirm, expectedPreviewLines = [] }) {
+  const t = useT();
   const [mode, setMode] = useState("none");
   const [manualText, setManualText] = useState("");
 
@@ -44,20 +46,19 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-cs2-border bg-cs2-bg-card p-4 shadow-2xl">
         <div className="mb-3 flex items-start justify-between gap-2">
           <h3 id="lib-load-mode-title" className="text-sm font-bold text-cs2-text-primary">
-            载入已选 Demo
+            {t("dialog.libLoadTitle")}
           </h3>
           <button
             type="button"
             onClick={onClose}
             className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-            aria-label="关闭"
+            aria-label={t("common.close")}
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <p className="mb-3 text-[12px] leading-relaxed text-cs2-text-muted">
-          「仅载入」加载完即可进入玩家列表。选择关注名单或手动昵称时，将全屏加载直至<strong className="text-cs2-text-secondary">全部场次解析完成</strong>
-          后再进入界面（多场并行解析时也会显示进度）。
+          {t("dialog.libLoadDescPre")}<strong className="text-cs2-text-secondary">{t("dialog.libLoadDescStrong")}</strong>{t("dialog.libLoadDescPost")}
         </p>
 
         <div className="mb-3 space-y-2">
@@ -70,8 +71,8 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
               onChange={() => setMode("none")}
             />
             <span>
-              <span className="block text-xs font-semibold text-cs2-text-primary">仅载入</span>
-              <span className="text-[11px] text-cs2-text-muted">不选玩家、不解析，与「载入选中」相同效果。</span>
+              <span className="block text-xs font-semibold text-cs2-text-primary">{t("dialog.libLoadModeNoneTitle")}</span>
+              <span className="text-[11px] text-cs2-text-muted">{t("dialog.libLoadModeNoneDesc")}</span>
             </span>
           </label>
           <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-input/30 p-2.5">
@@ -83,9 +84,9 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
               onChange={() => setMode("expected")}
             />
             <span>
-              <span className="block text-xs font-semibold text-cs2-text-primary">按侧栏「关注玩家」名单解析</span>
+              <span className="block text-xs font-semibold text-cs2-text-primary">{t("dialog.libLoadModeExpectedTitle")}</span>
               <span className="text-[11px] text-cs2-text-muted">
-                每场 Demo 只在 roster 里匹配名单中的昵称；未配置名单时本项无效。
+                {t("dialog.libLoadModeExpectedDesc")}
               </span>
               {expectedPreviewLines.length > 0 ? (
                 <span className="mt-1 block font-mono text-[10px] text-cs2-accent/90">
@@ -93,7 +94,7 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
                   {expectedPreviewLines.length > 8 ? " …" : ""}
                 </span>
               ) : (
-                <span className="mt-1 block text-[10px] text-cs2-amber-on-surface/90">当前侧栏名单为空。</span>
+                <span className="mt-1 block text-[10px] text-cs2-amber-on-surface/90">{t("dialog.libLoadModeExpectedEmpty")}</span>
               )}
             </span>
           </label>
@@ -106,8 +107,8 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
               onChange={() => setMode("manual")}
             />
             <span className="min-w-0 flex-1">
-              <span className="block text-xs font-semibold text-cs2-text-primary">手动输入昵称（每行一个）</span>
-              <span className="text-[11px] text-cs2-text-muted">应用于本场选中的每一份 Demo，按 roster 匹配。</span>
+              <span className="block text-xs font-semibold text-cs2-text-primary">{t("dialog.libLoadModeManualTitle")}</span>
+              <span className="text-[11px] text-cs2-text-muted">{t("dialog.libLoadModeManualDesc")}</span>
               <textarea
                 rows={4}
                 value={manualText}
@@ -126,14 +127,14 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
             onClick={onClose}
             className="rounded-md border border-cs2-border px-3 py-1.5 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/40"
           >
-            取消
+            {t("dialog.libLoadCancel")}
           </button>
           <button
             type="button"
             onClick={submit}
             className="rounded-md border border-cs2-accent/50 bg-cs2-accent/15 px-3 py-1.5 text-xs font-bold text-cs2-accent hover:bg-cs2-accent/25"
           >
-            确认载入
+            {t("dialog.libLoadConfirm")}
           </button>
         </div>
       </div>

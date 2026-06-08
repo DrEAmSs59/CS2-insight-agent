@@ -1,9 +1,11 @@
 import { Clapperboard } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 /**
  * 合辑工作台门控：FFmpeg 未配置或不可用时展示，不可通过遮罩/关闭按钮 dismiss。
  */
 export default function FfmpegRequiredDialog({ subtitle, message, onGoSettings }) {
+  const t = useT();
   return (
     <div
       className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
@@ -18,10 +20,10 @@ export default function FfmpegRequiredDialog({ subtitle, message, onGoSettings }
           </div>
           <div className="min-w-0">
             <h2 id="ffmpeg-required-title" className="text-sm font-bold text-cs2-text-primary">
-              无法使用合辑工作台
+              {t("dialog.ffmpegRequiredTitle")}
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">
-              {subtitle || "FFmpeg 未就绪"}
+              {subtitle || t("dialog.ffmpegRequiredSubtitleDefault")}
             </p>
           </div>
         </div>
@@ -38,7 +40,7 @@ export default function FfmpegRequiredDialog({ subtitle, message, onGoSettings }
             onClick={onGoSettings}
             className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20 transition-colors hover:bg-cs2-accent-light"
           >
-            前往设置
+            {t("dialog.ffmpegRequiredGoSettings")}
           </button>
         </div>
       </div>

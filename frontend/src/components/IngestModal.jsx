@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import API from "../api/api";
+import { useT } from "../i18n/useT.js";
 import {
   X,
   Search,
@@ -13,18 +14,16 @@ import {
   Upload,
 } from "lucide-react";
 
-const SOURCE_LABELS = {
-  "Faceit": "Faceit",
-  "5E": "5E",
+// Source labels that should NOT be translated (proper names / abbreviations)
+const SOURCE_LABELS_FIXED = new Set(["Faceit", "5E", "ESL", "ESEA", "Blast"]);
+// These Chinese labels remain as-is for now (platform-specific proper names)
+const SOURCE_LABELS_ZH = {
   "Perfect World": "完美",
   "Matchmaking": "官匹",
-  "ESL": "ESL",
-  "ESEA": "ESEA",
-  "Blast": "Blast",
-  "Local/Other": "本地",
 };
 
 export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
+  const t = useT();
   const [items, setItems] = useState([]);
   const [listLoading, setListLoading] = useState(false);
   const [ingesting, setIngesting] = useState(false);
@@ -99,7 +98,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         ? d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("；")
         : typeof d === "string"
           ? d
-          : e?.message || "入库失败";
+          : e?.message || t("dialog.ingestFallbackError");
       setIngestError(msg);
     } finally {
       setIngesting(false);
@@ -121,17 +120,17 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
           <div
             className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-[1px]"
             aria-busy="true"
-            aria-label="正在入库"
+            aria-label={t("dialog.ingestIngesting")}
           >
             <Loader2 className="h-8 w-8 animate-spin text-cs2-accent" />
-            <p className="text-xs font-semibold text-cs2-text-primary">正在入库，请稍候…</p>
+            <p className="text-xs font-semibold text-cs2-text-primary">{t("dialog.ingestIngestingMsg")}</p>
           </div>
         ) : null}
         {/* Header */}
         <div className="flex items-center justify-between border-b border-cs2-border px-5 py-4">
           <div className="flex items-center gap-2">
             <Database className="h-5 w-5 text-cs2-accent" />
-            <h2 className="text-sm font-bold text-cs2-text-primary">待入库 Demo</h2>
+            <h2 className="text-sm font-bold text-cs2-text-primary">{t("dialog.ingestTitle")}</h2>
             <span className="rounded bg-cs2-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-cs2-accent">
               {total}
             </span>
@@ -152,7 +151,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
               className="flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-hover px-3 py-1.5 text-[10px] font-bold text-cs2-text-secondary transition-all hover:bg-cs2-bg-active hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Upload className="h-3.5 w-3.5" />
-              本地浏览并导入
+              {t("dialog.ingestUploadBtn")}
             </button>
             <button
               type="button"
@@ -171,7 +170,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
             <Search className="h-3.5 w-3.5 text-cs2-text-muted" />
             <input
               type="text"
-              placeholder="搜索文件名..."
+              placeholder={t("dialog.ingestSearchPlaceholder")}
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="flex-1 bg-transparent text-xs text-cs2-text-primary outline-none placeholder:text-cs2-text-muted"
@@ -191,13 +190,13 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         {items.length > 0 && (
           <div className="flex items-center gap-2 border-b border-cs2-border bg-cs2-bg-input/30 px-5 py-2 text-[10px]">
             <button type="button" disabled={ingesting} onClick={handleSelectAll} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
-              本页全选
+              {t("dialog.ingestSelectAll")}
             </button>
             <span className="text-cs2-text-muted">|</span>
             <button type="button" disabled={ingesting} onClick={handleClearSelection} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
-              清空
+              {t("dialog.ingestClear")}
             </button>
-            <span className="ml-auto text-cs2-text-muted">已选 {selectedIds.size} / {items.length}</span>
+            <span className="ml-auto text-cs2-text-muted">{t("dialog.ingestSelected", { sel: selectedIds.size, total: items.length })}</span>
           </div>
         )}
 
@@ -212,14 +211,16 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
               <HardDrive className="h-8 w-8 opacity-20" />
               <p className="text-xs">
                 {search
-                  ? "没有找到匹配的待入库 Demo"
-                  : "没有待入库的 Demo，请点击工具栏「扫描本地 demo 库」发现新文件，再打开本窗口查看"}
+                  ? t("dialog.ingestEmptySearch")
+                  : t("dialog.ingestEmptyNoDemo")}
               </p>
             </div>
           ) : (
             <div className="space-y-1">
               {items.map((it) => {
-                const sourceLabel = SOURCE_LABELS[it.source] || "本地";
+                const sourceLabel = SOURCE_LABELS_FIXED.has(it.source)
+                  ? it.source
+                  : (SOURCE_LABELS_ZH[it.source] ?? t("dialog.ingestSourceLocal"));
                 const sizeMB = it.file_size != null ? (it.file_size / (1024 * 1024)).toFixed(1) : "?";
                 return (
                   <div
@@ -250,7 +251,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                           <span>•</span>
                           <span>{sizeMB} MB</span>
                           <span>•</span>
-                          <span>发现于 {new Date(it.added_at).toLocaleDateString()}</span>
+                          <span>{t("dialog.ingestDiscoveredAt", { date: new Date(it.added_at).toLocaleDateString() })}</span>
                         </div>
                       </div>
                     </div>
@@ -277,7 +278,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="text-[11px] text-cs2-text-muted">
-                第 {page} / {totalPages} 页
+                {t("dialog.ingestPageOf", { page, totalPages })}
               </span>
               <button
                 type="button"
@@ -297,7 +298,7 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
                 className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-extrabold text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20 transition-all hover:bg-cs2-accent-light disabled:opacity-50 disabled:grayscale"
               >
                 {ingesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                确认入库 ({selectedIds.size})
+                {t("dialog.ingestConfirmBtn", { count: selectedIds.size })}
               </button>
             </div>
           </div>

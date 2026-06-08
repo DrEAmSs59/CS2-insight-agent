@@ -1,4 +1,7 @@
 import { Crosshair, Search, CheckSquare } from "lucide-react";
+import { useT } from "../i18n/useT.js";
+import { useLocaleStore } from "../i18n/localeStore.js";
+import { labelTag } from "../utils/tagDescriptions.js";
 
 /**
  * CS2 社区梗标签（判断顺序不可打乱）
@@ -8,10 +11,11 @@ import { Crosshair, Search, CheckSquare } from "lucide-react";
  */
 /** 与 o / i / z 系列梗配套的追加标签 */
 const TAG_CHIEF_RD = "👨‍🔬 首席研发工程师";
+const TAG_211 = "🎓 211高材生";
 
 function getMemeTags(k, d, a) {
   void a; /* 助攻不参与梗判定，保留参数以符合接口 */
-  if (k === 2 && d === 11) return ["🎓 211高材生"];
+  if (k === 2 && d === 11) return [TAG_211];
   if (k === 0) return [`🥚 o${d}`, TAG_CHIEF_RD];
   if (k === 1 && d === 18) return [`🗿 i${d}`, TAG_CHIEF_RD];
   if (k === 1) return [`👨‍💻 i${d}`, TAG_CHIEF_RD];
@@ -39,7 +43,7 @@ const MEME_BADGE_CLASS =
   "shadow-[0_0_14px_rgba(236,72,153,0.85),0_0_28px_rgba(168,85,247,0.45)]";
 
 /** selected: string[] — 已选玩家名称数组 */
-function PlayerRow({ player, selected, onSelect }) {
+function PlayerRow({ player, selected, onSelect, locale }) {
   const { name, kills, deaths, assists } = player;
   const memeTags = getMemeTags(kills, deaths, assists);
   const isSelected = selected.includes(name);
@@ -83,7 +87,7 @@ function PlayerRow({ player, selected, onSelect }) {
           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
             {memeTags.map((tag) => (
               <span key={tag} className={MEME_BADGE_CLASS}>
-                {tag}
+                {labelTag(tag, locale)}
               </span>
             ))}
           </span>
@@ -96,7 +100,7 @@ function PlayerRow({ player, selected, onSelect }) {
   );
 }
 
-function TeamBlock({ title, players, selected, onSelect }) {
+function TeamBlock({ title, players, selected, onSelect, emptyLabel, locale }) {
   return (
     <div className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3">
       <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-cs2-text-secondary">
@@ -104,10 +108,10 @@ function TeamBlock({ title, players, selected, onSelect }) {
       </h3>
       <div className="flex flex-col gap-0.5">
         {players.length === 0 ? (
-          <p className="py-2 text-center text-[10px] text-cs2-text-muted">暂无</p>
+          <p className="py-2 text-center text-[10px] text-cs2-text-muted">{emptyLabel}</p>
         ) : (
           players.map((p) => (
-            <PlayerRow key={p.name} player={p} selected={selected} onSelect={onSelect} />
+            <PlayerRow key={p.name} player={p} selected={selected} onSelect={onSelect} locale={locale} />
           ))
         )}
       </div>
@@ -120,6 +124,8 @@ function TeamBlock({ title, players, selected, onSelect }) {
  * `selected` 为已选玩家名称数组；`onSelect` 接收名称进行切换（toggle）。
  */
 export default function PlayerSelect({ players, selected, onSelect, onAnalyze, disabled }) {
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const list = (players ?? []).map(normalizePlayer);
   const selectedArr = Array.isArray(selected) ? selected : (selected ? [selected] : []);
 
@@ -129,38 +135,37 @@ export default function PlayerSelect({ players, selected, onSelect, onAnalyze, d
 
   const btnLabel =
     selectedArr.length === 0
-      ? "请先选择玩家"
+      ? t("player.selectBtnNoPlayer")
       : selectedArr.length === 1
-      ? "解析当前场次"
-      : `解析选中玩家 (${selectedArr.length})`;
+      ? t("player.selectBtnSingle")
+      : t("player.selectBtnMulti", { n: selectedArr.length });
 
   return (
     <div className="bg-cs2-bg-card rounded-xl border border-cs2-border p-4">
       <div className="mb-2 flex items-center gap-2">
         <Crosshair className="h-4 w-4 shrink-0 text-cs2-accent" />
-        <h2 className="text-sm font-bold uppercase tracking-wide">本场目标玩家</h2>
+        <h2 className="text-sm font-bold uppercase tracking-wide">{t("player.selectTitle")}</h2>
         {selectedArr.length > 0 && (
           <span className="ml-auto text-[11px] text-cs2-text-muted">
-            已选 <span className="font-bold text-cs2-accent">{selectedArr.length}</span> 人
+            {t("player.selectSelected", { n: selectedArr.length })}
           </span>
         )}
       </div>
       <p className="mb-3 text-[12px] leading-relaxed text-cs2-text-muted">
-        可多选玩家同时解析；仅在<strong className="text-cs2-text-secondary">当前这一场</strong>
-        Demo 内生效，切换场次后请重新选择。解析进行中也可切换场次；正在解析的那一场会暂时锁定本按钮。
+        {t("player.selectDescPre")}<strong className="text-cs2-text-secondary">{t("player.selectDescStrong")}</strong>{t("player.selectDescPost")}
       </p>
 
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-        <TeamBlock title="队伍 A" players={teamA} selected={selectedArr} onSelect={onSelect} />
-        <TeamBlock title="队伍 B" players={teamB} selected={selectedArr} onSelect={onSelect} />
+        <TeamBlock title={t("player.selectTeamA")} players={teamA} selected={selectedArr} onSelect={onSelect} emptyLabel={t("player.selectEmpty")} locale={locale} />
+        <TeamBlock title={t("player.selectTeamB")} players={teamB} selected={selectedArr} onSelect={onSelect} emptyLabel={t("player.selectEmpty")} locale={locale} />
       </div>
 
       {unknown.length > 0 && (
         <div className="mb-3 rounded-lg border border-dashed border-cs2-border bg-cs2-bg-card p-2">
-          <p className="mb-1 px-1 text-[10px] font-semibold text-cs2-text-muted">未识别队伍</p>
+          <p className="mb-1 px-1 text-[10px] font-semibold text-cs2-text-muted">{t("player.selectTeamUnknown")}</p>
           <div className="flex flex-col gap-0.5">
             {unknown.map((p) => (
-              <PlayerRow key={p.name} player={p} selected={selectedArr} onSelect={onSelect} />
+              <PlayerRow key={p.name} player={p} selected={selectedArr} onSelect={onSelect} locale={locale} />
             ))}
           </div>
         </div>

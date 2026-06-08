@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import API from "../api/api";
 import { useLocaleStore } from "../i18n/localeStore";
+import { useT } from "../i18n/useT.js";
 import {
   X,
   Loader2,
@@ -39,6 +40,7 @@ export default function DemoInfoModal({
   aiMode = false,
   queuedClientClipUids = new Set(),
 }) {
+  const t = useT();
   const [tab, setTab] = useState("parse"); // "parse" | "clips"
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -47,6 +49,7 @@ export default function DemoInfoModal({
   const [selectedPlayers, setSelectedPlayers] = useState([]);
   const [selectedClipUids, setSelectedClipUids] = useState(new Set());
   const [progressText, setProgressText] = useState("");
+  const [progressSuccess, setProgressSuccess] = useState(false);
   const [activePlayerTab, setActivePlayerTab] = useState("");
   
   // 针对合集（如 211）的轮数选择草稿
@@ -59,6 +62,7 @@ export default function DemoInfoModal({
     setParsedPlayers({});
     setSelectedClipUids(new Set());
     setProgressText("");
+    setProgressSuccess(false);
     setSelectedPlayers([]);
     setActivePlayerTab("");
     setFreezeToDeathDraft({ picked: [] });
@@ -131,7 +135,7 @@ export default function DemoInfoModal({
           .filter(Boolean);
         setSelectedPlayers(autoSelected);
       } catch (e) {
-        setProgressText(`加载 Demo 信息失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("dialog.demoInfoLoadFail", { msg: e.response?.data?.detail || e.message }));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -142,7 +146,8 @@ export default function DemoInfoModal({
   const handleParse = useCallback(async () => {
     if (!demoId || !selectedPlayers.length) return;
     setParsing(true);
-    setProgressText("正在解析高光时刻…");
+    setProgressSuccess(false);
+    setProgressText(t("dialog.demoInfoParsingHighlights"));
       try {
         const ftdPicked = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
         const { data } = await API.post(`/demos/${demoId}/analyze`, {
@@ -200,7 +205,7 @@ export default function DemoInfoModal({
         ftdClip ? freezeToDeathDraftFromClipFilter(ftdClip.freeze_to_death_round_filter, maxR) : { picked: [] }
       );
     } catch (e) {
-      setProgressText(`解析失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("dialog.demoInfoParseFail", { msg: e.response?.data?.detail || e.message }));
     } finally {
       setParsing(false);
     }
@@ -263,7 +268,8 @@ export default function DemoInfoModal({
 
     onAddToQueue(allClips);
     setSelectedClipUids(new Set());
-    setProgressText(`已将 ${allClips.length} 条片段加入录制队列`);
+    setProgressText(t("dialog.demoInfoAddedToQueue", { n: allClips.length }));
+    setProgressSuccess(true);
   }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue, freezeToDeathDraft]);
 
   const handleSelectAll = useCallback(() => {
@@ -311,7 +317,7 @@ export default function DemoInfoModal({
         <div className="flex items-center justify-between border-b border-cs2-border px-6 py-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-xs font-medium text-cs2-text-muted mb-1">
-              <span className="truncate max-w-[200px]">{demoData?.filename || "Demo 解析"}</span>
+              <span className="truncate max-w-[200px]">{demoData?.filename || t("dialog.demoInfoDemoFallback")}</span>
               {matchMeta.map_name && <span>• {matchMeta.map_name}</span>}
             </div>
             <h2 className="text-lg font-black text-cs2-text-primary uppercase tracking-tight truncate">
@@ -338,7 +344,7 @@ export default function DemoInfoModal({
           {loading ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 py-20">
               <Loader2 className="h-10 w-10 animate-spin text-cs2-accent" />
-              <p className="text-sm font-medium text-cs2-text-secondary">正在读取 Demo 玩家信息...</p>
+              <p className="text-sm font-medium text-cs2-text-secondary">{t("dialog.demoInfoLoadingPlayers")}</p>
             </div>
           ) : (
             <div className="p-6 space-y-6">
@@ -347,18 +353,18 @@ export default function DemoInfoModal({
                 {matchMeta.map_name && <MatchScoreboard matchMeta={matchMeta} />}
                 
                 <div className="flex items-center gap-2 border-b border-cs2-border pb-2">
-                   <button 
+                   <button
                      onClick={() => setTab("parse")}
                      className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all ${tab === "parse" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
-                     1. 选择玩家解析
+                     {t("dialog.demoInfoTabParse")}
                    </button>
-                   <button 
+                   <button
                      onClick={() => setTab("clips")}
                      disabled={!parsedPlayerNames.length}
                      className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "clips" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
-                     2. 检视高光片段 {parsedPlayerNames.length > 0 && `(${selectableTotal})`}
+                     {parsedPlayerNames.length > 0 ? t("dialog.demoInfoTabClipsCount", { n: selectableTotal }) : t("dialog.demoInfoTabClips")}
                    </button>
                 </div>
 
@@ -423,11 +429,11 @@ export default function DemoInfoModal({
              
              {progressText && (
                <div className={`flex items-center gap-2 rounded-lg bg-cs2-bg-input/70 px-4 py-2 text-[12px] border ${
-                 progressText.includes("队列") || progressText.includes("完成") || progressText.includes("成功")
+                 progressSuccess
                    ? "text-cs2-text-success border-cs2-emerald-surface"
                    : "text-cs2-accent border-cs2-accent/20 animate-pulse"
                }`}>
-                 {progressText.includes("队列") || progressText.includes("完成") || progressText.includes("成功") ? (
+                 {progressSuccess ? (
                    <CheckCircle2 className="h-3.5 w-3.5" />
                  ) : (
                    <Loader2 className="h-3 w-3 animate-spin" />

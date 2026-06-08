@@ -1,10 +1,11 @@
 import { ShieldAlert, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useT } from "../i18n/useT.js";
 
 /**
  * 推断对话框副标题：根据后端返回的 detail 文本判定具体阻断场景。
  */
-function recordingBlockedSubtitle(message) {
+function recordingBlockedSubtitleKey(message) {
   const m = String(message || "");
   if (
     m.includes("分辨率") ||
@@ -14,21 +15,21 @@ function recordingBlockedSubtitle(message) {
     m.includes("所选屏幕比例") ||
     m.includes("填写启动分辨率")
   ) {
-    return "录制预热选项未通过校验";
+    return "dialog.recordBlockedSubResolution";
   }
   if (m.includes("GSI") || m.includes("未就绪") || m.includes("未进入游戏")) {
-    return "CS2 未在限定时间内进入游戏画面";
+    return "dialog.recordBlockedSubGsi";
   }
   if (m.includes("正在运行") || (m.includes("CS2") && m.includes("退出"))) {
-    return "当前检测到 CS2 正在运行";
+    return "dialog.recordBlockedSubRunning";
   }
   if (m.includes("已有录制任务")) {
-    return "已有录制任务进行中";
+    return "dialog.recordBlockedSubAlreadyRecording";
   }
   if (m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复")) {
-    return "玩家配置需要先恢复";
+    return "dialog.recordBlockedSubConfigRestore";
   }
-  return "录制启动条件未满足";
+  return "dialog.recordBlockedSubDefault";
 }
 
 function isConfigBackupMessage(message) {
@@ -37,9 +38,10 @@ function isConfigBackupMessage(message) {
 }
 
 export default function RecordingBlockedDialog({ message, onClose }) {
+  const t = useT();
   const navigate = useNavigate();
   if (!message) return null;
-  const subtitle = recordingBlockedSubtitle(message);
+  const subtitleKey = recordingBlockedSubtitleKey(message);
   const showConfigLink = isConfigBackupMessage(message);
   return (
     <div
@@ -56,7 +58,7 @@ export default function RecordingBlockedDialog({ message, onClose }) {
           type="button"
           onClick={onClose}
           className="absolute right-3 top-3 rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
-          aria-label="关闭"
+          aria-label={t("dialog.recordBlockedClose")}
         >
           <X className="h-4 w-4" />
         </button>
@@ -67,9 +69,9 @@ export default function RecordingBlockedDialog({ message, onClose }) {
           </div>
           <div className="min-w-0 pr-7">
             <h2 id="recording-blocked-title" className="text-sm font-bold text-cs2-text-primary">
-              无法开始录制
+              {t("dialog.recordBlockedTitle")}
             </h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">{subtitle}</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">{t(subtitleKey)}</p>
           </div>
         </div>
 
@@ -84,7 +86,7 @@ export default function RecordingBlockedDialog({ message, onClose }) {
               onClick={() => { onClose(); navigate("/player-game-config"); }}
               className="rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-4 py-2 text-sm font-bold text-cs2-accent transition-colors hover:bg-cs2-accent/20"
             >
-              前往玩家配置
+              {t("dialog.recordBlockedGoConfig")}
             </button>
           ) : null}
           <button
@@ -92,7 +94,7 @@ export default function RecordingBlockedDialog({ message, onClose }) {
             onClick={onClose}
             className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent shadow-lg shadow-cs2-accent/20 transition-colors hover:bg-cs2-accent-light"
           >
-            知道了
+            {t("dialog.recordBlockedOk")}
           </button>
         </div>
       </div>
