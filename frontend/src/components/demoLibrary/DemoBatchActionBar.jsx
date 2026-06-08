@@ -1,3 +1,5 @@
+import { useT } from "../../i18n/useT.js";
+
 export default function DemoBatchActionBar({
   count,
   onLoadSelected,
@@ -5,6 +7,8 @@ export default function DemoBatchActionBar({
   onBatchDelete,
   onClearSelection,
 }) {
+  const t = useT();
+
   if (count <= 0) return null;
 
   const btn =
@@ -19,23 +23,22 @@ export default function DemoBatchActionBar({
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-cs2-border bg-cs2-bg-card/90 px-3 py-2 backdrop-blur-[1px]">
       <span className="text-[12px] font-semibold tabular-nums text-cs2-text-secondary">
-        已选择 <span className="text-cs2-accent">{count}</span> 个
+        {t("library.batchSelected", { count })}
       </span>
       <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
         <button type="button" className={btn} onClick={() => void onLoadSelected()}>
-          载入选中
+          {t("library.batchLoad")}
         </button>
         <button type="button" className={btnPrimary} onClick={onOpenBatchModal}>
-          载入并解析…
+          {t("library.batchLoadParse")}
         </button>
         <button type="button" className={btnDanger} onClick={() => void onBatchDelete()}>
-          批量删除
+          {t("library.batchDelete")}
         </button>
         <button type="button" className={btn} onClick={onClearSelection}>
-          清空选择
+          {t("library.batchClear")}
         </button>
       </div>
     </div>
   );
 }
-

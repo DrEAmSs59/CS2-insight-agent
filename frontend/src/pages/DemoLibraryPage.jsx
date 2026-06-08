@@ -18,6 +18,7 @@ import {
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
+import { useT } from "../i18n/useT.js";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -37,6 +38,7 @@ const INITIAL_ADV_FILTERS = {
 };
 
 export default function DemoLibraryPage() {
+  const t = useT();
   const s = useAppShell();
   const addToQueue = useRecordingQueue((st) => st.addToQueue);
   const queue = useRecordingQueue((st) => st.queue);
@@ -113,7 +115,7 @@ export default function DemoLibraryPage() {
         }
       }
       if (!p || typeof p !== "string" || !String(p).trim()) {
-        s.setProgressText("无法获取该 Demo 的磁盘路径。");
+        s.setProgressText(t("library.openFileError"));
         return;
       }
       try {
@@ -124,11 +126,11 @@ export default function DemoLibraryPage() {
           ? d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("；")
           : typeof d === "string"
             ? d
-            : e?.message || "定位失败";
-        s.setProgressText(`在资源管理器中打开失败: ${msg}`);
+            : e?.message || t("library.actionDelete");
+        s.setProgressText(t("library.openFileFailPrefix", { msg }));
       }
     },
-    [s],
+    [s, t],
   );
 
   const filteredRows = useMemo(() => {
@@ -187,13 +189,13 @@ export default function DemoLibraryPage() {
   const emptyMessage = useMemo(() => {
     if (s.libraryLoading) return null;
     if (s.demoLibraryItems.length > 0 && filteredRows.length === 0) {
-      return "没有符合条件的 Demo，尝试清空筛选";
+      return t("library.emptyNoMatch");
     }
     if (s.demoLibraryItems.length === 0) {
       if (hasQuickOrAdvancedFilters || s.librarySearchQ) {
-        return "没有符合条件的 Demo，尝试清空筛选";
+        return t("library.emptyNoMatch");
       }
-      return "暂无 Demo，点击「监听目录」添加路径或手动导入";
+      return t("library.emptyNoDemo");
     }
     return null;
   }, [
@@ -202,18 +204,19 @@ export default function DemoLibraryPage() {
     filteredRows.length,
     hasQuickOrAdvancedFilters,
     s.librarySearchQ,
+    t,
   ]);
 
   const handleBatchDelete = useCallback(() => {
     const ids = Array.from(s.selectedLibraryDemoIds);
     if (!ids.length) return;
     if (
-      !window.confirm(`确定从库中删除选中的 ${ids.length} 条记录？不会删除磁盘上的 .dem 文件。`)
+      !window.confirm(t("library.batchDeleteConfirm", { count: ids.length }))
     ) {
       return;
     }
     void s.handleLibraryBatchDelete(ids);
-  }, [s]);
+  }, [s, t]);
 
   const onPageChange = useCallback(
     (page) => {
@@ -282,9 +285,9 @@ export default function DemoLibraryPage() {
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
         <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
           {s.libraryLoading ? (
-            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">加载中...</div>
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{t("library.loading")}</div>
           ) : filteredRows.length === 0 ? (
-            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{emptyMessage || "暂无 Demo"}</div>
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{emptyMessage || t("library.noDemo")}</div>
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredRows.map((it) => (
@@ -370,11 +373,11 @@ export default function DemoLibraryPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
-              从 Demo 库删除
+              {t("library.deleteTitle")}
             </h4>
             <p className="mb-3 font-mono text-[12px] text-cs2-text-secondary">{s.libraryDeletePrompt.label}</p>
             <p className="mb-3 text-[11px] leading-relaxed text-cs2-text-secondary">
-              仅移除本地库中的记录与解析缓存，不会删除磁盘上的 .dem 文件。请选择删除之后再次扫描时的行为：
+              {t("library.deleteDesc")}
             </p>
             <div className="flex flex-col gap-2">
               <button
@@ -382,9 +385,9 @@ export default function DemoLibraryPage() {
                 className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-cs2-emerald-on-surface hover:bg-emerald-500/20"
                 onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "reimport")}
               >
-                删除后再次扫描仍入库
+                {t("library.deleteReimport")}
                 <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
-                  下次扫描会重新加入库中，入库时间为扫描时刻。
+                  {t("library.deleteReimportHint")}
                 </span>
               </button>
               <button
@@ -392,9 +395,9 @@ export default function DemoLibraryPage() {
                 className="rounded border border-cs2-border px-3 py-2 text-left text-[11px] leading-snug text-cs2-text-secondary hover:bg-cs2-bg-input/50"
                 onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "skip")}
               >
-                删除后再次扫描不再入库
+                {t("library.deleteSkip")}
                 <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
-                  之后目录监听与手动扫描都会跳过该路径；仅改文件名或移动文件可视为新路径再入库。
+                  {t("library.deleteSkipHint")}
                 </span>
               </button>
               <button
@@ -405,14 +408,14 @@ export default function DemoLibraryPage() {
                   const row = s.demoLibraryItems.find((it) => it.id === p.id);
                   const base = (row?.filename || p.label || "").replace(/\.\w+$/, "");
                   const files = [`${base}.dem`, `${base}.zip`];
-                  if (window.confirm(`确定要删除以下文件？\n\n${files.join("\n")}\n\n此操作不可恢复。`)) {
+                  if (window.confirm(t("library.deleteDiskConfirm", { files: files.join("\n") }))) {
                     void s.handleDeleteDemoFile(p.id);
                   }
                 }}
               >
-                从磁盘删除文件
+                {t("library.deleteDisk")}
                 <span className="mt-0.5 block text-[11px] font-normal text-red-300/60">
-                  永久删除 .dem 及同名 .zip 文件，不可恢复。
+                  {t("library.deleteDiskHint")}
                 </span>
               </button>
             </div>
@@ -422,7 +425,7 @@ export default function DemoLibraryPage() {
                 className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
                 onClick={() => s.setLibraryDeletePrompt(null)}
               >
-                取消
+                {t("library.deleteCancel")}
               </button>
             </div>
           </div>
@@ -446,7 +449,7 @@ export default function DemoLibraryPage() {
           </div>
           <div className="flex flex-col gap-0.5">
             <span className={`text-[12px] font-semibold ${playToast.ok ? "text-cs2-emerald-on-surface" : "text-cs2-red-on-surface"}`}>
-              {playToast.ok ? "正在启动 CS2 播放 Demo" : "启动失败"}
+              {playToast.ok ? t("library.playToastOk") : t("library.playToastFail")}
             </span>
             <span className="max-w-[260px] truncate font-mono text-[11px] text-cs2-text-muted" title={playToast.label}>
               {playToast.label}
@@ -475,10 +478,10 @@ export default function DemoLibraryPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h4 id="library-rename-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
-              Demo 展示名
+              {t("library.renameTitle")}
             </h4>
             <p className="mb-2 text-[11px] leading-relaxed text-cs2-text-secondary">
-              仅保存在本地库中，不修改磁盘上的 .dem 文件名。留空并保存则恢复为文件名显示。
+              {t("library.renameDesc")}
             </p>
             <input
               type="text"
@@ -494,14 +497,14 @@ export default function DemoLibraryPage() {
                 className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
                 onClick={() => s.setLibraryRename(null)}
               >
-                取消
+                {t("library.renameCancel")}
               </button>
               <button
                 type="button"
                 className="rounded border border-cs2-accent/50 bg-cs2-accent/15 px-2 py-1 text-[11px] font-semibold text-cs2-accent hover:bg-cs2-accent/25"
                 onClick={() => void s.handleSaveLibraryRename()}
               >
-                保存
+                {t("library.renameSave")}
               </button>
             </div>
           </div>

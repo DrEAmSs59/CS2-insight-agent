@@ -20,6 +20,7 @@ import {
   formatScoreLine,
 } from "../../utils/demoLibraryDisplay";
 import { canLikelyPreviewScoreboard } from "../../utils/demoScoreboardModel";
+import { useT } from "../../i18n/useT.js";
 
 function dirnameFromPath(p) {
   if (!p || typeof p !== "string") return "";
@@ -102,6 +103,8 @@ export default function DemoTable({
   onDelete,
   onAnalyze,
 }) {
+  const t = useT();
+
   const iconBtn =
     "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-cs2-text-muted transition-colors duration-150 hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary active:bg-cs2-bg-active";
   const iconBtnDanger =
@@ -116,60 +119,60 @@ export default function DemoTable({
         <thead className="sticky top-0 z-[1] bg-cs2-bg-card/95 backdrop-blur-[2px]">
           <tr className="border-b border-cs2-border">
             <th className="w-[8.75rem] min-w-[8rem] px-2 py-2">
-              <span className="sr-only">展开预览与选择</span>
+              <span className="sr-only">{t("library.colExpandSrOnly")}</span>
             </th>
             <th className="min-w-[200px] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("filename")}>
-                文件名
+                {t("library.colFilename")}
                 <SortChevron active={sortKey === "filename"} dir={sortDir} />
               </button>
             </th>
             <th className="min-w-[7rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("map")}>
-                地图
+                {t("library.colMap")}
                 <SortChevron active={sortKey === "map"} dir={sortDir} />
               </button>
             </th>
-            <th className="min-w-[3.5rem] px-2 py-2 text-cs2-text-muted">比分</th>
+            <th className="min-w-[3.5rem] px-2 py-2 text-cs2-text-muted">{t("library.colScore")}</th>
             <th className="min-w-[3.5rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("rounds")}>
-                回合
+                {t("library.colRounds")}
                 <SortChevron active={sortKey === "rounds"} dir={sortDir} />
               </button>
             </th>
             <th className="min-w-[4rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("duration")}>
-                时长
+                {t("library.colDuration")}
                 <SortChevron active={sortKey === "duration"} dir={sortDir} />
               </button>
             </th>
             <th className="min-w-[6.5rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("date")}>
-                入库时间
+                {t("library.colDate")}
                 <SortChevron active={sortKey === "date"} dir={sortDir} />
               </button>
             </th>
             <th className="min-w-[4rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("size")}>
-                大小
+                {t("library.colSize")}
                 <SortChevron active={sortKey === "size"} dir={sortDir} />
               </button>
             </th>
             <th className="min-w-[5.5rem] px-2 py-2">
               <button type="button" className={thBtn} onClick={() => onColumnSort("library")}>
-                状态
+                {t("library.colStatus")}
                 <SortChevron active={sortKey === "library"} dir={sortDir} />
               </button>
             </th>
-            <th className="min-w-[7rem] px-2 py-2 text-cs2-text-muted">标签</th>
-            <th className="min-w-[10rem] px-2 py-2 text-right text-cs2-text-muted">操作</th>
+            <th className="min-w-[7rem] px-2 py-2 text-cs2-text-muted">{t("library.colTags")}</th>
+            <th className="min-w-[10rem] px-2 py-2 text-right text-cs2-text-muted">{t("library.colActions")}</th>
           </tr>
         </thead>
         <tbody>
           {libraryLoading && rows.length === 0 ? (
             <tr>
               <td colSpan={COL_SPAN} className="px-3 py-10 text-center text-[12px] text-cs2-text-muted">
-                加载中…
+                {t("library.tableLoading")}
               </td>
             </tr>
           ) : null}
@@ -223,7 +226,7 @@ export default function DemoTable({
                             : "text-cs2-text-muted group-hover/row:text-cs2-text-secondary",
                         ].join(" ")}
                         aria-expanded={expanded}
-                        title={expanded ? "收起比分预览" : "展开比分预览"}
+                        title={expanded ? t("library.scoreboardCollapse") : t("library.scoreboardExpand")}
                       >
                         <ChevronRight
                           className={[
@@ -238,11 +241,11 @@ export default function DemoTable({
                             expanded ? "text-cs2-accent" : "text-cs2-text-muted opacity-75 group-hover/row:text-cs2-accent group-hover/row:opacity-100",
                           ].join(" ")}
                         >
-                          比分预览
+                          {t("library.scoreboardPreview")}
                         </span>
                       </button>
                       <span onClick={(e) => e.stopPropagation()}>
-                        <DemoRowCheckbox checked={checked} onToggle={() => onToggleSelect(id)} title={`选择 ${title}`} />
+                        <DemoRowCheckbox checked={checked} onToggle={() => onToggleSelect(id)} title={t("library.rowSelect", { title })} />
                       </span>
                     </div>
                   </td>
@@ -263,11 +266,11 @@ export default function DemoTable({
                         </span>
                       </div>
                       {previewLikely ? (
-                        <span title="可预览比分数据" className="opacity-70 transition-opacity group-hover/row:opacity-100">
+                        <span title={t("library.canPreview")} className="opacity-70 transition-opacity group-hover/row:opacity-100">
                           <Eye className="mt-0.5 h-3 w-3 shrink-0 text-cs2-accent/75" aria-hidden />
                         </span>
                       ) : (
-                        <span title="需解析并索引玩家数据后可预览" className="opacity-50">
+                        <span title={t("library.noPreview")} className="opacity-50">
                           <EyeOff className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
                         </span>
                       )}
@@ -283,7 +286,7 @@ export default function DemoTable({
                     {roundsLabel(it)}
                   </td>
                   <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
-                    {formatDurationMinutesPlain(it.duration_mins)}
+                    {formatDurationMinutesPlain(it.duration_mins, t("library.durationUnit"))}
                   </td>
                   <td className="whitespace-nowrap align-middle px-2 py-2 font-mono text-[11px] text-cs2-text-secondary transition-colors group-hover/row:text-cs2-text-secondary">
                     {formatLibraryAddedAt(it.added_at)}
@@ -296,26 +299,26 @@ export default function DemoTable({
                   </td>
                   <td className="max-w-[9rem] align-middle px-2 py-2">
                     <div className="flex flex-wrap gap-1">
-                      {deriveTags(it).map((t, ti) => (
+                      {deriveTags(it).map((tag, ti) => (
                         <span
-                          key={`${id}-t-${ti}-${t}`}
+                          key={`${id}-t-${ti}-${tag}`}
                           className="max-w-full truncate rounded border border-cs2-border bg-cs2-bg-input/30 px-1 py-0.5 font-mono text-[9px] text-cs2-text-muted"
-                          title={t}
+                          title={tag}
                         >
-                          {t}
+                          {tag}
                         </span>
                       ))}
                     </div>
                   </td>
                   <td className="align-middle px-1 py-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap items-center justify-end gap-0.5 opacity-90 transition-opacity group-hover/row:opacity-100">
-                      <button type="button" className={iconBtn} title="战绩 / 高光分析" onClick={() => onAnalyze?.(it)}>
+                      <button type="button" className={iconBtn} title={t("library.actionAnalyze")} onClick={() => onAnalyze?.(it)}>
                         <ScanSearch className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" className={iconBtn} title="重命名展示名" onClick={() => onRename(it)}>
+                      <button type="button" className={iconBtn} title={t("library.actionRename")} onClick={() => onRename(it)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" className={iconBtnDanger} title="从库中删除" onClick={() => onDelete(it)}>
+                      <button type="button" className={iconBtnDanger} title={t("library.actionDelete")} onClick={() => onDelete(it)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>

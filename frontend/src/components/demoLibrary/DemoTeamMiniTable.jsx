@@ -1,4 +1,5 @@
 import DemoPlayerMiniRow from "./DemoPlayerMiniRow";
+import { useT } from "../../i18n/useT.js";
 
 export default function DemoTeamMiniTable({
   label,
@@ -10,6 +11,7 @@ export default function DemoTeamMiniTable({
   steamHighlightQuery,
   focusPlayerName,
 }) {
+  const t = useT();
   const q = String(highlightQuery ?? "").trim().toLowerCase();
   const sq = String(steamHighlightQuery ?? "").trim().toLowerCase();
 
@@ -36,7 +38,7 @@ export default function DemoTeamMiniTable({
         <table className="w-full border-collapse text-[11px]">
           <thead className="sticky top-0 bg-cs2-bg-page/85 text-[9px] uppercase tracking-wide text-cs2-text-muted">
             <tr>
-              <th className="px-1 py-0.5 text-left font-semibold">选手</th>
+              <th className="px-1 py-0.5 text-left font-semibold">{t("library.teamPlayer")}</th>
               <th className="w-7 px-1 py-0.5 text-right font-semibold">K</th>
               <th className="w-7 px-1 py-0.5 text-right font-semibold">A</th>
               <th className="w-7 px-1 py-0.5 text-right font-semibold">D</th>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useT } from "../../i18n/useT.js";
 
 export default function DemoWatchPathsModal({
   open,
@@ -7,6 +8,7 @@ export default function DemoWatchPathsModal({
   onDemoWatchPathsChange,
   onSaveConfig,
 }) {
+  const t = useT();
   const [watchPathInput, setWatchPathInput] = useState("");
 
   useEffect(() => {
@@ -43,12 +45,10 @@ export default function DemoWatchPathsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h4 id="demo-watch-paths-title" className="mb-1 text-xs font-semibold text-cs2-text-secondary">
-          Demo 监听路径
+          {t("library.watchPathsTitle")}
         </h4>
         <p className="mb-3 text-[11px] leading-relaxed text-cs2-text-secondary">
-          添加 CS2 存放比赛录像的目录（通常包含 <span className="font-mono text-cs2-text-muted">csgo</span> 或
-          <span className="font-mono text-cs2-text-muted"> game/csgo </span>
-          等）。保存后后端会监听新文件；入库请点击「扫描本地 demo 库」。
+          {t("library.watchPathsHint", { csgo: "csgo", gamecsgo: "game/csgo" })}
         </p>
         <div className="mb-3 flex gap-2">
           <input
@@ -69,12 +69,12 @@ export default function DemoWatchPathsModal({
             className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-xs font-semibold hover:border-cs2-accent/50"
             onClick={addPath}
           >
-            添加
+            {t("library.watchPathsAdd")}
           </button>
         </div>
         <div className="mb-4 max-h-48 space-y-1 overflow-y-auto">
           {(demoWatchPaths || []).length === 0 ? (
-            <p className="py-2 text-center text-[11px] text-cs2-text-muted">尚未添加监听目录</p>
+            <p className="py-2 text-center text-[11px] text-cs2-text-muted">{t("library.watchPathsEmpty")}</p>
           ) : (
             (demoWatchPaths || []).map((p) => (
               <div
@@ -87,7 +87,7 @@ export default function DemoWatchPathsModal({
                   className="shrink-0 text-[11px] text-cs2-fail hover:opacity-80"
                   onClick={() => removePath(p)}
                 >
-                  删除
+                  {t("library.watchPathsRemove")}
                 </button>
               </div>
             ))
@@ -99,7 +99,7 @@ export default function DemoWatchPathsModal({
             className="rounded border border-cs2-border px-3 py-1.5 text-[12px] text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
             onClick={onClose}
           >
-            关闭
+            {t("library.watchPathsClose")}
           </button>
         </div>
       </div>

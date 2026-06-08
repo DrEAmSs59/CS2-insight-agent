@@ -29,11 +29,11 @@ export function formatDurationMins(m) {
   return `${Math.round(x)}′`;
 }
 
-/** Demo 库表格：时长一律按「分钟」展示 */
-export function formatDurationMinutesPlain(m) {
+/** Demo 库表格：时长一律按「分钟」展示。unit 可由调用方传入（如 "min" / "分"）。 */
+export function formatDurationMinutesPlain(m, unit = "分") {
   const x = Number(m);
   if (!Number.isFinite(x) || x <= 0) return "—";
-  return `${Math.round(x)} 分`;
+  return unit ? `${Math.round(x)} ${unit}` : `${Math.round(x)}`;
 }
 
 /** 入库时间（仅 added_at），格式 yyyy/MM/dd HH:mm */

@@ -125,8 +125,9 @@ export function buildMiniScoreboardTeams(item, rawPlayers) {
 
 /**
  * @param {Record<string, unknown>} item
+ * @param {string} [durationUnit] 时长单位显示字符串（可由调用方传入 i18n 值，默认 "分"）
  */
-export function buildScoreboardHeader(item) {
+export function buildScoreboardHeader(item, durationUnit = "分") {
   const r = item.result && typeof item.result === "object" ? item.result : null;
   const mm = r?.match_meta && typeof r.match_meta === "object" ? r.match_meta : {};
   const map =
@@ -136,7 +137,7 @@ export function buildScoreboardHeader(item) {
   const roundsRaw = item.total_rounds ?? mm.total_rounds;
   const rounds =
     roundsRaw != null && Number.isFinite(Number(roundsRaw)) ? String(roundsRaw) : "—";
-  const duration = formatDurationMinutesPlain(item.duration_mins ?? mm.duration_mins);
+  const duration = formatDurationMinutesPlain(item.duration_mins ?? mm.duration_mins, durationUnit);
   const date = formatLibraryAddedAt(item.added_at);
   const score = formatScoreLine(item.team_a_score ?? mm.team_a_score, item.team_b_score ?? mm.team_b_score);
   const status = classifyDemoStatus(item);

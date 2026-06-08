@@ -7,6 +7,7 @@ import {
   scoreboardHasOptionalAdr,
   scoreboardHasOptionalRating,
 } from "../../utils/demoScoreboardModel";
+import { useT } from "../../i18n/useT.js";
 
 /**
  * @param {object} props
@@ -14,6 +15,7 @@ import {
  * @param {string} props.highlightQuery
  */
 function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }) {
+  const t = useT();
   const [rawPlayers, setRawPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,7 +43,7 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
     };
   }, [demoId]);
 
-  const header = useMemo(() => buildScoreboardHeader(demoItem), [demoItem]);
+  const header = useMemo(() => buildScoreboardHeader(demoItem, t("library.durationUnit")), [demoItem, t]);
 
   const teams = useMemo(() => buildMiniScoreboardTeams(demoItem, rawPlayers), [demoItem, rawPlayers]);
 
@@ -67,27 +69,27 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
       <div className="flex max-h-[240px] min-h-[180px] flex-col gap-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-cs2-border pb-2 text-[11px] text-cs2-text-muted">
           <span>
-            <span className="text-cs2-text-muted">地图</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardMap")}</span>{" "}
             <span className="font-mono text-cs2-text-secondary">{header.map}</span>
           </span>
           <span>
-            <span className="text-cs2-text-muted">比分</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardScore")}</span>{" "}
             <span className="font-mono font-semibold text-cs2-accent">{header.score}</span>
           </span>
           <span>
-            <span className="text-cs2-text-muted">回合</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardRounds")}</span>{" "}
             <span className="font-mono text-cs2-text-secondary">{header.rounds}</span>
           </span>
           <span>
-            <span className="text-cs2-text-muted">时长</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardDuration")}</span>{" "}
             <span className="font-mono text-cs2-text-secondary">{header.duration}</span>
           </span>
           <span>
-            <span className="text-cs2-text-muted">入库</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardDate")}</span>{" "}
             <span className="font-mono text-cs2-text-secondary">{header.date}</span>
           </span>
           <span>
-            <span className="text-cs2-text-muted">状态</span>{" "}
+            <span className="text-cs2-text-muted">{t("library.scoreboardStatus")}</span>{" "}
             <span className="rounded border border-cs2-border bg-cs2-bg-hover px-1 py-0.5 font-semibold text-cs2-text-secondary">
               {header.statusLabel}
             </span>
@@ -95,12 +97,12 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
         </div>
 
         {loading ? (
-          <div className="flex flex-1 items-center justify-center py-6 text-[12px] text-cs2-text-muted">加载比分板…</div>
+          <div className="flex flex-1 items-center justify-center py-6 text-[12px] text-cs2-text-muted">{t("library.scoreboardLoading")}</div>
         ) : null}
 
         {!loading && !hasRoster ? (
           <div className="flex flex-1 items-center justify-center py-6 text-center text-[12px] leading-relaxed text-cs2-text-muted">
-            暂无比分板数据，请先解析该 Demo
+            {t("library.scoreboardNoData")}
           </div>
         ) : null}
 

@@ -1,15 +1,6 @@
 import { Filter, X, Search, Calendar, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
 import { DEMO_LIBRARY_MAP_OPTIONS, DEMO_LIBRARY_STATUS_FILTER_OPTIONS } from "../../constants/demoLibraryFilters";
-
-const SORT_OPTIONS = [
-  { value: "library", label: "状态+入库时间" },
-  { value: "date", label: "入库时间" },
-  { value: "size", label: "大小" },
-  { value: "duration", label: "时长" },
-  { value: "rounds", label: "回合" },
-  { value: "map", label: "地图" },
-  { value: "filename", label: "文件名" },
-];
+import { useT } from "../../i18n/useT.js";
 
 export default function DemoLibraryQueryBar({
   librarySearchInput,
@@ -26,6 +17,25 @@ export default function DemoLibraryQueryBar({
   onClearQuickFilters,
   hasQuickOrAdvancedFilters,
 }) {
+  const t = useT();
+
+  const SORT_OPTIONS = [
+    { value: "library", label: t("library.sortOptLibrary") },
+    { value: "date", label: t("library.sortOptDate") },
+    { value: "size", label: t("library.sortOptSize") },
+    { value: "duration", label: t("library.sortOptDuration") },
+    { value: "rounds", label: t("library.sortOptRounds") },
+    { value: "map", label: t("library.sortOptMap") },
+    { value: "filename", label: t("library.sortOptFilename") },
+  ];
+
+  const STATUS_FILTER_LABELS = {
+    loaded: t("library.statusFilterLoaded"),
+    parsing: t("library.statusFilterParsing"),
+    done: t("library.statusFilterDone"),
+    error: t("library.statusFilterError"),
+  };
+
   return (
     <div className="flex shrink-0 flex-col gap-2 border-b border-cs2-border pb-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -34,7 +44,7 @@ export default function DemoLibraryQueryBar({
           <input
             type="search"
             enterKeyHint="search"
-            placeholder="文件名 / 展示名"
+            placeholder={t("library.searchPlaceholder")}
             className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-1.5 pl-8 pr-2 font-mono text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted focus:border-cs2-accent/40"
             value={librarySearchInput}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -44,7 +54,7 @@ export default function DemoLibraryQueryBar({
                 onSearchSubmit();
               }
             }}
-            aria-label="搜索 Demo"
+            aria-label={t("library.searchAriaLabel")}
           />
         </div>
 
@@ -52,9 +62,9 @@ export default function DemoLibraryQueryBar({
           className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
           value={libraryAdvFilters.mapName}
           onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, mapName: e.target.value }))}
-          aria-label="地图"
+          aria-label={t("library.mapAriaLabel")}
         >
-          <option value="">全部地图</option>
+          <option value="">{t("library.mapAll")}</option>
           {DEMO_LIBRARY_MAP_OPTIONS.map((m) => (
             <option key={m} value={m}>
               {m}
@@ -66,12 +76,12 @@ export default function DemoLibraryQueryBar({
           className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
           value={libraryAdvFilters.status}
           onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, status: e.target.value }))}
-          aria-label="状态"
+          aria-label={t("library.statusAriaLabel")}
         >
-          <option value="all">全部状态</option>
-          {DEMO_LIBRARY_STATUS_FILTER_OPTIONS.map(({ value, label }) => (
+          <option value="all">{t("library.statusAll")}</option>
+          {DEMO_LIBRARY_STATUS_FILTER_OPTIONS.map(({ value }) => (
             <option key={value} value={value}>
-              {label}
+              {STATUS_FILTER_LABELS[value] ?? value}
             </option>
           ))}
         </select>
@@ -103,7 +113,7 @@ export default function DemoLibraryQueryBar({
               onSortKeyChange(k);
               onSortDirChange(k === "filename" || k === "map" ? "asc" : "desc");
             }}
-            aria-label="排序字段"
+            aria-label={t("library.sortAriaLabel")}
           >
             {SORT_OPTIONS.map(({ value, label }) => (
               <option key={value} value={value}>
@@ -114,10 +124,10 @@ export default function DemoLibraryQueryBar({
           <button
             type="button"
             className="rounded-md border border-cs2-border px-2 py-1.5 font-mono text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
-            title={sortDir === "asc" ? "升序" : "降序"}
+            title={sortDir === "asc" ? t("library.sortAscTitle") : t("library.sortDescTitle")}
             onClick={() => onSortDirChange(sortDir === "asc" ? "desc" : "asc")}
           >
-            {sortDir === "asc" ? "升序" : "降序"}
+            {sortDir === "asc" ? t("library.sortAsc") : t("library.sortDesc")}
           </button>
         </div>
 
@@ -131,7 +141,7 @@ export default function DemoLibraryQueryBar({
           }`}
         >
           <Filter className="h-3.5 w-3.5" />
-          高级筛选
+          {t("library.advancedFilters")}
           {advancedOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
 
@@ -142,7 +152,7 @@ export default function DemoLibraryQueryBar({
             className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-muted hover:border-cs2-border hover:text-cs2-text-secondary"
           >
             <X className="h-3.5 w-3.5" />
-            清空筛选
+            {t("library.clearFilters")}
           </button>
         ) : null}
       </div>
