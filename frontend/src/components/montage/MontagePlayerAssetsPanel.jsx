@@ -3,6 +3,7 @@ import { Upload, Loader2 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import API, { API_BASE_URL } from "../../api/api";
 import { derivePlayerAssetsFromClips } from "../../utils/montageUtils";
+import { useT } from "../../i18n/useT.js";
 
 export function MontagePlayerAssetsPanel({
   clips,
@@ -11,6 +12,7 @@ export function MontagePlayerAssetsPanel({
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
 }) {
+  const t = useT();
   const players = useMemo(() => derivePlayerAssetsFromClips(clips), [clips]);
   const [uploadingKeys, setUploadingKeys] = useState(() => new Set());
   const [uploadErrors, setUploadErrors] = useState({}); // { [player_key]: errorMsg }
@@ -43,7 +45,7 @@ export function MontagePlayerAssetsPanel({
       }
     } catch (err) {
       console.error("[MontagePlayerAssetsPanel] avatar upload error", err);
-      setUploadErrors((prev) => ({ ...prev, [playerKey]: "上传失败，请重试" }));
+      setUploadErrors((prev) => ({ ...prev, [playerKey]: t("montage.playerAssetsUploadError") }));
     } finally {
       setUploadingKeys((prev) => {
         const next = new Set(prev);
@@ -59,20 +61,20 @@ export function MontagePlayerAssetsPanel({
 
   return (
     <CollapsibleSection
-      title="玩家信息卡"
-      hint="开启后在每段视频左下角显示玩家名与标签；头像可选，不上传则仅显示文字"
+      title={t("montage.playerAssetsSectionTitle")}
+      hint={t("montage.playerAssetsSectionHint")}
       defaultOpen
     >
       {/* Total enable/disable toggle */}
       <div className="flex items-center justify-between gap-3 py-1">
         <span className="text-xs font-semibold text-cs2-text-secondary">
-          显示玩家信息卡
+          {t("montage.playerAssetsToggleLabel")}
         </span>
         <button
           type="button"
           role="switch"
           aria-checked={nameCardsEnabled}
-          aria-label={nameCardsEnabled ? "关闭玩家信息卡" : "开启玩家信息卡"}
+          aria-label={nameCardsEnabled ? t("montage.playerAssetsToggleOff") : t("montage.playerAssetsToggleOn")}
           onClick={() => onNameCardsEnabledChange?.(!nameCardsEnabled)}
           className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cs2-surface-1 ${
             nameCardsEnabled
@@ -95,7 +97,7 @@ export function MontagePlayerAssetsPanel({
         <div
           className={`rounded-xl border p-4 text-center text-xs text-cs2-text-muted border-dashed border-cs2-border-subtle bg-cs2-surface-1/40`}
         >
-          编排时间线中暂无可识别玩家
+          {t("montage.playerAssetsEmpty")}
         </div>
       ) : (
         <div
@@ -140,12 +142,12 @@ export function MontagePlayerAssetsPanel({
                       </span>
                       {player.no_steamid && (
                         <span className="rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
-                          未识别 ID
+                          {t("montage.playerAssetsNoSteamId")}
                         </span>
                       )}
                     </div>
                     <p className="mt-0.5 text-[11px] text-cs2-text-muted">
-                      参与 {player.segment_count} 段
+                      {t("montage.playerAssetsSegmentCount", { n: player.segment_count })}
                     </p>
                   </div>
 
@@ -177,12 +179,12 @@ export function MontagePlayerAssetsPanel({
                       {isUploading ? (
                         <>
                           <Loader2 className="h-3 w-3 animate-spin" />
-                          上传中
+                          {t("montage.playerAssetsUploading")}
                         </>
                       ) : (
                         <>
                           <Upload className="h-3 w-3" />
-                          上传头像（可选）
+                          {t("montage.playerAssetsUploadBtn")}
                         </>
                       )}
                     </button>

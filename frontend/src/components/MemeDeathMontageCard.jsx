@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Skull } from "lucide-react";
 import { AiScoreBadge } from "./ClipCard";
+import { useT } from "../i18n/useT.js";
 
 /**
  * 研发集锦合集大卡：一键勾选本局全部 meme_death 片段
@@ -19,6 +20,7 @@ export default function MemeDeathMontageCard({
   onBundleToggle,
   bundleDisabled = false,
 }) {
+  const t = useT();
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -51,13 +53,13 @@ export default function MemeDeathMontageCard({
           <div className="mb-2 flex items-center gap-2 text-cs2-red-on-surface/90">
             <Skull className="h-5 w-5 shrink-0" />
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cs2-red-on-surface">
-              打包录制
+              {t("montage.bundleLabel")}
             </span>
           </div>
           <h3 className="text-xl font-black leading-tight tracking-tight text-cs2-text-primary drop-shadow-[0_0_12px_rgba(0,0,0,0.5)] md:text-2xl lg:text-3xl">
-            👨‍🔬 节目效果专属：研发全过程{" "}
+            {t("montage.bundleTitle")}{" "}
             <span className="whitespace-nowrap text-cs2-red-on-surface">
-              (本局共 {totalDeathsInMatch} 次死亡)
+              {t("montage.bundleDeathCount", { n: totalDeathsInMatch })}
             </span>
           </h3>
           {badges.length > 0 && (
@@ -82,7 +84,7 @@ export default function MemeDeathMontageCard({
                 <span className="mr-1.5 inline-block select-none not-italic" aria-hidden>
                   🎙️
                 </span>
-                <span className="font-semibold not-italic text-cs2-text-muted">AI 锐评（整局梗战绩）：</span>
+                <span className="font-semibold not-italic text-cs2-text-muted">{t("montage.aiCommentMeme")}</span>
                 <span className="italic text-cs2-text-primary/95">{montageComment}</span>
               </p>
             </div>
@@ -103,7 +105,7 @@ export default function MemeDeathMontageCard({
           }`}
         >
           <span className="max-w-[4.5rem] text-center text-[10px] font-bold uppercase leading-tight tracking-wider text-cs2-red-on-surface">
-            {bundleDisabled ? "已在队列" : "全选本合集"}
+            {bundleDisabled ? t("montage.bundleInQueue") : t("montage.bundleSelectAll")}
           </span>
           <input
             ref={inputRef}

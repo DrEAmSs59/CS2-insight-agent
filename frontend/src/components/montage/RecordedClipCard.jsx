@@ -7,8 +7,11 @@ import {
   getClipMetaLine,
   montageTypeTagBadgeClass,
 } from "../../utils/montageUtils";
+import { useT } from "../../i18n/useT.js";
 
 export default function RecordedClipCard({ clip, isAdded, onAdd }) {
+  const t = useT();
+
   if (!clip) return null;
   const tag = normalizeClipType(clip);
   const title = getClipTitle(clip);
@@ -16,7 +19,7 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
   const dur = getClipDurationSeconds(clip);
   const score = getClipScore(clip);
   const ai = getClipComment(clip);
-  const durLabel = dur != null ? `${dur.toFixed(1)}s` : "未知时长";
+  const durLabel = dur != null ? `${dur.toFixed(1)}s` : t("montage.clipCardUnknownDuration");
   const sub = [meta, durLabel].filter(Boolean).join(" · ");
 
   return (
@@ -30,13 +33,13 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
       <p className="mt-1.5 font-medium leading-snug text-cs2-text-primary">{title}</p>
       {ai ? (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-cs2-text-secondary">
-          <span className="text-cs2-text-muted">AI：</span>
+          <span className="text-cs2-text-muted">{t("montage.clipCardAiPrefix")}</span>
           {ai}
         </p>
       ) : null}
       {score != null ? (
         <p className="mt-1 text-[11px] text-cs2-text-secondary">
-          评分：<span className="text-cs2-accent">{Math.round(score)}</span>
+          {t("montage.clipCardScore")}<span className="text-cs2-accent">{Math.round(score)}</span>
         </p>
       ) : null}
       <button
@@ -45,7 +48,7 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
         onClick={() => onAdd?.(clip.id)}
         className="mt-2 w-full rounded-md border border-cs2-accent/45 bg-cs2-accent/10 py-1.5 text-[12px] font-semibold text-cs2-accent hover:bg-cs2-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {isAdded ? "已在合辑中" : "加入合辑"}
+        {isAdded ? t("montage.clipCardInMontage") : t("montage.clipCardAddBtn")}
       </button>
     </div>
   );

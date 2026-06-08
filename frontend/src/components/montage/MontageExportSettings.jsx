@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, Save } from "lucide-react";
+import { useT } from "../../i18n/useT.js";
 
 function PathField({ label, hint, value, onChange, onClear, placeholder, example }) {
+  const t = useT();
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[12px] font-medium text-cs2-text-secondary">{label}</span>
         {value ? (
           <button type="button" onClick={onClear} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-secondary">
-            清空
+            {t("montage.exportClearBtn")}
           </button>
         ) : null}
       </div>
@@ -19,15 +21,20 @@ function PathField({ label, hint, value, onChange, onClear, placeholder, example
         placeholder={placeholder}
         className="w-full rounded border border-cs2-border bg-cs2-bg-input/80 px-2 py-2 font-mono text-[11px] text-cs2-text-primary placeholder:text-cs2-text-muted"
       />
-      {example ? <p className="text-[11px] text-cs2-text-muted">示例：{example}</p> : null}
+      {example ? <p className="text-[11px] text-cs2-text-muted">{t("montage.exportExamplePrefix")}{example}</p> : null}
     </div>
   );
 }
 
 function CheckRow({ ok, optional, label }) {
+  const t = useT();
   const dot =
     ok === true ? "bg-emerald-400" : optional ? "bg-amber-400/90" : "bg-zinc-500";
-  const text = ok === true ? "已完成" : optional ? "可选 · 未填" : "必填 · 未填";
+  const text = ok === true
+    ? t("montage.exportCheckDone")
+    : optional
+      ? t("montage.exportCheckOptionalEmpty")
+      : t("montage.exportCheckRequiredEmpty");
   return (
     <div className="flex items-center gap-2 text-[11px] text-cs2-text-secondary">
       <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={text} />
@@ -61,6 +68,7 @@ export default function MontageExportSettings({
   onStartExport,
   exporting,
 }) {
+  const t = useT();
   const [open, setOpen] = useState(true);
 
   const checklist = useMemo(() => {
@@ -88,13 +96,13 @@ export default function MontageExportSettings({
         className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-cs2-bg-input/50"
       >
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] font-semibold text-cs2-text-primary">导出设置</span>
+          <span className="text-[12px] font-semibold text-cs2-text-primary">{t("montage.exportSettingsTitle")}</span>
           <span
             className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
               ready ? "border-emerald-500/40 bg-emerald-500/10 text-cs2-emerald-on-surface" : "border-amber-500/40 bg-amber-500/10 text-cs2-amber-on-surface"
             }`}
           >
-            {ready ? "就绪" : "未完成"}
+            {ready ? t("montage.exportSettingsReady") : t("montage.exportSettingsNotReady")}
           </span>
         </span>
         {open ? <ChevronUp className="h-4 w-4 shrink-0 text-cs2-text-muted" /> : <ChevronDown className="h-4 w-4 shrink-0 text-cs2-text-muted" />}
@@ -103,31 +111,31 @@ export default function MontageExportSettings({
         <div className="space-y-4 border-t border-cs2-border px-3 py-4">
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/60 px-2.5 py-2">
-              <p className="text-[9px] font-semibold uppercase tracking-wide text-cs2-text-muted">已编排</p>
+              <p className="text-[9px] font-semibold uppercase tracking-wide text-cs2-text-muted">{t("montage.exportStatArranged")}</p>
               <p className="mt-0.5 font-mono text-[15px] font-bold tabular-nums text-cs2-text-primary">{Number(clipCount) || 0}</p>
-              <p className="text-[9px] text-cs2-text-muted">段</p>
+              <p className="text-[9px] text-cs2-text-muted">{t("montage.exportStatArrangedUnit")}</p>
             </div>
             <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/60 px-2.5 py-2">
-              <p className="text-[9px] font-semibold uppercase tracking-wide text-cs2-text-muted">预计总时长</p>
+              <p className="text-[9px] font-semibold uppercase tracking-wide text-cs2-text-muted">{t("montage.exportStatDuration")}</p>
               <p className="mt-0.5 font-mono text-[14px] font-bold tabular-nums text-cs2-accent">{totalDurationText || "—"}</p>
-              <p className="text-[9px] text-cs2-text-muted">含未知则显示「未知」</p>
+              <p className="text-[9px] text-cs2-text-muted">{t("montage.exportStatDurationUnknown")}</p>
             </div>
           </div>
 
           <div className="space-y-1">
-            <span className="text-[12px] font-medium text-cs2-text-secondary">视频名称</span>
-            <p className="text-[11px] text-cs2-text-muted">导出后的视频文件名，不需要填写 .mp4 也可以。</p>
+            <span className="text-[12px] font-medium text-cs2-text-secondary">{t("montage.exportVideoNameLabel")}</span>
+            <p className="text-[11px] text-cs2-text-muted">{t("montage.exportVideoNameHint")}</p>
             <input
               value={videoName}
               onChange={(e) => onVideoNameChange(e.target.value)}
               className="w-full rounded border border-cs2-border bg-cs2-bg-input/80 px-2 py-2 font-mono text-[11px] text-cs2-text-primary"
-              placeholder="CS2-高光合集-2026-05-02"
+              placeholder="CS2-Highlights-2026-05-02"
             />
           </div>
 
           <div className="space-y-1">
-            <span className="text-[12px] font-medium text-cs2-text-secondary">输出位置</span>
-            <p className="text-[11px] text-cs2-text-muted">视频会保存到这个文件夹。</p>
+            <span className="text-[12px] font-medium text-cs2-text-secondary">{t("montage.exportOutputDirLabel")}</span>
+            <p className="text-[11px] text-cs2-text-muted">{t("montage.exportOutputDirHint")}</p>
             <input
               value={outputDir}
               onChange={(e) => onOutputDirChange(e.target.value)}
@@ -137,8 +145,8 @@ export default function MontageExportSettings({
           </div>
 
           <PathField
-            label="背景音乐，可选"
-            hint="请选择你有使用权的音乐文件。"
+            label={t("montage.exportBgmLabel")}
+            hint={t("montage.exportBgmHint")}
             value={bgmPath}
             onChange={onBgmChange}
             onClear={() => onBgmChange("")}
@@ -146,8 +154,8 @@ export default function MontageExportSettings({
             example="C:\Users\YourName\Music\bgm.mp3"
           />
           <PathField
-            label="片头视频，可选"
-            hint="建议 3-5 秒。"
+            label={t("montage.exportIntroLabel")}
+            hint={t("montage.exportIntroHint")}
             value={introPath}
             onChange={onIntroChange}
             onClear={() => onIntroChange("")}
@@ -155,8 +163,8 @@ export default function MontageExportSettings({
             example="C:\Users\YourName\Videos\intro.mp4"
           />
           <PathField
-            label="片尾视频，可选"
-            hint="可以放 Logo 或关注提示。"
+            label={t("montage.exportOutroLabel")}
+            hint={t("montage.exportOutroHint")}
             value={outroPath}
             onChange={onOutroChange}
             onClear={() => onOutroChange("")}
@@ -165,23 +173,23 @@ export default function MontageExportSettings({
           />
 
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/70 px-2.5 py-2">
-            <p className="text-[11px] font-semibold text-cs2-text-secondary">配置检查</p>
+            <p className="text-[11px] font-semibold text-cs2-text-secondary">{t("montage.exportChecklistTitle")}</p>
             <div className="mt-2 space-y-1.5">
-              <CheckRow ok={checklist.dirOk} optional={false} label="输出目录" />
-              <CheckRow ok={checklist.nameOk} optional={false} label="视频名称" />
-              <CheckRow ok={checklist.bgmOk} optional label="背景音乐" />
-              <CheckRow ok={checklist.introOk} optional label="片头" />
-              <CheckRow ok={checklist.outroOk} optional label="片尾" />
+              <CheckRow ok={checklist.dirOk} optional={false} label={t("montage.exportChecklistDir")} />
+              <CheckRow ok={checklist.nameOk} optional={false} label={t("montage.exportChecklistName")} />
+              <CheckRow ok={checklist.bgmOk} optional label={t("montage.exportChecklistBgm")} />
+              <CheckRow ok={checklist.introOk} optional label={t("montage.exportChecklistIntro")} />
+              <CheckRow ok={checklist.outroOk} optional label={t("montage.exportChecklistOutro")} />
             </div>
           </div>
 
           <div className="space-y-1 border-t border-cs2-border pt-4">
-            <span className="text-[12px] font-medium text-cs2-text-secondary">草稿名称（可选）</span>
-            <p className="text-[11px] text-cs2-text-muted">保存草稿时使用；留空则使用当前视频名称。</p>
+            <span className="text-[12px] font-medium text-cs2-text-secondary">{t("montage.exportDraftNameLabel")}</span>
+            <p className="text-[11px] text-cs2-text-muted">{t("montage.exportDraftNameHint")}</p>
             <input
               value={draftName}
               onChange={(e) => onDraftNameChange(e.target.value)}
-              placeholder={draftNamePlaceholder || "与视频名称同步"}
+              placeholder={draftNamePlaceholder || t("montage.exportDraftNamePlaceholderDefault")}
               className="w-full rounded border border-cs2-border bg-cs2-bg-input/80 px-2 py-2 text-[11px] text-cs2-text-primary"
             />
           </div>
@@ -194,7 +202,7 @@ export default function MontageExportSettings({
               className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-hover px-3 py-2 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-border disabled:opacity-50"
             >
               <Save className="h-3.5 w-3.5" />
-              {savingDraft ? "保存中…" : "保存草稿"}
+              {savingDraft ? t("montage.exportSavingDraft") : t("montage.exportSaveDraft")}
             </button>
           </div>
 
@@ -204,16 +212,16 @@ export default function MontageExportSettings({
             onClick={() => onStartExport?.()}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-accent/50 bg-cs2-accent/15 px-3 py-2.5 text-[12px] font-bold text-cs2-accent shadow-sm hover:bg-cs2-accent/22 disabled:opacity-45"
           >
-            开始导出
+            {t("montage.exportStartBtn")}
           </button>
 
           <div className="space-y-1">
-            <span className="text-[11px] font-medium text-cs2-text-muted">完整输出路径</span>
+            <span className="text-[11px] font-medium text-cs2-text-muted">{t("montage.exportFullPathLabel")}</span>
             <div className="flex gap-2">
               <input
                 readOnly
                 value={fullOutputPath || ""}
-                placeholder="填写目录与文件名后显示"
+                placeholder={t("montage.exportFullPathPlaceholder")}
                 className="min-w-0 flex-1 rounded border border-cs2-border bg-black/60 px-2 py-2 font-mono text-[10px] text-cs2-text-secondary"
               />
               <button
@@ -223,7 +231,7 @@ export default function MontageExportSettings({
                 className="inline-flex shrink-0 items-center gap-1 rounded border border-cs2-border bg-cs2-bg-input/70 px-2.5 py-2 text-[10px] font-medium text-cs2-text-secondary hover:border-cs2-accent/35 disabled:opacity-35"
               >
                 <Copy className="h-3.5 w-3.5" />
-                复制
+                {t("montage.exportCopyBtn")}
               </button>
             </div>
           </div>

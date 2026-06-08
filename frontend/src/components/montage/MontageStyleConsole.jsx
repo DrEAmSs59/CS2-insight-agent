@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
+import { useT } from "../../i18n/useT.js";
 
 function pathBasename(path) {
   const s = String(path || "").trim();
@@ -39,6 +40,7 @@ function MediaVideoSlotCard({
   imageDuration,
   onImageDurationChange,
 }) {
+  const t = useT();
   const filled = Boolean(path.trim());
   const base = pathBasename(path);
   const isImg = filled && isImagePath(path);
@@ -57,7 +59,7 @@ function MediaVideoSlotCard({
         const name = String(f.name || "");
         const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
         if (!type.startsWith("video/") && !type.startsWith("image/") && !IMAGE_EXTS.has(ext)) {
-          onVideoDrop?.(null, "请拖入视频或图片文件");
+          onVideoDrop?.(null, t("montage.consoleMediaVideoDropHintError"));
           return;
         }
         onVideoDrop?.(f.name, null);
@@ -71,12 +73,12 @@ function MediaVideoSlotCard({
             {base || path}
           </p>
         ) : (
-          <p className="ml-1 text-xs text-cs2-text-muted">拖入视频 / 图片或粘贴路径</p>
+          <p className="ml-1 text-xs text-cs2-text-muted">{t("montage.consoleMediaSlotDropHint")}</p>
         )}
       </div>
       {isImg ? (
         <div className="mt-2.5 flex items-center gap-2">
-          <p className="text-xs text-violet-300 font-medium">图片渐入渐出时长</p>
+          <p className="text-xs text-violet-300 font-medium">{t("montage.consoleMediaSlotImgDuration")}</p>
           <input
             type="number"
             min={1}
@@ -89,7 +91,7 @@ function MediaVideoSlotCard({
             }}
             className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400"
           />
-          <span className="text-xs text-cs2-text-muted">秒</span>
+          <span className="text-xs text-cs2-text-muted">{t("montage.consoleMediaSlotSec")}</span>
         </div>
       ) : null}
       <div className="mt-2.5 flex gap-2">
@@ -103,7 +105,7 @@ function MediaVideoSlotCard({
           <button
             type="button"
             onClick={onBrowse}
-            title="浏览文件"
+            title={t("montage.consoleMediaSlotBrowseTitle")}
             className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
           >
             <FolderOpen className="h-3.5 w-3.5" />
@@ -124,9 +126,14 @@ function MediaVideoSlotCard({
 }
 
 function ExportCheckRow({ ok, optional, label }) {
+  const t = useT();
   const dot =
     ok === true ? "bg-emerald-400" : optional ? "bg-amber-400" : "bg-zinc-500";
-  const text = ok === true ? "已完成" : optional ? "可选 · 未填" : "必填 · 未填";
+  const text = ok === true
+    ? t("montage.exportCheckDone")
+    : optional
+      ? t("montage.exportCheckOptionalEmpty")
+      : t("montage.exportCheckRequiredEmpty");
   return (
     <div className="flex items-center gap-2.5 text-xs text-cs2-text-secondary py-0.5">
       <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={text} />
@@ -191,6 +198,7 @@ export function MontageStyleConsole({
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
 }) {
+  const t = useT();
   const dirOk = Boolean(String(outputDir || "").trim()) || Boolean(String(effectiveOutputDirHint || "").trim());
   const nameOk = Boolean(String(outputFilename || "").trim());
   const bgmFilled = Boolean(String(bgmPath || "").trim());
@@ -202,28 +210,28 @@ export function MontageStyleConsole({
 
   const [activeTab, setActiveTab] = useState("media");
   const tabItems = [
-    { id: "media", label: "媒体资源" },
-    { id: "players", label: "玩家信息卡" },
-    { id: "export", label: "导出设置" },
+    { id: "media", label: t("montage.consoleTabMedia") },
+    { id: "players", label: t("montage.consoleTabPlayers") },
+    { id: "export", label: t("montage.consoleTabExport") },
   ];
 
   return (
     <aside className="flex min-h-0 w-full min-w-0 flex-col border-cs2-border bg-cs2-surface-1 xl:border-l">
       <div className="shrink-0 border-b border-cs2-border-subtle p-4">
-        <p className="text-sm font-bold text-cs2-text-primary tracking-wide">合辑成片控制台</p>
+        <p className="text-sm font-bold text-cs2-text-primary tracking-wide">{t("montage.consoleTitle")}</p>
         <div className="mt-3 flex gap-1.5">
-          {tabItems.map((t) => (
+          {tabItems.map((tab) => (
             <button
-              key={t.id}
+              key={tab.id}
               type="button"
-              onClick={() => setActiveTab(t.id)}
+              onClick={() => setActiveTab(tab.id)}
               className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
-                activeTab === t.id
+                activeTab === tab.id
                   ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
                   : "text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
               }`}
             >
-              {t.label}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -233,24 +241,24 @@ export function MontageStyleConsole({
         <div className="space-y-5">
           {exportingBanner ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-amber-300">
-              正在高效导出合辑，请保持程序平稳运行…
+              {t("montage.consoleExportingBanner")}
             </div>
           ) : null}
           {!exportingBanner && exportOk ? (
             <div className="relative rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-200">
               <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
-                合辑成片导出圆满完成
+                {t("montage.consoleExportSuccess")}
               </div>
               <button
                 type="button"
                 onClick={() => onDismissExportSuccess?.()}
                 className="absolute right-3 top-3 rounded-lg p-1 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
-                aria-label="关闭"
+                aria-label={t("montage.consoleExportSuccessClose")}
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
-              <p className="mt-3 text-xs text-cs2-text-muted">生成输出路径</p>
+              <p className="mt-3 text-xs text-cs2-text-muted">{t("montage.consoleExportOutputPath")}</p>
               <p className="mt-1 break-all font-mono text-xs font-semibold text-cs2-text-primary p-2 bg-cs2-surface-2 rounded-lg select-all border border-cs2-border-subtle">{lastExport.output_path}</p>
               <div className="mt-3.5 flex flex-wrap gap-2">
                 <button
@@ -259,17 +267,17 @@ export function MontageStyleConsole({
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-emerald-600 transition-all shadow-sm"
                 >
                   <Copy className="h-3.5 w-3.5" />
-                  复制文件路径
+                  {t("montage.consoleCopyFilePath")}
                 </button>
                 {exportDirForButton ? (
                   <button
                     type="button"
                     onClick={() => void onCopyText(exportDirForButton)}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-bold text-cs2-text-primary hover:border-cs2-border-focus transition-all"
-                    title="复制上级文件夹路径"
+                    title={t("montage.consoleCopyParentDirTitle")}
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
-                    复制上级目录
+                    {t("montage.consoleCopyParentDir")}
                   </button>
                 ) : null}
               </div>
@@ -277,13 +285,13 @@ export function MontageStyleConsole({
           ) : null}
           {!exportingBanner && lastExport && !lastExport.ok ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-300">
-              导出异常：{String(lastExport.err)}
+              {t("montage.consoleExportError")}{String(lastExport.err)}
             </div>
           ) : null}
 
           {activeTab === "media" && (<CollapsibleSection
-            title="媒体资源"
-            hint="BGM、片头与片尾（均可选）"
+            title={t("montage.consoleBgmSectionTitle")}
+            hint={t("montage.consoleBgmSectionHint")}
             defaultOpen
           >
             <div
@@ -297,26 +305,26 @@ export function MontageStyleConsole({
                 const f = e.dataTransfer.files?.[0];
                 if (!f) return;
                 if (!String(f.type || "").startsWith("audio/")) {
-                  onMediaDropHint?.("请拖入音频文件");
+                  onMediaDropHint?.(t("montage.consoleMediaDropHintAudio"));
                   return;
                 }
-                onMediaDropHint?.(`已识别「${f.name}」· 请粘贴完整路径到下方`);
+                onMediaDropHint?.(t("montage.consoleMediaDropHintRecognized", { name: f.name }));
               }}
             >
               <div className="flex items-center gap-2">
                 <Music className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
-                <p className="text-xs font-bold text-cs2-text-secondary">背景音乐混流</p>
+                <p className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleBgmTitle")}</p>
                 {bgmPath.trim() ? (
                   <p className="ml-auto max-w-[14rem] truncate font-mono text-xs text-cs2-text-secondary" title={bgmPath}>
                     {pathBasename(bgmPath)}
                   </p>
                 ) : (
-                  <p className="ml-1 text-xs text-cs2-text-muted">拖入音频或直接填入绝对路径</p>
+                  <p className="ml-1 text-xs text-cs2-text-muted">{t("montage.consoleBgmDropHint")}</p>
                 )}
               </div>
               <div className="mt-3">
                 <div className="flex items-center justify-between gap-2 text-xs text-cs2-text-muted">
-                  <span>混音音量占比</span>
+                  <span>{t("montage.consoleBgmVolume")}</span>
                   <span className="font-mono font-bold text-violet-400">{bgmVolume}%</span>
                 </div>
                 <input
@@ -329,7 +337,7 @@ export function MontageStyleConsole({
                 />
               </div>
               <div className="mt-3 flex items-center gap-2">
-                <span className="text-xs text-cs2-text-muted">起始播放秒数</span>
+                <span className="text-xs text-cs2-text-muted">{t("montage.consoleBgmStartSec")}</span>
                 <input
                   type="number"
                   min={0}
@@ -341,20 +349,20 @@ export function MontageStyleConsole({
                   }}
                   className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400 transition-all"
                 />
-                <span className="text-xs text-cs2-text-muted">秒</span>
+                <span className="text-xs text-cs2-text-muted">{t("montage.consoleBgmSec")}</span>
               </div>
               <div className="mt-2.5 flex gap-2">
                 <input
                   value={bgmPath}
                   onChange={(e) => onBgmPathChange(e.target.value)}
-                  placeholder="例如 D:\Music\bgm.mp3"
+                  placeholder={t("montage.consoleBgmPlaceholder")}
                   className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 {onFilePick ? (
                   <button
                     type="button"
                     onClick={() => onFilePick("audio", onBgmPathChange)}
-                    title="浏览音频文件"
+                    title={t("montage.consoleBgmBrowseTitle")}
                     className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
@@ -373,28 +381,28 @@ export function MontageStyleConsole({
             </div>
 
             <MediaVideoSlotCard
-              label="片头专属插槽"
+              label={t("montage.consoleIntroLabel")}
               path={introPath}
               onPathChange={onIntroPathChange}
               onClear={onIntroClear}
-              placeholder="例如 D:\Videos\intro.mp4 或 D:\img.png"
+              placeholder={t("montage.consoleIntroPlaceholder")}
               onVideoDrop={(name, err) => {
                 if (err) onMediaDropHint?.(err);
-                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整路径`);
+                else if (name) onMediaDropHint?.(t("montage.consoleMediaVideoDropHintOk", { name }));
               }}
               onBrowse={onFilePick ? () => onFilePick("video_or_image", onIntroPathChange) : undefined}
               imageDuration={introDuration}
               onImageDurationChange={onIntroDurationChange}
             />
             <MediaVideoSlotCard
-              label="片尾专属插槽"
+              label={t("montage.consoleOutroLabel")}
               path={outroPath}
               onPathChange={onOutroPathChange}
               onClear={onOutroClear}
-              placeholder="例如 D:\Videos\outro.mp4 或 D:\img.png"
+              placeholder={t("montage.consoleOutroPlaceholder")}
               onVideoDrop={(name, err) => {
                 if (err) onMediaDropHint?.(err);
-                else if (name) onMediaDropHint?.(`已识别「${name}」· 请粘贴完整路径`);
+                else if (name) onMediaDropHint?.(t("montage.consoleMediaVideoDropHintOk", { name }));
               }}
               onBrowse={onFilePick ? () => onFilePick("video_or_image", onOutroPathChange) : undefined}
               imageDuration={outroDuration}
@@ -415,7 +423,7 @@ export function MontageStyleConsole({
           {activeTab === "export" && (<CollapsibleSection
             title={
               <span className="inline-flex flex-wrap items-center gap-2">
-                <span>渲染成片设定</span>
+                <span>{t("montage.consoleExportSectionTitle")}</span>
                 <span
                   className={`rounded-md px-2 py-0.5 text-xs font-bold tracking-wide ${
                     readyTag
@@ -423,32 +431,32 @@ export function MontageStyleConsole({
                       : "bg-amber-500/10 text-amber-300"
                   }`}
                 >
-                  {readyTag ? "配置就绪" : "信息待补全"}
+                  {readyTag ? t("montage.consoleExportReady") : t("montage.consoleExportNotReady")}
                 </span>
               </span>
             }
-            hint="输出文件名、保存目录与渲染自检"
+            hint={t("montage.consoleExportSectionHint")}
             defaultOpen
           >
             <div className="grid grid-cols-2 gap-2.5">
               <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
-                <p className="text-xs font-bold text-cs2-text-muted">已加入队列</p>
+                <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportQueueCount")}</p>
                 <div className="mt-1 flex items-baseline gap-1">
                   <span className="font-mono text-base font-bold text-cs2-text-primary">{Number(clipCount) || 0}</span>
-                  <span className="text-xs text-cs2-text-muted">段片段</span>
+                  <span className="text-xs text-cs2-text-muted">{t("montage.consoleExportQueueUnit")}</span>
                 </div>
               </div>
               <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
-                <p className="text-xs font-bold text-cs2-text-muted">总计时间长</p>
+                <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportTotalDuration")}</p>
                 <div className="mt-1 flex items-baseline gap-1">
                   <span className="font-mono text-base font-bold text-cs2-accent">{durationText}</span>
-                  <span className="text-xs text-cs2-text-muted">原片估计</span>
+                  <span className="text-xs text-cs2-text-muted">{t("montage.consoleExportDurationUnit")}</span>
                 </div>
               </div>
             </div>
 
             <label className="mt-4 block space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-muted">目标成片文件名</span>
+              <span className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportFilenameLabel")}</span>
               <input
                 value={outputFilename}
                 onChange={(e) => onOutputFilenameChange(e.target.value)}
@@ -458,12 +466,12 @@ export function MontageStyleConsole({
             </label>
 
             <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-secondary">独立保存目录</span>
+              <span className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleExportDirLabel")}</span>
               <div className="flex gap-2">
                 <input
                   value={outputDir}
                   onChange={(e) => onOutputDirChange(e.target.value)}
-                  placeholder="留空自动归档至 exports/montage"
+                  placeholder={t("montage.consoleExportDirPlaceholder")}
                   className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 {outputDir ? (
@@ -478,26 +486,26 @@ export function MontageStyleConsole({
               </div>
               {effectiveOutputDirHint ? (
                 <p className="text-xs text-cs2-text-muted mt-1 bg-cs2-surface-1/60 p-2 rounded-lg border border-cs2-border-subtle">
-                  <span>目标位置：</span>
+                  <span>{t("montage.consoleExportDirTarget")}</span>
                   <span className="break-all font-mono text-cs2-text-secondary select-all">{effectiveOutputDirHint}</span>
                 </p>
               ) : null}
             </div>
 
             <div className="mt-4 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
-              <p className="text-xs font-bold text-cs2-text-primary border-b border-cs2-border-subtle pb-2 mb-2">渲染环境与依赖自检</p>
+              <p className="text-xs font-bold text-cs2-text-primary border-b border-cs2-border-subtle pb-2 mb-2">{t("montage.consoleExportCheckTitle")}</p>
               <div className="space-y-1">
-                <ExportCheckRow ok={dirOk} optional={false} label="有效输出路径分配" />
-                <ExportCheckRow ok={nameOk} optional={false} label="安全文件名验证" />
-                <ExportCheckRow ok={bgmFilled} optional label="定制背景音乐混流" />
-                <ExportCheckRow ok={introFilled} optional label="前置片头包装挂载" />
-                <ExportCheckRow ok={outroFilled} optional label="收尾片尾包装挂载" />
-                <ExportCheckRow ok={nameCardsFilled} optional label="左下角玩家信息卡" />
+                <ExportCheckRow ok={dirOk} optional={false} label={t("montage.consoleExportCheckDir")} />
+                <ExportCheckRow ok={nameOk} optional={false} label={t("montage.consoleExportCheckName")} />
+                <ExportCheckRow ok={bgmFilled} optional label={t("montage.consoleExportCheckBgm")} />
+                <ExportCheckRow ok={introFilled} optional label={t("montage.consoleExportCheckIntro")} />
+                <ExportCheckRow ok={outroFilled} optional label={t("montage.consoleExportCheckOutro")} />
+                <ExportCheckRow ok={nameCardsFilled} optional label={t("montage.consoleExportCheckNameCards")} />
               </div>
             </div>
 
             <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-secondary">保存草稿别名 (可选)</span>
+              <span className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleExportDraftLabel")}</span>
               <input
                 value={draftName}
                 onChange={(e) => onDraftNameChange(e.target.value)}
@@ -512,7 +520,7 @@ export function MontageStyleConsole({
               onClick={() => onSaveDraft?.()}
               className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2.5 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-45"
             >
-              保存至编排草稿箱
+              {t("montage.consoleExportSaveDraftBtn")}
             </button>
 
             <button
@@ -522,16 +530,16 @@ export function MontageStyleConsole({
               className="mt-2.5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-3 text-sm font-bold text-cs2-text-on-accent shadow-glow-accent hover:opacity-95 transition-all disabled:opacity-45"
             >
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              启动合辑引擎流式导出
+              {t("montage.consoleExportStartBtn")}
             </button>
 
             <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-muted">综合成片绝对路径预览</span>
+              <span className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportPathPreviewLabel")}</span>
               <div className="flex gap-2">
                 <input
                   readOnly
                   value={fullOutputPathPreview || ""}
-                  placeholder="完成路径及文件名配置后实时生成"
+                  placeholder={t("montage.consoleExportPathPreviewPlaceholder")}
                   className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-2 px-3 py-2 font-mono text-xs text-cs2-text-muted select-all outline-none"
                 />
                 <button
@@ -541,7 +549,7 @@ export function MontageStyleConsole({
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-2 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-35"
                 >
                   <Copy className="h-3.5 w-3.5" />
-                  复制
+                  {t("montage.consoleExportCopyBtn")}
                 </button>
               </div>
             </div>
@@ -552,14 +560,14 @@ export function MontageStyleConsole({
       <div className="shrink-0 border-t border-cs2-border-subtle bg-cs2-surface-1 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-xs font-bold text-cs2-text-muted">合集预估总时长</p>
+            <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterDuration")}</p>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="font-mono text-sm font-bold text-cs2-text-primary">{durationText}</span>
-              <span className="text-xs text-cs2-text-muted font-medium">({clipCount} 个切片节点)</span>
+              <span className="text-xs text-cs2-text-muted font-medium">{t("montage.consoleFooterClipCount", { n: clipCount })}</span>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-xs font-bold text-cs2-text-muted">输出画质标准</p>
+            <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterQuality")}</p>
             <p className="text-xs font-bold text-cs2-text-secondary mt-0.5">{resolutionLabel}</p>
           </div>
         </div>

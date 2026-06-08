@@ -14,6 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useT } from "../../i18n/useT.js";
 
 /* ─── 工具函数 ─── */
 function formatDateTime(iso) {
@@ -46,35 +47,52 @@ function dirname(p) {
 }
 
 /* ─── 转场摘要 ─── */
-const TRANSITION_LABELS = {
-  none: "无转场", cut: "快切", fade: "淡入淡出",
-  flash: "闪白", dip_black: "黑场", zoom: "轻微缩放",
-};
-function transitionSummary(transitions) {
+function getTransitionLabels(t) {
+  return {
+    none: t("montage.transNone"),
+    cut: t("montage.transCut"),
+    fade: t("montage.transFade"),
+    flash: t("montage.transFlash"),
+    dip_black: t("montage.transDipBlack"),
+    zoom: t("montage.transZoom"),
+  };
+}
+function transitionSummary(transitions, t) {
   if (!transitions || !Object.keys(transitions).length) return null;
+  const labels = getTransitionLabels(t);
   const counts = {};
   for (const v of Object.values(transitions)) {
-    const t = v?.type || "cut";
-    counts[t] = (counts[t] || 0) + 1;
+    const type = v?.type || "cut";
+    counts[type] = (counts[type] || 0) + 1;
   }
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
-    .map(([t, n]) => `${TRANSITION_LABELS[t] ?? t} ×${n}`)
+    .map(([type, n]) => `${labels[type] ?? type} ×${n}`)
     .join("　");
 }
 
-/* ─── 片段类别汉化 ─── */
-const CATEGORY_LABELS = {
-  highlight: "高光", fail: "下饭", meme_death: "梗",
-  compilation: "合集", timeline: "时间线",
-};
-function categoryLabel(c) { return CATEGORY_LABELS[c] ?? c ?? "—"; }
+/* ─── 片段类别本地化 ─── */
+function getCategoryLabels(t) {
+  return {
+    highlight: t("montage.catHighlight"),
+    fail: t("montage.catFail"),
+    meme_death: t("montage.catMemeDeath"),
+    compilation: t("montage.catCompilation"),
+    timeline: t("montage.catTimeline"),
+  };
+}
+function categoryLabel(c, t) { return getCategoryLabels(t)[c] ?? c ?? "—"; }
 
 /* ─── 主题 ─── */
-const THEME_LABELS = {
-  esports: "竞技快切", film: "电影感", funny: "下饭搞笑", clean: "无转场",
-};
+function getThemeLabels(t) {
+  return {
+    esports: t("montage.themeEsports"),
+    film: t("montage.themeFilm"),
+    funny: t("montage.themeFunny"),
+    clean: t("montage.themeClean"),
+  };
+}
 
 /* ─── 内联重命名 ─── */
 function InlineRename({ current, onSave, onCancel }) {
@@ -98,6 +116,7 @@ function InlineRename({ current, onSave, onCancel }) {
 
 /* ─── 单条片段标签 ─── */
 function ClipPill({ clip }) {
+  const t = useT();
   const category = clip.category;
   const map = clip.map_name?.replace("de_", "") ?? "?";
   const kills = clip.kill_count ?? null;
@@ -114,14 +133,14 @@ function ClipPill({ clip }) {
 
   return (
     <div className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] ${cls}`}>
-      <span className="font-semibold">{categoryLabel(category)}</span>
+      <span className="font-semibold">{categoryLabel(category, t)}</span>
       <span className="text-cs2-text-muted">·</span>
       <span>{map}</span>
       {kills != null && <><span className="text-cs2-text-muted">·</span><span>{kills}K</span></>}
       {player && <><span className="text-cs2-text-muted">·</span><span className="max-w-[64px] truncate opacity-70">{player}</span></>}
       {dur && <><span className="text-cs2-text-muted">·</span><span className="opacity-60">{dur}</span></>}
-      {tags.slice(0, 2).map((t) => (
-        <span key={t} className="ml-0.5 rounded bg-cs2-bg-input/50 px-1 text-[9px] text-cs2-text-muted">{t}</span>
+      {tags.slice(0, 2).map((tag) => (
+        <span key={tag} className="ml-0.5 rounded bg-cs2-bg-input/50 px-1 text-[9px] text-cs2-text-muted">{tag}</span>
       ))}
     </div>
   );
@@ -129,18 +148,19 @@ function ClipPill({ clip }) {
 
 /* ─── 单条导出记录 ─── */
 function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename }) {
+  const t = useT();
   const [renaming, setRenaming] = useState(false);
   const ok = item.status === "done";
   const isErr = item.status === "error";
   const running = item.status === "running" || item.status === "pending";
   const body = item.body ?? {};
   const clips = item.clips_preview ?? [];
-  const displayName = item.name || basename(item.output_path) || "未命名";
-  const themeLabel = body.theme_id && body.theme_id !== "custom" ? (THEME_LABELS[body.theme_id] ?? body.theme_id) : null;
+  const displayName = item.name || basename(item.output_path) || t("montage.historyUnnamed");
+  const themeLabel = body.theme_id && body.theme_id !== "custom" ? (getThemeLabels(t)[body.theme_id] ?? body.theme_id) : null;
   const hasBgm = Boolean(body.bgm_path);
   const hasIntro = Boolean(body.intro_path);
   const hasOutro = Boolean(body.outro_path);
-  const tSummary = transitionSummary(body.transitions);
+  const tSummary = transitionSummary(body.transitions, t);
 
   return (
     <div
@@ -187,7 +207,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
           ) : (
             <p
               className="cursor-text truncate text-[13px] font-semibold text-cs2-text-primary"
-              title="双击重命名"
+              title={t("montage.historyDoubleclickRename")}
               onDoubleClick={() => setRenaming(true)}
             >
               {displayName}
@@ -198,7 +218,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
               <Clock className="h-2.5 w-2.5" />
               {formatDateTime(item.created_at)}
             </span>
-            {clips.length > 0 && <span>{clips.length} 段</span>}
+            {clips.length > 0 && <span>{t("montage.historySegmentCount", { n: clips.length })}</span>}
             {themeLabel && (
               <span className="rounded bg-cs2-bg-input/50 px-1.5 py-0.5 text-cs2-text-secondary">{themeLabel}</span>
             )}
@@ -208,14 +228,14 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
               </span>
             )}
             {(hasIntro || hasOutro) && (
-              <span>{[hasIntro && "片头", hasOutro && "片尾"].filter(Boolean).join("+")}</span>
+              <span>{[hasIntro && t("montage.hasIntroLabel"), hasOutro && t("montage.hasOutroLabel")].filter(Boolean).join("+")}</span>
             )}
             {isErr && item.error_msg && (
               <span className="text-red-400/80">{item.error_msg}</span>
             )}
           </div>
           {tSummary && (
-            <p className="mt-0.5 text-[11px] text-cs2-text-muted">转场：{tSummary}</p>
+            <p className="mt-0.5 text-[11px] text-cs2-text-muted">{t("montage.historyTransitionPrefix")}{tSummary}</p>
           )}
         </div>
 
@@ -224,7 +244,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
           {ok && item.output_path && (
             <button
               type="button"
-              title="打开文件夹"
+              title={t("montage.historyOpenFolderTitle")}
               onClick={() => onOpenFolder(dirname(item.output_path))}
               className="rounded p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
             >
@@ -233,7 +253,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
           )}
           <button
             type="button"
-            title="删除"
+            title={t("montage.historyDeleteTitle")}
             onClick={() => onDelete([item.id])}
             className="rounded p-1.5 text-cs2-text-muted hover:bg-red-500/10 hover:text-red-400"
           >
@@ -256,15 +276,16 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
 
 /* ─── 删除确认 Dialog ─── */
 function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
+  const t = useT();
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4">
       <div className="w-full max-w-sm rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-2xl">
-        <h3 className="mb-2 text-[14px] font-bold text-cs2-text-primary">确认删除</h3>
+        <h3 className="mb-2 text-[14px] font-bold text-cs2-text-primary">{t("montage.historyDeleteConfirmTitle")}</h3>
         <p className="mb-1 text-[12px] text-cs2-text-secondary">
-          将删除 <span className="font-semibold text-cs2-accent">{count}</span> 条历史记录。
+          {t("montage.historyDeleteConfirmBody", { n: count })}
         </p>
         <p className="mb-4 text-[12px] leading-relaxed text-cs2-text-muted">
-          同时勾选「删除磁盘文件」将把对应的 .mp4 文件从硬盘中删除，<span className="text-red-400">此操作不可恢复</span>。
+          {t("montage.historyDeleteConfirmDiskWarn")}<span className="text-red-400">{t("montage.historyDeleteConfirmIrreversible")}</span>。
         </p>
         <div className="flex gap-3">
           <button
@@ -272,21 +293,21 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
             onClick={() => onConfirm(false)}
             className="flex-1 rounded-lg border border-cs2-border py-2 text-[12px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-input/50"
           >
-            仅删除记录
+            {t("montage.historyDeleteRecordOnly")}
           </button>
           <button
             type="button"
             onClick={() => onConfirm(true)}
             className="flex-1 rounded-lg bg-red-600 py-2 text-[12px] font-semibold text-cs2-text-primary hover:bg-red-500"
           >
-            同时删除文件
+            {t("montage.historyDeleteWithFile")}
           </button>
           <button
             type="button"
             onClick={onCancel}
             className="rounded-lg border border-cs2-border px-4 py-2 text-[12px] text-cs2-text-muted hover:text-cs2-text-secondary"
           >
-            取消
+            {t("montage.historyDeleteCancel")}
           </button>
         </div>
       </div>
@@ -296,6 +317,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
 
 /* ─── 主 Dialog ─── */
 export default function MontageHistoryPanel({ open, onClose }) {
+  const t = useT();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -338,14 +360,14 @@ export default function MontageHistoryPanel({ open, onClose }) {
           params: { delete_file: deleteFiles },
         });
         setItems((prev) => prev.filter((it) => !pendingDelete.includes(it.id)));
-        setTotal((t) => Math.max(0, t - 1));
+        setTotal((tot) => Math.max(0, tot - 1));
       } else {
         await API.post("/montage/exports/batch-delete", {
           ids: pendingDelete,
           delete_files: deleteFiles,
         });
         setItems((prev) => prev.filter((it) => !pendingDelete.includes(it.id)));
-        setTotal((t) => Math.max(0, t - pendingDelete.length));
+        setTotal((tot) => Math.max(0, tot - pendingDelete.length));
       }
       setSelectedIds(new Set());
     } catch { /* 静默 */ }
@@ -397,14 +419,14 @@ export default function MontageHistoryPanel({ open, onClose }) {
           <header className="flex shrink-0 items-center gap-3 border-b border-cs2-border px-6 py-4">
             <Film className="h-5 w-5 shrink-0 text-cs2-accent" />
             <div className="flex-1">
-              <h2 className="text-[15px] font-bold text-cs2-text-primary">合集历史</h2>
-              <p className="text-[12px] text-cs2-text-muted">共 {total} 条记录 · 双击名称可重命名</p>
+              <h2 className="text-[15px] font-bold text-cs2-text-primary">{t("montage.historyTitle")}</h2>
+              <p className="text-[12px] text-cs2-text-muted">{t("montage.historySubtitle", { n: total })}</p>
             </div>
             {loading && <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />}
             <button
               type="button"
               onClick={() => load(page)}
-              title="刷新"
+              title={t("montage.historyRefreshTitle")}
               className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
             >
               <RefreshCw className="h-4 w-4" />
@@ -428,7 +450,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
               className="h-3.5 w-3.5 accent-cs2-orange"
             />
             <span className="text-[12px] text-cs2-text-muted">
-              {someSelected ? `已选 ${selectedIds.size} 条` : "全选"}
+              {someSelected ? t("montage.historySelectedCount", { n: selectedIds.size }) : t("montage.historySelectAll")}
             </span>
             {someSelected && (
               <button
@@ -437,7 +459,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
                 className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-cs2-red-surface px-3 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:bg-red-900/40"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                删除选中 ({selectedIds.size})
+                {t("montage.historyDeleteSelected", { n: selectedIds.size })}
               </button>
             )}
           </div>
@@ -451,7 +473,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
             ) : items.length === 0 ? (
               <div className="flex h-40 flex-col items-center justify-center gap-3 text-cs2-text-muted">
                 <Film className="h-8 w-8 opacity-30" />
-                <span className="text-[12px]">暂无导出记录</span>
+                <span className="text-[12px]">{t("montage.historyEmpty")}</span>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -482,7 +504,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="text-[12px] text-cs2-text-muted">
-                第 {page + 1} 页 / 共 {totalPages} 页
+                {t("montage.historyPage", { page: page + 1, total: totalPages })}
               </span>
               <button
                 type="button"

@@ -1,8 +1,11 @@
+import { useT } from "../i18n/useT.js";
+
 /**
  * 「回合合集」卡片内：勾选回合（仅「全选」「清空」快捷操作 + 数字格）。
  * @param {{ maxRounds: number, picked: number[], disabled?: boolean, onChange: (next: { picked: number[] }) => void }} props
  */
 export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = false, onChange }) {
+  const t = useT();
   const n = Math.max(1, Math.min(64, Number(maxRounds) || 1));
   const set = new Set((picked || []).filter((r) => r >= 1 && r <= n));
 
@@ -23,7 +26,7 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
           onClick={() => onChange({ picked: Array.from({ length: n }, (_, i) => i + 1) })}
           className="rounded border border-cs2-border px-2 py-0.5 text-[10px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/35 hover:text-cs2-accent disabled:opacity-40"
         >
-          全选
+          {t("montage.pickerSelectAll")}
         </button>
         <button
           type="button"
@@ -31,12 +34,12 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
           onClick={() => onChange({ picked: [] })}
           className="rounded border border-cs2-border px-2 py-0.5 text-[10px] font-semibold text-cs2-text-secondary transition-colors hover:border-rose-500/30 hover:text-cs2-rose-on-surface disabled:opacity-40"
         >
-          清空
+          {t("montage.pickerClear")}
         </button>
       </div>
       {picked.length === 0 ? (
         <p className="mb-1 text-[11px] leading-snug text-amber-400/90">
-          未勾选时不可加入录制队列。解析在未勾选时仍按整局合规非赛后回合生成合辑；勾选后再解析可只生成所选回合；整局合辑也可在格内保留默认全选后取消勾选，入队时按勾选子集切片。
+          {t("montage.pickerNoSelectionHint")}
         </p>
       ) : null}
       <div className="max-h-24 overflow-y-auto rounded border border-cs2-border bg-cs2-bg-input/60 p-1.5">
@@ -48,7 +51,7 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
                 key={r}
                 type="button"
                 disabled={disabled}
-                title={`第 ${r} 回合`}
+                title={t("montage.pickerRoundTitle", { n: r })}
                 onClick={() => toggle(r)}
                 className={`min-w-[1.75rem] rounded border px-1 py-0.5 font-mono text-[9px] font-semibold tabular-nums transition-colors ${
                   on
