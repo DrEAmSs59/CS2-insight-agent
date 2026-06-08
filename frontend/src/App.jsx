@@ -21,6 +21,7 @@ import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
 import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
+import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
   freezeToDeathDraftFromClipFilter,
@@ -55,6 +56,7 @@ function ensureDefaultCs2FullscreenArg(value) {
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
+  const t = useT();
   const [backendReady, setBackendReady] = useState(false);
   const [aiMode, setAiMode] = useState(false);
   
@@ -167,7 +169,7 @@ export default function App() {
   /** 仅「扫描本地 demo 库」进行中；不在顶部 ProgressBar 展示，由按钮内 spinner 表示 */
   const [libraryScanning, setLibraryScanning] = useState(false);
   const [libraryLoadingOverlay, setLibraryLoadingOverlay] = useState(false);
-  const [libraryLoadingText, setLibraryLoadingText] = useState("正在加载 Demo...");
+  const [libraryLoadingText, setLibraryLoadingText] = useState("");
   const [libraryPage, setLibraryPage] = useState(1);
   const libraryPageRef = useRef(1);
   const [libraryHasNextPage, setLibraryHasNextPage] = useState(false);
@@ -497,19 +499,19 @@ export default function App() {
     if (!raw) return;
     const n = parseInt(raw, 10);
     if (!Number.isFinite(n) || n < 1) {
-      setProgressText("请输入有效页码（≥1 的整数）");
+      setProgressText(t("app.libraryPageJumpInvalid"));
       return;
     }
     const maxPage = libraryTotalPages;
     let target = n;
     if (maxPage != null && n > maxPage) {
       target = maxPage;
-      setProgressText(`页码超过总页数，已跳转到最后一页（第 ${maxPage} 页）`);
+      setProgressText(t("app.libraryPageJumpClamped", { maxPage }));
     }
     setLibraryJumpDraft("");
     setLibraryPage(target);
     void refreshDemoLibrary(target, { manageLoading: false });
-  }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary]);
+  }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary, t]);
 
   const handleScanDemos = useCallback(async () => {
     setLibraryScanning(true);
@@ -518,14 +520,14 @@ export default function App() {
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
       const n = data?.discovered_count;
       if (typeof n === "number" && n > 0) {
-        setProgressText(`扫描完成：当前有 ${n} 个待入库 Demo，可点击「待入库」批量入库。`);
+        setProgressText(t("app.scanDone", { n }));
       }
     } catch (e) {
-      setProgressText(`扫描或列表刷新失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }));
     } finally {
       setLibraryScanning(false);
     }
-  }, [refreshDemoLibrary, libraryPage]);
+  }, [refreshDemoLibrary, libraryPage, t]);
 
   const handleDeleteDemo = useCallback(
     async (id, rescan) => {
@@ -534,10 +536,10 @@ export default function App() {
         setLibraryDeletePrompt(null);
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
-        setProgressText(`删除失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }));
       }
     },
-    [refreshDemoLibrary, libraryPage]
+    [refreshDemoLibrary, libraryPage, t]
   );
 
   const handleDeleteDemoFile = useCallback(
@@ -545,37 +547,37 @@ export default function App() {
       try {
         await API.post(`/demos/${id}/delete-file`);
         setLibraryDeletePrompt(null);
-        setProgressText("已从磁盘删除 .dem 文件（如有同名 .zip 也一并删除）。");
+        setProgressText(t("app.deleteFileDone"));
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
-        setProgressText(`删除文件失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.deleteFileFail", { msg: e.response?.data?.detail || e.message }));
       }
     },
-    [refreshDemoLibrary, libraryPage]
+    [refreshDemoLibrary, libraryPage, t]
   );
 
   const handleLibraryBatchDelete = useCallback(
     async (ids, rescan = "skip") => {
       const list = [...ids];
       if (!list.length) return;
-      setProgressText(`正在批量删除（0 / ${list.length}）…`, { loading: true });
+      setProgressText(t("app.batchDeleteProgress", { done: 0, total: list.length }), { loading: true });
       let done = 0;
       for (const id of list) {
         try {
           await API.delete(`/demos/${id}`, { params: { rescan } });
           done += 1;
-          setProgressText(`正在批量删除（${done} / ${list.length}）…`, { loading: true });
+          setProgressText(t("app.batchDeleteProgress", { done, total: list.length }), { loading: true });
         } catch (e) {
-          setProgressText(`批量删除失败: ${e.response?.data?.detail || e.message}`);
+          setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }));
           await refreshDemoLibrary(libraryPage, { manageLoading: false });
           return;
         }
       }
       setSelectedLibraryDemoIds(new Set());
-      setProgressText(`已删除 ${list.length} 条 Demo。`);
+      setProgressText(t("app.batchDeleteDone", { n: list.length }));
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
     },
-    [refreshDemoLibrary, libraryPage]
+    [refreshDemoLibrary, libraryPage, t]
   );
 
   const handleSaveLibraryRename = useCallback(async () => {
@@ -585,15 +587,15 @@ export default function App() {
       setLibraryRename(null);
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
     } catch (e) {
-      setProgressText(`改名失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.renameFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, [libraryRename, refreshDemoLibrary, libraryPage]);
+  }, [libraryRename, refreshDemoLibrary, libraryPage, t]);
 
   const handleLoadDemoFromLibrary = useCallback(async (items, opts = {}) => {
     const { resolvedByDemoId, skipLoadingOverlay = false } = opts;
     if (!skipLoadingOverlay) {
       setLibraryLoadingOverlay(true);
-      setLibraryLoadingText("正在加载 Demo ...");
+      setLibraryLoadingText(t("app.libraryLoadingDemo"));
     }
     try {
       const list = Array.isArray(items) ? items : [items];
@@ -740,21 +742,21 @@ export default function App() {
       navigate("/analysis");
       return loaded;
     } catch (e) {
-      setProgressText(`加载 Demo 库失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.libraryLoadFail", { msg: e.response?.data?.detail || e.message }));
       return null;
     } finally {
       if (!skipLoadingOverlay) {
         setLibraryLoadingOverlay(false);
-        setLibraryLoadingText("正在加载 Demo...");
+        setLibraryLoadingText(t("app.libraryLoadingDemo"));
       }
     }
-  }, [navigate]);
+  }, [navigate, t]);
 
   const handleLoadSelectedLibraryDemos = useCallback(async () => {
     const ids = Array.from(selectedLibraryDemoIds);
     if (!ids.length) return;
     setLibraryLoadingOverlay(true);
-    setLibraryLoadingText("正在加载 Demo ...");
+    setLibraryLoadingText(t("app.libraryLoadingDemo"));
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
@@ -764,12 +766,12 @@ export default function App() {
       if (Array.isArray(failed) && failed.length) {
         setBatchLoadError({ open: true, failed });
       } else {
-        setProgressText(`载入选中失败: ${e.response?.data?.detail?.message || e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.libraryLoadSelectedFail", { msg: e.response?.data?.detail?.message || e.response?.data?.detail || e.message }));
       }
     } finally {
       setLibraryLoadingOverlay(false);
     }
-  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText]);
+  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText, t]);
 
   const selectLibraryPage = useCallback(() => {
     setSelectedLibraryDemoIds((prev) => {
@@ -792,12 +794,12 @@ export default function App() {
       const rows = data.items || [];
       setSelectedLibraryDemoIds(new Set(rows.map((it) => it.id)));
       if (libraryTotal != null && libraryTotal > cap) {
-        setProgressText(`已全选前 ${cap} 条（列表接口单次上限 ${cap}）；其余请分页勾选。`);
+        setProgressText(t("app.librarySelectAllCapped", { cap }));
       }
     } catch (e) {
-      setProgressText(`全选失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.librarySelectAllFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams]);
+  }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams, t]);
 
   const clearLibrarySelection = useCallback(() => {
     setSelectedLibraryDemoIds(new Set());
@@ -933,7 +935,7 @@ export default function App() {
           ? typeof e.response.data.detail === "string"
             ? e.response.data.detail
             : JSON.stringify(e.response.data.detail)
-          : e?.message || "无法连接后端";
+          : e?.message || t("app.backendConnectFail");
       setConfigBackupStatus({
         fetch_failed: true,
         message: String(msg),
@@ -941,7 +943,7 @@ export default function App() {
     } finally {
       setConfigBackupLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refreshConfigBackupStatus();
@@ -979,7 +981,7 @@ export default function App() {
     const list = Array.isArray(files) ? files : [files];
     if (!list.length) return;
 
-    setProgressText("正在上传 Demo 文件...", { loading: true });
+    setProgressText(t("app.uploadingDemo"), { loading: true });
     setParsing(true);
 
     try {
@@ -997,17 +999,17 @@ export default function App() {
       setSelectedClientClipUids(new Set());
       const uploadDoneMsg =
         uploads.length > 1
-          ? `已上传 ${uploads.length} 个 Demo。请切换场次，分别为每场选择玩家并点击「开始分析」。`
-          : "上传完成，请选择要分析的玩家后点击「开始分析」。";
+          ? t("app.uploadDoneMulti", { n: uploads.length })
+          : t("app.uploadDoneSingle");
       setProgressText("");
       setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
       navigate("/analysis");
     } catch (e) {
-      setProgressText(`上传失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }));
     } finally {
       setParsing(false);
     }
-  }, [navigate]);
+  }, [navigate, t]);
 
   const roundMontageCanEnqueue = useMemo(() => {
     const p = freezeToDeathDraft?.picked ?? [];
@@ -1074,7 +1076,7 @@ export default function App() {
       const viewingHere = currentMatchIndexRef.current === idx;
       if (viewingHere && !quietProgress) {
         setProgressText("");
-        setAnalysisInlineProgress({ active: true, text: `正在解析「${fn}」…` });
+        setAnalysisInlineProgress({ active: true, text: t("app.parsingDemo", { fn }) });
         setSelectedClientClipUids(new Set());
       }
 
@@ -1148,17 +1150,17 @@ export default function App() {
           0
         );
         const playerLabel =
-          names.length === 1 ? names[0] : `${names.length} 名玩家`;
+          names.length === 1 ? names[0] : t("app.parseDonePlayerCount", { n: names.length });
         const doneMsg =
           totalMeme > 0
-            ? `「${fn}」分析完成 — ${rounds} 回合，${playerLabel}，常规片段 ${totalRegular} 个，另含下饭 ${totalMeme} 段。`
-            : `「${fn}」分析完成 — ${rounds} 回合，${playerLabel}，共 ${totalRegular} 个片段。`;
+            ? t("app.parseDoneWithMeme", { fn, rounds, playerLabel, totalRegular, totalMeme })
+            : t("app.parseDone", { fn, rounds, playerLabel, totalRegular });
         if (!quietProgress) {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
           else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
         }
       } catch (e) {
-        const err = `解析失败「${fn}」: ${e.response?.data?.detail || e.message}`;
+        const err = t("app.parseFail", { fn, msg: e.response?.data?.detail || e.message });
         if (!quietProgress) {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
           else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
@@ -1171,7 +1173,7 @@ export default function App() {
         });
       }
     },
-    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex, freezeToDeathRoundsByMatch]
+    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex, freezeToDeathRoundsByMatch, t]
   );
 
   const handleParse = useCallback(async () => {
@@ -1188,14 +1190,14 @@ export default function App() {
       const holdOverlayUntilParsed = mode === "expected" || mode === "manual";
       if (holdOverlayUntilParsed) {
         setLibraryLoadingOverlay(true);
-        setLibraryLoadingText("正在载入并解析所选 Demo…");
+        setLibraryLoadingText(t("app.libraryLoadingAndParsing"));
       }
       try {
         const items = await Promise.all(ids.map((id) => API.get(`/demos/${id}`).then((r) => r.data)));
         let resolvedByDemoId = null;
         if (mode !== "none") {
           if (holdOverlayUntilParsed) {
-            setLibraryLoadingText("正在匹配玩家名单…");
+            setLibraryLoadingText(t("app.libraryMatchingPlayers"));
           }
           const apiMode = mode === "expected" ? "config_expected" : "manual";
           const { data } = await API.post("/demos/batch-resolve-players", {
@@ -1211,7 +1213,7 @@ export default function App() {
           }
         }
         if (holdOverlayUntilParsed) {
-          setLibraryLoadingText("正在加载 Demo 文件…");
+          setLibraryLoadingText(t("app.libraryLoadingDemoFiles"));
         }
         const loaded = await handleLoadDemoFromLibrary(items, {
           resolvedByDemoId: mode === "none" ? undefined : resolvedByDemoId,
@@ -1231,12 +1233,12 @@ export default function App() {
           .filter((s) => s.players.length > 0);
         if (!specs.length) {
           setProgressText((prev) =>
-            `${prev || ""}\n未匹配到可解析玩家（请检查关注名单或手动昵称）。`.trim()
+            `${prev || ""}\n${t("app.libraryNoPlayersMatched")}`.trim()
           );
           return;
         }
         if (holdOverlayUntilParsed) {
-          setLibraryLoadingText(`正在解析高光（0 / ${specs.length} 场）…`);
+          setLibraryLoadingText(t("app.libraryParsingHighlights", { done: 0, total: specs.length }));
         }
         const ctx = {
           demos: loaded,
@@ -1248,20 +1250,20 @@ export default function App() {
           await handleParseForIndex(spec.index, spec.players, ctx);
           if (holdOverlayUntilParsed) {
             done += 1;
-            setLibraryLoadingText(`正在解析高光（${done} / ${specs.length} 场）…`);
+            setLibraryLoadingText(t("app.libraryParsingHighlights", { done, total: specs.length }));
           }
         });
         setProgressText("");
       } catch (e) {
-        setProgressText(`载入并解析失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.libraryLoadAndParseFail", { msg: e.response?.data?.detail || e.message }));
       } finally {
         if (holdOverlayUntilParsed) {
           setLibraryLoadingOverlay(false);
-          setLibraryLoadingText("正在加载 Demo...");
+          setLibraryLoadingText(t("app.libraryLoadingDemo"));
         }
       }
     },
-    [selectedLibraryDemoIds, handleLoadDemoFromLibrary, handleParseForIndex]
+    [selectedLibraryDemoIds, handleLoadDemoFromLibrary, handleParseForIndex, t]
   );
 
   const handleToggleClip = useCallback(
@@ -1380,8 +1382,8 @@ export default function App() {
     setSelectedClientClipUids(new Set());
     const skipped = candidates.length - toAdd.length;
     const skipHint =
-      skipped > 0 ? `（已跳过 ${skipped} 条未满足条件的片段）` : "";
-    setProgressText(`已加入录制队列 ${toAdd.length} 条（当前场次）${skipHint}`, {
+      skipped > 0 ? t("app.enqueueSkippedHint", { n: skipped }) : "";
+    setProgressText(t("app.enqueueAdded", { n: toAdd.length }) + skipHint, {
       autoDismissMs: 2000,
       queueLink: true,
     });
@@ -1393,6 +1395,7 @@ export default function App() {
     currentMatchIndex,
     queueItemMetaForIndex,
     freezeToDeathDraft,
+    t,
   ]);
 
   const handleAddAllHighlightsAllMatches = useCallback(() => {
@@ -1419,15 +1422,15 @@ export default function App() {
       });
     });
     if (!toAdd.length) {
-      setProgressText("没有可加入的高光（可能已全部在队列中）。");
+      setProgressText(t("app.enqueueAllHighlightsEmpty"));
       return;
     }
     addToQueue(toAdd);
-    setProgressText(`已将 ${toAdd.length} 条高光片段加入队列（跨场次）。`, {
+    setProgressText(t("app.enqueueAllHighlightsDone", { n: toAdd.length }), {
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal]);
+  }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal, t]);
 
   const handleAddTimelineEventToQueue = useCallback(
     (event, roundRow) => {
@@ -1451,7 +1454,7 @@ export default function App() {
         clipId: clipData.clip_id,
       });
       if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText("该项已在录制队列中。", { autoDismissMs: 2000 });
+        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
         return;
       }
       addToQueue({
@@ -1464,7 +1467,7 @@ export default function App() {
         clientClipUid: uid,
         clipData,
       });
-      setProgressText("已加入录制队列（时间线）", { autoDismissMs: 2000, queueLink: true });
+      setProgressText(t("app.enqueueTimelineDone"), { autoDismissMs: 2000, queueLink: true });
     },
     [
       currentParsed,
@@ -1474,6 +1477,7 @@ export default function App() {
       addToQueue,
       queuedClientClipUidsGlobal,
       setProgressText,
+      t,
     ],
   );
 
@@ -1491,7 +1495,7 @@ export default function App() {
         clipId: clipData.clip_id,
       });
       if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText("该回合整段已在队列中。", { autoDismissMs: 2000 });
+        setProgressText(t("app.enqueueRoundAlreadyIn"), { autoDismissMs: 2000 });
         return;
       }
       addToQueue({
@@ -1504,7 +1508,7 @@ export default function App() {
         clientClipUid: uid,
         clipData,
       });
-      setProgressText("已加入本回合到录制队列", { autoDismissMs: 2000, queueLink: true });
+      setProgressText(t("app.enqueueRoundDone"), { autoDismissMs: 2000, queueLink: true });
     },
     [
       currentParsed,
@@ -1514,6 +1518,7 @@ export default function App() {
       addToQueue,
       queuedClientClipUidsGlobal,
       setProgressText,
+      t,
     ],
   );
 
@@ -1551,11 +1556,11 @@ export default function App() {
         });
       }
       if (!toAdd.length) {
-        setProgressText("所选时间线事件均已在队列中。", { autoDismissMs: 2000 });
+        setProgressText(t("app.enqueueTimelineBatchAllIn"), { autoDismissMs: 2000 });
         return;
       }
       addToQueue(toAdd);
-      setProgressText(`已加入 ${toAdd.length} 条时间线片段`, { autoDismissMs: 2000, queueLink: true });
+      setProgressText(t("app.enqueueTimelineBatchDone", { n: toAdd.length }), { autoDismissMs: 2000, queueLink: true });
     },
     [
       currentParsed,
@@ -1565,6 +1570,7 @@ export default function App() {
       addToQueue,
       queuedClientClipUidsGlobal,
       setProgressText,
+      t,
     ],
   );
 
@@ -1681,7 +1687,7 @@ export default function App() {
     try {
       await API.put("config", body);
       await refreshCommonParamsFromServer();
-      setProgressText("常用参数已保存到配置文件。", { autoDismissMs: 2800 });
+      setProgressText(t("app.commonParamsSaved"), { autoDismissMs: 2800 });
       return { ok: true };
     } catch (e) {
       const detail = e.response?.data?.detail;
@@ -1690,53 +1696,49 @@ export default function App() {
           ? typeof detail === "string"
             ? detail
             : JSON.stringify(detail)
-          : e.message || "保存失败";
-      setProgressText(`常用参数保存失败: ${msg}`);
+          : e.message || t("app.saveFailed");
+      setProgressText(t("app.commonParamsSaveFail", { msg }));
       return { ok: false, error: msg };
     }
-  }, [setProgressText, refreshCommonParamsFromServer]);
+  }, [setProgressText, refreshCommonParamsFromServer, t]);
 
   const openBatchWarmup = useCallback(async () => {
     if (!queue.length) return;
     // 每次点击开始录制时现场拉取最新状态，避免程序刚启动时 state 尚未加载而漏检
-    setProgressText("正在检查玩家配置状态…", { loading: true });
+    setProgressText(t("app.checkingPlayerConfig"), { loading: true });
     try {
       const { data: cfgStatus } = await API.get("/config-backup/status");
       setConfigBackupStatus(cfgStatus && typeof cfgStatus === "object" ? cfgStatus : null);
       if (cfgStatus?.restore_required) {
         setProgressText("");
-        setRecordingBlockedMessage(
-          "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
-        );
+        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
         return;
       }
     } catch {
       // 获取失败时退回本地缓存，不阻断流程
       if (configBackupStatus?.restore_required) {
         setProgressText("");
-        setRecordingBlockedMessage(
-          "检测到上次录制可能异常退出，玩家配置尚未恢复。\n请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
-        );
+        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
         return;
       }
     }
     // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
-    setProgressText("正在检测 OBS 连接…", { loading: true });
+    setProgressText(t("app.checkingObsConnection"), { loading: true });
     try {
       const { data } = await API.post("/obs/config-check", obsConfig);
       if (!data?.connected) {
-        setProgressText("无法连接 OBS。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。");
+        setProgressText(t("app.obsConnectFail"));
         return;
       }
     } catch (e) {
-      setProgressText(`OBS 连接检测失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.obsCheckFail", { msg: e.response?.data?.detail || e.message }));
       return;
     }
     setQueueDrawerOpen(false);
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
     setProgressText("");
-  }, [queue.length, configBackupStatus, setConfigBackupStatus, setProgressText]);
+  }, [queue.length, configBackupStatus, setConfigBackupStatus, setProgressText, obsConfig, t]);
 
   const handleWarmupConfirm = useCallback(
     async (warmupPayload) => {
@@ -1750,7 +1752,7 @@ export default function App() {
         setWarmupIntent(null);
         if (!queue.length) return;
         setBatchRecording(true);
-        setProgressText("正在准备录制…", { loading: true });
+        setProgressText(t("app.preparingRecording"), { loading: true });
 
         // 如果启用了虚拟键盘 Overlay，轮询预构建进度并更新提示文字
         const _kbOverlayOn = session.kb_overlay_enabled;
@@ -1761,11 +1763,11 @@ export default function App() {
               const { data: kbst } = await API.get("recording/kb-prebuild-status");
               if (kbst?.active) {
                 setProgressText(
-                  `正在预构建虚拟键盘按键数据 ${kbst.done}/${kbst.total}，请稍候…`,
+                  t("app.kbPrebuildProgress", { done: kbst.done, total: kbst.total }),
                   { loading: true }
                 );
               } else if (kbst?.done > 0 && !kbst?.active) {
-                setProgressText("虚拟键盘数据就绪，正在启动 CS2…", { loading: true });
+                setProgressText(t("app.kbPrebuildReady"), { loading: true });
               }
             } catch { /* ignore */ }
           }, 1000);
@@ -1780,7 +1782,7 @@ export default function App() {
             demoLibraryItems,
           );
           if (!requests.length) {
-            setProgressText("队列中没有可录制的片段（已跳过不支持的类型）。");
+            setProgressText(t("app.queueNoRecordableClips"));
             return;
           }
           requests = applySessionObsTransitionToRequests(requests, session);
@@ -1826,9 +1828,9 @@ export default function App() {
         } catch (e) {
           const detail = formatRecordingApiError(e);
           if (e.response?.status === 409 || e.response?.status === 422) {
-            setRecordingBlockedMessage(detail || "录制启动失败");
+            setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
           }
-          setProgressText(`批量录制失败: ${detail}`);
+          setProgressText(t("app.batchRecordFail", { msg: detail }));
         } finally {
           if (_kbPollTimer) clearInterval(_kbPollTimer);
           setBatchRecording(false);
@@ -1847,17 +1849,18 @@ export default function App() {
       uploadedDemos,
       parsedMatches,
       demoLibraryItems,
+      t,
     ]
   );
 
   const handleRestorePlayerConfig = useCallback(async () => {
-    setProgressText("正在恢复玩家配置…", { loading: true });
+    setProgressText(t("app.restoringPlayerConfig"), { loading: true });
     try {
       const { data } = await API.post("/config-backup/restore");
       if (data?.ok) {
-        setProgressText(data.message || "玩家配置已恢复", { autoDismissMs: 3000 });
+        setProgressText(data.message || t("app.playerConfigRestored"), { autoDismissMs: 3000 });
       } else {
-        setProgressText(data?.message || "部分配置恢复失败", { autoDismissMs: 4000 });
+        setProgressText(data?.message || t("app.playerConfigRestorePartial"), { autoDismissMs: 4000 });
       }
       await refreshConfigBackupStatus();
     } catch (e) {
@@ -1865,34 +1868,34 @@ export default function App() {
       const det = e.response?.data?.detail;
       if (st === 409 && det?.code === "CS2_RUNNING") {
         setRecordingBlockedMessage(
-          "CS2 正在运行，无法覆盖配置文件。\n请先关闭 CS2，然后再次点击一键恢复。",
+          t("app.restoreBlockedCs2Running"),
         );
       } else {
-        setProgressText(`恢复失败: ${formatRecordingApiError(e)}`, { autoDismissMs: 5000 });
+        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e) }), { autoDismissMs: 5000 });
       }
       await refreshConfigBackupStatus();
     }
-  }, [refreshConfigBackupStatus]);
+  }, [refreshConfigBackupStatus, t]);
 
   const handleOpenConfigBackupDir = useCallback(async () => {
     try {
       const { data } = await API.post("/config-backup/open-dir");
       if (data && data.ok === false && data.backup_dir) {
-        setProgressText(`${data.message || "请手动打开"} ${data.backup_dir}`);
+        setProgressText(`${data.message || t("app.openDirManual")} ${data.backup_dir}`);
       }
     } catch (e) {
-      setProgressText(`打开备份目录失败: ${formatRecordingApiError(e)}`);
+      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e) }));
     }
-  }, []);
+  }, [t]);
 
   const handleAbortBatchRecording = useCallback(async () => {
     try {
       const { data } = await API.post("recording/abort");
-      setProgressText(data?.message || "已发送中止请求。");
+      setProgressText(data?.message || t("app.abortSent"));
     } catch (e) {
-      setProgressText(`中止失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleSaveConfig = useCallback(async (config) => {
     try {
@@ -1911,13 +1914,13 @@ export default function App() {
       await API.put("config", { expected_parse_players: arr });
       setProgressText(
         arr.length
-          ? `已保存 ${arr.length} 个关注昵称（同一场 Demo 可对多名并排写入库展示名）。`
-          : "已清空关注名单。",
+          ? t("app.savedPlayersLong", { n: arr.length })
+          : t("app.clearedPlayers"),
       );
     } catch (e) {
-      setProgressText(`保存关注名单失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, [expectedParsePlayersText]);
+  }, [expectedParsePlayersText, t]);
 
   const persistObsConfig = useCallback(async () => {
     const o = obsConfigRef.current;
@@ -1942,12 +1945,12 @@ export default function App() {
         setObsConfig((prev) => ({ ...prev, password: "" }));
       }
     } catch (e) {
-      setProgressText(`保存 OBS 配置失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.saveObsConfigFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const obsPasswordPlaceholder =
-    obsHasSavedPassword && !obsPasswordEditing ? "已保存（点击输入以修改）" : "";
+    obsHasSavedPassword && !obsPasswordEditing ? t("app.obsPasswordSaved") : "";
 
   const handleObsPasswordFocus = useCallback(() => {
     setObsPasswordEditing(true);
@@ -2002,9 +2005,9 @@ export default function App() {
         }
       }
     } catch (e) {
-      setProgressText(`保存大模型配置失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.saveLlmConfigFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleAiModeChange = useCallback(
     async (next) => {
@@ -2014,19 +2017,19 @@ export default function App() {
         await API.put("config", { ai_mode: next });
       } catch (e) {
         setAiMode(prev);
-        setProgressText(`保存分析模式失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.saveAiModeFail", { msg: e.response?.data?.detail || e.message }));
         return;
       }
       if (next) {
         await persistLlmConfig();
         setProgressText(
-          "已开启 AI 洞察并同步大模型配置。请再点「解析当前场次」生成锐评（解析完成后卡片上会出现分数与气泡）。"
+          t("app.aiModeOnMsg")
         );
       } else {
-        setProgressText("已切换为极速本地：解析不再请求大模型，仅本地规则提取片段。");
+        setProgressText(t("app.aiModeOffMsg"));
       }
     },
-    [persistLlmConfig]
+    [persistLlmConfig, t]
   );
 
   const handleResetDemo = useCallback(() => {
@@ -2047,26 +2050,26 @@ export default function App() {
       const { data } = await API.post("config/detect-cs2");
       if (data.cs2_path) {
         setCs2Path(data.cs2_path);
-        setProgressText(`已自动找到 CS2：${data.cs2_path}`, { autoDismissMs: 4500 });
+        setProgressText(t("app.cs2DetectFound", { path: data.cs2_path }), { autoDismissMs: 4500 });
       }
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
-      setProgressText(typeof msg === "string" ? msg : "CS2 自动探测失败");
+      setProgressText(typeof msg === "string" ? msg : t("app.cs2DetectFail"));
     }
-  }, []);
+  }, [t]);
 
   const handleDetectFfmpeg = useCallback(async () => {
     try {
       const { data } = await API.post("config/detect-ffmpeg");
       if (data.ffmpeg_path) {
         setFfmpegPath(data.ffmpeg_path);
-        setProgressText(`已自动找到 FFmpeg：${data.ffmpeg_path}`, { autoDismissMs: 4500 });
+        setProgressText(t("app.ffmpegDetectFound", { path: data.ffmpeg_path }), { autoDismissMs: 4500 });
       }
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
-      setProgressText(typeof msg === "string" ? msg : "FFmpeg 自动探测失败");
+      setProgressText(typeof msg === "string" ? msg : t("app.ffmpegDetectFail"));
     }
-  }, []);
+  }, [t]);
 
   const saveExpectedPlayersFromList = useCallback(async (playersList) => {
     const cleaned = Array.isArray(playersList)
@@ -2076,13 +2079,13 @@ export default function App() {
       await API.put("config", { expected_parse_players: cleaned });
       setExpectedParsePlayersText(cleaned.join("\n"));
       setProgressText(
-        cleaned.length ? `已保存 ${cleaned.length} 个关注昵称。` : "已清空关注名单。",
+        cleaned.length ? t("app.savedPlayers", { n: cleaned.length }) : t("app.clearedPlayers"),
         { autoDismissMs: 2500 },
       );
     } catch (e) {
-      setProgressText(`保存关注名单失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleSaveAllSettingsPage = useCallback(
     async (expectedPlayersList) => {
@@ -2098,12 +2101,12 @@ export default function App() {
         });
         setExpectedParsePlayersText(arr.join("\n"));
         await persistLlmConfig();
-        setProgressText("设置已保存。", { autoDismissMs: 2200 });
+        setProgressText(t("app.settingsSaved"), { autoDismissMs: 2200 });
       } catch (e) {
-        setProgressText(`保存失败: ${e.response?.data?.detail || e.message}`);
+        setProgressText(t("app.settingsSaveFail", { msg: e.response?.data?.detail || e.message }));
       }
     },
-    [cs2Path, ffmpegPath, montageEncoder, persistLlmConfig, setExpectedParsePlayersText],
+    [cs2Path, ffmpegPath, montageEncoder, persistLlmConfig, setExpectedParsePlayersText, t],
   );
 
   const handleExportSettingsConfig = useCallback(async () => {
@@ -2115,15 +2118,15 @@ export default function App() {
       a.download = `cs2-insight-config-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
-      setProgressText("已导出配置 JSON（导出中的密钥为脱敏显示）。", { autoDismissMs: 3500 });
+      setProgressText(t("app.configExportDone"), { autoDismissMs: 3500 });
     } catch (e) {
-      setProgressText(`导出失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.configExportFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const applyImportedSettings = useCallback(async (raw) => {
     if (!raw || typeof raw !== "object") {
-      setProgressText("导入失败：不是有效的 JSON 对象。");
+      setProgressText(t("app.configImportInvalidJson"));
       return;
     }
     try {
@@ -2189,17 +2192,15 @@ export default function App() {
           setLlmKeySavedOnServer(true);
         }
       }
-      setProgressText("已应用导入的配置。", { autoDismissMs: 2800 });
+      setProgressText(t("app.configImportDone"), { autoDismissMs: 2800 });
     } catch (e) {
-      setProgressText(`导入失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.configImportFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleResetSettingsDefaults = useCallback(async () => {
     if (
-      !window.confirm(
-        "将 CS2/FFmpeg 路径、合辑编码、分析模式、关注名单与大模型接口/模型名恢复为默认（不含 OBS 与 Demo 监听目录）。已保存在服务器上的 API 密钥若未在导入文件中提供则仍会保留。确定继续？",
-      )
+      !window.confirm(t("app.resetSettingsConfirm"))
     ) {
       return;
     }
@@ -2229,36 +2230,36 @@ export default function App() {
         api_key: "",
         base_url: "",
       });
-      setProgressText("已恢复默认（路径与解析相关项）。", { autoDismissMs: 3000 });
+      setProgressText(t("app.resetSettingsDone"), { autoDismissMs: 3000 });
     } catch (e) {
-      setProgressText(`恢复默认失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.resetSettingsFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleOpenConfigDataDir = useCallback(async () => {
     try {
       const { data } = await API.post("config/open-dir");
       if (data?.ok === false) {
-        setProgressText(`${data.message || "无法打开目录"} ${data.path || ""}`.trim());
+        setProgressText(`${data.message || t("app.openDirFailed")} ${data.path || ""}`.trim());
       }
     } catch (e) {
-      setProgressText(`打开目录失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.openConfigDirFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, []);
+  }, [t]);
 
   const handleTestLlmConnection = useCallback(async () => {
     await persistLlmConfig();
     try {
       const { data } = await API.post("config/test-llm");
       if (data?.ok) {
-        setProgressText(`AI 连接正常${data.detail ? `：${data.detail}` : ""}`, { autoDismissMs: 4000 });
+        setProgressText(t("app.aiTestOk") + (data.detail ? `：${data.detail}` : ""), { autoDismissMs: 4000 });
       } else {
-        setProgressText(`AI 连接失败：${data?.detail || "未知错误"}`);
+        setProgressText(t("app.aiTestFail", { msg: data?.detail || t("app.unknownError") }));
       }
     } catch (e) {
-      setProgressText(`AI 测试请求失败: ${e.response?.data?.detail || e.message}`);
+      setProgressText(t("app.aiTestRequestFail", { msg: e.response?.data?.detail || e.message }));
     }
-  }, [persistLlmConfig]);
+  }, [persistLlmConfig, t]);
 
   const fetchUpdateInfo = useCallback(async (opts = { force: false, manual: false }) => {
     try {
@@ -2277,7 +2278,7 @@ export default function App() {
     } catch {
       if (opts.manual) {
         setUpdateInfo({
-          error: "无法连接服务器",
+          error: t("app.updateConnectFail"),
           current_version: "",
           latest_version: null,
           update_available: false,
@@ -2289,7 +2290,7 @@ export default function App() {
         setUpdateModalOpen(true);
       }
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchUpdateInfo({ force: false, manual: false });
@@ -2495,8 +2496,8 @@ export default function App() {
                     <div className="absolute inset-0 animate-ping rounded-full bg-cs2-orange/20" />
                   </div>
                   <div className="flex flex-col items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight text-dynamic-white">等待后端连接...</h2>
-                    <p className="text-sm text-dynamic-zinc-400">正在启动本地分析引擎，请稍候</p>
+                    <h2 className="text-xl font-bold tracking-tight text-dynamic-white">{t("app.backendConnecting")}</h2>
+                    <p className="text-sm text-dynamic-zinc-400">{t("app.backendStarting")}</p>
                   </div>
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
                     <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
@@ -2533,7 +2534,7 @@ export default function App() {
           >
             <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
               <ProgressBar
-                text={progressText || (batchRecording ? "正在批量录制…" : "")}
+                text={progressText || (batchRecording ? t("app.batchRecording") : "")}
                 active={progressToastShowsBusy(progressText, {
                   parsing: anyDemoParsing,
                   loading: progressToastMeta?.loading === true,
@@ -2602,7 +2603,7 @@ export default function App() {
           open={updateModalOpen}
           info={updateInfo}
           manual={updateModalManual}
-          title={updateModalManual ? "检查更新" : "发现新版本"}
+          title={updateModalManual ? t("app.checkUpdate") : t("app.updateFound")}
           onClose={() => {
             setUpdateModalOpen(false);
             setUpdateModalManual(false);
