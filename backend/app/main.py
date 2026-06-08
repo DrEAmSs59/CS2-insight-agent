@@ -500,6 +500,7 @@ async def _run_library_demo_analyze(
     dem_path: str,
     target_players: list[str],
     freeze_to_death_rounds: Optional[list[int]] = None,
+    locale: str = "zh",
 ) -> dict:
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
@@ -552,7 +553,7 @@ async def _run_library_demo_analyze(
             if not clips or not isinstance(meta, dict):
                 return
             try:
-                pdata["clips"] = await enrich_clips_dicts_with_reviewer(clips, meta, cfg.llm)
+                pdata["clips"] = await enrich_clips_dicts_with_reviewer(clips, meta, cfg.llm, locale=locale)
             except Exception:
                 logger.exception(
                     "AI review failed for library demo_id=%s path=%s player=%s",
@@ -1301,6 +1302,7 @@ def obs_config_open_backup_folder():
 class ParseRequest(BaseModel):
     target_player: str
     freeze_to_death_rounds: Optional[list[int]] = None
+    locale: str = "zh"
 
 
 @app.post("/api/demo/upload")
@@ -1372,6 +1374,7 @@ async def parse_demo(req: ParseRequest, filename: str):
                 result.get("clips") or [],
                 result.get("match_meta") or {},
                 cfg.llm,
+                locale=req.locale,
             )
         except Exception as e:
             logging.error("AI review failed: %s", e)
@@ -1382,6 +1385,7 @@ async def parse_demo(req: ParseRequest, filename: str):
 class ParseMultiRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
     freeze_to_death_rounds: Optional[list[int]] = None
+    locale: str = "zh"
 
 
 @app.post("/api/demo/parse-multi")
@@ -1416,6 +1420,7 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
                     result.get("clips") or [],
                     result.get("match_meta") or {},
                     cfg.llm,
+                    locale=req.locale,
                 )
             except Exception as e:
                 logging.error("AI review failed for %s: %s", player, e)
@@ -1431,6 +1436,7 @@ class BatchParseRequest(BaseModel):
     target_player: str
     paths: list[str] = Field(..., min_length=1)
     freeze_to_death_rounds: Optional[list[int]] = None
+    locale: str = "zh"
 
 
 @app.post("/api/demo/parse-batch")
@@ -1476,6 +1482,7 @@ async def parse_demo_batch(req: BatchParseRequest):
                     response["clips"],
                     response["match_meta"],
                     cfg.llm,
+                    locale=req.locale,
                 )
             except Exception as e:
                 logging.error("AI review failed for %s: %s", dem_path.name, e)
@@ -1939,6 +1946,7 @@ async def reparse_demo(demo_id: int):
 class DemoAnalyzeRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
     freeze_to_death_rounds: Optional[list[int]] = None
+    locale: str = "zh"
 
 
 @app.get("/api/demos/{demo_id}/players")
@@ -1974,6 +1982,7 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
         dem_path,
         req.target_players,
         req.freeze_to_death_rounds,
+        locale=req.locale,
     )
     return {**out, "demo_filename": row["filename"]}
 

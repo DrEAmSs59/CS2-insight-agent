@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import API from "../api/api";
+import { useLocaleStore } from "../i18n/localeStore";
 import {
   X,
   Loader2,
@@ -147,6 +148,7 @@ export default function DemoInfoModal({
         const { data } = await API.post(`/demos/${demoId}/analyze`, {
           target_players: selectedPlayers,
           freeze_to_death_rounds: ftdPicked.length ? ftdPicked : null,
+          locale: useLocaleStore.getState().locale,
         });
       const playersOut = data.players || {};
       

@@ -49,6 +49,30 @@ comment：**中文一两句**，不超过 100 字（含标点），禁止换行�
 
 【禁止】人身攻击真实种族/性别/疾病。"""
 
+# ─── English prompt variants ────────────────────────────────────────────────
+
+REVIEWER_SYSTEM_PROMPT_EN = """You are a concise CS2 match analyst. For each "highlight" or "lowlight" clip, give a short, plain, objective comment. Do not use slang or memes.
+Return JSON with:
+- "score": integer 0-100 (highlight: 70-100; fail: 0-45; meme_death: 20-60).
+- "comment": a string of one or two plain English sentences, no more than 200 characters, no line breaks.
+Output exactly one line of valid JSON with only these two keys. No markdown, no extra text."""
+
+MEME_MONTAGE_SYSTEM_PROMPT_EN = """You are a concise CS2 match analyst. The task is an overall comment on a whole-match community-stat compilation (not a single round).
+Return JSON with:
+- "score": integer 0-100 representing overall entertainment / highlight value (suggest 15-55 for poor K/D).
+- "comment": one or two plain English sentences, no more than 200 characters, no line breaks.
+Output exactly one line of valid JSON with only these two keys. No markdown, no extra text."""
+
+
+def select_reviewer_prompt(locale: str) -> str:
+    """Return the appropriate reviewer system prompt for the given locale."""
+    return REVIEWER_SYSTEM_PROMPT_EN if locale == "en" else REVIEWER_SYSTEM_PROMPT
+
+
+def select_meme_montage_prompt(locale: str) -> str:
+    """Return the appropriate meme montage system prompt for the given locale."""
+    return MEME_MONTAGE_SYSTEM_PROMPT_EN if locale == "en" else MEME_MONTAGE_SYSTEM_PROMPT
+
 
 def _clip_payload_for_prompt(clip: Clip) -> str:
     parts = [
@@ -164,6 +188,7 @@ class AIReviewer:
         *,
         timeout_seconds: float = 40.0,
         max_concurrency: int = 6,
+        locale: str = "zh",
     ):
         key = (api_key or "").strip()
         if not key or key.startswith("****"):
@@ -173,9 +198,10 @@ class AIReviewer:
         self._model = (model_name or "").strip() or "gpt-4o-mini"
         self._timeout = timeout_seconds
         self._sem = asyncio.Semaphore(max(1, int(max_concurrency)))
+        self._locale = locale
 
     @classmethod
-    def from_llm_config(cls, llm: LLMConfig, **kwargs: Any) -> AIReviewer:
+    def from_llm_config(cls, llm: LLMConfig, *, locale: str = "zh", **kwargs: Any) -> AIReviewer:
         key = (llm.api_key or "").strip()
         if key.startswith("****"):
             raise ValueError("AIReviewer: invalid or masked api_key")
@@ -185,6 +211,7 @@ class AIReviewer:
             api_key=key,
             base_url=llm.base_url,
             model_name=llm.model,
+            locale=locale,
             **kwargs,
         )
 
@@ -194,7 +221,7 @@ class AIReviewer:
             resp = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
+                    {"role": "system", "content": select_reviewer_prompt(self._locale)},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.88,
@@ -262,7 +289,7 @@ class AIReviewer:
                     self._client.chat.completions.create(
                         model=self._model,
                         messages=[
-                            {"role": "system", "content": MEME_MONTAGE_SYSTEM_PROMPT},
+                            {"role": "system", "content": select_meme_montage_prompt(self._locale)},
                             {"role": "user", "content": user_content},
                         ],
                         temperature=0.9,
@@ -315,6 +342,7 @@ async def enrich_clips_dicts_with_reviewer(
     clips: list[dict],
     match_meta: dict,
     llm: LLMConfig,
+    locale: str = "zh",
 ) -> list[dict]:
     """供仍持有 dict 列表的路由使用：就地语义等价于 ``review_clips`` 后再序列化。"""
     if not clips:
@@ -322,6 +350,7 @@ async def enrich_clips_dicts_with_reviewer(
     try:
         reviewer = AIReviewer.from_llm_config(
             llm,
+            locale=locale,
             max_concurrency=int(os.environ.get("CS2_INSIGHT_AI_REVIEW_CONCURRENCY", "6")),
         )
     except ValueError as e:

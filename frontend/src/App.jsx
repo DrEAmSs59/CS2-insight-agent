@@ -20,6 +20,7 @@ import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
 import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
+import { useLocaleStore } from "./i18n/localeStore";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
   freezeToDeathDraftFromClipFilter,
@@ -1079,7 +1080,7 @@ export default function App() {
 
       try {
         const activeLibraryDemoId = libIds[idx] ?? demos[idx]?.id;
-        const body = { target_players: names };
+        const body = { target_players: names, locale: useLocaleStore.getState().locale };
         const ftdCfg = freezeToDeathRoundsByMatch[idx] ?? { picked: [] };
         const ftdPicked = [...(ftdCfg.picked || [])].sort((a, b) => a - b);
         // null = 后端按全部合规非赛后回合生成回合合集；[] 会显式跳过生成（见 demo_parser）
