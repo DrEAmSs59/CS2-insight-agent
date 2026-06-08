@@ -13,6 +13,7 @@ import {
   warmupUiOptsToPersisted,
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
+import { useT } from "../i18n/useT.js";
 
 /** 未写入配置时的展示用回退（与队列微调面板一致） */
 const FB_VIC_PRE = 1.5;
@@ -118,6 +119,7 @@ export default function CommonParamsModal({
   kbOverlayPosition: initKbOverlayPosition = "bottom_center",
   configRefreshKey = 0,
 }) {
+  const t = useT();
   const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
@@ -217,8 +219,9 @@ export default function CommonParamsModal({
     if (!onSaveAllCommonParams || saveState === "saving") return;
     const vr = validateWarmupResolution(warmupOpts);
     if (!vr.ok) {
-      setWarmupResolutionError(vr.message);
-      setSaveError(vr.message);
+      const msg = t(vr.messageKey, vr.messageParams);
+      setWarmupResolutionError(msg);
+      setSaveError(msg);
       return;
     }
     setWarmupResolutionError("");
@@ -243,6 +246,7 @@ export default function CommonParamsModal({
       setTimeout(() => setSaveState("idle"), 2000);
     }
   }, [
+    t,
     onSaveAllCommonParams,
     saveState,
     warmupOpts,
@@ -258,6 +262,35 @@ export default function CommonParamsModal({
     povEnabled,
   ]);
 
+  const resSummaryRaw = formatResolutionSummary(
+    warmupOpts.aspect_ratio,
+    warmupOpts.resolution_width,
+    warmupOpts.resolution_height,
+  );
+  const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
+
+  const VF_OPTIONS = [
+    { value: "open",  labelKey: "record.warmupVoiceOpen",  code: "tv_listen_voice_indices -1",     descKey: "record.warmupVoiceOpenDesc" },
+    { value: "team",  labelKey: "record.warmupVoiceTeam",  code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceTeamDesc" },
+    { value: "enemy", labelKey: "record.warmupVoiceEnemy", code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceEnemyDesc" },
+    { value: "mute",  labelKey: "record.warmupVoiceMute",  code: "snd_voipvolume 0",              descKey: "record.warmupVoiceMuteDesc" },
+  ];
+
+  const KB_POSITIONS = [
+    { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
+    { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
+    { value: "weapon_right",  labelKey: "record.warmupKbPosWeaponRight" },
+  ];
+
+  const AR_TAGS = [
+    { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
+    { ar: "16:9",  sample: "1920×1080", tagKey: "record.arTag169" },
+    { ar: "16:10", sample: "1920×1200", tagKey: "record.arTag1610" },
+  ];
+
+  const vf = warmupOpts.voice_filter ?? "mute";
+  const selectedVf = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
+
   const saveButton = onSaveAllCommonParams ? (
     <button
       type="button"
@@ -270,7 +303,11 @@ export default function CommonParamsModal({
       ) : (
         <Save className="h-4 w-4" aria-hidden />
       )}
-      {saveState === "saving" ? "保存中…" : saveState === "saved" ? "已保存" : "保存到配置文件"}
+      {saveState === "saving"
+        ? t("record.commonSaving")
+        : saveState === "saved"
+        ? t("record.commonSaved")
+        : t("record.commonSaveBtn")}
     </button>
   ) : null;
 
@@ -291,16 +328,10 @@ export default function CommonParamsModal({
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-cs2-border px-4 py-4 sm:px-5">
           <div className="min-w-0 pr-2">
             <h2 id="common-params-title" className="text-base font-bold text-cs2-text-primary">
-              录制行为控制台
+              {t("record.commonTitle")}
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-cs2-text-muted">
-              在此定义<strong className="text-cs2-text-secondary">全局录制节奏</strong>、
-              <strong className="text-cs2-text-secondary">默认镜头逻辑</strong>与
-              <strong className="text-cs2-text-secondary">预热阶段画面规则</strong>。修改后请点击
-              <strong className="text-cs2-text-secondary">「保存到配置文件」</strong>写入{" "}
-              <span className="font-mono text-cs2-text-secondary">data/cs2-insight.config.json</span>
-              ；节奏与入队默认视角影响<strong className="text-cs2-text-secondary">之后新加入队列</strong>
-              的片段，预热选项在批量录制确认时作为默认值。
+              {t("record.commonSubtitle")}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -310,7 +341,7 @@ export default function CommonParamsModal({
                 type="button"
                 onClick={onClose}
                 className="rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input hover:text-cs2-text-secondary"
-                aria-label="关闭"
+                aria-label={t("record.commonArClose")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -325,13 +356,13 @@ export default function CommonParamsModal({
               <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
-            title="时间与多段节奏"
-            subtitle="成片击杀段前/击杀段后预留、跳剪间隔阈值与全局节奏重置；决定导出片的时间结构。"
+            title={t("record.commonSecPacing")}
+            subtitle={t("record.commonSecPacingSubtitle")}
             defaultOpen
           >
             <div className="mb-5 overflow-hidden rounded-lg border border-cs2-border bg-cs2-surface-1 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-                片段时间流
+                {t("record.commonPacingStripTitle")}
               </p>
               <div className="mb-2 flex min-h-[3rem] w-full overflow-hidden rounded-md">
                 <div
@@ -339,7 +370,7 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center border-r border-cs2-border-subtle bg-gradient-to-br from-cs2-accent/35 to-cs2-accent/10 px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
-                    击杀段前预留
+                    {t("record.commonPacingPreLabel")}
                   </span>
                   <span className="font-mono text-xs text-cs2-text-primary">{pre}s</span>
                 </div>
@@ -348,10 +379,10 @@ export default function CommonParamsModal({
                   className="flex min-w-[5.5rem] flex-col items-center justify-center border-r border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-center"
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                    精彩片段
+                    {t("record.commonPacingCore")}
                   </span>
                   <span className="mt-0.5 text-[10px] leading-snug text-cs2-text-muted">
-                    解析得到的击杀 / 高光主体段
+                    {t("record.commonPacingCoreDesc")}
                   </span>
                 </div>
                 <div
@@ -359,19 +390,19 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center bg-gradient-to-bl from-cyan-500/25 to-cyan-500/5 px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
-                    击杀段后预留
+                    {t("record.commonPacingPostLabel")}
                   </span>
                   <span className="font-mono text-xs text-cs2-text-primary">{post}s</span>
                 </div>
               </div>
               <p className="text-[10px] leading-relaxed text-cs2-text-muted">
-                左段为击杀段前预留、右段为击杀段后预留；中间为解析得到的高光主体（时长由片段本身决定）。左值为每段首杀前回拨，右值为每段末杀后收束（非每个击杀各加一段尾垫）；智能跳剪各段一致。
+                {t("record.commonPacingStripHint")}
               </p>
             </div>
 
             <div className="mb-4 grid gap-4 sm:grid-cols-2">
               <PacingSlider
-                label="击杀段前预留 (秒)"
+                label={t("record.commonPacingPreSlider")}
                 min={0}
                 max={20}
                 step={0.1}
@@ -380,7 +411,7 @@ export default function CommonParamsModal({
                 onCommit={(n) => commitPacingNumbers({ pre_first_sec: n })}
               />
               <PacingSlider
-                label="击杀段后预留 (秒)"
+                label={t("record.commonPacingPostSlider")}
                 min={0}
                 max={10}
                 step={0.1}
@@ -392,7 +423,7 @@ export default function CommonParamsModal({
 
             <div className="rounded-lg border border-amber-500/15 bg-cs2-amber-surface px-3 py-3">
               <PacingSlider
-                label="跳剪间隔阈值 (秒) — 相邻击杀间隔小于该值时合并为同一段成片"
+                label={t("record.commonPacingGapSlider")}
                 min={2}
                 max={70}
                 step={0.5}
@@ -402,7 +433,7 @@ export default function CommonParamsModal({
                 accentClass="accent-amber-500"
               />
               <p className="mt-2 text-xs text-cs2-text-muted">
-                成片预期：间隔极短的连续击杀更适合连成一段，避免频繁硬切；阈值越大合并越积极。
+                {t("record.commonPacingGapHint")}
               </p>
             </div>
 
@@ -412,22 +443,22 @@ export default function CommonParamsModal({
               onClick={() => resetNumericGlobalPacing()}
               className="mt-4 text-xs text-cs2-text-muted hover:text-cs2-text-secondary disabled:opacity-40"
             >
-              恢复数值类节奏为后端内置默认（保留入队默认视角与 POV 时序默认值）
+              {t("record.commonPacingResetBtn")}
             </button>
           </WorkflowSection>
 
           {/* A2 镜头与 POV */}
           <WorkflowSection
-            title="镜头与 POV"
-            subtitle="受害者 / 击杀者追加视角、FOV 与持枪模型、实验性 POV；入队默认与解析名单类型相关。"
+            title={t("record.commonSecCamera")}
+            subtitle={t("record.commonSecCameraSubtitle")}
             defaultOpen
             accentClass="ring-1 ring-cs2-border-subtle"
           >
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border-l-4 border-cyan-500/55 bg-cs2-surface-1 p-4">
-                <p className="text-xs font-bold text-cs2-cyan-on-surface">受害者镜头</p>
+                <p className="text-xs font-bold text-cs2-cyan-on-surface">{t("record.commonVictimPovTitle")}</p>
                 <p className="mt-0.5 text-xs text-cs2-text-muted">
-                  击杀前 / 死亡后停留，形成「先看你被杀」的镜头切换逻辑。
+                  {t("record.commonVictimPovDesc")}
                 </p>
                 <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2.5">
                   <input
@@ -438,17 +469,17 @@ export default function CommonParamsModal({
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cyan-500 disabled:opacity-40"
                   />
                   <span className="text-xs leading-snug text-cs2-text-secondary">
-                    新入队片段默认开启「追加受害者视角」（高光 / 合集高光等适用）
+                    {t("record.commonVictimPovCheckbox")}
                   </span>
                 </label>
                 {globalPacing.default_victim_pov ? (
                   <p className="mt-2 text-xs leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：适用片段在击杀后会短暂切到受害者 POV，突出「被击杀瞬间」。
+                    {t("record.commonVictimPovOutcome")}
                   </p>
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="回看前停留 (秒)"
+                    label={t("record.commonPovPreSlider")}
                     min={0}
                     max={5}
                     step={0.1}
@@ -458,7 +489,7 @@ export default function CommonParamsModal({
                     accentClass="accent-cyan-500"
                   />
                   <PacingSlider
-                    label="死亡后停留 (秒)"
+                    label={t("record.commonPovPostSlider")}
                     min={0}
                     max={5}
                     step={0.1}
@@ -471,9 +502,9 @@ export default function CommonParamsModal({
               </div>
 
               <div className="rounded-xl border-l-4 border-amber-500/55 bg-cs2-surface-1 p-4">
-                <p className="text-xs font-bold text-cs2-amber-on-surface">击杀者镜头</p>
+                <p className="text-xs font-bold text-cs2-amber-on-surface">{t("record.commonKillerPovTitle")}</p>
                 <p className="mt-0.5 text-xs text-cs2-text-muted">
-                  击杀前 / 击杀后停留，与受害者侧对照，形成「谁在动手」的镜头叙事。
+                  {t("record.commonKillerPovDesc")}
                 </p>
                 <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2.5">
                   <input
@@ -484,17 +515,17 @@ export default function CommonParamsModal({
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-amber-500 disabled:opacity-40"
                   />
                   <span className="text-xs leading-snug text-cs2-text-secondary">
-                    新入队片段默认开启「追加击杀者视角」（死亡合集 / 带击杀者的失误等适用）
+                    {t("record.commonKillerPovCheckbox")}
                   </span>
                 </label>
                 {globalPacing.default_killer_pov ? (
                   <p className="mt-2 text-xs leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：适用片段会插入击杀者视角段，强调击杀发起方。
+                    {t("record.commonKillerPovOutcome")}
                   </p>
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="回看前停留 (秒)"
+                    label={t("record.commonPovPreSlider")}
                     min={0}
                     max={5}
                     step={0.1}
@@ -504,7 +535,7 @@ export default function CommonParamsModal({
                     accentClass="accent-amber-500"
                   />
                   <PacingSlider
-                    label="死亡后停留 (秒)"
+                    label={t("record.commonPovPostSlider")}
                     min={0}
                     max={5}
                     step={0.1}
@@ -519,21 +550,24 @@ export default function CommonParamsModal({
 
             <div className="my-5 border-t border-cs2-border" />
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              视野、持枪与实验性 POV
+              {t("record.commonSecFovPov")}
             </p>
             <div className="mb-5 rounded-xl border border-amber-500/30 bg-gradient-to-br from-cs2-surface-1 to-cs2-surface-2 p-4 shadow-md">
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
-                  实验性
+                  {t("record.commonExpBadge")}
                 </span>
-                <h4 className="text-sm font-bold text-cs2-text-primary">实验功能：POV HUD</h4>
+                <h4 className="text-sm font-bold text-cs2-text-primary">{t("record.commonExpTitle")}</h4>
               </div>
               <p className="mb-1 text-xs leading-relaxed text-cs2-amber-on-surface/90">
-                影响说明：启用后以更接近真实第一人称的 HUD 资源录制本地 Demo，与普通观战 HUD 管线不同。
+                {t("record.commonExpDesc")}
               </p>
               <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
-                当前状态：{povEnabled ? "已启用 POV 特殊录制模式" : "未启用（使用标准观战 HUD 管线）"}
-                。兼容性：需本地 Demo、临时改写 gameinfo 与 pov.vpk，仅用于离线回放；勿连接联机服务器。
+                {t("record.commonExpStatus", {
+                  status: povEnabled
+                    ? t("record.commonExpStatusOn")
+                    : t("record.commonExpStatusOff"),
+                })}
               </p>
               <ExperimentalPovSection
                 visible={open || isPage}
@@ -550,7 +584,7 @@ export default function CommonParamsModal({
             </div>
 
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              基础镜头参数
+              {t("record.commonSecBasicCamera")}
             </p>
             <div className="space-y-4">
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-3">
@@ -562,7 +596,7 @@ export default function CommonParamsModal({
                     className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
                   />
                   <span className="text-sm text-cs2-text-primary">
-                    应用 FOV（<code className="text-xs text-cs2-accent">fov_cs_debug</code>）
+                    {t("record.warmupFovLabel")}
                   </span>
                 </label>
                 <div className="mt-2 flex items-center gap-2 pl-7">
@@ -582,23 +616,23 @@ export default function CommonParamsModal({
                     disabled={!warmupOpts.apply_fov}
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
-                  <span className="text-xs text-cs2-text-muted">默认 90</span>
+                  <span className="text-xs text-cs2-text-muted">{t("record.commonFovDefault")}</span>
                 </div>
                 {warmupOpts.apply_fov ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感，影响狙击枪的缩放效果。
+                    {t("record.commonFovOutcome")}
                   </p>
                 ) : null}
               </div>
               <OptionRow
                 checked={warmupOpts.viewmodel_fov_68}
                 onChange={(v) => patchWarmup({ viewmodel_fov_68: v })}
-                title="开启极限持枪视角"
+                title={t("record.warmupViewmodelTitle")}
                 code="viewmodel_fov 68"
               />
               {warmupOpts.viewmodel_fov_68 ? (
                 <p className="-mt-1 ml-1 text-xs leading-relaxed text-emerald-400/85">
-                  成片预期：手臂与枪械模型更贴近画面边缘，竞技剪辑常见「拉伸持枪」观感。
+                  {t("record.commonViewmodelOutcome")}
                 </p>
               ) : null}
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-3">
@@ -617,8 +651,7 @@ export default function CommonParamsModal({
                     className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
                   />
                   <span className="text-sm text-cs2-text-primary">
-                    调整闪光弹亮度（
-                    <code className="text-xs text-cs2-accent">r_spectator_flashbang_opacity</code>）
+                    {t("record.warmupFlashLabel")}
                   </span>
                 </label>
                 <div className="mt-2 flex items-center gap-2 pl-7">
@@ -642,15 +675,15 @@ export default function CommonParamsModal({
                     }
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
-                  <span className="text-xs text-cs2-text-muted">0.2–1.0，默认 0.6</span>
+                  <span className="text-xs text-cs2-text-muted">{t("record.commonFlashRange")}</span>
                 </div>
                 {povEnabled ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-amber-on-surface">
-                    已启用 POV HUD：录制时将强制注入亮度 1.0，更接近实战第一人称观感。
+                    {t("record.commonFlashPovActive")}
                   </p>
                 ) : warmupOpts.apply_spectator_flashbang_opacity ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-xs leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：数值越低闪光致盲越弱，越高越接近游戏实战白屏强度。
+                    {t("record.commonFlashOutcome")}
                   </p>
                 ) : null}
               </div>
@@ -660,8 +693,8 @@ export default function CommonParamsModal({
             </div>
             <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
               <WorkflowSection
-                title="OBS 转场"
-                subtitle="切换视角之间的转场效果。"
+                title={t("record.commonSecObs")}
+                subtitle={t("record.commonSecObsSubtitle")}
                 defaultOpen
               >
                 <div className="space-y-4">
@@ -672,25 +705,25 @@ export default function CommonParamsModal({
                       onChange={(e) => setObsTransEnabled(e.target.checked)}
                       className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
                     />
-                    <span className="text-sm text-cs2-text-primary">启用黑场渐入渐出</span>
+                    <span className="text-sm text-cs2-text-primary">{t("record.warmupObsEnable")}</span>
                   </label>
 
                   <label className="block text-xs font-medium text-cs2-text-secondary">
-                    转场样式
+                    {t("record.warmupSecObs")}
                     <select
                       value={obsTransName}
                       onChange={(e) => setObsTransName(e.target.value)}
                       disabled={!obsTransEnabled}
                       className="mt-1 block w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary disabled:opacity-40"
                     >
-                      <option value="Fade">淡入淡出</option>
-                      <option value="Cut">直切</option>
-                      <option value="Swipe">滑动</option>
+                      <option value="Fade">{t("record.warmupObsFade")}</option>
+                      <option value="Cut">{t("record.warmupObsCut")}</option>
+                      <option value="Swipe">{t("record.warmupObsSwipe")}</option>
                     </select>
                   </label>
 
                   <label className="block text-xs font-medium text-cs2-text-secondary">
-                    时长（ms）
+                    ms
                     <input
                       type="number"
                       min={0}
@@ -706,8 +739,8 @@ export default function CommonParamsModal({
               </WorkflowSection>
 
               <WorkflowSection
-                title="虚拟键盘 Overlay"
-                subtitle="在 OBS Browser Source 实时显示玩家按键状态，与画面同步录入。"
+                title={t("record.commonSecKb")}
+                subtitle={t("record.commonSecKbSubtitle")}
                 defaultOpen
               >
                 <label className="flex cursor-pointer items-center gap-3">
@@ -717,21 +750,16 @@ export default function CommonParamsModal({
                     onChange={(e) => setKbOverlayEnabled(e.target.checked)}
                     className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
                   />
-                  <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
+                  <span className="text-sm text-cs2-text-primary">{t("record.warmupKbEnable")}</span>
                 </label>
                 <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                    开启后可在成片画面中显示按键状态（以默认键位显示前进/后退/左移/右移、跳、蹲、鼠标左右键、更换弹匣）。
-                    录制开始前会预构建按键数据，片段较多或时长较长时可能需要等待数十秒。
+                  {t("record.commonKbDesc")}
                 </p>
                 {kbOverlayEnabled && (
                   <div className="mt-3 pl-7 flex flex-col gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">显示位置</span>
-                      {[
-                        { value: "bottom_center", label: "画面底部居中" },
-                        { value: "minimap_below", label: "左侧小地图下方" },
-                        { value: "weapon_right", label: "右侧武器栏上方" },
-                      ].map(({ value, label }) => (
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
+                      {KB_POSITIONS.map(({ value, labelKey }) => (
                         <label key={value} className="flex items-center gap-1.5 cursor-pointer">
                           <input
                             type="radio"
@@ -741,12 +769,12 @@ export default function CommonParamsModal({
                             onChange={() => setKbOverlayPosition(value)}
                             className="accent-cs2-orange"
                           />
-                          <span className="text-xs text-cs2-text-primary">{label}</span>
+                          <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
                         </label>
                       ))}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
                       <input
                         type="number"
                         value={kbOverlayTickOffset}
@@ -765,92 +793,92 @@ export default function CommonParamsModal({
                         className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
                       />
                       <span className="text-xs text-cs2-text-muted tabular-nums">
-                        ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? "（提前）" : Number(kbOverlayTickOffset) < 0 ? "（延后）" : "（无补偿）"}
+                        ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
                       </span>
                     </div>
                     <p className="text-xs text-cs2-text-muted leading-relaxed">
-                      按键显示与画面可能存在偏差，不同机器表现不同，可手动微调。正值提前显示、负值延后显示。
+                      {t("record.commonKbSyncHint")}
                     </p>
                   </div>
                 )}
               </WorkflowSection>
 
               <WorkflowSection
-                title="观战画面与调试"
-                subtitle="HUD / UI、Demo 调试条与 X 光；决定采集画面与预热注入内容。"
+                title={t("record.commonSecVisuals")}
+                subtitle={t("record.commonSecVisualsSubtitle")}
                 defaultOpen
               >
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  录制画面效果
+                  {t("record.commonVisualsSection")}
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <RecordingHudCard
-                    title="简化观战 HUD"
+                    title={t("record.hudSimplifyTitle")}
                     code="cl_draw_only_deathnotices true"
-                    description="仅保留击杀公告等核心提示，弱化其余观战 UI。"
+                    description={t("record.hudSimplifyDesc")}
                     checked={warmupOpts.cl_draw_only_deathnotices}
                     onChange={(v) => patchWarmup({ cl_draw_only_deathnotices: v })}
-                    outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
+                    outcomeOn={t("record.hudSimplifyOutcome")}
                     disabled={!!povEnabled}
                     disabledReason={POV_CONFLICT_HUD}
                   />
                   <RecordingHudCard
-                    title="隐藏准星目标信息"
+                    title={t("record.hudHideTargetTitle")}
                     code="hud_showtargetid 0"
-                    description="准星指向玩家时不再弹出名称与血量提示。"
+                    description={t("record.hudHideTargetDesc")}
                     checked={warmupOpts.hud_showtargetid_hide}
                     onChange={(v) => patchWarmup({ hud_showtargetid_hide: v })}
-                    outcomeOn="最终画面中不出现准星下的 ID / 血量条提示。"
+                    outcomeOn={t("record.hudHideTargetOutcome")}
                   />
                   <RecordingHudCard
-                    title="屏蔽文字聊天"
+                    title={t("record.hudNoChatTitle")}
                     code="tv_nochat 1"
-                    description="隐藏观战文字聊天区域。"
+                    description={t("record.hudNoChatDesc")}
                     checked={warmupOpts.tv_nochat}
                     onChange={(v) => patchWarmup({ tv_nochat: v })}
-                    outcomeOn="导出视频中不显示文字聊天栏。"
+                    outcomeOn={t("record.hudNoChatOutcome")}
                   />
                   <RecordingHudCard
-                    title="隐藏投掷物轨迹与画中窗"
+                    title={t("record.hudHideGrenadeTitle")}
                     code="sv_grenade_trajectory 0; …"
-                    description="关闭投掷物轨迹、练习画中窗与时间轴。"
+                    description={t("record.hudHideGrenadeDesc")}
                     checked={warmupOpts.hide_grenade_trajectory_pip}
                     onChange={(v) => patchWarmup({ hide_grenade_trajectory_pip: v })}
-                    outcomeOn="画面中不出现投掷物轨迹线与辅助画中窗。"
+                    outcomeOn={t("record.hudHideGrenadeOutcome")}
                   />
                 </div>
 
                 <div className="my-5 border-t border-cs2-border" />
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  Demo 条与透视
+                  {t("record.commonDemoSection")}
                 </p>
                 <div className="space-y-4">
                   <RecordingHudCard
-                    title="隐藏 Demo 进度条与回放控制条"
+                    title={t("record.hudHideDemoUiTitle")}
                     code="sv_cheats 1 → demoui false"
-                    description="预热阶段关闭 Demo UI 条，需临时开启作弊指令通道。"
+                    description={t("record.hudHideDemoUiDesc")}
                     checked={warmupOpts.hide_demo_playback_ui}
                     onChange={(v) => patchWarmup({ hide_demo_playback_ui: v })}
-                    outcomeOn="回放进度条与控制台 Demo 控制条不会出现在采集画面中。"
+                    outcomeOn={t("record.hudHideDemoUiOutcome")}
                   />
                   <RecordingHudCard
-                    title="开启 X 光透视"
+                    title={t("record.hudXrayTitle")}
                     code="spec_show_xray 1 / 0"
-                    description="观战穿透显示轮廓（竞技裁判视角常用）。"
+                    description={t("record.hudXrayDesc")}
                     checked={warmupOpts.spec_show_xray}
                     onChange={(v) => patchWarmup({ spec_show_xray: v })}
-                    outcomeOn="墙后可透视敌方轮廓，成片更具「上帝视角」信息密度。"
+                    outcomeOn={t("record.hudXrayOutcome")}
                   />
                 </div>
               </WorkflowSection>
 
               <WorkflowSection
-                title="启动、音频与画布"
-                subtitle="命令行与预热控制台、语音静音与录制分辨率（-w / -h）。"
+                title={t("record.commonSecLaunch")}
+                subtitle={t("record.commonSecLaunchSubtitle")}
                 defaultOpen
               >
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  命令行与控制台
+                  {t("record.commonLaunchCmdLabel")}
                 </p>
                 <Cs2LaunchConsoleFields
                   cs2ExtraLaunchArgs={localCs2ExtraLaunchArgs}
@@ -861,17 +889,10 @@ export default function CommonParamsModal({
 
                 <div className="my-5 border-t border-cs2-border" />
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  采集与静音
+                  {t("record.commonCaptureLabel")}
                 </p>
             {(() => {
-              const vf = warmupOpts.voice_filter ?? "mute";
-              const VF_OPTIONS = [
-                { value: "open",  label: "所有玩家",    code: "tv_listen_voice_indices -1",     desc: "录制轨包含所有玩家语音。" },
-                { value: "team",  label: "第一视角我方", code: "tv_listen_voice_indices <mask>", desc: "只保留主角所在队伍的语音。" },
-                { value: "enemy", label: "第一视角敌方", code: "tv_listen_voice_indices <mask>", desc: "只保留对方队伍的语音。" },
-                { value: "mute",  label: "全部静音",    code: "snd_voipvolume 0",              desc: "录制轨不含任何玩家语音。" },
-              ];
-              const selected = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
+              const selectedVfLocal = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
               return (
                 <>
                   <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
@@ -886,20 +907,20 @@ export default function CommonParamsModal({
                             : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
                         }`}
                       >
-                        <p className="text-[11px] font-semibold text-cs2-text-primary">{opt.label}</p>
+                        <p className="text-[11px] font-semibold text-cs2-text-primary">{t(opt.labelKey)}</p>
                         <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
                       </button>
                     ))}
                   </div>
                   <p className={`mb-4 mt-1.5 ml-0.5 text-xs leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
-                    {selected.desc}
+                    {t(selectedVfLocal.descKey)}
                   </p>
                 </>
               );
             })()}
 
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              录制输出比例
+              {t("record.commonResSection")}
             </p>
             <div
               className={`rounded-xl border p-4 ${
@@ -909,11 +930,7 @@ export default function CommonParamsModal({
               }`}
             >
               <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                {[
-                  { ar: "4:3", sample: "1920×1440", tag: "赛事 / 复古构图" },
-                  { ar: "16:9", sample: "1920×1080", tag: "流媒体默认" },
-                  { ar: "16:10", sample: "1920×1200", tag: "宽屏显示器" },
-                ].map(({ ar, sample, tag }) => {
+                {AR_TAGS.map(({ ar, sample, tagKey }) => {
                   const selected = warmupOpts.aspect_ratio === ar;
                   return (
                     <button
@@ -928,7 +945,7 @@ export default function CommonParamsModal({
                     >
                       <p className="font-mono text-base font-bold text-cs2-text-primary">{ar}</p>
                       <p className="mt-1 font-mono text-xs text-cs2-text-secondary">{sample}</p>
-                      <p className="mt-0.5 text-xs text-cs2-text-muted">{tag}</p>
+                      <p className="mt-0.5 text-xs text-cs2-text-muted">{t(tagKey)}</p>
                     </button>
                   );
                 })}
@@ -936,14 +953,14 @@ export default function CommonParamsModal({
 
               <label className="mb-3 block">
                 <span className="mb-1 block text-xs text-cs2-text-muted">
-                  屏幕比例（与 -w / -h 联动校验）
+                  {t("record.warmupResAspectLabel")}
                 </span>
                 <select
                   value={warmupOpts.aspect_ratio}
                   onChange={(e) => patchWarmup({ aspect_ratio: e.target.value })}
                   className="w-full max-w-md rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
                 >
-                  <option value="">不填写启动分辨率</option>
+                  <option value="">{t("record.warmupResAspectNone")}</option>
                   <option value="4:3">4 : 3</option>
                   <option value="16:9">16 : 9</option>
                   <option value="16:10">16 : 10</option>
@@ -951,32 +968,28 @@ export default function CommonParamsModal({
               </label>
 
               <div className="mb-4 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input p-3">
-                <p className="text-xs uppercase tracking-wide text-cs2-text-muted">当前解析</p>
+                <p className="text-xs uppercase tracking-wide text-cs2-text-muted">{t("record.commonResCurrentLabel")}</p>
                 <p className="mt-1 text-sm text-cs2-text-primary font-medium">
-                  比例{" "}
+                  {t("record.commonResAspectPrefix")}{" "}
                   <span className="font-mono text-cs2-accent font-bold">
-                    {warmupOpts.aspect_ratio || "（未选）"}
+                    {warmupOpts.aspect_ratio || t("record.commonResAspectUnset")}
                   </span>
                   {" · "}
-                  分辨率{" "}
+                  {t("record.commonResValuePrefix")}{" "}
                   <span className="font-mono text-cs2-text-secondary">
-                    {formatResolutionSummary(
-                      warmupOpts.aspect_ratio,
-                      warmupOpts.resolution_width,
-                      warmupOpts.resolution_height
-                    )}
+                    {resSummaryDisplay}
                   </span>
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-cs2-text-muted">
-                  {aspectHint(warmupOpts.aspect_ratio)}
+                  {t(aspectHint(warmupOpts.aspect_ratio))}
                 </p>
                 <p className="mt-0.5 text-xs leading-relaxed text-cs2-text-muted">
-                  最终导出方向：{aspectExportHint(warmupOpts.aspect_ratio)}
+                  {t("record.commonResExportPrefix")}{t(aspectExportHint(warmupOpts.aspect_ratio))}
                 </p>
               </div>
 
               <p className="mb-2 text-xs text-cs2-text-secondary font-medium">
-                启动参数（可选，不填则为本机当前游戏分辨率）
+                {t("record.commonResLaunchParamsHint")}
               </p>
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className="font-mono text-xs font-semibold text-cs2-text-muted">-w</span>
@@ -1000,8 +1013,7 @@ export default function CommonParamsModal({
                 <p className="mt-2.5 text-xs leading-snug text-rose-400">{warmupResolutionError}</p>
               ) : (
                 <p className="mt-2.5 text-xs leading-relaxed text-cs2-text-muted">
-                  留空宽高则沿用当前分辨率；若填写宽高须选择比例且化简后须匹配（4:3 含游戏内同组的 5:4，如
-                  1280×1024）。
+                  {t("record.commonResLeaveBlankHint")}
                 </p>
               )}
             </div>
@@ -1019,7 +1031,7 @@ export default function CommonParamsModal({
               onClick={onClose}
               className="w-full rounded-lg bg-cs2-accent py-2 text-sm font-bold text-cs2-text-on-accent hover:brightness-110 sm:w-auto sm:px-6"
             >
-              完成
+              {t("record.commonDone")}
             </button>
           </div>
         ) : null}
@@ -1033,15 +1045,15 @@ export default function CommonParamsModal({
         <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-sm sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">录制参数配置</h1>
+              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">{t("record.commonPageTitle")}</h1>
               <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
-                录制时的常用参数设置，修改后请点击「保存到配置文件」。
+                {t("record.commonPageSubtitle")}
               </p>
               {saveError ? (
                 <p className="mt-2 text-xs leading-snug text-rose-400">{saveError}</p>
               ) : null}
               {!configReady ? (
-                <p className="mt-2 text-xs text-cs2-text-muted">正在加载配置…</p>
+                <p className="mt-2 text-xs text-cs2-text-muted">{t("record.commonLoadingConfig")}</p>
               ) : null}
             </div>
             <div className="flex shrink-0 items-center self-center">{saveButton}</div>

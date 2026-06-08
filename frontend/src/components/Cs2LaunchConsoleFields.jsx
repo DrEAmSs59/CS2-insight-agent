@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useT } from "../i18n/useT.js";
 
 /** 程序内置、始终生效、不可删除的启动参数（仅展示，不写配置）。 */
 const FIXED_LAUNCH_ARGS = [
@@ -82,6 +83,7 @@ export default function Cs2LaunchConsoleFields({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
 }) {
+  const t = useT();
   const [launchArgDraft, setLaunchArgDraft] = useState("");
   const [consoleLineDraft, setConsoleLineDraft] = useState("");
 
@@ -98,15 +100,15 @@ export default function Cs2LaunchConsoleFields({
   const consoleChips = useMemo(() => consoleChipsFromStored(recordInjectConsoleLines), [recordInjectConsoleLines]);
 
   const addLaunchChip = useCallback(() => {
-    const t = launchArgDraft.trim();
-    if (!t || !onCs2ExtraLaunchArgsChange) return;
+    const trimmed = launchArgDraft.trim();
+    if (!trimmed || !onCs2ExtraLaunchArgsChange) return;
     const cur = launchChipsFromStored(cs2ExtraLaunchArgs);
-    if (cur.includes(t)) {
+    if (cur.includes(trimmed)) {
       setLaunchArgDraft("");
       return;
     }
     if (cur.length >= 32) return;
-    onCs2ExtraLaunchArgsChange(storedFromLaunchChips([...cur, t]));
+    onCs2ExtraLaunchArgsChange(storedFromLaunchChips([...cur, trimmed]));
     setLaunchArgDraft("");
   }, [launchArgDraft, cs2ExtraLaunchArgs, onCs2ExtraLaunchArgsChange]);
 
@@ -120,11 +122,11 @@ export default function Cs2LaunchConsoleFields({
   );
 
   const addConsoleChip = useCallback(() => {
-    const t = consoleLineDraft.trim();
-    if (!t || !onRecordInjectConsoleLinesChange) return;
+    const trimmed = consoleLineDraft.trim();
+    if (!trimmed || !onRecordInjectConsoleLinesChange) return;
     const cur = consoleChipsFromStored(recordInjectConsoleLines);
     if (cur.length >= 60) return;
-    onRecordInjectConsoleLinesChange(storedFromConsoleChips([...cur, t]));
+    onRecordInjectConsoleLinesChange(storedFromConsoleChips([...cur, trimmed]));
     setConsoleLineDraft("");
   }, [consoleLineDraft, recordInjectConsoleLines, onRecordInjectConsoleLinesChange]);
 
@@ -141,13 +143,13 @@ export default function Cs2LaunchConsoleFields({
     <div className="space-y-4">
       <div className="min-w-0 space-y-2">
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
-          额外启动参数
+          {t("record.launchSectionLabel")}
         </label>
         <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
           {FIXED_LAUNCH_ARGS.map((line) => (
             <span
               key={`fixed-${line}`}
-              title="程序内置，始终生效，不可移除"
+              title={t("record.launchFixedArgTitle")}
               className="inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input/60 px-2 py-1 text-[11px] font-semibold text-cs2-text-muted"
             >
               <span aria-hidden className="shrink-0">🔒</span>
@@ -169,7 +171,7 @@ export default function Cs2LaunchConsoleFields({
                 <button
                   type="button"
                   className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
-                  aria-label={`移除启动项 ${line}`}
+                  aria-label={t("record.launchRemoveAriaLabel", { arg: line })}
                   onClick={() => removeLaunchChip(idx)}
                 >
                   ✕
@@ -182,22 +184,22 @@ export default function Cs2LaunchConsoleFields({
           draft={launchArgDraft}
           onDraftChange={setLaunchArgDraft}
           onAdd={addLaunchChip}
-          placeholder="输入一条启动参数后回车或点添加"
-          addLabel="＋ 添加启动项"
+          placeholder={t("record.launchInputPlaceholder")}
+          addLabel={t("record.launchAddBtn")}
           disabled={launchChips.length >= 32}
         />
         <p className="text-[11px] leading-relaxed text-cs2-text-muted">
-          🔒 前 5 条为程序内置启动项，始终生效、不可移除。其余与之合并；含空格请用英文双引号包在一整条里。最多 32 条；重复条目会自动忽略。
+          {t("record.launchHint")}
         </p>
       </div>
 
       <div className="min-w-0 space-y-2 border-t border-cs2-border pt-4">
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
-          附加预热控制台
+          {t("record.consoleSectionLabel")}
         </label>
         <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
           {consoleChips.length === 0 ? (
-            <span className="py-1 text-[12px] text-cs2-text-muted">尚未添加控制台行</span>
+            <span className="py-1 text-[12px] text-cs2-text-muted">{t("record.consoleEmpty")}</span>
           ) : (
             consoleChips.map((line, idx) => (
               <span
@@ -210,7 +212,7 @@ export default function Cs2LaunchConsoleFields({
                 <button
                   type="button"
                   className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
-                  aria-label={`移除指令 ${line}`}
+                  aria-label={t("record.consoleRemoveAriaLabel", { arg: line })}
                   onClick={() => removeConsoleChip(idx)}
                 >
                   ✕
@@ -223,12 +225,12 @@ export default function Cs2LaunchConsoleFields({
           draft={consoleLineDraft}
           onDraftChange={setConsoleLineDraft}
           onAdd={addConsoleChip}
-          placeholder="输入一条控制台指令后回车或点添加"
-          addLabel="＋ 添加指令"
+          placeholder={t("record.consoleInputPlaceholder")}
+          addLabel={t("record.consoleAddBtn")}
           disabled={consoleChips.length >= 60}
         />
         <p className="text-[11px] leading-relaxed text-cs2-text-muted">
-          默认已预填 5 条性能/预测 cvar，可自行增删。以 # 或 // 开头的行会计入列表但不算入下方统计。条数已合入底部统计（+{injectExtraCount}）。
+          {t("record.consoleHint", { n: injectExtraCount })}
         </p>
       </div>
     </div>

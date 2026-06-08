@@ -40,24 +40,25 @@ export function validateWarmupResolution(opts) {
   const rh = h ? parseInt(h, 10) : null;
 
   if ((rw != null && Number.isNaN(rw)) || (rh != null && Number.isNaN(rh))) {
-    return { ok: false, message: "分辨率请填写有效数字，或留空。" };
+    return { ok: false, messageKey: "record.validResolutionNaN" };
   }
   if ((rw != null && rw <= 0) || (rh != null && rh <= 0)) {
-    return { ok: false, message: "分辨率宽高须为正整数，或两者都留空。" };
+    return { ok: false, messageKey: "record.validResolutionPositive" };
   }
   if ((rw != null) !== (rh != null)) {
-    return { ok: false, message: "分辨率请同时填写宽度与高度，或都留空。" };
+    return { ok: false, messageKey: "record.validResolutionBothOrNone" };
   }
   if (ar && (rw == null || rh == null)) {
-    return { ok: false, message: "已选择屏幕比例时必须填写启动分辨率宽度与高度。" };
+    return { ok: false, messageKey: "record.validResolutionNeedsBothWhenAr" };
   }
   if (rw != null && rh != null && !ar) {
-    return { ok: false, message: "填写启动分辨率时必须选择屏幕比例（4:3 / 16:9 / 16:10）。" };
+    return { ok: false, messageKey: "record.validResolutionNeedsAr" };
   }
   if (rw != null && rh != null && ar && !resolutionMatchesAspect(rw, rh, ar)) {
     return {
       ok: false,
-      message: `分辨率 ${rw}×${rh} 与所选屏幕比例 ${ar} 不一致，请修正后再试。`,
+      messageKey: "record.validResolutionMismatch",
+      messageParams: { w: rw, h: rh, ar },
     };
   }
   return { ok: true };
@@ -166,31 +167,39 @@ export function warmupApiPayloadToPersisted(warmup) {
   };
 }
 
+/**
+ * Returns the formatted resolution string (e.g. "1920×1440") when both width and
+ * height are filled, or an i18n key string for the hint text otherwise.
+ * Callers should display the return value directly when it contains "×",
+ * or pass it through `t()` when it is a "record.*" key.
+ */
 export function formatResolutionSummary(aspectRatio, wStr, hStr) {
   const w = String(wStr || "").trim();
   const h = String(hStr || "").trim();
   if (w && h) return `${w}×${h}`;
   const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "示例 1920×1440（填写宽高后显示实际值）";
-  if (ar === "16:9") return "示例 1920×1080（填写宽高后显示实际值）";
-  if (ar === "16:10") return "示例 1920×1200（填写宽高后显示实际值）";
-  return "未指定输出分辨率";
+  if (ar === "4:3") return "record.resSummaryHint43";
+  if (ar === "16:9") return "record.resSummaryHint169";
+  if (ar === "16:10") return "record.resSummaryHint1610";
+  return "record.resSummaryNone";
 }
 
+/** Returns an i18n key for the aspect ratio hint. */
 export function aspectHint(aspectRatio) {
   const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "适合赛事复古构图，画面两侧黑边或拉伸策略取决于 OBS 场景";
-  if (ar === "16:9") return "适合主流视频平台全屏播放";
-  if (ar === "16:10") return "适合部分宽屏显示器满屏取景";
-  return "选择比例并填写宽高后，本次启动 CS2 将使用该画布录制";
+  if (ar === "4:3") return "record.aspectHint43";
+  if (ar === "16:9") return "record.aspectHint169";
+  if (ar === "16:10") return "record.aspectHint1610";
+  return "record.aspectHintNone";
 }
 
+/** Returns an i18n key for the aspect ratio export hint. */
 export function aspectExportHint(aspectRatio) {
   const ar = String(aspectRatio || "").trim();
-  if (ar === "4:3") return "横向成片偏「赛场转播」比例";
-  if (ar === "16:9") return "横向成片偏「流媒体的默认」方向";
-  if (ar === "16:10") return "横向成片略宽于 16:9 显示器常见比例";
-  return "由 OBS 场景与画布决定最终导出方向；此处为游戏内渲染分辨率";
+  if (ar === "4:3") return "record.aspectExportHint43";
+  if (ar === "16:9") return "record.aspectExportHint169";
+  if (ar === "16:10") return "record.aspectExportHint1610";
+  return "record.aspectExportHintNone";
 }
 
 /**

@@ -1,6 +1,7 @@
-/** POV 开启时与简化观战 HUD 的说明（常用参数与录制前观战共用） */
-export const POV_CONFLICT_HUD =
-  "POV HUD 已启用：观战 HUD 由 POV 资源接管，此项与简化 HUD 冲突，无法单独调节。";
+import { useT } from "../i18n/useT.js";
+
+/** i18n key for POV HUD conflict message (CommonParamsModal and RecordWarmupModal). */
+export const POV_CONFLICT_HUD = "record.hudPovConflict";
 
 /** 录制画面效果：名称 / 指令 / 开关 / 说明 / 启用后的成片预期 */
 export function RecordingHudCard({
@@ -13,9 +14,11 @@ export function RecordingHudCard({
   disabled = false,
   disabledReason,
 }) {
+  const t = useT();
+  const disabledMsg = disabledReason ? t(disabledReason) : undefined;
   return (
     <div
-      title={disabled ? disabledReason : undefined}
+      title={disabled ? disabledMsg : undefined}
       className={`flex flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/50 p-4 ${
         disabled ? "opacity-45" : ""
       }`}
@@ -39,11 +42,11 @@ export function RecordingHudCard({
       </div>
       {checked && !disabled && outcomeOn ? (
         <p className="mt-3 border-t border-cs2-border pt-2.5 text-[11px] leading-relaxed text-emerald-400/95">
-          成片预期：{outcomeOn}
+          {t("record.outcomePrefix")}{outcomeOn}
         </p>
       ) : null}
       {disabled ? (
-        <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{disabledReason}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{disabledMsg}</p>
       ) : null}
     </div>
   );

@@ -11,6 +11,7 @@ import {
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import Cs2LaunchConsoleFields, { countInjectConsoleLines } from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
+import { useT } from "../i18n/useT.js";
 
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
 export function buildWarmupConsoleCommands(o) {
@@ -107,9 +108,10 @@ export function SectionHeader({ en, zh }) {
 }
 
 export function OptionRow({ checked, onChange, title, code, disabled = false, disabledReason }) {
+  const t = useT();
   return (
     <label
-      title={disabled ? disabledReason : undefined}
+      title={disabled && disabledReason ? t(disabledReason) : undefined}
       className={`flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5 transition-colors ${
         disabled
           ? "cursor-not-allowed opacity-45"
@@ -153,6 +155,7 @@ export default function RecordWarmupModal({
   initKbOverlayTickOffset = 6,
   initKbOverlayPosition = "bottom_center",
 }) {
+  const t = useT();
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
   const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
@@ -207,12 +210,12 @@ export default function RecordWarmupModal({
 
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       const vr = validateWarmupResolution(opts);
-      setResolutionError(vr.ok ? "" : vr.message);
+      setResolutionError(vr.ok ? "" : t(vr.messageKey, vr.messageParams));
     }, 400);
-    return () => clearTimeout(t);
-  }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height]);
+    return () => clearTimeout(timer);
+  }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height, t]);
 
   const injectExtraCount = useMemo(
     () => countInjectConsoleLines(sessionRecordInjectConsoleLines),
@@ -235,7 +238,7 @@ export default function RecordWarmupModal({
   const handleSubmit = () => {
     const vr = validateWarmupResolution(opts);
     if (!vr.ok) {
-      setResolutionError(vr.message);
+      setResolutionError(t(vr.messageKey, vr.messageParams));
       return;
     }
 
@@ -289,6 +292,36 @@ export default function RecordWarmupModal({
 
   if (!open) return null;
 
+  const resSummaryRaw = formatResolutionSummary(
+    opts.aspect_ratio,
+    opts.resolution_width,
+    opts.resolution_height,
+  );
+  // formatResolutionSummary returns a "record.*" key when no actual resolution is set
+  const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
+
+  const VF_OPTIONS = [
+    { value: "open",  labelKey: "record.warmupVoiceOpen",  code: "tv_listen_voice_indices -1",     descKey: "record.warmupVoiceOpenDesc" },
+    { value: "team",  labelKey: "record.warmupVoiceTeam",  code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceTeamDesc" },
+    { value: "enemy", labelKey: "record.warmupVoiceEnemy", code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceEnemyDesc" },
+    { value: "mute",  labelKey: "record.warmupVoiceMute",  code: "snd_voipvolume 0",              descKey: "record.warmupVoiceMuteDesc" },
+  ];
+
+  const KB_POSITIONS = [
+    { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
+    { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
+    { value: "weapon_right",  labelKey: "record.warmupKbPosWeaponRight" },
+  ];
+
+  const AR_TAGS = [
+    { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
+    { ar: "16:9",  sample: "1920×1080", tagKey: "record.arTag169" },
+    { ar: "16:10", sample: "1920×1200", tagKey: "record.arTag1610" },
+  ];
+
+  const vf = opts.voice_filter ?? "mute";
+  const selectedVf = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
@@ -304,30 +337,26 @@ export default function RecordWarmupModal({
           type="button"
           onClick={onClose}
           className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
-          aria-label="关闭"
+          aria-label={t("record.warmupArClose")}
         >
           <X className="h-4 w-4" />
         </button>
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-6 pb-4 @container/params">
         <h2 id="record-warmup-title" className="mb-1 pr-8 text-lg font-bold tracking-tight text-cs2-text-primary">
-          录制前观战选项
+          {t("record.warmupTitle")}
         </h2>
         <p className="mb-5 text-xs leading-relaxed text-cs2-text-muted">
-          以下命令在首次跳转 tick 前的<strong className="text-cs2-text-secondary">预热阶段</strong>
-          注入（与空格预热同批控制台）。隐藏 Demo 条需 <code className="text-cs2-accent/90">sv_cheats 1</code>{" "}
-          与 <code className="text-cs2-accent/90">demoui false</code>（启动已带 <code className="text-cs2-text-muted">-insecure</code>
-          ）。分辨率以 <code className="text-cs2-accent/90">-w</code> / <code className="text-cs2-accent/90">-h</code>{" "}
-          附加到本次 CS2 进程。
+          <strong className="text-cs2-text-secondary">{t("record.warmupIntro")}</strong>
           <span className="mt-1 block text-cs2-text-muted">
-            默认选项来自「常用参数」；此处修改仅作用于本次录制，不会写入配置文件。
+            {t("record.warmupIntroPersistNote")}
           </span>
         </p>
 
         <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
           <div className="min-w-0 space-y-4">
           <section aria-labelledby="sec-obs-fade">
-            <SectionHeader en="OBS Transition" zh="OBS 转场" />
+            <SectionHeader en="OBS Transition" zh={t("record.warmupSecObs")} />
             <div id="sec-obs-fade" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
               <label className="flex cursor-pointer items-center gap-3">
                 <input
@@ -347,10 +376,10 @@ export default function RecordWarmupModal({
                   }}
                   className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
                 />
-                <span className="text-sm text-cs2-text-primary">启用黑场渐入渐出</span>
+                <span className="text-sm text-cs2-text-primary">{t("record.warmupObsEnable")}</span>
               </label>
               <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                切换视角之间的转场效果。
+                {t("record.warmupObsDesc")}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
                 <select
@@ -359,9 +388,9 @@ export default function RecordWarmupModal({
                   disabled={obsTransEnabled !== true}
                   className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-sm text-cs2-text-primary disabled:opacity-40"
                 >
-                  <option value="Fade">淡入淡出</option>
-                  <option value="Cut">直切</option>
-                  <option value="Swipe">滑动</option>
+                  <option value="Fade">{t("record.warmupObsFade")}</option>
+                  <option value="Cut">{t("record.warmupObsCut")}</option>
+                  <option value="Swipe">{t("record.warmupObsSwipe")}</option>
                 </select>
                 <input
                   type="number"
@@ -382,7 +411,7 @@ export default function RecordWarmupModal({
           </section>
 
           <section aria-labelledby="sec-kb-overlay">
-            <SectionHeader en="Keyboard Overlay" zh="虚拟键盘 Overlay" />
+            <SectionHeader en="Keyboard Overlay" zh={t("record.warmupSecKb")} />
             <div id="sec-kb-overlay" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
               <label className="flex cursor-pointer items-center gap-3">
                 <input
@@ -391,21 +420,16 @@ export default function RecordWarmupModal({
                   onChange={(e) => setKbOverlayEnabled(e.target.checked)}
                   className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
                 />
-                <span className="text-sm text-cs2-text-primary">启用虚拟键盘 Overlay</span>
+                <span className="text-sm text-cs2-text-primary">{t("record.warmupKbEnable")}</span>
               </label>
               <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                  开启后可在成片画面中显示按键状态（以默认键位显示前进/后退/左移/右移、跳、蹲、鼠标左右键、更换弹匣）。
-                  录制开始前会预构建按键数据，片段较多或时长较长时可能需要等待数十秒。
+                {t("record.warmupKbDesc")}
               </p>
               {kbOverlayEnabled && (
                 <div className="mt-3 pl-7 flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">显示位置</span>
-                    {[
-                      { value: "bottom_center", label: "画面底部居中" },
-                      { value: "minimap_below", label: "左侧小地图下方" },
-                      { value: "weapon_right", label: "右侧武器栏上方" },
-                    ].map(({ value, label }) => (
+                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
+                    {KB_POSITIONS.map(({ value, labelKey }) => (
                       <label key={value} className="flex items-center gap-1.5 cursor-pointer">
                         <input
                           type="radio"
@@ -415,12 +439,12 @@ export default function RecordWarmupModal({
                           onChange={() => setKbOverlayPosition(value)}
                           className="accent-cs2-orange"
                         />
-                        <span className="text-xs text-cs2-text-primary">{label}</span>
+                        <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
                       </label>
                     ))}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">同步微调</span>
+                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
                     <input
                       type="number"
                       value={kbOverlayTickOffset}
@@ -439,11 +463,11 @@ export default function RecordWarmupModal({
                       className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
                     />
                     <span className="text-xs text-cs2-text-muted tabular-nums">
-                      ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? "（提前）" : Number(kbOverlayTickOffset) < 0 ? "（延后）" : "（无补偿）"}
+                      ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
                     </span>
                   </div>
                   <p className="text-xs text-cs2-text-muted leading-relaxed">
-                    按键显示与画面可能存在偏差，不同机器表现不同，可手动微调。正值提前显示、负值延后显示。
+                    {t("record.warmupKbSyncHint")}
                   </p>
                 </div>
               )}
@@ -451,69 +475,69 @@ export default function RecordWarmupModal({
           </section>
 
           <section aria-labelledby="sec-visuals">
-            <SectionHeader en="Visuals & HUD" zh="视觉与 UI" />
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">录制画面效果</p>
+            <SectionHeader en="Visuals & HUD" zh={t("record.warmupSecVisuals")} />
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupVisualsSection")}</p>
             <div id="sec-visuals" className="grid gap-3 sm:grid-cols-2">
               <RecordingHudCard
-                title="简化观战 HUD"
+                title={t("record.hudSimplifyTitle")}
                 code="cl_draw_only_deathnotices true"
-                description="仅保留击杀公告等核心提示，弱化其余观战 UI。"
+                description={t("record.hudSimplifyDesc")}
                 checked={opts.cl_draw_only_deathnotices}
                 onChange={(v) => set({ cl_draw_only_deathnotices: v })}
-                outcomeOn="成片观战 HUD 以精简样式呈现，减少界面干扰。"
+                outcomeOn={t("record.hudSimplifyOutcome")}
                 disabled={!!sessionPovEnabled}
                 disabledReason={POV_CONFLICT_HUD}
               />
               <RecordingHudCard
-                title="隐藏准星目标信息"
+                title={t("record.hudHideTargetTitle")}
                 code="hud_showtargetid 0"
-                description="准星指向玩家时不再弹出名称与血量提示。"
+                description={t("record.hudHideTargetDesc")}
                 checked={opts.hud_showtargetid_hide}
                 onChange={(v) => set({ hud_showtargetid_hide: v })}
-                outcomeOn="最终画面中不出现准星下的 ID / 血量条提示。"
+                outcomeOn={t("record.hudHideTargetOutcome")}
               />
               <RecordingHudCard
-                title="屏蔽文字聊天"
+                title={t("record.hudNoChatTitle")}
                 code="tv_nochat 1"
-                description="隐藏观战文字聊天区域。"
+                description={t("record.hudNoChatDesc")}
                 checked={opts.tv_nochat}
                 onChange={(v) => set({ tv_nochat: v })}
-                outcomeOn="导出视频中不显示文字聊天栏。"
+                outcomeOn={t("record.hudNoChatOutcome")}
               />
               <RecordingHudCard
-                title="隐藏投掷物轨迹与画中窗"
+                title={t("record.hudHideGrenadeTitle")}
                 code="sv_grenade_trajectory 0; …"
-                description="关闭投掷物轨迹、练习画中窗与时间轴。"
+                description={t("record.hudHideGrenadeDesc")}
                 checked={opts.hide_grenade_trajectory_pip}
                 onChange={(v) => set({ hide_grenade_trajectory_pip: v })}
-                outcomeOn="画面中不出现投掷物轨迹线与辅助画中窗。"
+                outcomeOn={t("record.hudHideGrenadeOutcome")}
               />
             </div>
 
             <div className="my-4 border-t border-cs2-border" />
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">Demo 条与透视</p>
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupDemoSection")}</p>
             <div className="space-y-4">
               <RecordingHudCard
-                title="隐藏 Demo 进度条与回放控制条"
+                title={t("record.hudHideDemoUiTitle")}
                 code="sv_cheats 1 → demoui false"
-                description="预热阶段关闭 Demo UI 条，需临时开启作弊指令通道。"
+                description={t("record.hudHideDemoUiDesc")}
                 checked={opts.hide_demo_playback_ui}
                 onChange={(v) => set({ hide_demo_playback_ui: v })}
-                outcomeOn="回放进度条与控制台 Demo 控制条不会出现在采集画面中。"
+                outcomeOn={t("record.hudHideDemoUiOutcome")}
               />
               <RecordingHudCard
-                title="开启 X 光透视"
+                title={t("record.hudXrayTitle")}
                 code="spec_show_xray 1 / 0"
-                description="观战穿透显示轮廓（竞技裁判视角常用）。"
+                description={t("record.hudXrayDesc")}
                 checked={opts.spec_show_xray}
                 onChange={(v) => set({ spec_show_xray: v })}
-                outcomeOn="墙后可透视敌方轮廓，成片更具「上帝视角」信息密度。"
+                outcomeOn={t("record.hudXrayOutcome")}
               />
             </div>
           </section>
 
           <section aria-labelledby="sec-camera">
-            <SectionHeader en="Camera & Viewmodel" zh="摄像机与持枪" />
+            <SectionHeader en="Camera & Viewmodel" zh={t("record.warmupSecCamera")} />
             <div id="sec-camera" className="space-y-4">
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
                 <label className="flex cursor-pointer items-center gap-3">
@@ -524,7 +548,7 @@ export default function RecordWarmupModal({
                     className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
                   />
                   <span className="text-sm text-cs2-text-primary">
-                    应用 FOV（<code className="text-xs text-cs2-accent">fov_cs_debug</code>）
+                    {t("record.warmupFovLabel")}
                   </span>
                 </label>
                 <div className="mt-2 flex items-center gap-2 pl-7">
@@ -542,23 +566,23 @@ export default function RecordWarmupModal({
                     disabled={!opts.apply_fov}
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
-                  <span className="text-xs text-cs2-text-muted">默认 90</span>
+                  <span className="text-xs text-cs2-text-muted">{t("record.warmupFovDefault")}</span>
                 </div>
                 {opts.apply_fov ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：视野角度按设定值渲染，影响镜头透视与边缘拉伸感，影响狙击枪的缩放效果。
+                    {t("record.warmupFovOutcome")}
                   </p>
                 ) : null}
               </div>
               <OptionRow
                 checked={opts.viewmodel_fov_68}
                 onChange={(v) => set({ viewmodel_fov_68: v })}
-                title="开启极限持枪视角"
+                title={t("record.warmupViewmodelTitle")}
                 code="viewmodel_fov 68"
               />
               {opts.viewmodel_fov_68 ? (
                 <p className="-mt-1 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
-                  成片预期：手臂与枪械模型更贴近画面边缘，竞技剪辑常见「拉伸持枪」观感。
+                  {t("record.warmupViewmodelOutcome")}
                 </p>
               ) : null}
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
@@ -575,8 +599,7 @@ export default function RecordWarmupModal({
                     className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
                   />
                   <span className="text-sm text-cs2-text-primary">
-                    调整闪光弹亮度（
-                    <code className="text-xs text-cs2-accent">r_spectator_flashbang_opacity</code>）
+                    {t("record.warmupFlashLabel")}
                   </span>
                 </label>
                 <div className="mt-2 flex items-center gap-2 pl-7">
@@ -598,15 +621,15 @@ export default function RecordWarmupModal({
                     disabled={sessionPovEnabled || !opts.apply_spectator_flashbang_opacity}
                     className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
                   />
-                  <span className="text-xs text-cs2-text-muted">0.2–1.0，默认 0.6</span>
+                  <span className="text-xs text-cs2-text-muted">{t("record.warmupFlashRange")}</span>
                 </div>
                 {sessionPovEnabled ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-amber-on-surface">
-                    已启用 POV HUD：预热将强制注入亮度 1.0，更接近实战第一人称观感。
+                    {t("record.warmupFlashPovActive")}
                   </p>
                 ) : opts.apply_spectator_flashbang_opacity ? (
                   <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-                    成片预期：数值越低闪光致盲越弱，越高越接近游戏实战白屏强度。
+                    {t("record.warmupFlashOutcome")}
                   </p>
                 ) : null}
               </div>
@@ -626,46 +649,32 @@ export default function RecordWarmupModal({
           />
 
           <section aria-labelledby="sec-audio">
-            <SectionHeader en="Audio & canvas" zh="音频与画布" />
+            <SectionHeader en="Audio & canvas" zh={t("record.warmupSecAudio")} />
             <div id="sec-audio" className="space-y-2">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">采集与静音</p>
-              {(() => {
-                const vf = opts.voice_filter ?? "mute";
-                const VF_OPTIONS = [
-                  { value: "open",  label: "所有玩家",   code: "tv_listen_voice_indices -1",     desc: "录制轨包含所有玩家语音。" },
-                  { value: "team",  label: "第一视角我方", code: "tv_listen_voice_indices <mask>", desc: "只保留主角所在队伍的语音。" },
-                  { value: "enemy", label: "第一视角敌方", code: "tv_listen_voice_indices <mask>", desc: "只保留对方队伍的语音。" },
-                  { value: "mute",  label: "全部静音",   code: "snd_voipvolume 0",              desc: "录制轨不含任何玩家语音。" },
-                ];
-                const selected = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
-                return (
-                  <>
-                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                      {VF_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => set({ voice_filter: opt.value })}
-                          className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                            vf === opt.value
-                              ? "border-cs2-accent/60 bg-cs2-accent/10"
-                              : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
-                          }`}
-                        >
-                          <p className="text-[11px] font-semibold text-cs2-text-primary">{opt.label}</p>
-                          <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
-                        </button>
-                      ))}
-                    </div>
-                    <p className={`mb-4 mt-1.5 ml-0.5 text-[11px] leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
-                      {selected.desc}
-                    </p>
-                  </>
-                );
-              })()}
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupVoiceSectionLabel")}</p>
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {VF_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => set({ voice_filter: opt.value })}
+                    className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                      vf === opt.value
+                        ? "border-cs2-accent/60 bg-cs2-accent/10"
+                        : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
+                    }`}
+                  >
+                    <p className="text-[11px] font-semibold text-cs2-text-primary">{t(opt.labelKey)}</p>
+                    <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
+                  </button>
+                ))}
+              </div>
+              <p className={`mb-4 mt-1.5 ml-0.5 text-[11px] leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
+                {t(selectedVf.descKey)}
+              </p>
 
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                录制输出比例
+                {t("record.warmupResSection")}
               </p>
               <div
                 className={`rounded-xl border px-4 py-4 ${
@@ -675,11 +684,7 @@ export default function RecordWarmupModal({
                 }`}
               >
                 <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                  {[
-                    { ar: "4:3", sample: "1920×1440", tag: "赛事 / 复古构图" },
-                    { ar: "16:9", sample: "1920×1080", tag: "流媒体默认" },
-                    { ar: "16:10", sample: "1920×1200", tag: "宽屏显示器" },
-                  ].map(({ ar, sample, tag }) => {
+                  {AR_TAGS.map(({ ar, sample, tagKey }) => {
                     const selected = opts.aspect_ratio === ar;
                     return (
                       <button
@@ -694,7 +699,7 @@ export default function RecordWarmupModal({
                       >
                         <p className="font-mono text-lg font-bold text-cs2-text-primary">{ar}</p>
                         <p className="mt-1 font-mono text-[11px] text-cs2-text-secondary">{sample}</p>
-                        <p className="mt-1 text-[10px] text-cs2-text-muted">{tag}</p>
+                        <p className="mt-1 text-[10px] text-cs2-text-muted">{t(tagKey)}</p>
                       </button>
                     );
                   })}
@@ -702,14 +707,14 @@ export default function RecordWarmupModal({
 
                 <label className="mb-3 block">
                   <span className="mb-1 block text-[11px] text-cs2-text-muted">
-                    屏幕比例（与 -w / -h 联动校验）
+                    {t("record.warmupResAspectLabel")}
                   </span>
                   <select
                     value={opts.aspect_ratio}
                     onChange={(e) => set({ aspect_ratio: e.target.value })}
                     className="w-full max-w-md rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary outline-none focus:border-cs2-accent/50"
                   >
-                    <option value="">不填写启动分辨率</option>
+                    <option value="">{t("record.warmupResAspectNone")}</option>
                     <option value="4:3">4 : 3</option>
                     <option value="16:9">16 : 9</option>
                     <option value="16:10">16 : 10</option>
@@ -717,32 +722,28 @@ export default function RecordWarmupModal({
                 </label>
 
                 <div className="mb-3 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-                  <p className="text-[10px] uppercase tracking-wide text-cs2-text-muted">当前解析</p>
+                  <p className="text-[10px] uppercase tracking-wide text-cs2-text-muted">{t("record.warmupResCurrentLabel")}</p>
                   <p className="mt-1 text-sm text-cs2-text-primary">
-                    比例{" "}
+                    {t("record.warmupResAspectPrefix")}{" "}
                     <span className="font-mono text-cs2-accent">
-                      {opts.aspect_ratio || "（未选）"}
+                      {opts.aspect_ratio || t("record.warmupResAspectUnset")}
                     </span>
                     {" · "}
-                    分辨率{" "}
+                    {t("record.warmupResValuePrefix")}{" "}
                     <span className="font-mono text-cs2-text-secondary">
-                      {formatResolutionSummary(
-                        opts.aspect_ratio,
-                        opts.resolution_width,
-                        opts.resolution_height,
-                      )}
+                      {resSummaryDisplay}
                     </span>
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-                    {aspectHint(opts.aspect_ratio)}
+                    {t(aspectHint(opts.aspect_ratio))}
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-                    最终导出方向：{aspectExportHint(opts.aspect_ratio)}
+                    {t("record.warmupResExportPrefix")}{t(aspectExportHint(opts.aspect_ratio))}
                   </p>
                 </div>
 
                 <p className="mb-2 text-[11px] text-cs2-text-secondary">
-                  启动参数（可选，不填则为本机当前游戏分辨率）
+                  {t("record.warmupResLaunchParamsHint")}
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-xs text-cs2-text-muted">-w</span>
@@ -766,8 +767,7 @@ export default function RecordWarmupModal({
                   <p className="mt-2 text-[11px] leading-snug text-rose-400">{resolutionError}</p>
                 ) : (
                   <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-muted">
-                    留空宽高则沿用当前分辨率；若填写宽高须选择比例且化简后须匹配（4:3 含游戏内同组的 5:4，如
-                    1280×1024）。
+                    {t("record.warmupResLeaveBlankHint")}
                   </p>
                 )}
               </div>
@@ -775,9 +775,9 @@ export default function RecordWarmupModal({
           </section>
 
           <section aria-labelledby="sec-launch">
-            <SectionHeader en="Launch & console" zh="启动与控制台" />
+            <SectionHeader en="Launch & console" zh={t("record.warmupSecLaunch")} />
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-              命令行与控制台
+              {t("record.warmupCmdLabel")}
             </p>
             <Cs2LaunchConsoleFields
               cs2ExtraLaunchArgs={sessionCs2ExtraLaunchArgs}
@@ -791,8 +791,11 @@ export default function RecordWarmupModal({
         </div>
 
           <p className="mt-4 font-mono text-[11px] leading-relaxed text-cs2-text-muted">
-            首片段预热：基础控制台 {baseWarmupCmdCount} 条 + 附加有效行 {injectExtraCount} 条，合计约{" "}
-            {baseWarmupCmdCount + injectExtraCount} 条（# // 注释行不计入附加）
+            {t("record.warmupWarmupCount", {
+              base: baseWarmupCmdCount,
+              extra: injectExtraCount,
+              total: baseWarmupCmdCount + injectExtraCount,
+            })}
           </p>
         </div>
 
@@ -803,7 +806,7 @@ export default function RecordWarmupModal({
               onClick={onClose}
               className="rounded-lg border border-cs2-border px-4 py-2 text-sm font-semibold text-cs2-text-secondary hover:bg-cs2-bg-input/50"
             >
-              取消
+              {t("record.warmupBtnCancel")}
             </button>
             <button
               type="button"
@@ -811,7 +814,7 @@ export default function RecordWarmupModal({
               disabled={Boolean(resolutionError)}
               className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45"
             >
-              开始录制
+              {t("record.warmupBtnStart")}
             </button>
           </div>
         </div>
