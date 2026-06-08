@@ -541,25 +541,34 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
                 for dto in req.requests
             )
             if _kb_overlay_requested:
-                _scene = _pre_obs_client.get_current_program_scene()
-                if _scene:
-                    import os as _os
-                    _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
-                    # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
-                    _kb_pos = next(
-                        (
-                            getattr(dto.options, "kb_overlay_position", None)
-                            for dto in req.requests
-                            if getattr(dto.options, "kb_overlay_enabled", False)
-                            and getattr(dto.options, "kb_overlay_position", None)
-                        ),
-                        None,
-                    ) or load_config().kb_overlay_position or "bottom_center"
-                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
-                    ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
-                    logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
-                else:
-                    logger.warning("[RecordingV3] kb overlay: could not get current scene name, skipping auto-setup")
+                # 键盘 Overlay 必须建到录制专用场景（与 Game Capture 同场景），不能用
+                # 当前 program 场景：玩家 OBS 此刻可能停在别的场景，那样源会被建到错误
+                # 场景，录制时 OBS 切到专用场景就看不到键盘 Overlay。
+                _scene = cfg.obs_game_scene_name
+                # 专用场景此时可能尚未创建（fade controller 在录制阶段才创建），先幂等确保存在。
+                try:
+                    if _scene not in _pre_obs_client.get_scene_names():
+                        _pre_obs_client.create_scene(_scene)
+                except Exception as _sc_e:
+                    logger.warning(
+                        "[RecordingV3] kb overlay: ensure scene %r failed (non-fatal): %s",
+                        _scene, _sc_e,
+                    )
+                import os as _os
+                _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
+                # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
+                _kb_pos = next(
+                    (
+                        getattr(dto.options, "kb_overlay_position", None)
+                        for dto in req.requests
+                        if getattr(dto.options, "kb_overlay_enabled", False)
+                        and getattr(dto.options, "kb_overlay_position", None)
+                    ),
+                    None,
+                ) or load_config().kb_overlay_position or "bottom_center"
+                _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
+                ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
+                logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
         except Exception as _kb_e:
             logger.warning("[RecordingV3] kb overlay auto-setup failed (non-fatal): %s", _kb_e)
         try:
