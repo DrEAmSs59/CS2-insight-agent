@@ -1,5 +1,6 @@
 import { mergedPacingForItem } from "../../utils/recordingQueueDerive";
 import { DEMO_TICK_RATE, isRoundTimelineRoundClip, isTimelineSourceClip } from "../../utils/montageUtils";
+import { useT } from "../../i18n/useT.js";
 
 function clipDataUsesDeathTickOverlay(clipData) {
   const cat = clipData?.category;
@@ -12,9 +13,9 @@ function clipDataUsesDeathTickOverlay(clipData) {
 
 /**
  * 按 start/end_tick 映射击杀刻度（高光、时间线击杀等；与下饭死亡条互斥）。
- * @param {{ clipData: Record<string, unknown> }} props
+ * @param {{ clipData: Record<string, unknown>, t: Function }} props
  */
-function KillTickMarksOverlay({ clipData }) {
+function KillTickMarksOverlay({ clipData, t }) {
   if (!isTimelineSourceClip(clipData)) return null;
   if (clipDataUsesDeathTickOverlay(clipData)) return null;
   const start = Number(clipData?.start_tick);
@@ -32,7 +33,7 @@ function KillTickMarksOverlay({ clipData }) {
         return (
           <span
             key={`k-${kt}-${i}`}
-            title={`击杀 tick ${kt}`}
+            title={t("queue.timelineKillTickTitle", { tick: kt })}
             className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-cs2-text-primary shadow-[0_0_5px_rgba(255,255,255,0.45)]"
             style={{ left: `${p}%` }}
           />
@@ -44,9 +45,9 @@ function KillTickMarksOverlay({ clipData }) {
 
 /**
  * 下饭 / 死亡合集：在与主条同一时间轴上叠加热力刻度（不单独占一行）。
- * @param {{ clipData: Record<string, unknown> }} props
+ * @param {{ clipData: Record<string, unknown>, t: Function }} props
  */
-function DeathTickOverlay({ clipData }) {
+function DeathTickOverlay({ clipData, t }) {
   const show = clipDataUsesDeathTickOverlay(clipData);
   if (!show) return null;
 
@@ -67,12 +68,12 @@ function DeathTickOverlay({ clipData }) {
     marks.push({
       tick: deathTick,
       cls: "bg-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.9)]",
-      title: "死亡",
+      titleKey: "queue.timelineDeathTitle",
     });
   }
   for (const kt of killTicks) {
     if (deathTick != null && kt === deathTick) continue;
-    marks.push({ tick: kt, cls: "bg-cs2-accent", title: "击杀" });
+    marks.push({ tick: kt, cls: "bg-cs2-accent", titleKey: "queue.timelineKillTitle" });
   }
   if (!marks.length) return null;
 
@@ -83,7 +84,7 @@ function DeathTickOverlay({ clipData }) {
         return (
           <span
             key={`${m.tick}-${i}`}
-            title={`${m.title} tick ${m.tick}`}
+            title={`${t(m.titleKey)} tick ${m.tick}`}
             className={`absolute bottom-0 top-0 w-[3px] -translate-x-1/2 rounded-sm ${m.cls}`}
             style={{ left: `${p}%` }}
           />
@@ -153,6 +154,8 @@ function barClass(type) {
  * }} props
  */
 export default function QueueMiniTimeline({ clipData, pacingOverride, globalPacing }) {
+  const t = useT();
+
   if (isRoundTimelineRoundClip(clipData)) {
     return null;
   }
@@ -173,8 +176,8 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
   const vic = Boolean(pacingOverride?.victim_pov);
   const killer = Boolean(pacingOverride?.killer_pov);
   const extraParts = [];
-  if (vic) extraParts.push("含受害者回看段落");
-  if (killer) extraParts.push("含击杀者回看段落");
+  if (vic) extraParts.push(t("queue.timelineVictimPov"));
+  if (killer) extraParts.push(t("queue.timelineKillerPov"));
 
   if (isGroupedCompilation) {
     const built = buildGroupedBlocks(src, pre, post);
@@ -190,18 +193,18 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
                 style={{ width: `${b.pct}%` }}
                 title={
                   b.type === "pre"
-                    ? `击杀段前预留 ${pre.toFixed(1)}s`
+                    ? t("queue.timelinePreTitle", { s: pre.toFixed(1) })
                     : b.type === "post"
-                      ? `击杀段后预留 ${post.toFixed(1)}s`
-                      : "击杀窗口（tick 跨度）"
+                      ? t("queue.timelinePostTitle", { s: post.toFixed(1) })
+                      : t("queue.timelineCoreTitleGrouped")
                 }
               />
             ))}
-            <DeathTickOverlay clipData={clipData} />
+            <DeathTickOverlay clipData={clipData} t={t} />
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-cs2-text-muted">
             <span className="text-cs2-text-muted">
-              ×{segmentCount} 段（每段：击杀段前 {pre.toFixed(1)}s · 击杀窗口 · 击杀段后 {post.toFixed(1)}s）
+              {t("queue.timelineSegmentSummary", { n: segmentCount, pre: pre.toFixed(1), post: post.toFixed(1) })}
             </span>
             {extraParts.map((t) => (
               <span key={t} className="text-cs2-text-muted">
@@ -243,34 +246,34 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
         <div
           className="h-full min-w-0 bg-gradient-to-b from-zinc-600/90 to-zinc-700/90"
           style={{ flex: `${pre} 1 0%` }}
-          title={`击杀段前预留 ${pre.toFixed(1)}s`}
+          title={t("queue.timelinePreTitle", { s: pre.toFixed(1) })}
         />
         <div
           className="relative h-full min-w-0 bg-gradient-to-b from-cs2-orange/85 to-orange-700/90"
           style={{ flex: `${core} 1 0%` }}
-          title="击杀片段主体"
+          title={t("queue.timelineCoreTitleSingle")}
         >
           {highlightDots}
         </div>
         <div
           className="h-full min-w-0 bg-gradient-to-b from-zinc-600/85 to-zinc-800/90"
           style={{ flex: `${post} 1 0%` }}
-          title={`击杀段后预留 ${post.toFixed(1)}s`}
+          title={t("queue.timelinePostTitle", { s: post.toFixed(1) })}
         />
-        <KillTickMarksOverlay clipData={clipData} />
-        <DeathTickOverlay clipData={clipData} />
+        <KillTickMarksOverlay clipData={clipData} t={t} />
+        <DeathTickOverlay clipData={clipData} t={t} />
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-cs2-text-muted">
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段前 {pre.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> {t("queue.timelineLegendPre", { s: pre.toFixed(1) })}
         </span>
         <span className="text-cs2-text-muted">·</span>
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-cs2-accent/90" /> 片段 ~{core.toFixed(0)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-cs2-accent/90" /> {t("queue.timelineLegendClip", { s: core.toFixed(0) })}
         </span>
         <span className="text-cs2-text-muted">·</span>
         <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> 击杀段后 {post.toFixed(1)}s
+          <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> {t("queue.timelineLegendPost", { s: post.toFixed(1) })}
         </span>
         {extraParts.map((t) => (
           <span key={t} className="text-cs2-text-muted">

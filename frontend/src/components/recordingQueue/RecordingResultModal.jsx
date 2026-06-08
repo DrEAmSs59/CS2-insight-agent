@@ -13,6 +13,7 @@ import {
   friendlyClipTitleForQueue,
   formatClipCombatSummaryLine,
 } from "../../utils/montageUtils";
+import { useT } from "../../i18n/useT.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export default function RecordingResultModal({
   onClearQueue,
   results = [],
 }) {
+  const t = useT();
   const [copiedIdx, setCopiedIdx] = useState(null);
 
   const successCount = results.filter((r) => r.success).length;
@@ -70,14 +72,14 @@ export default function RecordingResultModal({
         }}
         className="rounded-lg border border-cs2-border bg-cs2-bg-input px-4 py-2 text-[12px] font-semibold text-cs2-text-primary hover:border-cs2-accent/50"
       >
-        清空队列并关闭
+        {t("queue.modalClearAndClose")}
       </button>
       <button
         type="button"
         onClick={onClose}
         className="rounded-lg bg-cs2-accent px-4 py-2 text-[12px] font-bold text-cs2-text-on-accent hover:brightness-110"
       >
-        关闭
+        {t("queue.modalClose")}
       </button>
     </div>
   );
@@ -86,7 +88,7 @@ export default function RecordingResultModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="录制完成"
+      title={t("queue.modalTitle")}
       maxWidth="max-w-2xl"
       maxHeight="max-h-[85vh]"
       footer={footer}
@@ -95,18 +97,18 @@ export default function RecordingResultModal({
       <div className="flex items-center gap-4 border-b border-cs2-border px-5 py-3 text-[12px]">
         <span className="flex items-center gap-1.5 text-cs2-text-success">
           <CheckCircle2 className="h-4 w-4" />
-          成功 {successCount} / 共 {total}
+          {t("queue.modalSuccess", { n: successCount, total })}
         </span>
         {failCount > 0 && (
           <span className="flex items-center gap-1.5 text-cs2-rose-on-surface">
             <XCircle className="h-4 w-4" />
-            失败 {failCount}
+            {t("queue.modalFailed", { n: failCount })}
           </span>
         )}
         {abortedCount > 0 && (
           <span className="flex items-center gap-1.5 text-cs2-text-muted">
             <Ban className="h-4 w-4" />
-            中止 {abortedCount}
+            {t("queue.modalAborted", { n: abortedCount })}
           </span>
         )}
       </div>
@@ -116,7 +118,7 @@ export default function RecordingResultModal({
         {results.map((result) => {
           const aborted = isAborted(result);
           const cd = result._queueItem?.clipData ?? null;
-          const title = cd ? friendlyClipTitleForQueue(cd) : `片段 #${result._index + 1}`;
+          const title = cd ? friendlyClipTitleForQueue(cd) : t("queue.modalDefaultClipTitle", { n: result._index + 1 });
           const combatLine = cd ? formatClipCombatSummaryLine(cd) : "";
           const rl = roundLabel(cd);
           const killCount = cd?.kill_count ? Number(cd.kill_count) : null;
@@ -180,7 +182,7 @@ export default function RecordingResultModal({
                     </span>
                     <button
                       type="button"
-                      title="复制路径"
+                      title={t("queue.modalCopyPath")}
                       onClick={() => handleCopy(result._index, result.output_path)}
                       className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
                     >
@@ -192,7 +194,7 @@ export default function RecordingResultModal({
                     </button>
                     <button
                       type="button"
-                      title="在资源管理器中显示"
+                      title={t("queue.modalRevealPath")}
                       onClick={() => handleReveal(result.output_path)}
                       className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:text-cs2-text-primary"
                     >
@@ -208,7 +210,7 @@ export default function RecordingResultModal({
 
                 {/* 中止 */}
                 {aborted && (
-                  <div className="text-[11px] text-cs2-text-muted">已中止</div>
+                  <div className="text-[11px] text-cs2-text-muted">{t("queue.modalItemAborted")}</div>
                 )}
               </div>
             </li>

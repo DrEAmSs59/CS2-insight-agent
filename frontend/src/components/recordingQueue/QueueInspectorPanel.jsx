@@ -6,6 +6,7 @@ import {
   killBadgeColorClass,
 } from "../RecordingQueueDrawer";
 import { useRecordingQueue } from "../../stores/recordingQueueStore";
+import { useT } from "../../i18n/useT.js";
 import { AiScoreBadge } from "../ClipCard";
 import {
   getMontageBlockShortLabel,
@@ -39,6 +40,7 @@ function FieldGroup({ icon: Icon, title, children }) {
  * }} props
  */
 export default function QueueInspectorPanel({ selectedId: _selectedId, selectedItem, queue }) {
+  const t = useT();
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
   const resetGlobalPacing = useRecordingQueue((s) => s.resetGlobalPacing);
@@ -62,13 +64,13 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="shrink-0">{globalPanel}</div>
         <div className="shrink-0 border-b border-cs2-border px-2 py-1.5">
-          <h2 className="text-[11px] font-bold uppercase tracking-wide text-cs2-text-muted">检查器</h2>
+          <h2 className="text-[11px] font-bold uppercase tracking-wide text-cs2-text-muted">{t("queue.inspectorTitle")}</h2>
         </div>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 text-center">
           <Monitor className="mb-2 h-8 w-8 text-cs2-text-muted" />
-          <p className="text-[12px] font-semibold text-cs2-text-secondary">选择一个录制任务</p>
+          <p className="text-[12px] font-semibold text-cs2-text-secondary">{t("queue.inspectorSelectPrompt")}</p>
           <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-            在左侧队列中点选片段，可查看剪辑节奏与回放选项。
+            {t("queue.inspectorSelectHint")}
           </p>
         </div>
       </div>
@@ -101,7 +103,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
       <div className="shrink-0">{globalPanel}</div>
 
       <div className="shrink-0 border-b border-cs2-border px-2 py-1.5">
-        <h2 className="text-[11px] font-bold uppercase tracking-wide text-cs2-text-muted">检查器</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-wide text-cs2-text-muted">{t("queue.inspectorTitle")}</h2>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
@@ -173,13 +175,13 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
         {/* Stat 卡 */}
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded border border-cs2-border bg-cs2-bg-input/40 px-2 py-1.5">
-            <p className="text-[11px] text-cs2-text-muted">预计录制时长</p>
+            <p className="text-[11px] text-cs2-text-muted">{t("queue.statEstDuration")}</p>
             <p className="mt-0.5 font-mono text-[16px] font-bold text-cs2-accent">
               {Number.isFinite(estSec) ? `${Number(estSec).toFixed(0)}s` : "—"}
             </p>
           </div>
           <div className="rounded border border-cs2-border bg-cs2-bg-input/40 px-2 py-1.5">
-            <p className="text-[11px] text-cs2-text-muted">可追加视角数</p>
+            <p className="text-[11px] text-cs2-text-muted">{t("queue.statPlaybackViews")}</p>
             <p className="mt-0.5 font-mono text-[16px] font-bold text-cyan-300">
               {victimsCount}
             </p>
@@ -187,12 +189,12 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
         </div>
 
         {/* 节奏面板 */}
-        <FieldGroup icon={Settings} title="剪辑节奏">
+        <FieldGroup icon={Settings} title={t("queue.fieldPacing")}>
           {isClipPacingAndPovLocked(cd) ? (
             <p className="rounded border border-amber-500/20 bg-cs2-amber-surface px-2 py-1.5 text-[11px] text-cs2-amber-on-surface">
               {isRoundTimelineRoundClip(cd)
-                ? "整回合时间线为固定 tick 窗口，智能击杀段前/击杀段后预留对该条目不生效。"
-                : "回合死亡合集为固定分段合辑，智能击杀段前/击杀段后预留对该条目不生效。"}
+                ? t("queue.pacingLockedTimeline")
+                : t("queue.pacingLockedCompilation")}
             </p>
           ) : (
             <PacingMicroPanel
@@ -202,8 +204,8 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
           )}
         </FieldGroup>
 
-        {/* 视角面板 */}
-        <FieldGroup icon={Eye} title="回看视角">
+        {/* POV panel */}
+        <FieldGroup icon={Eye} title={t("queue.fieldPov")}>
           <PovSection item={selectedItem} updateItemPacing={updateItemPacing} />
         </FieldGroup>
       </div>

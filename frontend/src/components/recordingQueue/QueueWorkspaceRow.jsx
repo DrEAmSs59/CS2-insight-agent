@@ -10,6 +10,7 @@ import {
   History,
 } from "lucide-react";
 import QueueMiniTimeline from "./QueueMiniTimeline";
+import { useT } from "../../i18n/useT.js";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import {
   formatClipCombatSummaryLine,
@@ -68,17 +69,6 @@ function queueRowCatTagClass(timeline, cat) {
   }
 }
 
-function categoryZh(cat) {
-  return (
-    ({
-      highlight: "高光",
-      fail: "下饭",
-      meme_death: "坐牢",
-      compilation: "合集",
-    })[cat] || cat || "片段"
-  );
-}
-
 /**
  * @param {{
  *   item: import("../../stores/recordingQueueStore").RecordingQueueItem,
@@ -105,6 +95,7 @@ export default function QueueWorkspaceRow({
   onReorderDragStart,
   onReorderDragEnd,
 }) {
+  const t = useT();
   const cd = item.clipData || {};
   const cat = cd.category || "";
   const timeline = isTimelineSourceClip(cd);
@@ -133,7 +124,15 @@ export default function QueueWorkspaceRow({
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
   const queueSummary = String(cd.queue_summary_line || "").trim();
   const combatSummary = !timeline ? formatClipCombatSummaryLine(cd) : "";
-  const catBadgeZh = timeline ? "时间线" : categoryZh(cat);
+  const categoryKey = timeline
+    ? "queue.rowCatTimeline"
+    : ({
+        highlight: "queue.rowCatHighlight",
+        fail: "queue.rowCatFail",
+        meme_death: "queue.rowCatMemeDeath",
+        compilation: "queue.rowCatCompilation",
+      })[cat] || "queue.rowCatDefault";
+  const catBadge = t(categoryKey);
 
   return (
     <div
@@ -157,8 +156,8 @@ export default function QueueWorkspaceRow({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
           className="flex w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-cs2-text-muted active:cursor-grabbing hover:bg-cs2-bg-hover hover:text-cs2-text-secondary"
-          title="拖动排序"
-          aria-label="拖动调整顺序"
+          title={t("queue.rowDragTitle")}
+          aria-label={t("queue.rowDragAriaLabel")}
         >
           <GripVertical className="h-4 w-4" aria-hidden />
         </div>
@@ -188,16 +187,16 @@ export default function QueueWorkspaceRow({
           </span>
           <span className="truncate text-[13px] font-semibold text-cs2-text-primary">{title}</span>
           <span className={queueRowCatTagClass(timeline, cat)}>
-            {catBadgeZh}
+            {catBadge}
           </span>
         </div>
         <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[12px] leading-snug">
-          <span className="font-mono text-cs2-text-secondary" title="Demo 文件">
+          <span className="font-mono text-cs2-text-secondary" title="Demo">
             Demo <span className="text-cs2-text-secondary">{demoLabel}</span>
           </span>
           <span className="text-cs2-text-muted">·</span>
           <span className="text-cs2-text-secondary">
-            玩家 <span className="font-semibold text-cs2-text-primary">{playerLabel}</span>
+            {t("queue.rowPlayer")} <span className="font-semibold text-cs2-text-primary">{playerLabel}</span>
           </span>
         </div>
         {queueSummary ? (
@@ -215,9 +214,9 @@ export default function QueueWorkspaceRow({
           <p className="mt-1.5 font-mono text-[12px] leading-snug text-cs2-text-secondary">{timelineMetaLine}</p>
         ) : (
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[12px] text-cs2-text-muted">
-            <span title="地图">{mapName}</span>
-            <span title="回合 / 比分">{roundLabel}</span>
-            <span>{kills > 0 ? `${kills} 杀` : "—"}</span>
+            <span>{mapName}</span>
+            <span>{roundLabel}</span>
+            <span>{kills > 0 ? t("queue.rowKills", { n: kills }) : "—"}</span>
             <span className="text-cs2-text-muted">~{estSec}s</span>
           </div>
         )}
@@ -235,7 +234,7 @@ export default function QueueWorkspaceRow({
 
       <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5">
         <span className="rounded border border-cs2-emerald-surface bg-cs2-emerald-surface px-1.5 py-0.5 text-[10px] font-semibold text-cs2-emerald-on-surface">
-          待录
+          {t("queue.rowPendingBadge")}
         </span>
         <span className="font-mono text-[10px] text-cs2-text-muted">P{priorityIndex}</span>
         <button
@@ -245,7 +244,7 @@ export default function QueueWorkspaceRow({
             onRemove();
           }}
           className="rounded p-1 text-cs2-text-muted opacity-60 transition-opacity hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface group-hover:opacity-100"
-          aria-label="移除"
+          aria-label={t("queue.rowRemoveAriaLabel")}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>

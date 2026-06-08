@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useT } from "../../i18n/useT.js";
 
 /**
  * @param {{
@@ -22,6 +23,7 @@ export default function RecordingStatsStrip({
   obsEndpointLabel,
   obsConfigHasIssues,
 }) {
+  const t = useT();
   let durationNum = "—";
   let durationUnit = "";
   if (totalEstimateSec > 0) {
@@ -39,7 +41,7 @@ export default function RecordingStatsStrip({
     <div className="flex min-w-0 flex-wrap items-center justify-end gap-3.5">
       <div className="flex items-baseline gap-1.5">
         <span className="font-mono text-[18px] tabular-nums leading-none text-cs2-accent">{pendingCount}</span>
-        <span className="text-[11px] leading-none text-cs2-text-muted">片段</span>
+        <span className="text-[11px] leading-none text-cs2-text-muted">{t("queue.statClips")}</span>
       </div>
       {sep}
       <div className="flex items-baseline gap-1.5">
@@ -49,7 +51,7 @@ export default function RecordingStatsStrip({
       {sep}
       <div className="flex items-baseline gap-1.5">
         <span className="font-mono text-[18px] tabular-nums leading-none text-sky-300">{povSegmentCount}</span>
-        <span className="text-[11px] leading-none text-cs2-text-muted">回看</span>
+        <span className="text-[11px] leading-none text-cs2-text-muted">{t("queue.statPlayback")}</span>
       </div>
       {sep}
       <div className="flex items-baseline gap-1.5">
@@ -66,12 +68,12 @@ export default function RecordingStatsStrip({
             : "rounded-full border border-cs2-border bg-cs2-bg-hover px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-text-muted"
         }
       >
-        {obsConfigured ? "OBS · 已配置" : "OBS · 未配置"}
+        {obsConfigured ? t("queue.obsConfigured") : t("queue.obsNotConfigured")}
       </span>
       {obsConfigured && obsConfigHasIssues === true && (
         <Link to="/obs-config-center">
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-amber-300 hover:bg-amber-500/20 transition-colors">
-            OBS 配置待修复
+            {t("queue.obsNeedsFixing")}
           </span>
         </Link>
       )}
