@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import API from "../api/api";
 import { useAppShell } from "../context/AppShellContext";
+import { useT } from "../i18n/useT.js";
 import {
   Brain,
   Zap,
@@ -15,15 +16,8 @@ import {
   ScanSearch,
 } from "lucide-react";
 
-const CODEC_LABELS = {
-  h264_nvenc: "NVIDIA NVENC",
-  h264_qsv: "Intel QSV",
-  h264_amf: "AMD AMF",
-  libx264: "x264 软件 (CPU)",
-  none: "无可用编码器",
-};
-
 function FfmpegDetectButton({ onDetect }) {
+  const t = useT();
   const [detecting, setDetecting] = useState(false);
 
   const handleClick = async () => {
@@ -48,15 +42,24 @@ function FfmpegDetectButton({ onDetect }) {
       ) : (
         <ScanSearch className="h-3.5 w-3.5" />
       )}
-      {detecting ? "探测中…" : "自动探测 FFmpeg"}
+      {detecting ? t("settings.detectingLabel") : t("settings.autoDetectFfmpeg")}
     </button>
   );
 }
 
 function EncoderSelector({ value, onChange }) {
+  const t = useT();
   const [detecting, setDetecting] = useState(false);
   const [result, setResult] = useState(null);
   const abortRef = useRef(null);
+
+  const CODEC_LABELS = {
+    h264_nvenc: "NVIDIA NVENC",
+    h264_qsv: "Intel QSV",
+    h264_amf: "AMD AMF",
+    libx264: t("settings.encoderX264Label"),
+    none: t("settings.encoderNone"),
+  };
 
   const detect = async () => {
     setDetecting(true);
@@ -65,7 +68,7 @@ function EncoderSelector({ value, onChange }) {
       const r = await API.post("/config/detect-encoder");
       setResult(r.data);
     } catch (e) {
-      setResult({ error: e?.response?.data?.detail || e?.message || "检测失败" });
+      setResult({ error: e?.response?.data?.detail || e?.message || t("settings.encoderProbeFailed") });
     } finally {
       setDetecting(false);
     }
@@ -74,7 +77,7 @@ function EncoderSelector({ value, onChange }) {
   return (
     <div className="shrink-0 space-y-2">
       <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-        合辑视频编码
+        {t("settings.encoderLabel")}
       </label>
       <div className="flex gap-2">
         <select
@@ -82,11 +85,11 @@ function EncoderSelector({ value, onChange }) {
           onChange={(e) => onChange(e.target.value)}
           className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
         >
-          <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
+          <option value="auto">{t("settings.encoderAuto")}</option>
           <option value="h264_nvenc">NVIDIA NVENC</option>
           <option value="h264_qsv">Intel Quick Sync (QSV)</option>
           <option value="h264_amf">AMD AMF</option>
-          <option value="libx264">x264 软件（CPU）</option>
+          <option value="libx264">{t("settings.encoderX264")}</option>
         </select>
         <button
           type="button"
@@ -95,14 +98,14 @@ function EncoderSelector({ value, onChange }) {
           className="flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary disabled:opacity-40 transition-all"
         >
           {detecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-          检测
+          {t("settings.detectBtn")}
         </button>
       </div>
 
       {result && !result.error && (
         <div className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-3 space-y-2">
           <div className="flex items-center gap-2 text-xs font-bold text-cs2-text-primary">
-            <span className="text-cs2-text-muted">自动选择：</span>
+            <span className="text-cs2-text-muted">{t("settings.encoderAutoSelected")}</span>
             <span className={result.selected === "libx264" || result.selected === "none" ? "text-amber-400" : "text-emerald-400"}>
               {CODEC_LABELS[result.selected] ?? result.selected}
             </span>
@@ -115,8 +118,8 @@ function EncoderSelector({ value, onChange }) {
                   : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />}
                 <span className={h.probe_ok ? "text-cs2-text-primary" : "text-cs2-text-muted"}>
                   <span className="font-mono">{h.codec}</span>
-                  {!h.in_encoder_list && <span className="ml-1 text-amber-400/80">— FFmpeg 未编译</span>}
-                  {h.in_encoder_list && !h.probe_ok && <span className="ml-1 text-cs2-text-muted">— 探测失败</span>}
+                  {!h.in_encoder_list && <span className="ml-1 text-amber-400/80">{t("settings.encoderNotCompiled")}</span>}
+                  {h.in_encoder_list && !h.probe_ok && <span className="ml-1 text-cs2-text-muted">{t("settings.encoderProbeFailed")}</span>}
                   {h.error && !h.probe_ok && (
                     <span className="ml-1 block text-[10px] text-cs2-text-muted/70 leading-snug">{h.error}</span>
                   )}
@@ -134,8 +137,7 @@ function EncoderSelector({ value, onChange }) {
           </div>
           {!result.hw?.some(h => h.probe_ok) && (
             <p className="text-[11px] text-amber-400/90 leading-snug">
-              未检测到可用硬件编码器。若 FFmpeg 为 essentials 构建，请替换为{" "}
-              <span className="font-semibold">full 构建</span>（含 NVENC/QSV/AMF）。
+              {t("settings.encoderNoHwWarning")}
             </p>
           )}
         </div>
@@ -143,7 +145,7 @@ function EncoderSelector({ value, onChange }) {
       {result?.error && (
         <p className="text-[11px] text-red-400">{result.error}</p>
       )}
-      {!result && <p className="text-[10px] text-zinc-600">点击「检测」查看当前 FFmpeg 支持的编码器。</p>}
+      {!result && <p className="text-[10px] text-zinc-600">{t("settings.encoderClickHint")}</p>}
     </div>
   );
 }
@@ -236,7 +238,8 @@ function PrimaryButton({ children, className = "", ...rest }) {
   );
 }
 
-function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPastePath }) {
+function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPastePath, pasteTitle }) {
+  const t = useT();
   return (
     <div className="w-full max-w-full space-y-1.5">
       <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{label}</label>
@@ -252,9 +255,9 @@ function PathFieldRow({ label, value, placeholder, onChange, onBlurSave, onPaste
           type="button"
           className="shrink-0 px-2.5 py-2"
           onClick={onPastePath}
-          title="从剪贴板粘贴完整路径"
+          title={pasteTitle ?? t("settings.pastePathTitle")}
         >
-          粘贴路径
+          {t("settings.pastePathBtn")}
         </SecondaryButton>
       </div>
     </div>
@@ -271,6 +274,7 @@ function SmallField({ label, children }) {
 }
 
 export default function SettingsPage() {
+  const t = useT();
   const s = useAppShell();
   const [setup, setSetup] = useState(null);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -301,12 +305,12 @@ export default function SettingsPage() {
         void s.fetchUpdateInfo({ force: true, manual: true });
         return;
       }
-      setUpdateStatus({ status: "error", message: "开发模式下不支持检查更新" });
+      setUpdateStatus({ status: "error", message: t("settings.updateDevModeError") });
       setTimeout(() => setUpdateStatus(null), 3000);
       return;
     }
     if (window.electron?.checkForUpdates) {
-      setUpdateStatus({ status: "checking", message: "正在检查更新..." });
+      setUpdateStatus({ status: "checking", message: t("settings.updateChecking") });
       window.electron.checkForUpdates();
     }
   };
@@ -337,52 +341,52 @@ export default function SettingsPage() {
   };
 
   const cs2Status = useMemo(() => {
-    if (!setup) return { tone: "muted", text: "CS2：检测中…" };
-    if (setup.cs2_path_ok) return { tone: "ok", text: "CS2：已检测到可执行文件" };
+    if (!setup) return { tone: "muted", text: t("settings.statusCs2Detecting") };
+    if (setup.cs2_path_ok) return { tone: "ok", text: t("settings.statusCs2Ok") };
     if (String(s.cs2Path || "").trim())
-      return { tone: "warn", text: "CS2：路径已填但文件不存在或不可访问" };
-    return { tone: "err", text: "CS2：未配置" };
-  }, [setup, s.cs2Path]);
+      return { tone: "warn", text: t("settings.statusCs2PathBad") };
+    return { tone: "err", text: t("settings.statusCs2Missing") };
+  }, [setup, s.cs2Path, t]);
 
   const ffmpegStatus = useMemo(() => {
-    if (!setup) return { tone: "muted", text: "FFmpeg：检测中…" };
-    if (setup.ffmpeg_ok) return { tone: "ok", text: "FFmpeg：编码器 / 可执行文件可用" };
-    return { tone: "warn", text: "FFmpeg：未在 PATH 或自定义路径中找到" };
-  }, [setup]);
+    if (!setup) return { tone: "muted", text: t("settings.statusFfmpegDetecting") };
+    if (setup.ffmpeg_ok) return { tone: "ok", text: t("settings.statusFfmpegOk") };
+    return { tone: "warn", text: t("settings.statusFfmpegMissing") };
+  }, [setup, t]);
 
   const aiRowStatus = useMemo(() => {
-    if (!s.aiMode) return { tone: "muted", text: "AI：极速本地（未启用云端锐评）" };
+    if (!s.aiMode) return { tone: "muted", text: t("settings.statusAiLocal") };
     if (isLocal) {
-      return { tone: "ok", text: "AI：本机接口（可不填密钥）" };
+      return { tone: "ok", text: t("settings.statusAiLocalEndpoint") };
     }
-    if (!setup) return { tone: "muted", text: "AI：检测中…" };
+    if (!setup) return { tone: "muted", text: t("settings.statusAiDetecting") };
     if (setup.ai_key_ok || s.llmKeySavedOnServer) {
-      return { tone: "ok", text: "AI：已配置网关与密钥" };
+      return { tone: "ok", text: t("settings.statusAiOk") };
     }
-    return { tone: "warn", text: "AI：请填写并保存 API 密钥" };
-  }, [s.aiMode, s.llmKeySavedOnServer, setup, isLocal]);
+    return { tone: "warn", text: t("settings.statusAiKeyMissing") };
+  }, [s.aiMode, s.llmKeySavedOnServer, setup, isLocal, t]);
 
   const handlePasteCs2 = async () => {
     try {
-      const t = (await navigator.clipboard.readText()).trim();
-      if (t) {
-        s.setCs2Path(t);
-        await s.handleSaveConfig({ cs2_path: t });
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) {
+        s.setCs2Path(text);
+        await s.handleSaveConfig({ cs2_path: text });
       }
     } catch {
-      s.setProgressText("无法读取剪贴板，请手动粘贴路径。");
+      s.setProgressText(t("settings.clipboardError"));
     }
   };
 
   const handlePasteFfmpeg = async () => {
     try {
-      const t = (await navigator.clipboard.readText()).trim();
-      if (t) {
-        s.setFfmpegPath(t);
-        await s.handleSaveConfig({ ffmpeg_path: t });
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) {
+        s.setFfmpegPath(text);
+        await s.handleSaveConfig({ ffmpeg_path: text });
       }
     } catch {
-      s.setProgressText("无法读取剪贴板，请手动粘贴路径。");
+      s.setProgressText(t("settings.clipboardError"));
     }
   };
 
@@ -403,20 +407,20 @@ export default function SettingsPage() {
   };
 
   const editPlayer = (name) => {
-    const next = window.prompt("编辑昵称", name);
+    const next = window.prompt(t("settings.playerEditPrompt"), name);
     if (next == null) return;
-    const t = String(next).trim();
-    if (!t || t === name) return;
-    setPlayers((p) => p.map((x) => (x === name ? t : x)));
+    const trimmed = String(next).trim();
+    if (!trimmed || trimmed === name) return;
+    setPlayers((p) => p.map((x) => (x === name ? trimmed : x)));
   };
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col bg-cs2-bg-dark">
       <header className="shrink-0 border-b border-white/10 bg-cs2-bg-dark/95 px-4 py-3 backdrop-blur-sm sm:px-5">
         <div className="w-full min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-dynamic-white">设置中心</h1>
+          <h1 className="text-lg font-bold tracking-tight text-dynamic-white">{t("settings.pageTitle")}</h1>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
-            管理 CS2、FFmpeg、AI 洞察与录制相关选项。
+            {t("settings.pageSubtitle")}
           </p>
           <div className="mt-3 grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 min-[420px]:gap-x-3">
             <StatusLine tone={cs2Status.tone}>{cs2Status.text}</StatusLine>
@@ -444,8 +448,8 @@ export default function SettingsPage() {
             <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 pb-5 @min-[68rem]/settings:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] @min-[68rem]/settings:items-stretch @min-[68rem]/settings:gap-5 @min-[68rem]/settings:pb-6">
               <div className="flex min-w-0 flex-col gap-3 @min-[68rem]/settings:min-h-0 @min-[68rem]/settings:flex-1 @min-[68rem]/settings:gap-4">
             <SettingsCard
-              title="运行模式"
-              hint="切换后会影响解析是否请求大模型；AI 模式需配置密钥。"
+              title={t("settings.cardRunMode")}
+              hint={t("settings.cardRunModeHint")}
             >
               <div className="flex w-full max-w-full flex-wrap gap-3">
                 <button
@@ -459,12 +463,12 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-2">
                     <Zap className={`h-4 w-4 shrink-0 ${!s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`text-sm font-bold ${!s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>极速本地</span>
+                    <span className={`text-sm font-bold ${!s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>{t("settings.modeLocal")}</span>
                     {!s.aiMode ? (
-                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
+                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label={t("settings.modeSelectedAriaLabel")} />
                     ) : null}
                   </div>
-                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">本地规则提取片段，无需 AI</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">{t("settings.modeLocalDesc")}</p>
                 </button>
                 <button
                   type="button"
@@ -477,24 +481,24 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-2">
                     <Brain className={`h-4 w-4 shrink-0 ${s.aiMode ? "text-cs2-orange" : "text-zinc-500"}`} />
-                    <span className={`text-sm font-bold ${s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>AI 洞察</span>
+                    <span className={`text-sm font-bold ${s.aiMode ? "text-dynamic-white" : "text-dynamic-zinc-400"}`}>{t("settings.modeAi")}</span>
                     {s.aiMode ? (
-                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label="已选中" />
+                      <Check className="ml-auto h-4 w-4 shrink-0 text-cs2-orange" aria-label={t("settings.modeSelectedAriaLabel")} />
                     ) : null}
                   </div>
                   <ul className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-zinc-500">
-                    <li>· AI 锐评与评分</li>
+                    <li>· {t("settings.modeAiDesc")}</li>
                   </ul>
                 </button>
               </div>
             </SettingsCard>
 
             <SettingsCard
-              title="CS2 路径"
-              hint="一键录制依赖本机 CS2；若自动探测失败请粘贴 Steam 库中的 cs2.exe 完整路径。"
+              title={t("settings.cardCs2Path")}
+              hint={t("settings.cardCs2PathHint")}
             >
               <PathFieldRow
-                label="cs2.exe 完整路径"
+                label={t("settings.fieldCs2Exe")}
                 value={s.cs2Path}
                 placeholder="...\\game\\bin\\win64\\cs2.exe"
                 onChange={s.setCs2Path}
@@ -504,14 +508,14 @@ export default function SettingsPage() {
             </SettingsCard>
 
             <SettingsCard
-              title="关注玩家"
-              hint="用于 Demo 库展示名匹配等；不会自动拆高光。最多 50 名。"
+              title={t("settings.cardPlayers")}
+              hint={t("settings.cardPlayersHint")}
             >
               <div className="flex flex-col gap-3">
                 <div className="flex max-h-48 min-h-[5rem] w-full flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/25 p-2">
                 {players.length === 0 ? (
                   <span className="flex min-h-[3rem] w-full items-center justify-center px-2 py-2 text-center text-[11px] text-dynamic-zinc-400">
-                    尚未添加玩家
+                    {t("settings.playersEmpty")}
                   </span>
                 ) : (
                   players.map((p) => (
@@ -522,7 +526,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         className="max-w-[140px] truncate text-left hover:underline"
-                        title="双击编辑"
+                        title={t("settings.playerEditTitle")}
                         onDoubleClick={() => editPlayer(p)}
                       >
                         {p}
@@ -530,7 +534,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         className="rounded p-0.5 text-zinc-500 hover:bg-white/10 hover:text-dynamic-white"
-                        aria-label={`移除 ${p}`}
+                        aria-label={t("settings.playerRemoveAriaLabel", { name: p })}
                         onClick={() => removePlayer(p)}
                       >
                         ✕
@@ -549,22 +553,22 @@ export default function SettingsPage() {
                       addPlayer(playerDraft);
                     }
                   }}
-                  placeholder="输入昵称后回车或点添加"
+                  placeholder={t("settings.playerInputPlaceholder")}
                   className="min-w-0 w-full flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[12px] text-dynamic-white placeholder:text-zinc-600 focus:border-cs2-orange/50 focus:outline-none"
                   spellCheck={false}
                 />
                 <SecondaryButton type="button" className="w-full shrink-0 sm:w-auto" onClick={() => addPlayer(playerDraft)}>
-                  ＋ 添加玩家
+                  {t("settings.playerAddBtn")}
                 </SecondaryButton>
               </div>
               </div>
             </SettingsCard>
 
-            <SettingsCard title="系统与更新" hint="管理软件版本与自动更新。">
+            <SettingsCard title={t("settings.cardSystem")} hint={t("settings.cardSystemHint")}>
               <div className="space-y-4">
                 <div className="flex items-center justify-between rounded-lg bg-black/20 p-3 border border-white/5">
                   <div>
-                    <p className="text-[11px] font-semibold text-dynamic-zinc-300">当前版本</p>
+                    <p className="text-[11px] font-semibold text-dynamic-zinc-300">{t("settings.currentVersion")}</p>
                     <p className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">v{__APP_VERSION__} {!isPackaged && "(DEV)"}</p>
                   </div>
                   <button
@@ -578,7 +582,7 @@ export default function SettingsPage() {
                     } disabled:opacity-50`}
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${updateStatus?.status === "checking" || updateStatus?.status === "downloading" ? "animate-spin" : ""}`} />
-                    {updateStatus?.status === 'available' ? '立即更新' : '检查更新'}
+                    {updateStatus?.status === 'available' ? t("settings.btnUpdate") : t("settings.btnCheckUpdates")}
                   </button>
                 </div>
 
@@ -596,8 +600,8 @@ export default function SettingsPage() {
                     </div>
                     {updateStatus.status === 'downloading' && (
                       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-cs2-highlight transition-all duration-300" 
+                        <div
+                          className="h-full bg-cs2-highlight transition-all duration-300"
                           style={{ width: `${updateStatus.progress?.percent || 0}%` }}
                         />
                       </div>
@@ -648,15 +652,15 @@ export default function SettingsPage() {
 
               </div>
 
-              {/* 右列 */}
+              {/* right column */}
               <div className="flex min-w-0 flex-col gap-3 @min-[68rem]/settings:min-h-0 @min-[68rem]/settings:flex-1 @min-[68rem]/settings:gap-4">
-            <SettingsCard title="FFmpeg 与合辑" hint="合辑导出与编码器选择。" fill>
+            <SettingsCard title={t("settings.cardFfmpeg")} hint={t("settings.cardFfmpegHint")} fill>
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
                 <div className="shrink-0 space-y-2">
                   <PathFieldRow
-                    label="FFmpeg 可执行文件（可选）"
+                    label={t("settings.fieldFfmpegExe")}
                     value={s.ffmpegPath}
-                    placeholder="留空则使用 PATH 中的 ffmpeg"
+                    placeholder={t("settings.ffmpegPathPlaceholder")}
                     onChange={s.setFfmpegPath}
                     onBlurSave={() => void s.handleSaveConfig({ ffmpeg_path: s.ffmpegPath ?? "" })}
                     onPastePath={() => void handlePasteFfmpeg()}
@@ -664,10 +668,7 @@ export default function SettingsPage() {
                   <FfmpegDetectButton onDetect={s.handleDetectFfmpeg} />
                   {setup && !setup.ffmpeg_ok && !String(s.ffmpegPath || "").trim() && (
                     <p className="text-[11px] leading-relaxed text-amber-400/90">
-                      未检测到 FFmpeg。请填写{" "}
-                      <span className="font-mono">ffmpeg.exe</span>{" "}
-                      的完整路径，例如{" "}
-                      <span className="font-mono select-all">C:\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe</span>
+                      {t("settings.ffmpegMissingWarning")}
                     </p>
                   )}
                 </div>
@@ -681,24 +682,24 @@ export default function SettingsPage() {
 
             {s.aiMode ? (
               <SettingsCard
-                title="大模型（AI）"
-                hint="填写 OpenAI 兼容网关的 base URL 与模型 id。密钥在服务器保存后刷新不显示明文。"
+                title={t("settings.cardLlm")}
+                hint={t("settings.cardLlmHint")}
                 fill
               >
                 <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-                  <SmallField label="接口地址 (OpenAI 兼容)">
+                  <SmallField label={t("settings.fieldBaseUrl")}>
                     <input
                       value={s.llmConfig.base_url || ""}
-                      placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
+                      placeholder={t("settings.baseUrlPlaceholder")}
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, base_url: e.target.value })}
                       onBlur={schedulePersistLlm}
                       className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2.5 font-mono text-[12px] text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
                     />
                   </SmallField>
-                  <SmallField label="模型名称">
+                  <SmallField label={t("settings.fieldModel")}>
                     <input
                       value={s.llmConfig.model}
-                      placeholder="网关上注册的模型名，如 deepseek-chat、gpt-4o-mini"
+                      placeholder={t("settings.modelPlaceholder")}
                       onChange={(e) => s.setLlmConfig({ ...s.llmConfig, model: e.target.value })}
                       onBlur={schedulePersistLlm}
                       className="w-full min-w-0 max-w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-dynamic-white focus:border-cs2-orange/50 focus:outline-none @min-[40rem]/settings:max-w-md"
@@ -708,23 +709,23 @@ export default function SettingsPage() {
                     <div className="flex items-center gap-1.5 rounded-md border border-cs2-orange/20 bg-cs2-orange/10 px-2.5 py-2">
                       <Server className="h-3 w-3 shrink-0 text-cs2-orange" />
                       <span className="text-[10px] text-cs2-orange">
-                        检测到本机地址：可不填 API 密钥（后端使用占位密钥）。请确保兼容服务已启动。
+                        {t("settings.localEndpointInfo")}
                       </span>
                     </div>
                   )}
                   {!isLocal && (
                     <div>
-                      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">API 密钥</label>
+                      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">{t("settings.fieldApiKey")}</label>
                       {s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() && (
                         <p className="mb-1.5 text-[10px] leading-relaxed text-emerald-500/90">
-                          密钥已在服务器保存。更换请输入新密钥后失焦保存。
+                          {t("settings.apiKeySaved")}
                         </p>
                       )}
                       <div className="relative min-w-0 w-full max-w-full @min-[40rem]/settings:max-w-xl">
                         <input
                           type={showApiKey ? "text" : "password"}
                           value={s.llmConfig.api_key}
-                          placeholder={s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() ? "留空沿用已保存密钥" : "sk-..."}
+                          placeholder={s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() ? t("settings.apiKeyPlaceholderKeep") : "sk-..."}
                           onChange={(e) => s.setLlmConfig({ ...s.llmConfig, api_key: e.target.value })}
                           onBlur={schedulePersistLlm}
                           className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2.5 pl-3 pr-10 font-mono text-[12px] text-dynamic-white focus:border-cs2-orange/50 focus:outline-none"
@@ -745,13 +746,13 @@ export default function SettingsPage() {
 
             <div className="flex shrink-0 flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <p className="text-[11px] leading-relaxed text-dynamic-zinc-400">
-                将路径、编码、关注名单与大模型接口/模型名一次性写入配置文件。
+                {t("settings.saveFooterDesc")}
               </p>
               <PrimaryButton
                 className="shrink-0 sm:min-w-[140px]"
                 onClick={() => void s.handleSaveAllSettingsPage(players)}
               >
-                保存设置
+                {t("settings.saveBtn")}
               </PrimaryButton>
             </div>
 

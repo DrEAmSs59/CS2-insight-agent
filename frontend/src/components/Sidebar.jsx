@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import API from "../api/api";
+import { useT } from "../i18n/useT.js";
 import {
   Settings,
   Brain,
@@ -62,6 +63,7 @@ export default function Sidebar({
   onExpectedParsePlayersTextChange,
   onSaveExpectedParsePlayers,
 }) {
+  const t = useT();
   const [obsOpen, setObsOpen] = useState(true);
   const [cs2Open, setCs2Open] = useState(true);
   const [llmOpen, setLlmOpen] = useState(true);
@@ -91,12 +93,12 @@ export default function Sidebar({
 
   const handleCheckUpdates = () => {
     if (!isPackaged) {
-      setUpdateStatus({ status: "error", message: "开发模式下不支持检查更新" });
+      setUpdateStatus({ status: "error", message: t("settings.updateDevModeError") });
       setTimeout(() => setUpdateStatus(null), 3000);
       return;
     }
     if (window.electron?.checkForUpdates) {
-      setUpdateStatus({ status: "checking", message: "正在检查更新..." });
+      setUpdateStatus({ status: "checking", message: t("settings.updateChecking") });
       window.electron.checkForUpdates();
     }
   };
@@ -129,8 +131,8 @@ export default function Sidebar({
             <Monitor className="w-4 h-4 text-cs2-accent" />
           </div>
           <div>
-            <div className="text-sm font-bold tracking-wide">CS2 洞察</div>
-            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">智能体 v1.1.2</div>
+            <div className="text-sm font-bold tracking-wide">{t("settings.sidebarBrand")}</div>
+            <div className="text-[10px] text-cs2-text-secondary font-mono tracking-widest">{t("settings.sidebarVersionLabel")} v1.1.2</div>
           </div>
         </div>
       </div>
@@ -138,7 +140,7 @@ export default function Sidebar({
       {/* Mode Switcher */}
       <div className="px-4 py-4 border-b border-cs2-border">
         <div className="text-[10px] font-semibold text-cs2-text-secondary tracking-widest uppercase mb-3">
-          分析模式
+          {t("settings.sidebarAnalysisMode")}
         </div>
         <div className="grid grid-cols-2 gap-1 bg-cs2-bg-page rounded-lg p-1">
           <button
@@ -151,7 +153,7 @@ export default function Sidebar({
             }`}
           >
             <Zap className="w-3.5 h-3.5" />
-            极速本地
+            {t("settings.modeLocal")}
           </button>
           <button
             type="button"
@@ -163,12 +165,12 @@ export default function Sidebar({
             }`}
           >
             <Brain className="w-3.5 h-3.5" />
-            AI 洞察
+            {t("settings.modeAi")}
           </button>
         </div>
       </div>
 
-      {/* 系统与更新 (在正式版显示，在开发模式下也显示供调试) */}
+      {/* System & Updates (shown in production and dev for debugging) */}
       <div className="border-b border-cs2-border">
         <button
           type="button"
@@ -178,7 +180,7 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <RefreshCw className="h-3.5 w-3.5 text-cs2-text-secondary" />
             <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">
-              系统与更新 {!isPackaged && <span className="text-[9px] text-cs2-orange ml-1">(DEV)</span>}
+              {t("settings.cardSystem")} {!isPackaged && <span className="text-[9px] text-cs2-orange ml-1">(DEV)</span>}
             </span>
           </div>
           {systemOpen ? (
@@ -230,7 +232,7 @@ export default function Sidebar({
                     : ""
                 }`}
               />
-              检查版本更新
+              {t("settings.btnCheckUpdatesLong")}
             </button>
           </div>
         )}
@@ -245,7 +247,7 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <Settings className="w-3.5 h-3.5 text-cs2-text-secondary" />
             <span className="text-xs font-semibold tracking-wide uppercase text-cs2-text-secondary">
-              OBS 连接配置
+              {t("settings.sidebarObsSection")}
             </span>
           </div>
           {obsOpen ? (
@@ -256,11 +258,11 @@ export default function Sidebar({
         </button>
         {obsOpen && (
           <div className="px-4 pb-4 space-y-3">
-            <Input label="主机地址" value={obsConfig.host} onChange={(v) => onObsConfigChange({ ...obsConfig, host: v })} />
-            <Input label="端口" value={obsConfig.port || ""} type="number" onChange={(v) => onObsConfigChange({ ...obsConfig, port: Number(v) })} />
+            <Input label={t("settings.sidebarObsHost")} value={obsConfig.host} onChange={(v) => onObsConfigChange({ ...obsConfig, host: v })} />
+            <Input label={t("settings.sidebarObsPort")} value={obsConfig.port || ""} type="number" onChange={(v) => onObsConfigChange({ ...obsConfig, port: Number(v) })} />
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
-                密码
+                {t("settings.sidebarObsPassword")}
               </label>
               <input
                 type="password"
@@ -277,7 +279,7 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* CS2 路径 — 一键录制启动游戏所需 */}
+      {/* CS2 path — required for one-click recording */}
       <div className="border-b border-cs2-border">
         <button
           type="button"
@@ -287,7 +289,7 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <FolderOpen className="h-3.5 w-3.5 text-cs2-text-secondary" />
             <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">
-              CS2 路径
+              {t("settings.cardCs2Path")}
             </span>
           </div>
           {cs2Open ? (
@@ -299,22 +301,22 @@ export default function Sidebar({
         {cs2Open && (
           <div className="space-y-2 px-4 pb-4">
             <Input
-              label="cs2.exe 完整路径"
+              label={t("settings.fieldCs2Exe")}
               value={cs2Path ?? ""}
               placeholder="...\\game\\bin\\win64\\cs2.exe"
               onChange={(v) => onCs2PathChange?.(v)}
               onBlur={() => onSaveConfig?.({ cs2_path: cs2Path ?? "" })}
             />
             <Input
-              label="FFmpeg 可执行文件（合辑导出，可选）"
+              label={t("settings.fieldFfmpegSidebarLabel")}
               value={ffmpegPath ?? ""}
-              placeholder="留空则使用 PATH 中的 ffmpeg"
+              placeholder={t("settings.ffmpegPathPlaceholder")}
               onChange={(v) => onFfmpegPathChange?.(v)}
               onBlur={() => onSaveConfig?.({ ffmpeg_path: ffmpegPath ?? "" })}
             />
             <div className="space-y-1">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
-                合辑视频编码
+                {t("settings.encoderLabel")}
               </label>
               <select
                 value={montageEncoder ?? "auto"}
@@ -322,11 +324,11 @@ export default function Sidebar({
                 onBlur={() => onSaveConfig?.({ montage_encoder: montageEncoder ?? "auto" })}
                 className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary transition-colors focus:border-cs2-accent/50 focus:outline-none"
               >
-                <option value="auto">自动（优先 NVENC → QSV → AMF，否则 x264）</option>
+                <option value="auto">{t("settings.encoderAutoSidebar")}</option>
                 <option value="h264_nvenc">NVIDIA NVENC</option>
                 <option value="h264_qsv">Intel Quick Sync (QSV)</option>
                 <option value="h264_amf">AMD AMF</option>
-                <option value="libx264">x264 软件（CPU）</option>
+                <option value="libx264">{t("settings.encoderX264")}</option>
               </select>
             </div>
             <button
@@ -336,12 +338,10 @@ export default function Sidebar({
               className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
             >
               <ScanSearch className="h-3.5 w-3.5" />
-              {detectingCs2 ? "探测中…" : "自动探测"}
+              {detectingCs2 ? t("settings.detectingLabel") : t("settings.autoDetectCs2")}
             </button>
             <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
-              一键录制会启动本机 CS2 播放 Demo。若探测失败，请从 Steam 库右键 CS2 → 管理 → 浏览本地文件，找到
-              <span className="font-mono text-cs2-text-muted"> game\bin\win64\cs2.exe </span>
-              并粘贴完整路径。
+              {t("settings.sidebarCs2PathHint")}
             </p>
           </div>
         )}
@@ -356,7 +356,7 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <FolderOpen className="h-3.5 w-3.5 text-cs2-text-secondary" />
             <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">
-              Demo 监听路径
+              {t("settings.sidebarWatchPaths")}
             </span>
           </div>
           {watchOpen ? (
@@ -387,7 +387,7 @@ export default function Sidebar({
                   setWatchPathInput("");
                 }}
               >
-                添加
+                {t("settings.sidebarWatchAdd")}
               </button>
             </div>
             <div className="space-y-1">
@@ -406,7 +406,7 @@ export default function Sidebar({
                       onSaveConfig?.({ demo_watch_paths: next });
                     }}
                   >
-                    删除
+                    {t("settings.sidebarWatchRemove")}
                   </button>
                 </div>
               ))}
@@ -418,7 +418,7 @@ export default function Sidebar({
               className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
             >
               <ScanSearch className={`h-3.5 w-3.5 ${demoLibraryLoading ? "animate-spin" : ""}`} />
-              扫描现有 Demo
+              {t("settings.sidebarScanDemos")}
             </button>
           </div>
         )}
@@ -433,7 +433,7 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <Users className="h-3.5 w-3.5 text-cs2-text-secondary" />
             <span className="text-xs font-semibold uppercase tracking-wide text-cs2-text-secondary">
-              关注玩家
+              {t("settings.cardPlayers")}
             </span>
           </div>
           {expectedPlayersOpen ? (
@@ -445,8 +445,7 @@ export default function Sidebar({
         {expectedPlayersOpen && (
           <div className="space-y-2 px-4 pb-4">
             <p className="text-[10px] leading-relaxed text-cs2-text-secondary">
-              每行一个游戏内昵称，<strong className="text-cs2-text-secondary">可写多行多名</strong>。
-              <strong className="text-cs2-text-secondary">不会</strong>自动拆高光；要出片段请在库里选中后自行点解析。
+              {t("settings.sidebarPlayersHint")}
             </p>
             <textarea
               rows={5}
@@ -461,7 +460,7 @@ export default function Sidebar({
               className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50"
               onClick={() => void onSaveExpectedParsePlayers?.()}
             >
-              保存名单
+              {t("settings.sidebarSavePlayerList")}
             </button>
           </div>
         )}
@@ -477,7 +476,7 @@ export default function Sidebar({
             <div className="flex items-center gap-2">
               <Brain className="w-3.5 h-3.5 text-cs2-text-secondary" />
               <span className="text-xs font-semibold tracking-wide uppercase text-cs2-text-secondary">
-                大模型配置
+                {t("settings.cardLlmSidebarTitle")}
               </span>
             </div>
             {llmOpen ? (
@@ -489,17 +488,17 @@ export default function Sidebar({
           {llmOpen && (
             <div className="px-4 pb-4 space-y-3">
               <Input
-                label="接口地址 (OpenAI 兼容)"
+                label={t("settings.fieldBaseUrl")}
                 value={llmConfig.base_url || ""}
-                placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1"
+                placeholder={t("settings.baseUrlPlaceholder")}
                 onChange={(v) => onLlmConfigChange({ ...llmConfig, base_url: v })}
                 onBlur={schedulePersistLlm}
               />
 
               <Input
-                label="模型名称"
+                label={t("settings.fieldModel")}
                 value={llmConfig.model}
-                placeholder="网关上的模型 id，如 deepseek-chat、gpt-4o-mini"
+                placeholder={t("settings.modelPlaceholderSidebar")}
                 onChange={(v) => onLlmConfigChange({ ...llmConfig, model: v })}
                 onBlur={schedulePersistLlm}
               />
@@ -508,7 +507,7 @@ export default function Sidebar({
                 <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-md bg-cs2-accent/10 border border-cs2-accent/20">
                   <Server className="w-3 h-3 text-cs2-accent shrink-0" />
                   <span className="text-[10px] text-cs2-accent">
-                    检测到本机地址：可不填 API 密钥（后端使用占位密钥调用兼容接口）。
+                    {t("settings.localEndpointInfoSidebar")}
                   </span>
                 </div>
               )}
@@ -516,11 +515,11 @@ export default function Sidebar({
               {!isLocal && (
                 <div>
                   <label className="block text-[10px] font-semibold text-cs2-text-secondary tracking-wider uppercase mb-1.5">
-                    API 密钥
+                    {t("settings.fieldApiKey")}
                   </label>
                   {llmKeySavedOnServer && !llmConfig.api_key?.trim() && (
                     <p className="mb-1.5 text-[10px] leading-relaxed text-cs2-emerald-on-surface/90">
-                      密钥已在服务器保存（刷新不显示明文）。若要更换，输入新密钥后失焦即可覆盖。
+                      {t("settings.apiKeySavedSidebar")}
                     </p>
                   )}
                   <div className="relative">
@@ -529,7 +528,7 @@ export default function Sidebar({
                       value={llmConfig.api_key}
                       placeholder={
                         llmKeySavedOnServer && !llmConfig.api_key?.trim()
-                          ? "留空沿用已保存密钥"
+                          ? t("settings.apiKeyPlaceholderKeep")
                           : "sk-..."
                       }
                       onChange={(e) => onLlmConfigChange({ ...llmConfig, api_key: e.target.value })}
@@ -553,7 +552,7 @@ export default function Sidebar({
 
       <div className="mt-auto px-4 py-4 border-t border-cs2-border">
         <div className="text-[10px] text-cs2-text-secondary font-mono text-center">
-          CS2 洞察智能体 &copy; 2026
+          {t("settings.sidebarFooter")}
         </div>
       </div>
     </aside>
