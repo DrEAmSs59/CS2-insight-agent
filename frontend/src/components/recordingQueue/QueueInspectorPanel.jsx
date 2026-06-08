@@ -10,6 +10,7 @@ import { useT } from "../../i18n/useT.js";
 import { AiScoreBadge } from "../ClipCard";
 import {
   getMontageBlockShortLabel,
+  blockShortLabelI18nKey,
   isClipPacingAndPovLocked,
   isRoundTimelineRoundClip,
   isTimelineSourceClip,
@@ -79,7 +80,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
 
   const cd = selectedItem.clipData || {};
   const hideQueueAi = isTimelineSourceClip(cd) || cd.category === "compilation";
-  const killBadge = getMontageBlockShortLabel(cd);
+  const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(cd)));
   const playerName = String(selectedItem.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
   const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(selectedItem, cd);

@@ -100,7 +100,7 @@ export default function QueueWorkspaceRow({
   const cat = cd.category || "";
   const timeline = isTimelineSourceClip(cd);
   const Icon = timeline ? History : CAT_ICON[cat] || Crosshair;
-  const title = friendlyClipTitleForQueue(cd);
+  const title = friendlyClipTitleForQueue(cd, t);
   const showTimeline = cat !== "compilation";
   const demoLabel = String(item.demoFilename || item.demoPath || "").trim() || "—";
   const playerLabel = String(item.targetPlayer || "").trim() || "—";
@@ -123,7 +123,7 @@ export default function QueueWorkspaceRow({
   const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec) : "";
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
   const queueSummary = String(cd.queue_summary_line || "").trim();
-  const combatSummary = !timeline ? formatClipCombatSummaryLine(cd) : "";
+  const combatSummary = !timeline ? formatClipCombatSummaryLine(cd, t) : "";
   const categoryKey = timeline
     ? "queue.rowCatTimeline"
     : ({

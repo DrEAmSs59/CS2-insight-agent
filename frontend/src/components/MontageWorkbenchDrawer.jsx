@@ -1070,7 +1070,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     }));
   }, []);
 
-  const durationText = formatMontageEstimate(totalKnownSeconds, orderedIds.length);
+  const durationText = formatMontageEstimate(totalKnownSeconds, orderedIds.length, t);
 
   // Translated versions of constant arrays (labels resolved via t)
   const transitionTypeOptions = useMemo(
@@ -1127,7 +1127,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     const n = filteredLibrary.length;
     return {
       count: n,
-      totalLabel: formatMontageEstimate(sum, n),
+      totalLabel: formatMontageEstimate(sum, n, t),
       avgLabel: known > 0 ? `${(sum / known).toFixed(1)}s` : "—",
     };
   }, [filteredLibrary]);
@@ -1460,7 +1460,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
               {t("montage.deleteClipTitle")}
             </h4>
             <p className="mb-1.5 font-mono text-xs font-semibold text-cs2-text-secondary bg-cs2-surface-1 p-2 rounded-md truncate">
-              {clipBasename(deleteClipPrompt) || getClipTitle(deleteClipPrompt)}
+              {clipBasename(deleteClipPrompt) || getClipTitle(deleteClipPrompt, t)}
             </p>
             <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
               {t("montage.deleteClipDesc")}
@@ -1509,8 +1509,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </p>
             <ul className="mb-4 max-h-40 overflow-y-auto rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-2 font-mono text-xs text-cs2-text-secondary space-y-1">
               {batchDeleteLibraryPrompt.map((c) => (
-                <li key={c.id} className="truncate py-0.5 hover:text-cs2-text-primary transition-colors" title={clipBasename(c) || getClipTitle(c)}>
-                  {clipBasename(c) || getClipTitle(c)}
+                <li key={c.id} className="truncate py-0.5 hover:text-cs2-text-primary transition-colors" title={clipBasename(c) || getClipTitle(c, t)}>
+                  {clipBasename(c) || getClipTitle(c, t)}
                 </li>
               ))}
             </ul>

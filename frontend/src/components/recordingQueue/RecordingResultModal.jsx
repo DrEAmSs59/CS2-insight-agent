@@ -118,8 +118,8 @@ export default function RecordingResultModal({
         {results.map((result) => {
           const aborted = isAborted(result);
           const cd = result._queueItem?.clipData ?? null;
-          const title = cd ? friendlyClipTitleForQueue(cd) : t("queue.modalDefaultClipTitle", { n: result._index + 1 });
-          const combatLine = cd ? formatClipCombatSummaryLine(cd) : "";
+          const title = cd ? friendlyClipTitleForQueue(cd, t) : t("queue.modalDefaultClipTitle", { n: result._index + 1 });
+          const combatLine = cd ? formatClipCombatSummaryLine(cd, t) : "";
           const rl = roundLabel(cd);
           const killCount = cd?.kill_count ? Number(cd.kill_count) : null;
           const demoFile = String(result._queueItem?.demoFilename || result._queueItem?.demoPath || "").trim();

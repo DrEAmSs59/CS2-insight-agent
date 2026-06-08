@@ -15,7 +15,7 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
 
   if (!clip) return null;
   const tag = normalizeClipType(clip);
-  const title = getClipTitle(clip);
+  const title = getClipTitle(clip, t);
   const meta = getClipMetaLine(clip);
   const dur = getClipDurationSeconds(clip);
   const score = getClipScore(clip);

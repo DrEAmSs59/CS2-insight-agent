@@ -890,6 +890,62 @@ export default {
   "montage.consoleFooterDuration": "合集预估总时长",
   "montage.consoleFooterClipCount": "({n} 个切片节点)",
   "montage.consoleFooterQuality": "输出画质标准",
+  // montage — clip title fallbacks (getClipTitle)
+  "montage.clipTitleUnnamed": "未命名片段",
+  "montage.clipTitleFragment": "片段 {id}",
+  "montage.clipTitleTimelineRound": "整回合时间线",
+  "montage.clipTitleTimelineSegment": "时间线片段",
+  // montage — friendly category labels used in friendlyClipTitleForQueue
+  "montage.catHighlightClip": "高光片段",
+  "montage.catFailClip": "下饭片段",
+  "montage.catMemeDeathClip": "梗死亡片段",
+  "montage.compilationClip": "合集片段",
+  "montage.compilationWith": "合集 · {kind}",
+  "montage.genericClip": "片段",
+  // montage — combat summary strings (formatClipCombatSummaryLine / getMontageClipFactLine)
+  "montage.combatKills": "击杀 {names}",
+  "montage.combatKilledBy": "被 {killer} 击杀",
+  "montage.combatDeath": "阵亡",
+  "montage.killCount": "{kc}杀",
+  "montage.killCountPrefix": "{kc}杀 · ",
+  // montage — round labels (getMontageClipFactLine)
+  "montage.factRound": "第{n}回合",
+  "montage.factRounds": "第{rounds}回合",
+  // montage — perspective labels (getRecordedClipPerspectiveZh)
+  "montage.perspectiveSpectator": "观战视角",
+  "montage.perspectivePlayerFollow": "玩家视角",
+  "montage.perspectivePovHud": "POV HUD 视角",
+  "montage.perspectiveVictim": "受害者视角",
+  "montage.perspectiveKiller": "击杀者视角",
+  "montage.perspectiveVictimAndKiller": "含受害者与击杀者视角",
+  "montage.perspectiveWithVictim": "含受害者视角",
+  "montage.perspectiveVictimSuffix": "含 {n} 段受害者视角",
+  // montage — POV tooltip labels (getVictimPovSegmentsTooltip)
+  "montage.tooltipVictim": "{name}（受害者）",
+  "montage.tooltipKiller": "{name}（击杀者）",
+  // montage — duration unknown fallback
+  "montage.durationUnknown": "未知",
+  // montage — share text (buildShareText)
+  "montage.shareHighlight": "AI 帮我从 CS2 Demo 里剪了一个高光合集",
+  "montage.shareFunnyDeath": "AI 帮我从 CS2 Demo 里剪了一个下饭处刑合集",
+  "montage.shareContrast": "AI 帮我从 CS2 Demo 里剪了一个高光和下饭反差合集",
+  "montage.shareCustom": "AI 帮我从 CS2 Demo 里剪了一个自定义合集",
+  "montage.shareBody": "{title}，共 {n} 个片段，时长约 {dur}。\n视频路径：{path}",
+  // montage — compilation kind labels (humanizeCompilationKind)
+  "montage.compilationKindRivalKills": "亲儿子喂饭",
+  "montage.compilationKindAllKills": "全部击杀",
+  "montage.compilationKindNemesisDeaths": "本命苦主",
+  "montage.compilationKindAllDeaths": "全部死亡",
+  "montage.compilationKindFreezeToDeath": "回合死亡合集",
+  // montage — theme names and descriptions (MONTAGE_THEMES)
+  "montage.themeHighlightName": "高光合集",
+  "montage.themeHighlightDesc": "优先选择击杀、高评分和精彩操作片段",
+  "montage.themeFunnyDeathName": "下饭处刑合集",
+  "montage.themeFunnyDeathDesc": "优先选择下饭、梗死亡和节目效果片段",
+  "montage.themeContrastName": "反差合集",
+  "montage.themeContrastDesc": "先放下饭片段，最后用高光片段收尾",
+  "montage.themeCustomName": "自定义合集",
+  "montage.themeCustomDesc": "手动选择片段和顺序",
   // montage — clip type display labels (normalizeClipType return values → i18n keys)
   "montage.clipTypeHighlight": "高光",
   "montage.clipTypeFail": "下饭",

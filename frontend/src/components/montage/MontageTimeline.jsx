@@ -35,7 +35,7 @@ export default function MontageTimeline({
     <div className="flex h-full min-h-[200px] flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/40">
       <div className="border-b border-cs2-border px-3 py-2">
         <p className="text-[12px] font-semibold text-cs2-text-primary">
-          {t("montage.timelineHeader", { n: clips.length, dur: formatMontageEstimate(knownDur, clips.length) })}
+          {t("montage.timelineHeader", { n: clips.length, dur: formatMontageEstimate(knownDur, clips.length, t) })}
         </p>
         {unknownDurationHint ? (
           <p className="mt-1 text-[11px] text-cs2-amber-on-surface">{unknownDurationHint}</p>
@@ -63,7 +63,7 @@ export default function MontageTimeline({
           <ul className="space-y-2">
             {clips.map((clip, idx) => {
               const tag = normalizeClipType(clip);
-              const title = getClipTitle(clip);
+              const title = getClipTitle(clip, t);
               const dur = getClipDurationSeconds(clip);
               const durLabel = dur != null ? `${dur.toFixed(1)}s` : t("montage.timelineUnknownDuration");
               const meta = clip.demo_filename

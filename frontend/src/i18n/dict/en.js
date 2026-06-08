@@ -889,6 +889,62 @@ export default {
   "montage.consoleFooterDuration": "Est. total duration",
   "montage.consoleFooterClipCount": "({n} clip nodes)",
   "montage.consoleFooterQuality": "Output quality",
+  // montage — clip title fallbacks (getClipTitle)
+  "montage.clipTitleUnnamed": "Unnamed Clip",
+  "montage.clipTitleFragment": "Clip {id}",
+  "montage.clipTitleTimelineRound": "Full-Round Timeline",
+  "montage.clipTitleTimelineSegment": "Timeline Clip",
+  // montage — friendly category labels used in friendlyClipTitleForQueue
+  "montage.catHighlightClip": "Highlight Clip",
+  "montage.catFailClip": "Fail Clip",
+  "montage.catMemeDeathClip": "Meme Death Clip",
+  "montage.compilationClip": "Compilation Clip",
+  "montage.compilationWith": "Compilation · {kind}",
+  "montage.genericClip": "Clip",
+  // montage — combat summary strings (formatClipCombatSummaryLine / getMontageClipFactLine)
+  "montage.combatKills": "Killed {names}",
+  "montage.combatKilledBy": "Killed by {killer}",
+  "montage.combatDeath": "Died",
+  "montage.killCount": "{kc}K",
+  "montage.killCountPrefix": "{kc}K · ",
+  // montage — round labels (getMontageClipFactLine)
+  "montage.factRound": "Round {n}",
+  "montage.factRounds": "Rounds {rounds}",
+  // montage — perspective labels (getRecordedClipPerspectiveZh)
+  "montage.perspectiveSpectator": "Spectator view",
+  "montage.perspectivePlayerFollow": "Player view",
+  "montage.perspectivePovHud": "POV HUD view",
+  "montage.perspectiveVictim": "Victim view",
+  "montage.perspectiveKiller": "Killer view",
+  "montage.perspectiveVictimAndKiller": "Victim & killer view",
+  "montage.perspectiveWithVictim": "Includes victim view",
+  "montage.perspectiveVictimSuffix": "{n} victim POV segment(s)",
+  // montage — POV tooltip labels (getVictimPovSegmentsTooltip)
+  "montage.tooltipVictim": "{name} (victim)",
+  "montage.tooltipKiller": "{name} (killer)",
+  // montage — duration unknown fallback
+  "montage.durationUnknown": "Unknown",
+  // montage — share text (buildShareText)
+  "montage.shareHighlight": "AI clipped a highlight reel from my CS2 demo",
+  "montage.shareFunnyDeath": "AI clipped a fail / death reel from my CS2 demo",
+  "montage.shareContrast": "AI clipped a highlight & fail contrast reel from my CS2 demo",
+  "montage.shareCustom": "AI clipped a custom montage from my CS2 demo",
+  "montage.shareBody": "{title} — {n} clip(s), approx. {dur}.\nVideo path: {path}",
+  // montage — compilation kind labels (humanizeCompilationKind)
+  "montage.compilationKindRivalKills": "Nemesis feeder",
+  "montage.compilationKindAllKills": "All kills",
+  "montage.compilationKindNemesisDeaths": "Nemesis deaths",
+  "montage.compilationKindAllDeaths": "All deaths",
+  "montage.compilationKindFreezeToDeath": "Round death compilation",
+  // montage — theme names and descriptions (MONTAGE_THEMES)
+  "montage.themeHighlightName": "Highlight Reel",
+  "montage.themeHighlightDesc": "Prioritises kills, high-score and standout plays",
+  "montage.themeFunnyDeathName": "Fail Reel",
+  "montage.themeFunnyDeathDesc": "Prioritises fails, meme deaths and entertainment clips",
+  "montage.themeContrastName": "Contrast Reel",
+  "montage.themeContrastDesc": "Starts with fails, ends on highlights",
+  "montage.themeCustomName": "Custom Montage",
+  "montage.themeCustomDesc": "Pick clips and order manually",
   // montage — clip type display labels (normalizeClipType return values → i18n keys)
   "montage.clipTypeHighlight": "Highlight",
   "montage.clipTypeFail": "Fail",

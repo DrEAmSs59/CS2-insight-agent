@@ -12,6 +12,7 @@ export default function MontageExportResult({ result, themeId, clipCount, durati
     clipCount,
     durationText,
     outputPath: result.output_path,
+    t,
   });
 
   return (

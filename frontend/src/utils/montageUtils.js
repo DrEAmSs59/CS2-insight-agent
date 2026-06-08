@@ -11,32 +11,52 @@ export function stripTagEmoji(str) {
     .trim();
 }
 
+/**
+ * Theme metadata for MONTAGE_THEMES.
+ * `nameKey`/`descKey` are i18n keys; callers resolve via t().
+ * `exportToken` is the stable ASCII string used in export filenames (locale-independent).
+ */
 export const MONTAGE_THEMES = [
   {
     id: "highlight",
-    name: "高光合集",
-    description: "优先选择击杀、高评分和精彩操作片段",
+    nameKey: "montage.themeHighlightName",
+    descKey: "montage.themeHighlightDesc",
+    exportToken: "Highlights",
   },
   {
     id: "funny_death",
-    name: "下饭处刑合集",
-    description: "优先选择下饭、梗死亡和节目效果片段",
+    nameKey: "montage.themeFunnyDeathName",
+    descKey: "montage.themeFunnyDeathDesc",
+    exportToken: "FunnyDeaths",
   },
   {
     id: "contrast",
-    name: "反差合集",
-    description: "先放下饭片段，最后用高光片段收尾",
+    nameKey: "montage.themeContrastName",
+    descKey: "montage.themeContrastDesc",
+    exportToken: "Contrast",
   },
   {
     id: "custom",
-    name: "自定义合集",
-    description: "手动选择片段和顺序",
+    nameKey: "montage.themeCustomName",
+    descKey: "montage.themeCustomDesc",
+    exportToken: "Custom",
   },
 ];
 
-export function themeLabel(themeId) {
-  const t = MONTAGE_THEMES.find((x) => x.id === themeId);
-  return t?.name || "自定义合集";
+/** Return a resolved-name list suitable for MontageThemeSelector. */
+export function getThemesForSelector(t) {
+  return MONTAGE_THEMES.map((th) => ({
+    id: th.id,
+    name: t(th.nameKey),
+    description: t(th.descKey),
+    exportToken: th.exportToken,
+  }));
+}
+
+/** Return the translated label for a theme id. Accepts `t` from useT(). */
+export function themeLabel(themeId, t) {
+  const th = MONTAGE_THEMES.find((x) => x.id === themeId);
+  return th ? t(th.nameKey) : t("montage.themeCustomName");
 }
 
 /** 是否来自解析页「按回合时间线」入队（与 clip.category 独立，用于 UI / 合辑筛选） */
@@ -174,80 +194,111 @@ export function normalizeClipType(clip) {
   return "普通片段";
 }
 
-export function getClipTitle(clip) {
-  if (!clip || typeof clip !== "object") return "未命名片段";
+/**
+ * Returns the display title for a clip.
+ * Accepts `t` from useT() to translate fallback strings.
+ * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
+ */
+export function getClipTitle(clip, t) {
+  if (!clip || typeof clip !== "object") return t("montage.clipTitleUnnamed");
   if (isTimelineSourceClip(clip)) {
     if (String(clip.timeline_source || "").trim() === "round_timeline_round") {
-      return "整回合时间线";
+      return t("montage.clipTitleTimelineRound");
     }
     const kind = String(clip.timeline_record_kind || "").trim();
-    if (kind === "death") return "时间线死亡";
-    if (kind === "kill") return "时间线击杀";
-    return "时间线片段";
+    if (kind === "death") return t("montage.clipTypeTimelineDeath");
+    if (kind === "kill") return t("montage.clipTypeTimelineKill");
+    return t("montage.clipTitleTimelineSegment");
   }
-  const t =
+  const raw =
     clip.title ||
     clip.clip_title ||
     clip.name ||
     (typeof clip.label === "string" ? clip.label : null);
-  if (t && String(t).trim()) return String(t).trim();
+  if (raw && String(raw).trim()) return String(raw).trim();
   const p = clip.output_path || clip.path || "";
   if (typeof p === "string" && p.trim()) {
     const base = p.split(/[/\\]/).pop() || p;
-    return base.replace(/\.[^.]+$/, "") || base || "未命名片段";
+    return base.replace(/\.[^.]+$/, "") || base || t("montage.clipTitleUnnamed");
   }
-  return clip.clip_id ? `片段 ${clip.clip_id}` : "未命名片段";
+  return clip.clip_id ? t("montage.clipTitleFragment", { id: clip.clip_id }) : t("montage.clipTitleUnnamed");
 }
 
-/** 合集 compilation_kind → 简短中文（仅 UI） */
-export const COMPILATION_KIND_ZH = {
-  rival_kills: "亲儿子喂饭",
-  all_kills: "全部击杀",
-  nemesis_deaths: "本命苦主",
-  all_deaths: "全部死亡",
-  freeze_to_death: "回合死亡合集",
+/**
+ * Stable ASCII token used in export filenames for each compilation kind.
+ * Never localised — filenames must be locale-independent.
+ */
+export const COMPILATION_KIND_EXPORT_TOKEN = {
+  rival_kills: "NemesisFeeder",
+  all_kills: "AllKills",
+  nemesis_deaths: "NemesisDeaths",
+  all_deaths: "AllDeaths",
+  freeze_to_death: "RoundDeaths",
 };
 
-export function humanizeCompilationKind(kind) {
+/**
+ * Maps compilation_kind to its i18n key for UI display.
+ */
+export const COMPILATION_KIND_KEY_MAP = {
+  rival_kills: "montage.compilationKindRivalKills",
+  all_kills: "montage.compilationKindAllKills",
+  nemesis_deaths: "montage.compilationKindNemesisDeaths",
+  all_deaths: "montage.compilationKindAllDeaths",
+  freeze_to_death: "montage.compilationKindFreezeToDeath",
+};
+
+/**
+ * Returns the translated display label for a compilation kind.
+ * @param {string} kind
+ * @param {Function} t — translation function from useT()
+ */
+export function humanizeCompilationKind(kind, t) {
   if (kind == null || kind === "") return "";
   const k = String(kind);
-  return COMPILATION_KIND_ZH[k] || k;
+  const key = COMPILATION_KIND_KEY_MAP[k];
+  return key ? t(key) : k;
 }
 
-/** 队列/检查器展示用：无标题时避免只显示 `片段 c_xxx` 技术 id。 */
-export function friendlyClipTitleForQueue(clip) {
-  if (!clip || typeof clip !== "object") return "未命名片段";
-  const raw = getClipTitle(clip);
+/**
+ * 队列/检查器展示用：无标题时避免只显示 `片段 c_xxx` 技术 id。
+ * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
+ */
+export function friendlyClipTitleForQueue(clip, t) {
+  if (!clip || typeof clip !== "object") return t("montage.clipTitleUnnamed");
+  const raw = getClipTitle(clip, t);
   if (typeof raw !== "string" || !/^片段\s+c_[a-f0-9]{6,}$/i.test(raw.trim())) {
     return raw;
   }
   const tags = Array.isArray(clip.context_tags) ? clip.context_tags : [];
-  for (const t of tags) {
-    if (typeof t === "string" && t.trim()) return t.trim();
+  for (const tag of tags) {
+    if (typeof tag === "string" && tag.trim()) return tag.trim();
   }
   const map = String(clip.map_name || clip.map || "").trim();
   const cat = String(clip.category || "");
   const kind = String(clip.compilation_kind || "");
   const typeBase =
     cat === "highlight"
-      ? "高光片段"
+      ? t("montage.catHighlightClip")
       : cat === "fail"
-        ? "下饭片段"
+        ? t("montage.catFailClip")
         : cat === "meme_death"
-          ? "梗死亡片段"
+          ? t("montage.catMemeDeathClip")
           : cat === "compilation"
             ? kind
-              ? `合集 · ${humanizeCompilationKind(kind)}`
-              : "合集片段"
-            : "片段";
+              ? t("montage.compilationWith", { kind: humanizeCompilationKind(kind, t) })
+              : t("montage.compilationClip")
+            : t("montage.genericClip");
   return map ? `${typeBase} · ${map}` : typeBase;
 }
 
 /**
  * 高光 / 下饭：一行展示「击杀了谁 / 被谁击杀」与武器（与解析字段 weapon_used、victims、killer_name 对齐）。
  * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
  */
-export function formatClipCombatSummaryLine(clip) {
+export function formatClipCombatSummaryLine(clip, t) {
   if (!clip || typeof clip !== "object") return "";
   const cat = String(clip.category || "").trim().toLowerCase();
   const rawW = String(clip.weapon_used || "").trim();
@@ -263,14 +314,14 @@ export function formatClipCombatSummaryLine(clip) {
       ? clip.victims.map((v) => String(v ?? "").trim()).filter(Boolean)
       : [];
     const parts = [];
-    if (victims.length) parts.push(`击杀 ${victims.join("、")}`);
+    if (victims.length) parts.push(t("montage.combatKills", { names: victims.join("、") }));
     if (weapons.length) parts.push(weapons.join(" / "));
     return parts.join(" · ");
   }
   if (cat === "fail") {
     const killer = String(clip.killer_name || "").trim();
     const parts = [];
-    if (killer) parts.push(`击杀者 ${killer}`);
+    if (killer) parts.push(t("montage.combatKilledBy", { killer }));
     if (weapons.length) parts.push(weapons.join(" / "));
     else if (rawW) parts.push(rawW);
     return parts.join(" · ");
@@ -317,20 +368,32 @@ export function getCompilationSourceTicksSpanSeconds(clip) {
   return sum > 0 ? sum : null;
 }
 
-export function formatDuration(seconds) {
-  if (seconds == null || !Number.isFinite(Number(seconds))) return "未知";
+/**
+ * Format seconds as MM:SS. When `t` is provided and seconds is invalid, returns t("montage.durationUnknown").
+ * @param {number|null} seconds
+ * @param {Function} [t] — optional translation function; if omitted, falls back to "?"
+ */
+export function formatDuration(seconds, t) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) {
+    return t ? t("montage.durationUnknown") : "?";
+  }
   const s = Math.max(0, Math.floor(Number(seconds)));
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
 
-/** Header / timeline: empty montage shows 00:00; clips with no duration data show 未知 */
-export function formatMontageEstimate(totalKnownSeconds, clipCount) {
+/**
+ * Header / timeline: empty montage shows 00:00; clips with no duration data show translated "Unknown".
+ * @param {number} totalKnownSeconds
+ * @param {number} clipCount
+ * @param {Function} t — translation function from useT()
+ */
+export function formatMontageEstimate(totalKnownSeconds, clipCount, t) {
   const n = Number(clipCount) || 0;
-  if (n <= 0) return formatDuration(0);
-  if (totalKnownSeconds > 0) return formatDuration(totalKnownSeconds);
-  return "未知";
+  if (n <= 0) return formatDuration(0, t);
+  if (totalKnownSeconds > 0) return formatDuration(totalKnownSeconds, t);
+  return t ? t("montage.durationUnknown") : "?";
 }
 
 export function getClipScore(clip) {
@@ -365,13 +428,17 @@ export function getClipComment(clip) {
 
 function clipSearchBlob(clip) {
   if (!clip || typeof clip !== "object") return "";
+  // Note: getClipTitle is NOT called here to avoid requiring `t` in a search helper.
+  // clip.title / clip.clip_title / clip.name cover the real titles well enough.
   const parts = [
     clip.output_path,
     clip.demo_path,
     clip.demo_filename,
     clip.player_name,
     clip.clip_id,
-    getClipTitle(clip),
+    clip.title,
+    clip.clip_title,
+    clip.name,
     getClipComment(clip),
     clip.clip_type,
     clip.type,
@@ -555,22 +622,27 @@ export function getClipRoundLabel(clip) {
   return r != null ? `R${r}` : null;
 }
 
-/** 回合、击杀/死亡对象、武器摘要行；includeDemoName=false 时省略 Demo 文件名（素材池用）。 */
-export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
+/**
+ * 回合、击杀/死亡对象、武器摘要行；includeDemoName=false 时省略 Demo 文件名（素材池用）。
+ * @param {Record<string, unknown>} clip
+ * @param {{ includeDemoName?: boolean }} opts
+ * @param {Function} t — translation function from useT()
+ */
+export function getMontageClipFactLine(clip, { includeDemoName = true } = {}, t) {
   if (!clip || typeof clip !== "object") return "";
   const demo = includeDemoName
     ? (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
       (clip.demo_path && String(clip.demo_path).split(/[/\\]/).pop()?.replace(/\.dem$/i, "").trim()) ||
       ""
     : "";
-  // For compilation clips spanning multiple rounds, show all rounds ("第4·5·9回合").
+  // For compilation clips spanning multiple rounds, show all rounds.
   const srcRounds = Array.isArray(clip.source_rounds)
     ? clip.source_rounds.map(Number).filter(Number.isFinite)
     : [];
   const rnd = srcRounds.length > 1
-    ? `第${srcRounds.join("·")}回合`
+    ? t("montage.factRounds", { rounds: srcRounds.join("·") })
     : clip.round != null && Number.isFinite(Number(clip.round))
-      ? `第${clip.round}回合`
+      ? t("montage.factRound", { n: clip.round })
       : "";
   const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
   const cat = String(clip.category || "").toLowerCase();
@@ -584,12 +656,12 @@ export function getMontageClipFactLine(clip, { includeDemoName = true } = {}) {
     action = qsl;
   } else if (cat === "fail" || kind === "death" || wck === "timeline_death") {
     const killer = String(clip.killer_name || "").trim();
-    action = killer ? `被 ${killer} 击杀` : "死亡";
+    action = killer ? t("montage.combatKilledBy", { killer }) : t("montage.combatDeath");
   } else if (victims.length) {
-    const kPart = Number.isFinite(kc) && kc > 0 ? `${kc}杀 · ` : "";
+    const kPart = Number.isFinite(kc) && kc > 0 ? t("montage.killCountPrefix", { kc }) : "";
     action = `${kPart}${victims.join("、")}`;
   } else if (Number.isFinite(kc) && kc > 0) {
-    action = `${kc}杀`;
+    action = t("montage.killCount", { kc });
   }
   const parts = [demo, rnd, action, w].filter(Boolean);
   return parts.join(" · ");
@@ -730,35 +802,43 @@ export function getMontageExtraVictimPovCount(clip) {
   return segs.filter((s) => String(s?.perspective_type || "").toLowerCase() === "victim").length;
 }
 
-/** 受害者/击杀者 POV 段 tooltip：逐段玩家名 */
-export function getVictimPovSegmentsTooltip(clip) {
+/**
+ * 受害者/击杀者 POV 段 tooltip：逐段玩家名
+ * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
+ */
+export function getVictimPovSegmentsTooltip(clip, t) {
   const segs = Array.isArray(clip?.victim_pov_segments) ? clip.victim_pov_segments : [];
   if (segs.length === 0) return "";
   return segs
     .map((s) => {
       const n = String(s?.player_name || "").trim();
       if (!n) return "";
-      const t = String(s?.perspective_type || "").toLowerCase();
-      if (t === "victim") return `${n}（受害者）`;
-      if (t === "killer") return `${n}（击杀者）`;
+      const perspType = String(s?.perspective_type || "").toLowerCase();
+      if (perspType === "victim") return t("montage.tooltipVictim", { name: n });
+      if (perspType === "killer") return t("montage.tooltipKiller", { name: n });
       return n;
     })
     .filter(Boolean)
     .join("、");
 }
 
-/** 入库录像卡片：回放视角中文；优先落库字段 recording_perspective + victim_pov_segments */
-export function getRecordedClipPerspectiveZh(clip) {
-  if (!clip || typeof clip !== "object") return "观战视角";
+/**
+ * 入库录像卡片：回放视角翻译文案；优先落库字段 recording_perspective + victim_pov_segments
+ * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
+ */
+export function getRecordedClipPerspectiveZh(clip, t) {
+  if (!clip || typeof clip !== "object") return t("montage.perspectiveSpectator");
   const rp = String(clip.recording_perspective || "").trim();
   const fromEnum = {
-    pov_hud: "POV HUD 视角",
-    player_follow: "玩家视角",
-    spectator: "观战视角",
+    pov_hud: t("montage.perspectivePovHud"),
+    player_follow: t("montage.perspectivePlayerFollow"),
+    spectator: t("montage.perspectiveSpectator"),
   }[rp];
 
   const extraVictim = getMontageExtraVictimPovCount(clip);
-  const victimSuffix = extraVictim > 0 ? `含 ${extraVictim} 段受害者视角` : "";
+  const victimSuffix = extraVictim > 0 ? t("montage.perspectiveVictimSuffix", { n: extraVictim }) : "";
 
   if (fromEnum) {
     return victimSuffix ? `${fromEnum} · ${victimSuffix}` : fromEnum;
@@ -776,24 +856,35 @@ export function getRecordedClipPerspectiveZh(clip) {
   const matchesKiller = pnNorm && killerNorm && pnNorm === killerNorm;
 
   let legacy = "";
-  if (isPrimaryClipVictimPerspective(clip)) legacy = pn ? "玩家视角" : "观战视角";
-  else if (matchesVictim && matchesKiller) legacy = "含受害者与击杀者视角";
-  else if (matchesVictim) legacy = "受害者视角";
-  else if (matchesKiller) legacy = "击杀者视角";
-  else if (Array.isArray(clip.planned_segments) && clip.planned_segments.length > 1) legacy = "含受害者视角";
-  else if (Array.isArray(clip.record_segments) && clip.record_segments.length > 1) legacy = "含受害者视角";
-  else if ((cat === "highlight" || cat === "compilation") && hasVictimNames) legacy = "含受害者视角";
-  else if (pn) legacy = "玩家视角";
-  else legacy = "观战视角";
+  if (isPrimaryClipVictimPerspective(clip)) legacy = pn ? t("montage.perspectivePlayerFollow") : t("montage.perspectiveSpectator");
+  else if (matchesVictim && matchesKiller) legacy = t("montage.perspectiveVictimAndKiller");
+  else if (matchesVictim) legacy = t("montage.perspectiveVictim");
+  else if (matchesKiller) legacy = t("montage.perspectiveKiller");
+  else if (Array.isArray(clip.planned_segments) && clip.planned_segments.length > 1) legacy = t("montage.perspectiveWithVictim");
+  else if (Array.isArray(clip.record_segments) && clip.record_segments.length > 1) legacy = t("montage.perspectiveWithVictim");
+  else if ((cat === "highlight" || cat === "compilation") && hasVictimNames) legacy = t("montage.perspectiveWithVictim");
+  else if (pn) legacy = t("montage.perspectivePlayerFollow");
+  else legacy = t("montage.perspectiveSpectator");
 
   return victimSuffix ? `${legacy} · ${victimSuffix}` : legacy;
 }
 
-/** 不含「含 N 段受害者视角」后缀，便于与独立受害者 chip 并排展示 */
-export function getRecordedClipPerspectivePrimaryZh(clip) {
-  const full = getRecordedClipPerspectiveZh(clip);
-  const idx = full.indexOf(" · 含 ");
-  if (idx >= 0) return full.slice(0, idx).trim();
+/**
+ * 不含「含 N 段受害者视角」后缀，便于与独立受害者 chip 并排展示
+ * @param {Record<string, unknown>} clip
+ * @param {Function} t — translation function from useT()
+ */
+export function getRecordedClipPerspectivePrimaryZh(clip, t) {
+  const full = getRecordedClipPerspectiveZh(clip, t);
+  // Strip the victim-suffix that starts with " · " followed by translated suffix content.
+  // Since victimSuffix comes from t("montage.perspectiveVictimSuffix"), we split on " · " and
+  // check if the trailing part looks like a suffix (contains a digit indicating count).
+  const sepIdx = full.lastIndexOf(" · ");
+  if (sepIdx >= 0) {
+    const suffix = full.slice(sepIdx + 3);
+    // If the suffix looks like a victim-count label (contains digit), strip it.
+    if (/\d/.test(suffix)) return full.slice(0, sepIdx).trim();
+  }
   return full;
 }
 
@@ -801,29 +892,31 @@ export function buildDefaultExportName(themeId) {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-  const themeNameMap = {
-    highlight: "高光合集",
-    funny_death: "下饭处刑合集",
-    contrast: "反差合集",
-    custom: "自定义合集",
-  };
+  // Use stable ASCII export tokens — filenames must not change with locale.
+  const th = MONTAGE_THEMES.find((x) => x.id === themeId);
+  const token = th ? th.exportToken : "Montage";
 
-  return `CS2-${themeNameMap[themeId] || "合辑"}-${date}`;
+  return `CS2-${token}-${date}`;
 }
 
-export function buildShareText({ themeId, clipCount, durationText, outputPath }) {
-  const themeTextMap = {
-    highlight: "AI 帮我从 CS2 Demo 里剪了一个高光合集",
-    funny_death: "AI 帮我从 CS2 Demo 里剪了一个下饭处刑合集",
-    contrast: "AI 帮我从 CS2 Demo 里剪了一个高光和下饭反差合集",
-    custom: "AI 帮我从 CS2 Demo 里剪了一个自定义合集",
+/**
+ * Build share/copy text for a completed montage export.
+ * @param {{ themeId, clipCount, durationText, outputPath, t }} params
+ */
+export function buildShareText({ themeId, clipCount, durationText, outputPath, t }) {
+  const themeKeyMap = {
+    highlight: "montage.shareHighlight",
+    funny_death: "montage.shareFunnyDeath",
+    contrast: "montage.shareContrast",
+    custom: "montage.shareCustom",
   };
 
-  const title = themeTextMap[themeId] || themeTextMap.custom;
+  const titleKey = themeKeyMap[themeId] || themeKeyMap.custom;
+  const title = t(titleKey);
   const n = Number(clipCount) || 0;
-  const dur = durationText || "未知";
+  const dur = durationText || t("montage.durationUnknown");
   const path = outputPath || "";
-  return `${title}，共 ${n} 个片段，时长约 ${dur}。\n视频路径：${path}`;
+  return t("montage.shareBody", { title, n, dur, path });
 }
 
 export function ensureMp4Filename(name) {

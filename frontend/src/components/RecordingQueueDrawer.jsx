@@ -14,6 +14,7 @@ import {
   formatClipCombatSummaryLine,
   isTimelineSourceClip,
   getMontageBlockShortLabel,
+  blockShortLabelI18nKey,
   isRoundTimelineRoundClip,
   isClipPacingAndPovLocked,
   queueBlockBadgeClass,
@@ -26,6 +27,7 @@ import { estimateItemRecordSeconds } from "../utils/recordingQueueDerive";
 import { timelineQueueMetaOneLiner } from "../utils/timelineQueue";
 import { AiScoreBadge } from "./ClipCard";
 import QueueMiniTimeline from "./recordingQueue/QueueMiniTimeline";
+import { useT } from "../i18n/useT.js";
 
 // 与后端 build_smart_jump_segments 保持一致
 const DEFAULT_PACING = BACKEND_DEFAULT_PACING;
@@ -548,10 +550,11 @@ function QueueItemCard({
   globalPacing,
   updateItemPacing,
 }) {
+  const t = useT();
   const cd = item.clipData || {};
   const tl = isTimelineSourceClip(cd);
   const hideQueueAi = tl || cd.category === "compilation";
-  const killBadge = getMontageBlockShortLabel(cd);
+  const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(cd)));
   const playerName = String(item.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
   const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd);
@@ -561,7 +564,7 @@ function QueueItemCard({
   const mapName = String(cd.map_name || cd.map || "").trim();
   const aiScore = cd.ai_score;
   const queueSummary = String(cd.queue_summary_line || "").trim();
-  const combatSummary = !tl ? formatClipCombatSummaryLine(cd) : "";
+  const combatSummary = !tl ? formatClipCombatSummaryLine(cd, t) : "";
   const showLegacyTags =
     !queueSummary &&
     Array.isArray(cd.context_tags) &&

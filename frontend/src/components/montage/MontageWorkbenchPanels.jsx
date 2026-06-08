@@ -260,7 +260,7 @@ function MontageTransitionEdgeEditor({
       <p className="text-xs text-cs2-text-muted flex items-center gap-1.5">
         <span>{t("montage.transEdgeConnectTo")}</span>
         <span className="font-bold text-cs2-text-primary truncate max-w-[240px]" title={nextClip?.output_path}>
-          {pathBasenameQuick(nextClip?.output_path) || getClipTitle(nextClip)}
+          {pathBasenameQuick(nextClip?.output_path) || getClipTitle(nextClip, t)}
         </span>
       </p>
       <p className="mt-1.5 font-mono text-xs font-bold text-cs2-accent">
@@ -378,13 +378,13 @@ export function MontageOrchestrationTimeline({
           .filter(Boolean)[0];
       const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 6) : [];
       const mapName = mapNameFromClip(clip);
-      const perspectiveZh = getRecordedClipPerspectiveZh(clip);
-      const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
-      const factLine = getMontageClipFactLine(clip);
+      const perspectiveZh = getRecordedClipPerspectiveZh(clip, t);
+      const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip, t);
+      const factLine = getMontageClipFactLine(clip, {}, t);
       const scorePair = getMontageScorePair(clip);
       const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
       const victimSegCount = getMontageExtraVictimPovCount(clip);
-      const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip) : "";
+      const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip, t) : "";
       return {
         clip,
         next,
@@ -760,16 +760,16 @@ export function MontageMaterialPoolCard({
     : "";
   const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 5) : [];
   const playerName = clip.player_name?.trim() || t("montage.poolCardUnknownPlayer");
-  const perspectiveZh = getRecordedClipPerspectiveZh(clip);
-  const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
-  const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
+  const perspectiveZh = getRecordedClipPerspectiveZh(clip, t);
+  const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip, t);
+  const factLine = getMontageClipFactLine(clip, { includeDemoName: false }, t);
   const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
   const scorePair = getMontageScorePair(clip);
   const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
   const victimSegCount = getMontageExtraVictimPovCount(clip);
-  const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip) : "";
+  const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip, t) : "";
   const aiExplain = suppressMontageAi ? "" : montageAiExplainText(clip, t);
   const demoLabel = demoShortLabel(clip);
 
