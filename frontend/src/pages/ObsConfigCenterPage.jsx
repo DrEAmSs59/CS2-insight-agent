@@ -5,8 +5,10 @@ import PageContainer from "../components/PageContainer";
 import { useAppShell } from "../context/AppShellContext";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
 import { obsConfigHasIssues } from "../utils/obsConfigHealth";
+import { useT } from "../i18n/useT.js";
 
 export default function ObsConfigCenterPage() {
+  const t = useT();
   const {
     obsConfig,
     setObsConfig,
@@ -39,7 +41,7 @@ export default function ObsConfigCenterPage() {
         await persistObsConfig?.();
       }
     } catch (e) {
-      setErrorText(e.response?.data?.detail || e.message || "自动探测失败");
+      setErrorText(e.response?.data?.detail || e.message || t("obscfg.errorDetectFail"));
     } finally {
       setDetectingObs(false);
     }
@@ -55,9 +57,9 @@ export default function ObsConfigCenterPage() {
     try {
       await fetchStatus();
     } catch (e) {
-      setErrorText(e.response?.data?.detail || e.message || "加载失败");
+      setErrorText(e.response?.data?.detail || e.message || t("obscfg.errorLoadFail"));
     }
-  }, [fetchStatus]);
+  }, [fetchStatus, t]);
 
   const handleConfigCheck = async () => {
     setChecking(true);
@@ -71,7 +73,7 @@ export default function ObsConfigCenterPage() {
         await fetchStatus();
       }
     } catch (e) {
-      setErrorText(e.response?.data?.detail || e.message || "配置检查失败");
+      setErrorText(e.response?.data?.detail || e.message || t("obscfg.errorCheckFail"));
     } finally {
       setChecking(false);
     }
@@ -92,41 +94,105 @@ export default function ObsConfigCenterPage() {
       setCalibrateResult(data);
       const n = data.changed?.length ?? 0;
       setProgressText(
-        n > 0 ? `校准完成，已修正 ${n} 项配置` : "校准完成，OBS 配置均正常",
+        n > 0 ? t("obscfg.calibratedN", { n }) : t("obscfg.calibratedOk"),
         { autoDismissMs: 8000 },
       );
       await refreshSilent();
     } catch (e) {
-      setErrorText(e.response?.data?.detail || e.message || "校准失败");
+      setErrorText(e.response?.data?.detail || e.message || t("obscfg.errorCalibrateFail"));
     } finally {
       setCalibrating(false);
     }
   };
 
   const FORMAT_LABELS = {
-    hybrid_mp4: "混合 MP4",
+    hybrid_mp4: t("obscfg.formatHybridMp4"),
     mp4: "MP4",
     mkv: "MKV",
     mov: "MOV",
     ts: "TS",
-    fragmented_mp4: "分段 MP4",
+    fragmented_mp4: t("obscfg.formatFragMp4"),
   };
   const QUALITY_LABELS = {
-    Stream: "与串流一致",
-    Small: "高质量，中等文件大小",
-    HQ: "近似无损，大文件大小",
-    Lossless: "无损，非常大的文件大小",
+    Stream: t("obscfg.qualityStream"),
+    Small: t("obscfg.qualitySmall"),
+    HQ: t("obscfg.qualityHq"),
+    Lossless: t("obscfg.qualityLossless"),
   };
 
   const hasIssues = obsConfigHasIssues(status);
+
+  const statusRows = status?.obs_connected
+    ? [
+        {
+          label: t("obscfg.rowCanvas"),
+          value: `${status.video?.base_width ?? 0}×${status.video?.base_height ?? 0}`,
+          ok: status.video?.base_width === status.monitor?.width && status.video?.base_height === status.monitor?.height,
+          issue: t("obscfg.resShouldBe", { w: status.monitor?.width ?? "?", h: status.monitor?.height ?? "?" }),
+        },
+        {
+          label: t("obscfg.rowOutput"),
+          value: `${status.video?.output_width ?? 0}×${status.video?.output_height ?? 0}`,
+          ok: status.video?.output_width === status.monitor?.width && status.video?.output_height === status.monitor?.height,
+          issue: t("obscfg.resShouldBe", { w: status.monitor?.width ?? "?", h: status.monitor?.height ?? "?" }),
+        },
+        {
+          label: t("obscfg.rowScene"),
+          value: status.scene?.dedicated_scene_exists ? t("obscfg.sceneExists") : t("obscfg.sceneNotExists"),
+          ok: status.scene?.dedicated_scene_exists ?? false,
+          issue: t("obscfg.sceneIssue"),
+        },
+        {
+          label: t("obscfg.rowCapture"),
+          value: !status.scene?.dedicated_scene_exists
+            ? "—"
+            : status.scene?.capture_source_exists
+              ? t("obscfg.captureExists")
+              : t("obscfg.captureNotExists"),
+          ok: status.scene?.dedicated_scene_exists ? (status.scene?.capture_source_exists ?? false) : true,
+          issue: t("obscfg.captureIssue"),
+          skip: !status.scene?.dedicated_scene_exists,
+        },
+        {
+          label: t("obscfg.rowStretch"),
+          value: !status.scene?.capture_source_exists
+            ? "—"
+            : status.scene?.source_fit_to_canvas
+              ? t("obscfg.stretchFit")
+              : t("obscfg.stretchNotFit"),
+          ok: status.scene?.capture_source_exists ? (status.scene?.source_fit_to_canvas ?? false) : true,
+          issue: t("obscfg.stretchIssue"),
+          skip: !status.scene?.capture_source_exists,
+        },
+        {
+          label: t("obscfg.rowFormat"),
+          value: FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? t("obscfg.formatUnknown"),
+          ok: status.recording?.format === "hybrid_mp4",
+          issue: t("obscfg.formatIssue", { val: FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? t("obscfg.formatUnknown") }),
+        },
+        {
+          label: t("obscfg.rowQuality"),
+          value: QUALITY_LABELS[status.recording?.rec_quality] ?? status.recording?.rec_quality ?? t("obscfg.qualityUnknown"),
+          ok: status.recording?.rec_quality !== "Stream" && !!status.recording?.rec_quality,
+          issue: t("obscfg.qualityIssue"),
+        },
+        {
+          label: t("obscfg.rowOutputDir"),
+          value: status.recording?.output_path || t("obscfg.outputDirNotSet"),
+          ok: true,
+          infoOnly: true,
+          outputPath: status.recording?.output_path || "",
+        },
+      ]
+    : [];
 
   return (
     <div className="h-full min-h-0 w-full overflow-y-auto">
       <PageContainer>
         <div>
-          <h1 className="text-lg font-bold tracking-wide text-cs2-text-primary">OBS 配置中心</h1>
+          <h1 className="text-lg font-bold tracking-wide text-cs2-text-primary">{t("obscfg.pageTitle")}</h1>
           <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-cs2-text-secondary">
-            一键校准 OBS 录制环境，自动修复画布/输出分辨率错位、4:3 黑边、Game Capture 源缺失、录像格式错误等问题。
+            {t("obscfg.pageSubtitle")}
           </p>
         </div>
 
@@ -139,56 +205,56 @@ export default function ObsConfigCenterPage() {
         {/* OBS 程序设置 */}
         <section className="mt-4 rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-cs2-text-primary">OBS 程序设置</h2>
+            <h2 className="text-sm font-semibold text-cs2-text-primary">{t("obscfg.sectionSettings")}</h2>
             <button
               type="button"
               onClick={() => void handleConfigCheck()}
               disabled={checking}
-              title="配置检查"
+              title={t("obscfg.btnConfigCheck")}
               className="shrink-0 flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-input px-4 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:bg-cs2-bg-hover disabled:opacity-50"
             >
               {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-              {checking ? "检查中" : "配置检查"}
+              {checking ? t("obscfg.btnChecking") : t("obscfg.btnConfigCheck")}
             </button>
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-secondary">
-            配置 OBS 启动路径与 WebSocket 连接信息，用于录制前自动拉起 OBS 并控制回放。
+            {t("obscfg.settingsDesc")}
           </p>
 
           {/* 启动配置 */}
           <div className="mt-4">
             <div className="flex items-center justify-between">
-              <div className="text-[13px] font-semibold text-cs2-text-primary">启动配置</div>
+              <div className="text-[13px] font-semibold text-cs2-text-primary">{t("obscfg.launchConfig")}</div>
               {checkResult != null && (
                 checkResult.path_ok ? (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    路径正确
+                    {t("obscfg.pathOk")}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-amber-on-surface">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    路径错误
+                    {t("obscfg.pathError")}
                   </span>
                 )
               )}
             </div>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
-              填写 OBS 可执行文件的完整路径，用于录制前自动启动 OBS。
+              {t("obscfg.launchDesc")}
             </p>
             <div className="mt-2 space-y-2">
               <input
                 type="text"
                 value={obsConfig.obs_path ?? ""}
                 onChange={(e) => setObsConfig({ ...obsConfig, obs_path: e.target.value })}
-                placeholder="例如 C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+                placeholder={t("obscfg.obsPathPlaceholder")}
                 className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary transition-colors placeholder:text-cs2-text-muted/80 focus:border-cs2-accent/50 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => void detectObsPath()}
                 disabled={detectingObs}
-                title="自动探测 OBS 安装路径"
+                title={t("obscfg.btnDetectTitle")}
                 className="flex w-full items-center justify-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input py-2 text-xs font-semibold transition-colors hover:border-cs2-accent/50 disabled:opacity-50"
               >
                 {detectingObs ? (
@@ -196,7 +262,7 @@ export default function ObsConfigCenterPage() {
                 ) : (
                   <ScanSearch className="h-3.5 w-3.5" />
                 )}
-                {detectingObs ? "探测中…" : "自动探测 OBS"}
+                {detectingObs ? t("obscfg.btnDetecting") : t("obscfg.btnDetectObs")}
               </button>
             </div>
           </div>
@@ -204,28 +270,28 @@ export default function ObsConfigCenterPage() {
           {/* 连接配置 */}
           <div className="mt-4">
             <div className="flex items-center justify-between">
-              <div className="text-[13px] font-semibold text-cs2-text-primary">连接配置</div>
+              <div className="text-[13px] font-semibold text-cs2-text-primary">{t("obscfg.connConfig")}</div>
               {checkResult != null ? (
                 checkResult.connected ? (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-text-success">
                     <Wifi className="h-3.5 w-3.5 shrink-0" />
-                    连接正确
+                    {t("obscfg.connOk")}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-cs2-amber-on-surface">
                     <WifiOff className="h-3.5 w-3.5 shrink-0" />
-                    连接失败
+                    {t("obscfg.connFail")}
                   </span>
                 )
               ) : null}
             </div>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">
-              与 OBS 菜单栏「工具 → WebSocket 服务器设置」中的主机、端口、密码保持一致。
+              {t("obscfg.connDesc")}
             </p>
             <div className="mt-2 grid gap-3 sm:grid-cols-3">
               <div>
                 <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  主机地址
+                  {t("obscfg.fieldHost")}
                 </label>
                 <input
                   type="text"
@@ -236,7 +302,7 @@ export default function ObsConfigCenterPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  端口
+                  {t("obscfg.fieldPort")}
                 </label>
                 <input
                   type="number"
@@ -247,7 +313,7 @@ export default function ObsConfigCenterPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  密码
+                  {t("obscfg.fieldPassword")}
                 </label>
                 <input
                   type="password"
@@ -275,7 +341,7 @@ export default function ObsConfigCenterPage() {
         {/* 一键校准 */}
         <section className="mt-4 rounded-xl border border-cs2-border bg-cs2-bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-cs2-text-primary">一键校准</div>
+            <div className="text-sm font-semibold text-cs2-text-primary">{t("obscfg.sectionCalibrate")}</div>
             <button
               type="button"
               disabled={statusRefreshing || calibrating}
@@ -283,80 +349,20 @@ export default function ObsConfigCenterPage() {
                 setStatusRefreshing(true);
                 try { await refreshSilent(); } finally { setStatusRefreshing(false); }
               }}
-              title="刷新配置状态"
+              title={t("obscfg.btnRefreshTitle")}
               className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-40 transition-colors"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${statusRefreshing ? "animate-spin" : ""}`} />
-              刷新
+              {t("obscfg.btnRefresh")}
             </button>
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-secondary">
-            检测并修正 OBS 录制环境中的常见配置问题。仅操作 CS2 Insight 专用场景，不影响其他 OBS 场景。
+            {t("obscfg.calibrateDesc")}
           </p>
 
           {status?.obs_connected ? (
             <div className="mt-3 divide-y divide-cs2-border rounded-lg border border-cs2-border overflow-hidden">
-              {[
-                {
-                  label: "画布分辨率",
-                  value: `${status.video?.base_width ?? 0}×${status.video?.base_height ?? 0}`,
-                  ok: status.video?.base_width === status.monitor?.width && status.video?.base_height === status.monitor?.height,
-                  issue: `应为 ${status.monitor?.width ?? "?"}×${status.monitor?.height ?? "?"}（主显示器）`,
-                },
-                {
-                  label: "输出分辨率",
-                  value: `${status.video?.output_width ?? 0}×${status.video?.output_height ?? 0}`,
-                  ok: status.video?.output_width === status.monitor?.width && status.video?.output_height === status.monitor?.height,
-                  issue: `应为 ${status.monitor?.width ?? "?"}×${status.monitor?.height ?? "?"}（主显示器）`,
-                },
-                {
-                  label: "CS2 Insight 场景",
-                  value: status.scene?.dedicated_scene_exists ? "已存在" : "不存在",
-                  ok: status.scene?.dedicated_scene_exists ?? false,
-                  issue: "场景不存在，将自动创建",
-                },
-                {
-                  label: "Game Capture 源",
-                  value: !status.scene?.dedicated_scene_exists
-                    ? "—"
-                    : status.scene?.capture_source_exists
-                      ? "已存在"
-                      : "不存在",
-                  ok: status.scene?.dedicated_scene_exists ? (status.scene?.capture_source_exists ?? false) : true,
-                  issue: "Game Capture 源不存在，将自动创建",
-                  skip: !status.scene?.dedicated_scene_exists,
-                },
-                {
-                  label: "画面拉伸",
-                  value: !status.scene?.capture_source_exists
-                    ? "—"
-                    : status.scene?.source_fit_to_canvas
-                      ? "填满画布"
-                      : "未填满",
-                  ok: status.scene?.capture_source_exists ? (status.scene?.source_fit_to_canvas ?? false) : true,
-                  issue: "未填满画布，可能有 4:3 黑边",
-                  skip: !status.scene?.capture_source_exists,
-                },
-                {
-                  label: "录像格式",
-                  value: FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? "未知",
-                  ok: status.recording?.format === "hybrid_mp4",
-                  issue: `当前：${FORMAT_LABELS[status.recording?.format] ?? status.recording?.format ?? "未知"}，应为混合 MP4`,
-                },
-                {
-                  label: "录像质量",
-                  value: QUALITY_LABELS[status.recording?.rec_quality] ?? status.recording?.rec_quality ?? "未知",
-                  ok: status.recording?.rec_quality !== "Stream" && !!status.recording?.rec_quality,
-                  issue: "当前：与串流一致，可能无法正常录制",
-                },
-                {
-                  label: "录像输出目录",
-                  value: status.recording?.output_path || "未配置（OBS 将使用默认路径）",
-                  ok: true,
-                  infoOnly: true,
-                  outputPath: status.recording?.output_path || "",
-                },
-              ].map((item, i) => (
+              {statusRows.map((item, i) => (
                 <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]">
                   <span className="text-cs2-text-muted w-24 shrink-0">{item.label}</span>
                   <span className="flex-1 font-mono text-cs2-text-secondary">{item.value}</span>
@@ -366,12 +372,12 @@ export default function ObsConfigCenterPage() {
                     item.outputPath ? (
                       <button
                         type="button"
-                        title="在资源管理器中打开"
+                        title={t("obscfg.btnOpenFolderTitle")}
                         onClick={() => API.post("/open-folder", { path: item.outputPath }).catch(() => {})}
                         className="flex items-center gap-1 rounded px-2 py-0.5 text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
                       >
                         <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                        打开
+                        {t("obscfg.btnOpenFolder")}
                       </button>
                     ) : (
                       <span className="text-cs2-text-muted">—</span>
@@ -379,7 +385,7 @@ export default function ObsConfigCenterPage() {
                   ) : item.ok ? (
                     <span className="flex items-center gap-1 text-cs2-text-success">
                       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                      正常
+                      {t("obscfg.statusOk")}
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-cs2-amber-on-surface">
@@ -398,11 +404,11 @@ export default function ObsConfigCenterPage() {
             disabled={batchRecording || calibrating || !status?.obs_connected || !hasIssues}
             title={
               !status?.obs_connected
-                ? "请先连接 OBS WebSocket"
+                ? t("obscfg.btnTitleNotConnected")
                 : !hasIssues
-                  ? "所有配置均正常"
+                  ? t("obscfg.btnTitleAllOk")
                   : batchRecording
-                    ? "批量录制进行中"
+                    ? t("obscfg.btnTitleRecording")
                     : ""
             }
             className={[
@@ -413,7 +419,7 @@ export default function ObsConfigCenterPage() {
             ].join(" ")}
           >
             {calibrating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {hasIssues ? "一键修复" : "配置正常，无需修复"}
+            {hasIssues ? t("obscfg.btnFix") : t("obscfg.btnNoIssues")}
           </button>
 
           {calibrateResult?.changed?.length > 0 ? (
@@ -429,7 +435,7 @@ export default function ObsConfigCenterPage() {
           {calibrateResult?.restart_obs_required ? (
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-cs2-amber-on-surface/30 bg-amber-500/10 px-3 py-2.5 text-[12px] text-cs2-amber-on-surface">
               <RotateCcw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>录像编码器已更改，<strong>需要重启 OBS</strong> 后新设置才会生效，重启前录制仍会失败。</span>
+              <span>{t("obscfg.restartRequired")}</span>
             </div>
           ) : null}
         </section>

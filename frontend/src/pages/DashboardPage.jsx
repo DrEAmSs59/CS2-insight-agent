@@ -11,50 +11,88 @@ import {
   Gamepad2,
 } from "lucide-react";
 import { useAppShell } from "../context/AppShellContext";
+import { useT } from "../i18n/useT.js";
 
 export default function DashboardPage() {
+  const t = useT();
   const s = useAppShell();
   const nDemos = s.uploadedDemos?.length ?? 0;
   const q = s.queue?.length ?? 0;
   const libTotal = s.libraryTotal;
 
   const cards = [
-    { to: "/library", label: "Demo 库", desc: "搜索、筛选、载入解析", icon: Library, hint: libTotal != null ? `共 ${libTotal} 条` : "浏览本地库" },
-    { to: "/analysis", label: "解析分析", desc: "上传、选玩家、看片段", icon: Microscope, hint: nDemos ? `已导入 ${nDemos} 个` : "上传 .dem 开始" },
-    { to: "/queue", label: "录制队列", desc: "批量 OBS 录制", icon: Package, hint: `${q} 条待录` },
-    { to: "/montage", label: "合辑工作台", desc: "已录片段拼接导出", icon: Clapperboard, hint: "时间线与主题" },
-    { to: "/params", label: "录制参数配置", desc: "全局节奏与观战默认", icon: SlidersHorizontal, hint: "写入配置文件" },
+    {
+      to: "/library",
+      label: t("dashboard.cardLibraryLabel"),
+      desc: t("dashboard.cardLibraryDesc"),
+      icon: Library,
+      hint: libTotal != null ? t("dashboard.cardLibraryHintTotal", { n: libTotal }) : t("dashboard.cardLibraryHintBrowse"),
+    },
+    {
+      to: "/analysis",
+      label: t("dashboard.cardAnalysisLabel"),
+      desc: t("dashboard.cardAnalysisDesc"),
+      icon: Microscope,
+      hint: nDemos ? t("dashboard.cardAnalysisHintN", { n: nDemos }) : t("dashboard.cardAnalysisHintUpload"),
+    },
+    {
+      to: "/queue",
+      label: t("dashboard.cardQueueLabel"),
+      desc: t("dashboard.cardQueueDesc"),
+      icon: Package,
+      hint: t("dashboard.cardQueueHint", { n: q }),
+    },
+    {
+      to: "/montage",
+      label: t("dashboard.cardMontageLabel"),
+      desc: t("dashboard.cardMontageDesc"),
+      icon: Clapperboard,
+      hint: t("dashboard.cardMontageHint"),
+    },
+    {
+      to: "/params",
+      label: t("dashboard.cardParamsLabel"),
+      desc: t("dashboard.cardParamsDesc"),
+      icon: SlidersHorizontal,
+      hint: t("dashboard.cardParamsHint"),
+    },
     {
       to: "/player-game-config",
-      label: "玩家游戏配置",
-      desc: "CFG 备份与恢复",
+      label: t("dashboard.cardPlayerCfgLabel"),
+      desc: t("dashboard.cardPlayerCfgDesc"),
       icon: Gamepad2,
-      hint: "异常退出后恢复",
+      hint: t("dashboard.cardPlayerCfgHint"),
     },
-    { to: "/settings", label: "设置", desc: "OBS · CS2 · LLM", icon: Settings, hint: "连接与环境" },
+    {
+      to: "/settings",
+      label: t("dashboard.cardSettingsLabel"),
+      desc: t("dashboard.cardSettingsDesc"),
+      icon: Settings,
+      hint: t("dashboard.cardSettingsHint"),
+    },
   ];
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto px-4 py-4 sm:px-5">
       <div className="mb-6 shrink-0 border-b border-cs2-border pb-5">
-        <h1 className="text-xl font-bold text-cs2-text-primary">仪表盘</h1>
+        <h1 className="text-xl font-bold text-cs2-text-primary">{t("dashboard.pageTitle")}</h1>
         <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-cs2-text-muted">
-          选择下方入口进入对应功能。解析高光、管理录制队列与合辑导出已分为独立页面，左侧导航可随时切换。
+          {t("dashboard.pageSubtitle")}
         </p>
         <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 text-[11px] text-cs2-text-secondary">
-          <span className="font-semibold text-cs2-text-muted">分析模式</span>
+          <span className="font-semibold text-cs2-text-muted">{t("dashboard.analysisMode")}</span>
           {s.aiMode ? (
             <span className="inline-flex items-center gap-1 font-bold text-cs2-accent">
-              <Brain className="h-3.5 w-3.5" /> AI 洞察
+              <Brain className="h-3.5 w-3.5" /> {t("dashboard.modeAi")}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 font-bold text-cs2-text-secondary">
-              <Zap className="h-3.5 w-3.5" /> 极速本地
+              <Zap className="h-3.5 w-3.5" /> {t("dashboard.modeLocal")}
             </span>
           )}
           <span className="text-cs2-text-muted">·</span>
           <Link to="/settings" className="text-cs2-accent hover:underline">
-            在设置中切换
+            {t("dashboard.switchInSettings")}
           </Link>
         </div>
       </div>
