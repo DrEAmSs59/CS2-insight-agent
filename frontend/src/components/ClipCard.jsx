@@ -1,8 +1,10 @@
 import { Flame, Skull, Check, Clapperboard, Film, X } from "lucide-react";
 import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
-import { describeTag } from "../utils/tagDescriptions";
+import { describeTag, labelTag } from "../utils/tagDescriptions";
 import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
 import { isTimelineSourceClip } from "../utils/montageUtils";
+import { useT } from "../i18n/useT.js";
+import { useLocaleStore } from "../i18n/localeStore";
 
 export const CLIP_CATEGORY_CONFIG = {
   highlight: {
@@ -10,28 +12,28 @@ export const CLIP_CATEGORY_CONFIG = {
     color: "text-cs2-highlight",
     bgColor: "bg-cs2-highlight/10",
     borderColor: "border-cs2-highlight/30",
-    label: "高光",
+    labelKey: "clip.catHighlight",
   },
   fail: {
     icon: Skull,
     color: "text-cs2-fail",
     bgColor: "bg-cs2-fail/10",
     borderColor: "border-cs2-fail/30",
-    label: "下饭",
+    labelKey: "clip.catFail",
   },
   meme_death: {
     icon: Clapperboard,
     color: "text-cs2-fuchsia-on-surface",
     bgColor: "bg-cs2-fuchsia-surface",
     borderColor: "border-cs2-fuchsia-surface",
-    label: "坐牢集锦",
+    labelKey: "clip.catMemeDeath",
   },
   compilation: {
     icon: Film,
     color: "text-cs2-compilation",
     bgColor: "bg-cs2-compilation/10",
     borderColor: "border-cs2-compilation/35",
-    label: "合集",
+    labelKey: "clip.catCompilation",
   },
 };
 
@@ -43,6 +45,7 @@ function normalizeAiScore(raw) {
 
 /** 右上角抢眼的 AI 分数：>85 金橙发光；40–85 绿/灰；<40 紫红小丑 */
 export function AiScoreBadge({ score }) {
+  const t = useT();
   const n = normalizeAiScore(score);
   if (n == null) return null;
 
@@ -52,10 +55,10 @@ export function AiScoreBadge({ score }) {
     return (
       <div
         className="pointer-events-none select-none rounded-md border border-amber-400/50 bg-gradient-to-br from-amber-500/25 via-orange-500/15 to-amber-600/10 px-2 py-1 shadow-lg"
-        aria-label={`AI 评分 ${rounded} 分`}
+        aria-label={t("clip.aiScoreLabel", { n: rounded })}
       >
         <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-cs2-amber-on-surface drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
-          🏆 {rounded} 分
+          {t("clip.scoreHigh", { n: rounded })}
         </span>
       </div>
     );
@@ -65,10 +68,10 @@ export function AiScoreBadge({ score }) {
     return (
       <div
         className="pointer-events-none select-none rounded-md border border-cs2-emerald-surface bg-cs2-emerald-surface px-2 py-1"
-        aria-label={`AI 评分 ${rounded} 分`}
+        aria-label={t("clip.aiScoreLabel", { n: rounded })}
       >
         <span className="whitespace-nowrap font-mono text-[11px] font-bold tabular-nums text-cs2-emerald-on-surface">
-          {rounded} 分
+          {t("clip.scoreMid", { n: rounded })}
         </span>
       </div>
     );
@@ -77,10 +80,10 @@ export function AiScoreBadge({ score }) {
   return (
     <div
       className="pointer-events-none select-none rounded-md border border-cs2-rose-surface bg-gradient-to-br from-cs2-rose-surface via-cs2-fuchsia-surface to-cs2-red-surface px-2 py-1 shadow-lg"
-      aria-label={`AI 评分 ${rounded} 分`}
+      aria-label={t("clip.aiScoreLabel", { n: rounded })}
     >
       <span className="whitespace-nowrap text-[11px] font-black tracking-tight text-cs2-rose-on-surface drop-shadow-[0_0_6px_rgba(244,63,94,0.5)]">
-        🤡 {rounded} 分
+        {t("clip.scoreLow", { n: rounded })}
       </span>
     </div>
   );
@@ -99,6 +102,9 @@ export default function ClipCard({
   onFreezeToDeathDraftChange,
   roundMontagePickerDisabled = false,
 }) {
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
+
   const isRoundMontage = isFreezeToDeathCompilation(clip);
   const ftdPicked = freezeToDeathDraft?.picked || [];
   const ftdEnqueueBlocked = isRoundMontage && ftdPicked.length === 0;
@@ -128,9 +134,9 @@ export default function ClipCard({
 
   const hasScore = clip.score_own != null && clip.score_opp != null;
 
-  // 若 context_tags 已包含对应中文杀数词，则不再单独显示数字徽章（避免「双杀」+「2 杀」重复）
+  // 若 context_tags 已包含对应杀数词，则不再单独显示数字徽章（避免「双杀」+「2 杀」重复）
   const KILL_COUNT_TAGS = new Set(["双杀", "三杀", "四杀", "五杀 (ACE)"]);
-  const killCountInTags = clip.context_tags?.some((t) => KILL_COUNT_TAGS.has(t)) ?? false;
+  const killCountInTags = clip.context_tags?.some((tag) => KILL_COUNT_TAGS.has(tag)) ?? false;
 
   return (
     <div
@@ -170,11 +176,11 @@ export default function ClipCard({
       {inQueue && onDequeue ? (
         <button
           type="button"
-          aria-label="从队列移除"
+          aria-label={t("clip.dequeue")}
           onClick={(e) => { e.stopPropagation(); onDequeue(); }}
           className="absolute right-3 top-3 z-10 flex min-h-[1.25rem] items-center gap-0.5 rounded-md border border-cs2-border bg-cs2-bg-elevated px-1 text-[9px] font-bold uppercase tracking-wide text-cs2-text-secondary transition-colors hover:border-rose-500/60 hover:text-rose-400"
         >
-          队列<X className="h-2.5 w-2.5" />
+          {t("clip.inQueue")}<X className="h-2.5 w-2.5" />
         </button>
       ) : (
         <div
@@ -187,7 +193,7 @@ export default function ClipCard({
           }`}
         >
           {inQueue ? (
-            "队列"
+            t("clip.inQueue")
           ) : ftdEnqueueBlocked ? (
             <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
           ) : selected ? (
@@ -201,14 +207,14 @@ export default function ClipCard({
           {/* Category badge */}
           <div className={`flex flex-col items-center gap-1 rounded-lg px-3 py-2 ${cat.bgColor}`}>
             <Icon className={`h-5 w-5 ${cat.color}`} />
-            <span className={`text-[9px] font-bold tracking-widest ${cat.color}`}>{cat.label}</span>
+            <span className={`text-[9px] font-bold tracking-widest ${cat.color}`}>{t(cat.labelKey)}</span>
           </div>
 
           {/* Details */}
           <div className="min-w-0 flex-1 pr-6 sm:pr-8">
             {clip.category !== "compilation" && (
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs font-bold text-cs2-accent">第 {clip.round} 回合</span>
+                <span className="font-mono text-xs font-bold text-cs2-accent">{t("clip.roundLabel", { n: clip.round })}</span>
                 {clip.round_won != null && (
                   <span
                     className={`rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${
@@ -216,15 +222,15 @@ export default function ClipCard({
                         ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface"
                         : "bg-cs2-rose-surface text-cs2-rose-on-surface"
                     }`}
-                    title={clip.round_won ? "本回合：本方赢" : "本回合：本方输"}
+                    title={clip.round_won ? t("clip.roundWonTitle") : t("clip.roundLostTitle")}
                   >
-                    {clip.round_won ? "胜" : "败"}
+                    {clip.round_won ? t("clip.roundWon") : t("clip.roundLost")}
                   </span>
                 )}
                 {hasScore && (
                   <span
                     className="inline-flex items-center gap-0.5 rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums"
-                    title="本回合开局时比分（本方 : 对方）"
+                    title={t("clip.scoreTitle")}
                   >
                     <span className="text-cs2-emerald-on-surface">{clip.score_own}</span>
                     <span className="text-cs2-text-secondary">:</span>
@@ -233,7 +239,7 @@ export default function ClipCard({
                 )}
                 {clip.kill_count > 0 && !killCountInTags && (
                   <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-cs2-text-primary">
-                    {clip.kill_count} 杀
+                    {t("clip.kills", { n: clip.kill_count })}
                   </span>
                 )}
               </div>
@@ -243,14 +249,14 @@ export default function ClipCard({
                 {Array.isArray(clip.source_ticks) && clip.source_ticks.length > 0 && (
                   <span
                     className="rounded bg-cs2-bg-input px-2 py-0.5 font-mono text-[10px] font-bold text-cs2-text-primary"
-                    title="合集包含的子片段数（每段对应一次击杀或死亡）"
+                    title={t("clip.segmentsTitle")}
                   >
-                    {clip.source_ticks.length} 段
+                    {t("clip.segments", { n: clip.source_ticks.length })}
                   </span>
                 )}
                 {clip.kill_count > 0 && (
                   <span className="rounded bg-cs2-bg-input px-2 py-0.5 text-[10px] font-bold text-cs2-text-primary">
-                    {clip.kill_count} 杀
+                    {t("clip.kills", { n: clip.kill_count })}
                   </span>
                 )}
               </div>
@@ -258,9 +264,9 @@ export default function ClipCard({
 
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
               {clip.context_tags?.map((tag, ti) => {
-                const desc = describeTag(tag);
+                const desc = describeTag(tag, locale);
                 const flashNames = tag === "🤝 好闪配好人" && clip.flash_assisters?.length
-                  ? `闪光助攻：${clip.flash_assisters.join("、")}`
+                  ? t("clip.flashAssisters", { names: clip.flash_assisters.join("、") })
                   : null;
                 const title = [desc, flashNames].filter(Boolean).join("\n") || undefined;
                 return (
@@ -269,7 +275,7 @@ export default function ClipCard({
                     title={title}
                     className={`rounded border px-2 py-0.5 text-[10px] font-bold tracking-wide ${cat.bgColor} ${cat.borderColor} ${cat.color} ${title ? "cursor-help" : ""}`}
                   >
-                    {tag}
+                    {labelTag(tag, locale)}
                   </span>
                 );
               })}
@@ -287,12 +293,12 @@ export default function ClipCard({
                 ))}
               {showKillerBadge && (
                 <span className="rounded border border-cs2-rose-surface bg-cs2-rose-surface px-2 py-0.5 text-[10px] font-bold tracking-wide text-cs2-rose-on-surface">
-                  💀 击杀者: {clip.killer_name}
+                  {t("clip.killerBadge", { name: clip.killer_name })}
                 </span>
               )}
               {showVictimsBadge && (
                 <span className="rounded border border-cs2-emerald-surface bg-cs2-emerald-surface px-2 py-0.5 text-[10px] font-bold tracking-wide text-cs2-emerald-on-surface">
-                  🎯 击杀: {victimsList.join(", ")}
+                  {t("clip.victimsBadge", { names: victimsList.join(", ") })}
                 </span>
               )}
             </div>
@@ -329,7 +335,7 @@ export default function ClipCard({
               <span className="mr-1.5 inline-block select-none not-italic" aria-hidden>
                 🎙️
               </span>
-              <span className="font-semibold not-italic text-cs2-text-muted">AI 锐评：</span>
+              <span className="font-semibold not-italic text-cs2-text-muted">{t("clip.aiCommentaryLabel")}</span>
               <span className="italic text-cs2-text-primary/95">{aiCommentary}</span>
             </p>
           </div>

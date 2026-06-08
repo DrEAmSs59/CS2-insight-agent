@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Film, User } from "lucide-react";
 import ClipCard from "./ClipCard";
+import { useT } from "../i18n/useT.js";
 
 const NO_QUEUED = new Set();
 const COMPILATION_ORDER = {
@@ -49,6 +50,7 @@ export default function ClipList({
   suppressSummaryHeader = false,
   onDequeue,
 }) {
+  const t = useT();
   const queued = queuedClientClipUids ?? NO_QUEUED;
   // 顺序：高光 / 下饭 / 坐牢（已在上游过滤掉）按原顺序混排，合集永远排最后
   const regularClips = useMemo(() => {
@@ -76,10 +78,10 @@ export default function ClipList({
       {!suppressSummaryHeader && (
         <div className="flex items-center gap-2">
           <Film className="h-4 w-4 text-cs2-accent" />
-          <h2 className="text-sm font-bold uppercase tracking-wide">检测到的片段</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wide">{t("clip.detectedClips")}</h2>
           <span className="ml-auto text-right text-[12px] font-mono leading-snug text-cs2-text-secondary sm:text-xs">
-            共 <span className="text-cs2-text-secondary">{regularClips.length}</span> 条 · {highlights.length} 高光 ·{" "}
-            {fails.length} 下饭{compilations.length > 0 ? ` · ${compilations.length} 合集` : ""}
+            {t("clip.summaryTotal", { n: regularClips.length })} · {t("clip.summaryHighlights", { n: highlights.length })} ·{" "}
+            {t("clip.summaryFails", { n: fails.length })}{compilations.length > 0 ? ` · ${t("clip.summaryCompilations", { n: compilations.length })}` : ""}
           </span>
         </div>
       )}
@@ -146,7 +148,7 @@ export default function ClipList({
       ) : (
         showTabs && (
           <div className="rounded-lg border border-dashed border-cs2-border py-10 text-center text-[13px] text-cs2-text-muted">
-            该玩家暂无片段
+            {t("clip.emptyPlayer")}
           </div>
         )
       )}
