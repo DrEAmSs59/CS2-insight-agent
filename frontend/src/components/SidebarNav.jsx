@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
 import LocaleToggle from "./LocaleToggle";
+import { useT } from "../i18n/useT.js";
 
 const linkBase =
   "flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-semibold transition-colors border border-transparent";
@@ -33,6 +34,7 @@ function SectionLabel({ children }) {
 export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
+  const t = useT();
 
   return (
     <aside className="flex w-48 shrink-0 flex-col border-r border-cs2-border bg-cs2-bg-sidebar">
@@ -40,32 +42,32 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         <div className="flex items-center gap-2.5">
           <img
             src="/cs2-insight-logo-new.png"
-            alt="CS2 洞察"
+            alt={t("nav.brand")}
             width={64}
             height={64}
             decoding="async"
             className="h-16 w-16 shrink-0 object-contain"
           />
           <div className="min-w-0">
-            <div className="truncate text-sm font-bold tracking-wide text-cs2-text-primary">CS2 洞察</div>
+            <div className="truncate text-sm font-bold tracking-wide text-cs2-text-primary">{t("nav.brand")}</div>
             <div className="font-mono text-[10px] tracking-widest text-cs2-text-muted">v{__APP_VERSION__}</div>
           </div>
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-1.5 py-2" aria-label="主导航">
-        <SectionLabel>工作流</SectionLabel>
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-1.5 py-2" aria-label={t("nav.mainNav")}>
+        <SectionLabel>{t("nav.sectionWorkflow")}</SectionLabel>
         <NavLink to="/" end className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <BookOpen className="h-4 w-4 shrink-0 opacity-90" />
-          上手指南
+          {t("nav.guide")}
         </NavLink>
         <NavLink to="/library" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Library className="h-4 w-4 shrink-0 opacity-90" />
-          Demo 库
+          {t("nav.demoLibrary")}
         </NavLink>
         <NavLink to="/analysis" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Microscope className="h-4 w-4 shrink-0 opacity-90" />
-          解析分析
+          {t("nav.analysis")}
         </NavLink>
         <NavLink
           to="/queue"
@@ -73,7 +75,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         >
           <Package className="h-4 w-4 shrink-0 opacity-90" />
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span>录制队列</span>
+            <span>{t("nav.recordQueue")}</span>
             <span className="rounded bg-cs2-accent/20 px-1.5 font-mono text-[10px] tabular-nums text-cs2-text-primary">{queueLength}</span>
           </span>
         </NavLink>
@@ -82,21 +84,21 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle} ${disabled ? "pointer-events-none opacity-40" : ""}`}
         >
           <Clapperboard className="h-4 w-4 shrink-0 opacity-90" />
-          合辑工作台
+          {t("nav.montage")}
         </NavLink>
 
-        <SectionLabel>工具</SectionLabel>
+        <SectionLabel>{t("nav.sectionTools")}</SectionLabel>
         <NavLink to="/params" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <SlidersHorizontal className="h-4 w-4 shrink-0 opacity-90" />
-          录制参数配置
+          {t("nav.recordParams")}
         </NavLink>
         <NavLink to="/obs-config-center" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <RadioTower className="h-4 w-4 shrink-0 opacity-90" />
-          OBS 配置中心
+          {t("nav.obsConfig")}
         </NavLink>
         <NavLink to="/player-game-config" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Gamepad2 className="h-4 w-4 shrink-0 opacity-90" />
-          玩家游戏配置
+          {t("nav.playerConfig")}
         </NavLink>
         {/* 官匹战绩：Valve API 国服不可用，暂时隐藏入口
         <NavLink to="/match-history" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
@@ -112,7 +114,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
       <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">
         <NavLink to="/settings" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <Settings className="h-4 w-4 shrink-0 opacity-90" />
-          设置
+          {t("nav.settings")}
         </NavLink>
         {/* <button
           type="button"
@@ -133,7 +135,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           ) : (
             <Moon className="h-4 w-4 shrink-0 opacity-90" />
           )}
-          {theme === "dark" ? "切换亮色" : "切换暗色"}
+          {theme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}
         </button>
         <LocaleToggle />
       </div>
