@@ -5,6 +5,7 @@ import { useMontageStore } from "../stores/montageStore";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
 import { Loader2 } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
@@ -26,24 +27,24 @@ import {
 } from "../utils/montageUtils";
 
 const FILTER_TABS = [
-  { id: "all", label: "全部" },
-  { id: "highlight", label: "高光" },
-  { id: "timeline", label: "时间线" },
-  { id: "fail", label: "下饭" },
-  { id: "compilation", label: "合集" },
-  { id: "joined", label: "已加入" },
-  { id: "unjoined", label: "未加入" },
+  { id: "all", labelKey: "montage.filterAll" },
+  { id: "highlight", labelKey: "montage.filterHighlight" },
+  { id: "timeline", labelKey: "montage.filterTimeline" },
+  { id: "fail", labelKey: "montage.filterFail" },
+  { id: "compilation", labelKey: "montage.filterCompilation" },
+  { id: "joined", labelKey: "montage.filterJoined" },
+  { id: "unjoined", labelKey: "montage.filterUnjoined" },
 ];
 
 const DEFAULT_REL_EXPORT_DIR = "exports/montage";
 
 const TRANSITION_TYPES = [
-  { id: "none", label: "无转场" },
-  { id: "cut", label: "快切" },
-  { id: "fade", label: "淡入淡出" },
-  { id: "flash", label: "闪白" },
-  { id: "dip_black", label: "黑场淡入淡出" },
-  { id: "zoom", label: "轻微缩放" },
+  { id: "none", labelKey: "montage.transitionNone" },
+  { id: "cut", labelKey: "montage.transitionCut" },
+  { id: "fade", labelKey: "montage.transitionFade" },
+  { id: "flash", labelKey: "montage.transitionFlash" },
+  { id: "dip_black", labelKey: "montage.transitionDipBlack" },
+  { id: "zoom", labelKey: "montage.transitionZoom" },
 ];
 
 const DEFAULT_TRANSITION = { type: "cut", duration: 0.25 };
@@ -52,16 +53,17 @@ const DEFAULT_TRANSITION = { type: "cut", duration: 0.25 };
 const GLOBAL_TRANSITION_PRESET_SEC = 0.4;
 
 const GLOBAL_TRANSITION_TEMPLATES = [
-  { id: "esports", label: "竞技快切" },
-  { id: "film", label: "电影感淡入淡出" },
-  { id: "funny", label: "下饭搞笑" },
-  { id: "clean", label: "无转场纯净版" },
+  { id: "esports", labelKey: "montage.templateEsports" },
+  { id: "film", labelKey: "montage.templateFilm" },
+  { id: "funny", labelKey: "montage.templateFunny" },
+  { id: "clean", labelKey: "montage.templateClean" },
 ];
 
 const VALID_TRANSITION_TYPES = new Set(TRANSITION_TYPES.map((t) => t.id));
 
-function transitionTypeLabel(type) {
-  return TRANSITION_TYPES.find((t) => t.id === type)?.label || "快切";
+function transitionTypeLabel(type, t) {
+  const found = TRANSITION_TYPES.find((tr) => tr.id === type);
+  return found ? t(found.labelKey) : t("montage.transitionCut");
 }
 
 function normalizeTransition(raw) {
@@ -79,12 +81,12 @@ function getEffectiveTransition(map, sourceClipId) {
   return raw ? normalizeTransition(raw) : { ...DEFAULT_TRANSITION };
 }
 
-function formatTransitionNodeLine(map, sourceClipId) {
+function formatTransitionNodeLine(map, sourceClipId, t) {
   const tr = getEffectiveTransition(map, sourceClipId);
-  if (tr.type === "none") return "无转场";
+  if (tr.type === "none") return t("montage.transitionNone");
   const d = tr.duration;
   const ds = Number.isInteger(d) ? String(d) : String(Math.round(d * 100) / 100);
-  return `${transitionTypeLabel(tr.type)} · ${ds}s`;
+  return `${transitionTypeLabel(tr.type, t)} · ${ds}s`;
 }
 
 /** Only gaps between consecutive ordered clips (source = clip at index i). */
@@ -241,23 +243,24 @@ function clipMatchesLibraryFilter(clip, filterKey, orderedIdSet) {
   return true;
 }
 
-function humanizeExportError(err) {
+function humanizeExportError(err, t) {
   const s = String(err || "").trim();
-  if (!s) return "导出失败，请稍后重试。";
-  if (s.includes("recorded_clip_ids") || s.includes("不能为空")) return "请先从左侧素材库加入至少一个片段。";
+  if (!s) return t("montage.exportErrorGeneric");
+  if (s.includes("recorded_clip_ids") || s.includes("不能为空")) return t("montage.exportErrorNoClips");
   return s;
 }
 
 const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
 
-function ffmpegGateSubtitle(reason) {
-  if (reason === "not_configured") return "FFmpeg 尚未配置";
-  if (reason === "path_not_found") return "FFmpeg 路径无效";
-  if (reason === "not_usable") return "FFmpeg 不可执行";
-  return "FFmpeg 未就绪";
+function ffmpegGateSubtitle(reason, t) {
+  if (reason === "not_configured") return t("montage.ffmpegGateNotConfigured");
+  if (reason === "path_not_found") return t("montage.ffmpegGatePathNotFound");
+  if (reason === "not_usable") return t("montage.ffmpegGateNotUsable");
+  return t("montage.ffmpegGateNotReady");
 }
 
 export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer" }) {
+  const t = useT();
   const isPage = layout === "page";
   const navigate = useNavigate();
   const location = useLocation();
@@ -315,21 +318,21 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setFfmpegGate({
         loading: false,
         blocked: true,
-        subtitle: ffmpegGateSubtitle(data?.reason),
+        subtitle: ffmpegGateSubtitle(data?.reason, t),
         message:
           typeof data?.message === "string" && data.message.trim()
             ? data.message
-            : "FFmpeg 未配置或不可用，请前往设置页配置后再使用合辑工作台。",
+            : t("montage.ffmpegGateDefaultMessage"),
       });
     } catch {
       setFfmpegGate({
         loading: false,
         blocked: true,
-        subtitle: "检测失败",
-        message: "无法连接后端检测 FFmpeg 配置，请确认程序服务已启动后刷新页面。",
+        subtitle: t("montage.ffmpegGateDetectFail"),
+        message: t("montage.ffmpegGateConnectFail"),
       });
     }
-  }, [open, isPage]);
+  }, [open, isPage, t]);
 
   useEffect(() => {
     void checkFfmpegGate();
@@ -364,7 +367,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       if (data?.path) onResult(data.path);
     } catch (e) {
       const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : "文件选择器不可用（仅 Windows）");
+      showToast(typeof detail === "string" ? detail : t("montage.toastFilepickerUnavailable"));
     }
   }, [showToast]);
 
@@ -380,7 +383,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setItems(data.items || []);
     } catch {
       setItems([]);
-      showToast("片段列表加载失败，请重试");
+      showToast(t("montage.toastClipsLoadFail"));
     } finally {
       setLoading(false);
     }
@@ -396,7 +399,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     if (!open && !isPage) return;
     if (!lastExport?.unread || exporting) return;
     if (lastExport.ok) {
-      showToast("合辑导出已完成");
+      showToast(t("montage.toastExportDone"));
     } else if (lastExport.err) {
       showToast(lastExport.err);
     }
@@ -472,7 +475,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
     const anyUnknown = orderedClips.some((c) => getClipDurationSeconds(c) == null);
-    return anyUnknown ? "部分片段时长未知，导出时以后端为准" : null;
+    return anyUnknown ? t("montage.unknownDurationHint") : null;
   }, [orderedClips]);
 
   const totalKnownSeconds = useMemo(() => {
@@ -523,8 +526,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       return Array.from(set);
     });
-    if (added > 0) showToast(`已加入 ${added} 个新片段到编排（当前筛选共 ${filteredLibrary.length} 条）`);
-    else showToast("当前筛选中的片段均已加入编排时间线");
+    if (added > 0) showToast(t("montage.toastAddedFiltered", { added, total: filteredLibrary.length }));
+    else showToast(t("montage.toastAllFilteredJoined"));
   }, [filteredLibrary, showToast]);
 
   const removeFromSequence = useCallback((id) => {
@@ -567,22 +570,22 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         return next;
       });
       setDeleteClipPrompt(null);
-      showToast("已删除片段");
+      showToast(t("montage.toastClipDeleted"));
     } catch (e) {
       const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : e.message || "删除失败");
+      showToast(typeof detail === "string" ? detail : e.message || t("montage.toastClipDeleteFail"));
     }
-  }, [deleteClipPrompt, showToast]);
+  }, [deleteClipPrompt, showToast, t]);
 
   const openBatchDeleteLibraryPrompt = useCallback(() => {
     const clips = items.filter((c) => librarySelectedIds.has(c.id));
     if (!clips.length) {
-      showToast("没有可删除的选中项");
+      showToast(t("montage.toastNoneToDelete"));
       return;
     }
     setDeleteClipPrompt(null);
     setBatchDeleteLibraryPrompt(clips);
-  }, [items, librarySelectedIds, showToast]);
+  }, [items, librarySelectedIds, showToast, t]);
 
   const confirmBatchDeleteLibraryClips = useCallback(async () => {
     const clips = batchDeleteLibraryPrompt;
@@ -613,15 +616,15 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setBatchDeleteLibraryPrompt(null);
       const n = deletedIds.size;
       if (notFound.length) {
-        showToast(`已删除 ${n} 条；另有 ${notFound.length} 条已不存在或已删`);
+        showToast(t("montage.toastBatchDeletedWithMissing", { n, missing: notFound.length }));
       } else {
-        showToast(`已删除 ${n} 条素材`);
+        showToast(t("montage.toastBatchDeleted", { n }));
       }
     } catch (e) {
       const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : e.message || "批量删除失败");
+      showToast(typeof detail === "string" ? detail : e.message || t("montage.toastBatchDeleteFail"));
     }
-  }, [batchDeleteLibraryPrompt, showToast]);
+  }, [batchDeleteLibraryPrompt, showToast, t]);
 
   const handleSort = useCallback(
     (strategy) => {
@@ -635,13 +638,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const handleReverseOrder = useCallback(() => {
     if (orderedIds.length < 2) return;
     setOrderedIds((prev) => [...prev].reverse());
-    showToast("已倒序排列编排片段");
-  }, [orderedIds.length, showToast]);
+    showToast(t("montage.toastReverseOrder"));
+  }, [orderedIds.length, showToast, t]);
 
   const applyGlobalTransitionTemplate = useCallback(
     (styleId, label) => {
       if (orderedIds.length < 2) {
-        showToast("至少需要 2 个片段才能设置转场");
+        showToast(t("montage.toastNeedTwoForTransition"));
         return;
       }
       const built = buildGlobalTransitionStyleMap(styleId, orderedIds);
@@ -650,15 +653,15 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         for (const id of orderedIds) delete cleared[String(id)];
         return { ...cleared, ...built };
       });
-      showToast(`已应用「${label}」`);
+      showToast(t("montage.toastTemplateApplied", { label }));
     },
-    [orderedIds, showToast],
+    [orderedIds, showToast, t],
   );
 
   const applyGlobalTransitionType = useCallback(
     (type) => {
       if (orderedIds.length < 2) {
-        showToast("至少需要 2 个片段才能设置转场");
+        showToast(t("montage.toastNeedTwoForTransition"));
         return;
       }
       const dur = type === "none" ? 0 : Math.min(1.5, GLOBAL_TRANSITION_PRESET_SEC);
@@ -672,14 +675,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         }
         return next;
       });
-      showToast(`已全局应用「${transitionTypeLabel(type)}」`);
+      showToast(t("montage.toastTransitionTypeApplied", { label: transitionTypeLabel(type, t) }));
     },
-    [orderedIds, showToast],
+    [orderedIds, showToast, t],
   );
 
   const applyGlobalDurationToAll = useCallback(() => {
     if (orderedIds.length < 2) {
-      showToast("至少需要 2 个片段");
+      showToast(t("montage.toastNeedTwo"));
       return;
     }
     const sec = Math.min(1.5, GLOBAL_TRANSITION_PRESET_SEC);
@@ -693,12 +696,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       return next;
     });
-    showToast("已统一时长（跳过「无转场」衔接）");
-  }, [orderedIds, showToast]);
+    showToast(t("montage.toastUnifiedDuration"));
+  }, [orderedIds, showToast, t]);
 
   const applyRandomTransitions = useCallback(() => {
     if (orderedIds.length < 2) {
-      showToast("至少需要 2 个片段");
+      showToast(t("montage.toastNeedTwo"));
       return;
     }
     const pool = ["cut", "fade", "flash", "dip_black", "zoom"];
@@ -712,12 +715,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       return next;
     });
-    showToast("已为每条连接随机分配转场");
-  }, [orderedIds, showToast]);
+    showToast(t("montage.toastRandomTransitions"));
+  }, [orderedIds, showToast, t]);
 
   const applyKillTypeTransitions = useCallback(() => {
     if (orderedIds.length < 2) {
-      showToast("至少需要 2 个片段");
+      showToast(t("montage.toastNeedTwo"));
       return;
     }
     setTransitionByClipId((prev) => {
@@ -751,28 +754,28 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       return next;
     });
-    showToast("已按片段类型生成转场节奏");
-  }, [orderedIds, byId, showToast]);
+    showToast(t("montage.toastKillTypeTransitions"));
+  }, [orderedIds, byId, showToast, t]);
 
   const validateExport = useCallback(() => {
     if (orderedIds.length < 1) {
-      return "请先从左侧素材库加入至少一个片段。";
+      return t("montage.exportValidNoClips");
     }
     const name = outputFilename.trim();
     if (!name) {
-      return "请填写输出文件名。";
+      return t("montage.exportValidNoFilename");
     }
     if (!effectiveOutputDir) {
-      return "无法确定导出目录：请先加入至少一个已录片段（将使用其所在磁盘下的 exports/montage），或手动填写输出目录。";
+      return t("montage.exportValidNoDir");
     }
     return null;
-  }, [orderedIds.length, outputFilename, effectiveOutputDir]);
+  }, [orderedIds.length, outputFilename, effectiveOutputDir, t]);
 
   const saveDraft = useCallback(async () => {
     const effectiveName =
       draftName.trim() || stripMp4Extension(outputFilename).trim() || outputFilename.trim();
     if (!effectiveName) {
-      showToast("请填写草稿名称，或先填写输出文件名。");
+      showToast(t("montage.toastNeedDraftName"));
       return;
     }
     setSavingDraft(true);
@@ -834,9 +837,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
-      showToast("草稿已保存");
+      showToast(t("montage.toastDraftSaved"));
     } catch (e) {
-      showToast(e.response?.data?.detail || e.message || "保存失败");
+      showToast(e.response?.data?.detail || e.message || t("montage.toastDraftSaveFail"));
     } finally {
       setSavingDraft(false);
     }
@@ -858,6 +861,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
+    t,
   ]);
 
   const runExport = useCallback(async () => {
@@ -899,10 +903,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         name_cards_enabled: nameCardsEnabled,
       });
       setLastExport({ ok: true, ...data });
-      showToast("合辑导出完成");
+      showToast(t("montage.toastExportComplete"));
     } catch (e) {
       const detail = e.response?.data?.detail;
-      const errMsg = humanizeExportError(detail || e.message);
+      const errMsg = humanizeExportError(detail || e.message, t);
       setLastExport({ ok: false, err: errMsg });
       showToast(errMsg);
     } finally {
@@ -928,18 +932,19 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     showToast,
+    t,
   ]);
 
   const copyText = useCallback(
     async (text) => {
       try {
         await navigator.clipboard.writeText(text);
-        showToast("已复制到剪贴板");
+        showToast(t("montage.toastCopied"));
       } catch {
-        showToast("复制失败，请手动选择文本复制。");
+        showToast(t("montage.toastCopyFail"));
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const clearTimeline = useCallback(() => {
@@ -991,7 +996,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         const sortedIdx = [...indices].sort((a, b) => a - b);
         const contiguous = sortedIdx.every((v, j, arr) => j === 0 || v === arr[j - 1] + 1);
         if (!contiguous) {
-          queueMicrotask(() => showToast("批量移动请选中时间线上连续的片段"));
+          queueMicrotask(() => showToast(t("montage.toastNeedMoreForMove")));
           return prev;
         }
         const blockStart = sortedIdx[0];
@@ -1009,7 +1014,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         return [...without.slice(0, insertAt), ...block, ...without.slice(insertAt)];
       });
     },
-    [timelineMultiSelectedIds, showToast],
+    [timelineMultiSelectedIds, showToast, t],
   );
 
   const onDragStart = useCallback((e, id) => {
@@ -1040,7 +1045,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         return next;
       });
       setDragId(null);
-      showToast("已加入时间线");
+      showToast(t("montage.toastAddedToTimeline"));
       return;
     }
     if (draggedId === targetId) return;
@@ -1053,7 +1058,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       return next;
     });
     setDragId(null);
-  }, [orderedIds, showToast]);
+  }, [orderedIds, showToast, t]);
 
   const patchTransition = useCallback((sourceClipId, patch) => {
     setTransitionByClipId((prev) => ({
@@ -1066,6 +1071,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, []);
 
   const durationText = formatMontageEstimate(totalKnownSeconds, orderedIds.length);
+
+  // Translated versions of constant arrays (labels resolved via t)
+  const transitionTypeOptions = useMemo(
+    () => TRANSITION_TYPES.map((tr) => ({ id: tr.id, label: t(tr.labelKey) })),
+    [t],
+  );
+  const globalTransitionTemplates = useMemo(
+    () => GLOBAL_TRANSITION_TEMPLATES.map((tpl) => ({ id: tpl.id, label: t(tpl.labelKey) })),
+    [t],
+  );
 
   const exportReady = useMemo(() => {
     if (orderedIds.length < 1) return false;
@@ -1083,21 +1098,21 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, [effectiveOutputDir, outputFilename]);
 
   const displayMontageTitle = useMemo(
-    () => draftName.trim() || stripMp4Extension(outputFilename).trim() || "未命名合辑",
-    [draftName, outputFilename],
+    () => draftName.trim() || stripMp4Extension(outputFilename).trim() || t("montage.untitledMontage"),
+    [draftName, outputFilename, t],
   );
 
   const autosaveStatusLabel = useMemo(() => {
-    if (draftDirty) return "改动未保存";
+    if (draftDirty) return t("montage.autosaveDirty");
     if (lastDraftSavedAt) {
       try {
-        return `草稿已保存 · ${new Date(lastDraftSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        return t("montage.autosaveSavedAt", { time: new Date(lastDraftSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
       } catch {
-        return "草稿已保存";
+        return t("montage.autosaveSaved");
       }
     }
-    return "自动保存就绪";
-  }, [draftDirty, lastDraftSavedAt]);
+    return t("montage.autosaveReady");
+  }, [draftDirty, lastDraftSavedAt, t]);
 
   const libraryPoolStats = useMemo(() => {
     let known = 0;
@@ -1143,7 +1158,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const addSelectionToTimeline = useCallback(() => {
     const ids = librarySelectedIds.size > 0 ? [...librarySelectedIds] : [];
     if (!ids.length) {
-      showToast("请先选中多条素材（Ctrl / ⌘ 点选，或点「全选当前列表」），再点「批量加入编排」");
+      showToast(t("montage.toastSelectBeforeBatch"));
       return;
     }
     let added = 0;
@@ -1155,8 +1170,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       return Array.from(s);
     });
-    showToast(added ? `已将 ${added} 条素材加入中间编排时间线` : "所选素材已在编排时间线中");
-  }, [librarySelectedIds, showToast]);
+    showToast(added ? t("montage.toastAddedBatch", { n: added }) : t("montage.toastAllBatchAlready"));
+  }, [librarySelectedIds, showToast, t]);
 
   if (!open && !isPage) return null;
 
@@ -1173,11 +1188,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         <div
           className="fixed inset-0 z-[125] flex items-center justify-center bg-black/50 backdrop-blur-sm"
           aria-busy="true"
-          aria-label="正在检测 FFmpeg"
+          aria-label={t("montage.ffmpegChecking")}
         >
           <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 text-sm text-cs2-text-secondary">
             <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
-            正在检测 FFmpeg…
+            {t("montage.ffmpegChecking")}
           </div>
         </div>
       ) : null}
@@ -1192,7 +1207,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         <MontageWorkbenchToolbar
           isPage={isPage}
           montageTitle={displayMontageTitle}
-          subtitle="电竞高光素材编排台"
+          subtitle={t("montage.workbenchSubtitle")}
           autosaveLabel={autosaveStatusLabel}
           onClose={onClose}
           onAutoSort={() => handleSort("highlight_first")}
@@ -1218,23 +1233,23 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             <aside className="flex min-h-0 flex-col border-cs2-border bg-cs2-bg-card xl:border-r">
               <div className="shrink-0 border-b border-cs2-border p-4">
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-cs2-text-muted">素材池</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-cs2-text-muted">{t("montage.poolTitle")}</p>
                   {librarySelectedIds.size > 0 ? (
                     <span className="rounded-md border border-cs2-accent/40 bg-cs2-accent/12 px-2 py-0.5 text-xs font-bold text-cs2-accent">
-                      已选 {librarySelectedIds.size}
+                      {t("montage.poolSelectedCount", { n: librarySelectedIds.size })}
                     </span>
                   ) : (
-                    <span className="text-xs text-cs2-text-muted font-medium">多选就绪</span>
+                    <span className="text-xs text-cs2-text-muted font-medium">{t("montage.poolMultiSelectReady")}</span>
                   )}
                 </div>
                 <p className="mt-2.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-3 text-xs leading-relaxed text-cs2-text-secondary">
-                  <span className="font-bold text-cs2-text-primary">批量编排：</span>
-                  按住 <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">Ctrl</kbd>{" "}
-                  或 <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">⌘</kbd>{" "}
-                  点击多条素材；也可点下方「全选当前列表」后批量操作。
+                  <span className="font-bold text-cs2-text-primary">{t("montage.poolBatchHintTitle")}</span>
+                  <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">Ctrl</kbd>{" / "}
+                  <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">⌘</kbd>{" "}
+                  {t("montage.poolBatchHintBody")}
                 </p>
                 <p className="mt-2.5 font-mono text-xs text-cs2-text-muted">
-                  {libraryPoolStats.count} 条素材 · 总计 {libraryPoolStats.totalLabel} · 平均 {libraryPoolStats.avgLabel}
+                  {t("montage.poolStats", { count: libraryPoolStats.count, total: libraryPoolStats.totalLabel, avg: libraryPoolStats.avgLabel })}
                 </p>
               </div>
               <div className="shrink-0 space-y-3 border-b border-cs2-border p-3.5">
@@ -1250,14 +1265,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                           : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary"
                       }`}
                     >
-                      {f.label}
+                      {t(f.labelKey)}
                     </button>
                   ))}
                 </div>
                 <input
                   value={searchQ}
                   onChange={(e) => setSearchQ(e.target.value)}
-                  placeholder="搜索玩家 / 地图 / 文件名…"
+                  placeholder={t("montage.poolSearchPlaceholder")}
                   className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-3.5 py-2 text-xs text-cs2-text-primary placeholder:text-cs2-text-muted outline-none focus:border-cs2-accent"
                 />
                 <div className="flex flex-col gap-2">
@@ -1267,7 +1282,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                     disabled={filteredLibrary.length === 0}
                     className="w-full rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-border-focus hover:bg-cs2-surface-2 transition-all disabled:opacity-35"
                   >
-                    全选当前列表 ({filteredLibrary.length})
+                    {t("montage.poolSelectAllBtn", { n: filteredLibrary.length })}
                   </button>
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -1276,7 +1291,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                       disabled={filteredLibrary.length === 0}
                       className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/40 hover:bg-cs2-surface-2 transition-all disabled:opacity-35"
                     >
-                      筛选全入编排
+                      {t("montage.poolAddAllFilteredBtn")}
                     </button>
                     <button
                       type="button"
@@ -1284,7 +1299,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                       disabled={librarySelectedIds.size === 0}
                       className="rounded-lg border border-cs2-accent/40 bg-cs2-accent-soft py-2 text-xs font-semibold text-cs2-accent hover:bg-cs2-accent/20 transition-all disabled:opacity-35"
                     >
-                      批量加入编排 ({librarySelectedIds.size})
+                      {t("montage.poolAddSelectionBtn", { n: librarySelectedIds.size })}
                     </button>
                   </div>
                   <button
@@ -1293,7 +1308,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                     disabled={librarySelectedIds.size === 0}
                     className="rounded-lg border border-rose-500/20 bg-rose-500/10 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-35"
                   >
-                    批量删除选中 ({librarySelectedIds.size})
+                    {t("montage.poolBatchDeleteBtn", { n: librarySelectedIds.size })}
                   </button>
                 </div>
               </div>
@@ -1301,14 +1316,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 {loading ? (
                   <div className="flex items-center gap-2 py-10 text-xs text-cs2-text-secondary">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    加载中…
+                    {t("montage.poolLoading")}
                   </div>
                 ) : items.length === 0 ? (
                   <p className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-6 text-xs leading-relaxed text-cs2-text-muted text-center">
-                    暂无入库片段。完成 OBS 录制成功后会自动出现在此列表。
+                    {t("montage.poolEmpty")}
                   </p>
                 ) : filteredLibrary.length === 0 ? (
-                  <p className="text-xs text-cs2-text-muted p-4 text-center">没有符合筛选或搜索条件的片段。</p>
+                  <p className="text-xs text-cs2-text-muted p-4 text-center">{t("montage.poolNoMatch")}</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {filteredLibrary.map((clip, idx) => (
@@ -1350,17 +1365,17 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onDropOnRow={onTimelineCanvasDrop}
                 onRemoveOne={removeFromSequence}
                 transitionByClipId={transitionByClipId}
-                formatTransitionLine={(map, id) => formatTransitionNodeLine(map, id)}
+                formatTransitionLine={(map, id) => formatTransitionNodeLine(map, id, t)}
                 transitionEdgeSourceId={transitionEdgeSourceId}
                 onTransitionEdgeFocusChange={setTransitionEdgeSourceId}
                 getEffectiveTransition={getEffectiveTransition}
                 patchTransition={patchTransition}
-                transitionTypeOptions={TRANSITION_TYPES}
+                transitionTypeOptions={transitionTypeOptions}
                 onApplyGlobalTransitionType={applyGlobalTransitionType}
                 onApplyGlobalDurationToAll={applyGlobalDurationToAll}
                 onApplyRandomTransitions={applyRandomTransitions}
                 onApplyKillTypeTransitions={applyKillTypeTransitions}
-                globalTransitionTemplates={GLOBAL_TRANSITION_TEMPLATES}
+                globalTransitionTemplates={globalTransitionTemplates}
                 onApplyGlobalTemplate={applyGlobalTransitionTemplate}
                 onBulkRemove={removeTimelineMulti}
                 multiCount={timelineMultiSelectedIds.size}
@@ -1395,7 +1410,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onFilePick={pickFile}
                 clipCount={orderedIds.length}
                 durationText={durationText}
-                resolutionLabel="跟随源素材 · MP4"
+                resolutionLabel={t("montage.resolutionLabel")}
                 exporting={exporting}
                 onExport={() => void runExport()}
                 onSaveDraft={() => void saveDraft()}
@@ -1407,7 +1422,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 defaultFilenamePlaceholder={buildTimestampMontageFilename()}
                 draftName={draftName}
                 onDraftNameChange={setDraftName}
-                draftNamePlaceholder={stripMp4Extension(outputFilename) || "与输出文件名同步"}
+                draftNamePlaceholder={stripMp4Extension(outputFilename) || t("montage.exportDraftNamePlaceholderDefault")}
                 outputDir={outputDir}
                 onOutputDirChange={setOutputDir}
                 onOutputDirClear={() => setOutputDir("")}
@@ -1442,13 +1457,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             onClick={(e) => e.stopPropagation()}
           >
             <h4 id="montage-delete-clip-title" className="mb-3 text-sm font-bold text-cs2-text-primary">
-              从素材库删除
+              {t("montage.deleteClipTitle")}
             </h4>
             <p className="mb-1.5 font-mono text-xs font-semibold text-cs2-text-secondary bg-cs2-surface-1 p-2 rounded-md truncate">
               {clipBasename(deleteClipPrompt) || getClipTitle(deleteClipPrompt)}
             </p>
             <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
-              将同时删除磁盘上的录像文件，且不可恢复。若该片段已加入合辑时间线，也会从时间线中移除。
+              {t("montage.deleteClipDesc")}
             </p>
             {deleteClipPrompt.output_path ? (
               <p className="mb-4 break-all font-mono text-xs text-cs2-text-muted bg-cs2-bg-input p-2 rounded max-h-20 overflow-y-auto" title={String(deleteClipPrompt.output_path)}>
@@ -1461,14 +1476,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
                 onClick={() => setDeleteClipPrompt(null)}
               >
-                取消
+                {t("montage.deleteClipCancel")}
               </button>
               <button
                 type="button"
                 className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-dynamic-white hover:bg-rose-600 shadow-sm transition-all"
                 onClick={() => void confirmDeleteLibraryClip()}
               >
-                确认删除
+                {t("montage.deleteClipConfirm")}
               </button>
             </div>
           </div>
@@ -1487,11 +1502,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             onClick={(e) => e.stopPropagation()}
           >
             <h4 id="montage-batch-delete-title" className="mb-3 text-sm font-bold text-cs2-text-primary">
-              批量从素材库删除
+              {t("montage.batchDeleteTitle")}
             </h4>
             <p className="mb-3 text-xs leading-relaxed text-cs2-text-secondary">
-              将删除 <span className="font-bold text-cs2-accent">{batchDeleteLibraryPrompt.length}</span>{" "}
-              条素材，并同时删除磁盘上的录像文件，且不可恢复。已在合辑时间线中的片段也会一并移除。
+              {t("montage.batchDeleteDesc", { n: batchDeleteLibraryPrompt.length })}
             </p>
             <ul className="mb-4 max-h-40 overflow-y-auto rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-2 font-mono text-xs text-cs2-text-secondary space-y-1">
               {batchDeleteLibraryPrompt.map((c) => (
@@ -1506,14 +1520,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all"
                 onClick={() => setBatchDeleteLibraryPrompt(null)}
               >
-                取消
+                {t("montage.batchDeleteCancel")}
               </button>
               <button
                 type="button"
                 className="rounded-lg border border-rose-500/30 bg-rose-500 px-4 py-2 text-xs font-bold text-dynamic-white hover:bg-rose-600 shadow-sm transition-all"
                 onClick={() => void confirmBatchDeleteLibraryClips()}
               >
-                确认删除全部
+                {t("montage.batchDeleteConfirm")}
               </button>
             </div>
           </div>

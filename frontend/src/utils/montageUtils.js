@@ -102,6 +102,31 @@ export function montageTypeTagBadgeClass(tag) {
   }
 }
 
+/**
+ * Maps the stable type tag returned by `normalizeClipType` to an i18n key.
+ * Use in components: `t(clipTypeI18nKey(normalizeClipType(clip)))`.
+ * @param {string} tag — one of normalizeClipType's return values
+ * @returns {string} — montage.clipType* i18n key
+ */
+export function clipTypeI18nKey(tag) {
+  const MAP = {
+    "高光": "montage.clipTypeHighlight",
+    "下饭": "montage.clipTypeFail",
+    "梗死亡": "montage.clipTypeMemeDeath",
+    "击杀": "montage.clipTypeKill",
+    "合集": "montage.clipTypeCompilation",
+    "击杀合集": "montage.clipTypeKillCompilation",
+    "死亡合集": "montage.clipTypeDeathCompilation",
+    "回合合集": "montage.clipTypeRoundCompilation",
+    "时间线": "montage.clipTypeTimeline",
+    "时间线击杀": "montage.clipTypeTimelineKill",
+    "时间线死亡": "montage.clipTypeTimelineDeath",
+    "时间线整回合": "montage.clipTypeTimelineRound",
+    "普通片段": "montage.clipTypeNormal",
+  };
+  return MAP[tag] || "montage.clipTypeNormal";
+}
+
 /** Returns one of: 高光 | 下饭 | 梗死亡 | 击杀 | 合集 | 击杀合集 | 死亡合集 | 回合合集 | 时间线 | 时间线击杀 | 时间线死亡 | 时间线整回合 | 普通片段 */
 export function normalizeClipType(clip) {
   if (!clip || typeof clip !== "object") return "普通片段";
@@ -634,6 +659,16 @@ export function getMontageBlockShortLabel(clip) {
   if (cat === "compilation") return "合集";
   if (cat === "fail" || cat === "meme_death") return "下饭";
   return "高光";
+}
+
+/**
+ * Maps the stable label returned by `getMontageBlockShortLabel` to an i18n key.
+ * Use in components: `t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)))`.
+ * @param {string} label — one of getMontageBlockShortLabel's return values
+ * @returns {string} — montage.clipType* i18n key
+ */
+export function blockShortLabelI18nKey(label) {
+  return clipTypeI18nKey(label);
 }
 
 /** 回合比分：优先 CS2 双方 CT/T；否则回退为解析侧 己方/对方。 */

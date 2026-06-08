@@ -22,6 +22,7 @@ import {
   getClipRoundLabel,
   getClipTitle,
   getMontageBlockShortLabel,
+  blockShortLabelI18nKey,
   getMontageClipFactLine,
   getMontageTimelineVariant,
   isTimelineSourceClip,
@@ -36,12 +37,13 @@ import {
   getClipScore,
   stripTagEmoji,
 } from "../../utils/montageUtils";
+import { useT } from "../../i18n/useT.js";
 
-function montageAiExplainText(clip) {
+function montageAiExplainText(clip, t) {
   const c = getClipComment(clip);
   if (c) return c.length > 80 ? `${c.slice(0, 78)}…` : c;
   const s = getClipScore(clip);
-  if (s != null && Number.isFinite(Number(s))) return `AI 评分 ${Math.round(Number(s))} 分`;
+  if (s != null && Number.isFinite(Number(s))) return t("montage.orchAiScore", { n: Math.round(Number(s)) });
   return "";
 }
 
@@ -91,6 +93,7 @@ export function CollapsibleSection({ title, hint, defaultOpen = false, children 
 }
 
 function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort, onReverseOrder }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -102,18 +105,18 @@ function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort, 
   }, [open]);
 
   const items = [
-    { label: "自动排序", icon: Zap, desc: "高光片段优先", fn: onAutoSort },
-    { label: "时间线顺序", icon: History, desc: "按回合与 tick 升序", fn: onTimelineSort },
-    { label: "节奏优先", icon: Waves, desc: "高光与下饭交错", fn: onRhythmSort },
-    { label: "随机", icon: Shuffle, desc: "随机打乱", fn: onRandomSort },
-    { label: "倒序", icon: ArrowDownUp, desc: "反转当前片段顺序", fn: onReverseOrder },
+    { label: t("montage.sortAutoLabel"), icon: Zap, desc: t("montage.sortAutoDesc"), fn: onAutoSort },
+    { label: t("montage.sortTimelineLabel"), icon: History, desc: t("montage.sortTimelineDesc"), fn: onTimelineSort },
+    { label: t("montage.sortRhythmLabel"), icon: Waves, desc: t("montage.sortRhythmDesc"), fn: onRhythmSort },
+    { label: t("montage.sortRandomLabel"), icon: Shuffle, desc: t("montage.sortRandomDesc"), fn: onRandomSort },
+    { label: t("montage.sortReverseLabel"), icon: ArrowDownUp, desc: t("montage.sortReverseDesc"), fn: onReverseOrder },
   ];
 
   return (
     <div className="relative" ref={ref}>
-      <ToolbarMiniButton onClick={() => setOpen((v) => !v)} title="排序方式">
+      <ToolbarMiniButton onClick={() => setOpen((v) => !v)} title={t("montage.sortDropdownTitle")}>
         <ArrowUpDown className="h-3.5 w-3.5" />
-        排序
+        {t("montage.toolbarSortBtn")}
         <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
       </ToolbarMiniButton>
       {open && (
@@ -153,6 +156,7 @@ export function MontageWorkbenchToolbar({
   savingDraft,
   onHistory,
 }) {
+  const t = useT();
   return (
     <header className={`flex h-14 shrink-0 items-center gap-3 border-b px-4 ${isPage ? "border-cs2-border rounded-t-lg" : "border-cs2-border bg-cs2-surface-1"}`}>
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -177,20 +181,20 @@ export function MontageWorkbenchToolbar({
           onRandomSort={onRandomSort}
           onReverseOrder={onReverseOrder}
         />
-        <ToolbarMiniButton onClick={onHistory} title="查看历史合集记录">
+        <ToolbarMiniButton onClick={onHistory} title={t("montage.toolbarHistoryTitle")}>
           <History className="h-3.5 w-3.5" />
-          历史
+          {t("montage.toolbarHistoryBtn")}
         </ToolbarMiniButton>
-        <ToolbarMiniButton onClick={onSaveDraft} disabled={savingDraft} title="保存草稿">
+        <ToolbarMiniButton onClick={onSaveDraft} disabled={savingDraft} title={t("montage.toolbarSaveDraftTitle")}>
           {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          保存
+          {t("montage.toolbarSaveDraftBtn")}
         </ToolbarMiniButton>
         {!isPage ? (
           <button
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-colors"
-            aria-label="关闭"
+            aria-label={t("montage.toolbarCloseAriaLabel")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -228,6 +232,7 @@ function MontageTransitionEdgeEditor({
   transitionTypeOptions,
   formatTransitionLine,
 }) {
+  const t = useT();
   const eff = getEffectiveTransition(transitionByClipId, sourceClipId);
   const [durDraft, setDurDraft] = useState("");
   useEffect(() => {
@@ -253,13 +258,13 @@ function MontageTransitionEdgeEditor({
   return (
     <div className="mx-2 mb-2 ml-7 rounded-xl border border-cs2-accent/40 bg-cs2-surface-2 p-3.5 shadow-inner transition-all">
       <p className="text-xs text-cs2-text-muted flex items-center gap-1.5">
-        <span>衔接至下一段：</span>
+        <span>{t("montage.transEdgeConnectTo")}</span>
         <span className="font-bold text-cs2-text-primary truncate max-w-[240px]" title={nextClip?.output_path}>
           {pathBasenameQuick(nextClip?.output_path) || getClipTitle(nextClip)}
         </span>
       </p>
       <p className="mt-1.5 font-mono text-xs font-bold text-cs2-accent">
-        {formatTransitionLine?.(transitionByClipId, sourceClipId) || "默认快切"}
+        {formatTransitionLine?.(transitionByClipId, sourceClipId) || t("montage.transEdgeDefaultLabel")}
       </p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {transitionTypeOptions.map((opt) => {
@@ -286,7 +291,7 @@ function MontageTransitionEdgeEditor({
       </div>
       <div className="mt-3.5">
         <div className="flex items-center justify-between gap-2 text-xs text-cs2-text-muted">
-          <span>转场衔接时长</span>
+          <span>{t("montage.transEdgeDurationLabel")}</span>
           <span className="font-mono font-bold text-cs2-accent">{durMs} ms</span>
         </div>
         <input
@@ -305,7 +310,7 @@ function MontageTransitionEdgeEditor({
         />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-cs2-text-muted">精确设置 (秒)</span>
+        <span className="text-xs text-cs2-text-muted">{t("montage.transEdgePrecise")}</span>
         <input
           type="text"
           inputMode="decimal"
@@ -358,6 +363,7 @@ export function MontageOrchestrationTimeline({
   onClearTimeline,
   timelineClipCount,
 }) {
+  const t = useT();
   const rows = useMemo(() => {
     return clips.map((clip, idx) => {
       const next = clips[idx + 1];
@@ -404,8 +410,8 @@ export function MontageOrchestrationTimeline({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-surface-1 shadow-lg">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cs2-border-subtle p-4">
         <div>
-          <p className="text-sm font-bold tracking-wide text-cs2-text-primary">合集编排主线</p>
-          <p className="text-xs text-cs2-text-muted mt-0.5">拖拽排序 · Ctrl 多选 · 点击连线专属配置独立转场</p>
+          <p className="text-sm font-bold tracking-wide text-cs2-text-primary">{t("montage.orchTitle")}</p>
+          <p className="text-xs text-cs2-text-muted mt-0.5">{t("montage.orchHint")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -414,34 +420,34 @@ export function MontageOrchestrationTimeline({
             disabled={!timelineClipCount}
             className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all disabled:opacity-30"
           >
-            清空主线
+            {t("montage.orchClearBtn")}
           </button>
           {multiCount > 0 ? (
             <>
               <button
                 type="button"
                 onClick={onBulkMoveUp}
-                title="整体上移一格"
+                title={t("montage.orchMoveUpTitle")}
                 className="inline-flex items-center gap-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus transition-all"
               >
                 <ArrowUp className="h-3.5 w-3.5" />
-                上移
+                {t("montage.orchMoveUpBtn")}
               </button>
               <button
                 type="button"
                 onClick={onBulkMoveDown}
-                title="整体下移一格"
+                title={t("montage.orchMoveDownTitle")}
                 className="inline-flex items-center gap-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1.5 text-xs font-medium text-cs2-text-secondary hover:border-cs2-border-focus transition-all"
               >
                 <ArrowDown className="h-3.5 w-3.5" />
-                下移
+                {t("montage.orchMoveDownBtn")}
               </button>
               <button
                 type="button"
                 onClick={onBulkRemove}
                 className="rounded-lg border border-rose-500/30 bg-rose-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-rose-600 transition-all shadow-sm"
               >
-                批量移除 ({multiCount})
+                {t("montage.orchBulkRemoveBtn", { n: multiCount })}
               </button>
             </>
           ) : null}
@@ -449,9 +455,9 @@ export function MontageOrchestrationTimeline({
       </div>
       {timelineClipCount >= 2 ? (
         <div className="shrink-0 border-b border-cs2-border-subtle bg-cs2-surface-2/60 px-4 py-2">
-          <CollapsibleSection title="全局转场一键设定" hint="整体切换风格与节奏" defaultOpen={false}>
+          <CollapsibleSection title={t("montage.orchGlobalTransTitle")} hint={t("montage.orchGlobalTransHint")} defaultOpen={false}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
-              <span className="text-xs font-bold text-cs2-text-muted w-16">基础类型</span>
+              <span className="text-xs font-bold text-cs2-text-muted w-16">{t("montage.orchGlobalTransBaseLabel")}</span>
               <div className="flex flex-wrap gap-1.5">
                 {transitionTypeOptions.map((opt) => (
                   <button
@@ -466,15 +472,15 @@ export function MontageOrchestrationTimeline({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
-              <span className="text-xs font-bold text-cs2-text-muted w-16">节奏生成</span>
+              <span className="text-xs font-bold text-cs2-text-muted w-16">{t("montage.orchGlobalTransRhythmLabel")}</span>
               <div className="flex flex-wrap gap-1.5">
-                <button type="button" onClick={() => onApplyGlobalDurationToAll()} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">统一时长</button>
-                <button type="button" onClick={onApplyRandomTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">全随机打乱</button>
-                <button type="button" onClick={onApplyKillTypeTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">智能分析击杀节奏</button>
+                <button type="button" onClick={() => onApplyGlobalDurationToAll()} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">{t("montage.orchGlobalTransUnifyDuration")}</button>
+                <button type="button" onClick={onApplyRandomTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">{t("montage.orchGlobalTransRandom")}</button>
+                <button type="button" onClick={onApplyKillTypeTransitions} className="rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-1 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent transition-all">{t("montage.orchGlobalTransKillType")}</button>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1">
-              <span className="text-xs font-bold text-cs2-text-muted w-16">风格模板</span>
+              <span className="text-xs font-bold text-cs2-text-muted w-16">{t("montage.orchGlobalTransTemplateLabel")}</span>
               <div className="flex flex-wrap gap-1.5">
                 {globalTransitionTemplates.map((tpl) => (
                   <button
@@ -507,9 +513,9 @@ export function MontageOrchestrationTimeline({
       >
         {clips.length === 0 ? (
           <div className="flex min-h-[220px] flex-col items-center justify-center rounded-xl border border-dashed border-cs2-border-subtle bg-cs2-surface-1 p-8 text-center">
-            <p className="text-sm font-bold text-cs2-text-secondary">时间线空闲中</p>
+            <p className="text-sm font-bold text-cs2-text-secondary">{t("montage.orchEmptyTitle")}</p>
             <p className="mt-2 max-w-md text-xs leading-relaxed text-cs2-text-muted">
-              从左侧素材池点选多条素材进行批量导入，或直接将卡片拖拽进入下方区域排布您的合辑结构。
+              {t("montage.orchEmptyHint")}
             </p>
           </div>
         ) : (
@@ -537,9 +543,9 @@ export function MontageOrchestrationTimeline({
               const inMulti = multiSelectedIds?.has?.(clip.id);
               const dragging = dragId === clip.id;
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
-              const killBadge = getMontageBlockShortLabel(clip);
+              const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
               const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
-              const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip);
+              const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip, t);
               const outBase = pathBasenameQuick(clip?.output_path);
               return (
                 <li key={clip.id} className="flex flex-col">
@@ -573,7 +579,7 @@ export function MontageOrchestrationTimeline({
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs font-semibold text-cs2-text-muted shrink-0">#{rowIndex}</span>
                         <span className={`rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wider shrink-0 ${vCls}`}>{killBadge}</span>
-                        <span className="truncate text-sm font-bold text-cs2-text-primary">{clip.player_name || "未知玩家"}</span>
+                        <span className="truncate text-sm font-bold text-cs2-text-primary">{clip.player_name || t("montage.orchUnknownPlayer")}</span>
                         <span className="ml-auto font-mono text-xs font-bold text-cs2-accent bg-cs2-accent-soft px-2 py-0.5 rounded-md shrink-0">
                           {dur != null ? `${dur.toFixed(1)}s` : "?s"}
                         </span>
@@ -604,12 +610,12 @@ export function MontageOrchestrationTimeline({
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {victimSegCount > 0 ? (
                           <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface">
-                            受害者视角 ×{victimSegCount}
+                            {t("montage.orchVictimPovBadge", { n: victimSegCount })}
                           </span>
                         ) : null}
                         <span
                           className={`rounded px-2 py-0.5 text-xs font-medium ${
-                            perspectivePrimary !== "观战视角"
+                            perspectivePrimary !== t("montage.orchSpectatorPerspective")
                               ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
                               : "bg-cs2-bg-input text-cs2-text-muted"
                           }`}
@@ -656,7 +662,7 @@ export function MontageOrchestrationTimeline({
                         onRemoveOne(clip.id);
                       }}
                       className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
-                      aria-label="从时间线移除"
+                      aria-label={t("montage.orchRemoveAriaLabel")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -679,8 +685,8 @@ export function MontageOrchestrationTimeline({
                               : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-text-primary"
                           }`}
                         >
-                          <span className="text-[11px] uppercase tracking-wider font-semibold opacity-75">衔接转场</span>
-                          <span>{trLine || "快切"}</span>
+                          <span className="text-[11px] uppercase tracking-wider font-semibold opacity-75">{t("montage.orchTransConnectLabel")}</span>
+                          <span>{trLine || t("montage.orchTransDefaultCut")}</span>
                         </button>
                       </div>
                       {transitionEdgeSourceId === clip.id ? (
@@ -738,6 +744,7 @@ export function MontageMaterialPoolCard({
   onDragEnd,
   onClickMulti,
 }) {
+  const t = useT();
   const mapName = mapNameFromClip(clip);
   const dur = getClipDurationSeconds(clip);
   const weaponPrimary =
@@ -752,18 +759,18 @@ export function MontageMaterialPoolCard({
       : weaponPrimary
     : "";
   const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 5) : [];
-  const playerName = clip.player_name?.trim() || "未知玩家";
+  const playerName = clip.player_name?.trim() || t("montage.poolCardUnknownPlayer");
   const perspectiveZh = getRecordedClipPerspectiveZh(clip);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip);
   const factLine = getMontageClipFactLine(clip, { includeDemoName: false });
-  const killBadge = getMontageBlockShortLabel(clip);
+  const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
   const scorePair = getMontageScorePair(clip);
   const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
   const victimSegCount = getMontageExtraVictimPovCount(clip);
   const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip) : "";
-  const aiExplain = suppressMontageAi ? "" : montageAiExplainText(clip);
+  const aiExplain = suppressMontageAi ? "" : montageAiExplainText(clip, t);
   const demoLabel = demoShortLabel(clip);
 
   return (
@@ -800,7 +807,7 @@ export function MontageMaterialPoolCard({
               {suppressMontageAi ? null : <AiScoreBadge score={clip.ai_score} />}
               <button
                 type="button"
-                title="删除素材"
+                title={t("montage.poolCardDeleteTitle")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(clip);
@@ -838,7 +845,7 @@ export function MontageMaterialPoolCard({
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <span
               className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                perspectivePrimary !== "观战视角"
+                perspectivePrimary !== t("montage.poolCardSpectatorPerspective")
                   ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
                   : "bg-cs2-bg-input text-cs2-text-muted"
               }`}
@@ -850,7 +857,7 @@ export function MontageMaterialPoolCard({
             ) : null}
             {victimSegCount > 0 ? (
               <span className="rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
-                受害者视角 ×{victimSegCount}
+                {t("montage.poolCardVictimPovBadge", { n: victimSegCount })}
               </span>
             ) : null}
           </div>
@@ -885,7 +892,7 @@ export function MontageMaterialPoolCard({
                 : "bg-cs2-accent text-cs2-text-on-accent hover:bg-cs2-accent-light hover:shadow-glow-accent"
             }`}
           >
-            {added ? "已添加" : "加入"}
+            {added ? t("montage.poolCardAddedBtn") : t("montage.poolCardAddBtn")}
           </button>
           <div className="min-w-0 flex-1 text-right">
             {aiExplain ? (

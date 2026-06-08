@@ -1,5 +1,6 @@
 import {
   normalizeClipType,
+  clipTypeI18nKey,
   getClipTitle,
   getClipDurationSeconds,
   getClipScore,
@@ -26,7 +27,7 @@ export default function RecordedClipCard({ clip, isAdded, onAdd }) {
     <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/70 p-4 text-[12px] shadow-inner">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${montageTypeTagBadgeClass(tag)}`}>
-          {tag}
+          {t(clipTypeI18nKey(tag))}
         </span>
         <span className="text-cs2-text-secondary">{sub || durLabel}</span>
       </div>
