@@ -15,6 +15,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
+import LocaleToggle from "./LocaleToggle";
 
 const linkBase =
   "flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-semibold transition-colors border border-transparent";
@@ -134,6 +135,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           )}
           {theme === "dark" ? "切换亮色" : "切换暗色"}
         </button>
+        <LocaleToggle />
       </div>
     </aside>
   );
