@@ -102,6 +102,7 @@ function PacingSliderRow({
 }
 
 export function PacingMicroPanel({ item, updateItemPacing }) {
+  const t = useT();
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const gp = globalPacing || {};
   const po = item.pacing_override || {};
@@ -126,11 +127,11 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
     <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
       <div className="border-b border-cs2-border pb-2">
         <p className="mb-2 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
-          <Settings className="h-3 w-3" /> 基础参数
+          <Settings className="h-3 w-3" /> {t("queue.pacingBasicParams")}
         </p>
         <div className="space-y-3">
           <PacingSliderRow
-            label="击杀段前预留 (秒)"
+            label={t("record.commonPacingPreSlider")}
             value={pre}
             min={0}
             max={20}
@@ -138,7 +139,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ pre_first_sec: n })}
           />
           <PacingSliderRow
-            label="击杀段后预留 (秒)"
+            label={t("record.commonPacingPostSlider")}
             value={post}
             min={0}
             max={10}
@@ -146,7 +147,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ post_last_sec: n })}
           />
           <PacingSliderRow
-            label="跳剪间隔阈值 (秒)"
+            label={t("queue.pacingGapSliderLabel")}
             value={gap}
             min={2}
             max={70}
@@ -165,6 +166,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
  * 开关与独立时序参数均存入 item.pacing_override。
  */
 export function PovSection({ item, updateItemPacing }) {
+  const t = useT();
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
 
   if (isClipPacingAndPovLocked(item.clipData)) {
@@ -173,14 +175,14 @@ export function PovSection({ item, updateItemPacing }) {
       <p className="rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
         {wholeRound ? (
           <>
-            当前为<strong className="font-semibold text-cs2-text-secondary">整回合时间线</strong>
-            （固定 tick 窗口），
-            <span className="text-cs2-text-secondary">不支持剪辑节奏微调与追加受害者 / 击杀者回看视角</span>。
+            {t("queue.povLockedPrefix")}<strong className="font-semibold text-cs2-text-secondary">{t("queue.povLockedTimelineStrong")}</strong>
+            {t("queue.povLockedTimelineMiddle")}
+            <span className="text-cs2-text-secondary">{t("queue.povLockedTimelineSuffix")}</span>
           </>
         ) : (
           <>
-            当前为<strong className="font-semibold text-cs2-text-secondary">回合死亡合集</strong>（多回合勾选合辑），
-            <span className="text-cs2-text-secondary">不支持剪辑节奏微调与追加回看视角</span>。
+            {t("queue.povLockedPrefix")}<strong className="font-semibold text-cs2-text-secondary">{t("queue.povLockedDeathStrong")}</strong>{t("queue.povLockedDeathMiddle")}
+            <span className="text-cs2-text-secondary">{t("queue.povLockedDeathSuffix")}</span>
           </>
         )}
       </p>
@@ -196,7 +198,7 @@ export function PovSection({ item, updateItemPacing }) {
 
   const isHighlight = clipCategory === "highlight" && victimsList.length > 0;
   const noKillerPovReason = clipCategory === "fail" && clipHasNoKillerPovTags(item.clipData)
-    ? "C4 爆炸 / 摔死无真实攻击者，不支持击杀者视角"
+    ? t("queue.noKillerPovReason")
     : null;
   const isFail = clipCategory === "fail" && Boolean(killerName) && !noKillerPovReason;
   const isCompilation = clipCategory === "compilation";
@@ -239,7 +241,7 @@ export function PovSection({ item, updateItemPacing }) {
             }`}
           >
             {povEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
-            <span>追加受害者视角</span>
+            <span>{t("queue.appendVictimPov")}</span>
             {victimsPreview ? (
               <span
                 className={`ml-1 truncate text-[9px] font-normal ${
@@ -260,7 +262,7 @@ export function PovSection({ item, updateItemPacing }) {
         {noKillerPovReason && (
           <div className="flex w-full items-center gap-1.5 rounded border border-cs2-border bg-cs2-bg-hover px-2 py-1.5 text-[10px] text-cs2-text-muted cursor-not-allowed select-none">
             <EyeOff className="h-3 w-3 shrink-0 opacity-40" />
-            <span className="opacity-60">击杀者视角不可用</span>
+            <span className="opacity-60">{t("queue.killerPovUnavailable")}</span>
             <span className="ml-1 opacity-40">· {noKillerPovReason}</span>
           </div>
         )}
@@ -275,7 +277,7 @@ export function PovSection({ item, updateItemPacing }) {
             }`}
           >
             {killerPovEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
-            <span>追加击杀者视角</span>
+            <span>{t("queue.appendKillerPov")}</span>
             {killersPreview ? (
               <span
                 className={`ml-1 truncate text-[9px] font-normal ${
@@ -298,7 +300,7 @@ export function PovSection({ item, updateItemPacing }) {
       {povEnabled && canVictimPov && (
         <div className="space-y-2 rounded border border-cyan-500/10 bg-cs2-cyan-surface p-2">
           <PacingSliderRow
-            label="回看前停留 (秒) · 受害者视角"
+            label={t("queue.victimPovPreLabel")}
             value={vicPre}
             min={0}
             max={5}
@@ -308,7 +310,7 @@ export function PovSection({ item, updateItemPacing }) {
             onChange={(n) => commit({ victim_pov_pre_sec: n })}
           />
           <PacingSliderRow
-            label="死亡后停留 (秒) · 受害者视角"
+            label={t("queue.victimPovPostLabel")}
             value={vicPost}
             min={0}
             max={5}
@@ -323,7 +325,7 @@ export function PovSection({ item, updateItemPacing }) {
       {killerPovEnabled && canKillerPov && (
         <div className="space-y-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface p-2">
           <PacingSliderRow
-            label="回看前停留 (秒) · 击杀者视角"
+            label={t("queue.killerPovPreLabel")}
             value={killPre}
             min={0}
             max={5}
@@ -333,7 +335,7 @@ export function PovSection({ item, updateItemPacing }) {
             onChange={(n) => commit({ killer_pov_pre_sec: n })}
           />
           <PacingSliderRow
-            label="死亡后停留 (秒) · 击杀者视角"
+            label={t("queue.killerPovPostLabel")}
             value={killPost}
             min={0}
             max={5}
@@ -396,6 +398,7 @@ export function GlobalPacingPanel({
   // eslint-disable-next-line no-unused-vars
   defaultExpanded = false,
 }) {
+  const t = useT();
   const post = globalPacing.post_last_sec ?? DEFAULT_PACING.post_last_sec;
   const pre  = globalPacing.pre_first_sec ?? DEFAULT_PACING.pre_first_sec;
   const gap  = globalPacing.max_gap_sec   ?? DEFAULT_PACING.max_gap_sec;
@@ -416,16 +419,16 @@ export function GlobalPacingPanel({
       <div className="mb-2 flex min-w-0 flex-nowrap items-baseline gap-x-2 overflow-x-auto">
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-cs2-text-primary">
           <Settings className="h-3.5 w-3.5 text-cs2-text-muted" />
-          全局节奏设置
+          {t("queue.globalPacingTitle")}
         </span>
         <span className="min-w-0 whitespace-nowrap text-[11px] text-cs2-text-muted">
-          （对所有片段生效，单独设置优先）
+          {t("queue.globalPacingSubtitle")}
         </span>
       </div>
 
       <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
         <PacingSliderRow
-          label="击杀段前预留 (秒)"
+          label={t("record.commonPacingPreSlider")}
           value={pre}
           min={0}
           max={20}
@@ -433,7 +436,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ pre_first_sec: n })}
         />
         <PacingSliderRow
-          label="击杀段后预留 (秒)"
+          label={t("record.commonPacingPostSlider")}
           value={post}
           min={0}
           max={10}
@@ -441,7 +444,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ post_last_sec: n })}
         />
         <PacingSliderRow
-          label="跳剪间隔阈值 (秒)"
+          label={t("queue.pacingGapSliderLabel")}
           value={gap}
           min={2}
           max={70}
@@ -452,7 +455,7 @@ export function GlobalPacingPanel({
 
       <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-input/30 p-2">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-          批量视角设置
+          {t("queue.batchPovTitle")}
         </p>
         <div className="grid min-w-0 grid-cols-2 gap-2">
           <button
@@ -460,10 +463,10 @@ export function GlobalPacingPanel({
             disabled={victimPovEligible === 0}
             title={
               victimPovEligible === 0
-                ? "队列中暂无适用片段"
+                ? t("queue.victimPovNoClips")
                 : allVictimPovOn
-                  ? "关闭：取消所有符合条件的受害者回看"
-                  : "打开：为所有符合条件的片段开启受害者回看"
+                  ? t("queue.closeVictimPovTitle")
+                  : t("queue.openVictimPovTitle")
             }
             onClick={onToggleAllVictimPov}
             className={
@@ -478,7 +481,7 @@ export function GlobalPacingPanel({
             ) : (
               <Eye className="h-3 w-3 shrink-0" />
             )}
-            <span className="shrink-0">{allVictimPovOn ? "关闭受害者视角" : "打开受害者视角"}</span>
+            <span className="shrink-0">{allVictimPovOn ? t("queue.btnCloseVictimPov") : t("queue.btnOpenVictimPov")}</span>
             {victimPovEligible > 0 ? (
               <span
                 className={
@@ -495,10 +498,10 @@ export function GlobalPacingPanel({
             disabled={killerPovEligible === 0}
             title={
               killerPovEligible === 0
-                ? "队列中暂无适用片段"
+                ? t("queue.victimPovNoClips")
                 : allKillerPovOn
-                  ? "关闭：取消所有符合条件的击杀者回看"
-                  : "打开：为所有符合条件的片段开启击杀者回看"
+                  ? t("queue.closeKillerPovTitle")
+                  : t("queue.openKillerPovTitle")
             }
             onClick={onToggleAllKillerPov}
             className={
@@ -513,7 +516,7 @@ export function GlobalPacingPanel({
             ) : (
               <Eye className="h-3 w-3 shrink-0" />
             )}
-            <span className="shrink-0">{allKillerPovOn ? "关闭击杀者视角" : "打开击杀者视角"}</span>
+            <span className="shrink-0">{allKillerPovOn ? t("queue.btnCloseKillerPov") : t("queue.btnOpenKillerPov")}</span>
             {killerPovEligible > 0 ? (
               <span
                 className={
@@ -533,7 +536,7 @@ export function GlobalPacingPanel({
         onClick={resetGlobalPacing}
         className="mt-2 flex items-center gap-1 text-[10px] text-cs2-text-muted hover:text-cs2-text-secondary"
       >
-        <RotateCcw className="h-2.5 w-2.5" /> 恢复后端默认值
+        <RotateCcw className="h-2.5 w-2.5" /> {t("queue.resetToDefaults")}
       </button>
     </div>
   );
@@ -653,7 +656,7 @@ function QueueItemCard({
       {Array.isArray(item.freezeToDeathQueueRounds) &&
       item.freezeToDeathQueueRounds.length > 0 ? (
         <p className="mt-0.5 font-mono text-[10px] text-cs2-amber-on-surface/85">
-          回合合集含回合：{item.freezeToDeathQueueRounds.join("、")}
+          {t("queue.freezeToDeathRounds", { rounds: item.freezeToDeathQueueRounds.join("、") })}
         </p>
       ) : null}
 
@@ -662,8 +665,8 @@ function QueueItemCard({
         isClipPacingAndPovLocked(cd) ? (
           <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
-              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"
-              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"}
+              ? t("queue.pacingLockedTimeline")
+              : t("queue.pacingLockedCompilation")}
           </p>
         ) : (
           <div className="mt-2">
@@ -691,7 +694,7 @@ function QueueItemCard({
           }`}
         >
           <Settings className="h-3 w-3" />
-          节奏微调
+          {t("queue.btnPacing")}
         </button>
         <button
           type="button"
@@ -703,7 +706,7 @@ function QueueItemCard({
           }`}
         >
           <Eye className="h-3 w-3 shrink-0" />
-          <span className="shrink-0">视角</span>
+          <span className="shrink-0">{t("queue.btnPov")}</span>
           {victimsPreview ? (
             <span
               className="ml-1 max-w-[8rem] truncate text-[9px] font-normal opacity-80"
@@ -717,10 +720,10 @@ function QueueItemCard({
           type="button"
           onClick={() => onRemove(item.id)}
           className="ml-auto flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-semibold text-cs2-rose-on-surface/90 transition-colors hover:bg-rose-500/15"
-          aria-label="从队列移除"
+          aria-label={t("queue.removeAriaLabel")}
         >
           <Trash2 className="h-3 w-3" />
-          删除
+          {t("queue.btnRemove")}
         </button>
       </div>
     </li>
@@ -736,6 +739,7 @@ export function RecordingQueuePanel({
   batchRecording,
   onAbortBatch,
 }) {
+  const t = useT();
   const grouped = useMemo(() => groupByDemo(queue), [queue]);
   const [pacingExpandedId, setPacingExpandedId] = useState(null);
   const [povExpandedId, setPovExpandedId] = useState(null);
@@ -751,7 +755,7 @@ export function RecordingQueuePanel({
         <div className="flex items-center justify-between border-b border-cs2-border px-4 py-3">
           <h2 id="queue-drawer-title" className="flex items-center gap-2 text-sm font-bold text-cs2-text-primary">
             <Package className="h-4 w-4 text-cs2-accent" />
-            待录制队列
+            {t("queue.drawerTitle")}
             <span className="rounded bg-cs2-accent/20 px-2 py-0.5 font-mono text-xs text-cs2-accent">
               {queue.length}
             </span>
@@ -771,7 +775,7 @@ export function RecordingQueuePanel({
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {queue.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-cs2-text-muted">
-              暂无片段。在片段列表中勾选后点击「加入录制队列」。
+              {t("queue.emptyDrawer")}
             </p>
           ) : (
             <div className="space-y-4">
@@ -784,7 +788,7 @@ export function RecordingQueuePanel({
                     <p className="truncate font-mono text-[11px] font-semibold text-cs2-accent/90" title={demoKey}>
                       {demoKey}
                     </p>
-                    <p className="text-[10px] text-cs2-text-muted">{items.length} 个片段</p>
+                    <p className="text-[10px] text-cs2-text-muted">{t("queue.demoClipCount", { n: items.length })}</p>
                   </div>
                   <ul className="divide-y divide-white/[0.04]">
                     {items.map((it) => (
@@ -818,7 +822,7 @@ export function RecordingQueuePanel({
               onClick={onClear}
               className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-red-surface hover:text-cs2-red-on-surface"
             >
-              清空队列
+              {t("queue.btnClearQueue")}
             </button>
           )}
           <button
@@ -828,7 +832,7 @@ export function RecordingQueuePanel({
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent py-3.5 text-sm font-extrabold uppercase tracking-widest text-cs2-text-on-accent shadow-lg shadow-cs2-accent/25 transition-all hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Rocket className="h-4 w-4" />
-            开始批量录制
+            {t("queue.btnStartBatch")}
           </button>
           {batchRecording && typeof onAbortBatch === "function" ? (
             <button
@@ -837,7 +841,7 @@ export function RecordingQueuePanel({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-red-surface bg-cs2-red-surface py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-cs2-red-on-surface/60 hover:bg-cs2-red-surface"
             >
               <OctagonX className="h-4 w-4 shrink-0" />
-              中止录制
+              {t("queue.btnAbort")}
             </button>
           ) : null}
         </div>
@@ -846,10 +850,11 @@ export function RecordingQueuePanel({
 }
 
 export default function RecordingQueueDrawer({ open, onClose, ...rest }) {
+  const t = useT();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[90] flex justify-end bg-cs2-bg-input/80 backdrop-blur-[2px]" role="presentation">
-      <button type="button" className="h-full min-w-0 flex-1 cursor-default" aria-label="关闭抽屉背景" onClick={onClose} />
+      <button type="button" className="h-full min-w-0 flex-1 cursor-default" aria-label={t("queue.closeDrawerAriaLabel")} onClick={onClose} />
       <aside className="flex h-full w-full max-w-md flex-col border-l border-cs2-border bg-cs2-bg-sidebar shadow-2xl" role="dialog">
         <RecordingQueuePanel {...rest} />
       </aside>
