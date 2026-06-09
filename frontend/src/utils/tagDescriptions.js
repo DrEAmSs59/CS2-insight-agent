@@ -527,6 +527,7 @@ const LABELS_EN = {
   // ── meme ──
   "坐牢集锦": "Death Montage",
   "🎓 211高材生": "🎓 Zero-kill Match",
+  "👨‍🔬 首席研发工程师": "👨‍🔬 Chief R&D Engineer",
 };
 
 const PREFIX = [

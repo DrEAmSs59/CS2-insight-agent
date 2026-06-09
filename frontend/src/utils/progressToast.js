@@ -9,5 +9,7 @@ export function progressToastShowsBusy(
   if (parsing || loading) return true;
   const t = String(text || "").trim();
   if (!t) return false;
+  // 进行中文案统一以省略号结尾（中英一致约定）；中文关键词作兜底。
+  if (t.endsWith("…") || t.endsWith("...")) return true;
   return /正在|探测中|检测中|上传中|解析中|扫描中|载入中|导播中|恢复中|删除中|保存中/.test(t);
 }
