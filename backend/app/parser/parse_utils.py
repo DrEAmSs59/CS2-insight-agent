@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import pandas as pd
@@ -12,6 +13,22 @@ logger = logging.getLogger(__name__)
 
 # demoparser2 在坏/不兼容 demo 上可能 Rust panic → PyO3 的 PanicException 不是 Exception 子类。
 _DEMOPARSER_RE_RAISE = (KeyboardInterrupt, SystemExit, GeneratorExit)
+
+
+def win_panel_ceiling_from_match_tick(
+    win_panel_match_tick: int, tick_rate: float
+) -> "Optional[int]":
+    """终局回合录制上限 = cs_win_panel_match tick − 守护（env CS2_INSIGHT_WIN_PANEL_GUARD_SEC，默认 0.5s）。
+
+    win_panel_match_tick <= 0 → None（demo 无结算事件，调用方回退旧逻辑）。
+    """
+    if not win_panel_match_tick or int(win_panel_match_tick) <= 0:
+        return None
+    trf = float(tick_rate) if float(tick_rate) > 0 else 64.0
+    guard_ticks = int(float(
+        os.environ.get("CS2_INSIGHT_WIN_PANEL_GUARD_SEC", "0.5") or "0.5"
+    ) * trf)
+    return int(win_panel_match_tick) - guard_ticks
 
 
 def _to_pandas_df(result) -> pd.DataFrame:

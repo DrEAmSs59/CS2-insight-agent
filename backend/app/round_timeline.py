@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from collections import defaultdict
 from typing import Any, Optional
 
 import pandas as pd
+
+from .parser.parse_utils import win_panel_ceiling_from_match_tick
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,24 @@ def _adjust_round_for_pre_freeze(
 # 整回合时间线录制结束 tick：固定缓冲（与 demo_parser 默认策略一致），不读环境变量。
 _TIMELINE_ROUND_POST_ROUND_END_SEC = 3.0
 _TIMELINE_LAST_ROUND_KILL_TAIL_SEC = 2.5
+
+
+def _cap_event_end_for_final_round(
+    et_s: int,
+    tick: int,
+    eff_rn: int,
+    terminal_rn: "Optional[int]",
+    win_panel_ceiling: "Optional[int]",
+) -> int:
+    """终局回合事件窗口结尾封顶到 win_panel ceiling；其余回合 / 无 ceiling 时原样返回。"""
+    if (
+        win_panel_ceiling is not None
+        and terminal_rn is not None
+        and int(eff_rn) == int(terminal_rn)
+        and int(tick) < int(win_panel_ceiling)
+    ):
+        return min(int(et_s), int(win_panel_ceiling))
+    return int(et_s)
 
 
 def _timeline_round_record_end_tick(
@@ -332,13 +351,7 @@ def build_round_timeline(
 
     tp = str(target_player or "").strip()
     tr = max(1, int(total_rounds or 1))
-    _wp_guard = int(float(
-        os.environ.get("CS2_INSIGHT_WIN_PANEL_GUARD_SEC", "0.5") or "0.5"
-    ) * (float(tick_rate) if float(tick_rate) > 0 else 64.0))
-    win_panel_ceiling = (
-        int(win_panel_match_tick) - _wp_guard
-        if win_panel_match_tick and int(win_panel_match_tick) > 0 else None
-    )
+    win_panel_ceiling = win_panel_ceiling_from_match_tick(win_panel_match_tick, tick_rate)
     _terminal_rn = max(round_freeze_end_ticks.keys()) if round_freeze_end_ticks else None
     assist_col = _pick_assister_column(events) if events is not None and not events.empty else None
     winners_by_ended = _parse_round_winners_side(round_end_df, match_start_tick)
@@ -424,13 +437,7 @@ def build_round_timeline(
             post_w = int(tick_rate * 4.0)
             st_s = max(int(freeze_for_suggest), tick - pre_w)
             et_s = tick + post_w
-            if (
-                win_panel_ceiling is not None
-                and _terminal_rn is not None
-                and int(eff_rn) == int(_terminal_rn)
-                and int(tick) < int(win_panel_ceiling)
-            ):
-                et_s = min(int(et_s), int(win_panel_ceiling))
+            et_s = _cap_event_end_for_final_round(et_s, tick, eff_rn, _terminal_rn, win_panel_ceiling)
             rem = _related_clip_ids(tick, eff_rn, clips)
 
             if typ == "kill":
