@@ -38,6 +38,8 @@ import {
   stripTagEmoji,
 } from "../../utils/montageUtils";
 import { useT } from "../../i18n/useT.js";
+import { useLocaleStore } from "../../i18n/localeStore";
+import { labelTag } from "../../utils/tagDescriptions";
 
 function montageAiExplainText(clip, t) {
   const c = getClipComment(clip);
@@ -364,6 +366,7 @@ export function MontageOrchestrationTimeline({
   timelineClipCount,
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const rows = useMemo(() => {
     return clips.map((clip, idx) => {
       const next = clips[idx + 1];
@@ -643,12 +646,12 @@ export function MontageOrchestrationTimeline({
                       {/* 标签列表 */}
                       {tags.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
-                          {tags.map((t) => (
+                          {tags.map((tag) => (
                             <span
-                              key={t}
+                              key={tag}
                               className="rounded-md bg-cs2-bg-input px-2 py-0.5 text-xs font-medium text-cs2-text-secondary"
                             >
-                              {stripTagEmoji(t)}
+                              {labelTag(tag, locale)}
                             </span>
                           ))}
                         </div>
@@ -745,6 +748,7 @@ export function MontageMaterialPoolCard({
   onClickMulti,
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const mapName = mapNameFromClip(clip);
   const dur = getClipDurationSeconds(clip);
   const weaponPrimary =
@@ -865,12 +869,12 @@ export function MontageMaterialPoolCard({
           {/* 标签列表 */}
           {tags.length ? (
             <div className="mt-2 flex min-w-0 flex-wrap gap-1">
-              {tags.map((t) => (
+              {tags.map((tag) => (
                 <span
-                  key={t}
+                  key={tag}
                   className="truncate rounded-md bg-cs2-bg-input px-2 py-0.5 text-[11px] font-medium text-cs2-text-secondary"
                 >
-                  {stripTagEmoji(t)}
+                  {labelTag(tag, locale)}
                 </span>
               ))}
             </div>

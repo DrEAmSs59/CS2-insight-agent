@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import QueueMiniTimeline from "./QueueMiniTimeline";
 import { useT } from "../../i18n/useT.js";
+import { useLocaleStore } from "../../i18n/localeStore";
+import { labelTag } from "../../utils/tagDescriptions";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import {
   formatClipCombatSummaryLine,
@@ -96,6 +98,7 @@ export default function QueueWorkspaceRow({
   onReorderDragEnd,
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const cd = item.clipData || {};
   const cat = cd.category || "";
   const timeline = isTimelineSourceClip(cd);
@@ -221,7 +224,7 @@ export default function QueueWorkspaceRow({
           </div>
         )}
         {!timeline && tags.length > 0 ? (
-          <p className="mt-1 text-[11px] text-cs2-text-muted">{tags.join(" · ")}</p>
+          <p className="mt-1 text-[11px] text-cs2-text-muted">{tags.map((tg) => labelTag(tg, locale)).join(" · ")}</p>
         ) : null}
         {showTimeline ? (
           <QueueMiniTimeline

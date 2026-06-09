@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
+import { useLocaleStore } from "../../i18n/localeStore";
+import { labelTag } from "../../utils/tagDescriptions";
 
 /* ─── 工具函数 ─── */
 function formatDateTime(iso) {
@@ -117,6 +119,7 @@ function InlineRename({ current, onSave, onCancel }) {
 /* ─── 单条片段标签 ─── */
 function ClipPill({ clip }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const category = clip.category;
   const map = clip.map_name?.replace("de_", "") ?? "?";
   const kills = clip.kill_count ?? null;
@@ -140,7 +143,7 @@ function ClipPill({ clip }) {
       {player && <><span className="text-cs2-text-muted">·</span><span className="max-w-[64px] truncate opacity-70">{player}</span></>}
       {dur && <><span className="text-cs2-text-muted">·</span><span className="opacity-60">{dur}</span></>}
       {tags.slice(0, 2).map((tag) => (
-        <span key={tag} className="ml-0.5 rounded bg-cs2-bg-input/50 px-1 text-[9px] text-cs2-text-muted">{tag}</span>
+        <span key={tag} className="ml-0.5 rounded bg-cs2-bg-input/50 px-1 text-[9px] text-cs2-text-muted">{labelTag(tag, locale)}</span>
       ))}
     </div>
   );

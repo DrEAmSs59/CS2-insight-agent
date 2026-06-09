@@ -28,6 +28,8 @@ import { timelineQueueMetaOneLiner } from "../utils/timelineQueue";
 import { AiScoreBadge } from "./ClipCard";
 import QueueMiniTimeline from "./recordingQueue/QueueMiniTimeline";
 import { useT } from "../i18n/useT.js";
+import { useLocaleStore } from "../i18n/localeStore";
+import { labelTag } from "../utils/tagDescriptions";
 
 // 与后端 build_smart_jump_segments 保持一致
 const DEFAULT_PACING = BACKEND_DEFAULT_PACING;
@@ -554,6 +556,7 @@ function QueueItemCard({
   updateItemPacing,
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const cd = item.clipData || {};
   const tl = isTimelineSourceClip(cd);
   const hideQueueAi = tl || cd.category === "compilation";
@@ -645,7 +648,7 @@ function QueueItemCard({
       ) : null}
       {!queueSummary && showLegacyTags ? (
         <p className="mt-0.5 truncate text-[10px] text-cs2-text-muted">
-          {cd.context_tags.join(" · ")}
+          {cd.context_tags.map((tg) => labelTag(tg, locale)).join(" · ")}
         </p>
       ) : null}
       {tl ? (

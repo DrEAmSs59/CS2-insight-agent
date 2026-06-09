@@ -7,6 +7,8 @@ import {
 } from "../RecordingQueueDrawer";
 import { useRecordingQueue } from "../../stores/recordingQueueStore";
 import { useT } from "../../i18n/useT.js";
+import { useLocaleStore } from "../../i18n/localeStore";
+import { labelTag } from "../../utils/tagDescriptions";
 import { AiScoreBadge } from "../ClipCard";
 import {
   getMontageBlockShortLabel,
@@ -42,6 +44,7 @@ function FieldGroup({ icon: Icon, title, children }) {
  */
 export default function QueueInspectorPanel({ selectedId: _selectedId, selectedItem, queue }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
   const resetGlobalPacing = useRecordingQueue((s) => s.resetGlobalPacing);
@@ -160,12 +163,12 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
                     {weaponPrimary}
                   </span>
                 ) : null}
-                {tags.map((t) => (
+                {tags.map((tag) => (
                   <span
-                    key={t}
+                    key={tag}
                     className="rounded border border-cs2-border bg-zinc-800/40 px-1.5 py-px text-[11px] text-cs2-text-secondary"
                   >
-                    {t}
+                    {labelTag(tag, locale)}
                   </span>
                 ))}
               </div>
