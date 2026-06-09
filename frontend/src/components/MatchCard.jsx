@@ -91,8 +91,8 @@ export function MatchListRow({
     return expectedPlayers.some(p => p.toLowerCase() === n || n.includes(p.toLowerCase()));
   };
 
-  // classifyDemoStatus is a shared util — its label is left as-is (shared-util-sourced)
   const listStatus = classifyDemoStatus(demo);
+  const listStatusLabel = t(listStatus.labelKey, listStatus.labelParams);
   const listStatusDot =
     listStatus.kind === "done"
       ? "bg-cs2-highlight"
@@ -206,9 +206,8 @@ export function MatchListRow({
                   listStatus.kind === "pending" || listStatus.kind === "parsing" ? "animate-pulse" : ""
                 }`}
               />
-              {/* listStatus.label is sourced from shared util classifyDemoStatus — left as-is */}
-              <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatus.tooltip}>
-                {listStatus.label}
+              <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatus.tooltip || listStatusLabel}>
+                {listStatusLabel}
               </span>
             </div>
             <div className="text-[9px] font-bold text-cs2-text-muted font-mono">
@@ -337,8 +336,8 @@ export default function MatchCard({
 
   const killTags = getKillTags();
 
-  // classifyDemoStatus is a shared util — its label is left as-is (shared-util-sourced)
   const gridStatus = classifyDemoStatus(demo);
+  const gridStatusLabel = t(gridStatus.labelKey, gridStatus.labelParams);
   const gridStatusBadgeClass =
     {
       done: "bg-cs2-emerald-surface text-cs2-emerald-on-surface border-cs2-emerald-surface",
@@ -452,12 +451,11 @@ export default function MatchCard({
       <div className="flex flex-col p-2 px-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 overflow-hidden">
           <div className="flex flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-            {/* gridStatus.label is sourced from shared util classifyDemoStatus — left as-is */}
             <span
               className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-medium border ${gridStatusBadgeClass}`}
             >
               <CheckCircle2 className="h-2.5 w-2.5" />
-              {gridStatus.label}
+              {gridStatusLabel}
             </span>
             {killTags.map((tag, i) => (
               <span key={i} className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase ${tag.color}`}>

@@ -47,29 +47,35 @@ export function freezeToDeathDraftFromClipFilter(filter, maxRounds = 24) {
   return { picked: normalizePositiveIntRounds(filter, n) };
 }
 
-function formatRoundListCompact(rounds) {
-  if (!rounds.length) return "整局";
+/**
+ * Formats a list of selected rounds into a display string via i18n.
+ * @param {number[]} rounds sorted round numbers
+ * @param {(key: string, params?: object) => string} t
+ */
+function formatRoundListCompact(rounds, t) {
+  if (!rounds.length) return t("ftd.wholeMatch");
   if (rounds.length <= 4) return rounds.map((r) => `R${r}`).join("·");
-  return `R${rounds[0]}–R${rounds[rounds.length - 1]}（${rounds.length} 回合）`;
+  return t("ftd.roundRange", { first: rounds[0], last: rounds[rounds.length - 1], n: rounds.length });
 }
 
 /**
  * 队列/检查器一行：回合死亡合集回合展示（勿用 clip.round，整局合辑常为 R1）。
  * @param {{ freezeToDeathQueueRounds?: number[] }} item
  * @param {any} clip
+ * @param {(key: string, params?: object) => string} t
  */
-export function freezeToDeathQueueRoundBadgeText(item, clip) {
+export function freezeToDeathQueueRoundBadgeText(item, clip, t) {
   if (!isFreezeToDeathCompilation(clip)) return null;
   const fromClip = normalizePositiveIntRounds(clip.freeze_to_death_round_filter, 64);
   if (fromClip.length) {
-    return formatRoundListCompact(fromClip);
+    return formatRoundListCompact(fromClip, t);
   }
   const q = item?.freezeToDeathQueueRounds;
   const fromQ = normalizePositiveIntRounds(Array.isArray(q) ? q : [], 64);
   if (fromQ.length) {
-    return formatRoundListCompact(fromQ);
+    return formatRoundListCompact(fromQ, t);
   }
-  return "整局";
+  return t("ftd.wholeMatch");
 }
 
 /**
@@ -85,13 +91,13 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   }
   const picks = normalizePositiveIntRounds(pickedSorted, 64);
   if (!picks.length) {
-    return { ok: false, error: "「回合合集」须至少勾选一个回合才能加入队列。" };
+    return { ok: false, errorKey: "ftd.errorNeedsRound" };
   }
   const wins = clip.freeze_to_death_round_windows;
   if (!Array.isArray(wins) || wins.length === 0) {
     return {
       ok: false,
-      error: "该回合合集缺少 per-round 窗口数据，请重新解析本玩家一次后再入队。",
+      errorKey: "ftd.errorNoWindows",
     };
   }
 
@@ -160,7 +166,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
     .sort((a, b) => a.round - b.round);
 
   if (!filtered.length) {
-    return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
+    return { ok: false, errorKey: "ftd.errorNoIntersect" };
   }
 
   const tickRate = Number(clip.tick_rate ?? clip.tickRate ?? 64) || 64;
@@ -217,7 +223,7 @@ export function sliceFreezeToDeathClipForEnqueue(clip, pickedSorted) {
   }
 
   if (!newTicks.length) {
-    return { ok: false, error: "所选回合与合辑片段无交集，请调整勾选或重新解析。" };
+    return { ok: false, errorKey: "ftd.errorNoIntersect" };
   }
 
   const lastRoundNum = picks[picks.length - 1];

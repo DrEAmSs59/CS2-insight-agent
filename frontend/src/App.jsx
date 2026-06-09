@@ -523,7 +523,7 @@ export default function App() {
         setProgressText(t("app.scanDone", { n }));
       }
     } catch (e) {
-      setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     } finally {
       setLibraryScanning(false);
     }
@@ -536,7 +536,7 @@ export default function App() {
         setLibraryDeletePrompt(null);
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
-        setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }));
+        setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       }
     },
     [refreshDemoLibrary, libraryPage, t]
@@ -550,7 +550,7 @@ export default function App() {
         setProgressText(t("app.deleteFileDone"));
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
-        setProgressText(t("app.deleteFileFail", { msg: e.response?.data?.detail || e.message }));
+        setProgressText(t("app.deleteFileFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       }
     },
     [refreshDemoLibrary, libraryPage, t]
@@ -568,7 +568,7 @@ export default function App() {
           done += 1;
           setProgressText(t("app.batchDeleteProgress", { done, total: list.length }), { loading: true });
         } catch (e) {
-          setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }));
+          setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
           await refreshDemoLibrary(libraryPage, { manageLoading: false });
           return;
         }
@@ -587,7 +587,7 @@ export default function App() {
       setLibraryRename(null);
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
     } catch (e) {
-      setProgressText(t("app.renameFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.renameFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [libraryRename, refreshDemoLibrary, libraryPage, t]);
 
@@ -742,7 +742,7 @@ export default function App() {
       navigate("/analysis");
       return loaded;
     } catch (e) {
-      setProgressText(t("app.libraryLoadFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.libraryLoadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       return null;
     } finally {
       if (!skipLoadingOverlay) {
@@ -766,7 +766,7 @@ export default function App() {
       if (Array.isArray(failed) && failed.length) {
         setBatchLoadError({ open: true, failed });
       } else {
-        setProgressText(t("app.libraryLoadSelectedFail", { msg: e.response?.data?.detail?.message || e.response?.data?.detail || e.message }));
+        setProgressText(t("app.libraryLoadSelectedFail", { msg: e.response?.data?.detail?.message || e.response?.data?.detail || e.message }), { isError: true });
       }
     } finally {
       setLibraryLoadingOverlay(false);
@@ -797,7 +797,7 @@ export default function App() {
         setProgressText(t("app.librarySelectAllCapped", { cap }));
       }
     } catch (e) {
-      setProgressText(t("app.librarySelectAllFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.librarySelectAllFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams, t]);
 
@@ -1005,7 +1005,7 @@ export default function App() {
       setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
       navigate("/analysis");
     } catch (e) {
-      setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     } finally {
       setParsing(false);
     }
@@ -1255,7 +1255,7 @@ export default function App() {
         });
         setProgressText("");
       } catch (e) {
-        setProgressText(t("app.libraryLoadAndParseFail", { msg: e.response?.data?.detail || e.message }));
+        setProgressText(t("app.libraryLoadAndParseFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       } finally {
         if (holdOverlayUntilParsed) {
           setLibraryLoadingOverlay(false);
@@ -1361,7 +1361,7 @@ export default function App() {
       if (isFreezeToDeathCompilation(c)) {
         const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
         if (!sliced.ok) {
-          setProgressText(sliced.error);
+          setProgressText(t(sliced.errorKey));
           return;
         }
         toAdd.push({
@@ -1445,6 +1445,7 @@ export default function App() {
         mapName,
         targetPlayer: meta.targetPlayer,
         round: roundRow?.round ?? event?.round,
+        t,
       });
       const uid = clipData.client_clip_uid;
       const qk = queueItemClientUid({
@@ -1486,7 +1487,7 @@ export default function App() {
       if (!currentParsed || !roundRow) return;
       const meta = queueItemMetaForIndex(currentMatchIndex);
       const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename });
+      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename, t });
       const uid = clipData.client_clip_uid;
       const qk = queueItemClientUid({
         clientClipUid: uid,
@@ -1535,6 +1536,7 @@ export default function App() {
           mapName,
           targetPlayer: meta.targetPlayer,
           round: ev.round,
+          t,
         });
         const uid = clipData.client_clip_uid;
         const qk = queueItemClientUid({
@@ -1591,10 +1593,11 @@ export default function App() {
         mapName,
         targetPlayer: meta.targetPlayer,
         round: roundRow?.round ?? event?.round,
+        t,
       });
       removeByClientClipUid(clipData.client_clip_uid);
     },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid],
+    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid, t],
   );
 
   const handleRemoveTimelineRoundFromQueue = useCallback(
@@ -1607,6 +1610,7 @@ export default function App() {
         mapName,
         targetPlayer: meta.targetPlayer,
         demoFilename: meta.demoFilename,
+        t,
       });
       removeByClientClipUid(clipData.client_clip_uid);
     },
@@ -1697,7 +1701,7 @@ export default function App() {
             ? detail
             : JSON.stringify(detail)
           : e.message || t("app.saveFailed");
-      setProgressText(t("app.commonParamsSaveFail", { msg }));
+      setProgressText(t("app.commonParamsSaveFail", { msg }), { isError: true });
       return { ok: false, error: msg };
     }
   }, [setProgressText, refreshCommonParamsFromServer, t]);
@@ -1727,11 +1731,11 @@ export default function App() {
     try {
       const { data } = await API.post("/obs/config-check", obsConfig);
       if (!data?.connected) {
-        setProgressText(t("app.obsConnectFail"));
+        setProgressText(t("app.obsConnectFail"), { isError: true });
         return;
       }
     } catch (e) {
-      setProgressText(t("app.obsCheckFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.obsCheckFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       return;
     }
     setQueueDrawerOpen(false);
@@ -1826,11 +1830,11 @@ export default function App() {
           setRecordingResultModalOpen(true);
           setProgressText("", { autoDismissMs: 100 });
         } catch (e) {
-          const detail = formatRecordingApiError(e);
+          const detail = formatRecordingApiError(e, t("common.requestFail"));
           if (e.response?.status === 409 || e.response?.status === 422) {
             setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
           }
-          setProgressText(t("app.batchRecordFail", { msg: detail }));
+          setProgressText(t("app.batchRecordFail", { msg: detail }), { isError: true });
         } finally {
           if (_kbPollTimer) clearInterval(_kbPollTimer);
           setBatchRecording(false);
@@ -1871,7 +1875,7 @@ export default function App() {
           t("app.restoreBlockedCs2Running"),
         );
       } else {
-        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e) }), { autoDismissMs: 5000 });
+        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e, t("common.requestFail")) }), { autoDismissMs: 5000, isError: true });
       }
       await refreshConfigBackupStatus();
     }
@@ -1884,7 +1888,7 @@ export default function App() {
         setProgressText(`${data.message || t("app.openDirManual")} ${data.backup_dir}`);
       }
     } catch (e) {
-      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e) }));
+      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e, t("common.requestFail")) }), { isError: true });
     }
   }, [t]);
 
@@ -1893,7 +1897,7 @@ export default function App() {
       const { data } = await API.post("recording/abort");
       setProgressText(data?.message || t("app.abortSent"));
     } catch (e) {
-      setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -1918,7 +1922,7 @@ export default function App() {
           : t("app.clearedPlayers"),
       );
     } catch (e) {
-      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [expectedParsePlayersText, t]);
 
@@ -1945,7 +1949,7 @@ export default function App() {
         setObsConfig((prev) => ({ ...prev, password: "" }));
       }
     } catch (e) {
-      setProgressText(t("app.saveObsConfigFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.saveObsConfigFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2005,7 +2009,7 @@ export default function App() {
         }
       }
     } catch (e) {
-      setProgressText(t("app.saveLlmConfigFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.saveLlmConfigFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2017,7 +2021,7 @@ export default function App() {
         await API.put("config", { ai_mode: next });
       } catch (e) {
         setAiMode(prev);
-        setProgressText(t("app.saveAiModeFail", { msg: e.response?.data?.detail || e.message }));
+        setProgressText(t("app.saveAiModeFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
         return;
       }
       if (next) {
@@ -2083,7 +2087,7 @@ export default function App() {
         { autoDismissMs: 2500 },
       );
     } catch (e) {
-      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.savePlayersFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2103,7 +2107,7 @@ export default function App() {
         await persistLlmConfig();
         setProgressText(t("app.settingsSaved"), { autoDismissMs: 2200 });
       } catch (e) {
-        setProgressText(t("app.settingsSaveFail", { msg: e.response?.data?.detail || e.message }));
+        setProgressText(t("app.settingsSaveFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
       }
     },
     [cs2Path, ffmpegPath, montageEncoder, persistLlmConfig, setExpectedParsePlayersText, t],
@@ -2120,7 +2124,7 @@ export default function App() {
       URL.revokeObjectURL(a.href);
       setProgressText(t("app.configExportDone"), { autoDismissMs: 3500 });
     } catch (e) {
-      setProgressText(t("app.configExportFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.configExportFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2194,7 +2198,7 @@ export default function App() {
       }
       setProgressText(t("app.configImportDone"), { autoDismissMs: 2800 });
     } catch (e) {
-      setProgressText(t("app.configImportFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.configImportFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2232,7 +2236,7 @@ export default function App() {
       });
       setProgressText(t("app.resetSettingsDone"), { autoDismissMs: 3000 });
     } catch (e) {
-      setProgressText(t("app.resetSettingsFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.resetSettingsFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2243,7 +2247,7 @@ export default function App() {
         setProgressText(`${data.message || t("app.openDirFailed")} ${data.path || ""}`.trim());
       }
     } catch (e) {
-      setProgressText(t("app.openConfigDirFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.openConfigDirFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [t]);
 
@@ -2254,10 +2258,10 @@ export default function App() {
       if (data?.ok) {
         setProgressText(t("app.aiTestOk") + (data.detail ? `：${data.detail}` : ""), { autoDismissMs: 4000 });
       } else {
-        setProgressText(t("app.aiTestFail", { msg: data?.detail || t("app.unknownError") }));
+        setProgressText(t("app.aiTestFail", { msg: data?.detail || t("app.unknownError") }), { isError: true });
       }
     } catch (e) {
-      setProgressText(t("app.aiTestRequestFail", { msg: e.response?.data?.detail || e.message }));
+      setProgressText(t("app.aiTestRequestFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
   }, [persistLlmConfig, t]);
 
@@ -2545,6 +2549,7 @@ export default function App() {
                 onDismiss={() => setProgressText("")}
                 autoDismissAfterMs={progressToastMeta?.autoDismissMs ?? undefined}
                 showQueueNavigate={Boolean(progressToastMeta?.queueLink)}
+                isError={progressToastMeta?.isError === true}
               />
             </div>
           </div>

@@ -14,6 +14,12 @@ export default function ProgressBar({
   autoDismissAfterMs,
   /** 为 true 时展示跳转录制队列按钮（点击后导航并关闭通知） */
   showQueueNavigate = false,
+  /**
+   * Explicit error flag — when true the bar will NOT auto-dismiss (stays until manually dismissed).
+   * Replaces the old approach of sniffing Chinese error words in the text.
+   * Defaults to false for backward compatibility.
+   */
+  isError = false,
 }) {
   const t = useT();
   const navigate = useNavigate();
@@ -21,7 +27,9 @@ export default function ProgressBar({
   onDismissRef.current = onDismiss;
 
   useEffect(() => {
-    const effDismissMs = autoDismissAfterMs || (text?.includes("失败") || text?.includes("错误") || text?.includes("报错") ? 0 : 4500);
+    // If isError is explicitly set, never auto-dismiss (caller can still pass autoDismissAfterMs
+    // to override this default, though that is unusual for errors).
+    const effDismissMs = autoDismissAfterMs || (isError ? 0 : 4500);
     if (!effDismissMs || effDismissMs <= 0 || !text?.trim()) return;
     // 解析读条 / 批量录制进行中时不计时，避免误关或中途消失
     if (active || batchRecording) return;
@@ -29,7 +37,7 @@ export default function ProgressBar({
       onDismissRef.current?.();
     }, effDismissMs);
     return () => window.clearTimeout(id);
-  }, [text, autoDismissAfterMs, active, batchRecording]);
+  }, [text, autoDismissAfterMs, active, batchRecording, isError]);
 
   const showSpinner = active || batchRecording;
   return (

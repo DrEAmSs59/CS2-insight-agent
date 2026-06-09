@@ -299,15 +299,18 @@ export default function DemoTable({
                   </td>
                   <td className="max-w-[9rem] align-middle px-2 py-2">
                     <div className="flex flex-wrap gap-1">
-                      {deriveTags(it).map((tag, ti) => (
-                        <span
-                          key={`${id}-t-${ti}-${tag}`}
-                          className="max-w-full truncate rounded border border-cs2-border bg-cs2-bg-input/30 px-1 py-0.5 font-mono text-[9px] text-cs2-text-muted"
-                          title={tag}
-                        >
-                          {tag}
-                        </span>
-                      ))}
+                      {deriveTags(it).map((tag, ti) => {
+                        const tagLabel = typeof tag === "string" ? tag : t(tag.key, tag.params);
+                        return (
+                          <span
+                            key={`${id}-t-${ti}-${tagLabel}`}
+                            className="max-w-full truncate rounded border border-cs2-border bg-cs2-bg-input/30 px-1 py-0.5 font-mono text-[9px] text-cs2-text-muted"
+                            title={tagLabel}
+                          >
+                            {tagLabel}
+                          </span>
+                        );
+                      })}
                     </div>
                   </td>
                   <td className="align-middle px-1 py-2" onClick={(e) => e.stopPropagation()}>

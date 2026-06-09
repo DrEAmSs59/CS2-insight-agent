@@ -560,7 +560,7 @@ function QueueItemCard({
   const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(cd)));
   const playerName = String(item.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
-  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd);
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd, t);
   const own = cd.score_own != null ? Number(cd.score_own) : null;
   const opp = cd.score_opp != null ? Number(cd.score_opp) : null;
   const hasScorePair = own != null && opp != null && Number.isFinite(own) && Number.isFinite(opp);
@@ -650,7 +650,7 @@ function QueueItemCard({
       ) : null}
       {tl ? (
         <p className="mt-0.5 font-mono text-[10px] leading-snug text-cs2-text-secondary">
-          {timelineQueueMetaOneLiner(cd, estimateItemRecordSeconds(item, globalPacing))}
+          {timelineQueueMetaOneLiner(cd, estimateItemRecordSeconds(item, globalPacing), t)}
         </p>
       ) : null}
       {Array.isArray(item.freezeToDeathQueueRounds) &&

@@ -249,7 +249,7 @@ export default function DemoInfoModal({
         if (isFreezeToDeathCompilation(c)) {
           const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
           if (!sliced.ok) {
-            setProgressText(sliced.error);
+            setProgressText(t(sliced.errorKey));
             return;
           }
           allClips.push({

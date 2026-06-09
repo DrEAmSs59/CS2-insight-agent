@@ -83,7 +83,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(cd)));
   const playerName = String(selectedItem.targetPlayer || cd.player_name || "—").trim() || "—";
   const round = cd.round != null && Number.isFinite(Number(cd.round)) ? Number(cd.round) : null;
-  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(selectedItem, cd);
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(selectedItem, cd, t);
   const own = cd.score_own != null ? Number(cd.score_own) : null;
   const opp = cd.score_opp != null ? Number(cd.score_opp) : null;
   const hasScorePair = own != null && opp != null && Number.isFinite(own) && Number.isFinite(opp);

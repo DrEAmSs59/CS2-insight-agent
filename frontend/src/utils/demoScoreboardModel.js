@@ -4,6 +4,8 @@ import {
   formatLibraryAddedAt,
   formatScoreLine,
 } from "./demoLibraryDisplay";
+// Note: classifyDemoStatus now returns { labelKey, labelParams } instead of { label }.
+// buildScoreboardHeader propagates these as statusLabelKey / statusLabelParams.
 
 /** @param {Record<string, unknown>} item */
 export function canLikelyPreviewScoreboard(item) {
@@ -96,8 +98,8 @@ export function buildMiniScoreboardTeams(item, rawPlayers) {
 
   if (players.length === 0) {
     return {
-      left: { key: "empty", label: "—", score: null, players: [] },
-      right: { key: "empty2", label: "—", score: null, players: [] },
+      left: { key: "empty", labelKey: null, score: null, players: [] },
+      right: { key: "empty2", labelKey: null, score: null, players: [] },
       playersCount: 0,
     };
   }
@@ -109,16 +111,16 @@ export function buildMiniScoreboardTeams(item, rawPlayers) {
     const teamA = players.filter((p) => p.teamNum === 3);
     const teamB = players.filter((p) => p.teamNum === 2);
     return {
-      left: { key: "a", label: "队伍 A", score: tbN, players: takeFive(teamA) },
-      right: { key: "b", label: "队伍 B", score: taN, players: takeFive(teamB) },
+      left: { key: "a", labelKey: "match.teamA", score: tbN, players: takeFive(teamA) },
+      right: { key: "b", labelKey: "match.teamB", score: taN, players: takeFive(teamB) },
       playersCount: players.length,
     };
   }
 
   const sorted = sortPlayersDesc(players);
   return {
-    left: { key: "a", label: "队伍 A", score: taN, players: sorted.slice(0, 5) },
-    right: { key: "b", label: "队伍 B", score: tbN, players: sorted.slice(5, 10) },
+    left: { key: "a", labelKey: "match.teamA", score: taN, players: sorted.slice(0, 5) },
+    right: { key: "b", labelKey: "match.teamB", score: tbN, players: sorted.slice(5, 10) },
     playersCount: players.length,
   };
 }
@@ -141,7 +143,7 @@ export function buildScoreboardHeader(item, durationUnit = "分") {
   const date = formatLibraryAddedAt(item.added_at);
   const score = formatScoreLine(item.team_a_score ?? mm.team_a_score, item.team_b_score ?? mm.team_b_score);
   const status = classifyDemoStatus(item);
-  return { map, score, rounds, duration, date, statusLabel: status.label, statusKind: status.kind };
+  return { map, score, rounds, duration, date, statusLabelKey: status.labelKey, statusLabelParams: status.labelParams, statusKind: status.kind };
 }
 
 /**

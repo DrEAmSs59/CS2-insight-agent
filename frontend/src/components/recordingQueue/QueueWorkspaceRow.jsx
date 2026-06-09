@@ -105,7 +105,7 @@ export default function QueueWorkspaceRow({
   const demoLabel = String(item.demoFilename || item.demoPath || "").trim() || "—";
   const playerLabel = String(item.targetPlayer || "").trim() || "—";
   const mapName = String(cd.map_name || cd.map || "").trim() || "—";
-  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd);
+  const ftdRoundBadge = freezeToDeathQueueRoundBadgeText(item, cd, t);
   const roundLabel = (() => {
     if (isFreezeToDeathCompilation(cd)) {
       return ftdRoundBadge || "—";
@@ -120,7 +120,7 @@ export default function QueueWorkspaceRow({
   })();
   const kills = Number(cd.kill_count) || 0;
   const estSec = estimateItemRecordSeconds(item, globalPacing);
-  const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec) : "";
+  const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec, t) : "";
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
   const queueSummary = String(cd.queue_summary_line || "").trim();
   const combatSummary = !timeline ? formatClipCombatSummaryLine(cd, t) : "";

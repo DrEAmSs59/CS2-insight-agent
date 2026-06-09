@@ -75,6 +75,7 @@ export default function RoundTimelineItem({
       mapName,
       targetPlayer: focusedPlayer,
       round: rn,
+      t,
     });
     return queuedUids.has(
       queueItemClientUid({

@@ -1609,4 +1609,31 @@ export default {
   "match.unknownMap": "未知地图",
   "match.switcherMatch": "第 {n} 场 · {label}",
   "match.switcherFilename": "场次 {n}",
+  // status — demo status labels (A: demoLibraryDisplay / demoLibraryFilters)
+  "status.error": "解析失败",
+  "status.parsing": "解析中",
+  "status.pending": "待入库",
+  "status.loaded": "待高光解析",
+  "status.metaMissing": "元数据缺失",
+  "status.parsedOn": "解析于 {date}",
+  "status.clipsTag": "片段×{n}",
+  // ftd — freeze-to-death round filter errors (B)
+  "ftd.wholeMatch": "整局",
+  "ftd.roundRange": "R{first}–R{last}（{n} 回合）",
+  "ftd.errorNeedsRound": "「回合合集」须至少勾选一个回合才能加入队列。",
+  "ftd.errorNoWindows": "该回合合集缺少 per-round 窗口数据，请重新解析本玩家一次后再入队。",
+  "ftd.errorNoIntersect": "所选回合与合辑片段无交集，请调整勾选或重新解析。",
+  // timeline — queue summary lines (C)
+  "timeline.killText": "击杀 {vic}",
+  "timeline.deathText": "被 {atk} 击杀",
+  "timeline.killFallback": "击杀",
+  "timeline.deathFallback": "死亡",
+  "timeline.otherEvent": "时间线事件",
+  "timeline.wholeRound": "整回合",
+  "timeline.roundSummary": "本回合目标 {tk} 杀 / {td} 死 / {ta} 助攻",
+  // ingest — source labels (F)
+  "ingest.sourcePerfectWorld": "完美",
+  "ingest.sourceMatchmaking": "官匹",
+  // common — api error fallback (E)
+  "common.requestFail": "请求失败",
 };

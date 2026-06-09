@@ -1608,4 +1608,31 @@ export default {
   "match.unknownMap": "Unknown map",
   "match.switcherMatch": "Match {n} · {label}",
   "match.switcherFilename": "Match {n}",
+  // status — demo status labels (A: demoLibraryDisplay / demoLibraryFilters)
+  "status.error": "Parse failed",
+  "status.parsing": "Parsing",
+  "status.pending": "Pending ingest",
+  "status.loaded": "Pending highlights",
+  "status.metaMissing": "Metadata missing",
+  "status.parsedOn": "Parsed {date}",
+  "status.clipsTag": "{n} clip(s)",
+  // ftd — freeze-to-death round filter errors (B)
+  "ftd.wholeMatch": "Full match",
+  "ftd.roundRange": "R{first}–R{last} ({n} rounds)",
+  "ftd.errorNeedsRound": "\"Round compilation\" requires at least one round to be selected before queuing.",
+  "ftd.errorNoWindows": "This round compilation is missing per-round window data. Re-parse this player once and try again.",
+  "ftd.errorNoIntersect": "The selected rounds have no overlap with the compilation clip. Adjust your selection or re-parse.",
+  // timeline — queue summary lines (C)
+  "timeline.killText": "Kill {vic}",
+  "timeline.deathText": "Killed by {atk}",
+  "timeline.killFallback": "Kill",
+  "timeline.deathFallback": "Death",
+  "timeline.otherEvent": "Timeline event",
+  "timeline.wholeRound": "Full round",
+  "timeline.roundSummary": "Round: {tk}K / {td}D / {ta}A",
+  // ingest — source labels (F)
+  "ingest.sourcePerfectWorld": "Perfect World",
+  "ingest.sourceMatchmaking": "Official MM",
+  // common — api error fallback (E)
+  "common.requestFail": "Request failed",
 };

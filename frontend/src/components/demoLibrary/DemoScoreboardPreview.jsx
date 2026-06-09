@@ -91,7 +91,7 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
           <span>
             <span className="text-cs2-text-muted">{t("library.scoreboardStatus")}</span>{" "}
             <span className="rounded border border-cs2-border bg-cs2-bg-hover px-1 py-0.5 font-semibold text-cs2-text-secondary">
-              {header.statusLabel}
+              {t(header.statusLabelKey, header.statusLabelParams)}
             </span>
           </span>
         </div>
@@ -109,7 +109,7 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
         {!loading && hasRoster ? (
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
             <DemoTeamMiniTable
-              label={teams.left.label}
+              label={teams.left.labelKey ? t(teams.left.labelKey) : "—"}
               score={teams.left.score}
               players={teams.left.players}
               showAdr={showAdr}
@@ -119,7 +119,7 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
               focusPlayerName={focusPlayerName}
             />
             <DemoTeamMiniTable
-              label={teams.right.label}
+              label={teams.right.labelKey ? t(teams.right.labelKey) : "—"}
               score={teams.right.score}
               players={teams.right.players}
               showAdr={showAdr}

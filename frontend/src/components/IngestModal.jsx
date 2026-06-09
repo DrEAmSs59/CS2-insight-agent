@@ -16,10 +16,10 @@ import {
 
 // Source labels that should NOT be translated (proper names / abbreviations)
 const SOURCE_LABELS_FIXED = new Set(["Faceit", "5E", "ESL", "ESEA", "Blast"]);
-// These Chinese labels remain as-is for now (platform-specific proper names)
-const SOURCE_LABELS_ZH = {
-  "Perfect World": "完美",
-  "Matchmaking": "官匹",
+// i18n keys for platform display labels
+const SOURCE_I18N_KEYS = {
+  "Perfect World": "ingest.sourcePerfectWorld",
+  "Matchmaking": "ingest.sourceMatchmaking",
 };
 
 export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
@@ -220,7 +220,9 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
               {items.map((it) => {
                 const sourceLabel = SOURCE_LABELS_FIXED.has(it.source)
                   ? it.source
-                  : (SOURCE_LABELS_ZH[it.source] ?? t("dialog.ingestSourceLocal"));
+                  : SOURCE_I18N_KEYS[it.source]
+                    ? t(SOURCE_I18N_KEYS[it.source])
+                    : t("dialog.ingestSourceLocal");
                 const sizeMB = it.file_size != null ? (it.file_size / (1024 * 1024)).toFixed(1) : "?";
                 return (
                   <div

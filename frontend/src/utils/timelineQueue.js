@@ -10,8 +10,9 @@ import { isTimelineSourceClip } from "./montageUtils";
  * 队列单行：地图 + R# + 比分（若有）+ 杀数/整回合/死亡 + 估算时长（与高光条风格对齐）。
  * @param {Record<string, unknown>} clipData
  * @param {number} estSeconds
+ * @param {(key: string, params?: object) => string} t i18n translator
  */
-export function timelineQueueMetaOneLiner(clipData, estSeconds) {
+export function timelineQueueMetaOneLiner(clipData, estSeconds, t) {
   const cd = clipData && typeof clipData === "object" ? clipData : {};
   if (!isTimelineSourceClip(cd)) return "";
   const mapName = String(cd.map_name || cd.map || "").trim() || "—";
@@ -26,15 +27,17 @@ export function timelineQueueMetaOneLiner(clipData, estSeconds) {
     parts.push(r);
   }
   const src = String(cd.timeline_source || "").trim();
+  // If no t function supplied, fall back to key strings (non-component callers)
+  const tr = typeof t === "function" ? t : (k) => k;
   if (src === "round_timeline_round") {
-    parts.push("整回合");
+    parts.push(tr("timeline.wholeRound"));
   } else {
     const kc = Number(cd.kill_count) || 0;
     const kind = String(cd.timeline_record_kind || "").trim();
     if (kc > 0) {
-      parts.push(`${kc} 杀`);
+      parts.push(`${kc}K`);
     } else if (kind === "death") {
-      parts.push("死亡");
+      parts.push(tr("timeline.deathFallback"));
     } else {
       parts.push("—");
     }
@@ -44,9 +47,9 @@ export function timelineQueueMetaOneLiner(clipData, estSeconds) {
 }
 
 /**
- * @param {{ event: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, round?: number }} p
+ * @param {{ event: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, round?: number, t?: (key: string, params?: object) => string }} p
  */
-export function buildTimelineEventClipData({ event, mapName = "", targetPlayer = "", round }) {
+export function buildTimelineEventClipData({ event, mapName = "", targetPlayer = "", round, t }) {
   const sc = event?.suggested_clip;
   const st = Number(event?.start_tick ?? sc?.start_tick);
   const et = Number(event?.end_tick ?? sc?.end_tick);
@@ -68,15 +71,18 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
   const vic = String(event?.victim_name || "").trim();
   const vicSid = String(event?.victim_steamid || "").trim();
   const wpn = String(event?.weapon_name || event?.weapon || "").trim();
+  const tr = typeof t === "function" ? t : (k) => k;
   let queueSummaryLine = "";
   if (isKill) {
-    const parts = [vic ? `击杀 ${vic}` : "击杀", wpn || null].filter(Boolean);
+    const killLabel = vic ? tr("timeline.killText", { vic }) : tr("timeline.killFallback");
+    const parts = [killLabel, wpn || null].filter(Boolean);
     queueSummaryLine = parts.join(" · ");
   } else if (isDeath) {
-    const parts = [atk ? `被 ${atk} 击杀` : "死亡", wpn || null].filter(Boolean);
+    const deathLabel = atk ? tr("timeline.deathText", { atk }) : tr("timeline.deathFallback");
+    const parts = [deathLabel, wpn || null].filter(Boolean);
     queueSummaryLine = parts.join(" · ");
   } else {
-    queueSummaryLine = "时间线事件";
+    queueSummaryLine = tr("timeline.otherEvent");
   }
   // Spec slots pre-computed by round_timeline.py during demo parsing.
   // attacker_spec_slot = killer's spec_player slot; victim_spec_slot = victim's slot.
@@ -113,9 +119,9 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
 }
 
 /**
- * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, demoFilename?: string }} p
+ * @param {{ roundRow: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, demoFilename?: string, t?: (key: string, params?: object) => string }} p
  */
-export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "", demoFilename = "" }) {
+export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlayer = "", demoFilename = "", t }) {
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const fe = roundRow?.start_tick ?? roundRow?.round_start_tick;
   const en =
@@ -142,7 +148,8 @@ export function buildTimelineRoundClipData({ roundRow, mapName = "", targetPlaye
   const tk = Number(ps.kills ?? sum.kills) || 0;
   const td = Number(ps.deaths ?? sum.deaths) || 0;
   const ta = Number(ps.assists ?? sum.assists) || 0;
-  const queueSummaryLine = `本回合目标 ${tk} 杀 / ${td} 死 / ${ta} 助攻`;
+  const tr = typeof t === "function" ? t : (k) => k;
+  const queueSummaryLine = tr("timeline.roundSummary", { tk, td, ta });
   return {
     clip_id: client_clip_uid,
     client_clip_uid,

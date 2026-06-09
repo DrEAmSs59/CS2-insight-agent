@@ -1,4 +1,4 @@
-import { demoLibraryStatusLabel } from "../constants/demoLibraryFilters";
+import { demoLibraryStatusI18nKey } from "../constants/demoLibraryFilters";
 
 export function formatFileSize(bytes) {
   const n = Number(bytes);
@@ -97,11 +97,17 @@ export function libraryStatusTier(it) {
   return 1;
 }
 
-/** @param {Record<string, unknown>} it */
+/**
+ * @param {Record<string, unknown>} it
+ * @returns {Array<string | { key: string, params: Record<string, unknown> }>}
+ * Tags are plain strings or i18n key objects. Consumers call
+ *   tag => typeof tag === "string" ? tag : t(tag.key, tag.params)
+ */
 export function deriveTags(it) {
   const tags = [];
   const r = it.result && typeof it.result === "object" ? it.result : null;
-  if (Array.isArray(r?.clips) && r.clips.length) tags.push(`片段×${r.clips.length}`);
+  if (Array.isArray(r?.clips) && r.clips.length)
+    tags.push({ key: "status.clipsTag", params: { n: r.clips.length } });
   const tgt = r?.auto_target_player || r?.match_meta?.target_player;
   if (tgt) tags.push(String(tgt));
   const map = it.map_name || r?.match_meta?.map_name;
@@ -110,31 +116,40 @@ export function deriveTags(it) {
 }
 
 /**
- * @returns {{ kind: 'pending'|'loaded'|'parsing'|'done'|'error'|'meta_missing'|'unknown'; label: string; tooltip?: string }}
+ * Returns status classification with i18n key/params instead of a Chinese label.
+ * Consumers must call t(labelKey, labelParams) to produce the display string.
+ *
+ * @returns {{
+ *   kind: 'pending'|'loaded'|'parsing'|'done'|'error'|'meta_missing'|'unknown';
+ *   labelKey: string;
+ *   labelParams?: Record<string, unknown>;
+ *   tooltip?: string;
+ * }}
  */
 export function classifyDemoStatus(it) {
   const st = String(it.status ?? "").toLowerCase();
   const err = it.error_msg ? String(it.error_msg) : "";
   if (st === "error")
-    return { kind: "error", label: "解析失败", tooltip: err || undefined };
+    return { kind: "error", labelKey: "status.error", tooltip: err || undefined };
   if (st === "parsing" || st === "running" || st === "processing")
-    return { kind: "parsing", label: "解析中" };
-  if (st === "pending") return { kind: "pending", label: "待入库" };
-  if (st === "loaded") return { kind: "loaded", label: "待高光解析" };
+    return { kind: "parsing", labelKey: "status.parsing" };
+  if (st === "pending") return { kind: "pending", labelKey: "status.pending" };
+  if (st === "loaded") return { kind: "loaded", labelKey: "status.loaded" };
   const doneLike = st === "done" || st === "parsed";
   if (doneLike) {
     const hasCore =
       !!(it.map_name && String(it.map_name).trim()) ||
       (it.total_rounds != null && Number.isFinite(Number(it.total_rounds))) ||
       (it.result && typeof it.result === "object");
-    if (!hasCore) return { kind: "meta_missing", label: "元数据缺失" };
+    if (!hasCore) return { kind: "meta_missing", labelKey: "status.metaMissing" };
     const datePart =
       it.parsed_at != null && String(it.parsed_at).trim() !== ""
-        ? new Date(it.parsed_at).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
-        : "未知";
-    return { kind: "done", label: `解析于 ${datePart}` };
+        ? new Date(it.parsed_at).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" })
+        : "?";
+    return { kind: "done", labelKey: "status.parsedOn", labelParams: { date: datePart } };
   }
-  return { kind: "unknown", label: demoLibraryStatusLabel(it.status) };
+  const fallbackKey = demoLibraryStatusI18nKey(it.status);
+  return { kind: "unknown", labelKey: fallbackKey ?? "status.error", labelParams: fallbackKey ? undefined : undefined };
 }
 
 /**
@@ -212,7 +227,12 @@ export function filterByPathAndTags(items, rawQuery) {
     const dn = String(it.display_name ?? "").toLowerCase();
     const path = String(it.path ?? "").toLowerCase();
     if (fn.includes(q) || dn.includes(q) || path.includes(q)) return true;
-    return deriveTags(it).some((t) => t.toLowerCase().includes(q));
+    return deriveTags(it).some((tag) => {
+      if (typeof tag === "string") return tag.toLowerCase().includes(q);
+      // i18n tag: check params values for matches
+      if (tag.params) return Object.values(tag.params).some((v) => String(v).toLowerCase().includes(q));
+      return false;
+    });
   });
 }
 
