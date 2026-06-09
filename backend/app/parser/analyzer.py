@@ -30,6 +30,7 @@ from .parse_utils import (
     _DEMOPARSER_RE_RAISE, _bool, _int, _max_demo_tick,
     _duration_mins_from_tick_span, _get_match_start_tick,
     _count_team_wins_from_round_end_df, _infer_total_rounds_from_round_end,
+    win_panel_ceiling_from_match_tick,
 )
 from .round_economy import (
     build_round_economy, build_round_economy_shared, extract_target_team_map,
@@ -285,6 +286,17 @@ class DemoAnalyzer:
         if not pickup_df.empty and "user_name" in pickup_df.columns:
             pickup_df["user_name"] = pickup_df["user_name"].astype(str).str.strip()
 
+        # cs_win_panel_match — 比赛结算界面出现的 tick（全场一次；仅终局回合有意义）
+        win_panel_match_tick = 0
+        _wp_df = self._safe_parse_event("cs_win_panel_match")
+        if _wp_df is not None and not _wp_df.empty and "tick" in _wp_df.columns:
+            _wp_ticks = pd.to_numeric(_wp_df["tick"], errors="coerce").dropna().astype(int)
+            if match_start_tick > 0:
+                _wp_ticks = _wp_ticks[_wp_ticks > match_start_tick]
+            if len(_wp_ticks) > 0:
+                win_panel_match_tick = int(_wp_ticks.max())
+        logger.info("[win_panel] cs_win_panel_match tick=%s", win_panel_match_tick)
+
         return {
             "events":                        events,
             "fire_df":                       fire_df,
@@ -297,6 +309,7 @@ class DemoAnalyzer:
             "begindefuse_df":               begindefuse,
             "nade_batch":                    nade_batch,
             "re_df_cached":                  re_df,
+            "win_panel_match_tick":          win_panel_match_tick,
             "blind_df":                      blind_df,
             "economy_map_shared":            economy_map_shared,
             "round_freeze_end_ticks_shared": round_freeze_end_ticks_shared,
@@ -638,6 +651,7 @@ class DemoAnalyzer:
                 begindefuse_df=_shared["begindefuse_df"],
                 nade_batch=_shared["nade_batch"],
                 re_df_cached=_shared["re_df_cached"],
+                win_panel_match_tick=_shared["win_panel_match_tick"],
                 blind_df=_shared["blind_df"],
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
@@ -673,6 +687,7 @@ class DemoAnalyzer:
         begindefuse_df: "pd.DataFrame",
         nade_batch: dict,
         re_df_cached: "pd.DataFrame",
+        win_panel_match_tick: int = 0,
         blind_df: "Optional[pd.DataFrame]" = None,
         freeze_to_death_rounds: "Optional[list[int]]" = None,
     ) -> "ParseResult":
@@ -1293,6 +1308,7 @@ class DemoAnalyzer:
         _last_kill_buf_ticks = int(float(
             os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
+        _win_panel_ceiling = win_panel_ceiling_from_match_tick(win_panel_match_tick, TICK_RATE)
 
         # round_end 事件 tick 映射（已从缓存 DataFrame 派生）
         _round_end_evt_tick_map: dict[int, int] = dict(round_end_tick_map)
@@ -1380,7 +1396,11 @@ class DemoAnalyzer:
                                     if _kti > 0 and (_last_match_evt is None or _kti > _last_match_evt):
                                         _last_match_evt = _kti
                     if _last_match_evt is not None and _last_match_evt > 0:
-                        _c.clip_max_tick = int(_last_match_evt) + _last_kill_buf_ticks
+                        _heuristic = int(_last_match_evt) + _last_kill_buf_ticks
+                        if _win_panel_ceiling is not None and _win_panel_ceiling > int(_last_match_evt):
+                            _c.clip_max_tick = _win_panel_ceiling
+                        else:
+                            _c.clip_max_tick = _heuristic
                         if _c.end_tick > _c.clip_max_tick:
                             _c.end_tick = _c.clip_max_tick
             elif _terminal_play_round is not None and _c.round == _terminal_play_round:
@@ -1392,7 +1412,11 @@ class DemoAnalyzer:
                     _re_t = _round_end_evt_tick_map.get(_c.round, 0)
                     _last_evt_tick = _re_t + _re_offset_last_ticks if _re_t else None
                 if _last_evt_tick:
-                    _c.clip_max_tick = int(_last_evt_tick) + int(_last_kill_buf_ticks)
+                    _heuristic = int(_last_evt_tick) + int(_last_kill_buf_ticks)
+                    if _win_panel_ceiling is not None and _win_panel_ceiling > int(_last_evt_tick):
+                        _c.clip_max_tick = _win_panel_ceiling
+                    else:
+                        _c.clip_max_tick = _heuristic
                     if _c.end_tick > _c.clip_max_tick:
                         _c.end_tick = _c.clip_max_tick
             elif _c.round in _round_end_evt_tick_map:
@@ -1505,6 +1529,7 @@ class DemoAnalyzer:
                 match_start_tick=match_start_tick,
                 tick_rate=float(TICK_RATE),
                 spec_slots=spec_slots,
+                win_panel_match_tick=win_panel_match_tick,
             )
             timeline = bundle.get("timeline")
             round_timeline = bundle.get("round_timeline")
@@ -1531,6 +1556,7 @@ class DemoAnalyzer:
                 match_date=match_date, duration_mins=duration_mins,
                 meme_series_badges=meme_series_badges_for_kd(target_total_kills, target_total_deaths),
                 server_name=_server_name, all_players=all_players_roster,
+                win_panel_match_tick=win_panel_match_tick,
             ),
             clips=clips, timeline=timeline, round_timeline=round_timeline,
         )
@@ -1627,6 +1653,7 @@ def get_demo_match_summary(dem_path: str | Path) -> dict[str, object]:
         "total_rounds": 0, "target_kills": 0, "target_deaths": 0,
         "team_a_score": 0, "team_b_score": 0, "team_a_name": "Team A",
         "team_b_name": "Team B", "match_date": "", "duration_mins": 0,
+        "win_panel_match_tick": 0,
     }
     try:
         parser = DemoParser(str(path))
@@ -1649,6 +1676,7 @@ def get_demo_match_summary(dem_path: str | Path) -> dict[str, object]:
             "team_a_score": int(ta), "team_b_score": int(tb),
             "team_a_name": tan, "team_b_name": tbn,
             "match_date": md, "duration_mins": int(dm),
+            "win_panel_match_tick": 0,
         }
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):

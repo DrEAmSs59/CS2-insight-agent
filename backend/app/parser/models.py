@@ -49,6 +49,8 @@ class MatchMeta:
     server_name: str = ""
     # 全员名单：[{name, steamid64, spec_slot, team_num}, ...]；spec_slot 为原始未校准值
     all_players: list = field(default_factory=list)
+    # 比赛结算界面（cs_win_panel_match）出现的 tick；0 = demo 无该事件。供录制侧最后一回合封顶。
+    win_panel_match_tick: int = 0
 
 
 @dataclass
