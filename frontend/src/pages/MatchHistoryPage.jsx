@@ -8,15 +8,15 @@ import MatchHistoryFilterBar from "../components/matchHistory/MatchHistoryFilter
 import MatchHistoryRow from "../components/matchHistory/MatchHistoryRow";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
+import {
+  FILTER_ALL_MAPS,
+  FILTER_ALL_RESULTS,
+  FILTER_ALL_TIME,
+  FILTER_LAST_7,
+  FILTER_LAST_30,
+} from "./matchHistoryFilters.js";
 
 const PAGE_SIZE = 20;
-
-// Sentinel values (English keys, not displayed directly)
-export const FILTER_ALL_MAPS = "all_maps";
-export const FILTER_ALL_RESULTS = "all_results";
-export const FILTER_ALL_TIME = "all_time";
-export const FILTER_LAST_7 = "last_7";
-export const FILTER_LAST_30 = "last_30";
 
 const DEFAULT_FILTERS = {
   search: "",

@@ -6,7 +6,7 @@ import {
   FILTER_ALL_TIME,
   FILTER_LAST_7,
   FILTER_LAST_30,
-} from "../../pages/MatchHistoryPage.jsx";
+} from "../../pages/matchHistoryFilters.js";
 
 const MAPS = [
   FILTER_ALL_MAPS,
