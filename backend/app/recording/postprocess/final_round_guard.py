@@ -8,12 +8,61 @@ def sec_to_ticks(sec: float, tick_rate: float) -> int:
     return int(sec * tick_rate)
 
 
+def _apply_win_panel_guard(
+    segment: RecordingSegment,
+    req: NormalizedRequest,
+    win_panel_tick: int,
+) -> tuple[RecordingSegment, list[str]]:
+    """win_panel 可用时的干净硬天花板：逐段 end_tick = min(end_tick, ceiling)。
+
+    绕开 legacy 的 safe_end_tick(−final_round_guard_sec) / latest_recordable_tick
+    逻辑——win_panel 紧贴最后动作，legacy 的大额减法会误砍主段 post 与 POV post 预留。
+    """
+    options = req.options
+    tick_rate = req.demo.tick_rate
+    warnings: list[str] = []
+
+    guard_ticks = sec_to_ticks(options.final_round_win_panel_guard_sec, tick_rate)
+    ceiling = win_panel_tick - guard_ticks
+
+    anchor_ticks = segment.anchor_ticks or []
+    max_anchor = max(anchor_ticks) if anchor_ticks else None
+
+    if max_anchor is not None and ceiling <= max_anchor:
+        # 异常 demo：结算界面竟早于/等于锚点。别砍到锚点前，保锚点 +1 tick。
+        end_tick = min(segment.end_tick, max(max_anchor + 1, ceiling))
+        warnings.append(
+            f"segment {segment.segment_index}: win_panel_ceiling_at_or_before_anchor "
+            f"(ceiling={ceiling}, max_anchor={max_anchor})"
+        )
+    else:
+        end_tick = min(segment.end_tick, ceiling)
+
+    duration_ticks = end_tick - segment.start_tick
+    min_ticks = sec_to_ticks(options.final_round_min_duration_sec, tick_rate)
+    if duration_ticks < min_ticks or end_tick <= segment.start_tick:
+        return segment.model_copy(update={
+            "disabled": True,
+            "disabled_reason": "too_close_to_final_round_end",
+            "safe_end_tick": ceiling,
+        }), warnings
+
+    return segment.model_copy(update={
+        "end_tick": end_tick,
+        "safe_end_tick": ceiling,
+    }), warnings
+
+
 def apply_final_round_guard(
     segment: RecordingSegment,
     req: NormalizedRequest,
 ) -> tuple[RecordingSegment, list[str]]:
     if not segment.is_final_round:
         return segment, []
+
+    win_panel_tick = int(getattr(req.demo, "win_panel_match_tick", 0) or 0)
+    if win_panel_tick > 0:
+        return _apply_win_panel_guard(segment, req, win_panel_tick)
 
     options = req.options
     tick_rate = req.demo.tick_rate

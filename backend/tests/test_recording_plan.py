@@ -21,7 +21,7 @@ from app.recording.plan_builder import build_plan
 TICK_RATE = 64.0
 
 def make_demo(final_round=20, demo_end_tick=500_000, final_round_start_tick=480_000,
-              final_round_end_tick=495_000, first_tick=0):
+              final_round_end_tick=495_000, first_tick=0, win_panel_match_tick=0):
     return DemoContext(
         demo_path="/demo/test.dem",
         demo_filename="test.dem",
@@ -32,6 +32,7 @@ def make_demo(final_round=20, demo_end_tick=500_000, final_round_start_tick=480_
         final_round=final_round,
         final_round_start_tick=final_round_start_tick,
         final_round_end_tick=final_round_end_tick,
+        win_panel_match_tick=win_panel_match_tick,
     )
 
 PLAYER = TargetPlayer(name="TestPlayer", steamid64="76561198012345678")
@@ -863,6 +864,88 @@ if plan27.segments:
     check("27c: still records past round_end (some tail)",
           seg27.end_tick > round_end27,
           f"end={seg27.end_tick}, round_end={round_end27}")
+
+
+# ── Test WP1: win_panel ceiling caps killer + victim POV segments ──────────
+print("\nTest WP1: win_panel ceiling caps final-round killer + victim POV")
+# tick_rate=64; guard 0.5s = 32 ticks; win_panel at 20000 → ceiling = 19968
+wp_final_round = 5
+win_panel = 20_000
+wp_guard_ticks = int(0.5 * TICK_RATE)          # 32
+wp_ceiling = win_panel - wp_guard_ticks        # 19968
+demoWP1 = make_demo(final_round=wp_final_round, final_round_start_tick=15_000,
+                    final_round_end_tick=18_000, demo_end_tick=win_panel + 5_000,
+                    win_panel_match_tick=win_panel)
+# Match-winning kill 1s before scoreboard; highlight_post 2s would overrun ceiling.
+kill_wp = win_panel - int(1.0 * TICK_RATE)      # 19936
+optsWP1 = RecordingOptions(enable_victim_pov=True, highlight_post_sec=2.0,
+                           victim_pov_post_sec=1.5, final_round_win_panel_guard_sec=0.5)
+reqWP1 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demoWP1,
+    options=optsWP1,
+    events=[make_kill_event(kill_wp, round_num=wp_final_round)],
+)
+planWP1 = build_plan(reqWP1)
+killer_segs = [s for s in planWP1.segments if s.perspective == Perspective.killer]
+victim_segs = [s for s in planWP1.segments if s.perspective == Perspective.victim]
+check("WP1a: killer segment present", len(killer_segs) == 1, f"got {len(killer_segs)}")
+check("WP1b: victim POV segment present", len(victim_segs) == 1, f"got {len(victim_segs)}")
+if killer_segs:
+    check("WP1c: killer end capped at ceiling", killer_segs[0].end_tick == wp_ceiling,
+          f"got {killer_segs[0].end_tick}, want {wp_ceiling}")
+if victim_segs:
+    check("WP1d: victim POV end capped at ceiling", victim_segs[0].end_tick == wp_ceiling,
+          f"got {victim_segs[0].end_tick}, want {wp_ceiling}")
+
+
+# ── Test WP2: kill far before win_panel keeps its own post (no cut) ─────────
+print("\nTest WP2: win_panel ceiling does NOT cut a clip ending well before it")
+win_panel2 = 20_000
+demoWP2 = make_demo(final_round=5, final_round_start_tick=15_000,
+                    final_round_end_tick=18_000, demo_end_tick=win_panel2 + 5_000,
+                    win_panel_match_tick=win_panel2)
+kill_wp2 = 16_000  # post end = 16000 + 128 = 16128 << ceiling(19968)
+optsWP2 = RecordingOptions(highlight_post_sec=2.0, final_round_win_panel_guard_sec=0.5)
+reqWP2 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demoWP2,
+    options=optsWP2,
+    events=[make_kill_event(kill_wp2, round_num=5)],
+)
+planWP2 = build_plan(reqWP2)
+segWP2 = planWP2.segments[0] if planWP2.segments else None
+check("WP2a: 1 segment", len(planWP2.segments) == 1, f"got {len(planWP2.segments)}")
+if segWP2:
+    check("WP2b: end = kill + post (uncut)", segWP2.end_tick == kill_wp2 + int(2.0 * TICK_RATE),
+          f"got {segWP2.end_tick}")
+
+
+# ── Test WP3: win_panel absent (=0) → old guard behavior unchanged ─────────
+print("\nTest WP3: win_panel absent falls back to legacy final_round_guard")
+final_end3 = 20_000
+demoWP3 = make_demo(final_round=5, final_round_start_tick=15_000,
+                    final_round_end_tick=final_end3, demo_end_tick=final_end3 + 100,
+                    win_panel_match_tick=0)
+safe_end3 = final_end3 - int(4.0 * TICK_RATE)   # legacy: 19744
+kill_wp3 = 19_700
+optsWP3 = RecordingOptions(final_round_guard_sec=4.0, highlight_post_sec=2.0)
+reqWP3 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demoWP3,
+    options=optsWP3,
+    events=[make_kill_event(kill_wp3, round_num=5)],
+)
+planWP3 = build_plan(reqWP3)
+segWP3 = planWP3.segments[0] if planWP3.segments else None
+check("WP3a: 1 segment (legacy path)", len(planWP3.segments) == 1, f"got {len(planWP3.segments)}")
+if segWP3:
+    # legacy demo13 behavior: clamp to safe_end via existing logic
+    check("WP3b: legacy clamp still applies", segWP3.end_tick <= safe_end3 + int(2.0 * TICK_RATE),
+          f"got {segWP3.end_tick}")
 
 
 # ── Summary ────────────────────────────────────────────────────────────────
