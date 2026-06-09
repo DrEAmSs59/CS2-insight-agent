@@ -864,6 +864,7 @@ export default function App() {
         try {
           const { data } = await API.get("config");
           if (cancelled) return;
+          useLocaleStore.getState().hydrate(data.locale);
           if (data.obs) {
             const rawPw = data.obs.password ?? "";
             const masked = typeof rawPw === "string" && rawPw.startsWith("****");

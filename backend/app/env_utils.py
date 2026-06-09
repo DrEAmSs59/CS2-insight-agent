@@ -379,6 +379,8 @@ class AppConfig(BaseModel):
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
     ai_mode: bool = False
+    # 前端界面语言（中/英切换持久化于此；zh / en）
+    locale: str = "zh"
     # 监听目录新入库时：按名单在 demo roster 中匹配（同一场可多名），展示名写成「A K/D/A · B K/D/A」作标记（不做高光解析）
     expected_parse_players: list[str] = Field(default_factory=list)
     # 前端录制队列「全局节奏」覆写（仅含用户改过的字段；空对象表示沿用内置默认）

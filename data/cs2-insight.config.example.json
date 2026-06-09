@@ -13,6 +13,7 @@
   "cs2_path": "",
   "demo_directory": "",
   "ai_mode": false,
+  "locale": "zh",
   "recording_global_pacing": {},
   "default_record_warmup": {},
   "cs2_extra_launch_args": "-fullscreen",

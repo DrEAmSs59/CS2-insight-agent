@@ -603,6 +603,7 @@ class ConfigPayload(BaseModel):
     cs2_path: Optional[str] = None
     demo_watch_paths: Optional[list[str]] = None
     ai_mode: Optional[bool] = None
+    locale: Optional[str] = None
     expected_parse_players: Optional[list[str]] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
@@ -837,6 +838,8 @@ async def update_config(payload: ConfigPayload):
         cfg.demo_watch_paths = [str(Path(p).expanduser()) for p in payload.demo_watch_paths if str(p).strip()]
     if payload.ai_mode is not None:
         cfg.ai_mode = payload.ai_mode
+    if payload.locale is not None and payload.locale in ("zh", "en"):
+        cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
         cleaned: list[str] = []
         for x in payload.expected_parse_players:
