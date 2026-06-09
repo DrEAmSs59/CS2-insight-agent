@@ -7,9 +7,24 @@ import PlayerOverviewPanel from "../components/matchHistory/PlayerOverviewPanel"
 import MatchHistoryFilterBar from "../components/matchHistory/MatchHistoryFilterBar";
 import MatchHistoryRow from "../components/matchHistory/MatchHistoryRow";
 import API from "../api/api";
+import { useT } from "../i18n/useT.js";
 
 const PAGE_SIZE = 20;
-const DEFAULT_FILTERS = { search: "", map: "全部地图", result: "全部结果", time: "全部时间", mode: "all" };
+
+// Sentinel values (English keys, not displayed directly)
+export const FILTER_ALL_MAPS = "all_maps";
+export const FILTER_ALL_RESULTS = "all_results";
+export const FILTER_ALL_TIME = "all_time";
+export const FILTER_LAST_7 = "last_7";
+export const FILTER_LAST_30 = "last_30";
+
+const DEFAULT_FILTERS = {
+  search: "",
+  map: FILTER_ALL_MAPS,
+  result: FILTER_ALL_RESULTS,
+  time: FILTER_ALL_TIME,
+  mode: "all",
+};
 
 function applyFilters(matches, filters) {
   return matches.filter((m) => {
@@ -17,11 +32,11 @@ function applyFilters(matches, filters) {
       const q = filters.search.toLowerCase();
       if (!m.match_id.includes(q)) return false;
     }
-    if (filters.map !== "全部地图" && m.map !== filters.map) return false;
-    if (filters.result !== "全部结果" && m.result !== filters.result) return false;
+    if (filters.map !== FILTER_ALL_MAPS && m.map !== filters.map) return false;
+    if (filters.result !== FILTER_ALL_RESULTS && m.result !== filters.result) return false;
     if (filters.mode !== "all" && m.mode !== filters.mode) return false;
-    if (filters.time !== "全部时间") {
-      const days = filters.time === "近 7 天" ? 7 : 30;
+    if (filters.time !== FILTER_ALL_TIME) {
+      const days = filters.time === FILTER_LAST_7 ? 7 : 30;
       const cutoff = Date.now() - days * 86400000;
       if (new Date(m.played_at).getTime() < cutoff) return false;
     }
@@ -43,6 +58,7 @@ function exportCsv(matches) {
 
 export default function MatchHistoryPage() {
   const navigate = useNavigate();
+  const t = useT();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -61,11 +77,11 @@ export default function MatchHistoryPage() {
       setData(res);
       setCredOpen(false);
     } catch (e) {
-      setErr(e?.response?.data?.detail || "拉取战绩失败，请检查凭据或网络");
+      setErr(e?.response?.data?.detail || t("match.fetchFail"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     API.get("/config").then(({ data: cfg }) => {
@@ -111,10 +127,10 @@ export default function MatchHistoryPage() {
         <div>
           <h1 className="flex items-center gap-2 text-[22px] font-semibold text-cs2-text-primary">
             <Trophy className="h-6 w-6 text-cs2-accent" />
-            官匹战绩
+            {t("match.pageTitle")}
           </h1>
           <p className="mt-0.5 text-[13.5px] text-cs2-text-secondary">
-            通过 Steam Web API 拉取官方匹配（优先排位 / 竞技）战绩，可直接下载官方 Demo 进入「Demo 库」解析。
+            {t("match.pageSubtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -122,7 +138,7 @@ export default function MatchHistoryPage() {
             onClick={() => setCredOpen((v) => !v)}
             className="rounded-[7px] border border-cs2-border px-3 py-1.5 text-[13px] font-semibold text-cs2-text-secondary hover:text-cs2-text-primary"
           >
-            编辑凭据
+            {t("match.btnEditCred")}
           </button>
           <button
             onClick={doFetch}
@@ -130,14 +146,14 @@ export default function MatchHistoryPage() {
             className="flex items-center gap-1.5 rounded-[7px] border border-cs2-border px-3 py-1.5 text-[13px] font-semibold text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            刷新战绩
+            {t("match.btnRefresh")}
           </button>
           <button
             disabled
             className="flex items-center gap-1.5 rounded-[7px] bg-cs2-accent px-3 py-1.5 text-[13px] font-semibold text-black opacity-40 cursor-not-allowed"
           >
             <Download className="h-3.5 w-3.5" />
-            下载选中 Demo
+            {t("match.btnDownloadSelected")}
           </button>
         </div>
       </div>
@@ -149,8 +165,8 @@ export default function MatchHistoryPage() {
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#38b2c4]" />
         <span>
-          <strong className="text-[#38b2c4]">关于 Demo 保留期：</strong>
-          Valve 官方匹配 Demo 一般保留 <strong>8 天</strong>（赛后开始计算）。超过保留期的对局会显示「已过期」，无法下载——若需要历史 Demo，请尽早入库。
+          <strong className="text-[#38b2c4]">{t("match.demoRetentionTitle")}</strong>
+          {t("match.demoRetentionBody", { days: 8 })}
         </span>
       </div>
 
@@ -183,7 +199,7 @@ export default function MatchHistoryPage() {
       {loading && !data && (
         <div className="flex items-center justify-center gap-3 py-20 text-cs2-text-muted">
           <Loader2 className="h-5 w-5 animate-spin" />
-          正在从 Steam 拉取战绩…
+          {t("match.loadingMatches")}
         </div>
       )}
 
@@ -200,7 +216,7 @@ export default function MatchHistoryPage() {
 
           <div className="flex flex-col gap-2.5">
             {pageMatches.length === 0 ? (
-              <div className="py-16 text-center text-cs2-text-muted">没有符合条件的战绩</div>
+              <div className="py-16 text-center text-cs2-text-muted">{t("match.noMatches")}</div>
             ) : (
               pageMatches.map((m) => (
                 <MatchHistoryRow
@@ -216,7 +232,7 @@ export default function MatchHistoryPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-[12.5px] text-cs2-text-muted">
-              <span>显示 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} 共 {filtered.length} 场</span>
+              <span>{t("match.paginationRange", { from: (page - 1) * PAGE_SIZE + 1, to: Math.min(page * PAGE_SIZE, filtered.length), total: filtered.length })}</span>
               <div className="flex gap-1">
                 <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="px-2 py-1 disabled:opacity-30">‹</button>
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
@@ -230,7 +246,7 @@ export default function MatchHistoryPage() {
                 ))}
                 <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} className="px-2 py-1 disabled:opacity-30">›</button>
               </div>
-              <span>每页 {PAGE_SIZE} 条</span>
+              <span>{t("match.paginationPerPage", { n: PAGE_SIZE })}</span>
             </div>
           )}
         </>

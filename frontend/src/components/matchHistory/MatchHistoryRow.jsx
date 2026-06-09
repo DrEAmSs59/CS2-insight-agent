@@ -1,19 +1,7 @@
 import { Clock, Calendar } from "lucide-react";
 import RoundsStrip from "./RoundsStrip";
 import DemoDownloadCell from "./DemoDownloadCell";
-
-const RESULT_STYLE = {
-  win:  { bar: "#2eb86a", badge: "bg-[#2eb86a]/15 text-[#2eb86a]", label: "胜" },
-  loss: { bar: "#e0556a", badge: "bg-[#e0556a]/15 text-[#e0556a]", label: "负" },
-  tie:  { bar: "#d97706", badge: "bg-[#d97706]/15 text-[#d97706]", label: "平" },
-};
-
-const MODE_LABEL = { premier: "优先排位", competitive: "竞技模式" };
-
-function fmtDuration(sec) {
-  const m = Math.floor(sec / 60);
-  return `${m} 分钟`;
-}
+import { useT } from "../../i18n/useT.js";
 
 function fmtDate(iso) {
   if (!iso) return "";
@@ -40,9 +28,25 @@ function kdColor(k, d) {
 }
 
 export default function MatchHistoryRow({ match, onDownload, onGoToLibrary }) {
+  const t = useT();
+
+  const RESULT_STYLE = {
+    win:  { bar: "#2eb86a", badge: "bg-[#2eb86a]/15 text-[#2eb86a]", label: t("match.filterResultWin") },
+    loss: { bar: "#e0556a", badge: "bg-[#e0556a]/15 text-[#e0556a]", label: t("match.filterResultLoss") },
+    tie:  { bar: "#d97706", badge: "bg-[#d97706]/15 text-[#d97706]", label: t("match.filterResultTie") },
+  };
+
+  const MODE_LABEL = {
+    premier: t("match.filterModePremier"),
+    competitive: t("match.modeCompetitive"),
+  };
+
   const style = RESULT_STYLE[match.result] || RESULT_STYLE.tie;
   const demoFilename = `match730_${match.match_id}.dem`;
   const scoreColor = style.bar;
+
+  const durationSec = match.duration_sec;
+  const durationMin = durationSec != null ? Math.floor(durationSec / 60) : null;
 
   return (
     <div
@@ -78,7 +82,7 @@ export default function MatchHistoryRow({ match, onDownload, onGoToLibrary }) {
         <div className="flex items-center gap-3 text-[11.5px] text-cs2-text-muted">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {fmtDuration(match.duration_sec)}
+            {durationMin != null ? t("match.duration", { m: durationMin }) : ""}
           </span>
           <span className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
@@ -95,40 +99,40 @@ export default function MatchHistoryRow({ match, onDownload, onGoToLibrary }) {
       {/* Col 5: personal stats */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-3 py-3">
         <div>
-          <div className="text-[10.5px] text-cs2-text-muted">击杀·阵亡·助攻</div>
+          <div className="text-[10.5px] text-cs2-text-muted">{t("match.statKda")}</div>
           <div className={`font-mono text-[13px] font-semibold ${kdColor(match.kills, match.deaths)}`}>
             {match.kills}–{match.deaths}–{match.assists}
           </div>
         </div>
         <div>
-          <div className="text-[10.5px] text-cs2-text-muted">爆头率</div>
+          <div className="text-[10.5px] text-cs2-text-muted">{t("match.statHeadshotPct")}</div>
           <div className="font-mono text-[13px] font-semibold text-cs2-text-primary">{match.headshot_pct}%</div>
         </div>
         <div>
-          <div className="text-[10.5px] text-cs2-text-muted">场均伤害</div>
+          <div className="text-[10.5px] text-cs2-text-muted">{t("match.statAdr")}</div>
           <div className="font-mono text-[13px] font-semibold text-cs2-text-primary">{match.adr}</div>
         </div>
         <div>
-          <div className="text-[10.5px] text-cs2-text-muted">MVP</div>
+          <div className="text-[10.5px] text-cs2-text-muted">{t("match.statMvp")}</div>
           <div className="font-mono text-[13px] font-semibold text-cs2-text-primary">{match.mvp_count}</div>
         </div>
       </div>
 
       {/* Col 6: rating + badges */}
       <div className="flex flex-col items-center gap-1.5 px-2 py-3">
-        <div className="text-[10.5px] text-cs2-text-muted">综合评分</div>
+        <div className="text-[10.5px] text-cs2-text-muted">{t("match.statRating")}</div>
         <div className="font-mono text-[20px] font-bold" style={{ color: ratingColor(match.rating) }}>
           {match.rating}
         </div>
         <div className="flex flex-wrap justify-center gap-1">
           {match.ace_count > 0 && (
             <span className="rounded-[4px] bg-blue-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-blue-400">
-              五杀×{match.ace_count}
+              {t("match.badgeAce", { n: match.ace_count })}
             </span>
           )}
           {match.mvp_count >= 4 && (
             <span className="rounded-[4px] bg-[#2eb86a]/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#2eb86a]">
-              MVP×{match.mvp_count}
+              {t("match.badgeMvp", { n: match.mvp_count })}
             </span>
           )}
         </div>

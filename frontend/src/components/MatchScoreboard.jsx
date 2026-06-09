@@ -1,4 +1,5 @@
 import { Trophy } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 /**
  * 全局计分板 — 与 PlayerSelect 列顺序一致：
@@ -6,6 +7,7 @@ import { Trophy } from "lucide-react";
  * 右「队伍 B」= 玩家列表右列 (team_num 2) → 后端 team_a_score (winner==2)
  */
 export default function MatchScoreboard({ matchMeta }) {
+  const t = useT();
   if (!matchMeta) return null;
 
   const mapName = matchMeta.map_name?.trim() || "—";
@@ -45,7 +47,7 @@ export default function MatchScoreboard({ matchMeta }) {
                 <Trophy className="h-3.5 w-3.5 shrink-0 text-sky-400 drop-shadow-[0_0_8px_rgba(56,189,248,0.6)]" />
               )}
               <span className="truncate text-[11px] font-bold uppercase tracking-wider text-sky-300/90 drop-shadow-[0_0_12px_rgba(125,211,252,0.25)]">
-                队伍 A
+                {t("match.teamA")}
               </span>
             </div>
           </div>
@@ -84,7 +86,7 @@ export default function MatchScoreboard({ matchMeta }) {
           <div className="flex min-w-0 flex-col items-start text-left sm:pl-2">
             <div className="mb-0.5 flex items-center gap-1">
               <span className="truncate text-[11px] font-bold uppercase tracking-wider text-amber-300/90 drop-shadow-[0_0_12px_rgba(251,191,36,0.25)]">
-                队伍 B
+                {t("match.teamB")}
               </span>
               {winner === "right" && (
                 <Trophy className="h-3.5 w-3.5 shrink-0 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
@@ -93,16 +95,16 @@ export default function MatchScoreboard({ matchMeta }) {
           </div>
         </div>
 
-        {/* 元数据（无可靠真实开赛时间，不展示日期） */}
+        {/* 元数据 */}
         <div className="mt-2.5 flex flex-col gap-1.5 border-t border-cs2-border pt-2 font-mono text-xs text-cs2-text-secondary sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-1">
           <span className="tabular-nums">
-            🎯 回合: <span className="text-cs2-text-secondary">{totalRounds}</span>
+            {t("match.scoreboardRounds", { n: totalRounds })}
           </span>
           <span className="tabular-nums">
-            ⏱️ 时长: <span className="text-cs2-text-secondary">{durationMins}</span> 分钟
+            {t("match.scoreboardDuration", { n: durationMins })}
           </span>
           <span className="min-w-0 truncate sm:max-w-none">
-            🗺️ 地图: <span className="text-cs2-text-secondary">{mapName}</span>
+            {t("match.scoreboardMap", { name: mapName })}
           </span>
         </div>
       </div>

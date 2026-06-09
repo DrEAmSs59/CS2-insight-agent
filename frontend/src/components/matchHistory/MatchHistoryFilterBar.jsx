@@ -1,14 +1,26 @@
 import { LayoutGrid, List, Download } from "lucide-react";
+import { useT } from "../../i18n/useT.js";
+import {
+  FILTER_ALL_MAPS,
+  FILTER_ALL_RESULTS,
+  FILTER_ALL_TIME,
+  FILTER_LAST_7,
+  FILTER_LAST_30,
+} from "../../pages/MatchHistoryPage.jsx";
 
-const MAPS = ["全部地图", "de_mirage", "de_inferno", "de_dust2", "de_nuke", "de_ancient", "de_vertigo", "de_anubis", "de_overpass"];
-const RESULTS = ["全部结果", "win", "loss", "tie"];
-const RESULT_LABELS = { "全部结果": "全部结果", win: "胜", loss: "负", tie: "平" };
-const TIMES = ["全部时间", "近 7 天", "近 30 天"];
-const MODES = [
-  { value: "all", label: "全部" },
-  { value: "premier", label: "优先排位" },
-  { value: "competitive", label: "竞技" },
+const MAPS = [
+  FILTER_ALL_MAPS,
+  "de_mirage",
+  "de_inferno",
+  "de_dust2",
+  "de_nuke",
+  "de_ancient",
+  "de_vertigo",
+  "de_anubis",
+  "de_overpass",
 ];
+const RESULTS = [FILTER_ALL_RESULTS, "win", "loss", "tie"];
+const TIMES = [FILTER_ALL_TIME, FILTER_LAST_7, FILTER_LAST_30];
 
 function Sel({ value, onChange, options, labels }) {
   return (
@@ -25,6 +37,29 @@ function Sel({ value, onChange, options, labels }) {
 }
 
 export default function MatchHistoryFilterBar({ filters, onFiltersChange, viewMode, onViewModeChange, onExportCsv }) {
+  const t = useT();
+
+  const RESULT_LABELS = {
+    [FILTER_ALL_RESULTS]: t("match.filterAllResults"),
+    win: t("match.filterResultWin"),
+    loss: t("match.filterResultLoss"),
+    tie: t("match.filterResultTie"),
+  };
+
+  const MAP_LABELS = { [FILTER_ALL_MAPS]: t("match.filterAllMaps") };
+
+  const TIME_LABELS = {
+    [FILTER_ALL_TIME]: t("match.filterAllTime"),
+    [FILTER_LAST_7]: t("match.filterLast7Days"),
+    [FILTER_LAST_30]: t("match.filterLast30Days"),
+  };
+
+  const MODES = [
+    { value: "all", label: t("match.filterModeAll") },
+    { value: "premier", label: t("match.filterModePremier") },
+    { value: "competitive", label: t("match.filterModeCompetitive") },
+  ];
+
   function set(key, val) {
     onFiltersChange({ ...filters, [key]: val });
   }
@@ -35,12 +70,12 @@ export default function MatchHistoryFilterBar({ filters, onFiltersChange, viewMo
         type="text"
         value={filters.search}
         onChange={(e) => set("search", e.target.value)}
-        placeholder="搜索 Match ID / 备注…"
+        placeholder={t("match.filterSearchPlaceholder")}
         className="min-w-[220px] rounded-[7px] border border-cs2-border bg-cs2-bg-input px-3 py-1.5 text-[12.5px] text-cs2-text-primary placeholder:text-cs2-text-muted focus:border-cs2-accent focus:outline-none"
       />
-      <Sel value={filters.map} onChange={(v) => set("map", v)} options={MAPS} />
+      <Sel value={filters.map} onChange={(v) => set("map", v)} options={MAPS} labels={MAP_LABELS} />
       <Sel value={filters.result} onChange={(v) => set("result", v)} options={RESULTS} labels={RESULT_LABELS} />
-      <Sel value={filters.time} onChange={(v) => set("time", v)} options={TIMES} />
+      <Sel value={filters.time} onChange={(v) => set("time", v)} options={TIMES} labels={TIME_LABELS} />
 
       <div className="ml-auto flex items-center gap-2">
         <div className="flex rounded-[7px] border border-cs2-border overflow-hidden">
@@ -76,7 +111,7 @@ export default function MatchHistoryFilterBar({ filters, onFiltersChange, viewMo
           className="flex items-center gap-1.5 rounded-[7px] border border-cs2-border px-3 py-1.5 text-[12.5px] text-cs2-text-secondary hover:text-cs2-text-primary"
         >
           <Download className="h-3.5 w-3.5" />
-          导出 CSV
+          {t("match.filterExportCsv")}
         </button>
       </div>
     </div>

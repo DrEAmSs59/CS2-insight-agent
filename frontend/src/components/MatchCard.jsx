@@ -19,6 +19,7 @@ import {
   Info,
   Sparkles,
 } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
 /**
  * 格式化分钟数为 xx min
@@ -53,6 +54,7 @@ export function MatchListRow({
   onOpenInfo,
   expectedPlayers = [],
 }) {
+  const t = useT();
   const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [remarkDraft, setRemarkDraft] = useState(demo.remark || "");
 
@@ -89,6 +91,7 @@ export function MatchListRow({
     return expectedPlayers.some(p => p.toLowerCase() === n || n.includes(p.toLowerCase()));
   };
 
+  // classifyDemoStatus is a shared util — its label is left as-is (shared-util-sourced)
   const listStatus = classifyDemoStatus(demo);
   const listStatusDot =
     listStatus.kind === "done"
@@ -116,7 +119,7 @@ export function MatchListRow({
               : "text-cs2-text-secondary";
 
   return (
-    <div 
+    <div
       className={`group relative flex items-center gap-4 rounded-lg border px-4 py-2 transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
@@ -133,7 +136,7 @@ export function MatchListRow({
       {/* 2. 地图与来源 */}
       <div className="flex items-center gap-3 w-[180px] shrink-0">
         <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-cs2-bg-input/70 border border-cs2-border relative">
-          <img 
+          <img
             src={`/images/maps/${mapName}.png`}
             alt={mapName}
             className="h-full w-full object-cover opacity-60"
@@ -159,7 +162,7 @@ export function MatchListRow({
         {/* Team A & Players */}
         <div className="flex-1 flex flex-col items-end min-w-0">
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full text-right mb-0.5">
-            {matchMeta.team_a_name || "Team A"}
+            {matchMeta.team_a_name || t("match.teamA")}
           </span>
           <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
             {teamA.slice(0, 5).map((p, i) => (
@@ -180,7 +183,7 @@ export function MatchListRow({
         {/* Team B & Players */}
         <div className="flex-1 flex flex-col items-start min-w-0">
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full mb-0.5">
-            {matchMeta.team_b_name || "Team B"}
+            {matchMeta.team_b_name || t("match.teamB")}
           </span>
           <div className="flex flex-wrap justify-start gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
             {teamB.slice(0, 5).map((p, i) => (
@@ -203,6 +206,7 @@ export function MatchListRow({
                   listStatus.kind === "pending" || listStatus.kind === "parsing" ? "animate-pulse" : ""
                 }`}
               />
+              {/* listStatus.label is sourced from shared util classifyDemoStatus — left as-is */}
               <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatus.tooltip}>
                 {listStatus.label}
               </span>
@@ -211,7 +215,7 @@ export function MatchListRow({
               {demo.added_at ? new Date(demo.added_at).toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' }) : ""}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-1 text-[11px] font-black text-cs2-text-secondary w-12 tabular-nums">
             <Clock className="h-3.5 w-3.5 opacity-40 text-cs2-accent" />
             {formatDuration(matchMeta.duration_mins).replace(' min', '')}
@@ -221,20 +225,20 @@ export function MatchListRow({
 
         {/* 悬停显示：操作按钮 */}
         <div className="hidden group-hover:flex items-center gap-1 animate-in fade-in duration-200" onClick={e => e.stopPropagation()}>
-          <button 
-            onClick={() => setIsEditingRemark(!isEditingRemark)} 
+          <button
+            onClick={() => setIsEditingRemark(!isEditingRemark)}
             className={`p-2 rounded-md transition-colors ${demo.remark ? 'text-cs2-accent' : 'text-cs2-text-muted'} hover:bg-cs2-bg-input/50`}
-            title="备注"
+            title={t("match.btnRemark")}
           >
             <MessageSquare className="h-4 w-4" />
           </button>
-          <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title="启动 CS2 播放 Demo">
+          <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title={t("match.btnPlayCs2")}>
             <Play className="h-4 w-4 fill-current" />
           </button>
-          <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-text-secondary hover:bg-cs2-bg-input/50 rounded-md transition-colors" title="定位">
+          <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-text-secondary hover:bg-cs2-bg-input/50 rounded-md transition-colors" title={t("match.btnLocate")}>
             <FolderSearch className="h-4 w-4" />
           </button>
-          <button onClick={() => onDelete(demo.id, demo.filename)} className="p-2 text-cs2-red-on-surface hover:bg-cs2-red-surface rounded-md transition-colors" title="删除">
+          <button onClick={() => onDelete(demo.id, demo.filename)} className="p-2 text-cs2-red-on-surface hover:bg-cs2-red-surface rounded-md transition-colors" title={t("match.btnDelete")}>
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
@@ -242,7 +246,7 @@ export function MatchListRow({
 
       {/* 6. 展开备注编辑区 */}
       {isEditingRemark && (
-        <div 
+        <div
           className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-cs2-border bg-cs2-bg-card p-3 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           onClick={e => e.stopPropagation()}
         >
@@ -252,13 +256,13 @@ export function MatchListRow({
               value={remarkDraft}
               onChange={(e) => setRemarkDraft(e.target.value)}
               className="w-full bg-cs2-bg-input/70 border border-cs2-border rounded-md p-2 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/40 resize-none"
-              placeholder="添加备注..."
+              placeholder={t("match.remarkPlaceholder")}
               rows={2}
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary uppercase font-bold tracking-tighter">取消</button>
+              <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary uppercase font-bold tracking-tighter">{t("match.remarkCancel")}</button>
               <button onClick={handleSaveRemark} className="flex items-center gap-1 rounded bg-cs2-accent px-3 py-1 text-[10px] font-black text-cs2-text-on-accent uppercase tracking-tighter shadow-lg shadow-cs2-accent/20">
-                <Save className="h-3 w-3" /> 保存
+                <Save className="h-3 w-3" /> {t("match.remarkSave")}
               </button>
             </div>
           </div>
@@ -282,6 +286,7 @@ export default function MatchCard({
   onOpenInfo,
   expectedPlayers = [],
 }) {
+  const t = useT();
   const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [remarkDraft, setRemarkDraft] = useState(demo.remark || "");
 
@@ -332,6 +337,7 @@ export default function MatchCard({
 
   const killTags = getKillTags();
 
+  // classifyDemoStatus is a shared util — its label is left as-is (shared-util-sourced)
   const gridStatus = classifyDemoStatus(demo);
   const gridStatusBadgeClass =
     {
@@ -350,20 +356,20 @@ export default function MatchCard({
   };
 
   return (
-    <div 
+    <div
       className={`group relative flex flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
       {/* 顶部：地图缩略图背景 */}
       <div className="relative h-[70px] w-full overflow-hidden">
-        <img 
-          src={mapThumbnail} 
+        <img
+          src={mapThumbnail}
           alt={mapName}
           className="h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
           onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.png"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
-        
+
         {/* 顶部悬浮信息 */}
         <div className="absolute inset-0 flex flex-col justify-center px-2 py-0.5">
           <div className="relative flex items-center justify-between">
@@ -391,9 +397,9 @@ export default function MatchCard({
             </div>
 
             <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title="启动 CS2 播放 Demo"><Play className="h-4 w-4 fill-current" /></button>
-              <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all"><FolderSearch className="h-4 w-4" /></button>
-              <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title={t("match.btnPlayCs2")}><Play className="h-4 w-4 fill-current" /></button>
+              <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all" title={t("match.btnLocate")}><FolderSearch className="h-4 w-4" /></button>
+              <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all" title={t("match.btnDelete")}><Trash2 className="h-4 w-4" /></button>
             </div>
           </div>
 
@@ -417,7 +423,7 @@ export default function MatchCard({
       {/* 中部：队伍与成员 */}
       <div className="grid grid-cols-2 border-y border-cs2-border bg-cs2-bg-input/30 group/roster w-full transition-colors hover:bg-cs2-bg-hover">
         <div className="relative border-r border-cs2-border px-3 py-1">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_a_name || "Team A"}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_a_name || t("match.teamA")}</div>
           <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
             {teamA.length > 0 ? teamA.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
@@ -429,7 +435,7 @@ export default function MatchCard({
           </div>
         </div>
         <div className="px-3 py-1">
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_b_name || "Team B"}</div>
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_b_name || t("match.teamB")}</div>
           <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
             {teamB.length > 0 ? teamB.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
@@ -446,6 +452,7 @@ export default function MatchCard({
       <div className="flex flex-col p-2 px-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 overflow-hidden">
           <div className="flex flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            {/* gridStatus.label is sourced from shared util classifyDemoStatus — left as-is */}
             <span
               className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-medium border ${gridStatusBadgeClass}`}
             >
@@ -464,15 +471,15 @@ export default function MatchCard({
           <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-muted" />
           {isEditingRemark ? (
             <div className="flex flex-1 flex-col gap-1.5">
-              <textarea autoFocus value={remarkDraft} onChange={(e) => setRemarkDraft(e.target.value)} className="w-full bg-transparent p-0 text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted resize-none" placeholder="添加备注..." rows={2} />
+              <textarea autoFocus value={remarkDraft} onChange={(e) => setRemarkDraft(e.target.value)} className="w-full bg-transparent p-0 text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted resize-none" placeholder={t("match.remarkPlaceholder")} rows={2} />
               <div className="flex justify-end gap-2">
-                <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary">取消</button>
-                <button onClick={handleSaveRemark} className="flex items-center gap-1 rounded bg-cs2-accent px-2 py-0.5 text-[10px] font-bold text-cs2-text-on-accent"><Save className="h-2.5 w-2.5" /> 保存</button>
+                <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary">{t("match.remarkCancel")}</button>
+                <button onClick={handleSaveRemark} className="flex items-center gap-1 rounded bg-cs2-accent px-2 py-0.5 text-[10px] font-bold text-cs2-text-on-accent"><Save className="h-2.5 w-2.5" /> {t("match.remarkSave")}</button>
               </div>
             </div>
           ) : (
             <div className="group/remark flex flex-1 cursor-pointer items-start justify-between gap-2" onClick={() => setIsEditingRemark(true)}>
-              <p className={`text-[12px] leading-relaxed ${demo.remark ? 'text-cs2-text-secondary' : 'text-cs2-text-muted italic'}`}>{demo.remark || "点击添加备注..."}</p>
+              <p className={`text-[12px] leading-relaxed ${demo.remark ? 'text-cs2-text-secondary' : 'text-cs2-text-muted italic'}`}>{demo.remark || t("match.remarkClickAdd")}</p>
               <Pencil className="h-2.5 w-2.5 text-cs2-text-muted opacity-0 group-hover/remark:opacity-100" />
             </div>
           )}

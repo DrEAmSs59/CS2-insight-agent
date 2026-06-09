@@ -1,27 +1,29 @@
 import { Layers } from "lucide-react";
+import { useT } from "../i18n/useT.js";
 
-function mapLabel(meta) {
-  if (!meta) return "未知地图";
+function mapLabel(meta, t) {
+  if (!meta) return t("match.switcherUnknownMap");
   const m = meta.map_name;
-  return m && String(m).trim() ? String(m) : "未知地图";
+  return m && String(m).trim() ? String(m) : t("match.switcherUnknownMap");
 }
 
 /**
  * @param {{ matches: Array<{ match_meta?: object, demo_filename?: string, filename?: string, parsed?: boolean }>, currentIndex: number, onChange: (i: number) => void, disabled?: boolean }} props
  */
 export default function MatchSwitcher({ matches, currentIndex, onChange, disabled }) {
+  const t = useT();
   if (!matches || matches.length <= 1) return null;
 
   return (
     <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-3 py-2.5">
       <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-cs2-text-muted">
         <Layers className="h-3.5 w-3.5 text-cs2-accent/80" />
-        比赛切换
+        {t("match.switcherTitle")}
       </div>
       <div className="flex flex-wrap gap-1.5">
         {matches.map((m, i) => {
-          const label = mapLabel(m.match_meta);
-          const fname = m.demo_filename || m.filename || `场次 ${i + 1}`;
+          const label = mapLabel(m.match_meta, t);
+          const fname = m.demo_filename || m.filename || t("match.switcherFallbackName", { n: i + 1 });
           const active = i === currentIndex;
           return (
             <button
@@ -36,7 +38,7 @@ export default function MatchSwitcher({ matches, currentIndex, onChange, disable
               } ${disabled ? "opacity-40" : ""}`}
             >
               <span className="block truncate font-mono text-[10px] text-cs2-accent/90">
-                第 {i + 1} 场 · {label}
+                {t("match.switcherMatchN", { n: i + 1, label })}
               </span>
               <span className="flex items-center gap-1.5 truncate text-[10px] font-normal text-cs2-text-muted" title={fname}>
                 <span className="min-w-0 truncate">{fname}</span>

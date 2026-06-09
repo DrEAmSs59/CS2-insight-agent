@@ -1,3 +1,5 @@
+import { useT } from "../../i18n/useT.js";
+
 const RATING_TIERS = [
   { min: 25000, color: "#f5c542" },
   { min: 20000, color: "#ff5b5b" },
@@ -26,8 +28,11 @@ function StatCol({ label, value, sub }) {
 }
 
 export default function PlayerOverviewPanel({ player, stats }) {
+  const t = useT();
   if (!player) return null;
   const ratingColor = getRatingColor(player.cs_rating || 0);
+
+  const totalMatches = (stats?.wins || 0) + (stats?.losses || 0);
 
   return (
     <div className="grid gap-3.5" style={{ gridTemplateColumns: "340px 1fr" }}>
@@ -76,11 +81,22 @@ export default function PlayerOverviewPanel({ player, stats }) {
       <div className="rounded-[10px] border border-cs2-border bg-cs2-bg-card flex items-center">
         {stats && (
           <div className="flex w-full divide-x divide-cs2-border">
-            <StatCol label={`最近 ${(stats.wins || 0) + (stats.losses || 0)} 场`} value={`${stats.wins}胜/${stats.losses}负`} />
-            <StatCol label="场均 K/D" value={stats.avg_kd} sub={stats.avg_kd >= 1.2 ? "↑ 优秀" : stats.avg_kd < 0.95 ? "↓ 偏低" : undefined} />
-            <StatCol label="爆头率" value={`${stats.headshot_pct}%`} />
-            <StatCol label="场均伤害 ADR" value={stats.avg_adr} />
-            <StatCol label="综合评分" value={stats.rating} sub={stats.rating >= 1.2 ? "↑ 优秀" : stats.rating < 0.95 ? "↓ 偏低" : undefined} />
+            <StatCol
+              label={t("match.recentMatches", { n: totalMatches })}
+              value={t("match.winLoss", { wins: stats.wins, losses: stats.losses })}
+            />
+            <StatCol
+              label={t("match.avgKd")}
+              value={stats.avg_kd}
+              sub={stats.avg_kd >= 1.2 ? t("match.ratingGood") : stats.avg_kd < 0.95 ? t("match.ratingLow") : undefined}
+            />
+            <StatCol label={t("match.headshotPct")} value={`${stats.headshot_pct}%`} />
+            <StatCol label={t("match.avgAdr")} value={stats.avg_adr} />
+            <StatCol
+              label={t("match.overallRating")}
+              value={stats.rating}
+              sub={stats.rating >= 1.2 ? t("match.ratingGood") : stats.rating < 0.95 ? t("match.ratingLow") : undefined}
+            />
           </div>
         )}
       </div>
