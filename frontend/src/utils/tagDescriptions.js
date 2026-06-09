@@ -606,14 +606,37 @@ export function describeTag(tag, locale = "zh") {
   return "";
 }
 
+// 动态 tag（带可变人数 / 名字 / 时长，如 "🔥 1v2 史诗残局"、"👫 同框: Foo"、"⏳ 持续 3.5s"）
+// 中的中文片段 → 英文。仅在 LABELS_EN 精确匹配未命中时兜底替换，保留 emoji / 数字 / 名字。
+// 顺序：长片段在前，避免子串误伤。
+const DYNAMIC_LABEL_PHRASES_EN = [
+  ["亲儿子喂饭", "Repeated Victim"],
+  ["史诗残局", "Epic Clutch"],
+  ["兄弟齐心", "Team Clutch"],
+  ["绝地反击", "Desperate Comeback"],
+  ["封神未遂", "Clutch Fell Short"],
+  ["全部击杀", "All Kills"],
+  ["全部死亡", "All Deaths"],
+  ["回合合集", "Round Compilation"],
+  ["本命苦主", "Nemesis"],
+  ["同框", "Near enemy"],
+  ["持续", "Duration"],
+];
+
 /**
  * 返回 tag 的显示名称。
  * 中文 locale 直接返回原 tag 字符串；
- * 英文 locale 返回 LABELS_EN 中的译名（若无则回退到原 tag）。
+ * 英文 locale：先查 LABELS_EN 精确译名，未命中再对动态 tag 做中文片段替换，
+ * 仍含中文则原样返回（最坏情况不劣于原行为）。
  */
 export function labelTag(tag, locale = "zh") {
   if (!tag) return "";
   const t = String(tag).trim();
-  if (locale === "en" && LABELS_EN[t]) return LABELS_EN[t];
-  return t;
+  if (locale !== "en") return t;
+  if (LABELS_EN[t]) return LABELS_EN[t];
+  let out = t;
+  for (const [zh, en] of DYNAMIC_LABEL_PHRASES_EN) {
+    if (out.includes(zh)) out = out.split(zh).join(en);
+  }
+  return out;
 }
