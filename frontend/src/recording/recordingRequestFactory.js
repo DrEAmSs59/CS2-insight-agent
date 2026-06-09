@@ -26,6 +26,7 @@ export const DEFAULT_RECORDING_OPTIONS = {
   final_round_min_duration_sec: 0.8,
   final_round_demo_exit_guard_sec: 1.5,
   final_round_extra_post_sec: 1.0,
+  final_round_win_panel_guard_sec: 0.5,
   obs_transition_enabled: null,
   obs_transition_name: null,
   obs_transition_duration_ms: null,
@@ -63,6 +64,7 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
     final_round_end_tick: finalRoundEndTick,
     server_name: matchMeta?.server_name || "",
     all_players: matchMeta?.all_players || [],
+    win_panel_match_tick: Number(matchMeta?.win_panel_match_tick) || 0,
   };
 }
 
