@@ -26,7 +26,7 @@ export const DEFAULT_RECORDING_OPTIONS = {
   final_round_min_duration_sec: 0.8,
   final_round_demo_exit_guard_sec: 1.5,
   final_round_extra_post_sec: 1.0,
-  final_round_win_panel_guard_sec: 0.5,
+  final_round_win_panel_guard_sec: 2.0,
   obs_transition_enabled: null,
   obs_transition_name: null,
   obs_transition_duration_ms: null,

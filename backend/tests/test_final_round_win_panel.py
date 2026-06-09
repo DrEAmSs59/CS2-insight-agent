@@ -66,9 +66,10 @@ def test_non_final_round_unaffected_by_win_panel():
     assert out == min(11_000, 10_000 + int(3.0 * TICK_RATE)) or out == 11_000, out
 
 
-def test_win_panel_ceiling_from_match_tick_basic():
-    # default guard 0.5s * 64 = 32
-    assert win_panel_ceiling_from_match_tick(20_000, 64.0) == 19_968
+def test_win_panel_ceiling_from_match_tick_basic(monkeypatch):
+    # default guard 2.0s * 64 = 128
+    monkeypatch.delenv("CS2_INSIGHT_WIN_PANEL_GUARD_SEC", raising=False)
+    assert win_panel_ceiling_from_match_tick(20_000, 64.0) == 19_872
 
 
 def test_win_panel_ceiling_from_match_tick_absent():
