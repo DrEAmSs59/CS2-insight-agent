@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -94,6 +95,7 @@ def _timeline_round_record_end_tick(
     tick_rate: float,
     round_freeze_end_ticks: dict[int, int],
     evs: list[dict[str, Any]],
+    win_panel_ceiling: Optional[int] = None,
 ) -> Optional[int]:
     """与 ``demo_parser`` 填充 ``clip_max_tick`` 的非最后一回合策略对齐：``round_end`` 后留缓冲并顶到下一回合 freeze。
 
@@ -128,6 +130,11 @@ def _timeline_round_record_end_tick(
     # full round without cutting before late-round kills on the final round.
     # (For non-final rounds this branch is unreachable — nxt_fe provides the cap.)
     loose_cap = fe_tick + int(130.0 * trf)
+    # Final round: prefer the exact scoreboard tick (cs_win_panel_match) when available.
+    if win_panel_ceiling is not None:
+        floor = last_k if last_k is not None else re
+        if int(win_panel_ceiling) > int(floor):
+            return int(min(int(win_panel_ceiling), loose_cap))
     # For the final round, round_end is when the settlement/scoreboard appears —
     # adding buf_mid (3 s) would record into the settlement screen.
     # Use last_kill + tail instead: covers the kill animation and stops before settlement.
@@ -315,6 +322,7 @@ def build_round_timeline(
     match_start_tick: int,
     tick_rate: float,
     spec_slots: "dict[str, int] | None" = None,
+    win_panel_match_tick: int = 0,
 ) -> dict[str, Any]:
     from . import demo_parser as dp
 
@@ -324,6 +332,14 @@ def build_round_timeline(
 
     tp = str(target_player or "").strip()
     tr = max(1, int(total_rounds or 1))
+    _wp_guard = int(float(
+        os.environ.get("CS2_INSIGHT_WIN_PANEL_GUARD_SEC", "0.5") or "0.5"
+    ) * (float(tick_rate) if float(tick_rate) > 0 else 64.0))
+    win_panel_ceiling = (
+        int(win_panel_match_tick) - _wp_guard
+        if win_panel_match_tick and int(win_panel_match_tick) > 0 else None
+    )
+    _terminal_rn = max(round_freeze_end_ticks.keys()) if round_freeze_end_ticks else None
     assist_col = _pick_assister_column(events) if events is not None and not events.empty else None
     winners_by_ended = _parse_round_winners_side(round_end_df, match_start_tick)
 
@@ -408,6 +424,13 @@ def build_round_timeline(
             post_w = int(tick_rate * 4.0)
             st_s = max(int(freeze_for_suggest), tick - pre_w)
             et_s = tick + post_w
+            if (
+                win_panel_ceiling is not None
+                and _terminal_rn is not None
+                and int(eff_rn) == int(_terminal_rn)
+                and int(tick) < int(win_panel_ceiling)
+            ):
+                et_s = min(int(et_s), int(win_panel_ceiling))
             rem = _related_clip_ids(tick, eff_rn, clips)
 
             if typ == "kill":
@@ -582,6 +605,7 @@ def build_round_timeline(
         ret = round_end_tick_for(rn)
         record_end = _timeline_round_record_end_tick(
             rn, ret, float(tick_rate), round_freeze_end_ticks, evs,
+            win_panel_ceiling=win_panel_ceiling,
         )
 
         target_won = round_result_map.get(rn)
