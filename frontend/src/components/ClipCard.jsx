@@ -5,6 +5,7 @@ import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
 import { isTimelineSourceClip } from "../utils/montageUtils";
 import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore";
+import { weaponUsedTokens } from "../i18n/weaponNames.js";
 
 export const CLIP_CATEGORY_CONFIG = {
   highlight: {
@@ -279,11 +280,7 @@ export default function ClipCard({
                   </span>
                 );
               })}
-              {clip.weapon_used
-                ?.split(" / ")
-                .map((w) => w.trim())
-                .filter(Boolean)
-                .map((w) => (
+              {weaponUsedTokens(clip.weapon_used, locale).map((w) => (
                   <span
                     key={w}
                     className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-0.5 font-mono text-[10px] text-cs2-text-secondary"

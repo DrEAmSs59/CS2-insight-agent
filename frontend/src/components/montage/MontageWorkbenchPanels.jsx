@@ -40,6 +40,7 @@ import {
 import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore";
 import { labelTag } from "../../utils/tagDescriptions";
+import { weaponUsedTokens } from "../../i18n/weaponNames.js";
 
 function montageAiExplainText(clip, t) {
   const c = getClipComment(clip);
@@ -373,17 +374,12 @@ export function MontageOrchestrationTimeline({
       const trLine = next ? formatTransitionLine?.(transitionByClipId, clip.id) : null;
       const variant = getMontageTimelineVariant(clip);
       const dur = getClipDurationSeconds(clip);
-      const weapon =
-        clip.weapon_used &&
-        String(clip.weapon_used)
-          .split(" / ")
-          .map((w) => w.trim())
-          .filter(Boolean)[0];
+      const weapon = weaponUsedTokens(clip.weapon_used, locale)[0];
       const tags = Array.isArray(clip.context_tags) ? clip.context_tags.slice(0, 6) : [];
       const mapName = mapNameFromClip(clip);
       const perspectiveZh = getRecordedClipPerspectiveZh(clip, t);
       const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip, t);
-      const factLine = getMontageClipFactLine(clip, {}, t);
+      const factLine = getMontageClipFactLine(clip, {}, t, locale);
       const scorePair = getMontageScorePair(clip);
       const rnd = clip.round != null && Number.isFinite(Number(clip.round)) ? Number(clip.round) : null;
       const victimSegCount = getMontageExtraVictimPovCount(clip);
@@ -407,7 +403,7 @@ export function MontageOrchestrationTimeline({
         victimSegCount,
       };
     });
-  }, [clips, transitionByClipId, formatTransitionLine]);
+  }, [clips, transitionByClipId, formatTransitionLine, locale, t]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-surface-1 shadow-lg">
@@ -751,12 +747,7 @@ export function MontageMaterialPoolCard({
   const locale = useLocaleStore((s) => s.locale);
   const mapName = mapNameFromClip(clip);
   const dur = getClipDurationSeconds(clip);
-  const weaponPrimary =
-    clip.weapon_used &&
-    String(clip.weapon_used)
-      .split(" / ")
-      .map((w) => w.trim())
-      .filter(Boolean)[0];
+  const weaponPrimary = weaponUsedTokens(clip.weapon_used, locale)[0];
   const weaponShow = weaponPrimary
     ? weaponPrimary.length > 22
       ? `${weaponPrimary.slice(0, 20)}…`
@@ -766,7 +757,7 @@ export function MontageMaterialPoolCard({
   const playerName = clip.player_name?.trim() || t("montage.poolCardUnknownPlayer");
   const perspectiveZh = getRecordedClipPerspectiveZh(clip, t);
   const perspectivePrimary = getRecordedClipPerspectivePrimaryZh(clip, t);
-  const factLine = getMontageClipFactLine(clip, { includeDemoName: false }, t);
+  const factLine = getMontageClipFactLine(clip, { includeDemoName: false }, t, locale);
   const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
   const variant = getMontageTimelineVariant(clip);
   const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";

@@ -1,6 +1,7 @@
 /** Montage workbench helpers — all functions tolerate missing fields. */
 
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
+import { weaponUsedTokens } from "../i18n/weaponNames.js";
 
 /** 移除字符串中的 emoji 及变体选择符，避免在部分环境下渲染为方块。 */
 export function stripTagEmoji(str) {
@@ -297,17 +298,12 @@ export function friendlyClipTitleForQueue(clip, t) {
  * 高光 / 下饭：一行展示「击杀了谁 / 被谁击杀」与武器（与解析字段 weapon_used、victims、killer_name 对齐）。
  * @param {Record<string, unknown>} clip
  * @param {Function} t — translation function from useT()
+ * @param {string} [locale="zh"]
  */
-export function formatClipCombatSummaryLine(clip, t) {
+export function formatClipCombatSummaryLine(clip, t, locale = "zh") {
   if (!clip || typeof clip !== "object") return "";
   const cat = String(clip.category || "").trim().toLowerCase();
-  const rawW = String(clip.weapon_used || "").trim();
-  const weapons = rawW
-    ? rawW
-        .split(" / ")
-        .map((x) => String(x).trim())
-        .filter(Boolean)
-    : [];
+  const weapons = weaponUsedTokens(clip.weapon_used, locale);
 
   if (cat === "highlight") {
     const victims = Array.isArray(clip.victims)
@@ -323,7 +319,6 @@ export function formatClipCombatSummaryLine(clip, t) {
     const parts = [];
     if (killer) parts.push(t("montage.combatKilledBy", { killer }));
     if (weapons.length) parts.push(weapons.join(" / "));
-    else if (rawW) parts.push(rawW);
     return parts.join(" · ");
   }
   return "";
@@ -627,8 +622,9 @@ export function getClipRoundLabel(clip) {
  * @param {Record<string, unknown>} clip
  * @param {{ includeDemoName?: boolean }} opts
  * @param {Function} t — translation function from useT()
+ * @param {string} [locale="zh"]
  */
-export function getMontageClipFactLine(clip, { includeDemoName = true } = {}, t) {
+export function getMontageClipFactLine(clip, { includeDemoName = true } = {}, t, locale = "zh") {
   if (!clip || typeof clip !== "object") return "";
   const demo = includeDemoName
     ? (clip.demo_filename && String(clip.demo_filename).replace(/\.(dem|mp4)$/i, "").trim()) ||
@@ -644,7 +640,7 @@ export function getMontageClipFactLine(clip, { includeDemoName = true } = {}, t)
     : clip.round != null && Number.isFinite(Number(clip.round))
       ? t("montage.factRound", { n: clip.round })
       : "";
-  const w = (clip.weapon_used && String(clip.weapon_used).split(" / ")[0]?.trim()) || "";
+  const w = weaponUsedTokens(clip.weapon_used, locale)[0] || "";
   const cat = String(clip.category || "").toLowerCase();
   const kind = String(clip.timeline_record_kind || "").trim();
   const wck = String(clip.workbench_clip_kind || clip.recording_request_type || "").trim();

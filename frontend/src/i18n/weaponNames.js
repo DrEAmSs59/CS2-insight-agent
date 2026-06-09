@@ -103,3 +103,13 @@ export function weaponDisplayName(weaponName, locale) {
   if (locale !== "en") return weaponName;
   return WEAPON_NAME_ZH_TO_EN[weaponName] ?? weaponName;
 }
+
+/** Split backend `weapon_used` ("A / B") and localize each token. */
+export function weaponUsedTokens(raw, locale) {
+  if (raw == null || String(raw).trim() === "") return [];
+  return String(raw)
+    .split(" / ")
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .map((w) => weaponDisplayName(w, locale));
+}

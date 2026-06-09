@@ -554,4 +554,4 @@ POV HUD 能够让 Demo 的画面看起来更接近实际个人游戏。
 <img src="asset/wx.jpg" alt="赞助方式1" style="zoom:33%;" />
 <img src="asset/ali.jpg" alt="赞助方式2" style="zoom:33%;" />
 
-> **CS2 Insight Agent** v2.1.2 · Made with ❤️ for CS2 Players
+> **CS2 Insight Agent** v2.2.0 · Made with ❤️ for CS2 Players

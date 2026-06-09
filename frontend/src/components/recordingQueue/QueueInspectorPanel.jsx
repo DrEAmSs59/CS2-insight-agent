@@ -9,6 +9,7 @@ import { useRecordingQueue } from "../../stores/recordingQueueStore";
 import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore";
 import { labelTag } from "../../utils/tagDescriptions";
+import { weaponUsedTokens } from "../../i18n/weaponNames.js";
 import { AiScoreBadge } from "../ClipCard";
 import {
   getMontageBlockShortLabel,
@@ -92,12 +93,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const hasScorePair = own != null && opp != null && Number.isFinite(own) && Number.isFinite(opp);
   const mapName = String(cd.map_name || cd.map || "").trim();
   const aiScore = cd.ai_score;
-  const weaponPrimary =
-    cd.weapon_used &&
-    String(cd.weapon_used)
-      .split(" / ")
-      .map((w) => w.trim())
-      .filter(Boolean)[0];
+  const weaponPrimary = weaponUsedTokens(cd.weapon_used, locale)[0];
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 5) : [];
   const estSec = estimateItemRecordSeconds(selectedItem, globalPacing);
   const victimsCount = Array.isArray(cd.victims) ? cd.victims.length : 0;

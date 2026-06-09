@@ -570,7 +570,7 @@ function QueueItemCard({
   const mapName = String(cd.map_name || cd.map || "").trim();
   const aiScore = cd.ai_score;
   const queueSummary = String(cd.queue_summary_line || "").trim();
-  const combatSummary = !tl ? formatClipCombatSummaryLine(cd, t) : "";
+  const combatSummary = !tl ? formatClipCombatSummaryLine(cd, t, locale) : "";
   const showLegacyTags =
     !queueSummary &&
     Array.isArray(cd.context_tags) &&

@@ -14,6 +14,7 @@ import {
   formatClipCombatSummaryLine,
 } from "../../utils/montageUtils";
 import { useT } from "../../i18n/useT.js";
+import { useLocaleStore } from "../../i18n/localeStore";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ export default function RecordingResultModal({
   results = [],
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const [copiedIdx, setCopiedIdx] = useState(null);
 
   const successCount = results.filter((r) => r.success).length;
@@ -119,7 +121,7 @@ export default function RecordingResultModal({
           const aborted = isAborted(result);
           const cd = result._queueItem?.clipData ?? null;
           const title = cd ? friendlyClipTitleForQueue(cd, t) : t("queue.modalDefaultClipTitle", { n: result._index + 1 });
-          const combatLine = cd ? formatClipCombatSummaryLine(cd, t) : "";
+          const combatLine = cd ? formatClipCombatSummaryLine(cd, t, locale) : "";
           const rl = roundLabel(cd);
           const killCount = cd?.kill_count ? Number(cd.kill_count) : null;
           const demoFile = String(result._queueItem?.demoFilename || result._queueItem?.demoPath || "").trim();

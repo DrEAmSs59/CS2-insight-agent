@@ -126,7 +126,7 @@ export default function QueueWorkspaceRow({
   const timelineMetaLine = timeline ? timelineQueueMetaOneLiner(cd, estSec, t) : "";
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 3) : [];
   const queueSummary = String(cd.queue_summary_line || "").trim();
-  const combatSummary = !timeline ? formatClipCombatSummaryLine(cd, t) : "";
+  const combatSummary = !timeline ? formatClipCombatSummaryLine(cd, t, locale) : "";
   const categoryKey = timeline
     ? "queue.rowCatTimeline"
     : ({

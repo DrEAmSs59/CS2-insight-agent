@@ -51,6 +51,8 @@ CS2InsightAgent-*-windows-amd64.zip
 开发白皮书.md
 
 # Local tooling scripts (keep local only)
+debug_demoparser.py
+debug_demo_max_tick.py
 debug_demoparser2.py
 debug_parse_demo.py
 .cursor/

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { weaponDisplayName, WEAPON_NAME_ZH_TO_EN } from "../weaponNames.js";
+import { weaponDisplayName, WEAPON_NAME_ZH_TO_EN, weaponUsedTokens } from "../weaponNames.js";
 
 describe("weaponDisplayName", () => {
   test("zh locale returns input unchanged", () => {
@@ -67,5 +67,20 @@ describe("weaponDisplayName", () => {
       expect(en, `knife "${zh}"`).toBeTruthy();
       expect(en, `knife "${zh}"`).not.toBe(zh);
     }
+  });
+});
+
+describe("weaponUsedTokens", () => {
+  test("en splits and localizes multi-weapon strings", () => {
+    expect(weaponUsedTokens("消音 USP-S / 沙鹰", "en")).toEqual(["USP-S", "Desert Eagle"]);
+  });
+
+  test("zh returns tokens unchanged", () => {
+    expect(weaponUsedTokens("消音 M4A1-S / AK-47", "zh")).toEqual(["消音 M4A1-S", "AK-47"]);
+  });
+
+  test("empty input returns []", () => {
+    expect(weaponUsedTokens("", "en")).toEqual([]);
+    expect(weaponUsedTokens(null, "en")).toEqual([]);
   });
 });
