@@ -6,6 +6,7 @@ import RoundSummaryPanel from "./RoundSummaryPanel";
 import { queueItemClientUid } from "../../../utils/recordingBatch";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../../../utils/timelineQueue";
 import { useT } from "../../../i18n/useT.js";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 
 /**
  * @param {{
@@ -34,6 +35,7 @@ export default function RoundTimelineItem({
   onRemoveRound,
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const rn = Number(roundRow?.round_number ?? roundRow?.round);
   const events = Array.isArray(roundRow?.events) ? roundRow.events : [];
   const sum = roundRow?.summary || {};
@@ -76,6 +78,7 @@ export default function RoundTimelineItem({
       targetPlayer: focusedPlayer,
       round: rn,
       t,
+      locale,
     });
     return queuedUids.has(
       queueItemClientUid({

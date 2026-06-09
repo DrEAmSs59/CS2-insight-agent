@@ -57,6 +57,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const [backendReady, setBackendReady] = useState(false);
   const [aiMode, setAiMode] = useState(false);
   
@@ -1447,6 +1448,7 @@ export default function App() {
         targetPlayer: meta.targetPlayer,
         round: roundRow?.round ?? event?.round,
         t,
+        locale,
       });
       const uid = clipData.client_clip_uid;
       const qk = queueItemClientUid({
@@ -1480,6 +1482,7 @@ export default function App() {
       queuedClientClipUidsGlobal,
       setProgressText,
       t,
+      locale,
     ],
   );
 
@@ -1538,6 +1541,7 @@ export default function App() {
           targetPlayer: meta.targetPlayer,
           round: ev.round,
           t,
+          locale,
         });
         const uid = clipData.client_clip_uid;
         const qk = queueItemClientUid({
@@ -1574,6 +1578,7 @@ export default function App() {
       queuedClientClipUidsGlobal,
       setProgressText,
       t,
+      locale,
     ],
   );
 
@@ -1595,10 +1600,11 @@ export default function App() {
         targetPlayer: meta.targetPlayer,
         round: roundRow?.round ?? event?.round,
         t,
+        locale,
       });
       removeByClientClipUid(clipData.client_clip_uid);
     },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid, t],
+    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid, t, locale],
   );
 
   const handleRemoveTimelineRoundFromQueue = useCallback(

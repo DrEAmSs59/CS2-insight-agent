@@ -1,6 +1,8 @@
 import { X } from "lucide-react";
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
 import { useT } from "../../../i18n/useT.js";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
+import { weaponDisplayName } from "../../../i18n/weaponNames.js";
 
 function assisterDisplayName(raw) {
   if (raw == null || raw === "") return "";
@@ -65,6 +67,7 @@ export default function KillfeedEventRow({
   variant = "default",
 }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const typ = String(event?.type || "");
   const isAssistOnly = typ === "assist_only";
   const isKill = typ === "kill" || event?.record_type === "kill";
@@ -73,7 +76,7 @@ export default function KillfeedEventRow({
   const atkRaw = String(event?.attacker_name || "").trim();
   const atk = (atkRaw && !["nan", "undefined", "null"].includes(atkRaw.toLowerCase())) ? atkRaw : "—";
   const vic = String(event?.victim_name || "").trim() || "—";
-  const weapon = String(event?.weapon_name || "").trim() || "—";
+  const weapon = weaponDisplayName(String(event?.weapon_name || "").trim(), locale) || "—";
   const weaponKey = String(event?.weapon_key || "").trim();
   const assistName = assisterDisplayName(event?.assister_name);
   const mods = getModifiers(event);

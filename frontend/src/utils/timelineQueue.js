@@ -5,6 +5,7 @@
  */
 
 import { isTimelineSourceClip } from "./montageUtils";
+import { weaponDisplayName } from "../i18n/weaponNames.js";
 
 /**
  * 队列单行：地图 + R# + 比分（若有）+ 杀数/整回合/死亡 + 估算时长（与高光条风格对齐）。
@@ -47,9 +48,9 @@ export function timelineQueueMetaOneLiner(clipData, estSeconds, t) {
 }
 
 /**
- * @param {{ event: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, round?: number, t?: (key: string, params?: object) => string }} p
+ * @param {{ event: Record<string, unknown>, mapName?: string, targetPlayer?: string | null, round?: number, t?: (key: string, params?: object) => string, locale?: string }} p
  */
-export function buildTimelineEventClipData({ event, mapName = "", targetPlayer = "", round, t }) {
+export function buildTimelineEventClipData({ event, mapName = "", targetPlayer = "", round, t, locale }) {
   const sc = event?.suggested_clip;
   const st = Number(event?.start_tick ?? sc?.start_tick);
   const et = Number(event?.end_tick ?? sc?.end_tick);
@@ -70,7 +71,8 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
   const atkSid = String(event?.attacker_steamid || "").trim();
   const vic = String(event?.victim_name || "").trim();
   const vicSid = String(event?.victim_steamid || "").trim();
-  const wpn = String(event?.weapon_name || event?.weapon || "").trim();
+  const wpnRaw = String(event?.weapon_name || event?.weapon || "").trim();
+  const wpn = weaponDisplayName(wpnRaw, locale || "zh");
   const tr = typeof t === "function" ? t : (k) => k;
   let queueSummaryLine = "";
   if (isKill) {

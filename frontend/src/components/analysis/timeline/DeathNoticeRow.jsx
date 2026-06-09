@@ -1,5 +1,7 @@
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
 import { useT } from "../../../i18n/useT.js";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
+import { weaponDisplayName } from "../../../i18n/weaponNames.js";
 
 /** 过滤 demo 里可能出现的 NaN / 占位字符串，避免显示「助攻: nan」。 */
 function assisterDisplayName(raw) {
@@ -19,6 +21,7 @@ function assisterDisplayName(raw) {
  */
 export default function DeathNoticeRow({ event, focusedPlayer = "", queued = false, onEnqueue }) {
   const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const typ = String(event?.type || "");
   const isAssistOnly = typ === "assist_only";
   const isKill = typ === "kill" || event?.record_type === "kill";
@@ -26,7 +29,7 @@ export default function DeathNoticeRow({ event, focusedPlayer = "", queued = fal
   const timeText = String(event?.time_text || "--:--");
   const atk = String(event?.attacker_name || "").trim() || "—";
   const vic = String(event?.victim_name || "").trim() || "—";
-  const weapon = String(event?.weapon_name || "").trim() || "—";
+  const weapon = weaponDisplayName(String(event?.weapon_name || "").trim(), locale) || "—";
   const weaponKey = String(event?.weapon_key || "").trim();
   const assistName = assisterDisplayName(event?.assister_name);
   const canRec = Boolean(event?.can_record) && !isAssistOnly;
