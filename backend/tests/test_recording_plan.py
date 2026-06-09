@@ -948,6 +948,58 @@ if segWP3:
           f"got {segWP3.end_tick}")
 
 
+# ── Test WP4: ceiling at/before anchor → keep anchor+1, warn (no cut before payload) ──
+print("\nTest WP4: win_panel ceiling at/before anchor keeps anchor+1 and warns")
+win_panel4 = 20_000
+demoWP4 = make_demo(final_round=5, final_round_start_tick=15_000,
+                    final_round_end_tick=18_000, demo_end_tick=win_panel4 + 5_000,
+                    win_panel_match_tick=win_panel4)
+# guard 0.5s=32 → ceiling=19968; kill AFTER the ceiling so ceiling <= anchor
+kill_wp4 = 19_980
+optsWP4 = RecordingOptions(highlight_post_sec=2.0, final_round_win_panel_guard_sec=0.5)
+reqWP4 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demoWP4,
+    options=optsWP4,
+    events=[make_kill_event(kill_wp4, round_num=5)],
+)
+planWP4 = build_plan(reqWP4)
+segsWP4 = planWP4.segments + planWP4.disabled_segments
+segWP4 = segsWP4[0] if segsWP4 else None
+if segWP4 and not segWP4.disabled:
+    check("WP4a: end kept at anchor+1 (not cut before payload)", segWP4.end_tick == kill_wp4 + 1,
+          f"got {segWP4.end_tick}, want {kill_wp4 + 1}")
+check("WP4b: anchor-safety warning emitted",
+      any("win_panel_ceiling_at_or_before_anchor" in w for w in planWP4.warnings),
+      f"warnings={planWP4.warnings}")
+
+
+# ── Test WP5: ceiling forces too-short clip → segment disabled ──────────────
+print("\nTest WP5: win_panel ceiling too close to start disables segment")
+win_panel5 = 20_000
+demoWP5 = make_demo(final_round=5, final_round_start_tick=15_000,
+                    final_round_end_tick=18_000, demo_end_tick=win_panel5 + 5_000,
+                    win_panel_match_tick=win_panel5)
+# ceiling=19968; small pre puts start just below ceiling so duration < min (0.8s=51).
+# kill=19960 < ceiling → clean ceiling path; start = 19960 - int(0.1*64)=19954; dur=14 < 51.
+optsWP5 = RecordingOptions(highlight_pre_sec=0.1, highlight_post_sec=2.0,
+                           final_round_win_panel_guard_sec=0.5,
+                           final_round_min_duration_sec=0.8)
+kill_wp5 = 19_960
+reqWP5 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    demo=demoWP5,
+    options=optsWP5,
+    events=[make_kill_event(kill_wp5, round_num=5)],
+)
+planWP5 = build_plan(reqWP5)
+disabledWP5 = [s for s in planWP5.disabled_segments if s.disabled_reason == "too_close_to_final_round_end"]
+check("WP5a: segment disabled with too_close_to_final_round_end", len(disabledWP5) >= 1,
+      f"disabled={[(s.disabled, s.disabled_reason) for s in planWP5.disabled_segments]}, active={len(planWP5.segments)}")
+
+
 # ── Summary ────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 passed = sum(1 for s, *_ in results if s == "PASS")
