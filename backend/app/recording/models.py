@@ -45,6 +45,8 @@ class DemoContext(BaseModel):
     final_round_end_tick: int
     server_name: str = ""
     all_players: list = []
+    # 比赛结算界面（cs_win_panel_match）出现的 tick；0 = demo 无该事件，回退旧 guard 逻辑
+    win_panel_match_tick: int = 0
 
 
 class TargetPlayer(BaseModel):
@@ -105,6 +107,8 @@ class RecordingOptions(BaseModel):
     # Extra tail for the final round's clip so the match-deciding moment doesn't
     # cut abruptly. Capped at the real round_end so it never spills into the scoreboard.
     final_round_extra_post_sec: float = 1.0
+    # win_panel 可用时，结束上限 = win_panel_tick − 本守护；远小于 final_round_guard_sec
+    final_round_win_panel_guard_sec: float = 0.5
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
