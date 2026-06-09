@@ -35,6 +35,8 @@ from .round_economy import (
     build_round_economy, build_round_economy_shared, extract_target_team_map,
     build_round_scores, build_round_scores_team_based,
     _scoreline_by_starting_roster, _extract_team_names_from_demo,
+    build_group_side_by_round, round_target_team_map_from_groups,
+    compute_team_identity_scoreline,
 )
 from .player_roster import (
     build_player_name_to_user_id, build_player_name_to_steam_id,
@@ -42,10 +44,12 @@ from .player_roster import (
     _build_all_players_roster, _spec_player_slot_from_event_user_id,
     _lookup_user_id_for_name, _lookup_steam_id_for_name,
     lookup_spec_player_slot_for_name,
+    build_steam_to_team_from_player_info, build_name_to_team_from_player_info,
 )
 from .spatial_analysis import (
     parse_spatial_snapshots, _victim_facing_attacker, is_jump_kill,
     detect_kill_action_tags, enrich_kill_action_tags_spatial,
+    _spatial_snap_pre_kill, _alive_mates_and_enemies,
 )
 from .tag_detection import (
     build_highlight_tags, _extend_tags_unique,
@@ -261,6 +265,14 @@ class DemoAnalyzer:
             round_start_df=round_start_df,
         )
 
+        # 可靠的队伍身份（parse_player_info）+ 每回合阵营表：作为逐 tick team_num 失效
+        # （部分国服 demo）时的兜底来源，用于队伍分组、胜负与比分。
+        steam_to_final_team_shared = build_steam_to_team_from_player_info(self.parser)
+        name_to_final_team_shared = build_name_to_team_from_player_info(self.parser)
+        group_side_by_round_shared = build_group_side_by_round(
+            self.parser, round_freeze_end_ticks_shared, steam_to_final_team_shared,
+        )
+
         # Name strip on all relevant DataFrames
         for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
             if _df is None or _df.empty:
@@ -294,6 +306,9 @@ class DemoAnalyzer:
             "freeze_end_df":                 freeze_end_df,
             "round_start_df":                round_start_df,
             "match_start_df":                match_start_df,
+            "steam_to_final_team_shared":    steam_to_final_team_shared,
+            "name_to_final_team_shared":     name_to_final_team_shared,
+            "group_side_by_round_shared":    group_side_by_round_shared,
         }
 
     def analyze_multi_players(
@@ -416,6 +431,17 @@ class DemoAnalyzer:
             round_target_team_map  = extract_target_team_map(
                 _shared["economy_ticks_df"], _shared["tick_to_round_shared"], target_player,
             )
+            # extract_target_team_map 依赖逐 tick team_num；坏数据 demo 上会近乎为空。
+            # 覆盖率不足时改用 parse_player_info + 每回合阵营表重建目标逐回合阵营。
+            _grp_side = _shared.get("group_side_by_round_shared") or {}
+            _expected_rounds = len(_shared.get("round_freeze_end_ticks_shared") or {})
+            if _grp_side and len(round_target_team_map) < max(1, _expected_rounds // 2):
+                _tfinal = (_shared.get("name_to_final_team_shared") or {}).get(
+                    target_player.strip().lower()
+                )
+                _rebuilt = round_target_team_map_from_groups(_grp_side, _tfinal)
+                if _rebuilt:
+                    round_target_team_map = _rebuilt
 
             round_team_score_map = build_round_scores_team_based(
                 self.parser, round_target_team_map, match_start_tick,
@@ -1144,6 +1170,46 @@ class DemoAnalyzer:
                 ))
                 break
 
+        # 🐂 1v1 斗牛单杀：该回合目标仅 1 杀，但亲手赢下 1v1 残局
+        _duel_covered = {c.round for c in highlight_clips}
+        for rnd, kills in round_kills.items():
+            if len(kills) >= 2 or rnd in _duel_covered:
+                continue
+            if round_result_map.get(rnd) is not True:
+                continue
+            for k in kills:
+                kt = _int(k.get("tick"))
+                sk = _spatial_snap_pre_kill(spatial_cache, kt)
+                if sk is None:
+                    continue
+                _as = alive_summary or {}
+                _alive_by_team = (
+                    _as.get(kt - 8) or _as.get(kt - 16)
+                    or _as.get(kt - 24) or _as.get(kt - 32) or _as.get(kt)
+                )
+                pair = _alive_mates_and_enemies(sk, target_player, alive_by_team=_alive_by_team)
+                if pair is None:
+                    continue
+                n_mates, n_enems = pair
+                if (n_mates + 1) != 1 or n_enems != 1:
+                    continue
+                vic = str(k.get("victim") or "")
+                wpn = str(k.get("weapon") or "")
+                so, se = round_start_scores_for_target(rnd, round_team_score_map)
+                _rnd_dt = round_death_tick_map.get(rnd)
+                highlight_clips.append(Clip(
+                    clip_id=f"c_{uuid.uuid4().hex[:8]}",
+                    map_name=map_name, round=rnd, category="highlight",
+                    weapon_used=_translate_weapon(wpn), kill_count=1,
+                    start_tick=max(0, kt - BUFFER_SECONDS_BEFORE * TICK_RATE),
+                    end_tick=kt + BUFFER_SECONDS_AFTER * TICK_RATE,
+                    context_tags=["🐂 1v1 斗牛"],
+                    victims=[vic] if vic else [], kill_ticks=[kt],
+                    score_own=so, score_opp=se, round_won=round_result_map.get(rnd),
+                    clip_min_tick=round_freeze_end_ticks.get(rnd), death_tick=_rnd_dt,
+                ))
+                break
+
         rounds_with_kill_highlight = {c.round for c in highlight_clips}
         bomb_round_defuse_ticks: dict[int, int] = {bh["round"]: bh["defuse_tick"] for bh in bomb_highlights}
         merged_highlights: list[Clip] = []
@@ -1403,7 +1469,6 @@ class DemoAnalyzer:
         try:
             from ..round_timeline import build_round_timeline, build_round_timeline_error_fallback
 
-            round_scores_tbl = build_round_scores(self.parser, match_start_tick)
             re_df_tl = re_df_cached
             tteam: Optional[int] = None
             if round_target_team_map:
@@ -1411,6 +1476,16 @@ class DemoAnalyzer:
                     if rk in round_target_team_map:
                         tteam = int(round_target_team_map[rk])
                         break
+
+            # 每回合比分：优先按「队伍身份」累计（与记分牌一致，换边不串号），
+            # 回退到旧的按阵营 (T/CT) 累计。槽位约定：2=开赛打 T 的一方，3=开赛打 CT 的一方。
+            round_scores_tbl = build_round_scores(self.parser, match_start_tick)
+            if round_team_score_map and tteam in (2, 3):
+                _opp_slot = 3 if tteam == 2 else 2
+                round_scores_tbl = {
+                    rn: {tteam: int(own), _opp_slot: int(opp)}
+                    for rn, (own, opp) in round_team_score_map.items()
+                }
             bundle = build_round_timeline(
                 demo_path=str(self.dem_path),
                 map_name=map_name,
@@ -1516,6 +1591,15 @@ def collect_match_summary_metrics(
 
     if match_start_tick > 0:
         team_a_score, team_b_score = _scoreline_by_starting_roster(parser, match_start_tick, re_df)
+
+    # _scoreline_by_starting_roster 依赖逐 tick team_num，部分国服 demo 上该字段几乎全空，
+    # 会退化成单边比分（如 9:0）。检测到单边或全零时，改用对坏数据稳健的「队伍身份」算法重算。
+    _one_sided = (team_a_score == 0) ^ (team_b_score == 0)
+    if _one_sided or (team_a_score == 0 and team_b_score == 0):
+        ta_id, tb_id = compute_team_identity_scoreline(parser, match_start_tick, re_df)
+        if ta_id + tb_id > 0:
+            team_a_score, team_b_score = ta_id, tb_id
+
     if team_a_score == 0 and team_b_score == 0:
         team_a_score, team_b_score = _count_team_wins_from_round_end_df(re_filtered)
         if team_a_score == 0 and team_b_score == 0 and match_start_tick > 0:

@@ -33,6 +33,8 @@ from .tag_constants import (
     _FLYING_SNIPER_Z_DELTA_MIN,
     _KEQIAO_SEMI_SNIPERS,
     _KEQIAO_WEAPONS,
+    _ONE_MAN_ARMY_MIN_ENEMIES,
+    _ONE_MAN_ARMY_MIN_KILLS,
 )
 from .weapons import (
     SNIPER_WEAPONS,
@@ -54,6 +56,7 @@ from .spatial_analysis import (
     _victim_facing_attacker,
     is_jump_kill,
     _smallest_angle_diff_deg,
+    one_man_army_eval,
 )
 
 
@@ -517,6 +520,9 @@ def build_highlight_tags(
     best_nt_start = -1
     best_2v_n = -1
     any_3v5 = False
+    won_1v1_duel = False
+    oma_isolated_kills = 0
+    oma_max_nearby_enemies = 0
     for start in range(n):
         kt = _int(kills_sorted[start].get("tick"))
         sk = _spatial_snap_pre_kill(spatial_cache, kt)
@@ -534,6 +540,9 @@ def build_highlight_tags(
         n_mates, n_enems = pair
         total_friendly = n_mates + 1
         kills_from_here = n - start
+        if total_friendly == 1 and n_enems == 1 and kills_from_here >= 1:
+            # 残局打到 1v1，且目标亲手击杀最后一名敌人
+            won_1v1_duel = True
         if total_friendly == 1 and n_enems >= 2:
             if kills_from_here >= n_enems and n_enems > best_epic_1v:
                 best_epic_1v = n_enems
@@ -547,12 +556,30 @@ def build_highlight_tags(
         elif total_friendly == 3 and n_enems == 5:
             any_3v5 = True
 
+        # 一人成军：孤身（队友不在身边）被多名敌人围攻时的击杀
+        oma = one_man_army_eval(sk, target_player)
+        if oma is not None:
+            is_isolated, nearby_enemies = oma
+            if is_isolated:
+                oma_isolated_kills += 1
+                if nearby_enemies > oma_max_nearby_enemies:
+                    oma_max_nearby_enemies = nearby_enemies
+
     if best_epic_1v >= 2:
         tags.append(f"🔥 1v{best_epic_1v} 史诗残局")
     if best_2v_n >= 4:
         tags.append(f"🔥 2v{best_2v_n} 兄弟齐心")
     if any_3v5:
         tags.append("🔥 3v5 绝地反击")
+
+    # 🐂 1v1 斗牛：打到 1v1 且亲手赢下（仅胜局）
+    if won_1v1_duel and round_won is True:
+        tags.append("🐂 1v1 斗牛")
+
+    # 🪖 一人成军：孤身被围歼下完成多杀（不要求胜负）
+    if (oma_isolated_kills >= _ONE_MAN_ARMY_MIN_KILLS
+            and oma_max_nearby_enemies >= _ONE_MAN_ARMY_MIN_ENEMIES):
+        tags.append("🪖 一人成军")
 
     if best_nt_1v >= 2 and best_nt_start >= 0:
         _nt_1v_active = True

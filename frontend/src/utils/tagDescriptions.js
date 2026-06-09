@@ -190,6 +190,14 @@ const EXACT = {
     zh: "多杀起始时 HP 很低却完成翻盘",
     en: "Multi-kill started with very low HP",
   },
+  "🐂 1v1 斗牛": {
+    zh: "残局打到 1v1，亲手击杀最后一名敌人赢下回合",
+    en: "Won a 1v1 clutch by fragging the last enemy",
+  },
+  "🪖 一人成军": {
+    zh: "队友存活但都不在身边时，孤身被多名敌人（≥3）围攻并完成多杀（≥2）",
+    en: "Outnumbered solo (teammates alive but far away), killed 2+ of 3+ nearby enemies",
+  },
 
   // ── 新增 CS 黑话 ──
   "🔙 背刺": {
@@ -336,13 +344,9 @@ const EXACT = {
   },
 
   // ── 下饭高级 ──
-  "CS定律": {
+  "切刀就死": {
     zh: "架枪 ≥10s → 切刀或投掷物 → 1.5s 内被杀",
     en: "Held an angle for ≥ 10s, switched to knife or utility, then died within 1.5s",
-  },
-  "切刀必死": {
-    zh: "CS 定律的语义补充",
-    en: "Accompanies the CS Law: died right after switching away from your gun",
   },
   "人肉吸铁石": {
     zh: "爆头死亡且至少 2 个队友比你更靠近击杀者",
@@ -459,6 +463,8 @@ const LABELS_EN = {
   "无情碾压": "Overwhelming",
   "🔥 3v5 绝地反击": "🔥 3v5 Comeback Win",
   "❤️ 极限锁血战神": "❤️ Low-HP Multi-kill",
+  "🐂 1v1 斗牛": "🐂 1v1 Clutch Won",
+  "🪖 一人成军": "🪖 One-man Army",
 
   // ── 新增 CS 黑话 ──
   "🔙 背刺": "🔙 Backstab",
@@ -506,8 +512,7 @@ const LABELS_EN = {
   "痛击队友": "Team Kill",
 
   // ── 下饭高级 ──
-  "CS定律": "CS Law",
-  "切刀必死": "Knife Switch Death",
+  "切刀就死": "Knife Switch Death",
   "人肉吸铁石": "Magnet for Bullets",
   "保镖无用": "Useless Cover",
   "人体描边": "Bullet Sponge",

@@ -82,6 +82,17 @@ _OUTLINE_MAX_DAMAGE   = 25                       # 造成伤害 ≤ 25
 _MAGNET_RATIO         = 0.6                      # 队友距敌 < 60% × 你距敌
 _MAGNET_MIN_CLOSER    = 2                        # 至少 2 个队友更近
 
+# ── 一人成军：孤身被围歼（与地图无关，纯相对距离判定）──
+# 「队友不在身边」：最近存活队友的 2D 距离 ≥ 此值，视为孤身（队友在别的区域）。
+# 量纲参考：大狙「百步穿杨」长距离阈值 _HIGHLIGHT_LONG_RANGE_DIST = 1500。
+_ONE_MAN_ARMY_ISOLATION_DIST = 1400.0
+# 「面对很多人」：以目标为圆心，此半径内的存活敌人计为贴身围攻。
+_ONE_MAN_ARMY_ENGAGE_RADIUS  = 1200.0
+# 触发所需的「围攻敌人数」（任一孤身击杀瞬间达到即可）。
+_ONE_MAN_ARMY_MIN_ENEMIES    = 3
+# 触发所需的「孤身状态下的击杀数」。
+_ONE_MAN_ARMY_MIN_KILLS      = 2
+
 # ── 人体描边 / NiKo Play ──
 _BACKSTAB_WINDOW_TICKS = int(TICK_RATE * 3)
 _BACKSTAB_ATTACKER_BACK_DEG = 60.0

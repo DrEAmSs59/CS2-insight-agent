@@ -23,6 +23,69 @@ from .parse_utils import (
 from .tag_constants import TICK_RATE
 
 
+def _is_real_steamid64(sid: object) -> bool:
+    """是否为真实的 64 位 SteamID（剔除 GOTV/bot 等伪 id，如 "17"）。"""
+    s = _norm_steam_id(sid)
+    return bool(s) and s.isdigit() and len(s) >= 16 and s.startswith("7656")
+
+
+def _player_info_team_col(pi: pd.DataFrame) -> Optional[str]:
+    return next((c for c in ("team_number", "team_num", "team") if c in pi.columns), None)
+
+
+def build_steam_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
+    """steamid64(str) -> 末段（第二阶段）队伍号 2/3，来自 parse_player_info。
+
+    parse_player_info 是最可靠的全员队伍来源：即便逐 tick 的 team_num 字段在某些
+    国服 demo 上几乎全为空，它仍能给出完整 5v5。返回的队号为「比赛末段」所在阵营，
+    用作稳定的「队伍身份」分组键（两支 5 人队整局不变，换边只改阵营号）。
+    """
+    try:
+        pi = _to_pandas_df(parser.parse_player_info())
+    except BaseException as e:
+        if isinstance(e, _DEMOPARSER_RE_RAISE):
+            raise
+        return {}
+    if pi.empty or "steamid" not in pi.columns:
+        return {}
+    tcol = _player_info_team_col(pi)
+    if tcol is None:
+        return {}
+    out: dict[str, int] = {}
+    for _, r in pi.iterrows():
+        if not _is_real_steamid64(r.get("steamid")):
+            continue
+        tm = _cell_team(r.get(tcol))
+        if tm in (2, 3):
+            out[_norm_steam_id(r.get("steamid"))] = tm
+    return out
+
+
+def build_name_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
+    """玩家名(小写) -> 末段队伍号 2/3，来自 parse_player_info（剔除 bot/观察者）。"""
+    try:
+        pi = _to_pandas_df(parser.parse_player_info())
+    except BaseException as e:
+        if isinstance(e, _DEMOPARSER_RE_RAISE):
+            raise
+        return {}
+    if pi.empty or "name" not in pi.columns:
+        return {}
+    tcol = _player_info_team_col(pi)
+    if tcol is None:
+        return {}
+    has_sid = "steamid" in pi.columns
+    out: dict[str, int] = {}
+    for _, r in pi.iterrows():
+        if has_sid and not _is_real_steamid64(r.get("steamid")):
+            continue
+        nm = _cell_str(r.get("name")).strip().lower()
+        tm = _cell_team(r.get(tcol))
+        if nm and tm in (2, 3):
+            out[nm] = tm
+    return out
+
+
 def get_demo_spec_calibration_tick(dem_path: str | Path) -> int:
     """Return a tick after the real match has started, when the full player roster is present."""
     try:
@@ -229,6 +292,29 @@ def _build_all_players_roster(
             "spec_slot": spec_slots.get(name.lower()),
             "team_num": team_num,
         })
+
+    # 逐 tick team_num 在部分国服 demo 上几乎全为空，会导致名单残缺/单边。
+    # 此时用 parse_player_info 的可靠队伍补全全员。
+    distinct = {p["team_num"] for p in players}
+    if len(players) < 6 or len(distinct) < 2:
+        name_to_team_pi = build_name_to_team_from_player_info(parser)
+        if name_to_team_pi:
+            df_names = [str(r.get("name", "")).strip() for _, r in df.iterrows()]
+            existing = {p["name"] for p in players}
+            for name in df_names:
+                if not name or name in existing:
+                    continue
+                tm = name_to_team_pi.get(name.lower())
+                if tm not in (2, 3):
+                    continue
+                existing.add(name)
+                sid_int = name_to_sid.get(name) or name_to_sid.get(name.lower())
+                players.append({
+                    "name": name,
+                    "steamid64": str(sid_int) if sid_int is not None else "",
+                    "spec_slot": spec_slots.get(name.lower()),
+                    "team_num": tm,
+                })
     return players
 
 
@@ -574,36 +660,55 @@ def get_player_list(dem_path: str | Path) -> list[dict]:
                     player_info_team_by_sid[str(sid)] = tm
 
     if stats and (player_info_team_by_name or player_info_team_by_sid):
-        votes: dict[int, dict[int, int]] = {}
-        for name, rec in stats.items():
-            resolved_team = _cell_team(rec.get("team"))
-            if resolved_team not in (2, 3):
-                continue
+        def _pi_team_for(name: str) -> Optional[int]:
             sid_i = _lookup_steam_id_for_name(name_to_sid, name)
-            pi_team = player_info_team_by_sid.get(str(sid_i)) if sid_i is not None else None
-            if pi_team is None:
-                pi_team = player_info_team_by_name.get(str(name).strip().lower())
-            if pi_team in (2, 3):
-                bucket = votes.setdefault(pi_team, {})
-                bucket[resolved_team] = bucket.get(resolved_team, 0) + 1
+            t = player_info_team_by_sid.get(str(sid_i)) if sid_i is not None else None
+            if t is None:
+                t = player_info_team_by_name.get(str(name).strip().lower())
+            return t if t in (2, 3) else None
 
-        player_info_to_tick_team: dict[int, int] = {}
-        for pi_team, counts in votes.items():
-            if counts:
-                player_info_to_tick_team[pi_team] = max(counts.items(), key=lambda kv: kv[1])[0]
+        # 逐 tick 解析出的 team 是否可信：需覆盖大多数玩家且确实出现两支队伍。
+        # 国服 demo 常见仅极少数玩家有 team_num，会被错误折叠成一队，此时直接采用
+        # parse_player_info 的干净 5v5 分组。
+        resolved_valid = [
+            _cell_team(rec.get("team")) for rec in stats.values()
+            if _cell_team(rec.get("team")) in (2, 3)
+        ]
+        tick_team_reliable = (
+            len(resolved_valid) >= max(4, len(stats) - 2)
+            and len(set(resolved_valid)) >= 2
+        )
 
-        for name, rec in stats.items():
-            if rec.get("team") is not None:
-                continue
-            sid_i = _lookup_steam_id_for_name(name_to_sid, name)
-            pi_team = player_info_team_by_sid.get(str(sid_i)) if sid_i is not None else None
-            if pi_team is None:
-                pi_team = player_info_team_by_name.get(str(name).strip().lower())
-            if pi_team not in (2, 3):
-                continue
-            inferred_team = player_info_to_tick_team.get(pi_team, pi_team)
-            if inferred_team in (2, 3):
-                rec["team"] = inferred_team
+        if tick_team_reliable:
+            # 仅补全缺失项，并把 parse_player_info 的队号映射到逐 tick 的队号体系。
+            votes: dict[int, dict[int, int]] = {}
+            for name, rec in stats.items():
+                resolved_team = _cell_team(rec.get("team"))
+                if resolved_team not in (2, 3):
+                    continue
+                pi_team = _pi_team_for(name)
+                if pi_team is not None:
+                    bucket = votes.setdefault(pi_team, {})
+                    bucket[resolved_team] = bucket.get(resolved_team, 0) + 1
+            player_info_to_tick_team: dict[int, int] = {
+                pi_team: max(counts.items(), key=lambda kv: kv[1])[0]
+                for pi_team, counts in votes.items() if counts
+            }
+            for name, rec in stats.items():
+                if rec.get("team") is not None:
+                    continue
+                pi_team = _pi_team_for(name)
+                if pi_team is None:
+                    continue
+                inferred_team = player_info_to_tick_team.get(pi_team, pi_team)
+                if inferred_team in (2, 3):
+                    rec["team"] = inferred_team
+        else:
+            # 逐 tick team 不可靠：全部以 parse_player_info 的队伍身份分组。
+            for name, rec in stats.items():
+                pi_team = _pi_team_for(name)
+                if pi_team in (2, 3):
+                    rec["team"] = pi_team
 
     rows: list[dict] = []
     for n in names:

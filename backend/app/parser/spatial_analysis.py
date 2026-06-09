@@ -35,6 +35,8 @@ from .tag_constants import (
     _AIRBORNE_VEL_Z_MIN,
     _QUICKSCOPE_LOOKBACK_OFFSETS,
     _QUICKSCOPE_YAW_DELTA_MIN,
+    _ONE_MAN_ARMY_ISOLATION_DIST,
+    _ONE_MAN_ARMY_ENGAGE_RADIUS,
 )
 from .weapons import (
     SNIPER_WEAPONS,
@@ -184,6 +186,56 @@ def _alive_mates_and_enemies(
     return mates, enems
 
 
+def one_man_army_eval(
+    tick_dict: "dict[str, dict]",
+    target_player: str,
+    *,
+    isolation_dist: float = _ONE_MAN_ARMY_ISOLATION_DIST,
+    engage_radius: float = _ONE_MAN_ARMY_ENGAGE_RADIUS,
+) -> "Optional[tuple[bool, int]]":
+    """一人成军判定：基于纯相对距离（与地图无关）。
+
+    返回 (is_isolated, nearby_enemies)：
+      - is_isolated：仍有存活队友、但最近的队友 2D 距离 ≥ isolation_dist
+        （队友活着却不在身边，在别的区域）。若队友已全灭，则属于 1vN 残局，
+        不算「一人成军」，此处返回 False，交给残局逻辑处理。
+      - nearby_enemies：以目标为圆心、engage_radius 内的存活敌人数。
+    无法定位目标坐标时返回 None。
+    """
+    row_self = _spatial_player_row(tick_dict, target_player)
+    if row_self is None:
+        return None
+    try:
+        sx, sy = float(row_self["X"]), float(row_self["Y"])
+        s_team = int(float(row_self["team_num"]))
+    except (TypeError, ValueError, KeyError):
+        return None
+
+    nearest_mate = float("inf")
+    live_mates = 0
+    nearby_enemies = 0
+    for name, row in tick_dict.items():
+        if name == target_player or not row.get("is_alive"):
+            continue
+        tm = row.get("team_num")
+        if tm is None or _is_nan(tm):
+            continue
+        try:
+            tm_i = int(float(tm))
+            d = math.hypot(float(row["X"]) - sx, float(row["Y"]) - sy)
+        except (TypeError, ValueError, KeyError):
+            continue
+        if tm_i == s_team:
+            live_mates += 1
+            if d < nearest_mate:
+                nearest_mate = d
+        elif d <= engage_radius:
+            nearby_enemies += 1
+
+    is_isolated = live_mates > 0 and nearest_mate >= isolation_dist
+    return is_isolated, nearby_enemies
+
+
 def parse_spatial_snapshots(
     parser: DemoParser,
     ticks: list[int],
@@ -280,7 +332,7 @@ def check_timing_law(
     held_long = (switch_tick - hold_start_tick) >= _TIMING_HOLD_MIN
 
     if is_utility and just_switched and was_primary and held_long:
-        return ["CS定律", "切刀必死"]
+        return ["切刀就死"]
     return []
 
 

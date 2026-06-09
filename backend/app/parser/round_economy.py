@@ -47,19 +47,31 @@ def build_round_economy_shared(
     if fr.shape[0] == 0:
         return _empty
     trc = "total_rounds_played" if "total_rounds_played" in fr.columns else None
-    if trc is None:
-        return _empty
 
     round_freeze_end_ticks: dict[int, int] = {}
     tick_to_round: dict[int, int] = {}
-    for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
-        tick = _int(row.get("tick"))
-        if tick <= 0:
-            continue
-        rn_here = _int(row.get(trc)) + 1
-        tick_to_round[tick] = rn_here
-        if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
-            round_freeze_end_ticks[rn_here] = tick
+    if trc is not None:
+        for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
+            tick = _int(row.get("tick"))
+            if tick <= 0:
+                continue
+            rn_here = _int(row.get(trc)) + 1
+            tick_to_round[tick] = rn_here
+            if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
+                round_freeze_end_ticks[rn_here] = tick
+    else:
+        # 部分国服 demo 的 round_freeze_end 不带 total_rounds_played（甚至没有 round 列），
+        # 此时按 tick 先后顺序顺序编号回合（已按 match_start_tick 过滤掉热身/拼刀）。
+        seq = 0
+        seen_ticks: set[int] = set()
+        for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
+            tick = _int(row.get("tick"))
+            if tick <= 0 or tick in seen_ticks:
+                continue
+            seen_ticks.add(tick)
+            seq += 1
+            tick_to_round[tick] = seq
+            round_freeze_end_ticks[seq] = tick
 
     round_freeze_start_ticks: dict[int, int] = {}
     try:
@@ -294,6 +306,171 @@ def build_round_scores_team_based(
         out[ended_round + 1] = (own_wins, opp_wins)
 
     return out
+
+
+def build_group_side_by_round(
+    parser: DemoParser,
+    round_freeze_end_ticks: dict[int, int],
+    steam_to_final_team: dict[str, int],
+) -> dict[int, dict[int, int]]:
+    """每回合两支「队伍身份」各自所处阵营。
+
+    队伍身份用 parse_player_info 的末段队号（2/3）表示，整局不变；阵营 (engine team_num,
+    2=T / 3=CT) 会在中场/加时换边。返回 {round: {final_team: side}}。
+
+    原理：在每个回合的冻结时刻观察任意一名「已知队伍身份」玩家的 team_num，即可推断其
+    队伍当回合的阵营，另一支队伍取相反阵营；无观测的回合用相邻回合前/后向填充。对 team_num
+    字段稀疏的国服 demo 也稳健（每回合只需任意 1 名玩家可见）。
+    """
+    if not round_freeze_end_ticks or not steam_to_final_team:
+        return {}
+    ticks = sorted(set(round_freeze_end_ticks.values()))
+    try:
+        df = _to_pandas_df(parser.parse_ticks(["team_num", "steamid"], ticks=ticks))
+    except Exception:
+        return {}
+    if df.empty or "tick" not in df.columns:
+        return {}
+
+    obs_by_tick: dict[int, dict[int, int]] = {}
+    for tick, grp in df.groupby("tick", sort=False):
+        side_for_group: dict[int, int] = {}
+        for _, r in grp.iterrows():
+            ft = steam_to_final_team.get(_norm_steam_id(r.get("steamid")))
+            if ft not in (2, 3):
+                continue
+            tm = _cell_team(r.get("team_num"))
+            if tm in (2, 3):
+                side_for_group[ft] = tm
+        if side_for_group:
+            obs_by_tick[int(tick)] = side_for_group
+
+    def _complete(side_for_group: dict[int, int]) -> Optional[dict[int, int]]:
+        if 2 in side_for_group:
+            s = side_for_group[2]
+            return {2: s, 3: (3 if s == 2 else 2)}
+        if 3 in side_for_group:
+            s = side_for_group[3]
+            return {3: s, 2: (3 if s == 2 else 2)}
+        return None
+
+    rounds_sorted = sorted(round_freeze_end_ticks.keys())
+    raw: dict[int, Optional[dict[int, int]]] = {
+        rn: _complete(obs_by_tick.get(round_freeze_end_ticks[rn], {}))
+        for rn in rounds_sorted
+    }
+
+    last: Optional[dict[int, int]] = None
+    for rn in rounds_sorted:
+        if raw[rn] is not None:
+            last = raw[rn]
+        elif last is not None:
+            raw[rn] = dict(last)
+    nxt: Optional[dict[int, int]] = None
+    for rn in reversed(rounds_sorted):
+        if raw[rn] is not None:
+            nxt = raw[rn]
+        elif nxt is not None:
+            raw[rn] = dict(nxt)
+
+    return {rn: v for rn, v in raw.items() if v is not None}
+
+
+def build_round_winner_side_map(
+    re_df: pd.DataFrame,
+    match_start_tick: int = 0,
+) -> dict[int, int]:
+    """{round_num: 该回合获胜阵营 engine team_num 2/3}。无 total_rounds_played 时按 tick 顺序编号。"""
+    if re_df is None or re_df.empty or "winner" not in re_df.columns:
+        return {}
+    re = re_df
+    if match_start_tick > 0 and "tick" in re.columns:
+        re = re.loc[pd.to_numeric(re["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
+    if re.empty:
+        return {}
+    if "tick" in re.columns:
+        re = re.sort_values("tick", kind="mergesort")
+    trc = "total_rounds_played" if "total_rounds_played" in re.columns else None
+    out: dict[int, int] = {}
+    seq = 0
+    for _, row in re.iterrows():
+        w = _round_end_winner_team_num(row.get("winner"))
+        if w is None:
+            continue
+        if trc is not None:
+            rn = _int(row.get(trc)) + 1
+        else:
+            seq += 1
+            rn = seq
+        if rn > 0:
+            out[rn] = w
+    return out
+
+
+def round_target_team_map_from_groups(
+    group_side_by_round: dict[int, dict[int, int]],
+    target_final_team: Optional[int],
+) -> dict[int, int]:
+    """由每回合各队阵营表，取目标玩家（按其末段队伍身份）逐回合所处阵营。"""
+    if target_final_team not in (2, 3):
+        return {}
+    return {
+        rn: gs[target_final_team]
+        for rn, gs in group_side_by_round.items()
+        if target_final_team in gs
+    }
+
+
+def compute_team_identity_scoreline(
+    parser: DemoParser,
+    match_start_tick: int,
+    re_df: pd.DataFrame,
+) -> tuple[int, int]:
+    """对坏数据稳健的总比分：返回 (开赛先打 T 的队伍总胜场, 开赛先打 CT 的队伍总胜场)。
+
+    与 ``_scoreline_by_starting_roster`` 同语义，但用 parse_player_info + 逐回合阵营观测，
+    不依赖几乎全空的逐 tick team_num。无法计算时返回 (0, 0)。
+    """
+    from .player_roster import build_steam_to_team_from_player_info
+
+    steam_to_final = build_steam_to_team_from_player_info(parser)
+    if not steam_to_final:
+        return 0, 0
+
+    fr = _safe_parse_event(parser, "round_freeze_end")
+    if fr.empty or "tick" not in fr.columns:
+        return 0, 0
+    if match_start_tick > 0:
+        fr = fr.loc[pd.to_numeric(fr["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
+    ticks_sorted = sorted(set(pd.to_numeric(fr["tick"], errors="coerce").dropna().astype(int).tolist()))
+    if not ticks_sorted:
+        return 0, 0
+    round_freeze_end_ticks = {i: t for i, t in enumerate(ticks_sorted, start=1)}
+
+    group_side = build_group_side_by_round(parser, round_freeze_end_ticks, steam_to_final)
+    winner_side = build_round_winner_side_map(re_df, match_start_tick)
+    if not group_side or not winner_side:
+        return 0, 0
+
+    wins: dict[int, int] = {2: 0, 3: 0}  # 按末段队伍身份累计
+    for rn, win_side in winner_side.items():
+        gs = group_side.get(rn)
+        if not gs:
+            continue
+        for final_team, side in gs.items():
+            if side == win_side:
+                wins[final_team] = wins.get(final_team, 0) + 1
+                break
+
+    first_rn = min(group_side.keys())
+    start_sides = group_side[first_rn]  # {final_team: 开赛阵营}
+    team_a = team_b = 0
+    for final_team, start_side in start_sides.items():
+        if start_side == 2:
+            team_a = wins.get(final_team, 0)
+        elif start_side == 3:
+            team_b = wins.get(final_team, 0)
+    return team_a, team_b
 
 
 def _scoreline_by_starting_roster(
