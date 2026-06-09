@@ -90,6 +90,7 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         "victim_pov_post_sec",
         "fail_killer_pre_sec",
         "fail_killer_post_sec",
+        "final_round_win_panel_guard_sec",
     ]:
         value = getattr(dto.options, option_name)
         if value < 0:
