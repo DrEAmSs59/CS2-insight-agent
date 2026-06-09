@@ -215,6 +215,17 @@ class OBSFadeController:
             except OBSRecordError as exc:
                 logger.warning("[OBSFade] add black source failed (non-fatal): %s", exc)
 
+        # ── Keep game audio alive during the black period ────────────────
+        # When CS2 audio is captured by the Game Capture source (rather than the
+        # global Desktop Audio device), that source only produces audio while it
+        # is in the active program scene.  Switching the program scene to the
+        # black scene would deactivate it, dropping audio during the fade and
+        # leaving a brief silence at the start of the next clip while the source
+        # re-activates.  Mirror the game capture into the black scene (covered by
+        # the opaque black color source on top) so its audio stays continuous
+        # across the transition while the visuals remain fully black.
+        self._ensure_game_capture_hidden_in_black(client, black)
+
         # ── Validate transition (warning only) ───────────────────────────
         available = client.get_scene_transition_list()
         if available and self._cfg.transition_name not in available:
@@ -224,6 +235,57 @@ class OBSFadeController:
             )
 
         return True
+
+    def _ensure_game_capture_hidden_in_black(self, client: OBSClient, black: str) -> None:
+        """Mirror the game capture into the black scene, hidden under the black color source.
+
+        Keeps the game-capture source active (so CS2 game-audio capture keeps
+        producing audio) while the black color source on top hides the video,
+        preserving a fully-black fade.  Best-effort: all failures are logged and
+        swallowed so a missing capability never blocks transitions.
+        """
+        try:
+            if not client.scene_has_source(black, _GAME_CAPTURE_INPUT_NAME):
+                # Reference the existing game-capture input (created for the game
+                # scene) into the black scene rather than creating a duplicate.
+                client.ensure_game_capture_in_scene(
+                    black,
+                    _GAME_CAPTURE_INPUT_NAME,
+                    input_settings=_game_capture_settings(),
+                )
+                logger.info("[OBSFade] mirrored game capture into black scene %r for audio continuity", black)
+        except Exception as exc:
+            logger.warning("[OBSFade] mirror game capture into black scene failed (non-fatal): %s", exc)
+            return
+
+        # Stretch the black color source to fill the canvas so it fully occludes
+        # the game capture regardless of canvas resolution, then force the z-order
+        # so the black color source is on top and the game capture sits below it.
+        try:
+            video = client.get_video_settings()
+            bw = float(video.get("base_width", 1920) or 1920)
+            bh = float(video.get("base_height", 1080) or 1080)
+            black_item_id = client.get_scene_item_id(black, _BLACK_COLOR_SOURCE_NAME)
+            if black_item_id is not None:
+                client.set_scene_item_transform(
+                    black,
+                    black_item_id,
+                    {
+                        "boundsType": "OBS_BOUNDS_STRETCH",
+                        "boundsWidth": bw,
+                        "boundsHeight": bh,
+                        "positionX": 0.0,
+                        "positionY": 0.0,
+                        "rotation": 0.0,
+                    },
+                )
+                # Index 0 = bottom; raise the black color source above the game capture.
+                client.set_scene_item_index(black, black_item_id, 1)
+            game_item_id = client.get_scene_item_id(black, _GAME_CAPTURE_INPUT_NAME)
+            if game_item_id is not None:
+                client.set_scene_item_index(black, game_item_id, 0)
+        except Exception as exc:
+            logger.warning("[OBSFade] order black scene sources failed (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------
     # fade_to_black / fade_to_game

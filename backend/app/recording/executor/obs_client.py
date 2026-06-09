@@ -561,6 +561,32 @@ class OBSClient:
                 f"set_scene_item_transform({scene_name!r}, {scene_item_id}) failed: {exc}"
             ) from exc
 
+    def set_scene_item_index(
+        self, scene_name: str, scene_item_id: int, index: int
+    ) -> None:
+        """SetSceneItemIndex — set a scene item's z-order index.
+
+        Index 0 is the bottom of the stack; higher indices render on top.
+        """
+        self._require_connected()
+        try:
+            req = getattr(obs_requests, "SetSceneItemIndex", None)
+            if req is None:
+                raise OBSRecordError("SetSceneItemIndex not available in obs-websocket-py")
+            self._ws.call(
+                req(
+                    sceneName=scene_name,
+                    sceneItemId=scene_item_id,
+                    sceneItemIndex=index,
+                )
+            )
+        except OBSRecordError:
+            raise
+        except Exception as exc:
+            raise OBSRecordError(
+                f"set_scene_item_index({scene_name!r}, {scene_item_id}) failed: {exc}"
+            ) from exc
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
