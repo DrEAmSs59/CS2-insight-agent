@@ -6,6 +6,7 @@ import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
 import { Loader2 } from "lucide-react";
 import { useT } from "../i18n/useT.js";
+import { formatMontageApiError, humanizeMontageError } from "../utils/formatMontageApiError.js";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
@@ -243,11 +244,8 @@ function clipMatchesLibraryFilter(clip, filterKey, orderedIdSet) {
   return true;
 }
 
-function humanizeExportError(err, t) {
-  const s = String(err || "").trim();
-  if (!s) return t("montage.exportErrorGeneric");
-  if (s.includes("recorded_clip_ids") || s.includes("不能为空")) return t("montage.exportErrorNoClips");
-  return s;
+function montageToastFromError(e, t) {
+  return formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
 }
 
 const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
@@ -319,10 +317,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         loading: false,
         blocked: true,
         subtitle: ffmpegGateSubtitle(data?.reason, t),
-        message:
-          typeof data?.message === "string" && data.message.trim()
-            ? data.message
-            : t("montage.ffmpegGateDefaultMessage"),
+        message: t("montage.ffmpegGateDefaultMessage"),
       });
     } catch {
       setFfmpegGate({
@@ -366,8 +361,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       const { data } = await API.post("/file-picker", { file_type: fileType });
       if (data?.path) onResult(data.path);
     } catch (e) {
-      const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : t("montage.toastFilepickerUnavailable"));
+      showToast(montageToastFromError(e, t) || t("montage.toastFilepickerUnavailable"));
     }
   }, [showToast]);
 
@@ -401,10 +395,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     if (lastExport.ok) {
       showToast(t("montage.toastExportDone"));
     } else if (lastExport.err) {
-      showToast(lastExport.err);
+      showToast(humanizeMontageError(lastExport.err, t));
     }
     markExportRead();
-  }, [open, isPage, lastExport, exporting, showToast, markExportRead]);
+  }, [open, isPage, lastExport, exporting, showToast, markExportRead, t]);
 
   useEffect(() => {
     if (!open && !isPage) {
@@ -572,8 +566,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setDeleteClipPrompt(null);
       showToast(t("montage.toastClipDeleted"));
     } catch (e) {
-      const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : e.message || t("montage.toastClipDeleteFail"));
+      showToast(montageToastFromError(e, t) || t("montage.toastClipDeleteFail"));
     }
   }, [deleteClipPrompt, showToast, t]);
 
@@ -621,8 +614,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         showToast(t("montage.toastBatchDeleted", { n }));
       }
     } catch (e) {
-      const detail = e.response?.data?.detail;
-      showToast(typeof detail === "string" ? detail : e.message || t("montage.toastBatchDeleteFail"));
+      showToast(montageToastFromError(e, t) || t("montage.toastBatchDeleteFail"));
     }
   }, [batchDeleteLibraryPrompt, showToast, t]);
 
@@ -839,7 +831,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setLastDraftSavedAt(Date.now());
       showToast(t("montage.toastDraftSaved"));
     } catch (e) {
-      showToast(e.response?.data?.detail || e.message || t("montage.toastDraftSaveFail"));
+      showToast(montageToastFromError(e, t) || t("montage.toastDraftSaveFail"));
     } finally {
       setSavingDraft(false);
     }
@@ -905,8 +897,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       setLastExport({ ok: true, ...data });
       showToast(t("montage.toastExportComplete"));
     } catch (e) {
-      const detail = e.response?.data?.detail;
-      const errMsg = humanizeExportError(detail || e.message, t);
+      const errMsg = formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
       setLastExport({ ok: false, err: errMsg });
       showToast(errMsg);
     } finally {

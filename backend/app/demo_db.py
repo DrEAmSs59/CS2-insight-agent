@@ -928,6 +928,36 @@ class DemoDB:
             await conn.commit()
             return cur.rowcount > 0
 
+    @staticmethod
+    def _discovered_duplicate_match_sql(left_alias: str, right_alias: str) -> str:
+        la, ra = left_alias, right_alias
+        return f"""(
+            lower({la}.path) = lower({ra}.path)
+            OR lower({la}.filename) = lower({ra}.filename)
+            OR (
+                {la}.content_md5 IS NOT NULL AND trim({la}.content_md5) != ''
+                AND {ra}.content_md5 IS NOT NULL AND trim({ra}.content_md5) != ''
+                AND {la}.content_md5 = {ra}.content_md5
+            )
+        )"""
+
+    @staticmethod
+    def _discovered_not_already_in_library_sql(alias: str = "d") -> str:
+        """待入库列表去重：排除主库已有 demo，以及与其它 pending 重复的条目（保留 id 最小的一条）。"""
+        a = alias
+        dup = DemoDB._discovered_duplicate_match_sql(a, "ing")
+        return f"""
+        AND NOT EXISTS (
+            SELECT 1 FROM demo_files ing
+            WHERE ing.id != {a}.id
+            AND {dup}
+            AND (
+                ing.status != 'pending'
+                OR ing.id < {a}.id
+            )
+        )
+        """
+
     async def list_discovered_demos(
         self,
         limit: int = 200,
@@ -937,22 +967,29 @@ class DemoDB:
         """列出已发现但尚未入库（status='pending'）的 demo。"""
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
-            sql = "SELECT id, path, filename, file_size, source, added_at FROM demo_files WHERE status = 'pending'"
+            sql = (
+                "SELECT d.id, d.path, d.filename, d.file_size, d.source, d.added_at "
+                "FROM demo_files d WHERE d.status = 'pending'"
+                + self._discovered_not_already_in_library_sql("d")
+            )
             params: list[Any] = []
             if name_query:
-                sql += " AND filename LIKE ?"
+                sql += " AND d.filename LIKE ?"
                 params.append(f"%{name_query}%")
-            sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            sql += " ORDER BY d.id DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             cur = await conn.execute(sql, params)
             return [dict(r) for r in await cur.fetchall()]
 
     async def count_discovered_demos(self, name_query: str | None = None) -> int:
         async with aiosqlite.connect(self.db_path) as conn:
-            sql = "SELECT COUNT(*) FROM demo_files WHERE status = 'pending'"
+            sql = (
+                "SELECT COUNT(*) FROM demo_files d WHERE d.status = 'pending'"
+                + self._discovered_not_already_in_library_sql("d")
+            )
             params: list[Any] = []
             if name_query:
-                sql += " AND filename LIKE ?"
+                sql += " AND d.filename LIKE ?"
                 params.append(f"%{name_query}%")
             cur = await conn.execute(sql, params)
             row = await cur.fetchone()

@@ -8,6 +8,7 @@ import { useT } from "../../i18n/useT.js";
  *   batchRecording: boolean,
  *   onStart: () => void,
  *   onAbort: () => void,
+ *   abortRequested?: boolean,
  *   onClear: () => void,
  *   disabledStart: boolean,
  *   obsConfigured: boolean,
@@ -19,6 +20,7 @@ export default function RecordingControlDock({
   batchRecording,
   onStart,
   onAbort,
+  abortRequested = false,
   onClear,
   disabledStart,
   obsConfigured,
@@ -74,7 +76,7 @@ export default function RecordingControlDock({
         </div>
         <button
           type="button"
-          disabled={!batchRecording}
+          disabled={!batchRecording || abortRequested}
           onClick={() => void onAbort()}
           className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-2.5 py-2 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-red-500/40 hover:text-cs2-red-on-surface disabled:cursor-not-allowed disabled:opacity-30"
         >

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../api/api";
 import { getObsConfigStatus } from "../api/obsConfigCenter";
+import { useAppShell } from "../context/AppShellContext";
 import { obsConfigHasIssues } from "../utils/obsConfigHealth";
 import { useT } from "../i18n/useT.js";
 import {
@@ -34,8 +35,9 @@ function StatusDot({ ok, loading }) {
 
 function SetupChecklist() {
   const t = useT();
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { initialQuickCheckStatus } = useAppShell();
+  const [status, setStatus] = useState(() => initialQuickCheckStatus ?? null);
+  const [loading, setLoading] = useState(() => initialQuickCheckStatus == null);
   const [refreshing, setRefreshing] = useState(false);
   const [obsConfigHasIssuesState, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
   const timerRef = useRef(null);
@@ -99,11 +101,16 @@ function SetupChecklist() {
   };
 
   useEffect(() => {
-    fetchStatus(false);
+    if (initialQuickCheckStatus != null) {
+      setStatus(initialQuickCheckStatus);
+      setLoading(false);
+    } else {
+      void fetchStatus(false);
+    }
     // quick-check 不连 OBS 很快，保留轮询以反映配置变化
     timerRef.current = setInterval(() => fetchStatus(true), 15000);
     return () => clearInterval(timerRef.current);
-  }, []);
+  }, [initialQuickCheckStatus]);
 
   // OBS 配置状态变化时同步拉配置健康
   useEffect(() => {
@@ -154,12 +161,15 @@ function SetupChecklist() {
       <div className="grid gap-2 sm:grid-cols-2">
         {SETUP_ITEMS.map(({ key, required, label, desc, to, linkLabel }) => {
           const ok = status?.[key] ?? false;
+          const pending = loading || status == null;
           const isObs = key === "obs_configured";
           return (
             <div
               key={key}
               className={`rounded-xl border px-4 py-3 transition-colors ${
-                ok
+                pending
+                  ? "border-white/8 bg-cs2-bg-card/70"
+                  : ok
                   ? "border-emerald-500/20 bg-emerald-500/5"
                   : required
                   ? "border-red-500/20 bg-red-500/5"

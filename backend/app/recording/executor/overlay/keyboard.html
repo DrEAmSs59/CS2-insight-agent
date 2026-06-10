@@ -120,6 +120,9 @@ kb.classList.add(_posClass);
 let track = [], tickRate = 64, startTick = 0, offset = 0;
 let byTick = new Map(), tickList = [];
 let running = false, resumeAt = 0, activeMs = 0;
+// 短按（跳、点射、刀划）在 rAF 采样间易漏显，粘性保持约 3 个游戏 tick
+const STICKY_KEYS = new Set(["jump", "fire", "scope"]);
+const stickyUntil = {};
 
 function loadTrack(msg) {
   track = msg.frames || [];
@@ -130,6 +133,7 @@ function loadTrack(msg) {
   tickList = track.map(f => f.tick);
   activeMs = 0;
   running = false;
+  for (const k in stickyUntil) delete stickyUntil[k];
   kb.classList.remove("hidden");
   render(startTick);
 }
@@ -140,16 +144,23 @@ function nearest(tick) {
   let lo = 0, hi = tickList.length - 1;
   if (tick <= tickList[0]) return track[0];
   if (tick >= tickList[hi]) return track[hi];
+  // floor：取不晚于当前 tick 的最近采样，避免「提前亮键」
   while (lo < hi) {
-    const m = (lo + hi) >> 1;
-    if (tickList[m] < tick) lo = m + 1; else hi = m;
+    const m = (lo + hi + 1) >> 1;
+    if (tickList[m] <= tick) lo = m; else hi = m - 1;
   }
   return track[lo];
 }
 
 function render(tick) {
   const f = nearest(tick) || {};
-  for (const k in els) els[k].classList.toggle("on", !!f[k]);
+  const now = performance.now();
+  const stickyMs = Math.max(45, (1000 / tickRate) * 3);
+  for (const k in els) {
+    if (f[k]) stickyUntil[k] = now + stickyMs;
+    const on = !!f[k] || (STICKY_KEYS.has(k) && (stickyUntil[k] || 0) > now);
+    els[k].classList.toggle("on", on);
+  }
 }
 
 function loop() {

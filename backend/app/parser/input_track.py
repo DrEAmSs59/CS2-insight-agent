@@ -1,24 +1,41 @@
 from __future__ import annotations
+
 import pandas as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import _to_pandas_df as _to_df
 
 PROP_BUTTONS = "buttons"
-PROP_WALK    = "is_walking"
-PROP_SCOPE   = "is_scoped"
+PROP_WALK = "is_walking"
+PROP_SCOPE = "is_scoped"
 PROP_DUCKING = "ducking"
-PROP_RELOAD  = "is_in_reload"
+PROP_RELOAD = "is_in_reload"
 
 # CS2 默认按键位（已在 falcons-vs-legacy demo 标定确认）
-BIT_ATTACK  = 0
-BIT_JUMP    = 1
-BIT_FWD     = 3
-BIT_BACK    = 4
-BIT_LEFT    = 9
-BIT_RIGHT   = 10
+BIT_ATTACK = 0
+BIT_JUMP = 1
+BIT_FWD = 3
+BIT_BACK = 4
+BIT_LEFT = 9
+BIT_RIGHT = 10
+BIT_ATTACK2 = 11  # 右键：刀划 / 开镜按下
+
+# demoparser2 从 m_nButtonDownMaskPrev 派生的布尔列
+PROP_FIRE = "FIRE"
+PROP_RIGHTCLICK = "RIGHTCLICK"
+PROP_FORWARD = "FORWARD"
+PROP_MOVELEFT = "LEFT"
+PROP_MOVERIGHT = "RIGHT"
+PROP_MOVEBACK = "BACK"
+PROP_WALK_BTN = "WALK"
+PROP_RELOAD_BTN = "RELOAD"
 
 KEYS = ("W", "A", "S", "D", "jump", "crouch", "walk", "reload", "fire", "scope")
+EPHEMERAL_KEYS = ("jump", "fire", "scope")
+
+_MAX_TICKS = 2000
+# 降采样时短按合并：全 tick 密采样上限（约 8 分钟 @64tick）
+_MAX_DENSE_TICKS = 32_000
 
 
 def _resolve_col(df: pd.DataFrame, *candidates: str) -> str | None:
@@ -31,6 +48,111 @@ def _resolve_col(df: pd.DataFrame, *candidates: str) -> str | None:
         if c.lower() in low:
             return low[c.lower()]
     return None
+
+
+def _select_player(
+    df: pd.DataFrame,
+    *,
+    steamid: str | int | None,
+    player_name: str | None,
+    c_sid: str | None,
+    c_name: str | None,
+) -> pd.DataFrame:
+    sel = pd.Series(False, index=df.index)
+    if steamid is not None and c_sid:
+        sel |= df[c_sid].astype(str).str.strip() == str(steamid).strip()
+    if not sel.any() and player_name and c_name:
+        sel |= df[c_name].astype(str).str.strip() == str(player_name).strip()
+    pdf = df[sel]
+    if pdf.empty:
+        names = sorted(set(df[c_name].astype(str))) if c_name else []
+        raise RuntimeError(
+            f"片段内未匹配到玩家 sid={steamid} name={player_name!r}；在场={names}"
+        )
+    return pdf
+
+
+def _to_int_list(series: pd.Series) -> list[int]:
+    out: list[int] = []
+    for v in series:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            out.append(0)
+    return out
+
+
+def _bcol(series_col: pd.Series | None, n: int) -> list[bool]:
+    if series_col is None:
+        return [False] * n
+    return [
+        bool(int(v)) if pd.notna(v) else False
+        for v in pd.to_numeric(series_col, errors="coerce")
+    ]
+
+
+def _bvec(mask_ints: list[int], bit: int) -> list[bool]:
+    return [bool((m >> bit) & 1) for m in mask_ints]
+
+
+def _pick_bool(
+    derived: list[bool] | None,
+    mask_ints: list[int],
+    bit: int,
+    i: int,
+) -> bool:
+    if derived is not None:
+        return derived[i]
+    return bool((mask_ints[i] >> bit) & 1)
+
+
+def _merge_ephemeral_buckets(
+    records: list[dict],
+    ephemeral_by_tick: dict[int, dict[str, bool]],
+    end_tick: int,
+) -> None:
+    """把密采样 tick 上的短按 OR 进每个降采样帧所在的 tick 桶。"""
+    if not ephemeral_by_tick or not records:
+        return
+    for i, rec in enumerate(records):
+        bucket_start = int(rec["tick"])
+        bucket_end = (
+            int(records[i + 1]["tick"]) if i + 1 < len(records) else int(end_tick) + 1
+        )
+        for t in range(bucket_start, bucket_end):
+            ep = ephemeral_by_tick.get(t)
+            if not ep:
+                continue
+            for k in EPHEMERAL_KEYS:
+                if ep.get(k):
+                    rec[k] = True
+
+
+def _build_ephemeral_map(
+    pdf: pd.DataFrame,
+    *,
+    c_mask: str,
+    c_fire: str | None,
+    c_rightclick: str | None,
+    c_scope: str | None,
+) -> dict[int, dict[str, bool]]:
+    mask_ints = _to_int_list(pdf[c_mask])
+    fire_b = _bcol(pdf[c_fire] if c_fire else None, len(mask_ints))
+    rc_b = _bcol(pdf[c_rightclick] if c_rightclick else None, len(mask_ints))
+    scope_b = _bcol(pdf[c_scope] if c_scope else None, len(mask_ints))
+    ticks = [int(t) for t in pdf["tick"]]
+    out: dict[int, dict[str, bool]] = {}
+    for i, t in enumerate(ticks):
+        jump = bool((mask_ints[i] >> BIT_JUMP) & 1)
+        fire = fire_b[i] if c_fire else bool((mask_ints[i] >> BIT_ATTACK) & 1)
+        rightclick = rc_b[i] if c_rightclick else bool((mask_ints[i] >> BIT_ATTACK2) & 1)
+        scoped = scope_b[i] if c_scope else False
+        out[t] = {
+            "jump": jump,
+            "fire": fire,
+            "scope": rightclick or scoped,
+        }
+    return out
 
 
 def extract_input_track(
@@ -46,80 +168,121 @@ def extract_input_track(
     steamid 为主键；缺失时用 player_name 兜底（存在 steamid 缺失的真实片段）。
     """
     parser = DemoParser(demo_path)
-    # 限制每个片段最多解析 2000 个 tick（降采样），超长片段（如回合合集）按等比缩减，
-    # 保证解析时间可控（40s → 数秒），32fps 精度对键盘显示已足够。
-    _MAX_TICKS = 2000
-    _total = int(end_tick) - int(start_tick) + 1
-    _stride = max(1, (_total + _MAX_TICKS - 1) // _MAX_TICKS)
-    ticks = list(range(int(start_tick), int(end_tick) + 1, _stride))
-    df = _to_df(parser.parse_ticks(
-        [PROP_BUTTONS, PROP_WALK, PROP_SCOPE, PROP_DUCKING, PROP_RELOAD, "name", "steamid"],
-        ticks=ticks,
-    ))
+    start_i = int(start_tick)
+    end_i = int(end_tick)
+    total = end_i - start_i + 1
+    stride = max(1, (total + _MAX_TICKS - 1) // _MAX_TICKS)
+    sample_ticks = list(range(start_i, end_i + 1, stride))
+
+    tick_props = [
+        PROP_BUTTONS,
+        PROP_WALK,
+        PROP_SCOPE,
+        PROP_DUCKING,
+        PROP_RELOAD,
+        PROP_FIRE,
+        PROP_RIGHTCLICK,
+        PROP_FORWARD,
+        PROP_MOVELEFT,
+        PROP_MOVERIGHT,
+        PROP_MOVEBACK,
+        PROP_WALK_BTN,
+        PROP_RELOAD_BTN,
+        "name",
+        "steamid",
+    ]
+    df = _to_df(parser.parse_ticks(tick_props, ticks=sample_ticks))
     if df.empty:
         return []
 
-    c_mask   = _resolve_col(df, PROP_BUTTONS, "m_nButtonDownMaskPrev")
-    c_walk   = _resolve_col(df, PROP_WALK,    "m_bIsWalking")
-    c_scope  = _resolve_col(df, PROP_SCOPE,   "m_bIsScoped")
-    c_duck   = _resolve_col(df, PROP_DUCKING, "m_bDucking", "in_crouch")
-    c_reload = _resolve_col(df, PROP_RELOAD,  "m_bInReload")
-    c_name   = _resolve_col(df, "name")
-    c_sid    = _resolve_col(df, "steamid")
+    c_mask = _resolve_col(df, PROP_BUTTONS, "m_nButtonDownMaskPrev")
+    c_walk = _resolve_col(df, PROP_WALK, "m_bIsWalking")
+    c_scope = _resolve_col(df, PROP_SCOPE, "m_bIsScoped")
+    c_duck = _resolve_col(df, PROP_DUCKING, "m_bDucking", "in_crouch")
+    c_reload = _resolve_col(df, PROP_RELOAD, "m_bInReload")
+    c_fire = _resolve_col(df, PROP_FIRE)
+    c_rightclick = _resolve_col(df, PROP_RIGHTCLICK)
+    c_fwd = _resolve_col(df, PROP_FORWARD)
+    c_left = _resolve_col(df, PROP_MOVELEFT)
+    c_back = _resolve_col(df, PROP_MOVEBACK)
+    c_right = _resolve_col(df, PROP_MOVERIGHT)
+    c_walk_btn = _resolve_col(df, PROP_WALK_BTN)
+    c_reload_btn = _resolve_col(df, PROP_RELOAD_BTN)
+    c_name = _resolve_col(df, "name")
+    c_sid = _resolve_col(df, "steamid")
 
     if c_mask is None:
         raise RuntimeError("按键掩码列缺失：检查 demoparser2 版本的 'buttons' 别名")
 
-    sel = pd.Series(False, index=df.index)
-    if steamid is not None and c_sid:
-        sel |= df[c_sid].astype(str).str.strip() == str(steamid).strip()
-    if not sel.any() and player_name and c_name:
-        sel |= df[c_name].astype(str).str.strip() == str(player_name).strip()
-    pdf = df[sel]
-    if pdf.empty:
-        names = sorted(set(df[c_name].astype(str))) if c_name else []
-        raise RuntimeError(
-            f"片段内未匹配到玩家 sid={steamid} name={player_name!r}；在场={names}"
-        )
-
-    # 把 buttons 列转成 Python int 列表，兼容 object/uint64/float64/int64 等各种 dtype
-    def _to_int_list(series: "pd.Series") -> list[int]:
-        out = []
-        for v in series:
-            try:
-                out.append(int(v))
-            except (TypeError, ValueError):
-                out.append(0)
-        return out
+    pdf = _select_player(
+        df, steamid=steamid, player_name=player_name, c_sid=c_sid, c_name=c_name,
+    )
 
     mask_ints = _to_int_list(pdf[c_mask])
+    n = len(mask_ints)
+    w_derived = _bcol(pdf[c_fwd] if c_fwd else None, n) if c_fwd else None
+    a_derived = _bcol(pdf[c_left] if c_left else None, n) if c_left else None
+    s_derived = _bcol(pdf[c_back] if c_back else None, n) if c_back else None
+    d_derived = _bcol(pdf[c_right] if c_right else None, n) if c_right else None
+    fire_derived = _bcol(pdf[c_fire] if c_fire else None, n) if c_fire else None
+    rc_derived = _bcol(pdf[c_rightclick] if c_rightclick else None, n) if c_rightclick else None
+    walk_derived = _bcol(pdf[c_walk_btn] if c_walk_btn else None, n) if c_walk_btn else None
+    reload_derived = _bcol(pdf[c_reload_btn] if c_reload_btn else None, n) if c_reload_btn else None
+    scoped_b = _bcol(pdf[c_scope] if c_scope else None, n)
 
-    def bvec(bit: int) -> list[bool]:
-        return [bool((m >> bit) & 1) for m in mask_ints]
+    ticks_out = [int(t) for t in pdf["tick"]]
+    crouch_b = _bcol(pdf[c_duck] if c_duck else None, n)
+    walk_state_b = _bcol(pdf[c_walk] if c_walk else None, n)
+    reload_state_b = _bcol(pdf[c_reload] if c_reload else None, n)
 
-    def bcol(series_col) -> list[bool]:
-        if series_col is None:
-            return [False] * len(mask_ints)
-        return [bool(int(v)) if pd.notna(v) else False
-                for v in pd.to_numeric(series_col, errors="coerce")]
+    records: list[dict] = []
+    for i in range(n):
+        rightclick = _pick_bool(rc_derived, mask_ints, BIT_ATTACK2, i)
+        records.append({
+            "tick": ticks_out[i],
+            "W": _pick_bool(w_derived, mask_ints, BIT_FWD, i),
+            "A": _pick_bool(a_derived, mask_ints, BIT_LEFT, i),
+            "S": _pick_bool(s_derived, mask_ints, BIT_BACK, i),
+            "D": _pick_bool(d_derived, mask_ints, BIT_RIGHT, i),
+            "jump": bool((mask_ints[i] >> BIT_JUMP) & 1),
+            "fire": _pick_bool(fire_derived, mask_ints, BIT_ATTACK, i),
+            "crouch": crouch_b[i],
+            "walk": walk_derived[i] if c_walk_btn else walk_state_b[i],
+            "reload": reload_derived[i] if c_reload_btn else reload_state_b[i],
+            # 右键：刀划/副攻击 + 狙击开镜状态
+            "scope": rightclick or scoped_b[i],
+        })
 
-    ticks = [int(t) for t in pdf["tick"]]
+    if stride > 1:
+        dense_stride = max(1, (total + _MAX_DENSE_TICKS - 1) // _MAX_DENSE_TICKS)
+        dense_ticks = list(range(start_i, end_i + 1, dense_stride))
+        dense_df = _to_df(parser.parse_ticks(
+            [PROP_BUTTONS, PROP_FIRE, PROP_RIGHTCLICK, PROP_SCOPE, "name", "steamid"],
+            ticks=dense_ticks,
+        ))
+        if not dense_df.empty:
+            d_mask = _resolve_col(dense_df, PROP_BUTTONS, "m_nButtonDownMaskPrev")
+            d_fire = _resolve_col(dense_df, PROP_FIRE)
+            d_rc = _resolve_col(dense_df, PROP_RIGHTCLICK)
+            d_scope = _resolve_col(dense_df, PROP_SCOPE)
+            d_name = _resolve_col(dense_df, "name")
+            d_sid = _resolve_col(dense_df, "steamid")
+            if d_mask:
+                dense_pdf = _select_player(
+                    dense_df,
+                    steamid=steamid,
+                    player_name=player_name,
+                    c_sid=d_sid,
+                    c_name=d_name,
+                )
+                ephemeral = _build_ephemeral_map(
+                    dense_pdf,
+                    c_mask=d_mask,
+                    c_fire=d_fire,
+                    c_rightclick=d_rc,
+                    c_scope=d_scope,
+                )
+                _merge_ephemeral_buckets(records, ephemeral, end_i)
 
-    records = [
-        {
-            "tick":   ticks[i],
-            "W":      bvec(BIT_FWD)[i],
-            "A":      bvec(BIT_LEFT)[i],
-            "S":      bvec(BIT_BACK)[i],
-            "D":      bvec(BIT_RIGHT)[i],
-            "jump":   bvec(BIT_JUMP)[i],
-            "fire":   bvec(BIT_ATTACK)[i],
-            "crouch": bcol(pdf[c_duck]   if c_duck   else None)[i],
-            "walk":   bcol(pdf[c_walk]   if c_walk   else None)[i],
-            "reload": bcol(pdf[c_reload] if c_reload else None)[i],
-            "scope":  bcol(pdf[c_scope]  if c_scope  else None)[i],
-        }
-        for i in range(len(ticks))
-    ]
     records.sort(key=lambda r: r["tick"])
     return records

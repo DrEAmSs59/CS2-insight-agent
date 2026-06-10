@@ -1044,33 +1044,14 @@ def ffmpeg_montage_gate_check():
     cfg = load_config()
     raw = (cfg.ffmpeg_path or "").strip()
     if not raw:
-        return {
-            "ok": False,
-            "reason": "not_configured",
-            "message": (
-                "尚未在设置中配置 FFmpeg 可执行文件路径。\n"
-                "合辑导出需要 FFmpeg，请填写 ffmpeg.exe 的完整路径，"
-                "或在设置页点击「自动探测 FFmpeg」。"
-            ),
-            "ffmpeg_path": "",
-        }
+        return {"ok": False, "reason": "not_configured", "ffmpeg_path": ""}
     if not Path(raw).is_file():
-        return {
-            "ok": False,
-            "reason": "path_not_found",
-            "message": f"所配置的 FFmpeg 路径不存在或不是文件：\n{raw}",
-            "ffmpeg_path": raw,
-        }
+        return {"ok": False, "reason": "path_not_found", "ffmpeg_path": raw}
     try:
         resolved = resolve_ffmpeg_binary(raw)
         return {"ok": True, "ffmpeg_path": str(resolved)}
-    except MontageComposerError as exc:
-        return {
-            "ok": False,
-            "reason": "not_usable",
-            "message": str(exc),
-            "ffmpeg_path": raw,
-        }
+    except MontageComposerError:
+        return {"ok": False, "reason": "not_usable", "ffmpeg_path": raw}
 
 
 @app.get("/api/status/setup")
@@ -2135,21 +2116,20 @@ def config_backup_status():
 @app.post("/api/config-backup/restore")
 def config_backup_restore():
     if not is_restore_required():
-        return {"ok": True, "message": "玩家配置状态正常", "restored": 0}
+        return {"ok": True, "code": "CONFIG_RESTORE_NOT_NEEDED", "restored": 0}
     if is_cs2_running():
         raise HTTPException(
             status_code=409,
-            detail={
-                "code": "CS2_RUNNING",
-                "message": "CS2 正在运行，请先关闭 CS2 后再恢复玩家配置。",
-            },
+            detail={"code": "CS2_RUNNING"},
         )
     res = restore_latest_user_config_backup()
+    if res.get("code") == "CS2_RUNNING":
+        raise HTTPException(status_code=409, detail={"code": "CS2_RUNNING"})
     if res.get("ok"):
-        return {"ok": True, "message": "玩家配置已恢复", "restored": res.get("restored", 0)}
+        return {"ok": True, "code": "CONFIG_RESTORE_OK", "restored": res.get("restored", 0)}
     return {
         "ok": False,
-        "message": "部分配置恢复失败，请检查文件权限或手动打开备份目录。",
+        "code": "CONFIG_RESTORE_PARTIAL",
         "failed": res.get("failed") or [],
     }
 
@@ -2235,7 +2215,9 @@ async def delete_recorded_clip(clip_id: int):
     except ValueError as e:
         raise HTTPException(500, str(e)) from e
     if r is None:
-        raise HTTPException(404, "片段不存在或已删除")
+        from .api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_CLIP_ALREADY_DELETED"))
     return r
 
 
@@ -2299,10 +2281,16 @@ async def save_montage_project(body: MontageProjectBody):
     try:
         pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
     except ValueError as e:
-        raise HTTPException(404, str(e)) from e
+        from .api_errors import error_detail
+
+        if str(e) == "project not found":
+            raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND")) from e
+        raise HTTPException(400, error_detail("MONTAGE_EXPORT_FAILED")) from e
     item = await montage_db.get_project(pid)
     if not item:
-        raise HTTPException(500, "保存合辑项目后读取失败")
+        from .api_errors import error_detail
+
+        raise HTTPException(500, error_detail("MONTAGE_EXPORT_FAILED"))
     return item
 
 
@@ -2333,18 +2321,24 @@ async def montage_export(body: MontageExportBody):
 
         ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
     except MontageComposerError as e:
-        raise HTTPException(400, str(e)) from e
+        from .montage_errors import montage_detail_from_exception
+
+        raise HTTPException(400, montage_detail_from_exception(e)) from e
 
     extras: dict[str, Any] = {}
     if body.project_id is not None:
         proj = await montage_db.get_project(int(body.project_id))
         if not proj:
-            raise HTTPException(404, "合辑项目不存在")
+            from .api_errors import error_detail
+
+            raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND"))
         extras = proj.get("body") if isinstance(proj.get("body"), dict) else {}
 
     clip_ids = list(body.recorded_clip_ids) if body.recorded_clip_ids is not None else list(extras.get("recorded_clip_ids") or [])
     if not clip_ids:
-        raise HTTPException(400, "recorded_clip_ids 不能为空")
+        from .api_errors import error_detail
+
+        raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))
 
     def _coalesce(req_val: Optional[str], key: str) -> Optional[str]:
         if req_val is not None:
@@ -2417,14 +2411,18 @@ async def montage_export(body: MontageExportBody):
 
         out = validate_output_path(body.output_path)
     except MontageComposerError as e:
-        raise HTTPException(400, str(e)) from e
+        from .montage_errors import montage_detail_from_exception
+
+        raise HTTPException(400, montage_detail_from_exception(e)) from e
 
     rows = await montage_db.get_recorded_clips_by_ids([int(x) for x in clip_ids])
     clip_paths: list[Path] = []
     for cid in clip_ids:
         row = rows.get(int(cid))
         if not row:
-            raise HTTPException(400, f"未知的 recorded_clip id: {cid}")
+            from .api_errors import error_detail
+
+            raise HTTPException(400, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(cid)))
         clip_paths.append(Path(str(row["output_path"])))
 
     intro_p = Path(intro_s).expanduser() if intro_s else None
@@ -2527,8 +2525,13 @@ async def montage_export(body: MontageExportBody):
             name_cards=name_cards_arg,
         )
     except MontageComposerError as e:
-        await montage_db.update_export(export_id, status="error", error_msg=str(e), output_path=None)
-        raise HTTPException(400, str(e)) from e
+        from .montage_errors import montage_detail_from_exception
+
+        detail = montage_detail_from_exception(e)
+        await montage_db.update_export(
+            export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED"), output_path=None,
+        )
+        raise HTTPException(400, detail) from e
 
     await montage_db.update_export(export_id, status="done", error_msg="", output_path=str(out))
     return {"export_id": export_id, "status": "done", "output_path": str(out)}

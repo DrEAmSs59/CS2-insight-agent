@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 class MontageComposerError(Exception):
-    """可映射为 HTTP 400/500 的合成错误。"""
+    """可映射为 HTTP 400/500 的合成错误（code 由前端 i18n 展示）。"""
+
+    def __init__(self, code: str, **params: Any):
+        self.code = code
+        self.params = params
+        super().__init__(code)
 
 
 def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
@@ -32,7 +37,7 @@ def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
         p = Path(raw).expanduser()
         if p.is_file():
             return p.resolve()
-        raise MontageComposerError(f"配置的 FFmpeg 不存在或不可执行: {raw}")
+        raise MontageComposerError("MONTAGE_FFMPEG_NOT_FOUND", path=raw)
     from .env_utils import get_data_dir
 
     bundled = get_data_dir().parent / "third_party" / "ffmpeg" / "ffmpeg.exe"
@@ -40,9 +45,7 @@ def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
         return bundled.resolve()
     found = shutil.which("ffmpeg")
     if not found:
-        raise MontageComposerError(
-            "未找到 FFmpeg。请在配置中填写 ffmpeg.exe 完整路径，或将其加入系统 PATH。",
-        )
+        raise MontageComposerError("MONTAGE_FFMPEG_PATH_MISSING")
     return Path(found).resolve()
 
 
@@ -54,18 +57,20 @@ def resolve_ffprobe_binary(ffmpeg_bin: Path) -> Path:
     w = shutil.which("ffprobe")
     if w:
         return Path(w).resolve()
-    raise MontageComposerError("未找到 ffprobe（通常与 FFmpeg 一同安装）。")
+    raise MontageComposerError("MONTAGE_FFPROBE_NOT_FOUND")
 
 
 def _run_json(cmd: list[str]) -> dict[str, Any]:
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip()[-800:]
-        raise MontageComposerError(f"ffprobe 失败 (exit {proc.returncode}): {tail}")
+        logger.error("ffprobe failed (exit %s): %s", proc.returncode, tail)
+        raise MontageComposerError("MONTAGE_FFPROBE_FAILED")
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as e:
-        raise MontageComposerError(f"ffprobe 输出非 JSON: {e}") from e
+        logger.error("ffprobe JSON parse failed: %s", e)
+        raise MontageComposerError("MONTAGE_FFPROBE_FAILED") from e
 
 
 def ffprobe_streams(path: Path, ffprobe: Path) -> dict[str, Any]:
@@ -132,26 +137,26 @@ def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
 def validate_output_path(path_str: str) -> Path:
     raw = (path_str or "").strip()
     if not raw:
-        raise MontageComposerError("输出路径为空")
+        raise MontageComposerError("MONTAGE_OUTPUT_PATH_EMPTY")
     p = Path(raw).expanduser()
     if not p.is_absolute():
-        raise MontageComposerError("输出路径必须是绝对路径")
+        raise MontageComposerError("MONTAGE_OUTPUT_PATH_NOT_ABSOLUTE")
     if p.suffix.lower() != ".mp4":
-        raise MontageComposerError("输出文件必须是 .mp4")
+        raise MontageComposerError("MONTAGE_OUTPUT_NOT_MP4")
     try:
         resolved = p.resolve()
     except OSError as e:
-        raise MontageComposerError(f"输出路径无效: {e}") from e
+        raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID") from e
     if ".." in p.parts:
-        raise MontageComposerError("输出路径不能包含 '..' 段")
+        raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID")
     parent = resolved.parent
     if not parent.exists():
         try:
             parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            raise MontageComposerError(f"无法创建输出目录: {e}") from e
+            raise MontageComposerError("MONTAGE_OUTPUT_PARENT_CREATE_FAILED") from e
     if parent.exists() and not parent.is_dir():
-        raise MontageComposerError("输出目录路径不是文件夹")
+        raise MontageComposerError("MONTAGE_OUTPUT_DIR_NOT_FOLDER")
     return resolved
 
 
@@ -219,9 +224,9 @@ def _finalize_mp4_for_common_players(
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     if r.returncode != 0:
-        raise MontageComposerError(
-            f"成片封装失败（播放器兼容）: {(r.stderr or r.stdout or '').strip()[-900:]}",
-        )
+        tail = (r.stderr or r.stdout or "").strip()[-900:]
+        logger.error("montage finalize mp4 failed: %s", tail)
+        raise MontageComposerError("MONTAGE_FINALIZE_FAILED")
 
 
 _VALID_XFADE_TYPES = frozenset({"fade", "cut", "flash", "dip_black", "zoom", "none"})
@@ -274,9 +279,9 @@ def _image_to_ts_with_fade(
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
-        raise MontageComposerError(
-            f"图片转视频失败 ({image_path.name}): {(r.stderr or r.stdout or '').strip()[-600:]}",
-        )
+        tail = (r.stderr or r.stdout or "").strip()[-600:]
+        logger.error("image to video failed %s: %s", image_path.name, tail)
+        raise MontageComposerError("MONTAGE_IMAGE_TO_VIDEO_FAILED", name=image_path.name)
 
 
 def _xfade_transition_name(trans_type: str) -> str:
@@ -341,9 +346,9 @@ def _montage_xfade_chain_to_ts(
     """将已归一化的 .ts 片段链用 xfade + acrossfade 连成单路 mpegts（片段需同分辨率/帧率）。"""
     n = len(clip_ts_paths)
     if n < 2:
-        raise MontageComposerError("xfade 链至少需要 2 个片段")
+        raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
     if len(clip_row_ids) != n:
-        raise MontageComposerError("clip_row_ids 与片段数量不一致")
+        raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
 
     durs: list[float] = []
     for p in clip_ts_paths:
@@ -368,9 +373,7 @@ def _montage_xfade_chain_to_ts(
             xname = _xfade_transition_name(t_type)
         off = out_len - td
         if off < 1e-6:
-            raise MontageComposerError(
-                "转场时长相对片段过长（offset 无效），请缩短转场时长或检查素材长度。",
-            )
+            raise MontageComposerError("MONTAGE_TRANSITION_TOO_LONG")
         last = i == n - 1
         v_tag = "vout" if last else f"vxf{i}"
         a_tag = "aout" if last else f"axf{i}"
@@ -399,9 +402,9 @@ def _montage_xfade_chain_to_ts(
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     if r.returncode != 0:
-        raise MontageComposerError(
-            f"片段转场拼接失败: {(r.stderr or r.stdout or '').strip()[-900:]}",
-        )
+        tail = (r.stderr or r.stdout or "").strip()[-900:]
+        logger.error("montage xfade chain failed: %s", tail)
+        raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
 
 
 # E2 HUD 支架配色（RGB 三元组）
@@ -1149,16 +1152,16 @@ def compose_montage(
     name_cards: Optional[list[dict | None]] = None,
 ) -> None:
     if not clip_paths:
-        raise MontageComposerError("片段列表为空")
+        raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
     for c in clip_paths:
         if not c.is_file():
-            raise MontageComposerError(f"片段文件不存在: {c}")
+            raise MontageComposerError("MONTAGE_CLIP_FILE_MISSING", name=c.name)
     if intro_path is not None and not intro_path.is_file():
-        raise MontageComposerError(f"片头文件不存在: {intro_path}")
+        raise MontageComposerError("MONTAGE_INTRO_MISSING")
     if outro_path is not None and not outro_path.is_file():
-        raise MontageComposerError(f"片尾文件不存在: {outro_path}")
+        raise MontageComposerError("MONTAGE_OUTRO_MISSING")
     if bgm_path is not None and not bgm_path.is_file():
-        raise MontageComposerError(f"BGM 文件不存在: {bgm_path}")
+        raise MontageComposerError("MONTAGE_BGM_MISSING")
 
     _codec = resolve_h264_codec_name(ffmpeg_bin, montage_encoder)
     video_encode_quality = h264_encode_cli_args(_codec, "quality")
@@ -1180,7 +1183,7 @@ def compose_montage(
         ref = probe_video_audio_summary(working_clip_paths[0], ffprobe)
         w, h, fps = int(ref["width"]), int(ref["height"]), float(ref["fps"])
         if w <= 0 or h <= 0:
-            raise MontageComposerError("无法读取首段视频分辨率")
+            raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
         _name_card_scale = max(1.0, min(h / 1080.0, 2.25))
         fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
 
@@ -1346,9 +1349,9 @@ def compose_montage(
             ]
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
             if r.returncode != 0:
-                raise MontageComposerError(
-                    f"片段归一化失败 ({seg.name}): {(r.stderr or r.stdout or '').strip()[-600:]}",
-                )
+                tail = (r.stderr or r.stdout or "").strip()[-600:]
+                logger.error("clip normalize failed %s: %s", seg.name, tail)
+                raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=seg.name)
             normed.append(out_ts)
 
         has_transitions = bool(
@@ -1430,9 +1433,9 @@ def compose_montage(
         ]
         r2 = subprocess.run(cmd_concat, capture_output=True, text=True, timeout=3600)
         if r2.returncode != 0:
-            raise MontageComposerError(
-                f"拼接失败: {(r2.stderr or r2.stdout or '').strip()[-600:]}",
-            )
+            tail = (r2.stderr or r2.stdout or "").strip()[-600:]
+            logger.error("montage concat failed: %s", tail)
+            raise MontageComposerError("MONTAGE_CONCAT_FAILED")
 
         mid_playable = Path(tmpdir) / "mid_playable.mp4"
         _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable, video_encode_fast)
@@ -1485,9 +1488,9 @@ def compose_montage(
         ]
         r3 = subprocess.run(cmd_mix, capture_output=True, text=True, timeout=3600)
         if r3.returncode != 0:
-            raise MontageComposerError(
-                f"BGM 混音失败: {(r3.stderr or r3.stdout or '').strip()[-600:]}",
-            )
+            tail = (r3.stderr or r3.stdout or "").strip()[-600:]
+            logger.error("montage bgm mix failed: %s", tail)
+            raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)

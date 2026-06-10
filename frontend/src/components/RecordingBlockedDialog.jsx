@@ -1,11 +1,15 @@
 import { ShieldAlert, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { API_ERROR_SUBTITLE_KEYS } from "../utils/apiErrorMessages.js";
 import { useT } from "../i18n/useT.js";
 
 /**
- * 推断对话框副标题：根据后端返回的 detail 文本判定具体阻断场景。
+ * 推断对话框副标题：优先 detail.code，其次根据后端文案关键词（兼容旧响应）。
  */
-function recordingBlockedSubtitleKey(message) {
+function recordingBlockedSubtitleKey(message, errorCode) {
+  if (errorCode && API_ERROR_SUBTITLE_KEYS[errorCode]) {
+    return API_ERROR_SUBTITLE_KEYS[errorCode];
+  }
   const m = String(message || "");
   if (
     m.includes("分辨率") ||
@@ -13,36 +17,66 @@ function recordingBlockedSubtitleKey(message) {
     m.includes("宽高") ||
     m.includes("启动分辨率") ||
     m.includes("所选屏幕比例") ||
-    m.includes("填写启动分辨率")
+    m.includes("填写启动分辨率") ||
+    m.toLowerCase().includes("resolution") ||
+    m.toLowerCase().includes("aspect ratio")
   ) {
     return "dialog.recordBlockedSubResolution";
   }
-  if (m.includes("GSI") || m.includes("未就绪") || m.includes("未进入游戏")) {
+  if (
+    m.includes("GSI") ||
+    m.includes("未就绪") ||
+    m.includes("未进入游戏") ||
+    m.toLowerCase().includes("not ready") ||
+    m.toLowerCase().includes("did not enter")
+  ) {
     return "dialog.recordBlockedSubGsi";
   }
-  if (m.includes("正在运行") || (m.includes("CS2") && m.includes("退出"))) {
+  if (
+    m.includes("正在运行") ||
+    (m.includes("CS2") && m.includes("退出")) ||
+    (m.toLowerCase().includes("cs2") && m.toLowerCase().includes("running"))
+  ) {
     return "dialog.recordBlockedSubRunning";
   }
-  if (m.includes("已有录制任务")) {
+  if (m.includes("已有录制任务") || m.toLowerCase().includes("already in progress")) {
     return "dialog.recordBlockedSubAlreadyRecording";
   }
-  if (m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复")) {
+  if (
+    m.includes("尚未恢复") ||
+    m.includes("异常退出") ||
+    m.includes("一键恢复") ||
+    m.includes("玩家配置") ||
+    m.toLowerCase().includes("restore") && m.toLowerCase().includes("config")
+  ) {
     return "dialog.recordBlockedSubConfigRestore";
   }
   return "dialog.recordBlockedSubDefault";
 }
 
-function isConfigBackupMessage(message) {
+function isConfigBackupMessage(message, errorCode) {
+  if (
+    errorCode === "RECORDING_CONFIG_RESTORE_REQUIRED" ||
+    errorCode === "CONFIG_RESTORE_REQUIRED"
+  ) {
+    return true;
+  }
   const m = String(message || "");
-  return m.includes("尚未恢复") || m.includes("异常退出") || m.includes("一键恢复") || m.includes("玩家配置");
+  return (
+    m.includes("尚未恢复") ||
+    m.includes("异常退出") ||
+    m.includes("一键恢复") ||
+    m.includes("玩家配置") ||
+    (m.toLowerCase().includes("restore") && m.toLowerCase().includes("config"))
+  );
 }
 
-export default function RecordingBlockedDialog({ message, onClose }) {
+export default function RecordingBlockedDialog({ message, errorCode = null, onClose }) {
   const t = useT();
   const navigate = useNavigate();
   if (!message) return null;
-  const subtitleKey = recordingBlockedSubtitleKey(message);
-  const showConfigLink = isConfigBackupMessage(message);
+  const subtitleKey = recordingBlockedSubtitleKey(message, errorCode);
+  const showConfigLink = isConfigBackupMessage(message, errorCode);
   return (
     <div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"

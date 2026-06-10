@@ -1,4 +1,5 @@
 import axios from "axios";
+import { useLocaleStore } from "../i18n/localeStore.js";
 
 // 同步检测环境：
 // 1. 检查协议是否为自定义的 app:
@@ -21,8 +22,15 @@ export function getDemosStreamUrl() {
 
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
 
-const API = axios.create({ 
-  baseURL: `${API_BASE_URL}/api` 
+const API = axios.create({
+  baseURL: `${API_BASE_URL}/api`,
+});
+
+API.interceptors.request.use((config) => {
+  const locale = useLocaleStore.getState().locale || "zh";
+  config.headers = config.headers ?? {};
+  config.headers["X-CS2-Insight-Locale"] = locale;
+  return config;
 });
 
 /** axios 尚未收到 HTTP 响应时的典型错误：安装版启动瞬间后端未监听会导致 ECONNREFUSED。 */

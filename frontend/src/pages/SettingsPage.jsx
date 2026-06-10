@@ -301,10 +301,6 @@ export default function SettingsPage() {
 
   const handleCheckUpdates = () => {
     if (!isPackaged) {
-      if (s.fetchUpdateInfo) {
-        void s.fetchUpdateInfo({ force: true, manual: true });
-        return;
-      }
       setUpdateStatus({ status: "error", message: t("settings.updateDevModeError") });
       setTimeout(() => setUpdateStatus(null), 3000);
       return;

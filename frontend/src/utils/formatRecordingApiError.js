@@ -1,13 +1,18 @@
+import { messageFromApiCode, parseApiDetail } from "./apiErrorMessages.js";
+
 /**
- * 提取 FastAPI / axios 报错文案（含 422 校验数组）。
+ * 提取 FastAPI / axios 报错文案（含 422 校验数组与 detail.code i18n 映射）。
  * @param {unknown} e - axios error or similar
- * @param {string} [fallback] - fallback string shown when no detail is available;
- *   callers should pass t("common.requestFail") so the fallback is localised.
- *   Defaults to e.message if available, otherwise an empty string.
+ * @param {(key: string, params?: object) => string} t - i18n translate function
+ * @param {string} [fallback] - when no detail is available
  */
-export function formatRecordingApiError(e, fallback) {
+export function formatRecordingApiError(e, t, fallback) {
   const data = e?.response?.data;
   const d = data?.detail;
+  const { code, params } = parseApiDetail(d);
+  const fromCode = messageFromApiCode(code, t, params);
+  if (fromCode) return fromCode;
+
   if (typeof d === "string") return d;
   if (Array.isArray(d)) {
     return d
@@ -30,4 +35,19 @@ export function formatRecordingApiError(e, fallback) {
     }
   }
   return e?.message || fallback || "";
+}
+
+/**
+ * @param {unknown} e
+ * @param {(key: string, params?: object) => string} t
+ * @param {string} [fallback]
+ * @returns {{ text: string, code: string | null }}
+ */
+export function parseRecordingApiError(e, t, fallback) {
+  const data = e?.response?.data;
+  const { code } = parseApiDetail(data?.detail);
+  return {
+    text: formatRecordingApiError(e, t, fallback),
+    code,
+  };
 }

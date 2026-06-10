@@ -26,9 +26,11 @@ import ActionBar from "./ActionBar";
  *   onClose: () => void;
  *   demoId: number | null;
  *   onAddToQueue: (clipData: any[]) => void;
+ *   onEnqueueNotice?: (message: string, meta?: { autoDismissMs?: number; queueLink?: boolean }) => void;
  *   expectedPlayers: string[];
  *   aiMode: boolean;
  *   queuedClientClipUids?: Set<string>;
+ *   queueLength?: number;
  * }} props
  */
 export default function DemoInfoModal({
@@ -36,9 +38,11 @@ export default function DemoInfoModal({
   onClose,
   demoId,
   onAddToQueue,
+  onEnqueueNotice,
   expectedPlayers = [],
   aiMode = false,
   queuedClientClipUids = new Set(),
+  queueLength = 0,
 }) {
   const t = useT();
   const [tab, setTab] = useState("parse"); // "parse" | "clips"
@@ -268,9 +272,60 @@ export default function DemoInfoModal({
 
     onAddToQueue(allClips);
     setSelectedClipUids(new Set());
-    setProgressText(t("dialog.demoInfoAddedToQueue", { n: allClips.length }));
-    setProgressSuccess(true);
-  }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue, freezeToDeathDraft]);
+    onEnqueueNotice?.(t("app.enqueueAdded", { n: allClips.length }), {
+      autoDismissMs: 2000,
+      queueLink: true,
+    });
+  }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue, onEnqueueNotice, freezeToDeathDraft, t]);
+
+  const canAddAllHighlights = useMemo(
+    () =>
+      Object.values(parsedPlayers).some((pd) =>
+        (pd.clips || []).some(
+          (c) =>
+            c.category === "highlight" &&
+            c.client_clip_uid &&
+            !queuedClientClipUids.has(c.client_clip_uid)
+        )
+      ),
+    [parsedPlayers, queuedClientClipUids]
+  );
+
+  const handleAddAllHighlights = useCallback(() => {
+    const toAdd = [];
+    for (const pname of Object.keys(parsedPlayers)) {
+      const pd = parsedPlayers[pname];
+      const mm = pd.match_meta ?? null;
+      const steamId =
+        mm?.target_steam_id != null && mm.target_steam_id !== ""
+          ? String(mm.target_steam_id)
+          : null;
+      for (const c of pd.clips || []) {
+        if (c.category !== "highlight") continue;
+        if (!c.client_clip_uid || queuedClientClipUids.has(c.client_clip_uid)) continue;
+        toAdd.push({
+          demoPath: demoData?.path || "",
+          demoFilename: demoData?.filename || "",
+          targetPlayer: mm?.target_player || pname,
+          targetPlayerUserId: mm?.target_player_user_id ?? null,
+          targetSteamId: steamId,
+          clipId: c.clip_id,
+          clientClipUid: c.client_clip_uid,
+          clipData: { ...c },
+          matchMeta: mm,
+        });
+      }
+    }
+    if (!toAdd.length) {
+      onEnqueueNotice?.(t("app.enqueueAllHighlightsEmpty"));
+      return;
+    }
+    onAddToQueue(toAdd);
+    onEnqueueNotice?.(t("app.enqueueAllHighlightsDone", { n: toAdd.length }), {
+      autoDismissMs: 2000,
+      queueLink: true,
+    });
+  }, [parsedPlayers, demoData, queuedClientClipUids, onAddToQueue, onEnqueueNotice, t]);
 
   const handleSelectAll = useCallback(() => {
     setSelectedClipUids((prev) => {
@@ -419,11 +474,10 @@ export default function DemoInfoModal({
                   onSelectAll={handleSelectAll}
                   onDeselectAll={handleDeselectAll}
                   onAddSelectedToQueue={handleAddSelected}
-                  onAddAllHighlightsAllMatches={() => {}} // Modal 暂不支持跨场次一键加入
-                  queueLength={0} // 不在这里显示全局长度
+                  onAddAllHighlightsAllMatches={handleAddAllHighlights}
+                  queueLength={queueLength}
                   batchRecording={false}
-                  canAddAllHighlights={false}
-                  hideGlobalActions={true}
+                  canAddAllHighlights={canAddAllHighlights}
                />
              )}
              

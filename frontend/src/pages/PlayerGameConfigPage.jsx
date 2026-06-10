@@ -128,12 +128,6 @@ export default function PlayerGameConfigPage() {
             </div>
           </section>
         )}
-
-        {st?.message && !st.fetch_failed ? (
-          <p className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 font-mono text-[12px] text-cs2-text-secondary">
-            {st.message}
-          </p>
-        ) : null}
       </div>
       </PageContainer>
     </div>

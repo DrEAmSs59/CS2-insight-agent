@@ -134,11 +134,12 @@ export default function DemoLibraryPage() {
   );
 
   const filteredRows = useMemo(() => {
+    const searchQ = s.librarySearchInput.trim() || s.librarySearchQ;
     let rows = s.demoLibraryItems;
     rows = applyClientSideDemoFilters(rows, s.libraryAdvFilters);
-    rows = filterByPathAndTags(rows, s.librarySearchQ);
+    rows = filterByPathAndTags(rows, searchQ);
     return sortDemoRows(rows, sortKey, sortDir);
-  }, [s.demoLibraryItems, s.libraryAdvFilters, s.librarySearchQ, sortKey, sortDir]);
+  }, [s.demoLibraryItems, s.libraryAdvFilters, s.librarySearchInput, s.librarySearchQ, sortKey, sortDir]);
 
   const onColumnSort = useCallback((col) => {
     setSortKey((prevKey) => {
@@ -516,9 +517,11 @@ export default function DemoLibraryPage() {
         onClose={() => setDemoInfoModalId(null)}
         demoId={demoInfoModalId}
         onAddToQueue={handleAddToQueue}
+        onEnqueueNotice={(msg, meta) => s.setProgressText(msg, meta)}
         expectedPlayers={expectedPlayers}
         aiMode={s.aiMode}
         queuedClientClipUids={queuedClientClipUids}
+        queueLength={queue.length}
       />
 
       <IngestModal

@@ -37,8 +37,10 @@ import {
   applySessionObsTransitionToRequests,
   applySessionKbOverlayToRequests,
 } from "./utils/recordingBatch";
-import { formatRecordingApiError } from "./utils/formatRecordingApiError";
+import { messageFromApiCode } from "./utils/apiErrorMessages";
+import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
+import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
@@ -59,6 +61,12 @@ export default function App() {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const [backendReady, setBackendReady] = useState(false);
+  /** 后端就绪后的启动流程：先检查更新，再拉取首页配置检查 */
+  const [startupInitDone, setStartupInitDone] = useState(false);
+  const [startupInitPhase, setStartupInitPhase] = useState(/** @type {"update" | "config" | null} */ (null));
+  const [initialQuickCheckStatus, setInitialQuickCheckStatus] = useState(null);
+  const startupInitStartedRef = useRef(false);
+  const startupUpdateWaitRef = useRef(/** @type {(() => void) | null} */ (null));
   const [aiMode, setAiMode] = useState(false);
   
   // 修正 isPackaged 检测：同步判断
@@ -133,9 +141,12 @@ export default function App() {
     setAnalysisInlineProgress(null);
   }, [currentMatchIndex]);
   const [batchRecording, setBatchRecording] = useState(false);
+  const [recordingAbortRequested, setRecordingAbortRequested] = useState(false);
+  const recordingAbortRequestedRef = useRef(false);
   const [recordingResults, setRecordingResults] = useState(null);
   const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
+  const [recordingBlockedCode, setRecordingBlockedCode] = useState(null);
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
   /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
@@ -932,15 +943,10 @@ export default function App() {
       const { data } = await API.get("/config-backup/status");
       setConfigBackupStatus(data && typeof data === "object" ? data : null);
     } catch (e) {
-      const msg =
-        e?.response?.data?.detail != null
-          ? typeof e.response.data.detail === "string"
-            ? e.response.data.detail
-            : JSON.stringify(e.response.data.detail)
-          : e?.message || t("app.backendConnectFail");
+      const msg = formatRecordingApiError(e, t, t("app.backendConnectFail"));
       setConfigBackupStatus({
         fetch_failed: true,
-        message: String(msg),
+        message: msg,
       });
     } finally {
       setConfigBackupLoading(false);
@@ -954,9 +960,22 @@ export default function App() {
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
   useEffect(() => {
-    // 切页拉一次；库变更另由 /api/demos/stream（SSE）防抖刷新。新增文件需点「扫描本地 demo 库」入库。
+    // 后端就绪后再拉库，避免启动阶段请求失败导致进 Demo 库需手动回车刷新
+    if (!startupInitDone) return;
     void refreshDemoLibrary(libraryPage, { manageLoading: false });
-  }, [refreshDemoLibrary, libraryPage]);
+  }, [refreshDemoLibrary, libraryPage, startupInitDone]);
+
+  useEffect(() => {
+    if (!startupInitDone) return;
+    const timer = window.setTimeout(() => {
+      const next = librarySearchInput.trim();
+      if (next === librarySearchQ) return;
+      setLibrarySearchQ(next);
+      setLibraryPage(1);
+      void refreshDemoLibraryRef.current(1, { manageLoading: false, searchQ: next });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [librarySearchInput, librarySearchQ, startupInitDone]);
 
   const hasLibraryAdvancedFilters = useMemo(() => {
     const f = libraryAdvFilters;
@@ -1723,6 +1742,7 @@ export default function App() {
       if (cfgStatus?.restore_required) {
         setProgressText("");
         setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
+        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
         return;
       }
     } catch {
@@ -1730,6 +1750,7 @@ export default function App() {
       if (configBackupStatus?.restore_required) {
         setProgressText("");
         setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
+        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
         return;
       }
     }
@@ -1762,6 +1783,8 @@ export default function App() {
       if (intent === "batch") {
         setWarmupIntent(null);
         if (!queue.length) return;
+        recordingAbortRequestedRef.current = false;
+        setRecordingAbortRequested(false);
         setBatchRecording(true);
         setProgressText(t("app.preparingRecording"), { loading: true });
 
@@ -1770,8 +1793,10 @@ export default function App() {
         let _kbPollTimer = null;
         if (_kbOverlayOn) {
           _kbPollTimer = setInterval(async () => {
+            if (recordingAbortRequestedRef.current) return;
             try {
               const { data: kbst } = await API.get("recording/kb-prebuild-status");
+              if (recordingAbortRequestedRef.current) return;
               if (kbst?.active) {
                 setProgressText(
                   t("app.kbPrebuildProgress", { done: kbst.done, total: kbst.total }),
@@ -1813,6 +1838,9 @@ export default function App() {
             record_inject_console_lines: session.record_inject_console_lines,
             ...(povHud ? { pov_hud: povHud } : {}),
           };
+          if (!recordingAbortRequestedRef.current) {
+            setProgressText(t("app.batchRecording"), { loading: true });
+          }
           const { data } = await API.post("recording/queue", body);
           const results = Array.isArray(data) ? data : [];
 
@@ -1837,13 +1865,20 @@ export default function App() {
           setRecordingResultModalOpen(true);
           setProgressText("", { autoDismissMs: 100 });
         } catch (e) {
-          const detail = formatRecordingApiError(e, t("common.requestFail"));
+          const { text: detail, code: blockedCode } = parseRecordingApiError(
+            e,
+            t,
+            t("common.requestFail"),
+          );
           if (e.response?.status === 409 || e.response?.status === 422) {
             setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
+            setRecordingBlockedCode(blockedCode);
           }
           setProgressText(t("app.batchRecordFail", { msg: detail }), { isError: true });
         } finally {
           if (_kbPollTimer) clearInterval(_kbPollTimer);
+          recordingAbortRequestedRef.current = false;
+          setRecordingAbortRequested(false);
           setBatchRecording(false);
           void refreshConfigBackupStatus();
         }
@@ -1869,20 +1904,25 @@ export default function App() {
     try {
       const { data } = await API.post("/config-backup/restore");
       if (data?.ok) {
-        setProgressText(data.message || t("app.playerConfigRestored"), { autoDismissMs: 3000 });
+        setProgressText(
+          messageFromApiCode(data?.code, t) || t("app.playerConfigRestored"),
+          { autoDismissMs: 3000 },
+        );
       } else {
-        setProgressText(data?.message || t("app.playerConfigRestorePartial"), { autoDismissMs: 4000 });
+        setProgressText(
+          messageFromApiCode(data?.code, t) || t("app.playerConfigRestorePartial"),
+          { autoDismissMs: 4000 },
+        );
       }
       await refreshConfigBackupStatus();
     } catch (e) {
       const st = e.response?.status;
       const det = e.response?.data?.detail;
       if (st === 409 && det?.code === "CS2_RUNNING") {
-        setRecordingBlockedMessage(
-          t("app.restoreBlockedCs2Running"),
-        );
+        setRecordingBlockedMessage(t("app.restoreBlockedCs2Running"));
+        setRecordingBlockedCode("CS2_RUNNING");
       } else {
-        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e, t("common.requestFail")) }), { autoDismissMs: 5000, isError: true });
+        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { autoDismissMs: 5000, isError: true });
       }
       await refreshConfigBackupStatus();
     }
@@ -1892,17 +1932,26 @@ export default function App() {
     try {
       const { data } = await API.post("/config-backup/open-dir");
       if (data && data.ok === false && data.backup_dir) {
-        setProgressText(`${data.message || t("app.openDirManual")} ${data.backup_dir}`);
+        setProgressText(
+          `${messageFromApiCode(data?.code, t) || t("app.openDirManual")} ${data.backup_dir}`,
+        );
       }
     } catch (e) {
-      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e, t("common.requestFail")) }), { isError: true });
+      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { isError: true });
     }
   }, [t]);
 
   const handleAbortBatchRecording = useCallback(async () => {
+    if (recordingAbortRequestedRef.current) return;
     try {
       const { data } = await API.post("recording/abort");
-      setProgressText(data?.message || t("app.abortSent"));
+      if (data?.status === "idle") {
+        setProgressText(t("app.abortNoActive"), { autoDismissMs: 3000 });
+        return;
+      }
+      recordingAbortRequestedRef.current = true;
+      setRecordingAbortRequested(true);
+      setProgressText(t("app.abortingRecording"), { loading: true });
     } catch (e) {
       setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     }
@@ -2272,40 +2321,108 @@ export default function App() {
     }
   }, [persistLlmConfig, t]);
 
-  const fetchUpdateInfo = useCallback(async (opts = { force: false, manual: false }) => {
-    try {
-      const { data } = await API.get("/app/update-info", {
-        params: opts.force ? { force: "true" } : {},
-        timeout: 15000,
-      });
-      setUpdateInfo(data);
-      if (data?.update_available) {
-        setUpdateModalManual(Boolean(opts.manual));
-        setUpdateModalOpen(true);
-      } else if (opts.manual) {
-        setUpdateModalManual(true);
-        setUpdateModalOpen(true);
+  const waitForUpdateModalDismiss = useCallback(
+    () =>
+      new Promise((resolve) => {
+        startupUpdateWaitRef.current = resolve;
+      }),
+    [],
+  );
+
+  const handleUpdateModalClose = useCallback(() => {
+    setUpdateModalOpen(false);
+    setUpdateModalManual(false);
+    const resume = startupUpdateWaitRef.current;
+    startupUpdateWaitRef.current = null;
+    resume?.();
+  }, []);
+
+  const fetchUpdateInfo = useCallback(
+    async (opts = { force: false, manual: false, awaitDismiss: false }) => {
+      if (!(await shouldCheckAppUpdates())) {
+        if (opts.manual) {
+          setUpdateInfo({
+            error: t("settings.updateDevModeError"),
+            current_version: "",
+            latest_version: null,
+            update_available: false,
+            release_notes: "",
+            release_url: "",
+            downloads: { setup_url: null, zip_url: null },
+          });
+          setUpdateModalManual(true);
+          setUpdateModalOpen(true);
+        }
+        return;
       }
-    } catch {
-      if (opts.manual) {
-        setUpdateInfo({
-          error: t("app.updateConnectFail"),
-          current_version: "",
-          latest_version: null,
-          update_available: false,
-          release_notes: "",
-          release_url: "",
-          downloads: { setup_url: null, zip_url: null },
+      try {
+        const { data } = await API.get("/app/update-info", {
+          params: opts.force ? { force: "true" } : {},
+          timeout: 15000,
         });
-        setUpdateModalManual(true);
-        setUpdateModalOpen(true);
+        setUpdateInfo(data);
+        if (data?.update_available) {
+          setUpdateModalManual(Boolean(opts.manual));
+          setUpdateModalOpen(true);
+          if (opts.awaitDismiss) {
+            await waitForUpdateModalDismiss();
+          }
+        } else if (opts.manual) {
+          setUpdateModalManual(true);
+          setUpdateModalOpen(true);
+        }
+      } catch {
+        if (opts.manual) {
+          setUpdateInfo({
+            error: t("app.updateConnectFail"),
+            current_version: "",
+            latest_version: null,
+            update_available: false,
+            release_notes: "",
+            release_url: "",
+            downloads: { setup_url: null, zip_url: null },
+          });
+          setUpdateModalManual(true);
+          setUpdateModalOpen(true);
+        }
       }
-    }
-  }, [t]);
+    },
+    [t, waitForUpdateModalDismiss],
+  );
 
   useEffect(() => {
-    void fetchUpdateInfo({ force: false, manual: false });
-  }, [fetchUpdateInfo]);
+    if (!backendReady || startupInitStartedRef.current) return;
+    startupInitStartedRef.current = true;
+
+    let cancelled = false;
+    const runStartupInit = async () => {
+      try {
+        if (await shouldCheckAppUpdates()) {
+          setStartupInitPhase("update");
+          await fetchUpdateInfo({ force: false, manual: false, awaitDismiss: true });
+          if (cancelled) return;
+        }
+
+        setStartupInitPhase("config");
+        try {
+          const { data } = await API.get("/config/quick-check");
+          if (!cancelled) setInitialQuickCheckStatus(data);
+        } catch {
+          if (!cancelled) setInitialQuickCheckStatus(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setStartupInitPhase(null);
+          setStartupInitDone(true);
+        }
+      }
+    };
+
+    void runStartupInit();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendReady, fetchUpdateInfo]);
 
   const hasDemos = uploadedDemos && uploadedDemos.length > 0;
   const currentFilename = currentUpload?.filename ?? "";
@@ -2350,6 +2467,8 @@ export default function App() {
     setDemoWatchPaths,
     handleSaveConfig,
     fetchUpdateInfo,
+    startupInitDone,
+    initialQuickCheckStatus,
     handleDetectCs2,
     handleDetectFfmpeg,
     handleSaveAllSettingsPage,
@@ -2367,6 +2486,7 @@ export default function App() {
     handleSaveExpectedParsePlayers,
     currentDemoFilename,
     batchRecording,
+    recordingAbortRequested,
     savedRecordWarmupDefaults,
     saveAllCommonParams,
     commonParamsRefreshKey,
@@ -2518,6 +2638,20 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            ) : !startupInitDone ? (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
+                  <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
+                  <div className="flex flex-col items-center gap-2">
+                    <h2 className="text-xl font-bold tracking-tight text-dynamic-white">
+                      {startupInitPhase === "config"
+                        ? t("app.startupCheckingConfig")
+                        : t("app.startupCheckingUpdate")}
+                    </h2>
+                    <p className="text-sm text-dynamic-zinc-400">{t("app.startupPleaseWait")}</p>
+                  </div>
+                </div>
+              </div>
             ) : null}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -2540,7 +2674,7 @@ export default function App() {
 
         {showGlobalNotice ? (
           <div
-            className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
+            className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
             aria-live="polite"
           >
             <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
@@ -2551,7 +2685,9 @@ export default function App() {
                   loading: progressToastMeta?.loading === true,
                 })}
                 batchRecording={batchRecording}
-                onAbortBatch={handleAbortBatchRecording}
+                onAbortBatch={
+                  recordingAbortRequested ? undefined : handleAbortBatchRecording
+                }
                 dismissible={Boolean(progressText?.trim())}
                 onDismiss={() => setProgressText("")}
                 autoDismissAfterMs={progressToastMeta?.autoDismissMs ?? undefined}
@@ -2608,7 +2744,11 @@ export default function App() {
 
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
-          onClose={() => setRecordingBlockedMessage("")}
+          errorCode={recordingBlockedCode}
+          onClose={() => {
+            setRecordingBlockedMessage("");
+            setRecordingBlockedCode(null);
+          }}
         />
 
         <UpdateCheckModal
@@ -2616,10 +2756,7 @@ export default function App() {
           info={updateInfo}
           manual={updateModalManual}
           title={updateModalManual ? t("app.checkUpdate") : t("app.updateFound")}
-          onClose={() => {
-            setUpdateModalOpen(false);
-            setUpdateModalManual(false);
-          }}
+          onClose={handleUpdateModalClose}
         />
       </div>
     </AppShellProvider>

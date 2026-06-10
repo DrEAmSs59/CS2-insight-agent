@@ -203,6 +203,7 @@ export default function RecordingQueuePage() {
         batchRecording={s.batchRecording}
         onStart={s.openBatchWarmup}
         onAbort={s.handleAbortBatchRecording}
+        abortRequested={s.recordingAbortRequested}
         onClear={handleClear}
         disabledStart={queue.length === 0 || s.batchRecording}
         obsConfigured={obsConfigured}

@@ -12,6 +12,7 @@ import {
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
 import { useT } from "../../i18n/useT.js";
+import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
 
 function pathBasename(path) {
   const s = String(path || "").trim();
@@ -285,7 +286,8 @@ export function MontageStyleConsole({
           ) : null}
           {!exportingBanner && lastExport && !lastExport.ok ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-300">
-              {t("montage.consoleExportError")}{String(lastExport.err)}
+              {t("montage.consoleExportError")}
+              {humanizeMontageError(lastExport.err, t)}
             </div>
           ) : null}
 

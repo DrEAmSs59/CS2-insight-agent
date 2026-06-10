@@ -14,6 +14,7 @@ from .executor.recording_executor import RecordingExecutor, ExecutionResult
 from .executor.obs_fade_controller import OBSFadeController, FadeConfig
 from .services.result_writer import write_result
 from ..montage_db import MontageDB
+from ..api_errors import error_detail
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -296,8 +297,8 @@ def recording_abort():
     qev = get_queue_abort_event()
     if qev is not None:
         qev.set()
-        return {"status": "ok", "message": "已请求中止，正在收尾…"}
-    return {"status": "idle", "message": "当前没有进行中的录制"}
+        return {"status": "ok"}
+    return {"status": "idle"}
 
 
 @router.post("/plan", response_model=dict)
@@ -474,7 +475,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     def _resolve_demo_path(p: str) -> Path:
         raw = (p or "").strip()
         if not raw:
-            raise HTTPException(400, "Demo 路径为空")
+            raise HTTPException(400, error_detail("RECORDING_DEMO_PATH_EMPTY"))
         cand = Path(raw)
         if cand.is_file():
             return cand.resolve()
@@ -482,7 +483,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         dest = (upload_dir / cand.name).resolve()
         if dest.is_file():
             return dest
-        raise HTTPException(404, f"未找到 Demo 文件: {raw}")
+        raise HTTPException(404, error_detail("RECORDING_DEMO_NOT_FOUND", path=raw))
 
     def _merge_obs(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
         if payload is None:
@@ -507,17 +508,11 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     cfg = ensure_cs2_path(cfg)
 
     if not cfg.cs2_path:
-        raise HTTPException(
-            400,
-            "未配置 CS2 路径且自动探测失败。请在左侧「CS2 路径」中填写 cs2.exe 完整路径，或点击「自动探测」。",
-        )
+        raise HTTPException(400, error_detail("RECORDING_CS2_PATH_MISSING"))
     if is_cs2_running():
-        raise HTTPException(409, "CS2 正在运行，请先关闭 CS2 再开始录制。")
+        raise HTTPException(409, error_detail("RECORDING_CS2_RUNNING"))
     if is_restore_required():
-        raise HTTPException(
-            409,
-            "检测到上次录制可能异常退出，玩家配置尚未恢复。请先点击「一键恢复玩家配置」，恢复完成后再开始新的录制。",
-        )
+        raise HTTPException(409, error_detail("RECORDING_CONFIG_RESTORE_REQUIRED"))
 
     # Resolve OBS config (merge request-level obs override with saved config).
     obs_cfg_override = None
@@ -579,7 +574,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     except OBSConnectionError as e:
         raise HTTPException(
             400,
-            f"无法连接 OBS：{e}。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
+            error_detail("RECORDING_OBS_CONNECT_FAIL", err=str(e)),
         )
 
     # Resolve demo paths: replace filename/relative refs with absolute paths.
@@ -626,7 +621,7 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
 
     global _queue_abort_event
     if _queue_abort_event is not None:
-        raise HTTPException(409, "已有录制任务进行中，请先中止或等待结束。")
+        raise HTTPException(409, error_detail("RECORDING_ALREADY_RUNNING"))
 
     abort_ev = asyncio.Event()
     _queue_abort_event = abort_ev
@@ -660,12 +655,12 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
     try:
         results = await director.execute_plan_queue(resolved_requests, warmup=warmup_extras, fade_controller=fade_ctrl)
     except CS2AlreadyRunningError as e:
-        raise HTTPException(409, str(e)) from e
+        raise HTTPException(409, error_detail("RECORDING_CS2_RUNNING")) from e
     except CS2NotReadyError as e:
-        raise HTTPException(409, str(e)) from e
+        raise HTTPException(409, error_detail("RECORDING_GSI_NOT_READY")) from e
     except Exception as e:
         logger.exception("[RecordingV3] execute_plan_queue failed")
-        raise HTTPException(500, f"录制失败: {e}") from e
+        raise HTTPException(500, error_detail("RECORDING_FAILED", err=str(e))) from e
     finally:
         _queue_abort_event = None
 

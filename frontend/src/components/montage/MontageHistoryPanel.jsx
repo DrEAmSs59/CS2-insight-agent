@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
+import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
 import { useLocaleStore } from "../../i18n/localeStore";
 import { labelTag } from "../../utils/tagDescriptions";
 
@@ -234,7 +235,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
               <span>{[hasIntro && t("montage.hasIntroLabel"), hasOutro && t("montage.hasOutroLabel")].filter(Boolean).join("+")}</span>
             )}
             {isErr && item.error_msg && (
-              <span className="text-red-400/80">{item.error_msg}</span>
+              <span className="text-red-400/80">{humanizeMontageError(item.error_msg, t)}</span>
             )}
           </div>
           {tSummary && (
