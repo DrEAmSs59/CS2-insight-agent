@@ -22,6 +22,7 @@ export default function RecordingParamsPage() {
       kbOverlayEnabled={s.kbOverlayEnabled}
       kbOverlayTickOffset={s.kbOverlayTickOffset}
       kbOverlayPosition={s.kbOverlayPosition}
+      killFxEnabled={s.killFxEnabled}
     />
   );
 }

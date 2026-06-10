@@ -5,6 +5,9 @@ import pandas as pd
 from app.parser.input_track import (
     KEYS,
     _build_ephemeral_map,
+    _classify_grenade_throw_row,
+    _ephemeral_flags_for_ticks,
+    _grenade_throw_flags_from_weapon_fire,
     _merge_ephemeral_buckets,
     _pick_bool,
     _resolve_col,
@@ -67,6 +70,55 @@ def test_scope_combines_rightclick_and_scoped():
     assert ep[100]["fire"] is False
     assert ep[101]["fire"] is True
     assert ep[102]["scope"] is True   # 开镜
+
+
+def test_classify_grenade_throw_left_right_both():
+    left = pd.Series({"user_FIRE": True, "user_RIGHTCLICK": False, "user_buttons": 1})
+    right = pd.Series({"user_FIRE": False, "user_RIGHTCLICK": True, "user_buttons": 1 << 11})
+    both = pd.Series({"user_FIRE": True, "user_RIGHTCLICK": True, "user_buttons": 2049})
+    kw = dict(c_fire="user_FIRE", c_rightclick="user_RIGHTCLICK", c_buttons="user_buttons")
+    assert _classify_grenade_throw_row(left, **kw) == {"jump": False, "fire": True, "scope": False}
+    assert _classify_grenade_throw_row(right, **kw) == {"jump": False, "fire": False, "scope": True}
+    assert _classify_grenade_throw_row(both, **kw) == {"jump": False, "fire": True, "scope": True}
+
+
+def test_grenade_throw_flags_from_weapon_fire():
+    fire_df = pd.DataFrame({
+        "tick": [90, 100, 101, 102, 103],
+        "user_name": ["p1", "p1", "p2", "p1", "p1"],
+        "weapon": [
+            "ak47", "weapon_hegrenade", "flashbang",
+            "weapon_smokegrenade", "weapon_flashbang",
+        ],
+        "user_FIRE": [False, True, True, True, False],
+        "user_RIGHTCLICK": [False, False, False, False, True],
+        "user_buttons": [0, 1, 1, 1, 2048],
+    })
+    flags = _grenade_throw_flags_from_weapon_fire(
+        fire_df,
+        steamid=None,
+        player_name="p1",
+        start_tick=95,
+        end_tick=105,
+    )
+    assert flags[100] == {"jump": False, "fire": True, "scope": False}
+    assert flags[102] == {"jump": False, "fire": True, "scope": False}
+    assert flags[103] == {"jump": False, "fire": False, "scope": True}
+
+
+def test_grenade_throw_merged_into_fire_bucket():
+    records = [{"tick": 100, "jump": False, "fire": False, "scope": False}]
+    ephemeral = _ephemeral_flags_for_ticks({102}, fire=True)
+    _merge_ephemeral_buckets(records, ephemeral, end_tick=103)
+    assert records[0]["fire"] is True
+
+
+def test_grenade_both_buttons_merged_into_bucket():
+    records = [{"tick": 100, "jump": False, "fire": False, "scope": False}]
+    ephemeral = {102: {"jump": False, "fire": True, "scope": True}}
+    _merge_ephemeral_buckets(records, ephemeral, end_tick=103)
+    assert records[0]["fire"] is True
+    assert records[0]["scope"] is True
 
 
 def test_merge_ephemeral_buckets_or_short_presses():

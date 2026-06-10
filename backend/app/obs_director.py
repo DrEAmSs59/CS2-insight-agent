@@ -3377,10 +3377,21 @@ class OBSDirector:
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
 
         try:
-            # ── Phase 0: 预构建 plan + 提取 kb_track（CS2 启动前完成，避免进游戏后卡顿）────
+            # ── Phase 0: 预构建 plan + 提取 kb_track / kill_track（CS2 启动前完成，避免进游戏后卡顿）────
+            from .env_utils import load_config as _phase0_load_cfg
+            _phase0_cfg = _phase0_load_cfg()
+
+            def _fx_on(_d) -> bool:
+                v = getattr(_d.options, "kill_fx_enabled", None)
+                return bool(_phase0_cfg.kill_fx_enabled) if v is None else bool(v)
+
             _plan_cache: dict = {}   # {request_id: RecordingPlan}
             _kb_any = any(getattr(dto.options, "kb_overlay_enabled", False) for dto in requests)
-            logger.info("[RecordingV3] Pre-building %d plans (kb_overlay=%s)", len(requests), _kb_any)
+            _fx_any = any(_fx_on(dto) for dto in requests)
+            logger.info(
+                "[RecordingV3] Pre-building %d plans (kb_overlay=%s kill_fx=%s)",
+                len(requests), _kb_any, _fx_any,
+            )
             for dto in requests:
                 if self._abort_requested():
                     break
@@ -3389,8 +3400,9 @@ class OBSDirector:
                 except Exception as _bp_e:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
-            if _kb_any and _plan_cache and not self._abort_requested():
+            if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
                 from .parser.input_track import extract_input_track as _pre_extract_kb
+                from .parser.kill_track import extract_kill_track as _pre_extract_fx
 
                 async def _extract_seg_pre(_seg, _demo_path):
                     if self._abort_requested():
@@ -3414,23 +3426,53 @@ class OBSDirector:
                         logger.warning("[kb_overlay] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
                         _seg.metadata["kb_track"] = []
 
-                # 收集所有需要提取的任务
+                async def _extract_seg_fx(_seg, _demo_path, _ctx_tags):
+                    if self._abort_requested():
+                        _seg.metadata["kill_track"] = []
+                        return
+                    try:
+                        _kills = await asyncio.to_thread(
+                            _pre_extract_fx,
+                            _demo_path,
+                            steamid=_seg.target_steamid64,
+                            player_name=_seg.target_player_name,
+                            start_tick=_seg.start_tick,
+                            end_tick=_seg.end_tick,
+                            context_tags=_ctx_tags,
+                        )
+                        _seg.metadata["kill_track"] = _kills
+                        logger.info(
+                            "[kill_fx] pre-extract seg=%d %d kills (ticks %d-%d)",
+                            _seg.segment_index, len(_kills), _seg.start_tick, _seg.end_tick,
+                        )
+                    except Exception as _e:
+                        logger.warning("[kill_fx] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
+                        _seg.metadata["kill_track"] = []
+
+                # 收集所有需要提取的任务：(coro_fn, args...)
                 _kb_tasks = []
                 for _dto in requests:
-                    if not getattr(_dto.options, "kb_overlay_enabled", False):
-                        continue
                     _plan = _plan_cache.get(_dto.request_id)
-                    if _plan:
+                    if not _plan:
+                        continue
+                    if getattr(_dto.options, "kb_overlay_enabled", False):
                         _kb_off_req = getattr(_dto.options, "kb_overlay_tick_offset", None)
                         for _seg in _plan.segments:
                             _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
-                            _kb_tasks.append((_seg, _plan.demo_path))
+                            _kb_tasks.append((_extract_seg_pre, (_seg, _plan.demo_path)))
+                    if _fx_on(_dto):
+                        _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
+                        for _seg in _plan.segments:
+                            # 受害者视角片段不展示目标的击杀特效
+                            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
+                                continue
+                            _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
 
                 # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时
                 _BATCH = 8
                 _kb_total = len(_kb_tasks)
                 _kb_done = 0
-                logger.info("[kb_overlay] Pre-extracting %d segments before CS2 launch", _kb_total)
+                logger.info("[kb_overlay] Pre-extracting %d overlay tasks before CS2 launch", _kb_total)
 
                 from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
                 _kbp_start(_kb_total)
@@ -3441,7 +3483,7 @@ class OBSDirector:
                         _kbp_reset()
                         break
                     _batch = _kb_tasks[_bi: _bi + _BATCH]
-                    await asyncio.gather(*[_extract_seg_pre(s, p) for s, p in _batch])
+                    await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
                     _kb_done += len(_batch)
                     _kbp_update(_kb_done, _kb_total)
                 else:

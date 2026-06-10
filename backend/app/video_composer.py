@@ -457,7 +457,8 @@ _EMOJI_RE = _re.compile(
     "\U000023E9-\U000023F3"           # Arrows, Timers
     "\U000025AA-\U000025FE"           # Geometric shapes
     "\U00002614-\U00002615"           # Umbrella, Coffee
-    "️"                          # Variation selector
+    "\u200d"                          # ZWJ (e.g. 🏃‍♂️)
+    "\ufe0f"                          # Variation selector
     "]+",
     flags=_re.UNICODE,
 )
@@ -465,7 +466,8 @@ _EMOJI_RE = _re.compile(
 
 def _strip_emoji(text: str) -> str:
     """去掉 msyh.ttc 无法渲染的 emoji 字符，保留中文和 ASCII 内容。"""
-    return _EMOJI_RE.sub("", text).strip()
+    cleaned = _EMOJI_RE.sub("", text)
+    return _re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _text_needs_cjk(text: str) -> bool:

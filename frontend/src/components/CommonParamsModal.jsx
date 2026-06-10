@@ -117,6 +117,7 @@ export default function CommonParamsModal({
   kbOverlayEnabled: initKbOverlayEnabled = false,
   kbOverlayTickOffset: initKbOverlayTickOffset = 6,
   kbOverlayPosition: initKbOverlayPosition = "bottom_center",
+  killFxEnabled: initKillFxEnabled = false,
   configRefreshKey = 0,
 }) {
   const t = useT();
@@ -152,6 +153,7 @@ export default function CommonParamsModal({
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(() => Number(initKbOverlayTickOffset));
   const [kbOverlayPosition, setKbOverlayPosition] = useState(() => initKbOverlayPosition || "bottom_center");
+  const [killFxEnabled, setKillFxEnabled] = useState(() => !!initKillFxEnabled);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
@@ -189,6 +191,7 @@ export default function CommonParamsModal({
     setKbOverlayEnabled(!!initKbOverlayEnabled);
     setKbOverlayTickOffset(Number(initKbOverlayTickOffset));
     setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
+    setKillFxEnabled(!!initKillFxEnabled);
     setPovEnabled(!!experimentalPovEnabled);
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
@@ -207,6 +210,7 @@ export default function CommonParamsModal({
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
+    initKillFxEnabled,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -238,6 +242,7 @@ export default function CommonParamsModal({
       kb_overlay_enabled: kbOverlayEnabled,
       kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
       kb_overlay_position: kbOverlayPosition,
+      kill_fx_enabled: killFxEnabled,
       experimental_pov_enabled: povEnabled,
     });
     setSaveState(result?.ok ? "saved" : "error");
@@ -259,6 +264,7 @@ export default function CommonParamsModal({
     kbOverlayEnabled,
     kbOverlayTickOffset,
     kbOverlayPosition,
+    killFxEnabled,
     povEnabled,
   ]);
 
@@ -801,6 +807,20 @@ export default function CommonParamsModal({
                     </p>
                   </div>
                 )}
+                <div className="mt-4 border-t border-cs2-border pt-3">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={killFxEnabled}
+                      onChange={(e) => setKillFxEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
+                    />
+                    <span className="text-sm text-cs2-text-primary">{t("record.warmupKillFxEnable")}</span>
+                  </label>
+                  <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
+                    {t("record.warmupKillFxDesc")}
+                  </p>
+                </div>
               </WorkflowSection>
 
               <WorkflowSection

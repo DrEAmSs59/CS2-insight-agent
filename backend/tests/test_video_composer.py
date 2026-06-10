@@ -14,6 +14,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.video_composer import (
     MontageComposerError,
+    _strip_emoji,
     build_bgm_filter,
     resolve_ffmpeg_binary,
     validate_output_path,
@@ -65,6 +66,20 @@ class TestResolveFfmpegBundled(unittest.TestCase):
                 with patch("app.video_composer.shutil.which", return_value=None):
                     p = resolve_ffmpeg_binary("")
                     self.assertEqual(p.resolve(), exe.resolve())
+
+
+class TestStripEmoji(unittest.TestCase):
+    def test_zwj_compound_emoji(self):
+        self.assertEqual(_strip_emoji("🏃‍♂️ 跑打"), "跑打")
+        self.assertEqual(_strip_emoji("🏃‍♂️跑打"), "跑打")
+
+    def test_zwj_profession_emoji(self):
+        self.assertEqual(_strip_emoji("👨‍🔬 首席研发工程师"), "首席研发工程师")
+
+    def test_simple_emoji_prefix(self):
+        self.assertEqual(_strip_emoji("🔫 ECO特种兵"), "ECO特种兵")
+        self.assertEqual(_strip_emoji("🔫ECO特种兵"), "ECO特种兵")
+        self.assertEqual(_strip_emoji("⚔️ 首杀"), "首杀")
 
 
 class TestBgmFilter(unittest.TestCase):

@@ -4,6 +4,7 @@ import pandas as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import _to_pandas_df as _to_df
+from .weapons import GRENADE_ITEMS, _normalize_item
 
 PROP_BUTTONS = "buttons"
 PROP_WALK = "is_walking"
@@ -126,6 +127,203 @@ def _merge_ephemeral_buckets(
             for k in EPHEMERAL_KEYS:
                 if ep.get(k):
                     rec[k] = True
+
+
+def _classify_grenade_throw_row(
+    row: pd.Series,
+    *,
+    c_fire: str | None,
+    c_rightclick: str | None,
+    c_buttons: str | None,
+) -> dict[str, bool]:
+    """投掷出手 tick 的左/右/双键 → overlay 的 fire / scope。"""
+    fire = False
+    scope = False
+    if c_fire and c_fire in row.index and pd.notna(row[c_fire]):
+        fire = bool(row[c_fire])
+    if c_rightclick and c_rightclick in row.index and pd.notna(row[c_rightclick]):
+        scope = bool(row[c_rightclick])
+    if c_buttons and c_buttons in row.index and pd.notna(row[c_buttons]):
+        try:
+            mask = int(row[c_buttons])
+        except (TypeError, ValueError):
+            mask = 0
+        fire = fire or bool(mask & (1 << BIT_ATTACK))
+        scope = scope or bool(mask & (1 << BIT_ATTACK2))
+    if not fire and not scope:
+        fire = True
+    return {"jump": False, "fire": fire, "scope": scope}
+
+
+def _grenade_throw_flags_from_weapon_fire(
+    fire_df: pd.DataFrame,
+    *,
+    steamid: str | int | None,
+    player_name: str | None,
+    start_tick: int,
+    end_tick: int,
+) -> dict[int, dict[str, bool]]:
+    """投掷物出手记为 weapon_fire；用出手 tick 的 FIRE/RIGHTCLICK 区分左/右/双键。"""
+    if fire_df.empty or "tick" not in fire_df.columns:
+        return {}
+    c_weapon = _resolve_col(fire_df, "weapon")
+    if not c_weapon:
+        return {}
+    c_name = _resolve_col(fire_df, "user_name", "name", "attacker_name")
+    c_sid = _resolve_col(fire_df, "steamid", "user_steamid", "player_steamid")
+    c_fire = _resolve_col(fire_df, "user_FIRE", "FIRE")
+    c_rightclick = _resolve_col(fire_df, "user_RIGHTCLICK", "RIGHTCLICK")
+    c_buttons = _resolve_col(fire_df, "user_buttons", "buttons")
+
+    start_i, end_i = int(start_tick), int(end_tick)
+    sub = fire_df.loc[(fire_df["tick"] >= start_i) & (fire_df["tick"] <= end_i)]
+    if sub.empty:
+        return {}
+
+    player_mask = pd.Series(False, index=sub.index)
+    if steamid is not None and c_sid:
+        player_mask |= sub[c_sid].astype(str).str.strip() == str(steamid).strip()
+    if player_name and c_name:
+        player_mask |= sub[c_name].astype(str).str.strip() == str(player_name).strip()
+    if not player_mask.any():
+        return {}
+
+    out: dict[int, dict[str, bool]] = {}
+    for _, row in sub.loc[player_mask].iterrows():
+        if _normalize_item(row[c_weapon]) not in GRENADE_ITEMS:
+            continue
+        out[int(row["tick"])] = _classify_grenade_throw_row(
+            row,
+            c_fire=c_fire,
+            c_rightclick=c_rightclick,
+            c_buttons=c_buttons,
+        )
+    return out
+
+
+def _grenade_throw_ticks_from_grenades(
+    gdf: pd.DataFrame,
+    *,
+    steamid: str | int | None,
+    player_name: str | None,
+    start_tick: int,
+    end_tick: int,
+) -> set[int]:
+    if gdf.empty or "tick" not in gdf.columns:
+        return set()
+    c_name = _resolve_col(gdf, "name", "user_name", "thrower")
+    c_sid = _resolve_col(gdf, "steamid", "player_steamid")
+
+    start_i, end_i = int(start_tick), int(end_tick)
+    sub = gdf.loc[(gdf["tick"] >= start_i) & (gdf["tick"] <= end_i)]
+    if sub.empty:
+        return set()
+
+    player_mask = pd.Series(False, index=sub.index)
+    if steamid is not None and c_sid:
+        player_mask |= sub[c_sid].astype(str).str.strip() == str(steamid).strip()
+    if player_name and c_name:
+        player_mask |= sub[c_name].astype(str).str.strip() == str(player_name).strip()
+    if not player_mask.any():
+        return set()
+
+    return {int(t) for t in sub.loc[player_mask, "tick"]}
+
+
+def _lookup_throw_flags_at_ticks(
+    parser: DemoParser,
+    ticks: set[int],
+    *,
+    steamid: str | int | None,
+    player_name: str | None,
+) -> dict[int, dict[str, bool]]:
+    if not ticks:
+        return {}
+    tick_df = _to_df(parser.parse_ticks(
+        [PROP_BUTTONS, PROP_FIRE, PROP_RIGHTCLICK, "name", "steamid"],
+        ticks=sorted(int(t) for t in ticks),
+    ))
+    if tick_df.empty:
+        return {}
+    c_mask = _resolve_col(tick_df, PROP_BUTTONS, "m_nButtonDownMaskPrev")
+    if c_mask is None:
+        return {}
+    c_fire = _resolve_col(tick_df, PROP_FIRE)
+    c_rightclick = _resolve_col(tick_df, PROP_RIGHTCLICK)
+    c_name = _resolve_col(tick_df, "name")
+    c_sid = _resolve_col(tick_df, "steamid")
+    try:
+        pdf = _select_player(
+            tick_df, steamid=steamid, player_name=player_name, c_sid=c_sid, c_name=c_name,
+        )
+    except RuntimeError:
+        return {}
+    out: dict[int, dict[str, bool]] = {}
+    for _, row in pdf.iterrows():
+        out[int(row["tick"])] = _classify_grenade_throw_row(
+            row,
+            c_fire=c_fire,
+            c_rightclick=c_rightclick,
+            c_buttons=c_mask,
+        )
+    return out
+
+
+def _collect_grenade_throw_flags(
+    parser: DemoParser,
+    *,
+    steamid: str | int | None,
+    player_name: str | None,
+    start_tick: int,
+    end_tick: int,
+) -> dict[int, dict[str, bool]]:
+    flags: dict[int, dict[str, bool]] = {}
+    try:
+        flags = _grenade_throw_flags_from_weapon_fire(
+            _to_df(parser.parse_event(
+                "weapon_fire",
+                player=["FIRE", "RIGHTCLICK", "buttons"],
+            )),
+            steamid=steamid,
+            player_name=player_name,
+            start_tick=start_tick,
+            end_tick=end_tick,
+        )
+    except Exception:
+        pass
+    try:
+        parse_grenades = getattr(parser, "parse_grenades", None)
+        if callable(parse_grenades):
+            extra_ticks = _grenade_throw_ticks_from_grenades(
+                _to_df(parse_grenades()),
+                steamid=steamid,
+                player_name=player_name,
+                start_tick=start_tick,
+                end_tick=end_tick,
+            )
+            missing = extra_ticks - set(flags.keys())
+            if missing:
+                flags.update(_lookup_throw_flags_at_ticks(
+                    parser,
+                    missing,
+                    steamid=steamid,
+                    player_name=player_name,
+                ))
+    except Exception:
+        pass
+    return flags
+
+
+def _ephemeral_flags_for_ticks(
+    ticks: set[int],
+    *,
+    fire: bool = False,
+    scope: bool = False,
+) -> dict[int, dict[str, bool]]:
+    out: dict[int, dict[str, bool]] = {}
+    for t in ticks:
+        out[int(t)] = {"jump": False, "fire": fire, "scope": scope}
+    return out
 
 
 def _build_ephemeral_map(
@@ -253,6 +451,7 @@ def extract_input_track(
             "scope": rightclick or scoped_b[i],
         })
 
+    ephemeral: dict[int, dict[str, bool]] = {}
     if stride > 1:
         dense_stride = max(1, (total + _MAX_DENSE_TICKS - 1) // _MAX_DENSE_TICKS)
         dense_ticks = list(range(start_i, end_i + 1, dense_stride))
@@ -282,7 +481,23 @@ def extract_input_track(
                     c_rightclick=d_rc,
                     c_scope=d_scope,
                 )
-                _merge_ephemeral_buckets(records, ephemeral, end_i)
+
+    # 投掷物出手：weapon_fire + 出手 tick 的 FIRE/RIGHTCLICK 区分左/右/双键
+    grenade_flags = _collect_grenade_throw_flags(
+        parser,
+        steamid=steamid,
+        player_name=player_name,
+        start_tick=start_i,
+        end_tick=end_i,
+    )
+    for t, gflags in grenade_flags.items():
+        bucket = ephemeral.setdefault(t, {"jump": False, "fire": False, "scope": False})
+        if gflags.get("fire"):
+            bucket["fire"] = True
+        if gflags.get("scope"):
+            bucket["scope"] = True
+    if ephemeral:
+        _merge_ephemeral_buckets(records, ephemeral, end_i)
 
     records.sort(key=lambda r: r["tick"])
     return records

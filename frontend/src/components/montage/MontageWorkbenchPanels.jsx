@@ -647,7 +647,7 @@ export function MontageOrchestrationTimeline({
                               key={tag}
                               className="rounded-md bg-cs2-bg-input px-2 py-0.5 text-xs font-medium text-cs2-text-secondary"
                             >
-                              {labelTag(tag, locale)}
+                              {stripTagEmoji(labelTag(tag, locale))}
                             </span>
                           ))}
                         </div>
@@ -865,7 +865,7 @@ export function MontageMaterialPoolCard({
                   key={tag}
                   className="truncate rounded-md bg-cs2-bg-input px-2 py-0.5 text-[11px] font-medium text-cs2-text-secondary"
                 >
-                  {labelTag(tag, locale)}
+                  {stripTagEmoji(labelTag(tag, locale))}
                 </span>
               ))}
             </div>

@@ -117,6 +117,7 @@ class RecordingOptions(BaseModel):
     kb_overlay_enabled: Optional[bool] = None
     kb_overlay_tick_offset: Optional[int] = None
     kb_overlay_position: Optional[str] = None
+    kill_fx_enabled: Optional[bool] = None
 
 
 class SourceRef(BaseModel):

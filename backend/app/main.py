@@ -617,6 +617,7 @@ class ConfigPayload(BaseModel):
     kb_overlay_enabled: Optional[bool] = None
     kb_overlay_tick_offset: Optional[int] = None
     kb_overlay_position: Optional[str] = None
+    kill_fx_enabled: Optional[bool] = None
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
@@ -911,6 +912,8 @@ async def update_config(payload: ConfigPayload):
     if payload.kb_overlay_position is not None:
         if str(payload.kb_overlay_position) in ("bottom_center", "minimap_below", "weapon_right"):
             cfg.kb_overlay_position = str(payload.kb_overlay_position)
+    if payload.kill_fx_enabled is not None:
+        cfg.kill_fx_enabled = bool(payload.kill_fx_enabled)
     if payload.experimental is not None:
         if payload.experimental.pov_enabled is not None:
             cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
