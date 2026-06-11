@@ -134,6 +134,8 @@ function loadTrack(msg) {
   activeMs = 0;
   running = false;
   for (const k in stickyUntil) delete stickyUntil[k];
+  // 仅击杀特效启用时 load 会携带空 frames：保持键盘隐藏，避免遗留源显示空骨架
+  if (!track.length) { kb.classList.add("hidden"); return; }
   kb.classList.remove("hidden");
   render(startTick);
 }
