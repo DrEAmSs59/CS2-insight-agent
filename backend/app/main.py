@@ -331,6 +331,52 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .recording.executor.kb_overlay_bus import kb_overlay_bus as _kb_overlay_bus
 
 _overlay_dir = Path(__file__).parent / "recording" / "executor" / "overlay"
+
+# killfx.html?test_mov=1 左下角测试视频（放用户 Downloads；WebM 带 alpha 优先）
+_OVERLAY_DEV_VIDEO_CANDIDATES: list[tuple[Path, str]] = [
+    (Path.home() / "Downloads" / "test-alpha.webm", "video/webm"),   # VP9 + alpha，透明底
+    (Path.home() / "Downloads" / "test-h264.mp4", "video/mp4"),    # 无 alpha，透明区会变黑块
+]
+
+
+def overlay_dev_test_video_resolve() -> tuple[Path, str] | None:
+    for path, mime in _OVERLAY_DEV_VIDEO_CANDIDATES:
+        if path.is_file():
+            return path, mime
+    return None
+
+
+def overlay_dev_test_video_available() -> bool:
+    return overlay_dev_test_video_resolve() is not None
+
+
+def _overlay_dev_test_video_response():
+    """流式返回本地测试视频（HTML5 video 需要可 Range 的 FileResponse）。"""
+    from fastapi.responses import FileResponse as _VidFR
+
+    resolved = overlay_dev_test_video_resolve()
+    if resolved is None:
+        want = ", ".join(str(p) for p, _ in _OVERLAY_DEV_VIDEO_CANDIDATES)
+        raise HTTPException(404, detail=f"overlay dev test video not found; tried: {want}")
+    p, mime = resolved
+    return _VidFR(str(p), media_type=mime, filename=p.name)
+
+
+@app.api_route("/api/overlay-dev/test-video", methods=["GET", "HEAD"])
+def serve_overlay_dev_test_video():
+    """killfx ?test_mov=1 引用的测试视频（自动选 webm/mp4）。"""
+    return _overlay_dev_test_video_response()
+
+
+@app.api_route("/api/overlay-dev/test.mp4", methods=["GET", "HEAD"])
+@app.api_route("/api/overlay-dev/test.webm", methods=["GET", "HEAD"])
+@app.api_route("/api/overlay-dev/test.mov", methods=["GET", "HEAD"])
+@app.api_route("/overlay/dev/test.mov", methods=["GET", "HEAD"])
+def serve_overlay_dev_test_video_legacy():
+    """旧 URL 兼容。"""
+    return _overlay_dev_test_video_response()
+
+
 app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay-static")
 
 @app.websocket("/ws/kb-overlay")

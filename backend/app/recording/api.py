@@ -19,6 +19,25 @@ from ..api_errors import error_detail
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
 
+_KILL_FX_SOURCE = "CS2 Kill FX Overlay"
+
+
+def _kill_fx_overlay_url(port: int) -> str:
+    base = f"http://127.0.0.1:{port}/overlay/killfx.html"
+    from ..main import overlay_dev_test_video_available
+
+    if overlay_dev_test_video_available():
+        return f"{base}?test_mov=1"
+    return base
+
+
+def _kill_fx_preserve_obs_url(client: OBSClient, target_url: str) -> bool:
+    """保留 OBS 里手改的 Browser Source URL（如 ?test_mov=1）。"""
+    if "test_mov=1" in target_url:
+        return False
+    existing = str(client.get_input_settings(_KILL_FX_SOURCE).get("url") or "")
+    return "test_mov=1" in existing
+
 # ── Lazy singleton for the shared cs2-insight.db ────────────────────────────
 _montage_db: Optional[MontageDB] = None
 
@@ -597,11 +616,18 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
                     ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
                     logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
                 if _kill_fx_requested:
-                    _fx_url = f"http://127.0.0.1:{_port}/overlay/killfx.html"
+                    _fx_url = _kill_fx_overlay_url(_port)
+                    _fx_preserve = _kill_fx_preserve_obs_url(_pre_obs_client, _fx_url)
                     ok_fx = _pre_obs_client.ensure_kb_overlay_in_scene(
-                        _scene, _fx_url, source_name="CS2 Kill FX Overlay",
+                        _scene,
+                        _fx_url,
+                        source_name=_KILL_FX_SOURCE,
+                        preserve_url=_fx_preserve,
                     )
-                    logger.info("[RecordingV3] kill fx overlay auto-setup: scene=%r ok=%s", _scene, ok_fx)
+                    logger.info(
+                        "[RecordingV3] kill fx overlay auto-setup: scene=%r ok=%s url=%s preserve=%s",
+                        _scene, ok_fx, _fx_url, _fx_preserve,
+                    )
         except Exception as _kb_e:
             logger.warning("[RecordingV3] kb overlay auto-setup failed (non-fatal): %s", _kb_e)
         try:

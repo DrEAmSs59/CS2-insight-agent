@@ -76,6 +76,43 @@
     100% { opacity: 1; transform: scale(1); }
   }
   .fx-banner-in  { animation: fx-banner-stamp 0.16s ease-out both; }
+
+  /* dev：?test_mov=1 左下角常驻测试视频（宽度由 JS 设，可用 ?test_scale= 放大） */
+  #dev-test-mov {
+    position: fixed;
+    left: 2vh;
+    bottom: 2vh;
+    height: auto;
+    z-index: 9999;
+    pointer-events: none;
+    object-fit: contain;
+  }
+  #dev-test-mov-hint {
+    position: fixed;
+    left: 2vh;
+    z-index: 10000;
+    max-width: 42vw;
+    font: 12px/1.35 Consolas, monospace;
+    color: rgba(255, 220, 100, .95);
+    pointer-events: none;
+    text-shadow: 0 0 6px #000;
+    white-space: pre-wrap;
+  }
+  #dev-test-marker {
+    position: fixed;
+    left: 2vh;
+    bottom: 2vh;
+    width: 120px;
+    height: 48px;
+    z-index: 9997;
+    border: 3px solid rgba(255, 220, 0, .9);
+    background: rgba(255, 40, 40, .35);
+    color: #fff;
+    font: bold 13px/48px Impact, sans-serif;
+    text-align: center;
+    pointer-events: none;
+    text-shadow: 0 0 4px #000;
+  }
 </style>
 </head>
 <body>
@@ -95,6 +132,70 @@
 const PORT = location.port || "19871";
 const iconStage = document.getElementById("fx-icon-stage");
 const bannerStage = document.getElementById("fx-banner-stage");
+
+/* ── dev：?test_mov=1 → 左下角循环播放测试 MOV ── */
+(function initDevTestMov() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("test_mov") !== "1") return;
+  const MOV_URL = "/api/overlay-dev/test-video";
+  const testScale = Math.max(0.25, Math.min(4, parseFloat(params.get("test_scale") || "1.5") || 1.5));
+
+  function applyTestMovSize(el, hintEl) {
+    const w = Math.min(window.innerWidth * 0.48, 720) * testScale;
+    el.style.width = w + "px";
+    if (hintEl) hintEl.style.bottom = `calc(2vh + ${w * 0.55}px + 12px)`;
+  }
+
+  const hint = document.createElement("div");
+  hint.id = "dev-test-mov-hint";
+  hint.textContent = "DEV test_mov · probing " + MOV_URL + " …";
+  document.body.appendChild(hint);
+  const marker = document.createElement("div");
+  marker.id = "dev-test-marker";
+  marker.textContent = "FX TEST";
+  document.body.appendChild(marker);
+
+  const mediaErr = (v) => {
+    const e = v.error;
+    if (!e) return "unknown";
+    return ["", "MEDIA_ERR_ABORTED", "MEDIA_ERR_NETWORK", "MEDIA_ERR_DECODE", "MEDIA_ERR_SRC_NOT_SUPPORTED"][e.code] || ("code=" + e.code);
+  };
+
+  const v = document.createElement("video");
+  v.id = "dev-test-mov";
+  v.preload = "auto";
+  v.autoplay = true;
+  v.loop = true;
+  v.muted = true;
+  v.playsInline = true;
+
+  v.addEventListener("playing", () => {
+    marker.style.display = "none";
+    hint.style.display = "none";
+  });
+  v.addEventListener("error", () => {
+    console.warn("[killfx] dev test mov load failed", v.error);
+    hint.textContent =
+      "DEV test_mov · VIDEO FAILED\n" + mediaErr(v) +
+      "\n透明底请用 WebM：\n%USERPROFILE%\\Downloads\\test-alpha.webm\n" +
+      "ffmpeg -i 源.mov -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 test-alpha.webm";
+    hint.style.color = "rgba(255,100,100,.98)";
+  });
+  v.addEventListener("loadstart", () => {
+    hint.textContent = "DEV test_mov · loading " + MOV_URL + " …";
+  });
+  v.addEventListener("loadeddata", () => {
+    hint.textContent = "DEV test_mov · loaded, starting playback…";
+    v.play().catch(e => {
+      hint.textContent = "DEV test_mov · play() blocked: " + e;
+      hint.style.color = "rgba(255,100,100,.98)";
+    });
+  });
+  document.body.appendChild(v);
+  applyTestMovSize(v, hint);
+  window.addEventListener("resize", () => applyTestMovSize(v, hint));
+  v.src = MOV_URL;
+})();
 
 /* ── 图标 SVG（stencil 风格，currentColor 着色）────────────────────── */
 const S = 116; // 图标画布边长

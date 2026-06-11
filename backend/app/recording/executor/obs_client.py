@@ -298,6 +298,21 @@ class OBSClient:
                 f"add_color_source_to_scene({scene_name!r}) failed: {exc}"
             ) from exc
 
+    def get_input_settings(self, input_name: str) -> dict:
+        """GetInputSettings → inputSettings dict (empty on failure)."""
+        self._require_connected()
+        req = getattr(obs_requests, "GetInputSettings", None)
+        if req is None:
+            return {}
+        try:
+            resp = self._ws.call(req(inputName=input_name))
+            data = getattr(resp, "datain", None) or {}
+            settings = data.get("inputSettings")
+            return settings if isinstance(settings, dict) else {}
+        except Exception as exc:
+            logger.warning("OBSClient: get_input_settings(%r) failed: %s", input_name, exc)
+            return {}
+
     def set_input_settings(
         self, input_name: str, settings: dict, overlay: bool = True
     ) -> None:
@@ -404,10 +419,13 @@ class OBSClient:
         scene_name: str,
         overlay_url: str,
         source_name: str = "CS2 Keyboard Overlay",
+        *,
+        preserve_url: bool = False,
     ) -> bool:
         """确保当前场景中存在键盘 Overlay Browser Source。
 
-        - 如果已存在同名 source，仅更新 URL（幂等）。
+        - 如果已存在同名 source，默认更新 URL（幂等）。
+        - preserve_url=True 时保留 OBS 里已有 URL（便于手动加 ?test_mov=1 等调试参数）。
         - 如果不存在，创建并全屏对齐到场景画布。
         返回 True 表示操作成功（或已存在）。
         """
@@ -429,6 +447,26 @@ class OBSClient:
             already_in_scene = self.scene_has_source(scene_name, source_name)
 
             if already_in_scene:
+                existing_url = str(self.get_input_settings(source_name).get("url") or "")
+                if preserve_url and existing_url.strip():
+                    try:
+                        self.set_input_settings(
+                            source_name, {"restart_when_active": False}, overlay=True,
+                        )
+                    except Exception as e:
+                        logger.warning("OBSClient: kb overlay settings update failed (non-fatal): %s", e)
+                    # 保留 URL 但仍刷新 CEF，避免手改 query 后页面未重载
+                    try:
+                        req_refresh = getattr(obs_requests, "PressInputPropertiesButton", None)
+                        if req_refresh is not None:
+                            self._ws.call(req_refresh(inputName=source_name, propertyName="refreshnocache"))
+                    except Exception as e:
+                        logger.warning("OBSClient: kb overlay refresh failed (non-fatal): %s", e)
+                    logger.info(
+                        "OBSClient: kb overlay %r already in scene %r — URL preserved: %s",
+                        source_name, scene_name, existing_url,
+                    )
+                    return True
                 # 更新 URL 并确保 restart_when_active=False（保持 WebSocket 常连）
                 try:
                     self.set_input_settings(source_name, {
@@ -439,13 +477,14 @@ class OBSClient:
                 except Exception as e:
                     logger.warning("OBSClient: kb overlay settings update failed (non-fatal): %s", e)
                 # URL 改变后 OBS Browser Source 不会自动重载，手动触发刷新
-                try:
-                    req_refresh = getattr(obs_requests, "PressInputPropertiesButton", None)
-                    if req_refresh is not None:
-                        self._ws.call(req_refresh(inputName=source_name, propertyName="refreshnocache"))
-                        logger.info("OBSClient: kb overlay %r refreshed", source_name)
-                except Exception as e:
-                    logger.warning("OBSClient: kb overlay refresh failed (non-fatal): %s", e)
+                if not existing_url or existing_url.strip() != overlay_url.strip():
+                    try:
+                        req_refresh = getattr(obs_requests, "PressInputPropertiesButton", None)
+                        if req_refresh is not None:
+                            self._ws.call(req_refresh(inputName=source_name, propertyName="refreshnocache"))
+                            logger.info("OBSClient: kb overlay %r refreshed", source_name)
+                    except Exception as e:
+                        logger.warning("OBSClient: kb overlay refresh failed (non-fatal): %s", e)
                 return True
 
             # 检查是否全局已有同名 input（只是不在当前场景）
