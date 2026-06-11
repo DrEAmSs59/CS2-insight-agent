@@ -413,8 +413,6 @@ class AppConfig(BaseModel):
     kb_overlay_enabled: bool = False
     kb_overlay_tick_offset: int = 6   # 补偿 OBS CEF 渲染流水线延迟；正=overlay提前显示，负=延迟显示
     kb_overlay_position: str = "bottom_center"  # bottom_center | minimap_below
-    # 击杀特效 overlay（OBS Browser Source 实时合成；同步偏移复用 kb_overlay_tick_offset）
-    kill_fx_enabled: bool = False
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:

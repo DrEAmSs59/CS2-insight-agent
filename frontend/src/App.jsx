@@ -167,7 +167,6 @@ export default function App() {
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
-  const [killFxEnabled, setKillFxEnabled] = useState(false);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -850,9 +849,6 @@ export default function App() {
     }
     if (typeof data.kb_overlay_position === "string") {
       setKbOverlayPosition(data.kb_overlay_position);
-    }
-    if (typeof data.kill_fx_enabled === "boolean") {
-      setKillFxEnabled(data.kill_fx_enabled);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -1716,7 +1712,6 @@ export default function App() {
       kb_overlay_enabled: !!payload?.kb_overlay_enabled,
       kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
       kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
-      ...(typeof payload?.kill_fx_enabled === "boolean" && { kill_fx_enabled: payload.kill_fx_enabled }),
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -2592,7 +2587,6 @@ export default function App() {
     kbOverlayEnabled,
     kbOverlayTickOffset,
     kbOverlayPosition,
-    killFxEnabled,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2721,7 +2715,6 @@ export default function App() {
           initKbOverlayEnabled={kbOverlayEnabled}
           initKbOverlayTickOffset={kbOverlayTickOffset}
           initKbOverlayPosition={kbOverlayPosition}
-          initKillFxEnabled={killFxEnabled}
         />
 
         <LibraryLoadModeModal

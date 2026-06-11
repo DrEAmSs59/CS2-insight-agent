@@ -44,15 +44,12 @@ def _kb_bus(segment=None):
             return 0
 
     try:
-        if segment is not None and (
-            segment.metadata.get("kb_track") is not None
-            or segment.metadata.get("kill_track") is not None
-        ):
+        if segment is not None and segment.metadata.get("kb_track") is not None:
             from .kb_overlay_bus import kb_overlay_bus
             return kb_overlay_bus, _resolve_offset(segment)
         from ...env_utils import load_config
         cfg = load_config()
-        if cfg.kb_overlay_enabled or cfg.kill_fx_enabled:
+        if cfg.kb_overlay_enabled:
             from .kb_overlay_bus import kb_overlay_bus
             return kb_overlay_bus, _resolve_offset(segment, cfg)
     except Exception:
@@ -702,8 +699,6 @@ class RecordingExecutor:
                         "tick_rate": plan.tick_rate,
                         "offset_ticks": _tick_off,
                         "frames": _kb_frames or [],
-                        # 击杀特效 overlay（killfx.html）：同总线同步时钟，键盘页忽略此字段
-                        "kills": segment.metadata.get("kill_track") or [],
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────

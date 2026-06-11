@@ -3,14 +3,12 @@
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
 import { weaponUsedTokens } from "../i18n/weaponNames.js";
 
-/** 移除字符串中的 emoji（含 ZWJ 复合 emoji）及变体选择符，避免在部分环境下渲染为方块。 */
+/** 移除字符串中的 emoji 及变体选择符，避免在部分环境下渲染为方块。 */
 export function stripTagEmoji(str) {
   if (typeof str !== "string") return str;
   return str
-    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}]/gu, "")
-    .replace(/[\u200D\uFE0F\uFE0E]/gu, "")
-    .replace(/[\u2600-\u27BF]/gu, "")
-    .replace(/\s+/g, " ")
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+    .replace(/️/gu, "")
     .trim();
 }
 

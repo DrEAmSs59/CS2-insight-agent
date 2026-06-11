@@ -184,23 +184,20 @@ export function applySessionObsTransitionToRequests(requests, session) {
 }
 
 /**
- * 将录制前弹窗中的虚拟键盘 Overlay / 击杀特效 Overlay 开关与参数写入各 request.options（仅本次队列，不写配置）。
+ * 将录制前弹窗中的虚拟键盘 Overlay 开关、同步微调和位置写入各 request.options（仅本次队列，不写配置）。
  * @param {object[]} requests
- * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string, kill_fx_enabled?: boolean }} session
+ * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string }} session
  */
 export function applySessionKbOverlayToRequests(requests, session) {
   if (!Array.isArray(requests) || !requests.length || !session) return requests;
-  const hasKb = typeof session.kb_overlay_enabled === "boolean";
-  const hasFx = typeof session.kill_fx_enabled === "boolean";
-  if (!hasKb && !hasFx) return requests;
+  if (typeof session.kb_overlay_enabled !== "boolean") return requests;
   return requests.map((r) => ({
     ...r,
     options: {
       ...(r.options || {}),
-      ...(hasKb && { kb_overlay_enabled: session.kb_overlay_enabled }),
-      ...(hasKb && typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
-      ...(hasKb && typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
-      ...(hasFx && { kill_fx_enabled: session.kill_fx_enabled }),
+      kb_overlay_enabled: session.kb_overlay_enabled,
+      ...(typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
+      ...(typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
     },
   }));
 }

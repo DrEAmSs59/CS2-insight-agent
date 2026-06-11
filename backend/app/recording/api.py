@@ -379,10 +379,9 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
 
     # kb_track: 为 overlay 填充逐 tick 按键状态（请求参数优先，否则读全局配置）
-    _exec_cfg = load_config()
     _kb_overlay_req = dto.options.kb_overlay_enabled
     if _kb_overlay_req is None:
-        _kb_overlay_req = _exec_cfg.kb_overlay_enabled
+        _kb_overlay_req = load_config().kb_overlay_enabled
     if _kb_overlay_req:
         from ..parser.input_track import extract_input_track as _extract_kb
         _kb_off_req = dto.options.kb_overlay_tick_offset  # None → executor falls back to global config
@@ -401,31 +400,6 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
                     "kb_track extraction failed seg=%d: %s", _seg.segment_index, _kb_e,
                 )
                 _seg.metadata["kb_track"] = []
-
-    # kill_track: 击杀特效 overlay 事件（请求参数优先，否则读全局配置）
-    _fx_req = dto.options.kill_fx_enabled
-    if _fx_req is None:
-        _fx_req = _exec_cfg.kill_fx_enabled
-    if _fx_req:
-        from ..parser.kill_track import extract_kill_track as _extract_fx
-        _ctx_tags = list(dto.source_ref.context_tags or [])
-        for _seg in plan.segments:
-            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
-                continue
-            try:
-                _seg.metadata["kill_track"] = _extract_fx(
-                    plan.demo_path,
-                    steamid=_seg.target_steamid64,
-                    player_name=_seg.target_player_name,
-                    start_tick=_seg.start_tick,
-                    end_tick=_seg.end_tick,
-                    context_tags=_ctx_tags,
-                )
-            except Exception as _fx_e:
-                logger.warning(
-                    "kill_track extraction failed seg=%d: %s", _seg.segment_index, _fx_e,
-                )
-                _seg.metadata["kill_track"] = []
 
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
@@ -556,17 +530,12 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         _pre_obs_client = OBSClient(obs_cfg)
         _pre_obs_client.connect()
         try:
-            # Auto-setup kb overlay / kill fx Browser Sources if requested.
+            # Auto-setup kb overlay Browser Source if any request has kb_overlay_enabled.
             _kb_overlay_requested = any(
                 getattr(dto.options, "kb_overlay_enabled", False)
                 for dto in req.requests
             )
-            _kill_fx_requested = any(
-                (getattr(dto.options, "kill_fx_enabled", None) is True)
-                or (getattr(dto.options, "kill_fx_enabled", None) is None and cfg.kill_fx_enabled)
-                for dto in req.requests
-            )
-            if _kb_overlay_requested or _kill_fx_requested:
+            if _kb_overlay_requested:
                 # 键盘 Overlay 必须建到录制专用场景（与 Game Capture 同场景），不能用
                 # 当前 program 场景：玩家 OBS 此刻可能停在别的场景，那样源会被建到错误
                 # 场景，录制时 OBS 切到专用场景就看不到键盘 Overlay。
@@ -582,26 +551,19 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
                     )
                 import os as _os
                 _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
-                if _kb_overlay_requested:
-                    # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
-                    _kb_pos = next(
-                        (
-                            getattr(dto.options, "kb_overlay_position", None)
-                            for dto in req.requests
-                            if getattr(dto.options, "kb_overlay_enabled", False)
-                            and getattr(dto.options, "kb_overlay_position", None)
-                        ),
-                        None,
-                    ) or load_config().kb_overlay_position or "bottom_center"
-                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
-                    ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
-                    logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
-                if _kill_fx_requested:
-                    _fx_url = f"http://127.0.0.1:{_port}/overlay/killfx.html"
-                    ok_fx = _pre_obs_client.ensure_kb_overlay_in_scene(
-                        _scene, _fx_url, source_name="CS2 Kill FX Overlay",
-                    )
-                    logger.info("[RecordingV3] kill fx overlay auto-setup: scene=%r ok=%s", _scene, ok_fx)
+                # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
+                _kb_pos = next(
+                    (
+                        getattr(dto.options, "kb_overlay_position", None)
+                        for dto in req.requests
+                        if getattr(dto.options, "kb_overlay_enabled", False)
+                        and getattr(dto.options, "kb_overlay_position", None)
+                    ),
+                    None,
+                ) or load_config().kb_overlay_position or "bottom_center"
+                _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
+                ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
+                logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
         except Exception as _kb_e:
             logger.warning("[RecordingV3] kb overlay auto-setup failed (non-fatal): %s", _kb_e)
         try:

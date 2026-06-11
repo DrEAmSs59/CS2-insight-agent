@@ -154,7 +154,6 @@ export default function RecordWarmupModal({
   initKbOverlayEnabled = false,
   initKbOverlayTickOffset = 6,
   initKbOverlayPosition = "bottom_center",
-  initKillFxEnabled = false,
 }) {
   const t = useT();
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
@@ -165,7 +164,6 @@ export default function RecordWarmupModal({
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
-  const [killFxEnabled, setKillFxEnabled] = useState(false);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
@@ -193,7 +191,6 @@ export default function RecordWarmupModal({
     setKbOverlayEnabled(!!initKbOverlayEnabled);
     setKbOverlayTickOffset(Number(initKbOverlayTickOffset) || 6);
     setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
-    setKillFxEnabled(!!initKillFxEnabled);
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
@@ -207,7 +204,6 @@ export default function RecordWarmupModal({
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
-    initKillFxEnabled,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -288,7 +284,6 @@ export default function RecordWarmupModal({
         kb_overlay_enabled: kbOverlayEnabled,
         kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
         kb_overlay_position: kbOverlayPosition,
-        kill_fx_enabled: killFxEnabled,
         experimental_pov_enabled: sessionPovEnabled,
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
@@ -476,24 +471,6 @@ export default function RecordWarmupModal({
                   </p>
                 </div>
               )}
-            </div>
-          </section>
-
-          <section aria-labelledby="sec-kill-fx">
-            <SectionHeader en="Kill FX Overlay" zh={t("record.warmupSecKillFx")} />
-            <div id="sec-kill-fx" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={killFxEnabled}
-                  onChange={(e) => setKillFxEnabled(e.target.checked)}
-                  className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
-                />
-                <span className="text-sm text-cs2-text-primary">{t("record.warmupKillFxEnable")}</span>
-              </label>
-              <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                {t("record.warmupKillFxDesc")}
-              </p>
             </div>
           </section>
 
