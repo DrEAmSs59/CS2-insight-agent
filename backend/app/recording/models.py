@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RequestType(str, Enum):
@@ -63,6 +63,11 @@ class EventInfo(BaseModel):
     victim: TargetPlayer
     target_player: TargetPlayer
     perspective: Perspective
+    # 解析侧击杀元数据（供 AI 导播判断受害者 POV 价值；合集可选）
+    weapon: str = ""
+    headshot: bool = False
+    tags: list[str] = Field(default_factory=list)
+    shots_to_kill: Optional[int] = None
 
 
 class RoundInfo(BaseModel):
@@ -97,6 +102,8 @@ class RecordingOptions(BaseModel):
     enable_victim_pov: bool = False
     victim_pov_pre_sec: Optional[float] = None   # None = use highlight_pre_sec
     victim_pov_post_sec: float = 1.5
+    # When True with enable_victim_pov: K→V per kill. When False: all killer segments then all victim (legacy).
+    interleave_pov_pairs: bool = False
     enable_fail_killer_pov: bool = False
     fail_killer_pre_sec: float = 3.0
     fail_killer_post_sec: float = 2.0
@@ -117,6 +124,8 @@ class RecordingOptions(BaseModel):
     kb_overlay_enabled: Optional[bool] = None
     kb_overlay_tick_offset: Optional[int] = None
     kb_overlay_position: Optional[str] = None
+    # LLM 导播大纲：合并击杀簇 + 精选受害者 POV（替代纯规则/全量 K→V）
+    use_ai_director: bool = False
 
 
 class SourceRef(BaseModel):

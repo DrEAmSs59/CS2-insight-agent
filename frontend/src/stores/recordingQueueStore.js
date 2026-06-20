@@ -6,6 +6,8 @@ import { create } from "zustand";
  * @property {number} [post_last_sec]   击杀段后预留（秒），每段末杀后收束（含智能跳剪中段；非每个击杀各加一段尾垫）
  * @property {number} [max_gap_sec]     跳剪间隔阈值（秒），超过则拆成新击杀段
  * @property {boolean} [victim_pov]     是否追加 POV（高光→受害者、失误→击杀者）
+ * @property {boolean} [pov_interleaved] 连贯 POV：每事件后立即切对方视角（否则先全部主视角再全部 POV）
+ * @property {boolean} [ai_director] LLM 导播大纲（合并击杀簇 + 精选受害者 POV）
  * @property {number} [victim_pov_pre_sec]
  * @property {number} [victim_pov_post_sec]
  * @property {number} [killer_pov_pre_sec]
@@ -92,7 +94,7 @@ export function clipKillerPovEnqueueEligible(clipData) {
  */
 export function stripGlobalPacingMetaKeys(gp) {
   if (!gp || typeof gp !== "object" || Array.isArray(gp)) return {};
-  const { default_victim_pov, default_killer_pov, ...rest } = gp;
+  const { default_victim_pov, default_killer_pov, default_pov_interleaved, ...rest } = gp;
   return rest;
 }
 
@@ -100,7 +102,8 @@ function applyEnqueuePovDefaults(item, globalPacing) {
   const gp = globalPacing && typeof globalPacing === "object" ? globalPacing : {};
   const dv = gp.default_victim_pov === true;
   const dk = gp.default_killer_pov === true;
-  if (!dv && !dk) return item;
+  const di = gp.default_pov_interleaved === true;
+  if (!dv && !dk && !di) return item;
   const prev =
     item.pacing_override && typeof item.pacing_override === "object"
       ? { ...item.pacing_override }
@@ -112,6 +115,10 @@ function applyEnqueuePovDefaults(item, globalPacing) {
   }
   if (dk && clipKillerPovEnqueueEligible(item.clipData)) {
     prev.killer_pov = true;
+    touched = true;
+  }
+  if (di && (clipVictimPovEnqueueEligible(item.clipData) || clipKillerPovEnqueueEligible(item.clipData))) {
+    prev.pov_interleaved = true;
     touched = true;
   }
   if (!touched) return item;
@@ -220,6 +227,7 @@ export const useRecordingQueue = create((set, get) => ({
       const keep = new Set([
         "default_victim_pov",
         "default_killer_pov",
+        "default_pov_interleaved",
         "victim_pov_pre_sec",
         "victim_pov_post_sec",
         "killer_pov_pre_sec",

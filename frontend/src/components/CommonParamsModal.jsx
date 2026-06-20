@@ -477,6 +477,18 @@ export default function CommonParamsModal({
                     {t("record.commonVictimPovOutcome")}
                   </p>
                 ) : null}
+                <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    disabled={batchRecording}
+                    checked={globalPacing.default_pov_interleaved === true}
+                    onChange={(e) => setGlobalPacing({ default_pov_interleaved: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cyan-500 disabled:opacity-40"
+                  />
+                  <span className="text-xs leading-snug text-cs2-text-secondary">
+                    {t("record.commonPovInterleavedCheckbox")}
+                  </span>
+                </label>
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
                     label={t("record.commonPovPreSlider")}

@@ -30,17 +30,26 @@ def postprocess_segments(
         segment, guard_warnings = apply_final_round_guard(segment, req)
         warnings.extend(guard_warnings)
 
-        # Step 3: Warn but do NOT disable victim segments with missing steamid64.
-        # spec_player works by player name; verification is skipped when steamid64 is empty,
-        # but the perspective switch still happens.
+        # Step 3: Warn when victim segment lacks spec_slot (executor falls back to spec_player by name).
         if (
             not segment.disabled
             and segment.perspective == Perspective.victim
             and not (segment.target_steamid64 or "").strip()
+            and (segment.target_player_name or "").strip()
         ):
             warnings.append(
                 f"segment {segment.segment_index}: victim segment missing steamid64 for "
                 f"{segment.target_player_name!r} — will spectate by name without verification"
+            )
+        if (
+            not segment.disabled
+            and segment.perspective == Perspective.victim
+            and segment.target_spec_slot is None
+            and (segment.target_player_name or "").strip()
+        ):
+            warnings.append(
+                f"segment {segment.segment_index}: victim {segment.target_player_name!r} "
+                f"missing spec_slot — will spectate by name"
             )
 
         # Step 4: Validate minimum duration (zero or negative)

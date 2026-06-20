@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..models import RecordingPlan, RecordingSegment, SourceType
+from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .obs_fade_controller import OBSFadeController
@@ -13,7 +13,7 @@ from .demo_controller import (
     demo_pause_silent, demo_pause_silent_attempt, demo_pause_silent_strict, demo_resume_silent_strict,
     DemoSeekError, inject_console_sequence,
 )
-from .spec_controller import spec_by_slot
+from .spec_controller import spec_by_slot, spec_player
 from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,8 @@ def _kb_bus(segment=None):
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
 PREPARE_PREROLL_SEC: float = 5.0
+# If spec/GSI exceeds the prepare→start wall-clock budget, re-seek instead of drifting past start_tick.
+_SPEC_OVERSHOOT_RESYNC_SEC: float = 0.2
 
 # Poll interval for the round-segment tick watcher.
 _TICK_WATCHER_POLL_SEC: float = 0.1
@@ -368,8 +370,23 @@ async def _spec_by_slot_with_retry(
         False — all offsets exhausted, still wrong player
     """
     if base_slot is None:
+        if (player_name or "").strip():
+            logger.info(
+                "[RecordingV3] no spec slot for %r; falling back to spec_player by name",
+                player_name,
+            )
+            await spec_player(player_name)
+            if not target_steamid64:
+                return None
+            verified = await verify_spec_target(target_steamid64)
+            if verified is False:
+                result_warnings.append(
+                    f"segment {segment_index}: spec verify failed for "
+                    f"{player_name} (name fallback) — wrong player spectated"
+                )
+            return verified
         logger.warning(
-            "[RecordingV3] no spec slot for %r (not set during parsing); skipping spec switch",
+            "[RecordingV3] no spec slot or name for spectate target; skipping spec switch",
             player_name,
         )
         return None
@@ -633,8 +650,9 @@ class RecordingExecutor:
 
                     if spec_ok is False:
                         logger.error(
-                            "[RecordingV3] spec failed for %s (steamid=%s) after slot retries; aborting",
+                            "[RecordingV3] spec failed for %s (steamid=%s) perspective=%s",
                             segment.target_player_name, segment.target_steamid64,
+                            segment.perspective,
                         )
                         await demo_pause()
                         result.segment_results.append(SegmentResult(
@@ -645,6 +663,12 @@ class RecordingExecutor:
                             perspective=segment.perspective,
                             error=f"spec confirm: wrong player spectated for {segment.target_player_name}",
                         ))
+                        if segment.perspective == Perspective.victim:
+                            result.warnings.append(
+                                f"segment {segment.segment_index}: victim POV spec failed for "
+                                f"{segment.target_player_name} — skipped, continuing"
+                            )
+                            continue
                         result.error = (
                             f"spec verify failed for {segment.target_player_name} — "
                             "recording aborted to avoid capturing wrong POV"
@@ -656,14 +680,87 @@ class RecordingExecutor:
                         result.warnings.extend(plan.warnings)
                         return result
 
-                # ── 3. Wait for demo to reach start_tick, then pause ────────
-                # spec_player / GSI-verify run while the demo is playing inside
-                # the 5 s prepare window.  Sleep the remaining time so the demo
-                # reaches start_tick before OBS begins recording.
-                remaining_wait = max(0.0, pre_roll_sec - spec_elapsed)
+                # ── 3. Sync to start_tick, then pause ───────────────────────
+                # spec_player / GSI-verify run while the demo plays in the prepare window.
+                # Slow spec (common on the first segment) can overshoot start_tick; wall-clock
+                # sleep cannot rewind — re-seek and re-spec so killer POV is not missed.
+                tick_resynced = False
+                record_overhead_sec = max(0.0, spec_elapsed - pre_roll_sec)
+                overshoot_sec = record_overhead_sec
+                if overshoot_sec > _SPEC_OVERSHOOT_RESYNC_SEC:
+                    logger.info(
+                        "[RecordingV3] spec overshot start by %.2fs; resyncing to start_tick=%d",
+                        overshoot_sec, segment.start_tick,
+                    )
+                    try:
+                        await gototick(segment.start_tick)
+                    except DemoSeekError as e:
+                        result.segment_results.append(SegmentResult(
+                            segment_index=segment.segment_index,
+                            status="seek_failed",
+                            start_tick=segment.start_tick,
+                            end_tick=segment.end_tick,
+                            perspective=segment.perspective,
+                            error=f"resync after spec overshoot: {e}",
+                        ))
+                        continue
+                    tick_resynced = True
+                    record_overhead_sec = 0.0
+                    spec_elapsed = 0.0
+                    if segment.target_steamid64 or segment.target_player_name:
+                        spec_ok = await _spec_by_slot_with_retry(
+                            base_slot=segment.target_spec_slot,
+                            player_name=segment.target_player_name,
+                            target_steamid64=segment.target_steamid64,
+                            result_warnings=result.warnings,
+                            segment_index=segment.segment_index,
+                        )
+                        if spec_ok is False:
+                            logger.error(
+                                "[RecordingV3] spec failed after resync for %s perspective=%s",
+                                segment.target_player_name, segment.perspective,
+                            )
+                            await demo_pause()
+                            result.segment_results.append(SegmentResult(
+                                segment_index=segment.segment_index,
+                                status="spec_failed",
+                                start_tick=segment.start_tick,
+                                end_tick=segment.end_tick,
+                                perspective=segment.perspective,
+                                error=f"spec confirm after resync: {segment.target_player_name}",
+                            ))
+                            if segment.perspective == Perspective.victim:
+                                result.warnings.append(
+                                    f"segment {segment.segment_index}: victim POV spec failed after resync "
+                                    f"for {segment.target_player_name} — skipped, continuing"
+                                )
+                                continue
+                            result.error = (
+                                f"spec verify failed for {segment.target_player_name} — "
+                                "recording aborted to avoid capturing wrong POV"
+                            )
+                            if obs_recording_started:
+                                await self._ctrl.stop_record_safe()
+                            result.output_path = final_output_path
+                            result.success = any(r.status == "ok" for r in result.segment_results)
+                            result.warnings.extend(plan.warnings)
+                            return result
+                        if spec_ok is not False and segment.voice_listen_mask is not None:
+                            mask_val = segment.voice_listen_mask
+                            try:
+                                await asyncio.to_thread(
+                                    inject_console_sequence,
+                                    ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
+                                )
+                            except Exception as _e:
+                                logger.warning(
+                                    "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
+                                )
+
+                remaining_wait = 0.0 if tick_resynced else max(0.0, pre_roll_sec - spec_elapsed)
                 logger.info(
-                    "[RecordingV3] spec_elapsed=%.2fs  remaining_to_start=%.2fs",
-                    spec_elapsed, remaining_wait,
+                    "[RecordingV3] spec_elapsed=%.2fs  remaining_to_start=%.2fs resynced=%s overhead=%.2fs",
+                    spec_elapsed, remaining_wait, tick_resynced, record_overhead_sec,
                 )
                 if remaining_wait > 0.05:
                     await asyncio.sleep(remaining_wait)
@@ -798,7 +895,10 @@ class RecordingExecutor:
                     )
                 else:
                     tick_result = await _record_until_tick(
-                        segment, plan.tick_rate, self._abort_event, overhead_sec=0.0,
+                        segment,
+                        plan.tick_rate,
+                        self._abort_event,
+                        overhead_sec=record_overhead_sec,
                     )
 
                 if tick_result == "aborted":

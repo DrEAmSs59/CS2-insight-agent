@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+
 from .models import (
     RecordingRequestDTO, RecordingPlan, RequestType
 )
@@ -6,6 +11,40 @@ from .planners.event_clip_planner import plan_event_clip
 from .planners.event_compilation_planner import plan_event_compilation
 from .planners.round_pov_planner import plan_round_pov
 from .postprocess.segment_postprocessor import postprocess_segments
+
+_AI_DIRECTOR_TYPES = {
+    RequestType.highlight,
+    RequestType.kill_compilation,
+}
+
+
+def _run_async(coro):
+    """Run coroutine from sync code; works inside FastAPI's running event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _plan_with_ai_director(req, dto: RecordingRequestDTO, extra_warnings: list[str]) -> list:
+    from .ai_director import suggest_recording_outline
+    from .planners.ai_directed_planner import plan_from_ai_outline
+
+    outline, source, llm_error = _run_async(suggest_recording_outline(req))
+    extra_warnings.append(f"AI director outline source: {source}")
+    if llm_error:
+        extra_warnings.append(f"AI director LLM error: {llm_error}")
+    if outline.rationale:
+        extra_warnings.append(f"AI director: {outline.rationale[:200]}")
+    victim_blocks = sum(1 for b in outline.blocks if b.type == "kill_with_victim")
+    extra_warnings.append(
+        f"AI director blocks: {len(outline.blocks)} "
+        f"(kill_with_victim={victim_blocks}, segments_est≈{len(outline.blocks) + victim_blocks})"
+    )
+    return plan_from_ai_outline(req, outline)
+
 
 def build_plan(dto: RecordingRequestDTO) -> RecordingPlan:
     req = normalize(dto)
@@ -28,9 +67,15 @@ def build_plan(dto: RecordingRequestDTO) -> RecordingPlan:
     }
 
     if dto.request_type in EVENT_CLIP_TYPES:
-        raw_segments = plan_event_clip(req)
+        if req.options.use_ai_director and dto.request_type in _AI_DIRECTOR_TYPES:
+            raw_segments = _plan_with_ai_director(req, dto, extra_warnings)
+        else:
+            raw_segments = plan_event_clip(req)
     elif dto.request_type in EVENT_COMPILATION_TYPES:
-        raw_segments = plan_event_compilation(req)
+        if req.options.use_ai_director and dto.request_type in _AI_DIRECTOR_TYPES:
+            raw_segments = _plan_with_ai_director(req, dto, extra_warnings)
+        else:
+            raw_segments = plan_event_compilation(req)
     elif dto.request_type in ROUND_POV_TYPES:
         raw_segments, round_warnings = plan_round_pov(req)
         extra_warnings.extend(round_warnings)

@@ -14,6 +14,12 @@ from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, R
 
 from .demo_parser import Clip, meme_series_badges_for_kd
 from .env_utils import LLMConfig, llm_base_url_is_local_host
+from .llm_compat import (
+    ai_review_fallback_message,
+    completion_extra_body,
+    message_text,
+    normalize_llm_base_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,9 +199,10 @@ class AIReviewer:
         key = (api_key or "").strip()
         if not key or key.startswith("****"):
             raise ValueError("AIReviewer: invalid or masked api_key")
-        bu = (base_url or "").strip() or None
+        bu = normalize_llm_base_url((base_url or "").strip() or None)
         self._client = AsyncOpenAI(api_key=key, base_url=bu, timeout=timeout_seconds)
         self._model = (model_name or "").strip() or "gpt-4o-mini"
+        self._base_url = bu
         self._timeout = timeout_seconds
         self._sem = asyncio.Semaphore(max(1, int(max_concurrency)))
         self._locale = locale
@@ -217,21 +224,25 @@ class AIReviewer:
 
     async def _call_llm(self, clip: Clip, match_meta: dict) -> tuple[Optional[float], Optional[str]]:
         user_content = _build_user_message(clip, match_meta)
+        create_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": select_reviewer_prompt(self._locale)},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": 0.88,
+            "max_tokens": 256,
+        }
+        extra_body = completion_extra_body(self._model, self._base_url)
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": select_reviewer_prompt(self._locale)},
-                    {"role": "user", "content": user_content},
-                ],
-                temperature=0.88,
-                max_tokens=256,
-            )
+            resp = await self._client.chat.completions.create(**create_kwargs)
         except (APITimeoutError, APIConnectionError, RateLimitError, APIError) as e:
             logger.warning("LLM request failed for clip %s: %s", clip.clip_id, e)
             raise
         choice = resp.choices[0] if resp.choices else None
-        content = (choice.message.content if choice and choice.message else "") or ""
+        content = message_text(choice.message if choice else None)
         data = _extract_json_object(content)
         if not data:
             logger.warning("Unparseable LLM JSON for clip %s: %r", clip.clip_id, content[:300])
@@ -268,10 +279,7 @@ class AIReviewer:
     @staticmethod
     def _fallback(clip: Clip, reason: str) -> None:
         clip.ai_score = None
-        clip.ai_commentary = {
-            "timeout": "锐评超时，这分不给了",
-            "CancelledError": "任务取消",
-        }.get(reason, f"锐评翻车：{reason}")
+        clip.ai_commentary = ai_review_fallback_message(reason)
 
     async def review_meme_montage(
         self,
@@ -285,16 +293,20 @@ class AIReviewer:
         user_content = _build_meme_montage_user_message(match_meta, meme_n)
         async with self._sem:
             try:
+                create_kwargs: dict[str, Any] = {
+                    "model": self._model,
+                    "messages": [
+                        {"role": "system", "content": select_meme_montage_prompt(self._locale)},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "temperature": 0.9,
+                    "max_tokens": 256,
+                }
+                extra_body = completion_extra_body(self._model, self._base_url)
+                if extra_body:
+                    create_kwargs["extra_body"] = extra_body
                 resp = await asyncio.wait_for(
-                    self._client.chat.completions.create(
-                        model=self._model,
-                        messages=[
-                            {"role": "system", "content": select_meme_montage_prompt(self._locale)},
-                            {"role": "user", "content": user_content},
-                        ],
-                        temperature=0.9,
-                        max_tokens=256,
-                    ),
+                    self._client.chat.completions.create(**create_kwargs),
                     timeout=self._timeout + 5.0,
                 )
             except (APITimeoutError, APIConnectionError, RateLimitError, APIError) as e:
@@ -307,7 +319,7 @@ class AIReviewer:
                 logger.warning("LLM meme montage error: %s", e)
                 return None, None
         choice = resp.choices[0] if resp.choices else None
-        content = (choice.message.content if choice and choice.message else "") or ""
+        content = message_text(choice.message if choice else None)
         data = _extract_json_object(content)
         if not data:
             logger.warning("Unparseable LLM JSON for meme montage: %r", content[:300])

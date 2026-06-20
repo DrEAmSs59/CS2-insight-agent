@@ -12,6 +12,7 @@ from .models import (
     RecordingOptions,
     SourceRef,
 )
+from .roster_utils import enrich_events_victims_from_roster
 
 logger = logging.getLogger(__name__)
 
@@ -181,13 +182,17 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
             "enable_victim_pov only applies to highlight, kill_compilation, and timeline_kill"
         )
 
+    events = list(dto.events)
+    events, roster_notes = enrich_events_victims_from_roster(events, dto.demo.all_players or [])
+    warnings.extend(roster_notes)
+
     return NormalizedRequest(
         request_id=dto.request_id,
         request_type=dto.request_type,
         source_type=dto.source_type,
         demo=dto.demo,
         target_player=dto.target_player,
-        events=dto.events,
+        events=events,
         rounds=normalized_rounds,
         options=dto.options,
         source_ref=dto.source_ref,
