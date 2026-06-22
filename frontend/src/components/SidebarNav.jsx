@@ -6,30 +6,17 @@ import {
   Package,
   Clapperboard,
   Download,
-  SlidersHorizontal,
   Settings,
-  Gamepad2,
-  RadioTower,
   Sun,
   Moon,
-  Trophy,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
-import LocaleToggle from "./LocaleToggle";
 import { useT } from "../i18n/useT.js";
 
 const linkBase =
   "flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-semibold transition-colors border border-transparent";
 const linkIdle = "text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary";
 const linkActive = "border-cs2-accent/45 bg-cs2-accent-soft text-cs2-accent";
-
-function SectionLabel({ children }) {
-  return (
-    <div className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-cs2-text-muted">
-      {children}
-    </div>
-  );
-}
 
 export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   const theme = useThemeStore((s) => s.theme);
@@ -56,7 +43,6 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-1.5 py-2" aria-label={t("nav.mainNav")}>
-        <SectionLabel>{t("nav.sectionWorkflow")}</SectionLabel>
         <NavLink to="/" end className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <BookOpen className="h-4 w-4 shrink-0 opacity-90" />
           {t("nav.guide")}
@@ -86,29 +72,6 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           <Clapperboard className="h-4 w-4 shrink-0 opacity-90" />
           {t("nav.montage")}
         </NavLink>
-
-        <SectionLabel>{t("nav.sectionTools")}</SectionLabel>
-        <NavLink to="/params" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
-          <SlidersHorizontal className="h-4 w-4 shrink-0 opacity-90" />
-          {t("nav.recordParams")}
-        </NavLink>
-        <NavLink to="/obs-config-center" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
-          <RadioTower className="h-4 w-4 shrink-0 opacity-90" />
-          {t("nav.obsConfig")}
-        </NavLink>
-        <NavLink to="/player-game-config" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
-          <Gamepad2 className="h-4 w-4 shrink-0 opacity-90" />
-          {t("nav.playerConfig")}
-        </NavLink>
-        {/* 官匹战绩：Valve API 国服不可用，暂时隐藏入口
-        <NavLink to="/match-history" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
-          <Trophy className="h-4 w-4 shrink-0 opacity-90" />
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-1">
-            官匹战绩
-            <span className="rounded bg-cs2-accent/20 px-1 font-mono text-[9px] text-cs2-accent">新</span>
-          </span>
-        </NavLink>
-        */}
       </nav>
 
       <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">
@@ -137,7 +100,6 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           )}
           {theme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}
         </button>
-        <LocaleToggle />
       </div>
     </aside>
   );

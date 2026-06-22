@@ -406,6 +406,10 @@ class AppConfig(BaseModel):
     record_inject_console_lines_user_configured: bool = False
     # 检查更新：auto=镜像与直连并发；on=仅用镜像；off=仅直连；或以 https:// 开头的自定义镜像前缀
     update_github_mirror: str = "auto"
+    # 上次检查更新的时间（ISO 8601 UTC）
+    last_update_check_at: str = ""
+    # 检查更新频率：weekly / monthly / never；默认每周
+    update_check_frequency: str = "weekly"
     obs_transition_enabled: bool = False
     obs_transition_name: str = "Fade"
     obs_transition_duration_ms: int = 100

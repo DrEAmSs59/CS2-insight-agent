@@ -15,7 +15,6 @@ import AnalysisPage from "./pages/AnalysisPage";
 import RecordingQueuePage from "./pages/RecordingQueuePage";
 import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
 import RecordingParamsPage from "./pages/RecordingParamsPage";
-import ObsConfigCenterPage from "./pages/ObsConfigCenterPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
 import MatchHistoryPage from "./pages/MatchHistoryPage";
@@ -48,6 +47,28 @@ import CustomTitleBar from "./components/CustomTitleBar";
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
+/** 根据频率和上次检查时间判断是否需要检查更新 */
+function shouldCheckUpdateByFrequency(frequency, lastCheckAt) {
+  if (frequency === "never") return false;
+  if (!lastCheckAt) return true; // 没有记录过，需要检查
+
+  try {
+    const lastCheck = new Date(lastCheckAt);
+    const now = new Date();
+    const diffMs = now.getTime() - lastCheck.getTime();
+    const diffDays = diffMs / 86400000;
+
+    if (frequency === "weekly") {
+      return diffDays >= 7;
+    } else if (frequency === "monthly") {
+      return diffDays >= 30;
+    }
+    return true;
+  } catch {
+    return true; // 解析失败，默认检查
+  }
+}
+
 function ensureDefaultCs2FullscreenArg(value) {
   const text = String(value ?? "").trim();
   if (!text) return DEFAULT_CS2_EXTRA_LAUNCH_ARGS;
@@ -68,7 +89,10 @@ export default function App() {
   const startupInitStartedRef = useRef(false);
   const startupUpdateWaitRef = useRef(/** @type {(() => void) | null} */ (null));
   const [aiMode, setAiMode] = useState(false);
-  
+  const [updateCheckFrequency, setUpdateCheckFrequency] = useState("weekly");
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
+  const shouldCheckUpdateRef = useRef(false);
+
   // 修正 isPackaged 检测：同步判断
   const [isPackaged, setIsPackaged] = useState(false);
   useEffect(() => {
@@ -912,6 +936,18 @@ export default function App() {
               setUpdateGithubMirrorCustom("");
             }
           }
+          if (typeof data.update_check_frequency === "string") {
+            setUpdateCheckFrequency(data.update_check_frequency);
+          }
+          if (typeof data.last_update_check_at === "string") {
+            setLastUpdateCheckAt(data.last_update_check_at);
+          }
+          // 判断是否需要检查更新（根据频率和上次检查时间）
+          const needCheck = shouldCheckUpdateByFrequency(
+            data.update_check_frequency ?? "weekly",
+            data.last_update_check_at ?? ""
+          );
+          shouldCheckUpdateRef.current = needCheck;
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
@@ -2397,7 +2433,7 @@ export default function App() {
     let cancelled = false;
     const runStartupInit = async () => {
       try {
-        if (await shouldCheckAppUpdates()) {
+        if (await shouldCheckAppUpdates() && shouldCheckUpdateRef.current) {
           setStartupInitPhase("update");
           await fetchUpdateInfo({ force: false, manual: false, awaitDismiss: true });
           if (cancelled) return;
@@ -2662,7 +2698,6 @@ export default function App() {
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
                 <Route path="/params" element={<RecordingParamsPage />} />
-                <Route path="/obs-config-center" element={<ObsConfigCenterPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />

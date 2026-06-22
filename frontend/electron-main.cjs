@@ -394,3 +394,24 @@ ipcMain.handle('window-is-maximized', () => {
 ipcMain.handle('is-packaged', () => {
   return app.isPackaged;
 });
+
+ipcMain.handle('get-version', () => {
+  return app.getVersion();
+});
+
+// 文件选择对话框 IPC handler
+ipcMain.handle('show-open-dialog', async (event, options) => {
+  if (!mainWindow) return { canceled: true, filePaths: [] };
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: options.filters || [{ name: 'Executable Files', extensions: ['exe'] }],
+      defaultPath: options.defaultPath || '',
+      title: options.title || '选择文件',
+    });
+    return result;
+  } catch (e) {
+    log.error('showOpenDialog error:', e);
+    return { canceled: true, filePaths: [] };
+  }
+});

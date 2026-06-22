@@ -651,7 +651,16 @@ def get_config():
 def get_app_update_info(force: bool = False):
     """对比 GitHub 最新 Release；force=true 跳过进程内短缓存（手动「检查更新」）。"""
     cur, src = resolve_local_version_info()
-    return build_update_payload(cur, src, force_refresh=bool(force))
+    payload = build_update_payload(cur, src, force_refresh=bool(force))
+    # 保存检查时间到配置
+    if payload.get("checked_at"):
+        try:
+            cfg = load_config()
+            cfg.last_update_check_at = payload["checked_at"]
+            save_config(cfg)
+        except Exception:
+            pass
+    return payload
 
 
 @app.post("/api/config/detect-encoder")
@@ -716,6 +725,49 @@ def open_config_data_dir():
     except Exception as e:  # noqa: BLE001
         logging.warning("open config dir failed: %s", e)
         return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
+
+
+def _get_dir_size(path: Path) -> int:
+    """计算文件夹总大小（字节）。"""
+    if not path.is_dir():
+        return 0
+    total = 0
+    try:
+        for entry in path.rglob("*"):
+            if entry.is_file():
+                try:
+                    total += entry.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
+
+
+def _format_size(bytes: int) -> str:
+    """格式化字节大小为人类可读字符串。"""
+    if bytes < 1024:
+        return f"{bytes} B"
+    elif bytes < 1024 * 1024:
+        return f"{bytes / 1024:.1f} KB"
+    elif bytes < 1024 * 1024 * 1024:
+        return f"{bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+@app.get("/api/config/data-dir-info")
+def get_data_dir_info():
+    """返回数据目录路径和大小信息。"""
+    data_dir = get_data_dir()
+    size_bytes = _get_dir_size(data_dir)
+    size_str = _format_size(size_bytes)
+    return {
+        "path": str(data_dir.resolve()),
+        "exists": data_dir.exists(),
+        "size_bytes": size_bytes,
+        "size_str": size_str,
+    }
 
 
 @app.post("/api/config/detect-obs")
