@@ -7,7 +7,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .models import RecordingRequestDTO, RecordingPlan, RequestType, RecordingOptions
 from .plan_builder import build_plan
-from .normalizer import NormalizationError
+from .normalizer import NormalizationError, normalize
+from .ai_director import (
+    suggest_recording_outline,
+    outline_to_preview_lines,
+    victim_pov_omitted_kills,
+    count_eligible_victim_pov,
+)
+from .planners.ai_directed_planner import plan_from_ai_outline
 from ..env_utils import OBSConfig, AppConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
@@ -362,6 +369,47 @@ async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
                 1 for w in plan.warnings if "guard_skipped" in w
             ),
         },
+    }
+
+
+@router.post("/ai-director/preview", response_model=dict)
+async def ai_director_preview(dto: RecordingRequestDTO) -> dict:
+    """LLM 导播大纲预览（不执行录制）。"""
+    try:
+        req = normalize(dto)
+    except NormalizationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    outline, source, llm_error = await suggest_recording_outline(req)
+    preview_lines = outline_to_preview_lines(outline, req)
+    segments = plan_from_ai_outline(req, outline)
+    victim_count = sum(1 for s in segments if str(getattr(s.perspective, "value", s.perspective)) == "victim")
+    victim_blocks = sum(1 for b in outline.blocks if b.type == "kill_with_victim")
+    omitted = victim_pov_omitted_kills(outline, req)
+    victim_eligible = count_eligible_victim_pov(req.events)
+
+    blocks_out = []
+    for b in outline.blocks:
+        row = {"type": b.type, "label": b.label or ""}
+        if b.type == "killer_merged":
+            row["kill_indices"] = list(b.kill_indices)
+        else:
+            row["kill_index"] = b.kill_index
+        blocks_out.append(row)
+
+    return {
+        "source": source,
+        "llm_error": llm_error,
+        "rationale": outline.rationale,
+        "blocks": blocks_out,
+        "preview_lines": preview_lines,
+        "estimated_segments": len(segments),
+        "victim_pov_count": victim_count,
+        "victim_pov_blocks": victim_blocks,
+        "victim_pov_eligible_count": victim_eligible,
+        "victim_pov_cap": victim_eligible,
+        "victim_pov_omitted": omitted,
+        "kill_count": len(req.events),
     }
 
 

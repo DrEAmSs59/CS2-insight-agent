@@ -73,6 +73,20 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
 
     sorted_events = sorted(req.events, key=lambda e: e.tick)
 
+    if opts.enable_victim_pov and opts.interleave_pov_pairs:
+        from .pov_interleave import plan_kill_then_victim_pairs
+        return plan_kill_then_victim_pairs(
+            req,
+            sorted_events,
+            source_type=SourceType.kill,
+            killer_pre_ticks=pre_ticks,
+            killer_post_ticks=post_ticks,
+            vic_pre_ticks=vic_pre_ticks,
+            vic_post_ticks=vic_post_ticks,
+            clamp_fn=_clamp,
+            is_final_round_fn=_is_final_round,
+        )
+
     # Group events by jump-cut threshold
     groups: list[list] = []
     current_group: list = []
@@ -124,15 +138,12 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
         segments.append(seg)
         seg_idx += 1
 
-    # ── Phase 2: all victim-POV segments (in original kill-event order) ───────
     if opts.enable_victim_pov:
         for victim_event in sorted_events:
             v_start = victim_event.tick - vic_pre_ticks
             v_end = victim_event.tick + vic_post_ticks
             v_start, v_end = _clamp(v_start, v_end, req)
             victim_steamid64 = (victim_event.victim.steamid64 or "").strip()
-            victim_disabled = not victim_steamid64
-            victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
 
             victim_seg = RecordingSegment(
                 segment_index=seg_idx,
@@ -148,8 +159,8 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
                 is_final_round=_is_final_round(victim_event.round, req),
                 safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
                 safe_end_tick=None,
-                disabled=victim_disabled,
-                disabled_reason=victim_disabled_reason,
+                disabled=False,
+                disabled_reason=None,
                 metadata={},
                 voice_listen_mask=_mask,
                 voice_listen_mask_enemy=_mask_enemy,

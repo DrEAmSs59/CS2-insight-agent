@@ -34,6 +34,20 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
     # Sort events by (round, tick) ascending
     sorted_events = sorted(req.events, key=lambda e: (e.round, e.tick))
 
+    if opts.enable_victim_pov and opts.interleave_pov_pairs:
+        from .pov_interleave import plan_kill_then_victim_pairs
+        return plan_kill_then_victim_pairs(
+            req,
+            sorted_events,
+            source_type=SourceType.kill,
+            killer_pre_ticks=pre_ticks,
+            killer_post_ticks=post_ticks,
+            vic_pre_ticks=vic_pre_ticks,
+            vic_post_ticks=vic_post_ticks,
+            clamp_fn=lambda s, e, r: (max(s, first_tick), min(e, demo_end_tick)),
+            is_final_round_fn=lambda rnd, r: rnd == r.demo.final_round,
+        )
+
     # Group events into merge groups
     groups: list[list] = []
     current_group: list = []
@@ -96,14 +110,11 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
         )
         seg_idx += 1
 
-    # ── Phase 2: all victim-POV segments (in original kill-event order) ───────
     if opts.enable_victim_pov:
         for victim_event in sorted_events:
             v_start = max(victim_event.tick - vic_pre_ticks, first_tick)
             v_end = min(victim_event.tick + vic_post_ticks, demo_end_tick)
             victim_steamid64 = (victim_event.victim.steamid64 or "").strip()
-            victim_disabled = not victim_steamid64
-            victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
 
             segments.append(
                 RecordingSegment(
@@ -120,8 +131,8 @@ def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
                     is_final_round=(victim_event.round == req.demo.final_round),
                     safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
                     safe_end_tick=None,
-                    disabled=victim_disabled,
-                    disabled_reason=victim_disabled_reason,
+                    disabled=False,
+                    disabled_reason=None,
                     metadata={},
                     voice_listen_mask=_mask,
                     voice_listen_mask_enemy=_mask_enemy,
@@ -147,6 +158,22 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
 
     # Sort events by (round, tick) ascending
     sorted_events = sorted(req.events, key=lambda e: (e.round, e.tick))
+
+    if opts.enable_fail_killer_pov and opts.interleave_pov_pairs:
+        from .pov_interleave import plan_victim_then_killer_pairs
+        killer_pre_ticks = int(opts.fail_killer_pre_sec * tick_rate)
+        killer_post_ticks = int(opts.fail_killer_post_sec * tick_rate)
+        return plan_victim_then_killer_pairs(
+            req,
+            sorted_events,
+            source_type=SourceType.death,
+            victim_pre_ticks=pre_ticks,
+            victim_post_ticks=post_ticks,
+            killer_pre_ticks=killer_pre_ticks,
+            killer_post_ticks=killer_post_ticks,
+            clamp_fn=lambda s, e, r: (max(s, first_tick), min(e, demo_end_tick)),
+            is_final_round_fn=lambda rnd, r: rnd == r.demo.final_round,
+        )
 
     # Build (event, window_start, window_end) tuples
     windowed = [
@@ -217,7 +244,6 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
         )
         seg_idx += 1
 
-    # ── Phase 2: killer-POV segments (one per death event, in original order) ─
     if opts.enable_fail_killer_pov:
         killer_pre_ticks = int(opts.fail_killer_pre_sec * tick_rate)
         killer_post_ticks = int(opts.fail_killer_post_sec * tick_rate)

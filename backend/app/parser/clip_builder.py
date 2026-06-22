@@ -572,7 +572,7 @@ def build_rival_compilations(
             max(tick + 1, end_tick),
         ]
 
-    all_target_kills: list[tuple[int, int, str, str]] = []
+    all_target_kills: list[dict[str, Any]] = []
     for rnd, kills in round_kills.items():
         for k in kills:
             kt = _int(k.get("tick"))
@@ -583,8 +583,19 @@ def build_rival_compilations(
             so, se = round_start_scores_for_target(rnd, round_team_score_map)
             if is_post_match_round(rnd, so, se, completed_rounds=_done_rounds, final_scoreline=_final_line):
                 continue
-            all_target_kills.append((rnd, kt, victim, victim_steamid))
-    all_target_kills.sort(key=lambda item: (item[1], item[0], item[2]))
+            all_target_kills.append(
+                {
+                    "round": rnd,
+                    "tick": kt,
+                    "victim": victim,
+                    "victim_steamid": victim_steamid,
+                    "weapon": str(k.get("weapon") or ""),
+                    "headshot": bool(k.get("headshot")),
+                    "tags": list(k.get("tags") or []),
+                    "shots_to_kill": _int(k.get("shots_to_kill"), 0),
+                }
+            )
+    all_target_kills.sort(key=lambda item: (item["tick"], item["round"], item["victim"]))
 
     all_target_deaths: list[tuple[int, int, str, str]] = []
     for d in death_records:
@@ -697,14 +708,13 @@ def build_rival_compilations(
         ))
 
     if all_target_kills:
-        first_rnd, first_t, _, _ = all_target_kills[0]
-        _last_rnd, last_t, _, _ = all_target_kills[-1]
+        first_rnd = all_target_kills[0]["round"]
         source_ticks = [
-            _segment_around_tick(kt, round_num=rn)
-            for rn, kt, _, _ in all_target_kills
+            _segment_around_tick(item["tick"], round_num=item["round"])
+            for item in all_target_kills
         ]
-        victims = [victim for _, _, victim, _ in all_target_kills]
-        victim_steamids = [vsid for _, _, _, vsid in all_target_kills]
+        victims = [item["victim"] for item in all_target_kills]
+        victim_steamids = [item["victim_steamid"] for item in all_target_kills]
         compilations.append(Clip(
             clip_id=f"c_{uuid.uuid4().hex[:8]}",
             map_name=map_name,
@@ -718,11 +728,15 @@ def build_rival_compilations(
             killers=[target_player] * len(all_target_kills),
             victims=victims,
             victim_steamid64s=victim_steamids,
-            kill_ticks=[kt for _, kt, _, _ in all_target_kills],
+            kill_ticks=[item["tick"] for item in all_target_kills],
+            kill_weapons=[item["weapon"] for item in all_target_kills],
+            kill_headshots=[item["headshot"] for item in all_target_kills],
+            kill_tag_lists=[item["tags"] for item in all_target_kills],
+            shots_to_kill=[item["shots_to_kill"] for item in all_target_kills],
             round_won=round_result_map.get(first_rnd),
             clip_min_tick=round_freeze_end_ticks.get(first_rnd),
             source_ticks=source_ticks,
-            source_rounds=[rn for rn, _, _, _ in all_target_kills],
+            source_rounds=[item["round"] for item in all_target_kills],
             compilation_kind="all_kills",
         ))
 

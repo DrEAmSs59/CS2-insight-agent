@@ -37,6 +37,8 @@ function pacingOverrideToOptions(pacing) {
     opts.kill_compilation_jump_cut_threshold_sec = pacing.max_gap_sec;
   }
   if (pacing.victim_pov === true) opts.enable_victim_pov = true;
+  if (pacing.pov_interleaved === true) opts.interleave_pov_pairs = true;
+  if (pacing.ai_director === true) opts.use_ai_director = true;
 
   // Victim POV independent timing — maps to dedicated backend fields.
   if (pacing.victim_pov_pre_sec != null) opts.victim_pov_pre_sec = pacing.victim_pov_pre_sec;

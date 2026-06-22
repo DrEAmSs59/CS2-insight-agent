@@ -15,6 +15,8 @@ export const DEFAULT_RECORDING_OPTIONS = {
   round_freeze_preroll_sec: 3.0,
   round_death_post_sec: 2.0,
   enable_victim_pov: false,
+  interleave_pov_pairs: false,
+  use_ai_director: false,
   // victim_pov_pre_sec: null means "use highlight_pre_sec" on the backend
   victim_pov_pre_sec: null,
   victim_pov_post_sec: 1.5,
@@ -39,6 +41,27 @@ function buildTargetPlayer(name, steamid64, specSlot) {
   };
   if (specSlot != null) obj.spec_slot = Number(specSlot);
   return obj;
+}
+
+function lookupRosterPlayer(name, steamid64, allPlayers) {
+  const roster = Array.isArray(allPlayers) ? allPlayers : [];
+  const sid = String(steamid64 || "").trim();
+  if (sid) {
+    const bySid = roster.find((p) => String(p?.steamid64 || "").trim() === sid);
+    if (bySid) return bySid;
+  }
+  const raw = String(name || "").trim();
+  if (!raw) return null;
+  const low = raw.toLowerCase();
+  return roster.find((p) => {
+    const pn = String(p?.name || "").trim();
+    return pn === raw || pn.toLowerCase() === low;
+  }) || null;
+}
+
+function resolveVictimSpecSlot(victimName, victimSteamId, matchMeta) {
+  const row = lookupRosterPlayer(victimName, victimSteamId, matchMeta?.all_players);
+  return row?.spec_slot != null ? Number(row.spec_slot) : null;
 }
 
 function buildDemoContext(clipData, queueItem, matchMeta) {
@@ -140,7 +163,8 @@ export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, o
       const victimName = clipData.victims?.[i] || "";
       // victim_steamid64s is populated from player_death user_steamid in demo_parser; fall back to nameToSteamId roster map
       const victimSteamId = clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
-      const victimSpecSlot = clipData.victim_spec_slots?.[i] ?? null;
+      const victimSpecSlot =
+        clipData.victim_spec_slots?.[i] ?? resolveVictimSpecSlot(victimName, victimSteamId, matchMeta);
       return {
         event_type: "kill",
         tick: killTick,
@@ -199,7 +223,8 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
   const victimName = clipData.victim_name || clipData.victims?.[0] || "";
   const victimSteamId =
     clipData.victim_steamid || clipData.victim_steamid64s?.[0] || nameToSteamId[victimName] || "";
-  const victimSpecSlot = clipData.victim_spec_slot ?? null;
+  const victimSpecSlot =
+    clipData.victim_spec_slot ?? resolveVictimSpecSlot(victimName, victimSteamId, matchMeta);
   return {
     request_id: newRequestId(),
     request_type: "timeline_kill",
@@ -275,7 +300,11 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
         const victimName = clipData.victims?.[i] || "";
         const victimSteamId =
           clipData.victim_steamid64s?.[i] || nameToSteamId[victimName] || "";
-        const victimSpecSlot = clipData.victim_spec_slots?.[i] ?? null;
+        const victimSpecSlot =
+        clipData.victim_spec_slots?.[i] ?? resolveVictimSpecSlot(victimName, victimSteamId, matchMeta);
+        const tags = Array.isArray(clipData.kill_tag_lists?.[i])
+          ? clipData.kill_tag_lists[i]
+          : [];
         return {
           event_type: "kill",
           tick,
@@ -284,6 +313,11 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
           victim: buildTargetPlayer(victimName, victimSteamId, victimSpecSlot),
           target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot),
           perspective: "killer",
+          weapon: clipData.kill_weapons?.[i] || "",
+          headshot: Boolean(clipData.kill_headshots?.[i]),
+          tags,
+          shots_to_kill:
+            clipData.shots_to_kill?.[i] != null ? Number(clipData.shots_to_kill[i]) : null,
         };
       }) || [],
     rounds: [],

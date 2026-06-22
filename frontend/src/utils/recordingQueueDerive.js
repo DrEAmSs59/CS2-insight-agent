@@ -94,6 +94,20 @@ export function estimateItemRecordSeconds(item, globalPacing) {
     ? clip.kill_ticks.filter((t) => Number.isFinite(Number(t)))
     : [];
 
+  if (po.victim_pov && po.pov_interleaved && killTicks.length > 0) {
+    // Interleaved: one killer window per kill (no jump-cut merge when POV is on)
+    let secInterleaved = killTicks.length * (pre + post);
+    const povPre = po.victim_pov_pre_sec ?? _VICTIM_POV_PRE_DEFAULT;
+    const povPost = po.victim_pov_post_sec ?? _VICTIM_POV_POST_DEFAULT;
+    secInterleaved += killTicks.length * (povPre + povPost);
+    if (po.killer_pov) {
+      const kPre = po.killer_pov_pre_sec ?? povPre;
+      const kPost = po.killer_pov_post_sec ?? povPost;
+      secInterleaved += kPre + kPost;
+    }
+    return Math.max(3, Math.round(secInterleaved));
+  }
+
   let sec = 0;
 
   if (isKillCompilation && Array.isArray(sourceTicks) && sourceTicks.length > 0) {

@@ -1,5 +1,7 @@
 import { mergedPacingForItem } from "../../utils/recordingQueueDerive";
 import { DEMO_TICK_RATE, isRoundTimelineRoundClip, isTimelineSourceClip } from "../../utils/montageUtils";
+import { getRecordingPlanPreview } from "../../utils/recordingPlanPreview";
+import RecordingPlanPreview from "./RecordingPlanPreview";
 import { useT } from "../../i18n/useT.js";
 
 function clipDataUsesDeathTickOverlay(clipData) {
@@ -175,9 +177,12 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
 
   const vic = Boolean(pacingOverride?.victim_pov);
   const killer = Boolean(pacingOverride?.killer_pov);
+  const planPreview = getRecordingPlanPreview(item, globalPacing);
   const extraParts = [];
-  if (vic) extraParts.push(t("queue.timelineVictimPov"));
-  if (killer) extraParts.push(t("queue.timelineKillerPov"));
+  if (!planPreview) {
+    if (vic) extraParts.push(t("queue.timelineVictimPov"));
+    if (killer) extraParts.push(t("queue.timelineKillerPov"));
+  }
 
   if (isGroupedCompilation) {
     const built = buildGroupedBlocks(src, pre, post);
@@ -206,11 +211,20 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
             <span className="text-cs2-text-muted">
               {t("queue.timelineSegmentSummary", { n: segmentCount, pre: pre.toFixed(1), post: post.toFixed(1) })}
             </span>
-            {extraParts.map((t) => (
-              <span key={t} className="text-cs2-text-muted">
-                · {t}
+            {extraParts.map((part) => (
+              <span key={part} className="text-cs2-text-muted">
+                · {part}
               </span>
             ))}
+            {planPreview ? (
+              <span className="w-full">
+                <RecordingPlanPreview
+                  item={item}
+                  globalPacing={globalPacing}
+                  compact
+                />
+              </span>
+            ) : null}
           </div>
         </div>
       );
@@ -275,11 +289,16 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
         <span className="inline-flex items-center gap-0.5">
           <span className="inline-block h-1.5 w-3 rounded-sm bg-zinc-600" /> {t("queue.timelineLegendPost", { s: post.toFixed(1) })}
         </span>
-        {extraParts.map((t) => (
-          <span key={t} className="text-cs2-text-muted">
-            · {t}
+        {extraParts.map((part) => (
+          <span key={part} className="text-cs2-text-muted">
+            · {part}
           </span>
         ))}
+        {planPreview ? (
+          <span className="w-full">
+            <RecordingPlanPreview item={item} globalPacing={globalPacing} compact />
+          </span>
+        ) : null}
       </div>
     </div>
   );

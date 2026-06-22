@@ -23,6 +23,8 @@ import {
   freezeToDeathQueueRoundBadgeText,
   isFreezeToDeathCompilation,
 } from "../utils/freezeToDeathRoundFilter";
+import RecordingPlanPreview from "./recordingQueue/RecordingPlanPreview";
+import AiDirectorPreview from "./recordingQueue/AiDirectorPreview";
 import { estimateItemRecordSeconds } from "../utils/recordingQueueDerive";
 import { timelineQueueMetaOneLiner } from "../utils/timelineQueue";
 import { AiScoreBadge } from "./ClipCard";
@@ -219,6 +221,11 @@ export function PovSection({ item, updateItemPacing }) {
 
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
+  const povInterleaved = Boolean(po.pov_interleaved);
+  const aiDirectorEnabled = Boolean(po.ai_director);
+  const killCount = item.clipData?.kill_ticks?.length || 0;
+  const canAiDirector =
+    povEnabled && canVictimPov && killCount >= 3 && (isKillCompilation || (isHighlight && killCount > 1));
   const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
   const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
@@ -235,7 +242,8 @@ export function PovSection({ item, updateItemPacing }) {
         {canVictimPov && (
           <button
             type="button"
-            onClick={() => commit({ victim_pov: !povEnabled })}
+            title={t("queue.victimPovHint")}
+            onClick={() => commit({ victim_pov: !povEnabled, ai_director: povEnabled ? false : po.ai_director })}
             className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               povEnabled
                 ? "border-cyan-500/40 bg-cs2-cyan-surface text-cyan-300 hover:bg-cs2-cyan-surface"
@@ -298,6 +306,49 @@ export function PovSection({ item, updateItemPacing }) {
           </button>
         )}
       </div>
+
+      {((povEnabled && canVictimPov) || (killerPovEnabled && isDeathCompilation)) && !aiDirectorEnabled && (
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-[10px] text-cs2-text-secondary">
+          <input
+            type="checkbox"
+            checked={povInterleaved}
+            onChange={(e) => commit({ pov_interleaved: e.target.checked, ai_director: false })}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-cs2-border accent-cyan-500"
+          />
+          <span className="leading-snug">
+            <span className="font-semibold text-cs2-text-primary">
+              {povEnabled && canVictimPov ? t("queue.povInterleavedLabel") : t("queue.povInterleavedLabelDeath")}
+            </span>
+            <span className="mt-0.5 block text-[9px] text-cs2-text-muted">
+              {povEnabled && canVictimPov ? t("queue.povInterleavedHintKill") : t("queue.povInterleavedHintDeath")}
+            </span>
+          </span>
+        </label>
+      )}
+
+      {canAiDirector && (
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1.5 text-[10px] text-cs2-text-secondary">
+          <input
+            type="checkbox"
+            checked={aiDirectorEnabled}
+            onChange={(e) => {
+              const on = e.target.checked;
+              commit(on ? { ai_director: true, pov_interleaved: false } : { ai_director: false });
+            }}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-cs2-border accent-violet-500"
+          />
+          <span className="leading-snug">
+            <span className="font-semibold text-violet-300">{t("queue.aiDirectorLabel")}</span>
+            <span className="mt-0.5 block text-[9px] text-cs2-text-muted">{t("queue.aiDirectorHint")}</span>
+          </span>
+        </label>
+      )}
+
+      {aiDirectorEnabled && canAiDirector ? (
+        <AiDirectorPreview item={item} globalPacing={gp} />
+      ) : (
+        <RecordingPlanPreview item={item} globalPacing={gp} />
+      )}
 
       {povEnabled && canVictimPov && (
         <div className="space-y-2 rounded border border-cyan-500/10 bg-cs2-cyan-surface p-2">
@@ -531,6 +582,7 @@ export function GlobalPacingPanel({
             ) : null}
           </button>
         </div>
+        <p className="mt-1.5 text-[9px] leading-relaxed text-cs2-text-muted">{t("queue.batchPovPlanHint")}</p>
       </div>
 
       <button

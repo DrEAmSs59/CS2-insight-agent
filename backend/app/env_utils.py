@@ -22,7 +22,7 @@ try:
 except ImportError:
     winreg = None  # non-Windows
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +312,13 @@ class LLMConfig(BaseModel):
     model: str = ""
     api_key: str = ""
     base_url: Optional[str] = None
+
+    @field_validator("base_url")
+    @classmethod
+    def _normalize_base_url(cls, v: Optional[str]) -> Optional[str]:
+        from .llm_compat import normalize_llm_base_url
+
+        return normalize_llm_base_url(v)
 
 
 def llm_base_url_is_local_host(base_url: Optional[str]) -> bool:

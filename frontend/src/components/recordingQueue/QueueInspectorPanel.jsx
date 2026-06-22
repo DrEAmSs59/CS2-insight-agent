@@ -1,4 +1,4 @@
-import { Monitor, Settings, Eye } from "lucide-react";
+import { Monitor, Settings, Eye, Clapperboard } from "lucide-react";
 import {
   PacingMicroPanel,
   PovSection,
@@ -23,6 +23,8 @@ import {
   isFreezeToDeathCompilation,
 } from "../../utils/freezeToDeathRoundFilter";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
+import RecordingPlanPreview from "./RecordingPlanPreview";
+import { getRecordingPlanPreview } from "../../utils/recordingPlanPreview";
 
 function FieldGroup({ icon: Icon, title, children }) {
   return (
@@ -96,6 +98,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const weaponPrimary = weaponUsedTokens(cd.weapon_used, locale)[0];
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 5) : [];
   const estSec = estimateItemRecordSeconds(selectedItem, globalPacing);
+  const planPreview = getRecordingPlanPreview(selectedItem, globalPacing);
   const victimsCount = Array.isArray(cd.victims) ? cd.victims.length : 0;
 
   return (
@@ -187,6 +190,12 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
             </p>
           </div>
         </div>
+
+        {planPreview ? (
+          <FieldGroup icon={Clapperboard} title={t("queue.fieldPlanOrder")}>
+            <RecordingPlanPreview item={selectedItem} globalPacing={globalPacing} embedded />
+          </FieldGroup>
+        ) : null}
 
         {/* 节奏面板 */}
         <FieldGroup icon={Settings} title={t("queue.fieldPacing")}>

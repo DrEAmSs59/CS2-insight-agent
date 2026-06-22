@@ -585,13 +585,14 @@ req19 = dto(
     ],
 )
 plan19 = build_plan(req19)
-# Should have: 1 killer segment + 2 victim segments (one per kill)
-total19 = len(plan19.segments)
 killer19 = [s for s in plan19.segments if s.perspective == Perspective.killer]
 victim19 = [s for s in plan19.segments if s.perspective == Perspective.victim]
-check("19a: 1 killer segment", len(killer19) == 1, f"got {len(killer19)}")
-check("19b: 2 victim segments (one per kill)", len(victim19) == 2,
-      f"got {len(victim19)}: {[(s.target_player_name, s.target_steamid64) for s in victim19]}")
+check("19a: 1 killer segment (legacy batch)", len(killer19) == 1, f"got {len(killer19)}")
+check("19b: 2 victim segments after all kills", len(victim19) == 2,
+      f"got {len(victim19)}")
+persp19 = [s.perspective for s in plan19.segments]
+check("19c: batch order K… then V…", persp19 == [Perspective.killer, Perspective.victim, Perspective.victim],
+      f"got {persp19}")
 
 
 # ── Test 20: Victim steamid64 empty → segment stays active (warn, no disable)
@@ -998,6 +999,80 @@ planWP5 = build_plan(reqWP5)
 disabledWP5 = [s for s in planWP5.disabled_segments if s.disabled_reason == "too_close_to_final_round_end"]
 check("WP5a: segment disabled with too_close_to_final_round_end", len(disabledWP5) >= 1,
       f"disabled={[(s.disabled, s.disabled_reason) for s in planWP5.disabled_segments]}, active={len(planWP5.segments)}")
+
+
+# ── Test 28: Victim POV disables killer jump-cut merge (interleaved mode only) ─
+print("\nTest 28: Interleaved POV disables killer jump-cut merge")
+gap28 = 200  # < 12s threshold — would merge without interleave
+req28 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    options=RecordingOptions(enable_victim_pov=True, interleave_pov_pairs=True),
+    events=[make_kill_event(10_000), make_kill_event(10_000 + gap28)],
+)
+plan28 = build_plan(req28)
+check("28a: 4 segments not 3", len(plan28.segments) == 4, f"got {len(plan28.segments)}")
+killer28 = [s for s in plan28.segments if s.perspective == Perspective.killer]
+check("28b: 2 killer segments", len(killer28) == 2, f"got {len(killer28)}")
+persp28 = [s.perspective for s in plan28.segments]
+check("28c: interleaved K,V,K,V", persp28 == [Perspective.killer, Perspective.victim] * 2, f"got {persp28}")
+
+
+# ── Test 29: Kill compilation + interleaved victim POV ─────────────────────
+print("\nTest 29: Kill compilation + interleaved victim POV")
+tick_a29, tick_b29 = 10_000, 10_300
+req29 = dto(
+    request_type=RequestType.kill_compilation,
+    source_type=SourceType.kill,
+    options=RecordingOptions(enable_victim_pov=True, interleave_pov_pairs=True),
+    events=[make_kill_event(t, round_num=5) for t in (tick_a29, tick_b29)],
+)
+plan29 = build_plan(req29)
+check("29a: 4 segments", len(plan29.segments) == 4, f"got {len(plan29.segments)}")
+persp29 = [s.perspective for s in plan29.segments]
+check("29b: K,V,K,V", persp29 == [Perspective.killer, Perspective.victim] * 2, f"got {persp29}")
+
+
+# ── Test 30: Death compilation + interleaved killer POV ────────────────────
+print("\nTest 30: Death compilation + interleaved killer POV")
+tick_a30, tick_b30 = 10_000, 10_200
+req30 = dto(
+    request_type=RequestType.death_compilation,
+    source_type=SourceType.death,
+    options=RecordingOptions(enable_fail_killer_pov=True, interleave_pov_pairs=True),
+    events=[make_death_event(t, round_num=5) for t in (tick_a30, tick_b30)],
+)
+plan30 = build_plan(req30)
+check("30a: 4 segments", len(plan30.segments) == 4, f"got {len(plan30.segments)}")
+persp30 = [s.perspective for s in plan30.segments]
+check("30b: V,K,V,K", persp30 == [Perspective.victim, Perspective.killer] * 2, f"got {persp30}")
+
+
+# ── Test 31: Interleaved killer segment uses short post tail (not full highlight post) ─
+print("\nTest 31: Interleaved killer tail capped before victim POV")
+tick31 = 10_000
+post31 = int(2.0 * TICK_RATE)
+req31 = dto(
+    request_type=RequestType.highlight,
+    source_type=SourceType.kill,
+    options=RecordingOptions(
+        enable_victim_pov=True,
+        interleave_pov_pairs=True,
+        highlight_post_sec=2.0,
+    ),
+    events=[make_kill_event(tick31)],
+)
+plan31 = build_plan(req31)
+check("31a: 2 segments", len(plan31.segments) == 2, f"got {len(plan31.segments)}")
+if len(plan31.segments) >= 2:
+    killer31 = plan31.segments[0]
+    victim31 = plan31.segments[1]
+    tail31 = killer31.end_tick - tick31
+    max_tail31 = int(0.35 * TICK_RATE) + 1
+    check("31b: killer end near kill tick", tail31 <= max_tail31, f"tail={tail31} max={max_tail31}")
+    check("31c: victim uses victim POV post window",
+          victim31.end_tick - tick31 >= int(1.5 * TICK_RATE) - 1,
+          f"victim tail={victim31.end_tick - tick31}")
 
 
 # ── Summary ────────────────────────────────────────────────────────────────

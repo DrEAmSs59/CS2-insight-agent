@@ -117,6 +117,11 @@ class Clip:
     freeze_to_death_round_windows: Optional[list[dict[str, Any]]] = None
     # 本片段中因 assistedflash=True 的击杀对应的助攻闪光手玩家名（去重保序），供前端 hover 展示
     flash_assisters: list[str] = field(default_factory=list)
+    # 与 kill_ticks 等长；每次击杀的武器 / 爆头 / 标签 / 开火数（AI 导播选受害者 POV）
+    kill_weapons: list[str] = field(default_factory=list)
+    kill_headshots: list[bool] = field(default_factory=list)
+    kill_tag_lists: list[list[str]] = field(default_factory=list)
+    shots_to_kill: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
