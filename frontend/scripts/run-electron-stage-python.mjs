@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pythonExe = join(repoRoot, "python", "python.exe");
-const portablePs1 = join(repoRoot, "package_portable.ps1");
+const portablePs1 = join(repoRoot, "packaging", "windows", "package_portable.ps1");
 
 if (process.env.ELECTRON_SKIP_PYTHON_STAGE === "1") {
   console.log("[electron] ELECTRON_SKIP_PYTHON_STAGE=1 — skip python staging");
