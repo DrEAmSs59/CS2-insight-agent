@@ -37,6 +37,19 @@ export function buildWarmupConsoleCommands(o) {
   if (o.viewmodel_fov_68) {
     lines.push("viewmodel_fov 68");
   }
+  if (o.third_person_camera) {
+    lines.push(
+      "cam_command 1",
+      "cam_idealdist 30",
+      "cam_idealyaw 0",
+      "cam_idealpitch 0",
+      "c_thirdpersonshoulder 1",
+      "c_thirdpersonshoulderaimdist 300",
+      "c_thirdpersonshoulderdist 40",
+      "c_thirdpersonshoulderheight 2",
+      "c_thirdpersonshoulderoffset 20",
+    );
+  }
   const flashOpacity = effectiveSpectatorFlashbangOpacity(
     o,
     !!(o.pov_hud_enabled || o.experimental_pov_enabled),
@@ -74,6 +87,7 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   apply_fov: false,
   fov_cs_debug: 90,
   viewmodel_fov_68: false,
+  third_person_camera: false,
   apply_spectator_flashbang_opacity: false,
   spectator_flashbang_opacity: SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
   voice_filter: "mute",
@@ -259,6 +273,7 @@ export default function RecordWarmupModal({
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
       viewmodel_fov_68: opts.viewmodel_fov_68,
+      third_person_camera: opts.third_person_camera,
       spectator_flashbang_opacity: effectiveSpectatorFlashbangOpacity(opts, sessionPovEnabled),
       voice_filter: opts.voice_filter ?? "mute",
       hide_demo_playback_ui: opts.hide_demo_playback_ui,
@@ -583,6 +598,17 @@ export default function RecordWarmupModal({
               {opts.viewmodel_fov_68 ? (
                 <p className="-mt-1 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
                   {t("record.warmupViewmodelOutcome")}
+                </p>
+              ) : null}
+              <OptionRow
+                checked={opts.third_person_camera}
+                onChange={(v) => set({ third_person_camera: v })}
+                title={t("record.warmupThirdPersonTitle")}
+                code="cam_command 1; cam_idealdist 30; c_thirdpersonshoulder 1"
+              />
+              {opts.third_person_camera ? (
+                <p className="-mt-1 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
+                  {t("record.commonThirdPersonOutcome")}
                 </p>
               ) : null}
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">

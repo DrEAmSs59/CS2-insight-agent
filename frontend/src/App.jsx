@@ -179,6 +179,7 @@ export default function App() {
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const savedRecordWarmupDefaultsRef = useRef(null);
+  const queuePacingInitializedRef = useRef(false);
   const [cs2ExtraLaunchArgs, setCs2ExtraLaunchArgs] = useState("");
   const [recordInjectConsoleLines, setRecordInjectConsoleLines] = useState("");
   const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
@@ -877,12 +878,17 @@ export default function App() {
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
     }
-    if (
+    const savedPacing =
       data.recording_global_pacing &&
       typeof data.recording_global_pacing === "object" &&
       !Array.isArray(data.recording_global_pacing)
-    ) {
-      useRecordingQueue.getState().hydrateGlobalPacing(data.recording_global_pacing);
+        ? data.recording_global_pacing
+        : {};
+    const queueStore = useRecordingQueue.getState();
+    queueStore.hydratePresetPacing(savedPacing);
+    if (!queuePacingInitializedRef.current) {
+      queueStore.hydrateGlobalPacing(savedPacing);
+      queuePacingInitializedRef.current = true;
     }
   }, []);
 
@@ -1736,7 +1742,7 @@ export default function App() {
     const pacing =
       payload?.recording_global_pacing && typeof payload.recording_global_pacing === "object"
         ? payload.recording_global_pacing
-        : useRecordingQueue.getState().globalPacing;
+        : useRecordingQueue.getState().presetPacing;
     const body = {
       default_record_warmup: mergedWarmup,
       recording_global_pacing: pacing,

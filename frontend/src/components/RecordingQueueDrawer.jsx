@@ -582,7 +582,6 @@ export function GlobalPacingPanel({
             ) : null}
           </button>
         </div>
-        <p className="mt-1.5 text-[9px] leading-relaxed text-cs2-text-muted">{t("queue.batchPovPlanHint")}</p>
       </div>
 
       <button

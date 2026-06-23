@@ -31,6 +31,7 @@
 
 <p align="center">
   <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/PLAYER_GUIDE.md">使用指南</a> •
+  <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/CONTRIBUTING.md">贡献指南</a> •
   <a href="https://www.bilibili.com/video/BV1PcVj69ExZ/">视频教程</a> •
   <a href="#核心功能">核心功能</a> •
   <a href="#安装">快速安装</a> •

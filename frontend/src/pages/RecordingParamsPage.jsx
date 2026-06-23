@@ -1,11 +1,11 @@
 import CommonParamsModal from "../components/CommonParamsModal";
 import { useAppShell } from "../context/AppShellContext";
 
-export default function RecordingParamsPage() {
+export default function RecordingParamsPage({ embedded = false, onRegisterSave, onSaveUiChange }) {
   const s = useAppShell();
   return (
     <CommonParamsModal
-      variant="page"
+      variant={embedded ? "embedded" : "page"}
       open
       onClose={() => {}}
       configReady={s.savedRecordWarmupDefaults !== null}
@@ -22,6 +22,8 @@ export default function RecordingParamsPage() {
       kbOverlayEnabled={s.kbOverlayEnabled}
       kbOverlayTickOffset={s.kbOverlayTickOffset}
       kbOverlayPosition={s.kbOverlayPosition}
+      onRegisterSave={onRegisterSave}
+      onSaveUiChange={onSaveUiChange}
     />
   );
 }

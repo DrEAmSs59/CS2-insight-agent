@@ -1769,6 +1769,8 @@ class RecordingWarmupExtras:
     hud_showtargetid_hide: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
+    # 第三人称肩部镜头；启用后在预热阶段注入固定 cam_* / c_thirdperson* 参数。
+    third_person_camera: bool = False
     # Demo 观战闪光弹亮度；None 表示不注入。POV HUD 录制时由 pov_constants 强制 1.0
     spectator_flashbang_opacity: Optional[float] = None
     # "mute"=全部静音, "open"=所有玩家, "team"=只听主角队伍, "enemy"=只听对方队伍, "off"=不注入
@@ -3299,6 +3301,20 @@ class OBSDirector:
             lines.append(f"fov_cs_debug {float(w.fov_cs_debug)}")
         if w.viewmodel_fov_68:
             lines.append("viewmodel_fov 68")
+        if w.third_person_camera:
+            lines.extend(
+                (
+                    "cam_command 1",
+                    "cam_idealdist 30",
+                    "cam_idealyaw 0",
+                    "cam_idealpitch 0",
+                    "c_thirdpersonshoulder 1",
+                    "c_thirdpersonshoulderaimdist 300",
+                    "c_thirdpersonshoulderdist 40",
+                    "c_thirdpersonshoulderheight 2",
+                    "c_thirdpersonshoulderoffset 20",
+                )
+            )
         _fb = getattr(w, "spectator_flashbang_opacity", None)
         if _fb is not None and not getattr(w, "pov_hud_enabled", False):
             try:

@@ -135,6 +135,13 @@ export const useRecordingQueue = create((set, get) => ({
    */
   globalPacing: {},
 
+  /**
+   * 「设置 → 录制预设」中保存的默认节奏。它与当前录制队列的 globalPacing 分开，
+   * 队列内的临时调整不会反映到预设页，也不会写入配置文件。
+   * @type {PacingOverride}
+   */
+  presetPacing: {},
+
   /** @param {RecordingQueueItem | RecordingQueueItem[]} itemOrItems */
   addToQueue(itemOrItems) {
     const arr = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
@@ -217,6 +224,14 @@ export const useRecordingQueue = create((set, get) => ({
     }));
   },
 
+  /** 更新「设置 → 录制预设」的节奏默认值。 */
+  setPresetPacing(partial) {
+    if (!partial || typeof partial !== "object") return;
+    set((s) => ({
+      presetPacing: { ...s.presetPacing, ...partial },
+    }));
+  },
+
   /**
    * 重置「智能分段」数值（击杀段前预留 / 击杀段后预留 / 跳剪间隔阈值），保留入队默认开关与 POV 时序默认值。
    */
@@ -240,6 +255,27 @@ export const useRecordingQueue = create((set, get) => ({
     });
   },
 
+  /** 重置「设置 → 录制预设」中的数值节奏，保留入队默认开关与 POV 时序。 */
+  resetPresetPacing() {
+    set((s) => {
+      const g = s.presetPacing || {};
+      const next = {};
+      const keep = new Set([
+        "default_victim_pov",
+        "default_killer_pov",
+        "default_pov_interleaved",
+        "victim_pov_pre_sec",
+        "victim_pov_post_sec",
+        "killer_pov_pre_sec",
+        "killer_pov_post_sec",
+      ]);
+      for (const k of Object.keys(g)) {
+        if (keep.has(k)) next[k] = g[k];
+      }
+      return { presetPacing: next };
+    });
+  },
+
   /**
    * 从 data/cs2-insight.config.json / GET /api/config 一次性替换全局节奏（非合并）。
    * @param {Record<string, unknown>} obj
@@ -247,6 +283,14 @@ export const useRecordingQueue = create((set, get) => ({
   hydrateGlobalPacing(obj) {
     set({
       globalPacing:
+        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+    });
+  },
+
+  /** 从配置文件载入「设置 → 录制预设」的节奏默认值。 */
+  hydratePresetPacing(obj) {
+    set({
+      presetPacing:
         obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
     });
   },

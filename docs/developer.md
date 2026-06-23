@@ -1,3 +1,16 @@
+## 分支与贡献
+
+日常开发基于 **`develop`**，稳定发布在 **`main`**。工作分支从 `develop` 拉出，PR 目标为 `develop`。
+
+完整流程（发布、hotfix、分支命名）见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+
+```bash
+git fetch origin && git checkout develop && git pull
+git checkout -b feat/my-change
+```
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |

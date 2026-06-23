@@ -98,7 +98,7 @@ export default function AiDirectorPreview({ item, globalPacing }) {
           </p>
           {data.source !== "llm" && data.llm_error ? (
             <p className="mt-1 break-words text-[9px] leading-relaxed text-amber-400/95">
-              {t("queue.aiDirectorLlmError", { error: data.llm_error })}
+              {t("queue.aiDirectorLlmError")}
             </p>
           ) : data.source !== "llm" ? (
             <p className="mt-1 text-[9px] text-amber-400/90">{t("queue.aiDirectorHeuristicWarn")}</p>
@@ -113,7 +113,6 @@ export default function AiDirectorPreview({ item, globalPacing }) {
                   <li key={row.index}>
                     {t("queue.aiDirectorOmittedRow", {
                       index: row.display_index ?? row.index + 1,
-                      score: row.victim_pov_score,
                       victim: row.victim || "—",
                     })}
                   </li>

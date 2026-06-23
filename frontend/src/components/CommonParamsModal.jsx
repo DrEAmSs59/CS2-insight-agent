@@ -118,30 +118,34 @@ export default function CommonParamsModal({
   kbOverlayTickOffset: initKbOverlayTickOffset = 6,
   kbOverlayPosition: initKbOverlayPosition = "bottom_center",
   configRefreshKey = 0,
+  onRegisterSave,
+  onSaveUiChange,
 }) {
   const t = useT();
   const isPage = variant === "page";
-  const globalPacing = useRecordingQueue((s) => s.globalPacing);
-  const setGlobalPacing = useRecordingQueue((s) => s.setGlobalPacing);
-  const resetNumericGlobalPacing = useRecordingQueue((s) => s.resetGlobalPacing);
+  const isEmbedded = variant === "embedded";
+  const isModal = !isPage && !isEmbedded;
+  const presetPacing = useRecordingQueue((s) => s.presetPacing);
+  const setPresetPacing = useRecordingQueue((s) => s.setPresetPacing);
+  const resetPresetPacing = useRecordingQueue((s) => s.resetPresetPacing);
 
-  const post = globalPacing.post_last_sec ?? BACKEND_DEFAULT_PACING.post_last_sec;
-  const pre = globalPacing.pre_first_sec ?? BACKEND_DEFAULT_PACING.pre_first_sec;
-  const gap = globalPacing.max_gap_sec ?? BACKEND_DEFAULT_PACING.max_gap_sec;
+  const post = presetPacing.post_last_sec ?? BACKEND_DEFAULT_PACING.post_last_sec;
+  const pre = presetPacing.pre_first_sec ?? BACKEND_DEFAULT_PACING.pre_first_sec;
+  const gap = presetPacing.max_gap_sec ?? BACKEND_DEFAULT_PACING.max_gap_sec;
 
-  const victimPovPre = globalPacing.victim_pov_pre_sec ?? FB_VIC_PRE;
-  const victimPovPost = globalPacing.victim_pov_post_sec ?? FB_VIC_POST;
-  const killerPovPre = globalPacing.killer_pov_pre_sec ?? FB_KILL_PRE;
-  const killerPovPost = globalPacing.killer_pov_post_sec ?? FB_KILL_POST;
+  const victimPovPre = presetPacing.victim_pov_pre_sec ?? FB_VIC_PRE;
+  const victimPovPost = presetPacing.victim_pov_post_sec ?? FB_VIC_POST;
+  const killerPovPre = presetPacing.killer_pov_pre_sec ?? FB_KILL_PRE;
+  const killerPovPost = presetPacing.killer_pov_post_sec ?? FB_KILL_POST;
 
   const commitPacingNumbers = useCallback(
     (partial) => {
       const next = Object.fromEntries(
         Object.entries(partial).filter(([, v]) => typeof v === "number" && Number.isFinite(v))
       );
-      if (Object.keys(next).length) setGlobalPacing(next);
+      if (Object.keys(next).length) setPresetPacing(next);
     },
-    [setGlobalPacing]
+    [setPresetPacing]
   );
 
   const [warmupOpts, setWarmupOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
@@ -160,13 +164,13 @@ export default function CommonParamsModal({
   const lastHydratedRefreshKey = useRef(null);
 
   useEffect(() => {
-    if (!open && !isPage) return;
+    if (!open && !isPage && !isEmbedded) return;
     setWarmupResolutionError("");
   }, [open, isPage]);
 
   useEffect(() => {
     if (!configReady) return;
-    if (!open && !isPage) return;
+    if (!open && !isPage && !isEmbedded) return;
     if (lastHydratedRefreshKey.current === configRefreshKey) return;
     lastHydratedRefreshKey.current = configRefreshKey;
     const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
@@ -229,7 +233,7 @@ export default function CommonParamsModal({
     setSaveState("saving");
     const result = await onSaveAllCommonParams({
       default_record_warmup: warmupUiOptsToPersisted(warmupOpts),
-      recording_global_pacing: globalPacing,
+      recording_global_pacing: presetPacing,
       cs2_extra_launch_args: localCs2ExtraLaunchArgs,
       record_inject_console_lines: localRecordInjectLines,
       obs_transition_enabled: obsTransEnabled,
@@ -250,7 +254,7 @@ export default function CommonParamsModal({
     onSaveAllCommonParams,
     saveState,
     warmupOpts,
-    globalPacing,
+    presetPacing,
     localCs2ExtraLaunchArgs,
     localRecordInjectLines,
     obsTransEnabled,
@@ -261,6 +265,20 @@ export default function CommonParamsModal({
     kbOverlayPosition,
     povEnabled,
   ]);
+
+  const saveDisabled = !configReady || saveState === "saving" || batchRecording;
+
+  useEffect(() => {
+    onRegisterSave?.(handleSaveAll);
+    return () => onRegisterSave?.(null);
+  }, [handleSaveAll, onRegisterSave]);
+
+  useEffect(() => {
+    onSaveUiChange?.({
+      disabled: saveDisabled,
+      state: saveState,
+    });
+  }, [onSaveUiChange, saveDisabled, saveState]);
 
   const resSummaryRaw = formatResolutionSummary(
     warmupOpts.aspect_ratio,
@@ -294,7 +312,7 @@ export default function CommonParamsModal({
   const saveButton = onSaveAllCommonParams ? (
     <button
       type="button"
-      disabled={!configReady || saveState === "saving" || batchRecording}
+      disabled={saveDisabled}
       onClick={() => void handleSaveAll()}
       className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45"
     >
@@ -311,9 +329,9 @@ export default function CommonParamsModal({
     </button>
   ) : null;
 
-  if (!open && !isPage) return null;
+  if (!open && !isPage && !isEmbedded) return null;
 
-  const outerClass = isPage
+  const outerClass = isPage || isEmbedded
     ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
     : "flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl";
 
@@ -324,7 +342,7 @@ export default function CommonParamsModal({
   const body = (
     <>
       <div className={outerClass}>
-        {!isPage ? (
+        {isModal ? (
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-cs2-border px-4 py-4 sm:px-5">
           <div className="min-w-0 pr-2">
             <h2 id="common-params-title" className="text-base font-bold text-cs2-text-primary">
@@ -336,7 +354,7 @@ export default function CommonParamsModal({
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {saveButton}
-            {!isPage ? (
+            {isModal ? (
               <button
                 type="button"
                 onClick={onClose}
@@ -351,9 +369,9 @@ export default function CommonParamsModal({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4">
-          <div className="@container/params w-full min-w-0">
-            <div className="grid min-w-0 grid-cols-1 gap-3 pb-2 @min-[52rem]/params:grid-cols-2 @min-[52rem]/params:items-start @min-[52rem]/params:gap-5 @min-[52rem]/params:pb-4">
-              <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
+          <div className="@container/params mx-auto w-full max-w-4xl min-w-0">
+            <div className="grid min-w-0 grid-cols-1 gap-3 pb-2 sm:gap-4 sm:pb-4">
+              <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title={t("record.commonSecPacing")}
@@ -440,7 +458,7 @@ export default function CommonParamsModal({
             <button
               type="button"
               disabled={batchRecording}
-              onClick={() => resetNumericGlobalPacing()}
+              onClick={() => resetPresetPacing()}
               className="mt-4 text-xs text-cs2-text-muted hover:text-cs2-text-secondary disabled:opacity-40"
             >
               {t("record.commonPacingResetBtn")}
@@ -464,15 +482,15 @@ export default function CommonParamsModal({
                   <input
                     type="checkbox"
                     disabled={batchRecording}
-                    checked={globalPacing.default_victim_pov === true}
-                    onChange={(e) => setGlobalPacing({ default_victim_pov: e.target.checked })}
+                    checked={presetPacing.default_victim_pov === true}
+                    onChange={(e) => setPresetPacing({ default_victim_pov: e.target.checked })}
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cyan-500 disabled:opacity-40"
                   />
                   <span className="text-xs leading-snug text-cs2-text-secondary">
                     {t("record.commonVictimPovCheckbox")}
                   </span>
                 </label>
-                {globalPacing.default_victim_pov ? (
+                {presetPacing.default_victim_pov ? (
                   <p className="mt-2 text-xs leading-relaxed text-cs2-emerald-on-surface">
                     {t("record.commonVictimPovOutcome")}
                   </p>
@@ -481,8 +499,8 @@ export default function CommonParamsModal({
                   <input
                     type="checkbox"
                     disabled={batchRecording}
-                    checked={globalPacing.default_pov_interleaved === true}
-                    onChange={(e) => setGlobalPacing({ default_pov_interleaved: e.target.checked })}
+                    checked={presetPacing.default_pov_interleaved === true}
+                    onChange={(e) => setPresetPacing({ default_pov_interleaved: e.target.checked })}
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cyan-500 disabled:opacity-40"
                   />
                   <span className="text-xs leading-snug text-cs2-text-secondary">
@@ -522,15 +540,15 @@ export default function CommonParamsModal({
                   <input
                     type="checkbox"
                     disabled={batchRecording}
-                    checked={globalPacing.default_killer_pov === true}
-                    onChange={(e) => setGlobalPacing({ default_killer_pov: e.target.checked })}
+                    checked={presetPacing.default_killer_pov === true}
+                    onChange={(e) => setPresetPacing({ default_killer_pov: e.target.checked })}
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-amber-500 disabled:opacity-40"
                   />
                   <span className="text-xs leading-snug text-cs2-text-secondary">
                     {t("record.commonKillerPovCheckbox")}
                   </span>
                 </label>
-                {globalPacing.default_killer_pov ? (
+                {presetPacing.default_killer_pov ? (
                   <p className="mt-2 text-xs leading-relaxed text-cs2-emerald-on-surface">
                     {t("record.commonKillerPovOutcome")}
                   </p>
@@ -647,6 +665,17 @@ export default function CommonParamsModal({
                   {t("record.commonViewmodelOutcome")}
                 </p>
               ) : null}
+              <OptionRow
+                checked={warmupOpts.third_person_camera}
+                onChange={(v) => patchWarmup({ third_person_camera: v })}
+                title={t("record.commonThirdPersonTitle")}
+                code="cam_command 1; cam_idealdist 30; c_thirdpersonshoulder 1"
+              />
+              {warmupOpts.third_person_camera ? (
+                <p className="-mt-1 ml-1 text-xs leading-relaxed text-emerald-400/85">
+                  {t("record.commonThirdPersonOutcome")}
+                </p>
+              ) : null}
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-3">
                 <label
                   className={`flex cursor-pointer items-center gap-3 ${
@@ -703,7 +732,7 @@ export default function CommonParamsModal({
           </WorkflowSection>
 
             </div>
-            <div className="flex min-w-0 flex-col gap-3 @min-[52rem]/params:gap-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
               <WorkflowSection
                 title={t("record.commonSecObs")}
                 subtitle={t("record.commonSecObsSubtitle")}
@@ -1036,7 +1065,7 @@ export default function CommonParamsModal({
         </div>
         </div>
 
-        {!isPage ? (
+        {isModal ? (
           <div className="shrink-0 border-t border-cs2-border bg-cs2-bg-input/60 px-4 py-3 sm:px-5">
             <button
               type="button"
@@ -1055,26 +1084,33 @@ export default function CommonParamsModal({
     return (
       <div className="flex h-full min-h-0 w-full flex-col bg-cs2-bg-page">
         <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-sm sm:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">{t("record.commonPageTitle")}</h1>
-              <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
-                {t("record.commonPageSubtitle")}
-              </p>
-              {saveError ? (
-                <p className="mt-2 text-xs leading-snug text-rose-400">{saveError}</p>
-              ) : null}
-              {!configReady ? (
-                <p className="mt-2 text-xs text-cs2-text-muted">{t("record.commonLoadingConfig")}</p>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center self-center">{saveButton}</div>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">{t("record.commonPageTitle")}</h1>
+            <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
+              {t("record.commonPageSubtitle")}
+            </p>
+            {saveError ? (
+              <p className="mt-2 text-xs leading-snug text-rose-400">{saveError}</p>
+            ) : null}
+            {!configReady ? (
+              <p className="mt-2 text-xs text-cs2-text-muted">{t("record.commonLoadingConfig")}</p>
+            ) : null}
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
+        <div className="shrink-0 px-3 pb-3 sm:px-5 sm:pb-4">
+          <div className="flex flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <p className="text-[11px] leading-relaxed text-dynamic-zinc-400">
+              {t("record.commonSaveFooterDesc")}
+            </p>
+            {saveButton}
+          </div>
+        </div>
       </div>
     );
   }
+
+  if (isEmbedded) return body;
 
   return (
     <div

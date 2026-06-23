@@ -36,3 +36,24 @@ def test_keybind_reset_still_forced():
     lines = director._recording_warmup_console_lines(RecordingWarmupExtras())
     assert "unbindall" in lines
     assert any("toggleconsole" in l for l in lines)
+
+
+def test_third_person_camera_injects_the_configured_camera_commands():
+    director = _director("")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(third_person_camera=True)
+    )
+
+    third_person_commands = [
+        "cam_command 1",
+        "cam_idealdist 30",
+        "cam_idealyaw 0",
+        "cam_idealpitch 0",
+        "c_thirdpersonshoulder 1",
+        "c_thirdpersonshoulderaimdist 300",
+        "c_thirdpersonshoulderdist 40",
+        "c_thirdpersonshoulderheight 2",
+        "c_thirdpersonshoulderoffset 20",
+    ]
+    start = lines.index("cam_command 1")
+    assert lines[start : start + len(third_person_commands)] == third_person_commands

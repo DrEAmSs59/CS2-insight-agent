@@ -502,11 +502,11 @@ def _reconcile_victim_pov_outline(outline: AIDirectorOutline, req: NormalizedReq
         ev = events[idx]
         blob = _tag_blob(_kill_tags(ev))
         if "颗秒" in blob or "秒杀" in blob or "💥" in blob:
-            label = "颗秒+受害者"
+            label = "精彩击杀 + 对手回看"
         elif bool(getattr(ev, "headshot", False)):
-            label = "一枪头+受害者"
+            label = "爆头击杀 + 对手回看"
         else:
-            label = "受害者反应"
+            label = "对手回看"
         blocks = _promote_kill_to_victim_pov(blocks, idx, label)
 
     disp = [i + 1 for i in need]
@@ -566,17 +566,17 @@ def _heuristic_outline(req: NormalizedRequest) -> AIDirectorOutline:
             tags = _kill_tags(ev)
             blob = _tag_blob(tags)
             if "颗秒" in blob or "秒杀" in blob or "💥" in blob:
-                label = "颗秒+受害者"
+                label = "精彩击杀 + 对手回看"
             elif bool(getattr(ev, "headshot", False)):
-                label = "一枪头+受害者"
+                label = "爆头击杀 + 对手回看"
             else:
-                label = "受害者反应"
+                label = "对手回看"
             blocks = _promote_kill_to_victim_pov(blocks, idx, label)
 
-    meta_note = "" if has_meta else "（击杀无颗秒/一枪头元数据，请重新解析 demo）"
+    meta_note = "" if has_meta else "（缺少部分高光标记，重新解析 Demo 后可获得更准确的安排）"
     outline = AIDirectorOutline(
         blocks=blocks,
-        rationale=f"规则回退：按跳剪合并；受害者 POV 仅颗秒/一枪头{meta_note}",
+        rationale=f"自动安排：时间很接近的连续击杀会合并播放；精彩击杀会加入对手回看。{meta_note}",
     )
     return finalize_ai_director_outline(outline, req)
 

@@ -108,6 +108,7 @@ export function warmupUiOptsToPersisted(opts) {
     apply_fov: hasFov,
     fov_cs_debug: hasFov ? Number(fov) : 90,
     viewmodel_fov_68: !!opts.viewmodel_fov_68,
+    third_person_camera: !!opts.third_person_camera,
     apply_spectator_flashbang_opacity: hasFlash,
     spectator_flashbang_opacity: hasFlash
       ? clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity)
@@ -149,6 +150,7 @@ export function warmupApiPayloadToPersisted(warmup) {
     apply_fov: hasFov,
     fov_cs_debug: hasFov ? Number(fov) : 90,
     viewmodel_fov_68: !!warmup.viewmodel_fov_68,
+    third_person_camera: !!warmup.third_person_camera,
     apply_spectator_flashbang_opacity: hasFlash,
     spectator_flashbang_opacity: hasFlash
       ? clampSpectatorFlashbangOpacity(fb)

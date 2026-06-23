@@ -310,17 +310,6 @@ const UPDATE_FREQUENCY_OPTIONS = [
   { value: "never", key: "settings.updateFreqNever" },
 ];
 
-const MATCH_MODE_OPTIONS = [
-  { value: "premier", key: "settings.matchModePremier" },
-  { value: "competitive", key: "settings.matchModeCompetitive" },
-];
-
-const MATCH_COUNT_OPTIONS = [
-  { value: 20, key: "settings.matchCount20" },
-  { value: 50, key: "settings.matchCount50" },
-  { value: 100, key: "settings.matchCount100" },
-];
-
 /* ---------------------------------------------------------------------------
  * Tab definitions
  * ------------------------------------------------------------------------ */
@@ -344,6 +333,22 @@ export default function SettingsPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("general");
   const [dataDirInfo, setDataDirInfo] = useState(null);
+  const recordingSaveRef = useRef(null);
+  const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
+
+  const registerRecordingSave = useCallback((save) => {
+    recordingSaveRef.current = save;
+  }, []);
+
+  const updateRecordingSaveUi = useCallback((next) => {
+    setRecordingSaveUi((prev) => (
+      prev.disabled === next.disabled && prev.state === next.state ? prev : next
+    ));
+  }, []);
+
+  const handleRecordingSave = useCallback(() => {
+    recordingSaveRef.current?.();
+  }, []);
 
   // OBS Config Check / Calibrate
   const [checking, setChecking] = useState(false);
@@ -654,8 +659,8 @@ export default function SettingsPage() {
       </div>
 
       {/* Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-4 pb-24 pt-2">
+      <div className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+        <div className={activeTab === "recording" ? "flex min-h-0 flex-1 flex-col" : "mx-auto max-w-4xl px-4 pb-24 pt-2"}>
 
           {/* ======================== 通用设置 ======================== */}
           {activeTab === "general" && (
@@ -716,7 +721,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Paths (CS2 + Demo Directory only) */}
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelDemoDirectory") + " " + t("settings.labelDataDirectory"))}>
+              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelDataDirectory"))}>
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}
@@ -727,9 +732,6 @@ export default function SettingsPage() {
                     detectField="cs2_path"
                     t={t}
                   />
-                </FieldRow>
-                <FieldRow label={t("settings.labelDemoDirectory")} hint={t("settings.hintDemoDirectory")} search={search && !matches(t("settings.labelDemoDirectory") + " " + (config.demo_directory ?? ""))}>
-                  <TextInput value={config.demo_directory ?? ""} onChange={(v) => set("demo_directory", v)} placeholder="C:\\demos" />
                 </FieldRow>
                 <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
                   <div className="flex gap-2 items-center">
@@ -1095,63 +1097,58 @@ export default function SettingsPage() {
                 </FieldRow>
               </SectionCard>
 
-              {/* Match History */}
-              <SectionCard title={t("settings.sectionMatchHistory")} hint={t("settings.sectionMatchHistoryHint")} search={search && !matches(t("settings.sectionMatchHistory") + " " + t("settings.labelSteamApiKey") + " " + t("settings.labelSteamId64") + " " + t("settings.labelMatchMode") + " " + t("settings.labelMatchCount"))}>
-                <FieldRow label={t("settings.labelSteamApiKey")} search={search && !matches(t("settings.labelSteamApiKey"))}>
-                  <TextInput type="password" value={config.steam_api_key ?? ""} onChange={(v) => set("steam_api_key", v)} placeholder="Steam Web API key" />
-                </FieldRow>
-                <FieldRow label={t("settings.labelSteamId64")} search={search && !matches(t("settings.labelSteamId64") + " " + (config.steam_id64 ?? ""))}>
-                  <TextInput value={config.steam_id64 ?? ""} onChange={(v) => set("steam_id64", v)} placeholder="76561198..." />
-                </FieldRow>
-                <FieldRow label={t("settings.labelMatchMode")} search={search && !matches(t("settings.labelMatchMode"))}>
-                  <SelectInput
-                    value={config.match_mode ?? "premier"}
-                    onChange={(v) => set("match_mode", v)}
-                    options={MATCH_MODE_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                  />
-                </FieldRow>
-                <FieldRow label={t("settings.labelMatchCount")} search={search && !matches(t("settings.labelMatchCount"))}>
-                  <SelectInput
-                    value={config.match_count ?? 20}
-                    onChange={(v) => set("match_count", typeof v === "string" ? Number(v) : v)}
-                    options={MATCH_COUNT_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                  />
-                </FieldRow>
-              </SectionCard>
-
-                          </div>
+            </div>
           )}
 
           {/* ======================== 录制预设 ======================== */}
-          {activeTab === "recording" && <RecordingParamsPage />}
+          {activeTab === "recording" && (
+            <RecordingParamsPage
+              embedded
+              onRegisterSave={registerRecordingSave}
+              onSaveUiChange={updateRecordingSaveUi}
+            />
+          )}
 
         </div>
       </div>
 
-      {/* Footer save bar (only for general + parse tabs) */}
-      {activeTab !== "recording" && (
+      {/* Footer save bar */}
+      {
         <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
             <div className="min-w-0 flex-1">
-              {saveMsg && (
+              {activeTab !== "recording" && saveMsg && (
                 <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>
                   {saveMsg.text}
                 </p>
               )}
-              {!saveMsg && <p className="text-xs text-cs2-text-muted">{t("settings.saveFooterDesc")}</p>}
+              {activeTab !== "recording" && !saveMsg && <p className="text-xs text-cs2-text-muted">{t("settings.saveFooterDesc")}</p>}
+              {activeTab === "recording" && <p className="text-xs text-cs2-text-muted">{t("record.commonSaveFooterDesc")}</p>}
             </div>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              {t("settings.saveAllBtn")}
-            </button>
+            {activeTab === "recording" ? (
+              <button
+                type="button"
+                onClick={handleRecordingSave}
+                disabled={recordingSaveUi.disabled}
+                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
+              >
+                {recordingSaveUi.state === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {recordingSaveUi.state === "saving" ? t("record.commonSaving") : recordingSaveUi.state === "saved" ? t("record.commonSaved") : t("record.commonSaveBtn")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {t("settings.saveAllBtn")}
+              </button>
+            )}
           </div>
         </div>
-      )}
+      }
     </div>
   );
 }

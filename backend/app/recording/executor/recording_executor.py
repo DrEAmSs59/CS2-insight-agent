@@ -59,13 +59,29 @@ def _kb_bus(segment=None):
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
 PREPARE_PREROLL_SEC: float = 5.0
-# If spec/GSI exceeds the prepare→start wall-clock budget, re-seek instead of drifting past start_tick.
+# If prepare work exceeds the prepare→start wall-clock budget, re-seek instead of drifting past start_tick.
 _SPEC_OVERSHOOT_RESYNC_SEC: float = 0.2
 
 # Poll interval for the round-segment tick watcher.
 _TICK_WATCHER_POLL_SEC: float = 0.1
 # Log the tick watcher status every N polls (0.1s * 50 = 5s).
 _TICK_WATCHER_LOG_EVERY: int = 50
+
+
+def _resolve_prepare_timing(pre_roll_sec: float, prepare_elapsed_sec: float) -> tuple[float, float, bool]:
+    """Return (record_overhead, remaining_wait, needs_resync) for a segment pre-roll.
+
+    ``prepare_elapsed_sec`` must include *all* work while the demo is playing
+    after its prepare seek: player spectating, voice configuration, and any
+    post-spec console commands.  Measuring only the spec step lets later
+    console injection consume the configured pre-event window.
+    """
+    overhead_sec = max(0.0, prepare_elapsed_sec - pre_roll_sec)
+    return (
+        overhead_sec,
+        max(0.0, pre_roll_sec - prepare_elapsed_sec),
+        overhead_sec > _SPEC_OVERSHOOT_RESYNC_SEC,
+    )
 
 
 def _get_gsi_current_round() -> Optional[int]:
@@ -614,6 +630,10 @@ class RecordingExecutor:
                 # OBS is paused/stopped — console is safe here.
                 await demo_resume()
 
+                # Everything below runs while the demo is playing.  Keep one timer
+                # around the entire prepare phase, not just spec verification: the
+                # voice/post-spec console injections also consume demo ticks.
+                prepare_t0 = time.monotonic()
                 spec_elapsed = 0.0
                 if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
@@ -684,10 +704,13 @@ class RecordingExecutor:
                 # spec_player / GSI-verify run while the demo plays in the prepare window.
                 # Slow spec (common on the first segment) can overshoot start_tick; wall-clock
                 # sleep cannot rewind — re-seek and re-spec so killer POV is not missed.
+                prepare_elapsed_sec = time.monotonic() - prepare_t0
                 tick_resynced = False
-                record_overhead_sec = max(0.0, spec_elapsed - pre_roll_sec)
+                record_overhead_sec, remaining_wait, needs_resync = _resolve_prepare_timing(
+                    pre_roll_sec, prepare_elapsed_sec
+                )
                 overshoot_sec = record_overhead_sec
-                if overshoot_sec > _SPEC_OVERSHOOT_RESYNC_SEC:
+                if needs_resync:
                     logger.info(
                         "[RecordingV3] spec overshot start by %.2fs; resyncing to start_tick=%d",
                         overshoot_sec, segment.start_tick,
@@ -706,6 +729,7 @@ class RecordingExecutor:
                         continue
                     tick_resynced = True
                     record_overhead_sec = 0.0
+                    prepare_elapsed_sec = 0.0
                     spec_elapsed = 0.0
                     if segment.target_steamid64 or segment.target_player_name:
                         spec_ok = await _spec_by_slot_with_retry(
@@ -757,10 +781,10 @@ class RecordingExecutor:
                                     "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
                                 )
 
-                remaining_wait = 0.0 if tick_resynced else max(0.0, pre_roll_sec - spec_elapsed)
                 logger.info(
-                    "[RecordingV3] spec_elapsed=%.2fs  remaining_to_start=%.2fs resynced=%s overhead=%.2fs",
-                    spec_elapsed, remaining_wait, tick_resynced, record_overhead_sec,
+                    "[RecordingV3] spec_elapsed=%.2fs prepare_elapsed=%.2fs "
+                    "remaining_to_start=%.2fs resynced=%s overhead=%.2fs",
+                    spec_elapsed, prepare_elapsed_sec, remaining_wait, tick_resynced, record_overhead_sec,
                 )
                 if remaining_wait > 0.05:
                     await asyncio.sleep(remaining_wait)
@@ -805,8 +829,8 @@ class RecordingExecutor:
 
                 if not obs_recording_started:
                     logger.info(
-                        "[RecordingV3] start_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
-                        segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
+                        "[RecordingV3] start_record segment %d (prepare_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
+                        segment.segment_index, prepare_elapsed_sec, pre_roll_sec, remaining_wait,
                     )
                     result.recording_started_at = time.time()
                     # Hard cut at the very start of recording — no fade-in from black.
@@ -825,8 +849,8 @@ class RecordingExecutor:
                     self._obs_on_black = False
                 else:
                     logger.info(
-                        "[RecordingV3] resume_record segment %d (spec_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
-                        segment.segment_index, spec_elapsed, pre_roll_sec, remaining_wait,
+                        "[RecordingV3] resume_record segment %d (prepare_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
+                        segment.segment_index, prepare_elapsed_sec, pre_roll_sec, remaining_wait,
                     )
                     # Pre-warm the OBS connection for fade-in *before* ResumeRecord so
                     # the scene switch fires with near-zero latency after recording resumes.
