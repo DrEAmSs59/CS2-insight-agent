@@ -289,7 +289,7 @@ function FeatureCards() {
     { to: "/analysis", label: t("guide.navAnalysis"), desc: t("guide.navAnalysisDesc"), icon: Microscope },
     { to: "/queue", label: t("guide.navQueue"), desc: t("guide.navQueueDesc"), icon: Package },
     { to: "/montage", label: t("guide.navMontage"), desc: t("guide.navMontageDesc"), icon: Clapperboard },
-    { to: "/obs-config-center", label: t("guide.navObsConfig"), desc: t("guide.navObsConfigDesc"), icon: RadioTower },
+    { to: "/settings?tab=video", label: t("guide.navObsConfig"), desc: t("guide.navObsConfigDesc"), icon: RadioTower },
     { to: "/params", label: t("guide.navParams"), desc: t("guide.navParamsDesc"), icon: SlidersHorizontal },
     { to: "/player-game-config", label: t("guide.navPlayerConfig"), desc: t("guide.navPlayerConfigDesc"), icon: Gamepad2 },
     { to: "/settings", label: t("guide.navSettings"), desc: t("guide.navSettingsDesc"), icon: Settings },

@@ -2657,12 +2657,13 @@ async def serve_montage_avatar(filename: str):
 
 
 class FilePickerBody(BaseModel):
-    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|any)$")
+    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|exe|any)$")
 
 
 _FILE_PICKER_FILTERS: dict[str, str] = {
     "audio": "音频文件|*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a|所有文件|*.*",
     "video_or_image": "视频与图片|*.mp4;*.mov;*.mkv;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif|所有文件|*.*",
+    "exe": "可执行文件|*.exe|所有文件|*.*",
     "any": "所有文件|*.*",
 }
 
