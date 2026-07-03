@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import API from "../api/api";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
 import { useT } from "../i18n/useT.js";
@@ -342,18 +343,26 @@ const TABS = [
   { key: "recording", icon: SlidersHorizontal, labelKey: "settings.tabRecording" },
 ];
 
+const VALID_TAB_KEYS = new Set(TABS.map((tab) => tab.key));
+
+function resolveTabFromSearch(searchParams) {
+  const tab = searchParams.get("tab");
+  return tab && VALID_TAB_KEYS.has(tab) ? tab : "general";
+}
+
 /* ---------------------------------------------------------------------------
  * Main page
  * ------------------------------------------------------------------------ */
 
 export default function SettingsPage() {
   const t = useT();
+  const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState(() => resolveTabFromSearch(searchParams));
   const [dataDirInfo, setDataDirInfo] = useState(null);
   const recordingSaveRef = useRef(null);
   const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
@@ -387,6 +396,10 @@ export default function SettingsPage() {
   const shell = useAppShell();
   const playerConfigLoading = shell.configBackupLoading;
   const playerConfigStatus = shell.configBackupStatus;
+
+  useEffect(() => {
+    setActiveTab(resolveTabFromSearch(searchParams));
+  }, [searchParams]);
 
   // Load config on mount
   useEffect(() => {
