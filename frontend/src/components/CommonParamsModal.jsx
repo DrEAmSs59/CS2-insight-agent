@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Save, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Loader2, Save, Upload, X } from "lucide-react";
 import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../stores/recordingQueueStore";
@@ -14,6 +14,11 @@ import {
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
 import { useT } from "../i18n/useT.js";
+import {
+  buildRecordingPresetFile,
+  parseRecordingPresetFile,
+  RECORDING_PRESET_MAX_BYTES,
+} from "../utils/recordingPresetJson";
 
 /** 未写入配置时的展示用回退（与队列微调面板一致） */
 const FB_VIC_PRE = 1.5;
@@ -128,6 +133,7 @@ export default function CommonParamsModal({
   const presetPacing = useRecordingQueue((s) => s.presetPacing);
   const setPresetPacing = useRecordingQueue((s) => s.setPresetPacing);
   const resetPresetPacing = useRecordingQueue((s) => s.resetPresetPacing);
+  const hydratePresetPacing = useRecordingQueue((s) => s.hydratePresetPacing);
 
   const post = presetPacing.post_last_sec ?? BACKEND_DEFAULT_PACING.post_last_sec;
   const pre = presetPacing.pre_first_sec ?? BACKEND_DEFAULT_PACING.pre_first_sec;
@@ -161,6 +167,8 @@ export default function CommonParamsModal({
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
   const [saveState, setSaveState] = useState("idle");
   const [saveError, setSaveError] = useState("");
+  const [shareMessage, setShareMessage] = useState(null);
+  const importFileRef = useRef(null);
   const lastHydratedRefreshKey = useRef(null);
 
   useEffect(() => {
@@ -198,6 +206,7 @@ export default function CommonParamsModal({
     setLocalRecordInjectLines(recordInjectConsoleLines);
     setWarmupResolutionError("");
     setSaveError("");
+    setShareMessage(null);
   }, [
     configRefreshKey,
     open,
@@ -267,6 +276,95 @@ export default function CommonParamsModal({
   ]);
 
   const saveDisabled = !configReady || saveState === "saving" || batchRecording;
+
+  const currentPreset = useCallback(() => ({
+    recording_global_pacing: presetPacing,
+    default_record_warmup: warmupUiOptsToPersisted(warmupOpts),
+    cs2_extra_launch_args: localCs2ExtraLaunchArgs,
+    record_inject_console_lines: localRecordInjectLines,
+    obs_transition_enabled: obsTransEnabled,
+    obs_transition_name: obsTransName,
+    obs_transition_duration_ms: Number(obsTransDurationMs),
+    kb_overlay_enabled: kbOverlayEnabled,
+    kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
+    kb_overlay_position: kbOverlayPosition,
+    experimental_pov_enabled: povEnabled,
+  }), [
+    presetPacing,
+    warmupOpts,
+    localCs2ExtraLaunchArgs,
+    localRecordInjectLines,
+    obsTransEnabled,
+    obsTransName,
+    obsTransDurationMs,
+    kbOverlayEnabled,
+    kbOverlayTickOffset,
+    kbOverlayPosition,
+    povEnabled,
+  ]);
+
+  const handleExportPreset = useCallback(() => {
+    const vr = validateWarmupResolution(warmupOpts);
+    if (!vr.ok) {
+      setShareMessage({ tone: "error", text: t(vr.messageKey, vr.messageParams) });
+      return;
+    }
+    try {
+      const shareFile = buildRecordingPresetFile(currentPreset());
+      parseRecordingPresetFile(shareFile, RECORD_WARMUP_DEFAULT_OPTIONS);
+      const json = JSON.stringify(shareFile, null, 2);
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cs2-insight-recording-preset-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      setShareMessage({ tone: "ok", text: t("record.presetExported") });
+    } catch (error) {
+      const detail = error?.field
+        ? t("record.presetInvalidField", { field: error.field })
+        : (error?.message || String(error));
+      setShareMessage({ tone: "error", text: t("record.presetExportFailed", { error: detail }) });
+    }
+  }, [currentPreset, t, warmupOpts]);
+
+  const handleImportPreset = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > RECORDING_PRESET_MAX_BYTES) {
+      setShareMessage({ tone: "error", text: t("record.presetFileTooLarge") });
+      return;
+    }
+    try {
+      const parsed = parseRecordingPresetFile(JSON.parse(await file.text()), RECORD_WARMUP_DEFAULT_OPTIONS);
+      const vr = validateWarmupResolution(parsed.default_record_warmup);
+      if (!vr.ok) throw new Error(t(vr.messageKey, vr.messageParams));
+      hydratePresetPacing(parsed.recording_global_pacing);
+      setWarmupOpts(parsed.default_record_warmup);
+      setLocalCs2ExtraLaunchArgs(parsed.cs2_extra_launch_args);
+      setLocalRecordInjectLines(parsed.record_inject_console_lines);
+      setObsTransEnabled(parsed.obs_transition_enabled);
+      setObsTransName(parsed.obs_transition_name);
+      setObsTransDurationMs(parsed.obs_transition_duration_ms);
+      setKbOverlayEnabled(parsed.kb_overlay_enabled);
+      setKbOverlayTickOffset(parsed.kb_overlay_tick_offset);
+      setKbOverlayPosition(parsed.kb_overlay_position);
+      setPovEnabled(parsed.experimental_pov_enabled);
+      setWarmupResolutionError("");
+      setSaveError("");
+      setSaveState("idle");
+      setShareMessage({ tone: "ok", text: t("record.presetImported") });
+    } catch (error) {
+      const detail = error?.field
+        ? t("record.presetInvalidField", { field: error.field })
+        : (error?.message || String(error));
+      setShareMessage({ tone: "error", text: t("record.presetImportFailed", { error: detail }) });
+    }
+  }, [hydratePresetPacing, t]);
 
   useEffect(() => {
     onRegisterSave?.(handleSaveAll);
@@ -370,6 +468,44 @@ export default function CommonParamsModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4">
           <div className="@container/params mx-auto w-full max-w-4xl min-w-0">
+            <div className="mb-3 flex flex-col gap-3 rounded-xl border border-cs2-accent/25 bg-cs2-accent/[0.05] p-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-cs2-text-primary">{t("record.presetShareTitle")}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-cs2-text-muted">{t("record.presetShareDesc")}</p>
+                {shareMessage ? (
+                  <p className={`mt-1.5 text-xs ${shareMessage.tone === "ok" ? "text-emerald-400" : "text-rose-400"}`} role="status">
+                    {shareMessage.text}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={handleImportPreset}
+                />
+                <button
+                  type="button"
+                  disabled={!configReady || batchRecording}
+                  onClick={() => importFileRef.current?.click()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-semibold text-cs2-text-primary hover:border-cs2-accent/50 disabled:opacity-40"
+                >
+                  <Upload className="h-3.5 w-3.5" aria-hidden />
+                  {t("record.presetImportBtn")}
+                </button>
+                <button
+                  type="button"
+                  disabled={!configReady}
+                  onClick={handleExportPreset}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-3 py-2 text-xs font-semibold text-cs2-accent hover:bg-cs2-accent/15 disabled:opacity-40"
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden />
+                  {t("record.presetExportBtn")}
+                </button>
+              </div>
+            </div>
             <div className="grid min-w-0 grid-cols-1 gap-3 pb-2 sm:gap-4 sm:pb-4">
               <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
           {/* A1 时间与多段节奏 */}
