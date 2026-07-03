@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import API from "../api/api";
 import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
 import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
 import RecordingParamsPage from "./RecordingParamsPage";
+import SponsorModal from "../components/SponsorModal";
 import {
   Settings as SettingsIcon,
   Search,
@@ -22,7 +24,28 @@ import {
   ShieldAlert,
   Gamepad2,
   Download,
+  // 新增图标
+  Github,
+  Bug,
+  Lightbulb,
+  Mail,
+  Heart,
+  X,
 } from "lucide-react";
+
+/* ---------------------------------------------------------------------------
+ * Helper function to open external links in system default browser
+ * ------------------------------------------------------------------------ */
+
+function openExternalLink(url) {
+  // Electron 环境：使用 shell.openExternal 打开系统默认浏览器
+  if (window.electron?.openExternal) {
+    window.electron.openExternal(url);
+  } else {
+    // 非 Electron 环境（浏览器）：使用 window.open
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
 
 /* ---------------------------------------------------------------------------
  * Reusable field-row primitives
@@ -320,18 +343,26 @@ const TABS = [
   { key: "recording", icon: SlidersHorizontal, labelKey: "settings.tabRecording" },
 ];
 
+const VALID_TAB_KEYS = new Set(TABS.map((tab) => tab.key));
+
+function resolveTabFromSearch(searchParams) {
+  const tab = searchParams.get("tab");
+  return tab && VALID_TAB_KEYS.has(tab) ? tab : "general";
+}
+
 /* ---------------------------------------------------------------------------
  * Main page
  * ------------------------------------------------------------------------ */
 
 export default function SettingsPage() {
   const t = useT();
+  const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState(() => resolveTabFromSearch(searchParams));
   const [dataDirInfo, setDataDirInfo] = useState(null);
   const recordingSaveRef = useRef(null);
   const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
@@ -358,10 +389,17 @@ export default function SettingsPage() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibrateResult, setCalibrateResult] = useState(null);
 
+  // Sponsor Modal
+  const [showSponsorModal, setShowSponsorModal] = useState(false);
+
   // Player Game Config
   const shell = useAppShell();
   const playerConfigLoading = shell.configBackupLoading;
   const playerConfigStatus = shell.configBackupStatus;
+
+  useEffect(() => {
+    setActiveTab(resolveTabFromSearch(searchParams));
+  }, [searchParams]);
 
   // Load config on mount
   useEffect(() => {
@@ -439,7 +477,7 @@ export default function SettingsPage() {
       payload.ffmpeg_path = config.ffmpeg_path ?? "";
       payload.montage_encoder = config.montage_encoder ?? "auto";
       payload.ai_mode = !!config.ai_mode;
-      payload.locale = config.locale ?? "zh";
+      payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
@@ -702,17 +740,91 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </FieldRow>
+
+                {/* GitHub 地址 */}
+                <div className="py-2.5 flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-xs font-semibold text-cs2-text-secondary">
+                      {t("settings.aboutGithub")}
+                    </label>
+                    <p className="mt-1 text-xs text-cs2-text-muted">
+                      {t("settings.aboutGithubDesc")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink('https://github.com/DrEAmSs59/CS2-insight-agent')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <Github className="h-3.5 w-3.5" />
+                    GitHub
+                  </button>
+                </div>
+
+                {/* 常用功能 */}
+                <div className="mb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-cs2-text-secondary">{t("settings.commonFeatures")}</h3>
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="py-2.5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink('https://github.com/DrEAmSs59/CS2-insight-agent/issues')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    {t("settings.btnViewIssues")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink('https://github.com/DrEAmSs59/CS2-insight-agent/issues/new?template=bug_report.yml')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <Bug className="h-3.5 w-3.5" />
+                    {t("settings.btnReportBug")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openExternalLink('https://github.com/DrEAmSs59/CS2-insight-agent/issues/new?template=feature_request.yml')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    {t("settings.btnRequestFeature")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const locale = useLocaleStore.getState().locale;
+                      const subject = locale === 'zh' ? 'CS2-Insight-Agent 联系' : 'CS2-Insight-Agent Contact';
+                      openExternalLink(`mailto:dreamss29_@outlook.com?subject=${encodeURIComponent(subject)}`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    {t("settings.btnContact")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSponsorModal(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                  >
+                    <Heart className="h-3.5 w-3.5" />
+                    {t("settings.btnSponsor")}
+                  </button>
+                </div>
               </SectionCard>
 
               <SectionCard title={t("settings.sectionLanguage")} search={search && !matches(t("settings.sectionLanguage") + " " + t("settings.labelLocale"))}>
-                <FieldRow label={t("settings.labelLocale")} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
+                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? "中文" : "English" }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
                   <SelectInput
-                    value={config.locale ?? "zh"}
+                    value={config.locale ?? "auto"}
                     onChange={(v) => {
                       set("locale", v);
                       useLocaleStore.getState().setLocale(v);
                     }}
                     options={[
+                      { value: "auto", label: t("settings.localeAuto") },
                       { value: "zh", label: t("settings.localeZh") },
                       { value: "en", label: t("settings.localeEn") },
                     ]}
@@ -1149,6 +1261,8 @@ export default function SettingsPage() {
           </div>
         </div>
       }
+      {/* Sponsor Modal */}
+      {showSponsorModal && <SponsorModal onClose={() => setShowSponsorModal(false)} />}
     </div>
   );
 }

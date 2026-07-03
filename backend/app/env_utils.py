@@ -386,8 +386,8 @@ class AppConfig(BaseModel):
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
     ai_mode: bool = False
-    # 前端界面语言（中/英切换持久化于此；zh / en）
-    locale: str = "zh"
+    # 前端界面语言：auto=跟随操作系统（中文系统→zh，其他→en）；亦可显式设为 zh / en
+    locale: str = "auto"
     # 监听目录新入库时：按名单在 demo roster 中匹配（同一场可多名），展示名写成「A K/D/A · B K/D/A」作标记（不做高光解析）
     expected_parse_players: list[str] = Field(default_factory=list)
     # 前端录制队列「全局节奏」覆写（仅含用户改过的字段；空对象表示沿用内置默认）
@@ -911,6 +911,36 @@ def resolve_rajdhani_fonts() -> tuple[Optional[Path], Optional[Path]]:
     semi = _first("Rajdhani-SemiBold.ttf", "Rajdhani-Medium.ttf")
     bold = _first("Rajdhani-Bold.ttf", "Rajdhani-SemiBold.ttf")
     return semi, bold
+
+
+def resolve_system_locale() -> str:
+    """检测操作系统语言，返回 'zh' 或 'en'。
+
+    Windows 下通过 locale.getdefaultlocale() 获取系统语言标签，
+    如果包含 'zh'（中文）则返回 'zh'，否则默认返回 'en'。
+    """
+    try:
+        import locale
+        sys_lang, _ = locale.getdefaultlocale()
+        if sys_lang and "zh" in sys_lang.lower():
+            return "zh"
+    except Exception:
+        pass
+    return "en"
+
+
+def resolve_effective_locale(config_locale: str) -> str:
+    """解析配置中的 locale 值，返回实际应使用的语言代码。
+
+    - 'auto' → 根据系统语言解析为 'zh' 或 'en'
+    - 'zh' / 'en' → 直接返回
+    - 其他值 → 回退到 'zh'
+    """
+    if config_locale == "auto":
+        return resolve_system_locale()
+    if config_locale in ("zh", "en"):
+        return config_locale
+    return "zh"
 
 
 def get_primary_monitor_resolution() -> tuple[int, int]:

@@ -41,6 +41,7 @@ export default function DemoLibraryPage() {
   const t = useT();
   const s = useAppShell();
   const addToQueue = useRecordingQueue((st) => st.addToQueue);
+  const removeByClientClipUid = useRecordingQueue((st) => st.removeByClientClipUid);
   const queue = useRecordingQueue((st) => st.queue);
 
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
@@ -522,6 +523,7 @@ export default function DemoLibraryPage() {
         aiMode={s.aiMode}
         queuedClientClipUids={queuedClientClipUids}
         queueLength={queue.length}
+        onDequeue={removeByClientClipUid}
       />
 
       <IngestModal

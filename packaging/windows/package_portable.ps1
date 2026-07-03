@@ -233,12 +233,11 @@ $DestWeb = Join-Path $OutDir "web"
 robocopy $DistWeb $DestWeb /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy web failed (exit $LASTEXITCODE)" }
 
-# --- POV HUD（experimental）：发行包根目录 pov/，后端识别 pov_default.vpk + pov_de_dust2.vpk 或旧版 pov.vpk（见 pov_hud_manager.find_project_root）---
+# --- POV HUD（experimental）：所有地图统一使用 pov_default.vpk，兼容旧版 pov.vpk ---
 $PovSrc = Join-Path $Root "pov"
 $PovHasAssets = (
     (Test-Path (Join-Path $PovSrc "pov.vpk")) -or
-    (Test-Path (Join-Path $PovSrc "pov_default.vpk")) -or
-    (Test-Path (Join-Path $PovSrc "pov_de_dust2.vpk"))
+    (Test-Path (Join-Path $PovSrc "pov_default.vpk"))
 )
 $DestPov = Join-Path $OutDir "pov"
 if ($PovHasAssets) {
@@ -247,7 +246,7 @@ if ($PovHasAssets) {
     if ($LASTEXITCODE -ge 8) { throw "robocopy pov failed (exit $LASTEXITCODE)" }
 }
 else {
-    Write-Host "跳过 pov/：仓库根目录 pov/ 下未找到 pov.vpk、pov_default.vpk 或 pov_de_dust2.vpk，便携包内将无法安装 POV HUD。" -ForegroundColor Yellow
+    Write-Host "跳过 pov/：仓库根目录 pov/ 下未找到 pov.vpk 或 pov_default.vpk，便携包内将无法安装 POV HUD。" -ForegroundColor Yellow
 }
 
 # --- data/（示例配置、OBS basic.ini 等；排除本机 SQLite、用户配置、备份与日志）---

@@ -48,8 +48,8 @@ function SetupChecklist() {
       required: true,
       label: t("guide.setupObsLabel"),
       desc: t("guide.setupObsDesc"),
-      to: "/obs-config-center",
-      linkLabel: t("guide.setupObsLink"),
+      to: "/settings?tab=video",
+      linkLabel: t("guide.setupSettingsLink"),
     },
     {
       key: "cs2_path_ok",
@@ -226,7 +226,7 @@ function SetupChecklist() {
                         </span>
                         {obsConfigHasIssuesState && (
                           <Link
-                            to="/obs-config-center"
+                            to="/settings?tab=video"
                             className="ml-2 font-semibold text-cs2-orange hover:underline"
                           >
                             {t("guide.obsConfigFix")}

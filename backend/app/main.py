@@ -644,6 +644,9 @@ def get_config():
     if obs_pw:
         data.setdefault("obs", {})
         data["obs"]["password"] = "****" + str(obs_pw)[-4:] if len(str(obs_pw)) > 4 else "****"
+    # 返回原始配置值 + 解析后的实际语言（auto → zh/en）
+    from app.env_utils import resolve_effective_locale
+    data["effective_locale"] = resolve_effective_locale(data.get("locale", "auto"))
     return data
 
 
@@ -890,7 +893,7 @@ async def update_config(payload: ConfigPayload):
         cfg.demo_watch_paths = [str(Path(p).expanduser()) for p in payload.demo_watch_paths if str(p).strip()]
     if payload.ai_mode is not None:
         cfg.ai_mode = payload.ai_mode
-    if payload.locale is not None and payload.locale in ("zh", "en"):
+    if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
         cleaned: list[str] = []

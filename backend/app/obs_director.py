@@ -3358,7 +3358,7 @@ class OBSDirector:
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.normalizer import NormalizationError
-        from .pov_hud_manager import PovHudManager, PovHudError, pov_hud_effective_map_name
+        from .pov_hud_manager import PovHudManager, PovHudError
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
@@ -3375,15 +3375,6 @@ class OBSDirector:
             demo_groups.setdefault(key, []).append(dto)
             if key not in demo_abs_map:
                 demo_abs_map[key] = Path(dto.demo.demo_path or dto.demo.demo_filename)
-
-        _first_demo_key = next(iter(demo_groups))
-        _first_demo_reqs = demo_groups[_first_demo_key]
-        _first_demo_abs = demo_abs_map[_first_demo_key]
-        _d0demo = _first_demo_reqs[0].demo if _first_demo_reqs else None
-        _pov_first_map = pov_hud_effective_map_name(
-            _d0demo.map_name if _d0demo else None,
-            str(_first_demo_abs),
-        )
 
         # OBSClient is created here but connected lazily (right before the executor starts)
         # so the WebSocket receive thread does not die during the ~60s CS2 warmup window.
@@ -3470,11 +3461,8 @@ class OBSDirector:
                     from .env_utils import load_config as _load_cfg
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
-                    logger.info(
-                        "[RecordingV3][POV] install pov.vpk (map=%s)",
-                        _pov_first_map or "default",
-                    )
-                    pov_mgr_v3.install(_pov_first_map)
+                    logger.info("[RecordingV3][POV] install unified pov_default.vpk")
+                    pov_mgr_v3.install()
                     logger.info("[RecordingV3][POV] patch gameinfo.gi")
                     self._pov_enabled = True
                 except PovHudError as _pov_e:
@@ -3490,24 +3478,6 @@ class OBSDirector:
                 demo_name = demo_abs.name
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
-
-                if pov_on_v3 and pov_mgr_v3 is not None and job_idx > 0:
-                    _d_cur = demo_requests[0].demo if demo_requests else None
-                    _pov_map_cur = pov_hud_effective_map_name(
-                        _d_cur.map_name if _d_cur else None,
-                        str(demo_abs),
-                    )
-                    try:
-                        logger.info(
-                            "[RecordingV3][POV] replace pov.vpk for map=%s",
-                            _pov_map_cur or "default",
-                        )
-                        pov_mgr_v3.replace_pov_vpk_for_map(_pov_map_cur)
-                    except PovHudError as _pov_sw:
-                        logger.error(
-                            "[RecordingV3][POV] replace_pov_vpk_for_map failed: %s",
-                            _pov_sw,
-                        )
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:

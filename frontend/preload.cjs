@@ -11,5 +11,7 @@ contextBridge.exposeInMainWorld('electron', {
   onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, status) => callback(status)),
-  showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options)
+  showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
+  // 打开外部链接（使用系统默认浏览器）
+  openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });
