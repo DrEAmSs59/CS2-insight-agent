@@ -815,6 +815,8 @@ export default {
   "settings.modeLocalDesc": "本地规则提取片段，无需 AI",
 
   // Dropdown options
+  "settings.localeAuto": "跟随系统",
+  "settings.localeAutoHint": "当前：{lang}",
   "settings.localeZh": "中文",
   "settings.localeEn": "English",
   "settings.encoderAuto": "自动（NVENC → QSV → AMF → x264）",

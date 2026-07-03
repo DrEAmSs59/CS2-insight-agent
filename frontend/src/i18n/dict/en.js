@@ -814,6 +814,8 @@ export default {
   "settings.modeLocalDesc": "Rule-based clip extraction, no AI needed",
 
   // Dropdown options
+  "settings.localeAuto": "Follow System",
+  "settings.localeAutoHint": "Current: {lang}",
   "settings.localeZh": "中文",
   "settings.localeEn": "English",
   "settings.encoderAuto": "Auto (NVENC → QSV → AMF → x264)",

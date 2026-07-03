@@ -464,7 +464,7 @@ export default function SettingsPage() {
       payload.ffmpeg_path = config.ffmpeg_path ?? "";
       payload.montage_encoder = config.montage_encoder ?? "auto";
       payload.ai_mode = !!config.ai_mode;
-      payload.locale = config.locale ?? "zh";
+      payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
@@ -803,14 +803,15 @@ export default function SettingsPage() {
               </SectionCard>
 
               <SectionCard title={t("settings.sectionLanguage")} search={search && !matches(t("settings.sectionLanguage") + " " + t("settings.labelLocale"))}>
-                <FieldRow label={t("settings.labelLocale")} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
+                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? "中文" : "English" }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
                   <SelectInput
-                    value={config.locale ?? "zh"}
+                    value={config.locale ?? "auto"}
                     onChange={(v) => {
                       set("locale", v);
                       useLocaleStore.getState().setLocale(v);
                     }}
                     options={[
+                      { value: "auto", label: t("settings.localeAuto") },
                       { value: "zh", label: t("settings.localeZh") },
                       { value: "en", label: t("settings.localeEn") },
                     ]}

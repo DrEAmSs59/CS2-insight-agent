@@ -26,6 +26,7 @@ export function translate(locale, key, params) {
 }
 
 export function useT() {
-  const locale = useLocaleStore((s) => s.locale);
-  return useCallback((key, params) => translate(locale, key, params), [locale]);
+  // 使用 effectiveLocale（实际语言代码 zh/en），而不是配置值（可能为 "auto"）
+  const effectiveLocale = useLocaleStore((s) => s.effectiveLocale);
+  return useCallback((key, params) => translate(effectiveLocale, key, params), [effectiveLocale]);
 }
