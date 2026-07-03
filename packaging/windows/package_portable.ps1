@@ -39,7 +39,14 @@ param(
 $ErrorActionPreference = "Stop"
 if ($PSVersionTable.PSVersion.Major -lt 5) { throw "PowerShell 5.1+ required" }
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+try {
+    $Root = (git -C (Split-Path -Parent $MyInvocation.MyCommand.Path) rev-parse --show-toplevel)
+    if ($LASTEXITCODE -ne 0) { throw "git rev-parse failed (exit $LASTEXITCODE)" }
+    # git rev-parse --show-toplevel may return forward-slash paths on Windows; normalize.
+    $Root = $Root -replace '/', '\'
+} catch {
+    throw "Cannot locate git repository root. Ensure this script is inside a git working tree. Original error: $_"
+}
 if (-not $OutDir) {
     $OutDir = Join-Path $Root "dist\CS2-Insight-Agent-portable"
 }
