@@ -6,6 +6,9 @@ export const POV_CONFLICT_CVARS = new Set([
   "cl_spec_show_bindings",
   "cl_teamcounter_playercount_instead_of_avatars",
   "cl_drawhud_force_radar",
+  "cl_radar_always_centered",
+  "cl_radar_square_when_spectating",
+  "cl_radar_scale",
 ]);
 
 /** @param {{ cvar?: string, command?: string, commands?: string[], conflictsWithExperimental?: string[] }} param */

@@ -1641,7 +1641,7 @@ export default {
   "pov.radarLabel": "Radar",
   "pov.radarHide": "Hide radar (cl_drawhud_force_radar -1)",
   "pov.radarShow": "Show radar (cl_drawhud_force_radar 0)",
-  "pov.radarHint": "When the current POV asset does not modify the radar style, you can hide it or use the game default.",
+  "pov.radarHint": "When shown, the radar follows the current view, uses the round spectator style, and shows the full map at 0.4 scale.",
   "pov.teamcounterTitle": "In-game player display (alive count)",
   "pov.teamcounterHintPre": ": when checked, the top HUD shows ",
   "pov.teamcounterHintMid": " (reduces enemy avatar health-bar clutter from pov.vpk); unchecked shows ",

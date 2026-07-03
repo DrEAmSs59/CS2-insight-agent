@@ -1642,7 +1642,7 @@ export default {
   "pov.radarLabel": "雷达",
   "pov.radarHide": "隐藏雷达（cl_drawhud_force_radar -1）",
   "pov.radarShow": "显示雷达（cl_drawhud_force_radar 0）",
-  "pov.radarHint": "当前 POV 资源未改雷达样式时，可隐藏雷达或按游戏默认显示。",
+  "pov.radarHint": "显示时雷达会跟随当前视角旋转，使用圆形观战样式并以 0.4 比例展示完整地图。",
   "pov.teamcounterTitle": "局内玩家显示（存活人数）",
   "pov.teamcounterHintPre": "：勾选后 HUD 正上方为",
   "pov.teamcounterHintMid": "（可降低 pov.vpk 下敌方头像旁血量信息干扰）；取消勾选为",
