@@ -1601,6 +1601,8 @@ export default {
   "dialog.demoInfoTabParse": "1. Select Players",
   "dialog.demoInfoTabClips": "2. View Highlights",
   "dialog.demoInfoTabClipsCount": "2. View Highlights ({n})",
+  "dialog.demoInfoTabTimeline": "3. Round Timeline",
+  "dialog.demoInfoCurrentPlayer": "Current player",
   "dialog.demoInfoAddedToQueue": "Added {n} clip(s) to recording queue",
   "dialog.demoInfoParsingHighlights": "Parsing highlights…",
   "dialog.demoInfoLoadFail": "Failed to load demo info: {msg}",

@@ -1602,6 +1602,8 @@ export default {
   "dialog.demoInfoTabParse": "1. 选择玩家解析",
   "dialog.demoInfoTabClips": "2. 检视高光片段",
   "dialog.demoInfoTabClipsCount": "2. 检视高光片段 ({n})",
+  "dialog.demoInfoTabTimeline": "3. 回合时间线",
+  "dialog.demoInfoCurrentPlayer": "当前玩家",
   "dialog.demoInfoAddedToQueue": "已将 {n} 条片段加入录制队列",
   "dialog.demoInfoParsingHighlights": "正在解析高光时刻…",
   "dialog.demoInfoLoadFail": "加载 Demo 信息失败: {msg}",
