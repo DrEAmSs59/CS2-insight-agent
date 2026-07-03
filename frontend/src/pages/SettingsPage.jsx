@@ -180,8 +180,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
           const detectedPath = data[detectField];
           if (detectedPath) {
             onChange(detectedPath);
-            setDetecting(false);
-            return; // 检测成功，不再打开文件选择对话框
+            return;
           }
         } catch {
           // 检测失败，继续打开文件选择对话框
@@ -191,31 +190,38 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       }
     }
 
-    // 使用 Electron 的文件选择对话框（如果可用）
+    // 后端原生文件选择（Windows；Vite dev 与 Electron 均可返回完整路径）
+    try {
+      const { data } = await API.post("file-picker", { file_type: "exe" });
+      if (data?.path) {
+        onChange(data.path);
+        return;
+      }
+    } catch {
+      // 非 Windows 或选择器不可用，继续 fallback
+    }
+
+    // Electron 文件选择对话框
     if (window.electron?.showOpenDialog) {
       try {
-        // 如果已有值，使用完整路径作为 defaultPath（预定位并预选择该文件）
-        const defaultPath = value && value.trim() ? value : "";
-
+        const defaultPath = value && value.trim() ? value : undefined;
         const result = await window.electron.showOpenDialog({
-          title: `选择 ${exeName}`,
-          defaultPath: defaultPath || undefined,
-          filters: [{ name: exeName, extensions: ['exe'] }],
-          properties: ['openFile']
+          title: t("settings.browseFileTitle"),
+          defaultPath,
+          filters: [{ name: exeName, extensions: ["exe"] }],
+          properties: ["openFile"],
         });
-
-        if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+        if (!result.canceled && result.filePaths?.[0]) {
           onChange(result.filePaths[0]);
         }
+        return;
       } catch (e) {
-        console.error('Electron dialog error:', e);
-        // Electron 对话框失败，fallback 到 HTML file input
-        fileRef.current?.click();
+        console.error("Electron dialog error:", e);
       }
-    } else {
-      // 非 Electron 环境，使用 HTML file input
-      fileRef.current?.click();
     }
+
+    // 最后兜底：HTML file input（浏览器中通常只能拿到文件名）
+    fileRef.current?.click();
   };
 
   return (
@@ -840,7 +846,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("cs2_path", v)}
                     placeholder="cs2.exe"
                     exeName="cs2.exe"
-                    detectApi="/api/config/detect-cs2"
+                    detectApi="config/detect-cs2"
                     detectField="cs2_path"
                     t={t}
                   />
@@ -960,7 +966,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("obs.obs_path", v)}
                     placeholder="obs64.exe"
                     exeName="obs64.exe"
-                    detectApi="/api/config/detect-obs"
+                    detectApi="config/detect-obs"
                     detectField="obs_path"
                     t={t}
                   />
@@ -971,7 +977,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("ffmpeg_path", v)}
                     placeholder="ffmpeg.exe"
                     exeName="ffmpeg.exe"
-                    detectApi="/api/config/detect-ffmpeg"
+                    detectApi="config/detect-ffmpeg"
                     detectField="ffmpeg_path"
                     t={t}
                   />
