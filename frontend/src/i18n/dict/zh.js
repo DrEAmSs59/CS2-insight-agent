@@ -844,6 +844,26 @@ export default {
   // Advanced JSON validation
   "settings.advancedJsonHint": "编辑 recording_global_pacing 和 default_record_warmup。必须为有效 JSON 对象。",
   "settings.advancedJsonInvalid": "JSON 格式无效：{error}",
+
+  // 项目信息板块
+  "settings.aboutSection": "项目信息",
+  "settings.aboutSectionHint": "了解项目开源地址、协议与反馈渠道。",
+  "settings.commonFeatures": "常用功能",
+  "settings.aboutGithub": "开源地址",
+  "settings.aboutGithubDesc": "本项目在 GitHub 开源，采用 PolyForm Noncommercial 1.0.0 协议，不允许商用。欢迎 Star ⭐ 支持！",
+  "settings.aboutLicense": "开源协议",
+  "settings.aboutLicenseDesc": "PolyForm Noncommercial 1.0.0 — 个人学习研究免费，商业用途需授权。",
+  "settings.btnViewIssues": "查阅 Issue",
+  "settings.btnReportBug": "反馈 BUG",
+  "settings.btnRequestFeature": "反馈功能",
+  "settings.btnContact": "联系我们",
+  "settings.btnSponsor": "赞助我们",
+  "settings.aboutEmail": "邮箱：{email}",
+  "settings.sponsorTitle": "赞助支持",
+  "settings.sponsorDesc": "如果这个项目帮你节省了剪辑时间，欢迎请开发者喝一杯咖啡 ☕",
+  "settings.sponsorWx": "微信支付",
+  "settings.sponsorAli": "支付宝",
+
   // obscfg — ObsConfigCenterPage
   "obscfg.pageTitle": "OBS 配置中心",
   "obscfg.pageSubtitle": "一键校准 OBS 录制环境，自动修复画布/输出分辨率错位、4:3 黑边、Game Capture 源缺失、录像格式错误等问题。",

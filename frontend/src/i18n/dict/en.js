@@ -843,6 +843,26 @@ export default {
   // Advanced JSON validation
   "settings.advancedJsonHint": "Edit recording_global_pacing and default_record_warmup. Must be a valid JSON object.",
   "settings.advancedJsonInvalid": "Invalid JSON: {error}",
+
+  // About section
+  "settings.aboutSection": "About",
+  "settings.aboutSectionHint": "Project repository, license, and feedback channels.",
+  "settings.commonFeatures": "Common Features",
+  "settings.aboutGithub": "Open Source",
+  "settings.aboutGithubDesc": "This project is open source on GitHub under the PolyForm Noncommercial 1.0.0 license, commercial use prohibited. Star ⭐ to support!",
+  "settings.aboutLicense": "License",
+  "settings.aboutLicenseDesc": "PolyForm Noncommercial 1.0.0 — Free for personal use; commercial use requires authorization.",
+  "settings.btnViewIssues": "View Issues",
+  "settings.btnReportBug": "Report Bug",
+  "settings.btnRequestFeature": "Request Feature",
+  "settings.btnContact": "Contact Us",
+  "settings.btnSponsor": "Support Us",
+  "settings.aboutEmail": "Email: {email}",
+  "settings.sponsorTitle": "Support",
+  "settings.sponsorDesc": "If this project saved you editing time, consider buying us a coffee ☕",
+  "settings.sponsorWx": "WeChat Pay",
+  "settings.sponsorAli": "Alipay",
+
   // obscfg — ObsConfigCenterPage
   "obscfg.pageTitle": "OBS Config Center",
   "obscfg.pageSubtitle": "One-click calibration of the OBS recording environment — automatically fixes canvas/output resolution mismatch, 4:3 letterboxing, missing Game Capture source, wrong recording format, and more.",

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, protocol, net, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, protocol, net, dialog, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
@@ -413,5 +413,16 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
   } catch (e) {
     log.error('showOpenDialog error:', e);
     return { canceled: true, filePaths: [] };
+  }
+});
+
+// 打开外部链接（使用系统默认浏览器）
+ipcMain.handle('open-external', async (event, url) => {
+  try {
+    await shell.openExternal(url);
+    return true;
+  } catch (e) {
+    log.error('openExternal error:', e);
+    return false;
   }
 });
