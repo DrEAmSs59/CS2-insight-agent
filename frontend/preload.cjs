@@ -10,7 +10,12 @@ contextBridge.exposeInMainWorld('electron', {
   getVersion: () => ipcRenderer.invoke('get-version'),
   onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
-  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, status) => callback(status)),
+  cancelUpdate: () => ipcRenderer.send('cancel-update'),
+  onUpdateStatus: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('update-status', handler);
+    return () => ipcRenderer.removeListener('update-status', handler);
+  },
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
   // 打开外部链接（使用系统默认浏览器）
   openExternal: (url) => ipcRenderer.invoke('open-external', url)

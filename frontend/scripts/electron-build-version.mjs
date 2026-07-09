@@ -30,10 +30,7 @@ run(["npm", "run", "electron:stage-python"]);
 run(["node", "scripts/check-electron-bundle-prereqs.mjs"]);
 run(["npm", "run", "electron:icons"]);
 run(["npm", "run", "electron:clean"]);
-run([
-  "npm",
-  "exec",
-  "electron-builder",
-  "--",
-  `--config.extraMetadata.version=${v}`,
-]);
+// Prefer local binary — npm@6 has no `npm exec`
+const ebCmd = process.platform === "win32" ? "electron-builder.cmd" : "electron-builder";
+const ebBin = join(frontendRoot, "node_modules", ".bin", ebCmd);
+run([ebBin, `--config.extraMetadata.version=${v}`]);

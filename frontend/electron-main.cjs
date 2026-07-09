@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, screen, protocol, net, dialog, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const { CancellationToken, CancellationError } = require('builder-util-runtime');
 const log = require('electron-log');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -20,9 +21,11 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-// 配置更新日志
+// 配置更新日志；关闭自动下载，便于用 CancellationToken 支持「停止更新」
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
 
 // 每次启动时清除旧日志，仅保留当次运行记录
 try {
@@ -313,40 +316,229 @@ app.whenReady().then(() => {
   });
 });
 
-// 手动检查更新的 IPC 处理程序
+/** 缓存最近一次发现的远端版本，供 download-progress 等不含 version 的事件复用 */
+let cachedUpdateVersion = null;
+let cachedReleaseNotes = '';
+/** @type {import('builder-util-runtime').CancellationToken | null} */
+let updateDownloadToken = null;
+let updateInstallTimer = null;
+let updateDownloadInFlight = false;
+/** 用户点停止/关闭后，忽略后续 available → 自动开下 */
+let updateUserCancelled = false;
+
+function clearUpdateInstallTimer() {
+  if (updateInstallTimer) {
+    clearTimeout(updateInstallTimer);
+    updateInstallTimer = null;
+  }
+}
+
+function sendUpdateStatus(payload) {
+  mainWindow?.webContents.send('update-status', payload);
+}
+
+function cancelUpdateDownload(reason = 'user') {
+  clearUpdateInstallTimer();
+  updateUserCancelled = true;
+  const token = updateDownloadToken;
+  updateDownloadToken = null;
+  if (token && !token.cancelled) {
+    log.info(`Cancelling update download (${reason})`);
+    try {
+      token.cancel();
+    } catch (e) {
+      log.warn('cancel update token failed:', e);
+    }
+  }
+  updateDownloadInFlight = false;
+  sendUpdateStatus({
+    status: 'cancelled',
+    latest_version: cachedUpdateVersion,
+    release_notes: cachedReleaseNotes,
+  });
+}
+
+function startUpdateDownload() {
+  if (updateUserCancelled) {
+    log.info('Skip start download: user cancelled this check session');
+    return;
+  }
+  if (updateDownloadInFlight) {
+    log.info('Update download already in progress — skip start');
+    return;
+  }
+  clearUpdateInstallTimer();
+  updateDownloadToken = new CancellationToken();
+  updateDownloadInFlight = true;
+  sendUpdateStatus({
+    status: 'downloading',
+    progress: { percent: 0 },
+    latest_version: cachedUpdateVersion,
+    release_notes: cachedReleaseNotes,
+  });
+  const token = updateDownloadToken;
+  autoUpdater
+    .downloadUpdate(token)
+    .then(() => {
+      log.info('downloadUpdate resolved');
+    })
+    .catch((err) => {
+      if (err instanceof CancellationError || token?.cancelled || updateUserCancelled) {
+        log.info('Update download cancelled');
+        updateDownloadInFlight = false;
+        if (updateDownloadToken === token) updateDownloadToken = null;
+        sendUpdateStatus({
+          status: 'cancelled',
+          latest_version: cachedUpdateVersion,
+          release_notes: cachedReleaseNotes,
+        });
+        return;
+      }
+      log.error('downloadUpdate failed:', err);
+      updateDownloadInFlight = false;
+      if (updateDownloadToken === token) updateDownloadToken = null;
+      sendUpdateStatus({
+        status: 'error',
+        error: err?.message || String(err),
+        latest_version: cachedUpdateVersion,
+      });
+    });
+}
+
+// Cloudflare R2（generic provider）— 由前端「检查更新」/ 启动频率门控触发
 ipcMain.on('check-for-updates', () => {
-  log.info('Manual update check requested');
-  autoUpdater.checkForUpdatesAndNotify();
+  if (!app.isPackaged) {
+    log.info('Update check skipped: app is not packaged');
+    sendUpdateStatus({
+      status: 'error',
+      error: 'dev-mode',
+    });
+    return;
+  }
+  if (updateDownloadInFlight) {
+    log.info('Update check skipped: download already in progress');
+    sendUpdateStatus({
+      status: 'downloading',
+      latest_version: cachedUpdateVersion,
+      release_notes: cachedReleaseNotes,
+      error: '',
+    });
+    return;
+  }
+  updateUserCancelled = false;
+  log.info('Update check requested (Cloudflare R2 / electron-updater)');
+  autoUpdater.checkForUpdates().catch((err) => {
+    if (updateUserCancelled) return;
+    log.error('checkForUpdates failed:', err);
+    sendUpdateStatus({
+      status: 'error',
+      error: err?.message || String(err),
+    });
+  });
 });
 
-// 更新相关的事件监听，通过 IPC 发送到前端
+ipcMain.on('cancel-update', () => {
+  cancelUpdateDownload('user');
+});
+
 autoUpdater.on('checking-for-update', () => {
   log.info('Checking for update...');
-  mainWindow?.webContents.send('update-status', { status: 'checking', message: '正在检查更新...' });
+  cachedUpdateVersion = null;
+  cachedReleaseNotes = '';
+  if (updateUserCancelled) return;
+  sendUpdateStatus({ status: 'checking' });
 });
 autoUpdater.on('update-available', (info) => {
-  log.info('Update available.');
-  mainWindow?.webContents.send('update-status', { status: 'available', message: '发现新版本', info });
+  log.info('Update available:', info?.version);
+  cachedUpdateVersion = info?.version || null;
+  cachedReleaseNotes = typeof info?.releaseNotes === 'string' ? info.releaseNotes : '';
+  if (updateUserCancelled) {
+    log.info('Ignore update-available after user cancel');
+    return;
+  }
+  sendUpdateStatus({
+    status: 'available',
+    info,
+    latest_version: cachedUpdateVersion,
+    release_notes: cachedReleaseNotes,
+  });
+  // autoDownload=false：手动开始下载，才能取消
+  startUpdateDownload();
 });
 autoUpdater.on('update-not-available', (info) => {
   log.info('Update not available.');
-  mainWindow?.webContents.send('update-status', { status: 'not-available', message: '当前已是最新版本' });
+  cachedUpdateVersion = info?.version || null;
+  if (updateUserCancelled) return;
+  sendUpdateStatus({
+    status: 'not-available',
+    info,
+    latest_version: cachedUpdateVersion,
+  });
 });
 autoUpdater.on('error', (err) => {
+  if (err instanceof CancellationError || updateUserCancelled) {
+    log.info('Updater reported cancellation');
+    updateDownloadInFlight = false;
+    updateDownloadToken = null;
+    sendUpdateStatus({
+      status: 'cancelled',
+      latest_version: cachedUpdateVersion,
+      release_notes: cachedReleaseNotes,
+    });
+    return;
+  }
   log.error('Error in auto-updater. ' + err);
-  mainWindow?.webContents.send('update-status', { status: 'error', message: '更新检查失败', error: err.message });
+  updateDownloadInFlight = false;
+  sendUpdateStatus({
+    status: 'error',
+    error: err?.message || String(err),
+    latest_version: cachedUpdateVersion,
+  });
 });
 autoUpdater.on('download-progress', (progressObj) => {
-  let log_message = "Download speed: " + progressObj.bytesPerSecond;
-  log_message = log_message + ' - Downloaded ' + progressObj.percent + '%';
-  log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
-  log.info(log_message);
-  mainWindow?.webContents.send('update-status', { status: 'downloading', message: '正在下载更新...', progress: progressObj });
+  if (updateUserCancelled) return;
+  log.info(
+    `Download ${progressObj.percent?.toFixed?.(1) ?? progressObj.percent}% ` +
+      `(${progressObj.transferred}/${progressObj.total}) @ ${progressObj.bytesPerSecond}/s`,
+  );
+  sendUpdateStatus({
+    status: 'downloading',
+    progress: progressObj,
+    latest_version: cachedUpdateVersion,
+    release_notes: cachedReleaseNotes,
+  });
+});
+autoUpdater.on('update-cancelled', (info) => {
+  log.info('update-cancelled', info?.version);
+  updateDownloadInFlight = false;
+  updateDownloadToken = null;
+  clearUpdateInstallTimer();
+  sendUpdateStatus({
+    status: 'cancelled',
+    latest_version: cachedUpdateVersion || info?.version || null,
+    release_notes: cachedReleaseNotes,
+  });
 });
 autoUpdater.on('update-downloaded', (info) => {
+  if (updateUserCancelled) {
+    log.info('Ignore update-downloaded after user cancel');
+    return;
+  }
   log.info('Update downloaded');
-  mainWindow?.webContents.send('update-status', { status: 'downloaded', message: '更新下载完成，准备重启安装' });
-  setTimeout(function() {
+  updateDownloadInFlight = false;
+  updateDownloadToken = null;
+  if (info?.version) cachedUpdateVersion = info.version;
+  if (typeof info?.releaseNotes === 'string') cachedReleaseNotes = info.releaseNotes;
+  sendUpdateStatus({
+    status: 'downloaded',
+    info,
+    latest_version: cachedUpdateVersion || info?.version || null,
+    release_notes: cachedReleaseNotes || (typeof info?.releaseNotes === 'string' ? info.releaseNotes : ''),
+  });
+  clearUpdateInstallTimer();
+  updateInstallTimer = setTimeout(function () {
+    updateInstallTimer = null;
+    if (updateUserCancelled) return;
     autoUpdater.quitAndInstall();
   }, 3000);
 });

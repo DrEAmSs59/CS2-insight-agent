@@ -631,6 +631,9 @@ class ConfigPayload(BaseModel):
     steam_id64: Optional[str] = None
     match_mode: Optional[str] = None
     match_count: Optional[int] = None
+    # Cloudflare / electron-updater 启动检查频率（不再用于 GitHub update-info）
+    update_check_frequency: Optional[str] = None
+    last_update_check_at: Optional[str] = None
 
 
 class MatchHistoryDownloadBody(BaseModel):
@@ -986,6 +989,12 @@ async def update_config(payload: ConfigPayload):
         cfg.match_mode = payload.match_mode
     if payload.match_count is not None and payload.match_count in (20, 50, 100):
         cfg.match_count = payload.match_count
+    if payload.update_check_frequency is not None:
+        freq = str(payload.update_check_frequency).strip().lower()
+        if freq in ("weekly", "monthly", "never"):
+            cfg.update_check_frequency = freq
+    if payload.last_update_check_at is not None:
+        cfg.last_update_check_at = str(payload.last_update_check_at).strip()
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
