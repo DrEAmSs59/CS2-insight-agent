@@ -327,12 +327,6 @@ const ENCODER_OPTIONS = [
   { value: "libx264", key: "settings.encoderX264" },
 ];
 
-const MIRROR_OPTIONS = [
-  { value: "auto", key: "settings.mirrorAuto" },
-  { value: "on", key: "settings.mirrorOn" },
-  { value: "off", key: "settings.mirrorOff" },
-];
-
 const UPDATE_FREQUENCY_OPTIONS = [
   { value: "weekly", key: "settings.updateFreqWeekly" },
   { value: "monthly", key: "settings.updateFreqMonthly" },
@@ -487,7 +481,6 @@ export default function SettingsPage() {
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
-      payload.update_github_mirror = config.update_github_mirror ?? "auto";
       payload.update_check_frequency = config.update_check_frequency ?? "weekly";
       payload.steam_api_key = config.steam_api_key ?? "";
       payload.steam_id64 = config.steam_id64 ?? "";
@@ -710,7 +703,7 @@ export default function SettingsPage() {
           {activeTab === "general" && (
             <div className="space-y-4">
               {/* System + Language */}
-              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.labelUpdateMirror"))}>
+              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.labelUpdateFrequency"))}>
                 <FieldRow label={t("settings.currentVersion")} search={search && !matches(t("settings.currentVersion") + " version")}>
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-cs2-text-primary font-mono">{appVersion}</p>
@@ -722,23 +715,16 @@ export default function SettingsPage() {
                   </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelUpdateFrequency")} hint={t("settings.hintUpdateFrequency")} search={search && !matches(t("settings.labelUpdateFrequency"))}>
-                  <SelectInput
-                    value={config.update_check_frequency ?? "weekly"}
-                    onChange={(v) => set("update_check_frequency", v)}
-                    options={UPDATE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                  />
-                </FieldRow>
-                <FieldRow label={t("settings.labelUpdateMirror")} search={search && !matches(t("settings.labelUpdateMirror") + " mirror")}>
                   <div className="flex gap-2">
                     <SelectInput
-                      value={config.update_github_mirror ?? "auto"}
-                      onChange={(v) => set("update_github_mirror", v)}
-                      options={MIRROR_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
+                      value={config.update_check_frequency ?? "weekly"}
+                      onChange={(v) => set("update_check_frequency", v)}
+                      options={UPDATE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
                       className="flex-1"
                     />
                     <button
                       type="button"
-                      onClick={() => void shell.fetchUpdateInfo({ force: true, manual: true })}
+                      onClick={() => void shell.fetchUpdateInfo({ manual: true })}
                       className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
                     >
                       <Download className="h-3.5 w-3.5" />

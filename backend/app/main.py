@@ -48,7 +48,12 @@ from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
-from .gsi_ready import gsi_status, notify_gsi_payload
+from .gsi_ready import (
+    cleanup_stale_gsi_configs,
+    gsi_status,
+    install_gsi_access_log_filter,
+    notify_gsi_payload,
+)
 from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
 from .name_card_meta import (
@@ -77,6 +82,7 @@ from .steam_match_history import (
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+install_gsi_access_log_filter()
 
 _FAULT_LOG_FILE = None
 try:
@@ -254,6 +260,9 @@ async def lifespan(_: FastAPI):
     await demo_db.init_db()
     await montage_db.init_tables()
     cfg = load_config()
+    removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
+    if removed_gsi_configs:
+        logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
     demo_watcher = DemoWatcher(cfg.demo_watch_paths or [], _enqueue_demo_path, demo_db)
     from .pov_hud_manager import try_restore_stale_pov_on_startup
 
@@ -622,6 +631,9 @@ class ConfigPayload(BaseModel):
     steam_id64: Optional[str] = None
     match_mode: Optional[str] = None
     match_count: Optional[int] = None
+    # Cloudflare / electron-updater 启动检查频率（不再用于 GitHub update-info）
+    update_check_frequency: Optional[str] = None
+    last_update_check_at: Optional[str] = None
 
 
 class MatchHistoryDownloadBody(BaseModel):
@@ -977,6 +989,12 @@ async def update_config(payload: ConfigPayload):
         cfg.match_mode = payload.match_mode
     if payload.match_count is not None and payload.match_count in (20, 50, 100):
         cfg.match_count = payload.match_count
+    if payload.update_check_frequency is not None:
+        freq = str(payload.update_check_frequency).strip().lower()
+        if freq in ("weekly", "monthly", "never"):
+            cfg.update_check_frequency = freq
+    if payload.last_update_check_at is not None:
+        cfg.last_update_check_at = str(payload.last_update_check_at).strip()
     save_config(cfg)
     if demo_watcher is not None and payload.demo_watch_paths is not None:
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；

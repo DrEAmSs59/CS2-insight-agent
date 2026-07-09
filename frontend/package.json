@@ -1,7 +1,7 @@
 {
   "name": "cs2-insight-agent",
   "private": true,
-  "version": "2.2.3",
+  "version": "2.2.4",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
@@ -13,7 +13,7 @@
     "electron:copy-python": "node scripts/copy-python-for-bundle.mjs",
     "electron:stage-python": "node scripts/run-electron-stage-python.mjs",
     "electron:icons": "node scripts/generate-windows-icon.mjs",
-    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:icons && npm run electron:clean && npm exec electron-builder --",
+    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:icons && npm run electron:clean && electron-builder",
     "electron:build:ver": "node scripts/electron-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs",
     "test": "vitest run",
@@ -82,6 +82,7 @@
         "to": "data",
         "filter": [
           "**/*",
+          "!**/lite_cut_assets/**",
           "!**/.cs2_config_backup/**",
           "!**/.obs_config_backups/**",
           "!**/logs/**",
