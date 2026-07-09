@@ -48,7 +48,12 @@ from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
-from .gsi_ready import gsi_status, notify_gsi_payload
+from .gsi_ready import (
+    cleanup_stale_gsi_configs,
+    gsi_status,
+    install_gsi_access_log_filter,
+    notify_gsi_payload,
+)
 from .update_info import build_update_payload, resolve_local_version_info
 from .montage_db import MontageDB
 from .name_card_meta import (
@@ -77,6 +82,7 @@ from .steam_match_history import (
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+install_gsi_access_log_filter()
 
 _FAULT_LOG_FILE = None
 try:
@@ -254,6 +260,9 @@ async def lifespan(_: FastAPI):
     await demo_db.init_db()
     await montage_db.init_tables()
     cfg = load_config()
+    removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
+    if removed_gsi_configs:
+        logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
     demo_watcher = DemoWatcher(cfg.demo_watch_paths or [], _enqueue_demo_path, demo_db)
     from .pov_hud_manager import try_restore_stale_pov_on_startup
 

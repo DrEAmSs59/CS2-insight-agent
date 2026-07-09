@@ -43,7 +43,14 @@ from .cs2_config_backup import (
     write_persistent_backup_from_snap,
 )
 from .env_utils import OBSConfig, SpecPlayerVerifyConfig, _steam_install_from_registry as _get_steam_install_root
-from .gsi_ready import gsi_status, is_gsi_ready, reset_gsi_ready, wait_gsi_payload_after
+from .gsi_ready import (
+    cleanup_stale_gsi_configs,
+    gsi_config_path,
+    gsi_status,
+    is_gsi_ready,
+    reset_gsi_ready,
+    wait_gsi_payload_after,
+)
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
@@ -2116,6 +2123,9 @@ class OBSDirector:
 
         cfg_dir = csgo_dir / "cfg"
         cfg_dir.mkdir(parents=True, exist_ok=True)
+        removed_gsi_configs = cleanup_stale_gsi_configs(cs2)
+        if removed_gsi_configs:
+            logger.info("Removed %d stale CS2 Insight GSI config(s) before launch", len(removed_gsi_configs))
         stem = dest.stem  # _insight_<uuid>
         cfg_path = cfg_dir / f"{stem}.cfg"
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
@@ -2139,15 +2149,15 @@ class OBSDirector:
 
         reset_gsi_ready()
         gsi_url = _resolve_gsi_sink_url()
-        gsi_path = cfg_dir / f"gamestate_integration_{stem}.cfg"
+        gsi_path = gsi_config_path(cfg_dir)
         logger.info("GSI HTTP sink (gamestate cfg): %s -> %s", gsi_url, gsi_path)
         gsi_lines = [
             '"CS2 Insight Agent"',
             "{",
             f'  "uri" "{gsi_url}"',
             '  "timeout" "1.0"',
-            '  "buffer" "0.0"',
-            '  "throttle" "0.1"',
+            '  "buffer" "0.1"',
+            '  "throttle" "0.2"',
             '  "heartbeat" "1.0"',
             '  "data"',
             "  {",
