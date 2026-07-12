@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -64,6 +65,13 @@ def main() -> None:
         port = int(os.environ.get("CS2_INSIGHT_PORT", "19871"))
     except ValueError:
         port = 19871
+
+    # H1 fix: 生成随机认证 Token，通过环境变量传递给后端进程
+    # 打印到 stdout 供 Electron 主进程捕获并注入到前端请求中
+    token = secrets.token_urlsafe(32)
+    os.environ["CS2_INSIGHT_AUTH_TOKEN"] = token
+    print(f"CS2_INSIGHT_AUTH_TOKEN={token}", flush=True)
+
     uvicorn.run(
         "app.main:app",
         host=host,

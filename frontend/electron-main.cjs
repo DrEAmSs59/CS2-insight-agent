@@ -38,6 +38,7 @@ log.info('App starting...');
 
 let mainWindow;
 let backendProcess;
+let backendAuthToken = null; // H1 fix: 从后端 stdout 捕获的认证 Token
 
 function resolveWindowIconPath() {
   const icoPath = path.join(__dirname, 'build', 'icon.ico');
@@ -67,9 +68,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      // 允许跨域请求后端 API，并加载本地模块 (解决 blocked:origin)
-      webSecurity: false, 
-      allowRunningInsecureContent: true
+      // C1 fix: 恢复 webSecurity，配合后端 CORS 白名单实现跨域请求
+      webSecurity: true,
     }
   });
 
@@ -250,7 +250,14 @@ function startBackend() {
     });
 
     backendProcess.stdout.on('data', (data) => {
-      log.info(`[Backend] ${data.toString().trimEnd()}`);
+      const text = data.toString().trimEnd();
+      // H1 fix: 捕获后端启动时输出的认证 Token
+      const tokenMatch = text.match(/^CS2_INSIGHT_AUTH_TOKEN=(.+)$/);
+      if (tokenMatch) {
+        backendAuthToken = tokenMatch[1];
+        log.info('[Backend] Auth token captured');
+      }
+      log.info(`[Backend] ${text}`);
     });
 
     backendProcess.stderr.on('data', (data) => {
@@ -280,26 +287,27 @@ function startBackend() {
 
 app.whenReady().then(() => {
   // 使用更稳健的 registerFileProtocol
+  // H7 fix: 添加路径遍历检查，确保解析后的路径在 dist 目录内
   protocol.registerFileProtocol('app', (request, callback) => {
-    // 移除 app://local/ 前缀
     const urlPath = request.url.replace(/^app:\/\/local\//, '');
-    // 去除参数
     const cleanPath = urlPath.split('?')[0].split('#')[0];
-    
-    // 关键修复：如果是请求 api，说明前端代码写错了（生产环境必须用 http 绝对路径）
-    // 我们返回错误，而不是 index.html，避免掩盖真实的连接问题
+
     if (cleanPath.startsWith('api/') || cleanPath === 'api') {
+      return callback({ error: -6 });
+    }
+
+    const distRoot = path.resolve(app.getAppPath(), 'dist');
+    const resolved = path.resolve(distRoot, cleanPath || 'index.html');
+    // 路径遍历检查：确保解析后的路径在 dist 目录内
+    if (!resolved.startsWith(distRoot + path.sep) && resolved !== distRoot) {
+      log.warn('[Protocol] Path traversal blocked:', cleanPath);
       return callback({ error: -6 }); // net::ERR_FILE_NOT_FOUND
     }
 
-    // 现在的路径相对于 app.asar，由于我们把 dist 整个打进去了
-    let filePath = path.join(app.getAppPath(), 'dist', cleanPath || 'index.html');
-    
-    // 如果是目录或不存在，回退到 index.html
+    let filePath = resolved;
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      filePath = path.join(app.getAppPath(), 'dist', 'index.html');
+      filePath = path.join(distRoot, 'index.html');
     }
-    
     callback({ path: filePath });
   });
 
@@ -609,12 +617,24 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
 });
 
 // 打开外部链接（使用系统默认浏览器）
+// H6 fix: 添加 URL 协议白名单，仅允许 http/https/mailto
 ipcMain.handle('open-external', async (event, url) => {
   try {
+    const parsed = new URL(url);
+    const allowedProtocols = ['https:', 'http:', 'mailto:'];
+    if (!allowedProtocols.includes(parsed.protocol)) {
+      log.warn('[Security] Blocked open-external with disallowed protocol:', parsed.protocol);
+      return false;
+    }
     await shell.openExternal(url);
     return true;
   } catch (e) {
     log.error('openExternal error:', e);
     return false;
   }
+});
+
+// H1 fix: 向后端请求提供认证 Token
+ipcMain.handle('get-auth-token', () => {
+  return backendAuthToken;
 });

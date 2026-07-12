@@ -23,7 +23,7 @@ import faulthandler
 
 from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -279,13 +279,33 @@ app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
 
 app.include_router(recording_router)
 
+# C2 fix: 收窄 CORS 来源，仅允许 Electron app:// 协议和本地开发服务器
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["app://local", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# H1 fix: 从环境变量读取认证 Token，要求所有请求携带该 Token
+_AUTH_TOKEN: str = os.environ.get("CS2_INSIGHT_AUTH_TOKEN", "")
+
+
+@app.middleware("http")
+async def auth_token_middleware(request: Request, call_next):
+    """Token 认证中间件：SSE 推送端点豁免（不支持自定义头），其余均须携带有效 Token。"""
+    # SSE 端点豁免：EventSource API 不支持自定义请求头
+    if request.url.path == "/api/demos/stream":
+        return await call_next(request)
+    if _AUTH_TOKEN:
+        token = request.headers.get("X-CS2-Insight-Token", "")
+        if token != _AUTH_TOKEN:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: invalid or missing X-CS2-Insight-Token"},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")
