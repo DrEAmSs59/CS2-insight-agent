@@ -1367,13 +1367,15 @@ async def upload_demo(file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".dem"):
         raise HTTPException(400, "Only .dem files are accepted")
 
-    dest = UPLOAD_DIR / file.filename
+    # H2 fix: 取纯文件名，防止路径穿越（如 ../../etc/passwd.dem）
+    safe_name = Path(file.filename).name
+    dest = UPLOAD_DIR / safe_name
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
     players, match_meta = await _safe_upload_demo_meta(dest)
     return {
-        "filename": file.filename,
+        "filename": safe_name,
         "path": str(dest),
         "players": players,
         "match_meta": match_meta,
@@ -1389,13 +1391,15 @@ async def upload_demos(files: Annotated[list[UploadFile], File()]):
     for file in files:
         if not file.filename or not str(file.filename).lower().endswith(".dem"):
             raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
-        dest = UPLOAD_DIR / file.filename
+        # H2 fix: 取纯文件名，防止路径穿越
+        safe_name = Path(file.filename).name
+        dest = UPLOAD_DIR / safe_name
         with dest.open("wb") as f:
             shutil.copyfileobj(file.file, f)
         players, match_meta = await _safe_upload_demo_meta(dest)
         out.append(
             {
-                "filename": file.filename,
+                "filename": safe_name,
                 "path": str(dest),
                 "players": players,
                 "match_meta": match_meta,
@@ -2732,15 +2736,30 @@ class RevealFileInExplorerBody(BaseModel):
 
 @app.post("/api/open-folder")
 def open_folder(body: OpenFolderBody):
+    """在文件管理器中打开指定目录。
+
+    H3 fix: 仅允许打开**已存在的目录**，拒绝文件和含路径穿越的输入，
+    防止通过 os.startfile 启动任意可执行程序。
+    """
     import os, subprocess as sp, sys
-    p = body.path.strip()
+    raw = body.path.strip()
+    # 拒绝路径穿越
+    if ".." in raw.split("/") or ".." in raw.split("\\"):
+        raise HTTPException(400, "路径不允许包含 '..'")
+    try:
+        p = Path(raw).expanduser().resolve()
+    except OSError as exc:
+        raise HTTPException(400, f"无效路径: {exc}") from exc
+    if not p.is_dir():
+        raise HTTPException(400, "仅支持打开目录，不支持打开文件或可执行程序")
+    path_str = str(p)
     try:
         if sys.platform == "win32":
-            os.startfile(p)  # noqa: S606
+            os.startfile(path_str)  # noqa: S606
         elif sys.platform == "darwin":
-            sp.run(["open", p], check=False, timeout=10)
+            sp.run(["open", path_str], check=False, timeout=10)
         else:
-            sp.run(["xdg-open", p], check=False, timeout=10)
+            sp.run(["xdg-open", path_str], check=False, timeout=10)
     except Exception as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True}
@@ -2748,26 +2767,37 @@ def open_folder(body: OpenFolderBody):
 
 @app.post("/api/reveal-file-in-explorer")
 def reveal_file_in_explorer(body: RevealFileInExplorerBody):
-    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。"""
+    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。
+
+    H3 fix: 仅允许显示已存在的文件，拒绝含路径穿越的输入和可执行程序。
+    """
     import subprocess as sp
     import sys
 
     raw = (body.path or "").strip().strip('"')
     if not raw:
         raise HTTPException(400, "path 为空")
+    # 拒绝路径穿越
+    if ".." in raw.split("/") or ".." in raw.split("\\"):
+        raise HTTPException(400, "路径不允许包含 '..'")
     try:
         p = Path(raw).expanduser().resolve(strict=False)
     except OSError as exc:
         raise HTTPException(400, f"无效路径: {exc}") from exc
     if not p.exists():
         raise HTTPException(404, f"路径不存在: {p}")
+    if not p.is_file():
+        raise HTTPException(400, "仅支持显示文件，不支持目录或可执行程序")
+    # 拒绝可执行程序
+    if p.suffix.lower() in (".exe", ".bat", ".cmd", ".ps1", ".msi", ".com"):
+        raise HTTPException(400, "不允许打开可执行程序文件")
     try:
         if sys.platform == "win32":
             if p.is_dir():
                 os.startfile(str(p))  # noqa: S606
             else:
                 # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
-                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
+                # Explorer 在含空格/特殊字符场景下可能退回默认"文档"目录。
                 sp.Popen(["explorer.exe", "/select,", str(p)])
         elif sys.platform == "darwin":
             sp.run(["open", "-R", str(p)], check=False, timeout=20)
