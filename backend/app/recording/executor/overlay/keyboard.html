@@ -120,8 +120,14 @@ kb.classList.add(_posClass);
 let track = [], tickRate = 64, startTick = 0, offset = 0;
 let byTick = new Map(), tickList = [];
 let running = false, resumeAt = 0, activeMs = 0;
-// 短按（跳、点射、刀划）在 rAF 采样间易漏显，粘性保持约 3 个游戏 tick
+// 新版 demo 的 weapon_fire 是逐发事件：自动步枪按住左键时，相邻子弹间
+// 不能闪灭。右键也需要比单帧更长的可见时间，便于成片观看。
 const STICKY_KEYS = new Set(["jump", "fire", "scope"]);
+const STICKY_MS = {
+  jump: 75,
+  fire: 160,
+  scope: 180,
+};
 const stickyUntil = {};
 
 function loadTrack(msg) {
@@ -157,9 +163,11 @@ function nearest(tick) {
 function render(tick) {
   const f = nearest(tick) || {};
   const now = performance.now();
-  const stickyMs = Math.max(45, (1000 / tickRate) * 3);
   for (const k in els) {
-    if (f[k]) stickyUntil[k] = now + stickyMs;
+    if (f[k] && STICKY_KEYS.has(k)) {
+      const stickyMs = Math.max(STICKY_MS[k] ?? 45, (1000 / tickRate) * 3);
+      stickyUntil[k] = now + stickyMs;
+    }
     const on = !!f[k] || (STICKY_KEYS.has(k) && (stickyUntil[k] || 0) > now);
     els[k].classList.toggle("on", on);
   }

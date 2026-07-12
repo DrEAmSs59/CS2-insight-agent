@@ -38,7 +38,11 @@ def _plan_with_ai_director(req, dto: RecordingRequestDTO, extra_warnings: list[s
         extra_warnings.append(f"AI director LLM error: {llm_error}")
     if outline.rationale:
         extra_warnings.append(f"AI director: {outline.rationale[:200]}")
-    victim_blocks = sum(1 for b in outline.blocks if b.type == "kill_with_victim")
+    victim_blocks = sum(
+        1 if b.type == "kill_with_victim" else len(b.kill_indices)
+        for b in outline.blocks
+        if b.type in {"kill_with_victim", "killer_merged_with_victims"}
+    )
     extra_warnings.append(
         f"AI director blocks: {len(outline.blocks)} "
         f"(kill_with_victim={victim_blocks}, segments_est≈{len(outline.blocks) + victim_blocks})"

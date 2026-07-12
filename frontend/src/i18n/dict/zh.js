@@ -370,7 +370,7 @@ export default {
   "queue.killerPovPreLabel": "回看前停留 (秒) · 击杀者视角",
   "queue.killerPovPostLabel": "死亡后停留 (秒) · 击杀者视角",
   "queue.aiDirectorLabel": "AI 自动编排",
-  "queue.aiDirectorHint": "AI 会把精彩击杀安排为「击杀后回看对手」；时间很接近的普通击杀会合并播放。",
+  "queue.aiDirectorHint": "AI 会按击杀间隔编排：短间隔多杀先合并击杀者过程，再连续回看对手；独立击杀则逐组回看。",
   "queue.aiDirectorPreviewTitle": "AI 推荐播放顺序",
   "queue.aiDirectorLoading": "正在生成推荐播放顺序…",
   "queue.aiDirectorRefresh": "刷新",
