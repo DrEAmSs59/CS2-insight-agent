@@ -71,7 +71,7 @@ def _req(events: list[EventInfo]) -> NormalizedRequest:
     )
 
 
-def test_picks_all_eligible_instant_kills():
+def test_heuristic_picks_all_eligible_instant_kills():
     events = []
     instant_indices = [2, 7, 12, 17, 20, 22]
     for i in range(23):
@@ -98,7 +98,7 @@ def test_excludes_multi_shot_and_non_headshot():
     assert not _is_victim_pov_eligible(events[1])
 
 
-def test_reconcile_inserts_all_eligible():
+def test_finalize_keeps_merge_and_adds_every_victim_pov():
     events = []
     for i in range(10):
         if i % 2 == 0:
@@ -108,18 +108,22 @@ def test_reconcile_inserts_all_eligible():
     req = _req(events)
     outline = finalize_ai_director_outline(
         AIDirectorOutline(
-            blocks=[AIDirectorBlock(type="killer_single", kill_index=i, label="") for i in range(10)],
+            blocks=[
+                AIDirectorBlock(type="killer_merged", kill_indices=[0, 1, 2, 3, 4], label="连杀"),
+                *[AIDirectorBlock(type="killer_single", kill_index=i, label="") for i in range(5, 10)],
+            ],
             rationale="test",
         ),
         req,
     )
     victim_blocks = [b for b in outline.blocks if b.type == "kill_with_victim"]
+    assert outline.blocks[0].type == "killer_merged_with_victims"
     assert len(victim_blocks) == 5
     assert victim_pov_omitted_kills(outline, req) == []
 
 
 if __name__ == "__main__":
-    test_picks_all_eligible_instant_kills()
+    test_heuristic_picks_all_eligible_instant_kills()
     test_excludes_multi_shot_and_non_headshot()
-    test_reconcile_inserts_all_eligible()
+    test_finalize_keeps_merge_and_adds_every_victim_pov()
     print("test_ai_director_victim_picks: OK")

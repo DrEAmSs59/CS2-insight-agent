@@ -19,7 +19,12 @@ from .models import EventInfo
 
 logger = logging.getLogger(__name__)
 
-BlockType = Literal["killer_merged", "killer_single", "kill_with_victim"]
+BlockType = Literal[
+    "killer_merged",
+    "killer_merged_with_victims",
+    "killer_single",
+    "kill_with_victim",
+]
 
 
 class AIDirectorBlock(BaseModel):
@@ -43,46 +48,34 @@ class AIDirectorOutline(BaseModel):
 
 
 DIRECTOR_SYSTEM_PROMPT = """你是 CS2 击杀合辑 / 多杀高光的「导播 + 剪辑大纲」助手。
-用户会给你按时间排序的击杀列表（含回合、间隔、受害者、武器、爆头、标签、victim_pov_score 等），你要决定 OBS 录制顺序与是否插入受害者视角。
+用户会给你按时间排序的击杀列表（含回合、间隔、受害者、武器、爆头、标签等），你要决定 OBS 录制顺序。
 
-核心原则：**凡 victim_pov_eligible=true 的颗秒/秒杀击杀，一律 kill_with_victim（全插受害者 POV）。** 非 eligible 的击杀只用击杀者视角。
-
-【仅以下击杀 victim_pov_eligible=true，必须 kill_with_victim】
-1. **颗秒 / 秒杀 / 一枪头**：tags 含颗秒/💥/秒杀，或 headshot=true 且 shots_to_kill≤2（含一枪头+一枪身）
-2. **禁止**对 victim_pov_eligible=false 使用 kill_with_victim（非爆头、shots_to_kill≥3、普通补枪）
-
-【一般只用击杀者视角（killer_single / killer_merged）】
-- 普通步枪点射、补枪、shots_to_kill≥3 的击杀
-- 非爆头且无颗秒/秒杀标签的击杀
-- 间隔极短的多杀合并段用 killer_merged；其中 eligible 的颗秒/秒杀仍单独 kill_with_victim
-
-【插入顺序】
-- blocks 顺序 = 成片时间顺序；每个 eligible 击杀各一个 kill_with_victim block
-- 同回合且 gap_sec ≤ jump_cut_threshold 的非 eligible 击杀可 killer_merged
-- **跨回合或 gap 超过阈值必须拆 block**
+当 enable_victim_pov=true 时，**每一杀都必须包含受害者视角**，但不能机械地 K→V→K→V。你要根据间隔和同回合连杀长度决定：
+1. 同回合且 gap_sec ≤ jump_cut_threshold 的连续击杀：用 killer_merged_with_victims。成片为「合并的击杀者多杀过程 → 该组每一杀的受害者视角」，避免打断连杀节奏。
+2. 跨回合、间隔长、或独立击杀：用 kill_with_victim，成片为单杀 K→V。
+3. enable_victim_pov=false 时，使用 killer_merged / killer_single，不得使用带 victims 的 block。
 
 【输出】只输出一行合法 JSON，不要 markdown：
 {
   "blocks": [
-    {"type": "killer_merged", "kill_indices": [0, 1], "label": "短说明"},
-    {"type": "killer_single", "kill_index": 5, "label": "短说明"},
-    {"type": "kill_with_victim", "kill_index": 12, "label": "颗秒受害者反应"}
+    {"type": "killer_merged_with_victims", "kill_indices": [0, 1], "label": "连续双杀后回看两名对手"},
+    {"type": "kill_with_victim", "kill_index": 2, "label": "独立击杀回看"}
   ],
-  "rationale": "100字以内：说明受害者 POV 选在哪几杀、为何、节奏安排"
+  "rationale": "100字以内：说明哪些连杀被合并、哪些击杀分开，以及节奏安排"
 }
 
 【block 类型】
-- killer_merged：连续击杀合并为一段击杀者视角
-- killer_single：单杀击杀者视角，不插受害者
-- kill_with_victim：该击杀 K→V 连贯（仅高观赏价值）。**必须在 blocks 里单独列出，不能只在 rationale 里写、却用 killer_merged 覆盖该 kill**
+- killer_merged：连续击杀合并为一段击杀者视角（仅 enable_victim_pov=false）
+- killer_merged_with_victims：连续击杀者段合并为一段，然后追加该组内每一杀的受害者视角
+- killer_single：单杀击杀者视角（仅 enable_victim_pov=false）
+- kill_with_victim：单杀 K→V 连贯
 
 【硬性规则】
 1. 每个 kill 索引 0..N-1 恰好出现一次
-2. blocks 顺序 = 成片顺序
-3. **victim_pov_eligible=true 的击杀必须全部 kill_with_victim，不可遗漏**
-4. gap_sec ≤ jump_cut_threshold 的同回合短间隔、且非 eligible 的击杀可 killer_merged
-5. **禁止**对 victim_pov_eligible=false 的击杀使用 kill_with_victim
-6. **rationale 与 blocks 一致：eligible 击杀均应有 kill_with_victim**
+2. blocks 顺序 = 成片时间顺序
+3. enable_victim_pov=true 时，每个索引必须恰好位于 kill_with_victim 或 killer_merged_with_victims；不得遗漏受害者视角
+4. 跨回合或 gap 超过阈值必须拆 block
+5. rationale 与 blocks 一致
 
 【禁止】省略 kill 索引；输出 coverage 以外的顶层字段。"""
 
@@ -240,8 +233,13 @@ def build_kill_brief_payload(req: NormalizedRequest) -> dict[str, Any]:
         "kill_count": len(rows),
         "jump_cut_threshold_sec": jump,
         "compilation_kind": req.request_type.value,
+        "enable_victim_pov": bool(opts.enable_victim_pov),
         "context_tags": tags,
-        "director_hint": "victim_pov_eligible=true 的颗秒/秒杀/爆头≤2枪：全部 kill_with_victim，无数量上限",
+        "director_hint": (
+            "用户已开启受害者视角：AI 可按节奏选择 K→V；短间隔连杀优先合并，避免逐杀交替"
+            if opts.enable_victim_pov
+            else "用户未开启受害者视角：仅使用击杀者视角"
+        ),
         "kills": rows,
     }
 
@@ -250,7 +248,7 @@ def _validate_outline(outline: AIDirectorOutline, kill_count: int) -> None:
     seen: set[int] = set()
     for block in outline.blocks:
         indices: list[int] = []
-        if block.type == "killer_merged":
+        if block.type in ("killer_merged", "killer_merged_with_victims"):
             indices = list(block.kill_indices)
             if len(indices) < 1:
                 raise ValueError("killer_merged requires at least one kill_index")
@@ -277,7 +275,7 @@ def _parse_outline(data: dict[str, Any], kill_count: int) -> AIDirectorOutline:
 
 
 def _indices_in_block(block: AIDirectorBlock) -> list[int]:
-    if block.type == "killer_merged":
+    if block.type in ("killer_merged", "killer_merged_with_victims"):
         return list(block.kill_indices)
     if block.kill_index is not None:
         return [block.kill_index]
@@ -330,23 +328,36 @@ def _demote_kill_from_victim_pov(blocks: list[AIDirectorBlock], idx: int) -> lis
 
 
 def _sanitize_victim_pov_outline(outline: AIDirectorOutline, req: NormalizedRequest) -> AIDirectorOutline:
-    """Remove victim POV from kills that are not instant headshot / 颗秒."""
-    events = sorted(req.events, key=lambda e: (e.round, e.tick))
+    """Honor the POV switch while preserving the AI's merge decisions."""
+    if req.options.enable_victim_pov:
+        blocks: list[AIDirectorBlock] = []
+        for block in outline.blocks:
+            if block.type == "killer_merged":
+                blocks.append(block.model_copy(update={"type": "killer_merged_with_victims"}))
+            elif block.type == "killer_single":
+                blocks.append(block.model_copy(update={"type": "kill_with_victim"}))
+            else:
+                blocks.append(block)
+        return AIDirectorOutline(blocks=blocks, rationale=outline.rationale)
+
     blocks = list(outline.blocks)
     demoted: list[int] = []
     for block in outline.blocks:
-        if block.type != "kill_with_victim" or block.kill_index is None:
-            continue
-        idx = block.kill_index
-        if 0 <= idx < len(events) and not _is_victim_pov_eligible(events[idx]):
-            blocks = _demote_kill_from_victim_pov(blocks, idx)
-            demoted.append(idx)
+        if block.type == "kill_with_victim" and block.kill_index is not None:
+            blocks = _demote_kill_from_victim_pov(blocks, block.kill_index)
+            demoted.append(block.kill_index)
+        elif block.type == "killer_merged_with_victims":
+            blocks = [
+                b.model_copy(update={"type": "killer_merged"}) if b is block else b
+                for b in blocks
+            ]
+            demoted.extend(block.kill_indices)
     if not demoted:
         return outline
     disp = [i + 1 for i in sorted(set(demoted))]
     note = outline.rationale.strip()
-    note += f"（已移除非颗秒/一枪头的受害者 POV：#{', #'.join(map(str, disp))}）"
-    logger.info("AI director demoted ineligible victim POV: %s", demoted)
+    note += f"（受害者视角未开启，已移除对手回看：#{', #'.join(map(str, disp))}）"
+    logger.info("AI director demoted victim POV because it is disabled: %s", demoted)
     return AIDirectorOutline(blocks=blocks, rationale=note)
 
 
@@ -407,10 +418,6 @@ def _victim_indices_in_outline(outline: AIDirectorOutline) -> set[int]:
     return out
 
 
-# Victim POV policy: all eligible instant-kill types get K→V
-VICTIM_POV_MUST_SCORE = 8.0
-
-
 def _eligible_victim_pov_indices(events: list) -> list[int]:
     """All kill indices that qualify for victim POV (颗秒/秒杀/HS≤2 shots)."""
     return sorted(i for i, ev in enumerate(events) if _is_victim_pov_eligible(ev))
@@ -418,6 +425,11 @@ def _eligible_victim_pov_indices(events: list) -> list[int]:
 
 def count_eligible_victim_pov(events: list) -> int:
     return len(_eligible_victim_pov_indices(events))
+
+
+def count_available_victim_pov(events: list) -> int:
+    """Number of kills that can receive a victim POV when the user enables it."""
+    return sum(1 for ev in events if getattr(ev, "victim", None) is not None)
 
 
 def _jump_threshold_sec(req: NormalizedRequest) -> float:
@@ -442,7 +454,7 @@ def _pick_victim_pov_indices(
     jump_threshold_sec: float = 12.0,
     tick_rate: float = 64.0,
 ) -> list[int]:
-    """All eligible 颗秒/秒杀 kills get victim POV (no cap)."""
+    """Heuristic fallback: reserve victim POV for standout kills only."""
     _ = jump_threshold_sec, tick_rate
     if n <= 0:
         return []
@@ -450,74 +462,19 @@ def _pick_victim_pov_indices(
 
 
 def victim_pov_omitted_kills(outline: AIDirectorOutline, req: NormalizedRequest) -> list[dict[str, Any]]:
-    """Eligible kills still missing kill_with_victim after reconcile — for preview UI."""
-    events = sorted(req.events, key=lambda e: (e.round, e.tick))
-    selected = _victim_indices_in_outline(outline)
-    omitted: list[dict[str, Any]] = []
-    for idx, ev in enumerate(events):
-        if not _is_victim_pov_eligible(ev) or idx in selected:
-            continue
-        score = _event_victim_pov_score(ev)
-        victim_name = (ev.victim.name if ev.victim else "") or ""
-        omitted.append(
-            {
-                "index": idx,
-                "display_index": idx + 1,
-                "victim_pov_score": round(score, 1),
-                "victim": victim_name,
-                "tags": _kill_tags(ev),
-                "headshot": bool(getattr(ev, "headshot", False)),
-            }
-        )
-    omitted.sort(key=lambda row: (-float(row["victim_pov_score"]), -row["index"]))
-    return omitted
+    """AI victim choices are intentional; there is no mandatory omitted list."""
+    _ = outline, req
+    return []
 
 
 def _reconcile_victim_pov_outline(outline: AIDirectorOutline, req: NormalizedRequest) -> AIDirectorOutline:
-    """
-    LLM often writes victim POV in rationale but only emits killer_merged blocks.
-    Promote promised / high-score kills to kill_with_victim when missing.
-    """
-    if not req.options.enable_victim_pov:
-        return outline
-    events = sorted(req.events, key=lambda e: (e.round, e.tick))
-    n = len(events)
-    if n == 0:
-        return outline
-
-    existing = _victim_indices_in_outline(outline)
-    ideal = _pick_victim_pov_indices(events, n, jump_threshold_sec=_jump_threshold_sec(req), tick_rate=req.demo.tick_rate or 64.0)
-
-    want: set[int] = {i for i in existing if _is_victim_pov_eligible(events[i])}
-    want.update(ideal)
-
-    need = sorted(i for i in want if i not in existing)
-    if not need:
-        return outline
-
-    blocks = list(outline.blocks)
-    for idx in need:
-        if idx in _victim_indices_in_outline(AIDirectorOutline(blocks=blocks, rationale="")):
-            continue
-        ev = events[idx]
-        blob = _tag_blob(_kill_tags(ev))
-        if "颗秒" in blob or "秒杀" in blob or "💥" in blob:
-            label = "精彩击杀 + 对手回看"
-        elif bool(getattr(ev, "headshot", False)):
-            label = "爆头击杀 + 对手回看"
-        else:
-            label = "对手回看"
-        blocks = _promote_kill_to_victim_pov(blocks, idx, label)
-
-    disp = [i + 1 for i in need]
-    note = outline.rationale.strip()
-    note += f"（系统已补全 kill_with_victim：#{', #'.join(map(str, disp))}）"
-    logger.info("AI director reconciled victim POV blocks: %s", need)
-    return AIDirectorOutline(blocks=blocks, rationale=note)
+    """Keep the AI's pacing decision; do not force K→V pairs after planning."""
+    _ = req
+    return outline
 
 
 def _heuristic_outline(req: NormalizedRequest) -> AIDirectorOutline:
-    """Fallback: merge by jump threshold; victim POV on high-score kills (颗秒等)."""
+    """Fallback: merge by jump threshold; reserve victim POV for standout kills."""
     opts = req.options
     events = sorted(req.events, key=lambda e: (e.round, e.tick))
     n = len(events)
@@ -557,32 +514,16 @@ def _heuristic_outline(req: NormalizedRequest) -> AIDirectorOutline:
     flush()
 
     has_meta = any(_event_victim_pov_score(ev) > 0 for ev in events)
-    if opts.enable_victim_pov and n >= 1:
-        jump = _jump_threshold_sec(req)
-        tick_rate = req.demo.tick_rate or 64.0
-        victim_picks = _pick_victim_pov_indices(events, n, jump_threshold_sec=jump, tick_rate=tick_rate)
-        for idx in victim_picks:
-            ev = events[idx]
-            tags = _kill_tags(ev)
-            blob = _tag_blob(tags)
-            if "颗秒" in blob or "秒杀" in blob or "💥" in blob:
-                label = "精彩击杀 + 对手回看"
-            elif bool(getattr(ev, "headshot", False)):
-                label = "爆头击杀 + 对手回看"
-            else:
-                label = "对手回看"
-            blocks = _promote_kill_to_victim_pov(blocks, idx, label)
-
     meta_note = "" if has_meta else "（缺少部分高光标记，重新解析 Demo 后可获得更准确的安排）"
     outline = AIDirectorOutline(
         blocks=blocks,
-        rationale=f"自动安排：时间很接近的连续击杀会合并播放；精彩击杀会加入对手回看。{meta_note}",
+        rationale="自动安排：时间很接近的连续击杀会合并播放；精彩击杀会加入对手回看。" + meta_note,
     )
     return finalize_ai_director_outline(outline, req)
 
 
 def finalize_ai_director_outline(outline: AIDirectorOutline, req: NormalizedRequest) -> AIDirectorOutline:
-    """Sanitize ineligible victim POV + reconcile + split over-long killer_merged blocks."""
+    """Honor the POV switch and preserve the AI's pacing decisions."""
     from .planners.ai_directed_planner import normalize_outline_jump_cuts
 
     outline = _sanitize_victim_pov_outline(outline, req)
@@ -890,11 +831,11 @@ def outline_to_preview_lines(outline: AIDirectorOutline, req: NormalizedRequest)
     events = sorted(req.events, key=lambda e: (e.round, e.tick))
     lines: list[str] = []
     for i, block in enumerate(outline.blocks):
-        if block.type == "killer_merged":
+        if block.type in ("killer_merged", "killer_merged_with_victims"):
             ticks = [events[j].tick for j in block.kill_indices if j < len(events)]
-            vics = sum(1 for _ in block.kill_indices)  # placeholder count
+            suffix = "，后接受害者回看" if block.type == "killer_merged_with_victims" else ""
             lines.append(
-                f"{i + 1}. [合并击杀×{len(block.kill_indices)}] R? ticks={ticks[:3]}{'…' if len(ticks) > 3 else ''} "
+                f"{i + 1}. [合并击杀×{len(block.kill_indices)}{suffix}] R? ticks={ticks[:3]}{'…' if len(ticks) > 3 else ''} "
                 f"— {block.label or 'merged'}"
             )
         elif block.type == "killer_single":

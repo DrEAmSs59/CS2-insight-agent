@@ -369,7 +369,7 @@ export default {
   "queue.killerPovPreLabel": "Pre-review linger (s) · killer POV",
   "queue.killerPovPostLabel": "Post-kill linger (s) · killer POV",
   "queue.aiDirectorLabel": "AI auto arrangement",
-  "queue.aiDirectorHint": "AI adds an opponent replay after standout kills and merges ordinary kills that happen close together.",
+  "queue.aiDirectorHint": "AI uses kill timing: close multi-kills are merged before their opponent replays, while isolated kills stay as separate replay pairs.",
   "queue.aiDirectorPreviewTitle": "AI recommended playback order",
   "queue.aiDirectorLoading": "Creating the recommended playback order…",
   "queue.aiDirectorRefresh": "Refresh",

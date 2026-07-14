@@ -74,14 +74,18 @@ def normalize_outline_jump_cuts(outline: AIDirectorOutline, req: NormalizedReque
         return outline
     new_blocks: list[AIDirectorBlock] = []
     for block in outline.blocks:
-        if block.type != "killer_merged" or len(block.kill_indices) <= 1:
+        if block.type not in ("killer_merged", "killer_merged_with_victims") or len(block.kill_indices) <= 1:
             new_blocks.append(block)
             continue
         for sub in _split_indices_by_jump_cut(block.kill_indices, events, req):
             if len(sub) == 1:
                 new_blocks.append(
                     AIDirectorBlock(
-                        type="killer_single",
+                        type=(
+                            "kill_with_victim"
+                            if block.type == "killer_merged_with_victims"
+                            else "killer_single"
+                        ),
                         kill_index=sub[0],
                         label=block.label or "单杀",
                     )
@@ -89,7 +93,7 @@ def normalize_outline_jump_cuts(outline: AIDirectorOutline, req: NormalizedReque
             else:
                 new_blocks.append(
                     AIDirectorBlock(
-                        type="killer_merged",
+                        type=block.type,
                         kill_indices=sub,
                         label=block.label or f"合并 {len(sub)} 杀",
                     )
@@ -157,6 +161,39 @@ def plan_from_ai_outline(req: NormalizedRequest, outline: AIDirectorOutline) -> 
                 seg_idx = _append_merged_killer_segment(
                     segments, req, events, sub, seg_idx, pre_ticks, post_ticks
                 )
+        elif block.type == "killer_merged_with_victims":
+            subgroups = _split_indices_by_jump_cut(block.kill_indices, events, req)
+            for sub in subgroups:
+                seg_idx = _append_merged_killer_segment(
+                    segments, req, events, sub, seg_idx, pre_ticks, post_ticks
+                )
+                victim_pairs = plan_kill_then_victim_pairs(
+                    req,
+                    [events[i] for i in sub],
+                    source_type=SourceType.kill,
+                    killer_pre_ticks=pre_ticks,
+                    killer_post_ticks=post_ticks,
+                    vic_pre_ticks=vic_pre,
+                    vic_post_ticks=vic_post,
+                    clamp_fn=_clamp,
+                    is_final_round_fn=_is_final_round,
+                )
+                for victim_seg in victim_pairs:
+                    if victim_seg.perspective != Perspective.victim:
+                        continue
+                    segments.append(
+                        victim_seg.model_copy(
+                            update={
+                                "segment_index": seg_idx,
+                                "metadata": {
+                                    **(victim_seg.metadata or {}),
+                                    "ai_director_block": "killer_merged_with_victims",
+                                    "kill_indices": list(sub),
+                                },
+                            }
+                        )
+                    )
+                    seg_idx += 1
         elif block.type == "killer_single":
             ki = block.kill_index if block.kill_index is not None else 0
             seg_idx = _append_merged_killer_segment(

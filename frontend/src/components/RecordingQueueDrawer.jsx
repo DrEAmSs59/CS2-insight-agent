@@ -225,7 +225,7 @@ export function PovSection({ item, updateItemPacing }) {
   const aiDirectorEnabled = Boolean(po.ai_director);
   const killCount = item.clipData?.kill_ticks?.length || 0;
   const canAiDirector =
-    povEnabled && canVictimPov && killCount >= 3 && (isKillCompilation || (isHighlight && killCount > 1));
+    canVictimPov && killCount >= 3 && (isKillCompilation || (isHighlight && killCount > 1));
   const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
   const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
@@ -333,7 +333,9 @@ export function PovSection({ item, updateItemPacing }) {
             checked={aiDirectorEnabled}
             onChange={(e) => {
               const on = e.target.checked;
-              commit(on ? { ai_director: true, pov_interleaved: false } : { ai_director: false });
+              commit(on
+                ? { ai_director: true, victim_pov: true, pov_interleaved: false }
+                : { ai_director: false });
             }}
             className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-cs2-border accent-violet-500"
           />

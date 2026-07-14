@@ -14,6 +14,7 @@ import sys
 import tempfile
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -272,7 +273,8 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
-        pass
+        if _FAULT_LOG_FILE and not _FAULT_LOG_FILE.closed:
+            _FAULT_LOG_FILE.close()
 
 
 app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
@@ -2390,7 +2392,7 @@ class MontageExportBody(BaseModel):
 async def montage_export(body: MontageExportBody):
     cfg = load_config()
     try:
-        from .video_composer import resolve_ffmpeg_binary
+        from .video_composer import MontageComposerError, resolve_ffmpeg_binary
 
         ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
     except MontageComposerError as e:

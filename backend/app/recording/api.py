@@ -12,7 +12,7 @@ from .ai_director import (
     suggest_recording_outline,
     outline_to_preview_lines,
     victim_pov_omitted_kills,
-    count_eligible_victim_pov,
+    count_available_victim_pov,
 )
 from .planners.ai_directed_planner import plan_from_ai_outline
 from ..env_utils import OBSConfig, AppConfig, load_config, ensure_cs2_path, resolve_config_path
@@ -384,14 +384,18 @@ async def ai_director_preview(dto: RecordingRequestDTO) -> dict:
     preview_lines = outline_to_preview_lines(outline, req)
     segments = plan_from_ai_outline(req, outline)
     victim_count = sum(1 for s in segments if str(getattr(s.perspective, "value", s.perspective)) == "victim")
-    victim_blocks = sum(1 for b in outline.blocks if b.type == "kill_with_victim")
+    victim_blocks = sum(
+        1 if b.type == "kill_with_victim" else len(b.kill_indices)
+        for b in outline.blocks
+        if b.type in {"kill_with_victim", "killer_merged_with_victims"}
+    )
     omitted = victim_pov_omitted_kills(outline, req)
-    victim_eligible = count_eligible_victim_pov(req.events)
+    victim_eligible = count_available_victim_pov(req.events)
 
     blocks_out = []
     for b in outline.blocks:
         row = {"type": b.type, "label": b.label or ""}
-        if b.type == "killer_merged":
+        if b.type in {"killer_merged", "killer_merged_with_victims"}:
             row["kill_indices"] = list(b.kill_indices)
         else:
             row["kill_index"] = b.kill_index

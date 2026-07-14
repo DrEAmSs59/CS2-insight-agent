@@ -6,6 +6,7 @@ import { fetchAiDirectorPreview } from "../../recording/aiDirectorApi";
 
 function blockBadge(type, t) {
   if (type === "killer_merged") return t("queue.aiDirectorBadgeMerged");
+  if (type === "killer_merged_with_victims") return "合并后回看";
   if (type === "kill_with_victim") return t("queue.aiDirectorBadgeKv");
   return t("queue.aiDirectorBadgeSingle");
 }
@@ -129,12 +130,18 @@ export default function AiDirectorPreview({ item, globalPacing }) {
                     {blockBadge(block.type, t)}
                   </span>
                   {block.label ? <span className="text-cs2-text-primary">{block.label}</span> : null}
-                  {block.type === "killer_merged" && block.kill_indices?.length ? (
+                  {[
+                    "killer_merged",
+                    "killer_merged_with_victims",
+                  ].includes(block.type) && block.kill_indices?.length ? (
                     <span className="ml-1 text-cs2-text-muted">
                       (#{block.kill_indices.map((x) => x + 1).join(", ")})
                     </span>
                   ) : null}
-                  {block.kill_index != null && block.type !== "killer_merged" ? (
+                  {block.kill_index != null && ![
+                    "killer_merged",
+                    "killer_merged_with_victims",
+                  ].includes(block.type) ? (
                     <span className="ml-1 text-cs2-text-muted">#{block.kill_index + 1}</span>
                   ) : null}
                 </span>

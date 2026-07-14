@@ -11,6 +11,9 @@ from app.parser.input_track import (
     _merge_ephemeral_buckets,
     _pick_bool,
     _resolve_col,
+    _resolve_button_mask_col,
+    _event_ticks_for_player,
+    _infer_movement_from_motion,
     _scope_press_at,
 )
 from app.parser.parse_utils import _to_pandas_df as _to_df
@@ -29,6 +32,39 @@ def test_resolve_col_case_insensitive():
 def test_resolve_col_missing_returns_none():
     df = pd.DataFrame({"foo": [1]})
     assert _resolve_col(df, "buttons") is None
+
+
+def test_resolve_button_mask_supports_new_usercmd_layout():
+    df = pd.DataFrame({"usercmd_buttonstate_1": [8]})
+    assert _resolve_button_mask_col(df) == "usercmd_buttonstate_1"
+
+
+def test_motion_inference_uses_player_view_space():
+    pdf = pd.DataFrame({
+        "tick": [10, 11, 12],
+        "X": [0.0, 1.0, 1.0],
+        "Y": [0.0, 0.0, -1.0],
+        "yaw": [0.0, 0.0, 0.0],
+    })
+    movement = _infer_movement_from_motion(pdf, min_units_per_tick=0.1)
+    assert movement["W"] == [True, False, False]
+    assert movement["D"] == [False, True, True]
+    assert movement["A"] == [False, False, False]
+
+
+def test_event_ticks_for_player_filters_identity_and_range():
+    events = pd.DataFrame({
+        "tick": [99, 100, 101, 102],
+        "user_steamid": ["1", "1", "2", "1"],
+        "user_name": ["p1", "p1", "p2", "p1"],
+    })
+    assert _event_ticks_for_player(
+        events,
+        steamid="1",
+        player_name=None,
+        start_tick=100,
+        end_tick=101,
+    ) == {100}
 
 
 def test_to_df_passthrough():
