@@ -233,6 +233,7 @@ export function getClipTitle(clip, t) {
 export const COMPILATION_KIND_EXPORT_TOKEN = {
   rival_kills: "NemesisFeeder",
   all_kills: "AllKills",
+  weapon_kills: "WeaponKills",
   nemesis_deaths: "NemesisDeaths",
   all_deaths: "AllDeaths",
   freeze_to_death: "RoundDeaths",
@@ -244,6 +245,7 @@ export const COMPILATION_KIND_EXPORT_TOKEN = {
 export const COMPILATION_KIND_KEY_MAP = {
   rival_kills: "montage.compilationKindRivalKills",
   all_kills: "montage.compilationKindAllKills",
+  weapon_kills: "montage.compilationKindWeaponKills",
   nemesis_deaths: "montage.compilationKindNemesisDeaths",
   all_deaths: "montage.compilationKindAllDeaths",
   freeze_to_death: "montage.compilationKindFreezeToDeath",
@@ -345,14 +347,14 @@ export function getClipDurationSeconds(clip) {
 }
 
 /**
- * 亲儿子喂饭 / 全部击杀：按 source_ticks 累加各段跨度（秒）。
+ * 亲儿子喂饭 / 全部击杀 / 枪械击杀：按 source_ticks 累加各段跨度（秒）。
  * @param {Record<string, unknown>} clip
  */
 export function getCompilationSourceTicksSpanSeconds(clip) {
   const raw = clip?.source_ticks;
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const kind = String(clip?.compilation_kind || "");
-  if (kind !== "rival_kills" && kind !== "all_kills") return null;
+  if (!["rival_kills", "all_kills", "weapon_kills"].includes(kind)) return null;
   let sum = 0;
   for (const p of raw) {
     if (!Array.isArray(p) || p.length < 2) continue;

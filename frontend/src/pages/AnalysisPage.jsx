@@ -4,6 +4,7 @@ import PlayerSelect from "../components/PlayerSelect";
 import MatchScoreboard from "../components/MatchScoreboard";
 import ClipList from "../components/ClipList";
 import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView";
+import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import ProgressBar from "../components/ProgressBar";
 import ActionBar from "../components/ActionBar";
 import MatchSwitcher from "../components/MatchSwitcher";
@@ -11,6 +12,7 @@ import { Loader2, RefreshCw, Film, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAppShell } from "../context/AppShellContext";
 import { useT } from "../i18n/useT.js";
+import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 
 export default function AnalysisPage() {
   const s = useAppShell();
@@ -19,6 +21,8 @@ export default function AnalysisPage() {
   const timelineRounds = s.timeline?.rounds?.length ?? 0;
   const roundTlLen = s.roundTimeline?.length ?? 0;
   const hasTimeline = roundTlLen > 0 || timelineRounds > 0;
+  const weaponKillSummary = summarizeWeaponKills(s.roundTimeline);
+  const hasWeaponKills = weaponKillSummary.killCount > 0;
   const showResultsBlock =
     s.currentParsed &&
     (s.clips.length > 0 || s.parsedPlayerNames.length > 0 || hasTimeline);
@@ -139,6 +143,13 @@ export default function AnalysisPage() {
                   <>
                     {t("analysis.clipCount", { n: s.clips.filter((c) => c.category !== "meme_death").length })}
                   </>
+                ) : analysisViewMode === "weapon_kills" ? (
+                  <>
+                    {t("analysis.weaponGroupCount", { n: weaponKillSummary.groupCount })} ·{" "}
+                    <span className="text-cs2-emerald-on-surface">
+                      {t("analysis.killCount", { n: weaponKillSummary.killCount })}
+                    </span>
+                  </>
                 ) : (
                   <>
                     {t("analysis.roundCount", {
@@ -194,6 +205,21 @@ export default function AnalysisPage() {
                 ].join(" ")}
               >
                 {t("analysis.tabTimeline")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalysisViewMode("weapon_kills")}
+                disabled={!hasWeaponKills}
+                title={!hasWeaponKills ? t("analysis.tabWeaponKillsDisabledTitle") : undefined}
+                className={[
+                  "rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors",
+                  analysisViewMode === "weapon_kills"
+                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                    : "text-cs2-text-muted hover:text-cs2-text-primary",
+                  !hasWeaponKills ? "cursor-not-allowed opacity-40" : "",
+                ].join(" ")}
+              >
+                {t("analysis.tabWeaponKills")}
               </button>
             </div>
 
@@ -257,19 +283,34 @@ export default function AnalysisPage() {
                     })}
                   </div>
                 )}
-                <RoundTimelineView
-                  roundTimeline={s.roundTimeline}
-                  focusedPlayer={s.currentActivePlayer || s.matchMeta?.target_player || ""}
-                  demoFilename={s.currentFilename}
-                  mapName={s.matchMeta?.map_name ?? ""}
-                  queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
-                  onAddEvent={s.handleAddTimelineEventToQueue}
-                  onAddRound={s.handleAddTimelineRoundToQueue}
-                  onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue}
-                  onRemoveEvent={s.handleRemoveTimelineEventFromQueue}
-                  onRemoveRound={s.handleRemoveTimelineRoundFromQueue}
-                  suppressSummaryHeader
-                />
+                {analysisViewMode === "weapon_kills" ? (
+                  <WeaponKillsView
+                    roundTimeline={s.roundTimeline}
+                    focusedPlayer={s.currentActivePlayer || s.matchMeta?.target_player || ""}
+                    demoFilename={s.currentFilename}
+                    mapName={s.matchMeta?.map_name ?? ""}
+                    queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                    onAdd={s.handleAddWeaponKillsToQueue}
+                    onRemove={s.handleDequeueClip}
+                    onAddEvent={s.handleAddTimelineEventToQueue}
+                    onRemoveEvent={s.handleRemoveTimelineEventFromQueue}
+                    suppressSummaryHeader
+                  />
+                ) : (
+                  <RoundTimelineView
+                    roundTimeline={s.roundTimeline}
+                    focusedPlayer={s.currentActivePlayer || s.matchMeta?.target_player || ""}
+                    demoFilename={s.currentFilename}
+                    mapName={s.matchMeta?.map_name ?? ""}
+                    queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                    onAddEvent={s.handleAddTimelineEventToQueue}
+                    onAddRound={s.handleAddTimelineRoundToQueue}
+                    onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue}
+                    onRemoveEvent={s.handleRemoveTimelineEventFromQueue}
+                    onRemoveRound={s.handleRemoveTimelineRoundFromQueue}
+                    suppressSummaryHeader
+                  />
+                )}
               </div>
             )}
           </div>
@@ -277,7 +318,7 @@ export default function AnalysisPage() {
         </div>
       </div>
 
-      {s.clips.length > 0 && (
+      {s.clips.length > 0 && analysisViewMode === "clips" && (
         <ActionBar
           selectedCount={s.selectedRegularCount}
           totalCount={s.regularSelectableTotal}

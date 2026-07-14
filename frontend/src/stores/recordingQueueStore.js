@@ -53,7 +53,7 @@ export function clipVictimPovEnqueueEligible(clipData) {
   const kind = clipData.compilation_kind;
   return (
     (clipData.category === "highlight" ||
-      (clipData.category === "compilation" && ["rival_kills", "all_kills"].includes(kind))) &&
+      (clipData.category === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(kind))) &&
     victims.some((v) => String(v ?? "").trim().length > 0)
   );
 }
@@ -306,7 +306,7 @@ export const useRecordingQueue = create((set, get) => ({
         const kind = q.clipData?.compilation_kind;
         return (
           (q.clipData?.category === "highlight" ||
-            (q.clipData?.category === "compilation" && ["rival_kills", "all_kills"].includes(kind))) &&
+            (q.clipData?.category === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(kind))) &&
           victims.some((v) => String(v ?? "").trim().length > 0)
         );
       };

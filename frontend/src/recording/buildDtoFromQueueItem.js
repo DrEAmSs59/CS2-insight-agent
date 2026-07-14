@@ -111,7 +111,7 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
   if (cat === "fail") return buildFailRecordingRequest(...args);
   if (cat === "compilation") {
     if (kind === "freeze_to_death") return buildRoundCompilationRecordingRequest(...args);
-    if (kind === "rival_kills" || kind === "all_kills")
+    if (["rival_kills", "all_kills", "weapon_kills"].includes(kind))
       return buildKillCompilationRecordingRequest(...args);
     if (kind === "nemesis_deaths" || kind === "all_deaths")
       return buildDeathCompilationRecordingRequest(...args);

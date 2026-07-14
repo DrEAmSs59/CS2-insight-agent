@@ -207,7 +207,7 @@ export function PovSection({ item, updateItemPacing }) {
   const isFail = clipCategory === "fail" && Boolean(killerName) && !noKillerPovReason;
   const isCompilation = clipCategory === "compilation";
   const compilationKind = item.clipData?.compilation_kind;
-  const isKillCompilation = isCompilation && ["rival_kills", "all_kills"].includes(compilationKind);
+  const isKillCompilation = isCompilation && ["rival_kills", "all_kills", "weapon_kills"].includes(compilationKind);
   const isDeathCompilation = isCompilation && ["nemesis_deaths", "all_deaths"].includes(compilationKind);
   const canVictimPov = (isHighlight || isKillCompilation) && victimsList.some((v) => String(v ?? "").trim());
   const canKillerPov = isFail || (isDeathCompilation && killersList.some((v) => String(v ?? "").trim()));
@@ -411,7 +411,7 @@ function countVictimPovEligibleHighlights(queue) {
     const kind = q.clipData?.compilation_kind;
     return (
       (q.clipData?.category === "highlight" ||
-        (q.clipData?.category === "compilation" && ["rival_kills", "all_kills"].includes(kind))) &&
+        (q.clipData?.category === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(kind))) &&
       victims.some((v) => String(v ?? "").trim().length > 0)
     );
   }).length;
@@ -428,7 +428,7 @@ function allEligibleVictimPovEnabled(queue) {
     const kind = q.clipData?.compilation_kind;
     return (
       (q.clipData?.category === "highlight" ||
-        (q.clipData?.category === "compilation" && ["rival_kills", "all_kills"].includes(kind))) &&
+        (q.clipData?.category === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(kind))) &&
       victims.some((v) => String(v ?? "").trim().length > 0)
     );
   });

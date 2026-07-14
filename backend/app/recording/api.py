@@ -113,6 +113,11 @@ def build_v3_recorded_clip_meta(
     category = _REQUEST_TYPE_TO_CATEGORY.get(request_type, "highlight")
     timeline_record_kind = _REQUEST_TYPE_TO_TIMELINE_RECORD_KIND.get(request_type)
     compilation_kind = _REQUEST_TYPE_TO_COMPILATION_KIND.get(request_type)
+    source_ref = dto.source_ref
+    if request_type == "kill_compilation" and source_ref and source_ref.group_id == "weapon_kills":
+        # The request type selects the existing kill-compilation planner, while
+        # group_id preserves this new UI subtype for the material pool.
+        compilation_kind = "weapon_kills"
 
     events = dto.events or []
     # For round-based request types, source_rounds come from dto.rounds (events is empty).
@@ -139,7 +144,6 @@ def build_v3_recorded_clip_meta(
     target_player_name = (dto.target_player.name if dto.target_player else None)
     target_steamid64 = (dto.target_player.steamid64 if dto.target_player else None)
 
-    source_ref = dto.source_ref
     timeline_event_id = (source_ref.timeline_event_id if source_ref else None) or None
     # Always set timeline_source for timeline request types regardless of timeline_event_id
     if timeline_record_kind:

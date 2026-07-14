@@ -118,7 +118,7 @@ export function getRecordingPlanPreview(item, globalPacing) {
   const eventTicks = extractEventTicks(clip);
   const eventCount = eventTicks.length;
 
-  const isKillCompilation = cat === "compilation" && ["rival_kills", "all_kills"].includes(compKind);
+  const isKillCompilation = cat === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(compKind);
   const isDeathCompilation = cat === "compilation" && ["nemesis_deaths", "all_deaths"].includes(compKind);
   const isHighlight = cat === "highlight" && eventCount > 0;
   const isFail = cat === "fail";

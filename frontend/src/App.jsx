@@ -1635,6 +1635,44 @@ export default function App() {
     ],
   );
 
+  const handleAddWeaponKillsToQueue = useCallback(
+    (clipData) => {
+      if (!currentParsed || !clipData?.client_clip_uid || !clipData?.kill_ticks?.length) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const uid = clipData.client_clip_uid;
+      const qk = queueItemClientUid({
+        clientClipUid: uid,
+        clipData,
+        demoFilename: meta.demoFilename,
+        clipId: clipData.clip_id,
+      });
+      if (queuedClientClipUidsGlobal.has(qk)) {
+        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
+        return;
+      }
+      addToQueue({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: clipData.clip_id,
+        clientClipUid: uid,
+        clipData,
+      });
+      setProgressText(t("app.enqueueWeaponKillsDone"), { autoDismissMs: 2000, queueLink: true });
+    },
+    [
+      currentParsed,
+      currentMatchIndex,
+      queueItemMetaForIndex,
+      queuedClientClipUidsGlobal,
+      addToQueue,
+      setProgressText,
+      t,
+    ],
+  );
+
   const handleDequeueClip = useCallback(
     (clientClipUid) => {
       removeByClientClipUid(clientClipUid);
@@ -2674,6 +2712,7 @@ export default function App() {
     handleAddTimelineEventToQueue,
     handleAddTimelineRoundToQueue,
     handleAddTimelineEventsBatchToQueue,
+    handleAddWeaponKillsToQueue,
     handleDequeueClip,
     handleRemoveTimelineEventFromQueue,
     handleRemoveTimelineRoundFromQueue,

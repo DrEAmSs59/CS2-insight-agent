@@ -55,6 +55,8 @@ function modifierBadgeKeys(mods, flashAssistLine) {
  *   onRowRemove?: () => void,
  *   roundNumber?: number,
  *   variant?: "default" | "timeline",
+ *   showAddAction?: boolean,
+ *   spacious?: boolean,
  * }} props
  */
 export default function KillfeedEventRow({
@@ -65,6 +67,8 @@ export default function KillfeedEventRow({
   onRowRemove,
   roundNumber,
   variant = "default",
+  showAddAction = false,
+  spacious = false,
 }) {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
@@ -89,8 +93,9 @@ export default function KillfeedEventRow({
   const vicHighlight = focusedPlayer && vic === focusedPlayer;
 
   const rowClass = [
-    "killfeed-event-row flex min-h-9 w-full max-w-full cursor-default flex-col justify-center rounded-md border px-2.5 py-1.5 text-left transition-colors duration-150",
-    normalAssistLine || flashAssistLine ? "min-h-[52px]" : "",
+    "killfeed-event-row flex w-full max-w-full cursor-default flex-col justify-center rounded-md border text-left transition-colors duration-150",
+    spacious ? "min-h-12 px-3.5 py-2.5" : "min-h-9 px-2.5 py-1.5",
+    normalAssistLine || flashAssistLine ? (spacious ? "min-h-[64px]" : "min-h-[52px]") : "",
     isAssistOnly
       ? "cursor-default border-cs2-border bg-cs2-bg-input/60 text-cs2-text-muted"
       : isKill
@@ -152,7 +157,10 @@ export default function KillfeedEventRow({
       }
       className={rowClass}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] leading-tight">
+      <div className={spacious
+        ? "flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] leading-tight"
+        : "flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] leading-tight"}
+      >
         <span className="shrink-0 font-mono text-[12px] text-cs2-text-muted">[{timeText}]</span>
         {variant !== "timeline" && Number.isFinite(roundNumber) && roundNumber > 0 ? (
           <span className="shrink-0 rounded border border-cyan-500/30 bg-cs2-cyan-surface px-1 py-0 font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
@@ -194,6 +202,10 @@ export default function KillfeedEventRow({
               {t("analysis.queued")}
             </span>
           )
+        ) : showAddAction && clickable ? (
+          <span className="ml-auto shrink-0 rounded border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-emerald-on-surface">
+            {t("analysis.addSingleKill")}
+          </span>
         ) : null}
       </div>
       {flashAssistLine ? (

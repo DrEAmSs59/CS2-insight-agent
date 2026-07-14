@@ -88,7 +88,7 @@ export function estimateItemRecordSeconds(item, globalPacing) {
   }
 
   const compilationKind = String(clip.compilation_kind || "");
-  const isKillCompilation = compilationKind === "rival_kills" || compilationKind === "all_kills";
+  const isKillCompilation = ["rival_kills", "all_kills", "weapon_kills"].includes(compilationKind);
   const sourceTicks = clip.source_ticks;
   const killTicks = Array.isArray(clip.kill_ticks)
     ? clip.kill_ticks.filter((t) => Number.isFinite(Number(t)))
