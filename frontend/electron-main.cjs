@@ -6,6 +6,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { attachBackendOutput } = require('./backend-auth.cjs');
 
 // 注册自定义协议以支持 Vite 的 ES 模块加载
 protocol.registerSchemesAsPrivileged([
@@ -249,15 +250,12 @@ function startBackend() {
       env: spawnEnv,
     });
 
-    backendProcess.stdout.on('data', (data) => {
-      const text = data.toString().trimEnd();
-      // H1 fix: 捕获后端启动时输出的认证 Token
-      const tokenMatch = text.match(/^CS2_INSIGHT_AUTH_TOKEN=(.+)$/);
-      if (tokenMatch) {
-        backendAuthToken = tokenMatch[1];
+    attachBackendOutput(backendProcess.stdout, {
+      onToken: (token) => {
+        backendAuthToken = token;
         log.info('[Backend] Auth token captured');
-      }
-      log.info(`[Backend] ${text}`);
+      },
+      onLog: (line) => log.info(`[Backend] ${line}`),
     });
 
     backendProcess.stderr.on('data', (data) => {

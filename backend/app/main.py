@@ -279,15 +279,6 @@ app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
 
 app.include_router(recording_router)
 
-# C2 fix: 收窄 CORS 来源，仅允许 Electron app:// 协议和本地开发服务器
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["app://local", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # H1 fix: 从环境变量读取认证 Token，要求所有请求携带该 Token
 _AUTH_TOKEN: str = os.environ.get("CS2_INSIGHT_AUTH_TOKEN", "")
 
@@ -315,6 +306,18 @@ async def log_unhandled_http_errors(request: Request, call_next):
     except Exception:
         logger.exception("Unhandled request error: %s %s", request.method, request.url.path)
         raise
+
+
+# Keep CORS outermost so preflight requests and auth failures receive the
+# headers required by the Electron renderer.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["app://local", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "cs2_insight_demos"
 UPLOAD_DIR.mkdir(exist_ok=True)
