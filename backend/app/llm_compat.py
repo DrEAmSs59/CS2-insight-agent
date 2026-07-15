@@ -2,40 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-
-# H4 fix: 已知 LLM 服务提供商域名白名单
-_KNOWN_LLM_PROVIDER_HOSTS: frozenset[str] = frozenset({
-    # OpenAI
-    "api.openai.com",
-    # 智谱 AI
-    "open.bigmodel.cn",
-    # DeepSeek
-    "api.deepseek.com",
-    # 月之暗面 / Kimi
-    "api.moonshot.cn",
-    # 阿里百炼
-    "dashscope.aliyuncs.com",
-    # 百度千帆
-    "aip.baidubce.com",
-    # Anthropic
-    "api.anthropic.com",
-    # Groq
-    "api.groq.com",
-    # 零一万物
-    "api.lingyiwanwu.com",
-    # 火山引擎 (字节)
-    "ark.cn-beijing.volces.com",
-    # SiliconFlow
-    "api.siliconflow.cn",
-    # Together AI
-    "api.together.xyz",
-})
 
 
 def normalize_llm_base_url(base_url: Optional[str]) -> Optional[str]:
@@ -51,10 +24,11 @@ def normalize_llm_base_url(base_url: Optional[str]) -> Optional[str]:
 
 
 def validate_llm_base_url(base_url: Optional[str]) -> None:
-    """H4 fix: 检查 LLM base_url 安全性，对非 HTTPS 的未知远程域名记录警告。
+    """Warn when a remote LLM base URL can expose the API key in transit.
 
-    仅记录 warning 日志，不拦截请求 — 尊重用户对本地工具的配置自主权。
-    后续可在前端保存配置时添加确认弹窗。
+    HTTP remains available for local model servers on loopback addresses. Remote
+    URLs are not blocked, but every non-HTTPS transport is logged regardless of
+    provider identity.
     """
     raw = (base_url or "").strip()
     if not raw:
@@ -63,23 +37,33 @@ def validate_llm_base_url(base_url: Optional[str]) -> None:
         raw = "http://" + raw
     try:
         parsed = urlparse(raw)
+        host = (parsed.hostname or "").lower()
     except ValueError:
         logger.warning("LLM base_url 解析失败: %r", base_url)
         return
-    host = (parsed.hostname or "").lower()
-    # localhost 不受限制
-    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"):
+
+    if parsed.scheme.lower() == "https":
         return
-    # 已知提供商域名始终允许
-    if host in _KNOWN_LLM_PROVIDER_HOSTS:
+    if host == "localhost" or host.endswith(".localhost"):
         return
-    # 未知的远程域名未使用 HTTPS 时记录警告
-    if parsed.scheme != "https":
-        logger.warning(
-            "LLM base_url '%s' 未使用 HTTPS，API Key 将以明文传输。"
-            "建议使用 HTTPS 或在提供商白名单中确认该域名。",
-            base_url,
-        )
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return
+    except ValueError:
+        pass
+
+    logger.warning(
+        "LLM base_url '%s' 未使用 HTTPS，API Key 将以明文传输。"
+        "建议远程服务使用 HTTPS；HTTP 仅用于本机模型服务。",
+        base_url,
+    )
+
+
+def prepare_llm_base_url(base_url: Optional[str]) -> Optional[str]:
+    """Normalize and validate a base URL before constructing an LLM client."""
+    normalized = normalize_llm_base_url(base_url)
+    validate_llm_base_url(normalized)
+    return normalized
 
 
 def is_zhipu_glm_model(model: str, base_url: Optional[str]) -> bool:
