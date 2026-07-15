@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 # demoparser2 在坏/不兼容 demo 上可能 Rust panic → PyO3 的 PanicException 不是 Exception 子类。
 _DEMOPARSER_RE_RAISE = (KeyboardInterrupt, SystemExit, GeneratorExit)
 
+# `team_num` is normally the convenient player-pawn alias exposed by
+# demoparser2.  Some Perfect World demos omit the pawn value for a subset of
+# players while the controller still carries the authoritative team number.
+PLAYER_CONTROLLER_TEAM_PROP = "CCSPlayerController.m_iTeamNum"
+PLAYER_TEAM_PARSE_FIELDS = ["team_num", PLAYER_CONTROLLER_TEAM_PROP]
+
 
 def win_panel_ceiling_from_match_tick(
     win_panel_match_tick: int, tick_rate: float
@@ -41,6 +47,27 @@ def _to_pandas_df(result) -> pd.DataFrame:
     if isinstance(result, list):
         return pd.DataFrame(result) if result else pd.DataFrame()
     return pd.DataFrame()
+
+
+def coalesce_player_team_num(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing/invalid ``team_num`` values from the player controller.
+
+    The fallback is deterministic and stays within the same ``parse_ticks``
+    result, so callers gain compatibility without an additional demo scan.
+    """
+    if df.empty or PLAYER_CONTROLLER_TEAM_PROP not in df.columns:
+        return df
+    controller = pd.to_numeric(df[PLAYER_CONTROLLER_TEAM_PROP], errors="coerce")
+    controller = controller.where(controller.isin((2, 3)))
+    if "team_num" in df.columns:
+        primary = pd.to_numeric(df["team_num"], errors="coerce")
+        primary = primary.where(primary.isin((2, 3)))
+        combined = primary.fillna(controller)
+    else:
+        combined = controller
+    out = df.copy()
+    out["team_num"] = combined
+    return out
 
 
 def _safe_parse_event(parser: DemoParser, event_name: str, **kwargs) -> pd.DataFrame:
@@ -290,14 +317,24 @@ def _steam_id_cell(val) -> Optional[int]:
     return i
 
 
-def _max_demo_tick(parser: DemoParser, re_df: pd.DataFrame, match_start_tick: int) -> int:
+def _max_demo_tick(
+    parser: DemoParser,
+    re_df: pd.DataFrame,
+    match_start_tick: int,
+    *,
+    death_df: Optional[pd.DataFrame] = None,
+) -> int:
     mx = 0
     if not re_df.empty and "tick" in re_df.columns:
         v = pd.to_numeric(re_df["tick"], errors="coerce").max()
         if not pd.isna(v):
             mx = max(mx, int(v))
     try:
-        de = _to_pandas_df(parser.parse_event("player_death"))
+        de = (
+            death_df
+            if death_df is not None and not death_df.empty and "tick" in death_df.columns
+            else _to_pandas_df(parser.parse_event("player_death"))
+        )
         if not de.empty and "tick" in de.columns:
             if match_start_tick > 0:
                 de = de.loc[

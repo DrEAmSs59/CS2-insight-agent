@@ -1449,8 +1449,8 @@ class ParseMultiRequest(BaseModel):
 
 @app.post("/api/demo/parse-multi")
 async def parse_demo_multi(req: ParseMultiRequest, filename: str):
-    """多玩家解析：对同一个 Demo 依次分析每个目标玩家，返回 { players: { name: result } }。"""
-    from .demo_parse_isolation import IsolatedParseError
+    """多玩家解析：共享同一次 Demo 扫描，返回 { players: { name: result } }。"""
+    from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
 
     dem_path = UPLOAD_DIR / filename
     if not dem_path.exists():
@@ -1458,15 +1458,13 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
 
     cfg = load_config()
 
-    results_by_player: dict = {}
     try:
-        for player in req.target_players:
-            results_by_player[player] = await asyncio.to_thread(
-                _analyze_demo_sync,
-                str(dem_path),
-                player,
-                req.freeze_to_death_rounds,
-            )
+        results_by_player = await asyncio.to_thread(
+            analyze_multi_isolated,
+            str(dem_path),
+            req.target_players,
+            req.freeze_to_death_rounds,
+        )
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 

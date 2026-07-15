@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from bisect import bisect_left, bisect_right
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,14 +30,14 @@ from .parse_utils import (
     _DEMOPARSER_RE_RAISE, _bool, _int, _max_demo_tick,
     _duration_mins_from_tick_span, _get_match_start_tick,
     _count_team_wins_from_round_end_df, _infer_total_rounds_from_round_end,
-    win_panel_ceiling_from_match_tick,
+    _pick_assister_column, win_panel_ceiling_from_match_tick,
 )
 from .round_economy import (
     build_round_economy, build_round_economy_shared, extract_target_team_map,
     build_round_scores, build_round_scores_team_based,
     _scoreline_by_starting_roster, _extract_team_names_from_demo,
     build_group_side_by_round, round_target_team_map_from_groups,
-    compute_team_identity_scoreline,
+    compute_team_identity_scoreline, _round_end_frame_usable,
 )
 from .player_roster import (
     build_player_name_to_user_id, build_player_name_to_steam_id,
@@ -64,6 +64,35 @@ from .clip_builder import (
 from .spatial_analysis import build_fire_index, count_shots_before
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class SharedDemoFacts:
+    """Player-independent analysis facts materialized once per Demo.
+
+    The native parser is intentionally kept out of the per-player finish path.
+    Mutable values are treated as read-only; player-specific builders copy the
+    small structures they need before applying any corrections.
+    """
+
+    match_summary: tuple[int, int, str, int, str, str]
+    demo_max_tick: int
+    name_to_uid: dict[str, int]
+    observed_user_ids: tuple[int, ...]
+    spec_slots: dict[str, int]
+    name_to_sid: dict[str, int]
+    all_players_roster: list[dict]
+    server_name: str
+    round_scores_by_round: dict[int, dict[int, int]]
+    victim_blind_index: dict[str, list[tuple[int, float]]]
+    grenade_detonate_points: list[tuple[int, float, float]]
+    bomb_explode_tick_map: dict[int, int]
+    round_end_tick_map: dict[int, int]
+    timeline_event_positions_by_player: dict[str, tuple[int, ...]]
+
+    def roster_snapshot(self) -> list[dict]:
+        """Return an isolated roster for one ParseResult output."""
+        return [dict(player) for player in self.all_players_roster]
 
 
 def _world_self_kill_cluster_c4_surrogate_keys(
@@ -145,9 +174,21 @@ class DemoAnalyzer:
         except Exception:
             return "unknown"
 
-    def _build_match_summary(self, match_start_tick: int) -> tuple[int, int, str, int, str, str]:
+    def _build_match_summary(
+        self,
+        match_start_tick: int,
+        *,
+        death_events: Optional[pd.DataFrame] = None,
+        round_end_df: Optional[pd.DataFrame] = None,
+        header: Optional[dict] = None,
+    ) -> tuple[int, int, str, int, str, str]:
         ta, tb, md, dm, _, tan, tbn = collect_match_summary_metrics(
-            self.parser, self.dem_path, match_start_tick,
+            self.parser,
+            self.dem_path,
+            match_start_tick,
+            death_events=death_events,
+            round_end_df=round_end_df,
+            header=header,
         )
         return ta, tb, md, dm, tan, tbn
 
@@ -208,7 +249,7 @@ class DemoAnalyzer:
         # player_death (largest event) — player=["X","Y","Z"] 附带攻击者/受害者击杀瞬间坐标
         _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
         events = _filter_ms(_to_pandas_df(self.parser.parse_event(
-            "player_death", other=_death_other, player=["X", "Y", "Z"],
+            "player_death", other=_death_other, player=["X", "Y", "Z", "user_id"],
         )))
 
         # weapon_fire + player_hurt — 合并为单次 demo 扫描
@@ -240,6 +281,25 @@ class DemoAnalyzer:
         round_start_df  = _round_batch["round_start"]
         match_start_df  = _round_batch["round_announce_match_start"]
 
+        # A failed batch parse is represented as empty frames. Empty critical
+        # round data is not authoritative: retry the legacy single-event paths
+        # so a transient/format-specific batch failure cannot erase scores,
+        # round boundaries, or duration metadata.
+        if not _round_end_frame_usable(re_df, match_start_tick):
+            re_df = self._safe_parse_event(
+                "round_end",
+                other=list(_EXTRA_EVENT_FIELDS) + ["winner", "reason"],
+            )
+        if freeze_end_df.empty:
+            freeze_end_df = self._safe_parse_event(
+                "round_freeze_end",
+                other=list(_EXTRA_EVENT_FIELDS),
+            )
+        if round_start_df.empty:
+            round_start_df = self._safe_parse_event("round_start")
+        if match_start_df.empty:
+            match_start_df = self._safe_parse_event("round_announce_match_start")
+
         if match_start_tick > 0 and not re_df.empty and "tick" in re_df.columns:
             re_df = re_df.loc[
                 pd.to_numeric(re_df["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
@@ -268,10 +328,23 @@ class DemoAnalyzer:
 
         # 可靠的队伍身份（parse_player_info）+ 每回合阵营表：作为逐 tick team_num 失效
         # （部分国服 demo）时的兜底来源，用于队伍分组、胜负与比分。
-        steam_to_final_team_shared = build_steam_to_team_from_player_info(self.parser)
-        name_to_final_team_shared = build_name_to_team_from_player_info(self.parser)
+        try:
+            player_info_df = _to_pandas_df(self.parser.parse_player_info())
+        except BaseException as e:
+            if isinstance(e, _DEMOPARSER_RE_RAISE):
+                raise
+            player_info_df = pd.DataFrame()
+        steam_to_final_team_shared = build_steam_to_team_from_player_info(
+            self.parser, player_info_df=player_info_df,
+        )
+        name_to_final_team_shared = build_name_to_team_from_player_info(
+            self.parser, player_info_df=player_info_df,
+        )
         group_side_by_round_shared = build_group_side_by_round(
-            self.parser, round_freeze_end_ticks_shared, steam_to_final_team_shared,
+            self.parser,
+            round_freeze_end_ticks_shared,
+            steam_to_final_team_shared,
+            player_ticks_df=economy_ticks_df,
         )
 
         # Name strip on all relevant DataFrames
@@ -322,7 +395,195 @@ class DemoAnalyzer:
             "steam_to_final_team_shared":    steam_to_final_team_shared,
             "name_to_final_team_shared":     name_to_final_team_shared,
             "group_side_by_round_shared":    group_side_by_round_shared,
+            "player_info_df":                 player_info_df,
         }
+
+    def _build_shared_demo_facts(
+        self,
+        *,
+        match_start_tick: int,
+        header: dict,
+        shared_events: dict,
+        expected_players: Optional[list[str]] = None,
+    ) -> SharedDemoFacts:
+        """Materialize native-parser and full-table facts once for all players."""
+        events = shared_events["events"]
+        re_df = shared_events["re_df_cached"]
+
+        match_summary = self._build_match_summary(
+            match_start_tick,
+            death_events=events,
+            round_end_df=re_df,
+            header=header,
+        )
+        demo_max_tick = _max_demo_tick(
+            self.parser,
+            re_df,
+            match_start_tick,
+            death_df=events,
+        )
+        name_to_uid = build_player_name_to_user_id(
+            self.parser,
+            match_start_tick,
+            death_events=events,
+        )
+        name_to_sid = build_player_name_to_steam_id(
+            self.parser,
+            match_start_tick,
+            death_events=events,
+        )
+        roster_tick = (
+            match_start_tick
+            if match_start_tick > 0
+            else max(
+                1,
+                _int(events["tick"].min())
+                if events.shape[0] > 0 and "tick" in events.columns
+                else 1,
+            )
+        )
+        expected_roster_names = (
+            set(expected_players or ())
+            | set(name_to_uid)
+            | set(name_to_sid)
+            | set(shared_events.get("name_to_final_team_shared") or {})
+        )
+        roster_ticks_df = shared_events.get("economy_ticks_df")
+        observed_user_ids = tuple(name_to_uid.values())
+        spec_slots = build_player_name_to_spec_player_slot_dict(
+            self.parser,
+            roster_tick,
+            self.dem_path,
+            player_ticks_df=roster_ticks_df,
+            expected_names=expected_roster_names,
+        )
+        all_players_roster = _build_all_players_roster(
+            self.parser,
+            match_start_tick,
+            spec_slots,
+            name_to_sid,
+            name_to_team_pi=shared_events.get("name_to_final_team_shared") or {},
+            player_ticks_df=roster_ticks_df,
+            expected_names=expected_roster_names,
+        )
+        server_name = str(header.get("server_name") or "").strip()
+        round_scores_by_round = build_round_scores(
+            self.parser,
+            match_start_tick,
+            re_df=re_df,
+        )
+
+        victim_blind_index: dict[str, list[tuple[int, float]]] = {}
+        blind_df = shared_events.get("blind_df")
+        if blind_df is not None and not blind_df.empty:
+            duration_col = next(
+                (c for c in ("blind_duration", "duration") if c in blind_df.columns),
+                None,
+            )
+            victim_col = "user_name" if "user_name" in blind_df.columns else None
+            if duration_col and victim_col:
+                for _, row in blind_df.iterrows():
+                    name = str(row.get(victim_col) or "").strip()
+                    tick = _int(row.get("tick"))
+                    try:
+                        duration = float(row.get(duration_col) or 0.0)
+                    except (TypeError, ValueError):
+                        duration = 0.0
+                    if name and tick > 0:
+                        victim_blind_index.setdefault(name, []).append((tick, duration))
+                for name in victim_blind_index:
+                    victim_blind_index[name].sort()
+
+        grenade_detonate_points: list[tuple[int, float, float]] = []
+        for grenade_df in shared_events["nade_batch"].values():
+            if grenade_df.empty:
+                continue
+            xcol = "x" if "x" in grenade_df.columns else (
+                "X" if "X" in grenade_df.columns else None
+            )
+            ycol = "y" if "y" in grenade_df.columns else (
+                "Y" if "Y" in grenade_df.columns else None
+            )
+            if xcol is None or ycol is None:
+                continue
+            for _, row in grenade_df.iterrows():
+                try:
+                    grenade_detonate_points.append(
+                        (_int(row.get("tick")), float(row.get(xcol)), float(row.get(ycol)))
+                    )
+                except (TypeError, ValueError):
+                    pass
+        grenade_detonate_points.sort()
+
+        bomb_explode_tick_map: dict[int, int] = {}
+        bomb_exploded_df = shared_events["bomb_exploded_df"]
+        if (
+            not bomb_exploded_df.empty
+            and "tick" in bomb_exploded_df.columns
+            and "total_rounds_played" in bomb_exploded_df.columns
+        ):
+            for _, row in bomb_exploded_df.iterrows():
+                tick = _int(row.get("tick"))
+                round_number = _int(row.get("total_rounds_played")) + 1
+                if tick > 0 and round_number > 0 and round_number not in bomb_explode_tick_map:
+                    bomb_explode_tick_map[round_number] = tick
+
+        round_end_tick_map: dict[int, int] = {}
+        if not re_df.empty and "tick" in re_df.columns:
+            sequence = 0
+            for _, row in re_df.sort_values("tick", kind="mergesort").iterrows():
+                tick = _int(row.get("tick"))
+                rounds_played = row.get("total_rounds_played")
+                if rounds_played is not None and not (
+                    isinstance(rounds_played, float) and pd.isna(rounds_played)
+                ):
+                    try:
+                        round_number = int(float(rounds_played))
+                    except (ValueError, TypeError):
+                        sequence += 1
+                        round_number = sequence
+                else:
+                    sequence += 1
+                    round_number = sequence
+                if tick > 0 and round_number > 0 and round_number not in round_end_tick_map:
+                    round_end_tick_map[round_number] = tick
+
+        timeline_positions: dict[str, list[int]] = {}
+        assist_col = _pick_assister_column(events) if not events.empty else None
+        for position, (_, row) in enumerate(events.iterrows()):
+            attacker = str(row.get("attacker_name", "") or "").strip()
+            victim = str(row.get("user_name", "") or "").strip()
+            if not victim and "player_name" in row:
+                victim = str(row.get("player_name", "") or "").strip()
+            assister = ""
+            if assist_col:
+                raw_assister = row.get(assist_col, "")
+                if not pd.isna(raw_assister):
+                    assister = str(raw_assister).strip()
+                    if assister.lower() in ("nan", "nat", "none"):
+                        assister = ""
+            for name in {attacker, victim, assister}:
+                if name:
+                    timeline_positions.setdefault(name, []).append(position)
+
+        return SharedDemoFacts(
+            match_summary=match_summary,
+            demo_max_tick=demo_max_tick,
+            name_to_uid=name_to_uid,
+            observed_user_ids=observed_user_ids,
+            spec_slots=spec_slots,
+            name_to_sid=name_to_sid,
+            all_players_roster=all_players_roster,
+            server_name=server_name,
+            round_scores_by_round=round_scores_by_round,
+            victim_blind_index=victim_blind_index,
+            grenade_detonate_points=grenade_detonate_points,
+            bomb_explode_tick_map=bomb_explode_tick_map,
+            round_end_tick_map=round_end_tick_map,
+            timeline_event_positions_by_player={
+                name: tuple(positions) for name, positions in timeline_positions.items()
+            },
+        )
 
     def analyze_multi_players(
         self,
@@ -347,11 +608,22 @@ class DemoAnalyzer:
         if not players:
             return {}
 
-        map_name = self._detect_map()
+        try:
+            parsed_header = self.parser.parse_header()
+            header = parsed_header if isinstance(parsed_header, dict) else {}
+        except Exception:
+            header = {}
+        map_name = str(header.get("map_name") or "unknown")
         match_start_tick = _get_match_start_tick(self.parser)
 
         # Phase 1: Parse all shared events ONCE
         _shared = self._parse_shared_events(match_start_tick)
+        shared_facts = self._build_shared_demo_facts(
+            match_start_tick=match_start_tick,
+            header=header,
+            shared_events=_shared,
+            expected_players=players,
+        )
 
         # Phase 2: Per-player first pass (round economy + kill/death extraction, pure Python after events)
         aim_secs = _backstab_aim_sample_offsets_sec()
@@ -653,6 +925,7 @@ class DemoAnalyzer:
                 re_df_cached=_shared["re_df_cached"],
                 win_panel_match_tick=_shared["win_panel_match_tick"],
                 blind_df=_shared["blind_df"],
+                shared_facts=shared_facts,
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
 
@@ -689,6 +962,7 @@ class DemoAnalyzer:
         re_df_cached: "pd.DataFrame",
         win_panel_match_tick: int = 0,
         blind_df: "Optional[pd.DataFrame]" = None,
+        shared_facts: SharedDemoFacts,
         freeze_to_death_rounds: "Optional[list[int]]" = None,
     ) -> "ParseResult":
         bomb_highlights = analyze_bomb_defuse_highlights(
@@ -699,25 +973,7 @@ class DemoAnalyzer:
         enrich_kill_action_tags_spatial(round_kills, spatial_cache, target_player)
 
         # 好闪配好人质量门控：从 blind_df 查受害者盲化时长，< 阈值则移除 tag
-        _victim_blind_index: dict[str, list[tuple[int, float]]] = {}
-        if blind_df is not None and not blind_df.empty:
-            _dur_col = next(
-                (c for c in ("blind_duration", "duration") if c in blind_df.columns),
-                None,
-            )
-            _vname_col = "user_name" if "user_name" in blind_df.columns else None
-            if _dur_col and _vname_col:
-                for _, _brow in blind_df.iterrows():
-                    _bname = str(_brow.get(_vname_col) or "").strip()
-                    _btick = _int(_brow.get("tick"))
-                    try:
-                        _bdur = float(_brow.get(_dur_col) or 0.0)
-                    except (TypeError, ValueError):
-                        _bdur = 0.0
-                    if _bname and _btick > 0:
-                        _victim_blind_index.setdefault(_bname, []).append((_btick, _bdur))
-                for _vn in _victim_blind_index:
-                    _victim_blind_index[_vn].sort()
+        _victim_blind_index = shared_facts.victim_blind_index
 
         _FLASH_WINDOW_TICKS = int(TICK_RATE * 3.0)
         for _kills in round_kills.values():
@@ -742,78 +998,13 @@ class DemoAnalyzer:
         # ── 额外辅助事件 ──
 
         # player_blind — use pre-parsed shared DataFrame (already warmup-filtered, user_name stripped)
-        flash_on_target_index: list[tuple[int, float]] = []
-        try:
-            _bdf_src = blind_df if (blind_df is not None and not blind_df.empty) else pd.DataFrame()
-            if not _bdf_src.empty and "user_name" in _bdf_src.columns:
-                bdf = _bdf_src.loc[_bdf_src["user_name"] == target_player]
-                dur_col = None
-                for _c in ("blind_duration", "duration"):
-                    if _c in bdf.columns:
-                        dur_col = _c
-                        break
-                for _, _br in bdf.iterrows():
-                    _bt = _int(_br.get("tick"))
-                    _bd = 0.0
-                    if dur_col is not None:
-                        try:
-                            _bd = float(_br.get(dur_col) or 0.0)
-                        except (TypeError, ValueError):
-                            _bd = 0.0
-                    if _bt > 0:
-                        flash_on_target_index.append((_bt, _bd))
-                flash_on_target_index.sort()
-        except Exception:
-            flash_on_target_index = []
+        flash_on_target_index = list(_victim_blind_index.get(target_player, ()))
 
-        # 手雷爆点（已从批量结果中读取）
-        grenade_detonate_points: list[tuple[int, float, float]] = []
-        for _ev, _gdf in nade_batch.items():
-            if _gdf.empty:
-                continue
-            xcol = "x" if "x" in _gdf.columns else ("X" if "X" in _gdf.columns else None)
-            ycol = "y" if "y" in _gdf.columns else ("Y" if "Y" in _gdf.columns else None)
-            if xcol is None or ycol is None:
-                continue
-            for _, _gr in _gdf.iterrows():
-                try:
-                    grenade_detonate_points.append((
-                        _int(_gr.get("tick")),
-                        float(_gr.get(xcol)),
-                        float(_gr.get(ycol)),
-                    ))
-                except (TypeError, ValueError):
-                    pass
-        grenade_detonate_points.sort()
+        grenade_detonate_points = shared_facts.grenade_detonate_points
 
-        # bomb_explode_tick_map（已从批量结果中读取）
-        bomb_explode_tick_map: dict[int, int] = {}
-        _be = bomb_exploded_df
-        if not _be.empty and "tick" in _be.columns and "total_rounds_played" in _be.columns:
-            for _, _br in _be.iterrows():
-                _bt = _int(_br.get("tick"))
-                _rn = _int(_br.get("total_rounds_played")) + 1
-                if _bt > 0 and _rn > 0 and _rn not in bomb_explode_tick_map:
-                    bomb_explode_tick_map[_rn] = _bt
+        bomb_explode_tick_map = shared_facts.bomb_explode_tick_map
 
-        # round_end_tick_map — 复用 _parse_shared_events 缓存的 round_end DataFrame
-        round_end_tick_map: dict[int, int] = {}
-        if not re_df_cached.empty and "tick" in re_df_cached.columns:
-            _seq = 0
-            for _, _rr in re_df_cached.sort_values("tick", kind="mergesort").iterrows():
-                _rt = _int(_rr.get("tick"))
-                _trc = _rr.get("total_rounds_played")
-                if _trc is not None and not (isinstance(_trc, float) and pd.isna(_trc)):
-                    try:
-                        _rn = int(float(_trc))
-                    except (ValueError, TypeError):
-                        _seq += 1
-                        _rn = _seq
-                else:
-                    _seq += 1
-                    _rn = _seq
-                if _rt > 0 and _rn > 0 and _rn not in round_end_tick_map:
-                    round_end_tick_map[_rn] = _rt
+        round_end_tick_map = shared_facts.round_end_tick_map
 
         # 回合末刀杀分离
         _transition_knife_highlight_kills: list[dict] = []
@@ -1275,8 +1466,7 @@ class DemoAnalyzer:
         )
         fail_clips = fail_clips + shoulder_clips
 
-        # _demo_max_tick 使用缓存的 round_end DataFrame
-        _demo_max_tick = _max_demo_tick(self.parser, re_df_cached, match_start_tick)
+        _demo_max_tick = shared_facts.demo_max_tick
 
         compilation_clips = build_rival_compilations(
             target_player, round_kills, death_records,
@@ -1444,20 +1634,17 @@ class DemoAnalyzer:
             )
 
         team_a_score, team_b_score, match_date, duration_mins, team_a_name, team_b_name = (
-            self._build_match_summary(match_start_tick)
+            shared_facts.match_summary
         )
 
-        name_to_uid = build_player_name_to_user_id(self.parser, match_start_tick)
-        roster_tick = (
-            match_start_tick
-            if match_start_tick > 0
-            else max(1, _int(events["tick"].min()) if events.shape[0] > 0 and "tick" in events.columns else 1)
-        )
-        observed_user_ids = tuple(name_to_uid.values())
-        event_user_id = _lookup_user_id_for_name(name_to_uid, target_player)
-        spec_slots = build_player_name_to_spec_player_slot_dict(self.parser, roster_tick, self.dem_path)
+        event_user_id = _lookup_user_id_for_name(shared_facts.name_to_uid, target_player)
+        spec_slots = shared_facts.spec_slots
         target_player_user_id = (
-            _spec_player_slot_from_event_user_id(event_user_id, self.dem_path, observed_user_ids)
+            _spec_player_slot_from_event_user_id(
+                event_user_id,
+                self.dem_path,
+                shared_facts.observed_user_ids,
+            )
             or lookup_spec_player_slot_for_name(spec_slots, target_player)
         )
         for _c in clips:
@@ -1467,19 +1654,11 @@ class DemoAnalyzer:
             if _c.killer_name:
                 _c.killer_spec_slot = spec_slots.get(_c.killer_name.lower())
             _c.killers_spec_slots = [spec_slots.get(k.lower()) if k else None for k in _c.killers]
-        name_to_sid = build_player_name_to_steam_id(self.parser, match_start_tick)
-        tsid = _lookup_steam_id_for_name(name_to_sid, target_player)
+        tsid = _lookup_steam_id_for_name(shared_facts.name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None
 
-        all_players_roster = _build_all_players_roster(self.parser, match_start_tick, spec_slots, name_to_sid)
-
-        _server_name = ""
-        try:
-            _hdr = self.parser.parse_header()
-            _sn_raw = _hdr.get("server_name") if isinstance(_hdr, dict) else None
-            _server_name = str(_sn_raw).strip() if _sn_raw is not None else ""
-        except Exception:
-            pass
+        all_players_roster = shared_facts.roster_snapshot()
+        _server_name = shared_facts.server_name
 
         total_rounds = max(round_kills.keys(), default=0)
         if events.shape[0] > 0 and "total_rounds_played" in events.columns:
@@ -1503,13 +1682,18 @@ class DemoAnalyzer:
 
             # 每回合比分：优先按「队伍身份」累计（与记分牌一致，换边不串号），
             # 回退到旧的按阵营 (T/CT) 累计。槽位约定：2=开赛打 T 的一方，3=开赛打 CT 的一方。
-            round_scores_tbl = build_round_scores(self.parser, match_start_tick)
+            round_scores_tbl = shared_facts.round_scores_by_round
             if round_team_score_map and tteam in (2, 3):
                 _opp_slot = 3 if tteam == 2 else 2
                 round_scores_tbl = {
                     rn: {tteam: int(own), _opp_slot: int(opp)}
                     for rn, (own, opp) in round_team_score_map.items()
                 }
+            timeline_positions = shared_facts.timeline_event_positions_by_player.get(
+                target_player,
+                (),
+            )
+            timeline_events = events.iloc[list(timeline_positions)]
             bundle = build_round_timeline(
                 demo_path=str(self.dem_path),
                 map_name=map_name,
@@ -1518,7 +1702,7 @@ class DemoAnalyzer:
                 target_steam_id=target_steam_id,
                 target_team_num=tteam,
                 round_target_team_map=round_target_team_map or {},
-                events=events,
+                events=timeline_events,
                 round_freeze_end_ticks=round_freeze_end_ticks,
                 round_result_map=round_result_map,
                 round_scores_by_round=round_scores_tbl,
@@ -1577,6 +1761,10 @@ def collect_match_summary_metrics(
     parser: DemoParser,
     dem_path: Path,
     match_start_tick: int,
+    *,
+    death_events: Optional[pd.DataFrame] = None,
+    round_end_df: Optional[pd.DataFrame] = None,
+    header: Optional[dict] = None,
 ) -> tuple[int, int, str, int, int, str, str]:
     """全局比赛信息：Team2/3 胜场、Demo 时长、总回合、队名。"""
     team_a_score = 0
@@ -1591,8 +1779,8 @@ def collect_match_summary_metrics(
 
     duration_header = 0
     try:
-        header = parser.parse_header()
-        raw_pt = header.get("playback_time", 0)
+        header_data = header if header is not None else parser.parse_header()
+        raw_pt = header_data.get("playback_time", 0)
         duration_header = int(float(raw_pt) // 60) if raw_pt is not None else 0
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
@@ -1600,7 +1788,11 @@ def collect_match_summary_metrics(
         duration_header = 0
 
     try:
-        re_df = _to_pandas_df(parser.parse_event("round_end"))
+        re_df = (
+            round_end_df
+            if _round_end_frame_usable(round_end_df, match_start_tick)
+            else _to_pandas_df(parser.parse_event("round_end"))
+        )
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
             raise
@@ -1637,7 +1829,12 @@ def collect_match_summary_metrics(
     if total_rounds_est <= 0:
         total_rounds_est = _infer_total_rounds_from_round_end(re_df, match_start_tick)
 
-    max_tick = _max_demo_tick(parser, re_df, match_start_tick)
+    max_tick = _max_demo_tick(
+        parser,
+        re_df,
+        match_start_tick,
+        death_df=death_events,
+    )
     duration_ticks = _duration_mins_from_tick_span(match_start_tick, max_tick)
     duration_mins = max(duration_header, duration_ticks)
 
