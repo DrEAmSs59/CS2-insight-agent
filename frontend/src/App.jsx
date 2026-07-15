@@ -417,19 +417,20 @@ export default function App() {
     if (f.mapName.trim()) params.map_name = f.mapName.trim();
     if (f.status && f.status !== "all") params.status = f.status;
     const pq = f.playerQuery.trim();
-    if (!pq) return;
-    params.player_query = pq;
+    if (pq) params.player_query = pq;
+    const sq = f.steamQuery.trim();
+    if (sq) params.steam_query = sq;
     const num = (v) => {
       const s = String(v ?? "").trim();
       if (!s) return null;
       const n = parseInt(s, 10);
-      return Number.isFinite(n) ? n : null;
+      return Number.isFinite(n) && n >= 0 ? n : null;
     };
     const fl = (v) => {
       const s = String(v ?? "").trim();
       if (!s) return null;
       const n = parseFloat(s);
-      return Number.isFinite(n) ? n : null;
+      return Number.isFinite(n) && n >= 0 ? n : null;
     };
     const mk = num(f.minKills);
     if (mk != null) params.min_kills = mk;
@@ -439,6 +440,24 @@ export default function App() {
     if (ma != null) params.min_assists = ma;
     const mkd = fl(f.minKd);
     if (mkd != null) params.min_kd = mkd;
+    const roundsMin = num(f.roundsMin);
+    if (roundsMin != null) params.rounds_min = roundsMin;
+    const roundsMax = num(f.roundsMax);
+    if (roundsMax != null) params.rounds_max = roundsMax;
+    const durationMin = fl(f.durationMin);
+    if (durationMin != null) params.duration_min = durationMin;
+    const durationMax = fl(f.durationMax);
+    if (durationMax != null) params.duration_max = durationMax;
+    const dateBoundary = (value, endOfDay) => {
+      const date = String(value ?? "").trim();
+      if (!date) return null;
+      const local = new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+      return Number.isNaN(local.getTime()) ? null : local.toISOString();
+    };
+    const dateFrom = dateBoundary(f.dateFrom, false);
+    if (dateFrom) params.date_from = dateFrom;
+    const dateTo = dateBoundary(f.dateTo, true);
+    if (dateTo) params.date_to = dateTo;
   }, [libraryAdvFilters]);
 
   const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
@@ -451,7 +470,7 @@ export default function App() {
       const qEff = searchQOverride !== undefined ? searchQOverride : librarySearchQ;
       if (qEff) params.q = qEff;
       appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos", { params });
+      const { data } = await API.get("/demos/compact", { params });
       setDemoLibraryItems(data.items || []);
       const total = typeof data.total === "number" ? data.total : null;
       if (total != null) {
@@ -829,9 +848,8 @@ export default function App() {
       const params = { limit: want, offset: 0 };
       if (librarySearchQ) params.q = librarySearchQ;
       appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos", { params });
-      const rows = data.items || [];
-      setSelectedLibraryDemoIds(new Set(rows.map((it) => it.id)));
+      const { data } = await API.get("/demos/ids", { params });
+      setSelectedLibraryDemoIds(new Set(data.ids || []));
       if (libraryTotal != null && libraryTotal > cap) {
         setProgressText(t("app.librarySelectAllCapped", { cap }));
       }
