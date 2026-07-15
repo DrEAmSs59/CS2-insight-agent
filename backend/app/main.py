@@ -409,6 +409,24 @@ def resolve_uploaded_demo_path(p: str) -> Path:
     raise HTTPException(404, f"未找到 Demo 文件: {raw}")
 
 
+def resolve_demo_upload_path(filename: str) -> Path:
+    """Resolve an uploaded demo without allowing paths outside ``UPLOAD_DIR``."""
+    raw = (filename or "").strip()
+    if not raw:
+        raise HTTPException(400, "Demo 文件名为空")
+
+    upload_root = UPLOAD_DIR.resolve()
+    candidate = (upload_root / raw).resolve()
+    try:
+        candidate.relative_to(upload_root)
+    except ValueError as exc:
+        raise HTTPException(400, "Demo 文件路径超出上传目录") from exc
+
+    if not candidate.is_file():
+        raise HTTPException(404, f"Demo file not found: {filename}")
+    return candidate
+
+
 def _analyze_demo_sync(
     dem_path: str,
     target_player: str,
@@ -1412,9 +1430,7 @@ async def upload_demos(files: Annotated[list[UploadFile], File()]):
 async def parse_demo(req: ParseRequest, filename: str):
     from .demo_parse_isolation import IsolatedParseError
 
-    dem_path = UPLOAD_DIR / filename
-    if not dem_path.exists():
-        raise HTTPException(404, f"Demo file not found: {filename}")
+    dem_path = resolve_demo_upload_path(filename)
 
     try:
         result = await asyncio.to_thread(
@@ -1454,9 +1470,7 @@ async def parse_demo_multi(req: ParseMultiRequest, filename: str):
     """多玩家解析：对同一个 Demo 依次分析每个目标玩家，返回 { players: { name: result } }。"""
     from .demo_parse_isolation import IsolatedParseError
 
-    dem_path = UPLOAD_DIR / filename
-    if not dem_path.exists():
-        raise HTTPException(status_code=404, detail=f"Demo file not found: {filename}")
+    dem_path = resolve_demo_upload_path(filename)
 
     cfg = load_config()
 
