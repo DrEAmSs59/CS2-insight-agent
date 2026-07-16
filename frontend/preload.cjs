@@ -18,5 +18,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
   // 打开外部链接（使用系统默认浏览器）
-  openExternal: (url) => ipcRenderer.invoke('open-external', url)
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  // H1 fix: 获取后端认证 Token
+  getAuthToken: () => ipcRenderer.invoke('get-auth-token')
 });
