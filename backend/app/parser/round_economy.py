@@ -14,8 +14,29 @@ from .parse_utils import (
     _cell_team,
     _cell_str,
     _winner_side_engine_num,
+    PLAYER_TEAM_PARSE_FIELDS,
+    coalesce_player_team_num,
 )
 from .tag_constants import TICK_RATE, _EXTRA_EVENT_FIELDS
+
+
+def _round_end_frame_usable(
+    frame: Optional[pd.DataFrame],
+    match_start_tick: int = 0,
+) -> bool:
+    """Whether a cached round_end frame can safely replace a dedicated parse."""
+    if frame is None or frame.empty or "winner" not in frame.columns:
+        return False
+    work = frame
+    if match_start_tick > 0 and "tick" not in work.columns:
+        return False
+    if match_start_tick > 0:
+        work = work.loc[
+            pd.to_numeric(work["tick"], errors="coerce").fillna(0).astype(int)
+            >= match_start_tick
+        ]
+    winners = [_round_end_winner_team_num(value) for value in work["winner"].tolist()]
+    return bool(winners) and all(winner in (2, 3) for winner in winners)
 
 
 def build_round_economy_shared(
@@ -102,17 +123,34 @@ def build_round_economy_shared(
     if not ticks:
         return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
+    economy_fields = PLAYER_TEAM_PARSE_FIELDS + [
+        "current_equip_value", "is_alive", "name", "steamid", "user_id",
+    ]
     try:
-        raw = parser.parse_ticks(
-            ["team_num", "current_equip_value", "is_alive", "name"],
-            ticks=ticks,
-        )
-        economy_ticks_df = _to_pandas_df(raw)
+        raw = parser.parse_ticks(economy_fields, ticks=ticks)
+        economy_ticks_df = coalesce_player_team_num(_to_pandas_df(raw))
     except Exception:
         return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
     if economy_ticks_df.empty or "tick" not in economy_ticks_df.columns:
         return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
+
+    observed_ticks = set(
+        pd.to_numeric(economy_ticks_df["tick"], errors="coerce").dropna().astype(int)
+    )
+    missing_ticks = sorted(set(ticks) - observed_ticks)
+    if missing_ticks:
+        try:
+            retry_df = coalesce_player_team_num(
+                _to_pandas_df(parser.parse_ticks(economy_fields, ticks=missing_ticks))
+            )
+        except Exception:
+            retry_df = pd.DataFrame()
+        if not retry_df.empty:
+            economy_ticks_df = pd.concat(
+                [economy_ticks_df, retry_df],
+                ignore_index=True,
+            )
 
     economy_map: dict[int, dict[int, int]] = {}
     for tick, grp in economy_ticks_df.groupby("tick", sort=False):
@@ -203,9 +241,15 @@ def build_round_economy(
 def build_round_scores(
     parser: DemoParser,
     match_start_tick: int = 0,
+    *,
+    re_df: Optional[pd.DataFrame] = None,
 ) -> dict[int, dict[int, int]]:
     """解析 round_end，返回每回合**开始前**的双方比分 {round: {2: T胜场, 3: CT胜场}}。"""
-    re = _safe_parse_event(parser, "round_end", other=list(_EXTRA_EVENT_FIELDS))
+    re = (
+        re_df
+        if _round_end_frame_usable(re_df, match_start_tick)
+        else _safe_parse_event(parser, "round_end", other=list(_EXTRA_EVENT_FIELDS))
+    )
     if match_start_tick > 0 and not re.empty and "tick" in re.columns:
         re = re.loc[pd.to_numeric(re["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick]
     if re.empty:
@@ -252,7 +296,7 @@ def build_round_scores_team_based(
 
     re_df: 已过滤 warmup 的 round_end DataFrame，有则直接用，省一次 parse_event。
     """
-    if re_df is not None:
+    if _round_end_frame_usable(re_df, match_start_tick):
         re = re_df
     else:
         re = _safe_parse_event(parser, "round_end", other=list(_EXTRA_EVENT_FIELDS))
@@ -312,6 +356,8 @@ def build_group_side_by_round(
     parser: DemoParser,
     round_freeze_end_ticks: dict[int, int],
     steam_to_final_team: dict[str, int],
+    *,
+    player_ticks_df: Optional[pd.DataFrame] = None,
 ) -> dict[int, dict[int, int]]:
     """每回合两支「队伍身份」各自所处阵营。
 
@@ -325,10 +371,35 @@ def build_group_side_by_round(
     if not round_freeze_end_ticks or not steam_to_final_team:
         return {}
     ticks = sorted(set(round_freeze_end_ticks.values()))
-    try:
-        df = _to_pandas_df(parser.parse_ticks(["team_num", "steamid"], ticks=ticks))
-    except Exception:
-        return {}
+    df = pd.DataFrame()
+    if player_ticks_df is not None and not player_ticks_df.empty:
+        df = coalesce_player_team_num(player_ticks_df)
+        if "tick" in df.columns:
+            df = df.loc[pd.to_numeric(df["tick"], errors="coerce").isin(ticks)]
+
+    def _ticks_with_usable_observation(frame: pd.DataFrame) -> set[int]:
+        usable: set[int] = set()
+        if frame.empty or "tick" not in frame.columns:
+            return usable
+        for tick, grp in frame.groupby("tick", sort=False):
+            for _, row in grp.iterrows():
+                final_team = steam_to_final_team.get(_norm_steam_id(row.get("steamid")))
+                if final_team in (2, 3) and _cell_team(row.get("team_num")) in (2, 3):
+                    usable.add(int(tick))
+                    break
+        return usable
+
+    missing_ticks = sorted(set(ticks) - _ticks_with_usable_observation(df))
+    if missing_ticks:
+        try:
+            fresh_df = coalesce_player_team_num(_to_pandas_df(parser.parse_ticks(
+                PLAYER_TEAM_PARSE_FIELDS + ["steamid"],
+                ticks=missing_ticks,
+            )))
+        except Exception:
+            fresh_df = pd.DataFrame()
+        if not fresh_df.empty:
+            df = pd.concat([df, fresh_df], ignore_index=True)
     if df.empty or "tick" not in df.columns:
         return {}
 
@@ -497,8 +568,12 @@ def _scoreline_by_starting_roster(
 
     try:
         roster_df = _to_pandas_df(
-            parser.parse_ticks(["steamid", "team_num", "name"], ticks=[match_start_tick]),
+            parser.parse_ticks(
+                ["steamid", *PLAYER_TEAM_PARSE_FIELDS, "name"],
+                ticks=[match_start_tick],
+            ),
         )
+        roster_df = coalesce_player_team_num(roster_df)
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
             raise
@@ -520,8 +595,12 @@ def _scoreline_by_starting_roster(
 
     try:
         big = _to_pandas_df(
-            parser.parse_ticks(["steamid", "team_num", "name"], ticks=ticks_needed),
+            parser.parse_ticks(
+                ["steamid", *PLAYER_TEAM_PARSE_FIELDS, "name"],
+                ticks=ticks_needed,
+            ),
         )
+        big = coalesce_player_team_num(big)
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
             raise
