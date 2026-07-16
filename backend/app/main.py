@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import weakref
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -112,6 +113,10 @@ DB_PATH = resolve_config_path().parent / "cs2-insight.db"
 demo_db = DemoDB(DB_PATH)
 montage_db = MontageDB(DB_PATH)
 demo_watcher: DemoWatcher | None = None
+_demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+_DEMO_ROSTER_CACHE_VERSION = 1
 
 # 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
 _enqueue_striped_locks: list[asyncio.Lock] = []
@@ -489,6 +494,12 @@ def _matched_demo_players_in_order(expected: list[str], dem_path: str) -> list[d
     from .demo_parse_isolation import get_player_list_isolated
 
     roster = get_player_list_isolated(str(dem_path))
+    return _match_expected_players_in_roster(expected, roster)
+
+
+def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -> list[dict]:
+    """Match configured names against an already loaded roster."""
+
     if not roster:
         return []
     out: list[dict] = []
@@ -513,13 +524,18 @@ async def _run_library_demo_analyze(
     freeze_to_death_rounds: Optional[list[int]] = None,
     locale: str = "zh",
 ) -> dict:
+    target_players = list(
+        dict.fromkeys(
+            str(player).strip()
+            for player in target_players
+            if str(player).strip()
+        )
+    )
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
-    # 列表筛选 / PlayerSelect 依赖 demo_player_stats；待入库入库失败或旧数据可能缺失，解析前强制补索引
-    idx = await index_demo_player_stats(demo_id, dem_path)
-    if idx.get("indexed"):
-        await demo_library_hub.notify("player_stats")
-    elif idx.get("error"):
+    # 列表筛选 / PlayerSelect 依赖 demo_player_stats；缓存命中时不再重复扫描 Demo。
+    idx = await get_or_index_demo_roster(demo_id, dem_path)
+    if idx.get("error"):
         logger.warning(
             "index_demo_player_stats before library analyze demo_id=%s: %s",
             demo_id,
@@ -551,6 +567,12 @@ async def _run_library_demo_analyze(
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, msg) from e
 
+    if not players_out:
+        msg = "Demo 解析未返回任何目标玩家结果"
+        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        await demo_library_hub.notify("parse_error")
+        raise HTTPException(500, msg)
+
     cfg = load_config()
     if cfg.ai_mode and cfg.llm.api_key:
         from .ai_reviewer import enrich_clips_dicts_with_reviewer
@@ -575,12 +597,15 @@ async def _run_library_demo_analyze(
 
         await asyncio.gather(*[_enrich_library_player(p) for p in target_players])
 
-    first_player = target_players[0]
+    first_player = next(
+        (player for player in target_players if player in players_out),
+        next(iter(players_out)),
+    )
     first_pdata = players_out[first_player]
     players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
     composite: dict[str, Any] = {
         "players": players_payload,
-        "analyzed_target_players": list(target_players),
+        "analyzed_target_players": [p for p in target_players if p in players_payload],
         "auto_target_player": first_player,
         # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
         "clips": first_pdata.get("clips") or [],
@@ -1570,6 +1595,13 @@ def _demo_library_filters_from_query(
     min_assists: Optional[int],
     min_kd: Optional[float],
     player_query: Optional[str],
+    steam_query: Optional[str] = None,
+    rounds_min: Optional[int] = None,
+    rounds_max: Optional[int] = None,
+    duration_min: Optional[float] = None,
+    duration_max: Optional[float] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> DemoListFilters:
     f: DemoListFilters = {}
     mns = _split_csv_query_param(map_names)
@@ -1588,20 +1620,41 @@ def _demo_library_filters_from_query(
     pq = (player_query or "").strip() or None
     if pq:
         f["player_query"] = pq
-        if min_kills is not None:
-            f["min_kills"] = min_kills
-        if max_deaths is not None:
-            f["max_deaths"] = max_deaths
-        if min_assists is not None:
-            f["min_assists"] = min_assists
-        if min_kd is not None:
-            f["min_kd"] = min_kd
+    sq = (steam_query or "").strip() or None
+    if sq:
+        f["steam_query"] = sq
+    for key, value in (
+        ("min_kills", min_kills),
+        ("max_deaths", max_deaths),
+        ("min_assists", min_assists),
+        ("min_kd", min_kd),
+        ("rounds_min", rounds_min),
+        ("rounds_max", rounds_max),
+        ("duration_min", duration_min),
+        ("duration_max", duration_max),
+    ):
+        if value is not None:
+            f[key] = value
+    if date_from and str(date_from).strip():
+        f["date_from"] = str(date_from).strip()
+    if date_to and str(date_to).strip():
+        f["date_to"] = str(date_to).strip()
     return f
+
+
+def _demo_roster_source_fingerprint(demo_path: str) -> tuple[str, int | None, int | None]:
+    normalized_path = os.path.normcase(os.path.abspath(os.fspath(demo_path)))
+    try:
+        stat = Path(demo_path).stat()
+        return normalized_path, int(stat.st_size), int(stat.st_mtime_ns)
+    except OSError:
+        return normalized_path, None, None
 
 
 async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any]:
     from .demo_parse_isolation import get_player_list_isolated
 
+    normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
     try:
         raw = await asyncio.to_thread(get_player_list_isolated, demo_path)
         if isinstance(raw, dict):
@@ -1615,10 +1668,219 @@ async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any
         if not isinstance(players, list):
             players = []
         await demo_db.replace_demo_player_stats(demo_id, demo_path, players)
-        return {"indexed": True, "player_count": len(players), "error": None}
+        await demo_db.save_demo_roster_cache(
+            demo_id,
+            normalized_path,
+            cache_version=_DEMO_ROSTER_CACHE_VERSION,
+            source_file_size=file_size,
+            source_mtime_ns=mtime_ns,
+            state="ready" if players else "empty",
+            row_count=len(players),
+        )
+        return {
+            "indexed": True,
+            "player_count": len(players),
+            "players": players,
+            "error": None,
+        }
     except Exception as exc:
         logger.warning("Failed to index player stats for demo %s: %s", demo_id, exc)
-        return {"indexed": False, "player_count": 0, "error": str(exc)}
+        try:
+            await demo_db.replace_demo_player_stats(demo_id, demo_path, [])
+            await demo_db.save_demo_roster_cache(
+                demo_id,
+                normalized_path,
+                cache_version=_DEMO_ROSTER_CACHE_VERSION,
+                source_file_size=file_size,
+                source_mtime_ns=mtime_ns,
+                state="error",
+                row_count=0,
+                error_msg=str(exc),
+            )
+        except Exception:
+            logger.exception("Failed to persist roster error state for demo %s", demo_id)
+        return {
+            "indexed": False,
+            "player_count": 0,
+            "players": [],
+            "error": str(exc),
+        }
+
+
+def _roster_rows_for_api(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize persisted player stats to the roster shape returned by demoparser."""
+
+    out: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("player_name") or "").strip()
+        if not name:
+            continue
+        team = raw.get("team")
+        if team is None:
+            team = raw.get("team_number")
+        try:
+            team = int(team) if team is not None else 0
+        except (TypeError, ValueError):
+            team = 0
+        raw_steam_id64 = raw.get("steam_id64") or raw.get("steamid64")
+        raw_steam_id = raw.get("steam_id") or raw.get("steamid")
+        steam_id64 = str(raw_steam_id64).strip() if raw_steam_id64 not in (None, "") else None
+        steam_id = str(raw_steam_id).strip() if raw_steam_id not in (None, "") else None
+        if steam_id64 is None and steam_id and steam_id.isdigit() and len(steam_id) >= 15:
+            steam_id64 = steam_id
+        if steam_id is None:
+            steam_id = steam_id64
+        account_id = raw.get("account_id")
+        if account_id is None and steam_id64:
+            try:
+                derived = int(steam_id64) - 76561197960265728
+                account_id = derived if derived >= 0 else None
+            except (TypeError, ValueError):
+                account_id = None
+        user_id = raw.get("user_id")
+
+        def integer(key: str) -> int:
+            try:
+                return int(raw.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        kills = integer("kills")
+        deaths = integer("deaths")
+        assists = integer("assists")
+        try:
+            kd = float(raw.get("kd")) if raw.get("kd") is not None else kills / max(deaths, 1)
+        except (TypeError, ValueError):
+            kd = kills / max(deaths, 1)
+        team_name = raw.get("team_name")
+        out.append(
+            {
+                "name": name,
+                "player_name": name,
+                "team": team,
+                "team_number": team,
+                "team_name": str(team_name).strip() if team_name not in (None, "") else None,
+                "steam_id": steam_id,
+                "steam_id64": steam_id64,
+                "steamid64": steam_id64,
+                "account_id": str(account_id) if account_id not in (None, "") else None,
+                "user_id": str(user_id) if user_id not in (None, "") else None,
+                "kills": kills,
+                "deaths": deaths,
+                "assists": assists,
+                "kd": round(kd, 3),
+            }
+        )
+    return out
+
+
+async def _read_valid_demo_roster_cache(
+    demo_id: int,
+    demo_path: str,
+    *,
+    cached_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    metadata = await demo_db.get_demo_roster_cache(demo_id)
+    if not metadata:
+        return None
+    normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
+    cached_path = os.path.normcase(os.path.abspath(str(metadata.get("demo_path") or "")))
+    source_md5 = str(metadata.get("source_content_md5") or "").strip().lower()
+    current_md5 = str(metadata.get("current_content_md5") or "").strip().lower()
+    try:
+        cache_version = int(metadata.get("cache_version"))
+        cached_file_size = (
+            int(metadata["source_file_size"])
+            if metadata.get("source_file_size") is not None
+            else None
+        )
+        cached_mtime_ns = (
+            int(metadata["source_mtime_ns"])
+            if metadata.get("source_mtime_ns") is not None
+            else None
+        )
+        row_count = int(metadata.get("row_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if (
+        cache_version != _DEMO_ROSTER_CACHE_VERSION
+        or cached_path != normalized_path
+        or cached_file_size != file_size
+        or cached_mtime_ns != mtime_ns
+        or source_md5 != current_md5
+    ):
+        return None
+
+    state = str(metadata.get("state") or "")
+    if state == "empty" and row_count == 0:
+        return {
+            "players": [],
+            "cache_hit": True,
+            "indexed": True,
+            "error": None,
+        }
+    if state == "error" and row_count == 0:
+        return {
+            "players": [],
+            "cache_hit": True,
+            "indexed": False,
+            "error": str(metadata.get("error_msg") or "Demo 玩家名单解析失败"),
+        }
+    if state != "ready" or row_count <= 0:
+        return None
+    rows = cached_rows if cached_rows is not None else await demo_db.list_demo_player_stats(demo_id)
+    players = _roster_rows_for_api(rows)
+    if len(players) != row_count:
+        return None
+    return {
+        "players": players,
+        "cache_hit": True,
+        "indexed": True,
+        "error": None,
+    }
+
+
+async def get_or_index_demo_roster(
+    demo_id: int,
+    demo_path: str,
+    *,
+    parse_semaphore: asyncio.Semaphore | None = None,
+    cached_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return a versioned roster cache, parsing the Demo once on a valid miss."""
+
+    cached = await _read_valid_demo_roster_cache(
+        demo_id,
+        demo_path,
+        cached_rows=cached_rows,
+    )
+    if cached is not None:
+        return cached
+    lock = _demo_roster_locks.get(demo_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _demo_roster_locks[demo_id] = lock
+    async with lock:
+        # Recheck after acquiring the single-flight lock. Persisted empty and
+        # error states stop concurrent waiters from serially repeating a parse.
+        cached = await _read_valid_demo_roster_cache(demo_id, demo_path)
+        if cached is not None:
+            return cached
+        if parse_semaphore is None:
+            indexed = await index_demo_player_stats(demo_id, demo_path)
+        else:
+            async with parse_semaphore:
+                indexed = await index_demo_player_stats(demo_id, demo_path)
+        if indexed.get("indexed"):
+            await demo_library_hub.notify("player_stats")
+        return {
+            "players": _roster_rows_for_api(indexed.get("players") or []),
+            "cache_hit": False,
+            "indexed": bool(indexed.get("indexed")),
+            "error": indexed.get("error"),
+        }
 
 
 @app.get("/api/demos")
@@ -1643,6 +1905,13 @@ async def list_demos(
     min_assists: Optional[int] = Query(default=None, ge=0),
     min_kd: Optional[float] = Query(default=None, ge=0),
     player_query: Optional[str] = Query(default=None, max_length=200),
+    steam_query: Optional[str] = Query(default=None, max_length=64),
+    rounds_min: Optional[int] = Query(default=None, ge=0),
+    rounds_max: Optional[int] = Query(default=None, ge=0),
+    duration_min: Optional[float] = Query(default=None, ge=0),
+    duration_max: Optional[float] = Query(default=None, ge=0),
+    date_from: Optional[str] = Query(default=None, max_length=32),
+    date_to: Optional[str] = Query(default=None, max_length=32),
 ):
     qn = (q or "").strip() or None
     filters = _demo_library_filters_from_query(
@@ -1655,10 +1924,123 @@ async def list_demos(
         min_assists=min_assists,
         min_kd=min_kd,
         player_query=player_query,
+        steam_query=steam_query,
+        rounds_min=rounds_min,
+        rounds_max=rounds_max,
+        duration_min=duration_min,
+        duration_max=duration_max,
+        date_from=date_from,
+        date_to=date_to,
     )
     total = await demo_db.count_demos(name_query=qn, filters=filters or None)
-    rows = await demo_db.list_demos(limit=limit, offset=offset, name_query=qn, filters=filters or None)
+    rows = await demo_db.list_demos(
+        limit=limit,
+        offset=offset,
+        name_query=qn,
+        filters=filters or None,
+    )
     return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
+
+
+@app.get("/api/demos/compact")
+async def list_demos_compact_api(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200, description="按文件名或库内展示名子串筛选"),
+    map_names: Optional[str] = Query(default=None, max_length=4000),
+    map_name: Optional[str] = Query(default=None, max_length=200),
+    statuses: Optional[str] = Query(default=None, max_length=256),
+    status: Optional[str] = Query(default=None, max_length=64),
+    min_kills: Optional[int] = Query(default=None, ge=0),
+    max_deaths: Optional[int] = Query(default=None, ge=0),
+    min_assists: Optional[int] = Query(default=None, ge=0),
+    min_kd: Optional[float] = Query(default=None, ge=0),
+    player_query: Optional[str] = Query(default=None, max_length=200),
+    steam_query: Optional[str] = Query(default=None, max_length=64),
+    rounds_min: Optional[int] = Query(default=None, ge=0),
+    rounds_max: Optional[int] = Query(default=None, ge=0),
+    duration_min: Optional[float] = Query(default=None, ge=0),
+    duration_max: Optional[float] = Query(default=None, ge=0),
+    date_from: Optional[str] = Query(default=None, max_length=32),
+    date_to: Optional[str] = Query(default=None, max_length=32),
+):
+    qn = (q or "").strip() or None
+    filters = _demo_library_filters_from_query(
+        map_names=map_names,
+        map_name=map_name,
+        statuses=statuses,
+        status=status,
+        min_kills=min_kills,
+        max_deaths=max_deaths,
+        min_assists=min_assists,
+        min_kd=min_kd,
+        player_query=player_query,
+        steam_query=steam_query,
+        rounds_min=rounds_min,
+        rounds_max=rounds_max,
+        duration_min=duration_min,
+        duration_max=duration_max,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    total = await demo_db.count_demos(name_query=qn, filters=filters or None)
+    rows = await demo_db.list_demos_compact(
+        limit=limit,
+        offset=offset,
+        name_query=qn,
+        filters=filters or None,
+    )
+    return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
+
+
+@app.get("/api/demos/ids")
+async def list_demo_ids(
+    limit: int = Query(default=1000, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
+    map_names: Optional[str] = Query(default=None, max_length=4000),
+    map_name: Optional[str] = Query(default=None, max_length=200),
+    statuses: Optional[str] = Query(default=None, max_length=256),
+    status: Optional[str] = Query(default=None, max_length=64),
+    min_kills: Optional[int] = Query(default=None, ge=0),
+    max_deaths: Optional[int] = Query(default=None, ge=0),
+    min_assists: Optional[int] = Query(default=None, ge=0),
+    min_kd: Optional[float] = Query(default=None, ge=0),
+    player_query: Optional[str] = Query(default=None, max_length=200),
+    steam_query: Optional[str] = Query(default=None, max_length=64),
+    rounds_min: Optional[int] = Query(default=None, ge=0),
+    rounds_max: Optional[int] = Query(default=None, ge=0),
+    duration_min: Optional[float] = Query(default=None, ge=0),
+    duration_max: Optional[float] = Query(default=None, ge=0),
+    date_from: Optional[str] = Query(default=None, max_length=32),
+    date_to: Optional[str] = Query(default=None, max_length=32),
+):
+    qn = (q or "").strip() or None
+    filters = _demo_library_filters_from_query(
+        map_names=map_names,
+        map_name=map_name,
+        statuses=statuses,
+        status=status,
+        min_kills=min_kills,
+        max_deaths=max_deaths,
+        min_assists=min_assists,
+        min_kd=min_kd,
+        player_query=player_query,
+        steam_query=steam_query,
+        rounds_min=rounds_min,
+        rounds_max=rounds_max,
+        duration_min=duration_min,
+        duration_max=duration_max,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    ids = await demo_db.list_filtered_demo_ids(
+        name_query=qn,
+        filters=filters or None,
+        limit=limit,
+        offset=offset,
+    )
+    return {"ids": ids, "limit": limit, "offset": offset, "q": qn}
 
 
 @app.get("/api/demos/stream")
@@ -1894,7 +2276,10 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
             continue
         dem_path = str(row["path"])
         try:
-            matched = await asyncio.to_thread(_matched_demo_players_in_order, exp, dem_path)
+            roster_lookup = await get_or_index_demo_roster(int(did), dem_path)
+            if roster_lookup.get("error"):
+                raise RuntimeError(str(roster_lookup["error"]))
+            matched = _match_expected_players_in_roster(exp, roster_lookup["players"])
         except Exception:
             logger.exception("batch_resolve roster match failed demo_id=%s", did)
             resolved[str(did)] = []
@@ -1907,18 +2292,29 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
 @app.post("/api/demos/batch-summary")
 async def batch_demo_summary(body: BatchSummaryBody):
     """批量加载 Demo 元数据 + 玩家列表，并发数上限 5。任一失败返回 400。"""
-    from .demo_parse_isolation import get_player_list_isolated
-
     sem = asyncio.Semaphore(5)
+    rows_by_id = {
+        int(row["id"]): row
+        for row in await demo_db.get_demo_list_items(body.ids)
+    }
 
     async def fetch_one(demo_id: int) -> dict:
-        row = await demo_db.get_demo_list_item(demo_id)
+        row = rows_by_id.get(int(demo_id))
         if not row:
             raise ValueError(f"Demo {demo_id} 不存在")
         row = dict(row)
+        if row.get("result_error"):
+            raise ValueError(str(row["result_error"]))
         dem_path = row.get("path", "")
-        async with sem:
-            players = await asyncio.to_thread(get_player_list_isolated, dem_path)
+        roster_lookup = await get_or_index_demo_roster(
+            demo_id,
+            dem_path,
+            parse_semaphore=sem,
+            cached_rows=row.get("players") or None,
+        )
+        if roster_lookup.get("error"):
+            raise ValueError(str(roster_lookup["error"]))
+        players = roster_lookup["players"]
         match_meta = {
             "map_name": row.get("map_name"),
             "total_rounds": row.get("total_rounds"),
@@ -1939,10 +2335,14 @@ async def batch_demo_summary(body: BatchSummaryBody):
     items: list[dict] = []
     for did, res in zip(body.ids, results):
         if isinstance(res, Exception):
-            try:
-                row = await demo_db.get_demo_list_item(did)
-                fname = (row.get("display_name") and str(row["display_name"]).strip()) or row.get("filename") or str(did)
-            except Exception:
+            row = rows_by_id.get(int(did))
+            if row:
+                fname = (
+                    (row.get("display_name") and str(row["display_name"]).strip())
+                    or row.get("filename")
+                    or str(did)
+                )
+            else:
                 fname = str(did)
             errors.append({"id": did, "filename": fname, "reason": str(res)})
         else:
@@ -1994,6 +2394,7 @@ async def reparse_demo(demo_id: int):
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
+    await demo_db.invalidate_demo_roster_cache(demo_id, clear_rows=True)
     await demo_db.clear_result(row["path"])
     await demo_db.update_status(row["path"], "loaded", error_msg=None, parsed_at=None)
     await demo_library_hub.notify("reparse")
@@ -2008,8 +2409,6 @@ class DemoAnalyzeRequest(BaseModel):
 
 @app.get("/api/demos/{demo_id}/players")
 async def get_demo_players(demo_id: int):
-    from .demo_parse_isolation import get_player_list_isolated
-
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
@@ -2022,8 +2421,11 @@ async def get_demo_players(demo_id: int):
         "duration_mins": row.get("duration_mins"),
         "match_date": row.get("match_date"),
     }
+    roster_lookup = await get_or_index_demo_roster(demo_id, str(dem_path))
+    if roster_lookup.get("error"):
+        raise HTTPException(500, f"Demo 玩家名单解析失败：{roster_lookup['error']}")
     return {
-        "players": await asyncio.to_thread(get_player_list_isolated, dem_path),
+        "players": roster_lookup["players"],
         "match_meta": match_meta,
     }
 

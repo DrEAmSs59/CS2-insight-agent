@@ -90,6 +90,10 @@ export function MatchListRow({
     const n = name.toLowerCase();
     return expectedPlayers.some(p => p.toLowerCase() === n || n.includes(p.toLowerCase()));
   };
+  const isAnalyzedPlayer = (name) =>
+    !!result.players?.[name] ||
+    (Array.isArray(demo.analyzed_targets) && demo.analyzed_targets.includes(name)) ||
+    demo.primary_target === name;
 
   const listStatus = classifyDemoStatus(demo);
   const listStatusLabel = t(listStatus.labelKey, listStatus.labelParams);
@@ -167,7 +171,7 @@ export function MatchListRow({
           <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
             {teamA.slice(0, 5).map((p, i) => (
               <span key={i} className={`truncate flex items-center gap-0.5 ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`}>
-                {p.name?.slice(0, 8)}{!!result.players?.[p.name] && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+                {p.name?.slice(0, 8)}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
               </span>
             ))}
           </div>
@@ -188,7 +192,7 @@ export function MatchListRow({
           <div className="flex flex-wrap justify-start gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
             {teamB.slice(0, 5).map((p, i) => (
               <span key={i} className={`truncate flex items-center gap-0.5 ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`}>
-                {p.name?.slice(0, 8)}{!!result.players?.[p.name] && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+                {p.name?.slice(0, 8)}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
               </span>
             ))}
           </div>
@@ -318,9 +322,20 @@ export default function MatchCard({
     const n = name.toLowerCase();
     return expectedPlayers.some(p => p.toLowerCase() === n || n.includes(p.toLowerCase()));
   };
+  const isAnalyzedPlayer = (name) =>
+    !!result.players?.[name] ||
+    (Array.isArray(demo.analyzed_targets) && demo.analyzed_targets.includes(name)) ||
+    demo.primary_target === name;
 
   const getKillTags = () => {
-    if (!result.clips) return [];
+    if (!result.clips) {
+      const tags = [];
+      const k4 = Number(demo.four_k_count) || 0;
+      const k5 = Number(demo.five_k_count) || 0;
+      if (k4 > 0) tags.push({ label: `4K x ${k4}`, color: "bg-cs2-accent/20 text-cs2-accent" });
+      if (k5 > 0) tags.push({ label: `5K x ${k5}`, color: "bg-cs2-red-surface text-cs2-red-on-surface" });
+      return tags;
+    }
     const tags = [];
     let k4 = 0, k5 = 0;
     result.clips.forEach(c => {
@@ -427,7 +442,7 @@ export default function MatchCard({
             {teamA.length > 0 ? teamA.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
                 {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}
-                {!!result.players?.[p.name] && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+                {isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
                 {i < 4 && i < teamA.length - 1 ? ',' : ''}
               </span>
             )) : <span className="text-[10px] text-cs2-text-muted italic">No roster</span>}
@@ -439,7 +454,7 @@ export default function MatchCard({
             {teamB.length > 0 ? teamB.slice(0, 5).map((p, i) => (
               <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
                 {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}
-                {!!result.players?.[p.name] && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+                {isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
                 {i < 4 && i < teamB.length - 1 ? ',' : ''}
               </span>
             )) : <span className="text-[10px] text-cs2-text-muted italic">No roster</span>}

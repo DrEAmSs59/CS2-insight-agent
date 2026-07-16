@@ -14,6 +14,107 @@ logger = logging.getLogger(__name__)
 
 DemoListFilters = dict[str, Any]
 
+_RESULT_SUMMARY_VERSION = 2
+_RESULT_SUMMARY_BACKFILL_BATCH = 100
+_STEAM_ID64_ACCOUNT_BASE = 76561197960265728
+
+
+def _summarize_result(
+    result: dict[str, Any],
+) -> tuple[int, str | None, list[str], int, int]:
+    """Return the compact, list-safe summary stored alongside a full result.
+
+    ``clip_count`` follows the existing UI's primary-player semantics: the
+    top-level ``clips`` list wins, then the primary player's nested result is
+    used as a compatibility fallback for older multi-player payloads.
+    """
+    primary_target = str(result.get("auto_target_player") or "").strip()
+    meta = result.get("match_meta")
+    if not primary_target and isinstance(meta, dict):
+        primary_target = str(meta.get("target_player") or "").strip()
+    if not primary_target:
+        analyzed = result.get("analyzed_target_players")
+        if isinstance(analyzed, list):
+            primary_target = next(
+                (value.strip() for value in analyzed if isinstance(value, str) and value.strip()),
+                "",
+            )
+
+    analyzed_targets: list[str] = []
+    seen_targets: set[str] = set()
+
+    def add_target(value: object) -> None:
+        if not isinstance(value, str):
+            return
+        clean = value.strip()
+        if not clean or clean in seen_targets:
+            return
+        seen_targets.add(clean)
+        analyzed_targets.append(clean)
+
+    clips = result.get("clips")
+    players = result.get("players")
+    successful_targets = []
+    if isinstance(players, dict):
+        for value, player_result in players.items():
+            if isinstance(player_result, dict):
+                successful_targets.append(value)
+                add_target(value)
+    if not successful_targets:
+        analyzed = result.get("analyzed_target_players")
+        if isinstance(analyzed, list):
+            for value in analyzed:
+                add_target(value)
+    if not isinstance(clips, list) and isinstance(players, dict):
+        player_result = players.get(primary_target) if primary_target else None
+        if not isinstance(player_result, dict):
+            player_result = next(
+                (value for value in players.values() if isinstance(value, dict)),
+                None,
+            )
+        clips = player_result.get("clips") if isinstance(player_result, dict) else None
+
+    add_target(primary_target)
+    four_k_count = 0
+    five_k_count = 0
+    if isinstance(clips, list):
+        for clip in clips:
+            if not isinstance(clip, dict) or clip.get("category") != "highlight":
+                continue
+            try:
+                kill_count = int(clip.get("kill_count") or 0)
+            except (TypeError, ValueError):
+                continue
+            if kill_count == 4:
+                four_k_count += 1
+            elif kill_count >= 5:
+                five_k_count += 1
+
+    return (
+        len(clips) if isinstance(clips, list) else 0,
+        primary_target or None,
+        analyzed_targets,
+        four_k_count,
+        five_k_count,
+    )
+
+
+def _result_match_meta(result: dict[str, Any], primary_target: str | None) -> dict[str, Any]:
+    meta = result.get("match_meta")
+    if isinstance(meta, dict):
+        return meta
+    players = result.get("players")
+    if not isinstance(players, dict):
+        return {}
+    player_result = players.get(primary_target) if primary_target else None
+    if not isinstance(player_result, dict):
+        player_result = next(
+            (value for value in players.values() if isinstance(value, dict)),
+            None,
+        )
+    nested_meta = player_result.get("match_meta") if isinstance(player_result, dict) else None
+    return nested_meta if isinstance(nested_meta, dict) else {}
+
 
 def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -65,6 +166,23 @@ class DemoDB:
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_match_results_demo_path ON match_results(demo_path)",
+            )
+            # Keep compact list metadata in a separate table.  Appending these
+            # columns after result_json would still make SQLite traverse the
+            # large row's overflow chain to reach them.
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_result_summaries (
+                    demo_path TEXT PRIMARY KEY NOT NULL,
+                    clip_count INTEGER NOT NULL DEFAULT 0,
+                    primary_target TEXT,
+                    analyzed_targets_json TEXT NOT NULL DEFAULT '[]',
+                    four_k_count INTEGER NOT NULL DEFAULT 0,
+                    five_k_count INTEGER NOT NULL DEFAULT 0,
+                    result_created_at TEXT NOT NULL,
+                    summary_version INTEGER NOT NULL
+                )
+                """
             )
             await conn.execute(
                 """
@@ -143,6 +261,25 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN origin_zip TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
+            cur_summary = await conn.execute("PRAGMA table_info(demo_result_summaries)")
+            summary_cols = {str(r[1]) for r in await cur_summary.fetchall()}
+            if "analyzed_targets_json" not in summary_cols:
+                await conn.execute(
+                    "ALTER TABLE demo_result_summaries ADD COLUMN analyzed_targets_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "four_k_count" not in summary_cols:
+                await conn.execute(
+                    "ALTER TABLE demo_result_summaries ADD COLUMN four_k_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "five_k_count" not in summary_cols:
+                await conn.execute(
+                    "ALTER TABLE demo_result_summaries ADD COLUMN five_k_count INTEGER NOT NULL DEFAULT 0"
+                )
+            # Persist the schema first so a large legacy backfill can commit in
+            # bounded, restart-safe batches instead of holding one write
+            # transaction for the entire application startup.
+            await conn.commit()
+            await self._backfill_result_summaries(conn)
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_content_md5 ON demo_files(content_md5)",
             )
@@ -159,6 +296,7 @@ class DemoDB:
                     steam_id64 TEXT,
                     steam_id TEXT,
                     account_id TEXT,
+                    user_id TEXT,
                     player_name TEXT NOT NULL,
                     normalized_name TEXT,
                     team_name TEXT,
@@ -171,6 +309,36 @@ class DemoDB:
                 )
                 """
             )
+            cur_players = await conn.execute("PRAGMA table_info(demo_player_stats)")
+            player_cols = {str(r[1]) for r in await cur_players.fetchall()}
+            if "user_id" not in player_cols:
+                await conn.execute("ALTER TABLE demo_player_stats ADD COLUMN user_id TEXT")
+                # Older builds stored parser spectator slots in account_id.
+                # Preserve that mixed legacy value before normalizing the true
+                # Steam account ID. Perfect World rows often have no Steam ID,
+                # so clearing account_id without this copy would lose their
+                # only stable parser identifier.
+                await conn.execute(
+                    """
+                    UPDATE demo_player_stats
+                    SET user_id = account_id
+                    WHERE user_id IS NULL AND account_id IS NOT NULL
+                    """
+                )
+                await conn.execute(
+                    """
+                    UPDATE demo_player_stats
+                    SET account_id = CASE
+                        WHEN steam_id64 IS NOT NULL
+                         AND length(steam_id64) >= 15
+                         AND steam_id64 NOT GLOB '*[^0-9]*'
+                         AND CAST(steam_id64 AS INTEGER) >= ?
+                        THEN CAST(CAST(steam_id64 AS INTEGER) - ? AS TEXT)
+                        ELSE NULL
+                    END
+                    """,
+                    (_STEAM_ID64_ACCOUNT_BASE, _STEAM_ID64_ACCOUNT_BASE),
+                )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_demo_id ON demo_player_stats(demo_id)"
             )
@@ -190,6 +358,22 @@ class DemoDB:
                 "CREATE INDEX IF NOT EXISTS idx_demo_player_stats_kd ON demo_player_stats(kd)"
             )
             await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_roster_cache (
+                    demo_id INTEGER PRIMARY KEY,
+                    demo_path TEXT NOT NULL,
+                    cache_version INTEGER NOT NULL,
+                    source_content_md5 TEXT,
+                    source_file_size INTEGER,
+                    source_mtime_ns INTEGER,
+                    state TEXT NOT NULL,
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    error_msg TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
                 "UPDATE demo_files SET status = 'done' WHERE lower(status) = 'parsed'"
             )
             await conn.commit()
@@ -197,6 +381,144 @@ class DemoDB:
             cur_fc = await conn2.execute("PRAGMA table_info(demo_files)")
             fin_cols = {str(r[1]) for r in await cur_fc.fetchall()}
         self.ingest_md5_supported = "content_md5" in fin_cols
+
+    @staticmethod
+    async def _backfill_result_summaries(conn: aiosqlite.Connection) -> None:
+        """Populate compact summaries once for result rows created by older builds."""
+        await conn.execute(
+            """
+            DELETE FROM demo_result_summaries
+            WHERE NOT EXISTS (
+                SELECT 1 FROM match_results r
+                WHERE r.demo_path = demo_result_summaries.demo_path
+            )
+            """
+        )
+        candidates_cur = await conn.execute(
+            """
+            SELECT r.id, r.demo_path, r.created_at
+            FROM match_results r
+            LEFT JOIN demo_result_summaries s ON s.demo_path = r.demo_path
+            WHERE r.id = (
+                SELECT MAX(r_latest.id)
+                FROM match_results r_latest
+                WHERE r_latest.demo_path = r.demo_path
+            )
+              AND (s.demo_path IS NULL OR s.summary_version < ?)
+            ORDER BY r.id
+            """,
+            (_RESULT_SUMMARY_VERSION,),
+        )
+        # Candidate metadata is small; fetch each large JSON payload separately
+        # so only one legacy result blob is resident at a time.
+        candidates = await candidates_cur.fetchall()
+        for index, (result_id, demo_path, result_created_at) in enumerate(candidates, start=1):
+            payload_cur = await conn.execute(
+                "SELECT result_json FROM match_results WHERE id = ?",
+                (int(result_id),),
+            )
+            payload_row = await payload_cur.fetchone()
+            raw = payload_row[0] if payload_row else None
+            parsed: dict[str, Any] | None = None
+            try:
+                candidate = json.loads(str(raw))
+                if not isinstance(candidate, dict):
+                    raise ValueError("result_json is not an object")
+                parsed = candidate
+                (
+                    clip_count,
+                    primary_target,
+                    analyzed_targets,
+                    four_k_count,
+                    five_k_count,
+                ) = _summarize_result(parsed)
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Cannot summarize legacy match result path=%s: %s",
+                    demo_path,
+                    exc,
+                )
+                clip_count, primary_target = 0, None
+                analyzed_targets, four_k_count, five_k_count = [], 0, 0
+            await conn.execute(
+                """
+                INSERT INTO demo_result_summaries(
+                    demo_path, clip_count, primary_target,
+                    analyzed_targets_json, four_k_count, five_k_count,
+                    result_created_at, summary_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(demo_path) DO UPDATE SET
+                    clip_count = excluded.clip_count,
+                    primary_target = excluded.primary_target,
+                    analyzed_targets_json = excluded.analyzed_targets_json,
+                    four_k_count = excluded.four_k_count,
+                    five_k_count = excluded.five_k_count,
+                    result_created_at = excluded.result_created_at,
+                    summary_version = excluded.summary_version
+                """,
+                (
+                    str(demo_path),
+                    clip_count,
+                    primary_target,
+                    json.dumps(analyzed_targets, ensure_ascii=False),
+                    four_k_count,
+                    five_k_count,
+                    str(result_created_at),
+                    _RESULT_SUMMARY_VERSION,
+                ),
+            )
+            if parsed is not None:
+                await DemoDB._fill_missing_demo_meta_from_result(
+                    conn,
+                    str(demo_path),
+                    parsed,
+                    primary_target,
+                )
+            if index % _RESULT_SUMMARY_BACKFILL_BATCH == 0:
+                await conn.commit()
+        await conn.commit()
+
+    @staticmethod
+    async def _fill_missing_demo_meta_from_result(
+        conn: aiosqlite.Connection,
+        demo_path: str,
+        result: dict[str, Any],
+        primary_target: str | None,
+    ) -> None:
+        """Preserve legacy list metadata without keeping result_json on the hot path."""
+        meta = _result_match_meta(result, primary_target)
+        if not meta:
+            return
+
+        def value(key: str) -> Any:
+            raw = meta.get(key)
+            return None if raw is None or raw == "" else raw
+
+        await conn.execute(
+            """
+            UPDATE demo_files
+            SET map_name = COALESCE(NULLIF(map_name, ''), ?),
+                total_rounds = COALESCE(total_rounds, ?),
+                team_a_score = COALESCE(team_a_score, ?),
+                team_b_score = COALESCE(team_b_score, ?),
+                team_a_name = COALESCE(NULLIF(team_a_name, ''), ?),
+                team_b_name = COALESCE(NULLIF(team_b_name, ''), ?),
+                duration_mins = COALESCE(duration_mins, ?),
+                match_date = COALESCE(NULLIF(match_date, ''), ?)
+            WHERE path = ?
+            """,
+            (
+                value("map_name"),
+                value("total_rounds"),
+                value("team_a_score"),
+                value("team_b_score"),
+                value("team_a_name"),
+                value("team_b_name"),
+                value("duration_mins"),
+                value("match_date"),
+                demo_path,
+            ),
+        )
 
     async def add_demo(
         self,
@@ -358,6 +680,13 @@ class DemoDB:
     async def save_result(self, demo_path: str, result: dict[str, Any]) -> None:
         now = utc_now_iso()
         payload = json.dumps(result, ensure_ascii=False)
+        (
+            clip_count,
+            primary_target,
+            analyzed_targets,
+            four_k_count,
+            five_k_count,
+        ) = _summarize_result(result)
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
             await conn.execute(
@@ -366,6 +695,39 @@ class DemoDB:
                 VALUES (?, ?, ?)
                 """,
                 (demo_path, payload, now),
+            )
+            await conn.execute(
+                """
+                INSERT INTO demo_result_summaries(
+                    demo_path, clip_count, primary_target,
+                    analyzed_targets_json, four_k_count, five_k_count,
+                    result_created_at, summary_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(demo_path) DO UPDATE SET
+                    clip_count = excluded.clip_count,
+                    primary_target = excluded.primary_target,
+                    analyzed_targets_json = excluded.analyzed_targets_json,
+                    four_k_count = excluded.four_k_count,
+                    five_k_count = excluded.five_k_count,
+                    result_created_at = excluded.result_created_at,
+                    summary_version = excluded.summary_version
+                """,
+                (
+                    demo_path,
+                    clip_count,
+                    primary_target,
+                    json.dumps(analyzed_targets, ensure_ascii=False),
+                    four_k_count,
+                    five_k_count,
+                    now,
+                    _RESULT_SUMMARY_VERSION,
+                ),
+            )
+            await self._fill_missing_demo_meta_from_result(
+                conn,
+                demo_path,
+                result,
+                primary_target,
             )
             await conn.commit()
         meta = result.get("match_meta")
@@ -458,6 +820,7 @@ class DemoDB:
     async def clear_result(self, demo_path: str) -> None:
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
+            await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
             await conn.commit()
 
@@ -473,7 +836,12 @@ class DemoDB:
 
     @staticmethod
     def _need_player_join(f: DemoListFilters) -> bool:
-        return bool(str(f.get("player_query") or "").strip())
+        if str(f.get("player_query") or "").strip() or str(f.get("steam_query") or "").strip():
+            return True
+        return any(
+            f.get(key) is not None
+            for key in ("min_kills", "max_deaths", "min_assists", "min_kd")
+        )
 
     @staticmethod
     def _merge_demo_filters(
@@ -528,20 +896,57 @@ class DemoDB:
             if isinstance(status, str) and status.strip():
                 parts.append("d.status = ?")
                 params.append(status.strip())
+        for key, column, operator, caster in (
+            ("rounds_min", "d.total_rounds", ">=", int),
+            ("rounds_max", "d.total_rounds", "<=", int),
+            ("duration_min", "d.duration_mins", ">=", float),
+            ("duration_max", "d.duration_mins", "<=", float),
+        ):
+            if f.get(key) is None:
+                continue
+            try:
+                parts.append(f"{column} {operator} ?")
+                params.append(caster(f[key]))
+            except (TypeError, ValueError):
+                pass
+        date_expr = "julianday(COALESCE(NULLIF(d.match_date, ''), NULLIF(d.parsed_at, ''), d.added_at))"
+        date_from = str(f.get("date_from") or "").strip()
+        if date_from:
+            parts.append(f"{date_expr} >= julianday(?)")
+            params.append(date_from)
+        date_to = str(f.get("date_to") or "").strip()
+        if date_to:
+            is_date_only = False
+            if len(date_to) == 10:
+                try:
+                    datetime.strptime(date_to, "%Y-%m-%d")
+                    is_date_only = True
+                except ValueError:
+                    pass
+            if is_date_only:
+                parts.append(f"{date_expr} < julianday(?, '+1 day')")
+            else:
+                parts.append(f"{date_expr} <= julianday(?)")
+            params.append(date_to)
         need_ps = DemoDB._need_player_join(f)
         if need_ps:
             ps_parts: list[str] = []
             pq = str(f.get("player_query") or "").strip()
-            id_sql_bits: list[str] = []
             if pq:
-                id_sql_bits.append(
+                parts.append(
                     "(instr(lower(ifnull(ps.player_name, '')), lower(?)) > 0 "
                     "OR instr(lower(ifnull(ps.normalized_name, '')), lower(?)) > 0)"
                 )
                 params.append(pq)
                 params.append(pq)
-            if id_sql_bits:
-                parts.append("(" + " OR ".join(id_sql_bits) + ")")
+            sq = str(f.get("steam_query") or "").strip()
+            if sq:
+                parts.append(
+                    "(instr(ifnull(ps.steam_id64, ''), ?) > 0 "
+                    "OR instr(ifnull(ps.steam_id, ''), ?) > 0 "
+                    "OR instr(ifnull(ps.account_id, ''), ?) > 0)"
+                )
+                params.extend([sq, sq, sq])
             if f.get("min_kills") is not None:
                 try:
                     ps_parts.append("ps.kills >= ?")
@@ -580,6 +985,38 @@ class DemoDB:
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
                d.content_md5, d.origin_zip,
                r.result_json, r.created_at AS result_created_at
+        """
+
+    _COMPACT_LIST_SELECT = """
+        SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
+               d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
+               d.content_md5, d.origin_zip,
+               CASE WHEN rs.demo_path IS NULL THEN 0 ELSE 1 END AS has_result,
+               COALESCE(rs.clip_count, 0) AS clip_count,
+               rs.primary_target,
+               COALESCE(rs.analyzed_targets_json, '[]') AS analyzed_targets_json,
+               COALESCE(rs.four_k_count, 0) AS four_k_count,
+               COALESCE(rs.five_k_count, 0) AS five_k_count,
+               rs.result_created_at
+        """
+
+    _PLAYER_LIST_SELECT = """
+        SELECT demo_id,
+               player_name AS name,
+               player_name,
+               steam_id64,
+               COALESCE(steam_id64, steam_id) AS steamid64,
+               steam_id,
+               account_id,
+               user_id,
+               team_number,
+               team_number AS team,
+               team_name,
+               kills,
+               deaths,
+               assists,
+               kd
+        FROM demo_player_stats
         """
 
     # 主库列表：待高光解析(loaded)置顶，其次 parsing / error，已解析 done 靠后；同档仍按 id 从新到旧
@@ -625,8 +1062,17 @@ class DemoDB:
                 s2 = str(raw_sid).strip()
                 if s2 and s2 != steam_id64:
                     steam_id = s2
-            account_id = p.get("account_id") or p.get("user_id")
+            account_id = p.get("account_id")
+            if account_id is None and steam_id64 is not None:
+                try:
+                    derived_account_id = int(steam_id64) - _STEAM_ID64_ACCOUNT_BASE
+                    if derived_account_id >= 0:
+                        account_id = derived_account_id
+                except (TypeError, ValueError):
+                    pass
             account_s = str(account_id).strip() if account_id is not None else None
+            user_id = p.get("user_id")
+            user_id_s = str(user_id).strip() if user_id is not None else None
             try:
                 kills = int(p.get("kills") or p.get("k") or 0)
             except (TypeError, ValueError):
@@ -656,6 +1102,7 @@ class DemoDB:
                     steam_id64,
                     steam_id,
                     account_s,
+                    user_id_s,
                     name,
                     norm or None,
                     team_name_s,
@@ -673,10 +1120,10 @@ class DemoDB:
                 await conn.executemany(
                     """
                     INSERT INTO demo_player_stats(
-                        demo_id, demo_path, steam_id64, steam_id, account_id,
+                        demo_id, demo_path, steam_id64, steam_id, account_id, user_id,
                         player_name, normalized_name, team_name, team_number,
                         kills, deaths, assists, kd, indexed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )
@@ -687,7 +1134,7 @@ class DemoDB:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
-                SELECT id, demo_id, demo_path, steam_id64, steam_id, account_id, player_name, normalized_name,
+                SELECT id, demo_id, demo_path, steam_id64, steam_id, account_id, user_id, player_name, normalized_name,
                        team_name, team_number, kills, deaths, assists, kd, indexed_at
                 FROM demo_player_stats
                 WHERE demo_id = ?
@@ -697,6 +1144,89 @@ class DemoDB:
             )
             rws = await cur.fetchall()
         return [dict(r) for r in rws]
+
+    async def get_demo_roster_cache(self, demo_id: int) -> Optional[dict[str, Any]]:
+        """Return roster cache metadata together with the demo's current MD5."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT c.demo_id, c.demo_path, c.cache_version,
+                       c.source_content_md5, c.source_file_size, c.source_mtime_ns,
+                       c.state, c.row_count, c.error_msg, c.updated_at,
+                       d.content_md5 AS current_content_md5
+                FROM demo_roster_cache c
+                LEFT JOIN demo_files d ON d.id = c.demo_id
+                WHERE c.demo_id = ?
+                """,
+                (demo_id,),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def save_demo_roster_cache(
+        self,
+        demo_id: int,
+        demo_path: str,
+        *,
+        cache_version: int,
+        source_file_size: int | None,
+        source_mtime_ns: int | None,
+        state: Literal["ready", "empty", "error"],
+        row_count: int,
+        error_msg: str | None = None,
+    ) -> None:
+        """Persist the result of one roster parse, including negative results."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                INSERT INTO demo_roster_cache(
+                    demo_id, demo_path, cache_version, source_content_md5,
+                    source_file_size, source_mtime_ns, state, row_count,
+                    error_msg, updated_at
+                ) VALUES (
+                    ?, ?, ?,
+                    (SELECT content_md5 FROM demo_files WHERE id = ?),
+                    ?, ?, ?, ?, ?, ?
+                )
+                ON CONFLICT(demo_id) DO UPDATE SET
+                    demo_path = excluded.demo_path,
+                    cache_version = excluded.cache_version,
+                    source_content_md5 = excluded.source_content_md5,
+                    source_file_size = excluded.source_file_size,
+                    source_mtime_ns = excluded.source_mtime_ns,
+                    state = excluded.state,
+                    row_count = excluded.row_count,
+                    error_msg = excluded.error_msg,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    demo_id,
+                    str(demo_path),
+                    int(cache_version),
+                    demo_id,
+                    source_file_size,
+                    source_mtime_ns,
+                    state,
+                    max(0, int(row_count)),
+                    error_msg,
+                    utc_now_iso(),
+                ),
+            )
+            await conn.commit()
+
+    async def invalidate_demo_roster_cache(
+        self,
+        demo_id: int,
+        *,
+        clear_rows: bool = False,
+    ) -> None:
+        """Invalidate roster metadata and optionally discard its materialized rows."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
+            if clear_rows:
+                await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+            await conn.commit()
 
     async def search_players(self, q: str, limit: int = 20) -> list[dict[str, Any]]:
         qq = (q or "").strip()
@@ -757,6 +1287,34 @@ class DemoDB:
             rows = await cur.fetchall()
         return [(int(r["id"]), str(r["path"])) for r in rows]
 
+    @classmethod
+    async def _players_by_demo_id(
+        cls,
+        conn: aiosqlite.Connection,
+        demo_ids: list[int],
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Load roster rows in bounded IN queries instead of one query per demo."""
+        normalized = list(dict.fromkeys(int(value) for value in demo_ids))
+        grouped: dict[int, list[dict[str, Any]]] = {demo_id: [] for demo_id in normalized}
+        for start in range(0, len(normalized), 500):
+            chunk = normalized[start : start + 500]
+            if not chunk:
+                continue
+            placeholders = ",".join("?" for _ in chunk)
+            cur = await conn.execute(
+                f"""
+                {cls._PLAYER_LIST_SELECT}
+                WHERE demo_id IN ({placeholders})
+                ORDER BY demo_id, kills DESC, player_name ASC
+                """,
+                chunk,
+            )
+            for row in await cur.fetchall():
+                item = dict(row)
+                demo_id = int(item.pop("demo_id"))
+                grouped.setdefault(demo_id, []).append(item)
+        return grouped
+
     async def list_demos(
         self,
         limit: int = 200,
@@ -785,41 +1343,145 @@ class DemoDB:
                 item = dict(row)
                 raw = item.pop("result_json", None)
                 item["result"] = json.loads(raw) if raw else None
-                players_cur = await conn.execute(
-                    "SELECT player_name AS name, team_number, team_name, kills, deaths, assists, kd FROM demo_player_stats WHERE demo_id = ?",
-                    (item["id"],),
-                )
-                item["players"] = [dict(pr) for pr in await players_cur.fetchall()]
                 out.append(item)
+            players_by_id = await self._players_by_demo_id(
+                conn,
+                [int(item["id"]) for item in out],
+            )
+            for item in out:
+                item["players"] = players_by_id.get(int(item["id"]), [])
             return out
+
+    async def list_demos_compact(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        *,
+        name_query: str | None = None,
+        filters: DemoListFilters | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return lightweight list rows without selecting or decoding result_json.
+
+        The result summary is materialized by :meth:`save_result`, and all
+        roster rows for the page are fetched in one additional query (or one
+        per 500 demos for unusually large pages).
+        """
+        f = self._merge_demo_filters(name_query=name_query, filters=filters)
+        where_sql, params, need_ps = self._build_demo_filters_sql(f)
+        join_sql = ""
+        if need_ps:
+            join_sql = " JOIN demo_player_stats ps ON ps.demo_id = d.id "
+        sql = (
+            f"{self._COMPACT_LIST_SELECT} FROM demo_files d "
+            f"LEFT JOIN demo_result_summaries rs ON rs.demo_path = d.path {join_sql} {where_sql} "
+            f"{self._LIST_ORDER_BY} LIMIT ? OFFSET ?"
+        )
+        params_ext = [*params, max(1, int(limit)), max(0, int(offset))]
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(sql, params_ext)
+            rows = await cur.fetchall()
+            out = [dict(row) for row in rows]
+            players_by_id = await self._players_by_demo_id(
+                conn,
+                [int(item["id"]) for item in out],
+            )
+            for item in out:
+                item["has_result"] = bool(item["has_result"])
+                item["clip_count"] = int(item["clip_count"] or 0)
+                raw_targets = item.pop("analyzed_targets_json", "[]")
+                try:
+                    decoded_targets = json.loads(str(raw_targets))
+                except (TypeError, ValueError):
+                    decoded_targets = []
+                item["analyzed_targets"] = (
+                    [str(value) for value in decoded_targets if isinstance(value, str)]
+                    if isinstance(decoded_targets, list)
+                    else []
+                )
+                item["four_k_count"] = int(item["four_k_count"] or 0)
+                item["five_k_count"] = int(item["five_k_count"] or 0)
+                item["players"] = players_by_id.get(int(item["id"]), [])
+            return out
+
+    async def list_filtered_demo_ids(
+        self,
+        *,
+        name_query: str | None = None,
+        filters: DemoListFilters | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[int]:
+        """Return only matching IDs, suitable for cross-page selection flows."""
+        f = self._merge_demo_filters(name_query=name_query, filters=filters)
+        where_sql, params, need_ps = self._build_demo_filters_sql(f)
+        join_sql = ""
+        if need_ps:
+            join_sql = " JOIN demo_player_stats ps ON ps.demo_id = d.id "
+        sql = (
+            f"SELECT DISTINCT d.id FROM demo_files d {join_sql} {where_sql} "
+            f"{self._LIST_ORDER_BY}"
+        )
+        final_params: list[Any] = list(params)
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            final_params.extend([max(1, int(limit)), max(0, int(offset))])
+        elif offset:
+            # SQLite requires LIMIT when OFFSET is present; -1 means no limit.
+            sql += " LIMIT -1 OFFSET ?"
+            final_params.append(max(0, int(offset)))
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(sql, final_params)
+            rows = await cur.fetchall()
+        return [int(row[0]) for row in rows]
+
+    async def get_demo_list_items(self, demo_ids: list[int]) -> list[dict[str, Any]]:
+        """Batch-fetch full list items while preserving first-seen ID order.
+
+        Full ``result_json`` payloads are intentionally returned here for
+        detail/analysis flows.  Queries are chunked to stay below conservative
+        SQLite bind-variable limits, and roster data is loaded in matching
+        batches rather than N+1 queries.
+        """
+        ordered_ids = list(dict.fromkeys(int(value) for value in demo_ids))
+        if not ordered_ids:
+            return []
+
+        by_id: dict[int, dict[str, Any]] = {}
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            for start in range(0, len(ordered_ids), 500):
+                chunk = ordered_ids[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                cur = await conn.execute(
+                    f"""
+                    {self._LIST_SELECT}
+                    FROM demo_files d
+                    LEFT JOIN match_results r ON r.demo_path = d.path
+                    WHERE d.id IN ({placeholders})
+                    """,
+                    chunk,
+                )
+                for row in await cur.fetchall():
+                    item = dict(row)
+                    raw = item.pop("result_json", None)
+                    try:
+                        item["result"] = json.loads(raw) if raw else None
+                        item["result_error"] = None
+                    except (TypeError, ValueError) as exc:
+                        item["result"] = None
+                        item["result_error"] = f"损坏的解析结果：{exc}"
+                    by_id[int(item["id"])] = item
+            players_by_id = await self._players_by_demo_id(conn, ordered_ids)
+
+        for demo_id, item in by_id.items():
+            item["players"] = players_by_id.get(demo_id, [])
+        return [by_id[demo_id] for demo_id in ordered_ids if demo_id in by_id]
 
     async def get_demo_list_item(self, demo_id: int) -> Optional[dict[str, Any]]:
         """与 ``list_demos`` 单条结构一致（含 ``result``），供跨页载入选中等。"""
-        async with aiosqlite.connect(self.db_path) as conn:
-            conn.row_factory = aiosqlite.Row
-            cur = await conn.execute(
-                f"""
-                {self._LIST_SELECT}
-                FROM demo_files d
-                LEFT JOIN match_results r ON r.demo_path = d.path
-                WHERE d.id = ?
-                """,
-                (demo_id,),
-            )
-            row = await cur.fetchone()
-        if not row:
-            return None
-        item = dict(row)
-        raw = item.pop("result_json", None)
-        item["result"] = json.loads(raw) if raw else None
-        async with aiosqlite.connect(self.db_path) as conn_p:
-            conn_p.row_factory = aiosqlite.Row
-            players_cur = await conn_p.execute(
-                "SELECT player_name AS name, team_number, team_name, kills, deaths, assists, kd FROM demo_player_stats WHERE demo_id = ?",
-                (item["id"],),
-            )
-            item["players"] = [dict(pr) for pr in await players_cur.fetchall()]
-        return item
+        items = await self.get_demo_list_items([demo_id])
+        return items[0] if items else None
 
     async def count_demos(
         self,
@@ -891,7 +1553,9 @@ class DemoDB:
         disk_path = str(demo["path"])
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
+            await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (disk_path,))
+            await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
             if rescan == "skip":
@@ -1012,7 +1676,9 @@ class DemoDB:
                 chunk = all_paths[i:i + batch_size]
                 await conn.executemany("INSERT INTO _tmp_existing_paths(path) VALUES (?)", [(p,) for p in chunk])
             await conn.execute("DELETE FROM match_results WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id NOT IN (SELECT d.id FROM demo_files d WHERE d.path IN (SELECT path FROM _tmp_existing_paths))")
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id NOT IN (SELECT d.id FROM demo_files d WHERE d.path IN (SELECT path FROM _tmp_existing_paths))")
             cur = await conn.execute("DELETE FROM demo_files WHERE path NOT IN (SELECT path FROM _tmp_existing_paths)")
             await conn.commit()

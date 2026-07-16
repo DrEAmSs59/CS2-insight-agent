@@ -106,9 +106,10 @@ export function libraryStatusTier(it) {
 export function deriveTags(it) {
   const tags = [];
   const r = it.result && typeof it.result === "object" ? it.result : null;
-  if (Array.isArray(r?.clips) && r.clips.length)
-    tags.push({ key: "status.clipsTag", params: { n: r.clips.length } });
-  const tgt = r?.auto_target_player || r?.match_meta?.target_player;
+  const clipCount = Array.isArray(r?.clips) ? r.clips.length : Number(it.clip_count) || 0;
+  if (clipCount > 0)
+    tags.push({ key: "status.clipsTag", params: { n: clipCount } });
+  const tgt = r?.auto_target_player || r?.match_meta?.target_player || it.primary_target;
   if (tgt) tags.push(String(tgt));
   const map = it.map_name || r?.match_meta?.map_name;
   if (map && tags.length < 3) tags.push(String(map));
@@ -140,7 +141,8 @@ export function classifyDemoStatus(it) {
     const hasCore =
       !!(it.map_name && String(it.map_name).trim()) ||
       (it.total_rounds != null && Number.isFinite(Number(it.total_rounds))) ||
-      (it.result && typeof it.result === "object");
+      (it.result && typeof it.result === "object") ||
+      it.has_result === true;
     if (!hasCore) return { kind: "meta_missing", labelKey: "status.metaMissing" };
     const datePart =
       it.parsed_at != null && String(it.parsed_at).trim() !== ""
@@ -153,7 +155,7 @@ export function classifyDemoStatus(it) {
 }
 
 /**
- * 客户端筛选（日期 / 回合 / 时长 / Steam 关键词仅占位）：在单页结果上收紧显示。
+ * 客户端筛选（日期 / 回合 / 时长 / Steam ID）：在单页结果上收紧显示。
  * @param {Record<string, unknown>[]} items
  * @param {Record<string, string>} f libraryAdvFilters
  */
@@ -162,7 +164,7 @@ export function applyClientSideDemoFilters(items, f) {
     const s = String(v ?? "").trim();
     if (!s) return null;
     const n = parseFloat(s);
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) && n >= 0 ? n : null;
   };
   const roundsMin = num(f.roundsMin);
   const roundsMax = num(f.roundsMax);
@@ -206,10 +208,13 @@ export function applyClientSideDemoFilters(items, f) {
     }
 
     if (steamQ) {
-      const path = String(it.path ?? "").toLowerCase();
-      const fn = String(it.filename ?? "").toLowerCase();
-      const hay = `${path} ${fn}`;
-      if (!hay.includes(steamQ)) return false;
+      const players = Array.isArray(it.players) ? it.players : [];
+      const matchesSteam = players.some((player) =>
+        [player.steam_id64, player.steamid64, player.steam_id, player.account_id]
+          .filter((value) => value != null)
+          .some((value) => String(value).toLowerCase().includes(steamQ))
+      );
+      if (!matchesSteam) return false;
     }
 
     return true;
