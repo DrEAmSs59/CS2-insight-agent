@@ -849,7 +849,9 @@ async def test_llm_connection():
 
     from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
-    bu = (llm.base_url or "").strip() or None
+    from .llm_compat import prepare_llm_base_url
+
+    bu = prepare_llm_base_url(llm.base_url)
     model = (llm.model or "").strip() or "gpt-4o-mini"
     try:
         client = AsyncOpenAI(api_key=api_key, base_url=bu, timeout=12.0)
