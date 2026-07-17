@@ -1086,6 +1086,16 @@ class RecordingExecutor:
             await self._ctrl.force_stop_recording()
 
         result.output_path = final_output_path
-        result.success = any(r.status == "ok" for r in result.segment_results)
+        was_aborted = self._is_aborted() or any(
+            str(item.error or "").strip().lower() == "aborted"
+            for item in result.segment_results
+        )
+        if was_aborted:
+            # Keep partial output_path information, but make the request-level
+            # state unambiguous for the API and result modal.
+            result.error = "aborted"
+            result.success = False
+        else:
+            result.success = any(r.status == "ok" for r in result.segment_results)
         result.warnings.extend(plan.warnings)
         return result

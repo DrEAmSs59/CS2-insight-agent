@@ -3606,6 +3606,10 @@ class OBSDirector:
                     _kbp_finish()
                 logger.info("[kb_overlay] Pre-extraction done")
 
+            # An abort may arrive while plans/overlay tracks are being built.
+            # Do not continue into POV installation or launch CS2 after that.
+            self._check_abort()
+
             # ── POV HUD install (before first CS2 launch) ─────────────────────
             if pov_on_v3:
                 try:
@@ -3987,6 +3991,24 @@ class OBSDirector:
                 await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
                 await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
 
+        except RecordingAborted:
+            logger.info("[RecordingV3] queue aborted by user; entering final cleanup")
+            self._set_state(DirectorState.STOPPING, "aborted")
+            completed_request_ids = {
+                str(item.get("request_id"))
+                for item in all_results
+                if item.get("request_id") is not None
+            }
+            for dto in requests:
+                if str(dto.request_id) in completed_request_ids:
+                    continue
+                all_results.append({
+                    "request_id": dto.request_id,
+                    "success": False,
+                    "error": "aborted",
+                    "segment_results": [],
+                    "warnings": [],
+                })
         except (CS2AlreadyRunningError, CS2NotReadyError):
             raise
         except Exception as e:
@@ -4005,6 +4027,20 @@ class OBSDirector:
                 await asyncio.to_thread(obs_client.disconnect)
             except Exception:
                 pass
+            # This must be unconditional.  Abort can raise while CS2 is still
+            # launching or waiting for GSI, before the per-demo cleanup below
+            # is reached.  _kill_cs2 restores the player config snapshot after
+            # the process exits; both operations are safe to repeat.
+            await self._run_cleanup_step(
+                "CS2 shutdown during final recording cleanup",
+                self._kill_cs2,
+                timeout=30.0,
+            )
+            await self._run_cleanup_step(
+                "CS2 artifact cleanup during final recording cleanup",
+                self._cleanup_cs2_artifacts,
+                timeout=8.0,
+            )
             if pov_mgr_v3 is not None:
                 try:
                     logger.info("[RecordingV3][POV] restore gameinfo.gi")

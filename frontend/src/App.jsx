@@ -30,6 +30,10 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
+import {
+  recordingAbortToastKind,
+  recordingQueueWasAborted,
+} from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
@@ -1004,13 +1008,17 @@ export default function App() {
     setConfigBackupLoading(true);
     try {
       const { data } = await API.get("/config-backup/status");
-      setConfigBackupStatus(data && typeof data === "object" ? data : null);
+      const nextStatus = data && typeof data === "object" ? data : null;
+      setConfigBackupStatus(nextStatus);
+      return nextStatus;
     } catch (e) {
       const msg = formatRecordingApiError(e, t, t("app.backendConnectFail"));
-      setConfigBackupStatus({
+      const failedStatus = {
         fetch_failed: true,
         message: msg,
-      });
+      };
+      setConfigBackupStatus(failedStatus);
+      return failedStatus;
     } finally {
       setConfigBackupLoading(false);
     }
@@ -1983,7 +1991,23 @@ export default function App() {
           if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
-          setProgressText("", { autoDismissMs: 100 });
+          const wasAborted = recordingQueueWasAborted(
+            results,
+            recordingAbortRequestedRef.current,
+          );
+          if (wasAborted) {
+            const backupStatus = await refreshConfigBackupStatus();
+            const toastKind = recordingAbortToastKind(backupStatus);
+            if (toastKind === "restore_pending") {
+              setProgressText(t("app.abortRestorePending"), { isError: true });
+            } else if (toastKind === "unverified") {
+              setProgressText(t("app.abortRestoreUnverified"), { isError: true });
+            } else {
+              setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
+            }
+          } else {
+            setProgressText("", { autoDismissMs: 100 });
+          }
         } catch (e) {
           const { text: detail, code: blockedCode } = parseRecordingApiError(
             e,
@@ -1994,7 +2018,10 @@ export default function App() {
             setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
             setRecordingBlockedCode(blockedCode);
           }
-          setProgressText(t("app.batchRecordFail", { msg: detail }), { isError: true });
+          const toastKey = recordingAbortRequestedRef.current
+            ? "app.abortFail"
+            : "app.batchRecordFail";
+          setProgressText(t(toastKey, { msg: detail }), { isError: true });
         } finally {
           if (_kbPollTimer) clearInterval(_kbPollTimer);
           recordingAbortRequestedRef.current = false;
@@ -2073,7 +2100,12 @@ export default function App() {
       setRecordingAbortRequested(true);
       setProgressText(t("app.abortingRecording"), { loading: true });
     } catch (e) {
-      setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      setProgressText(
+        t("app.abortFail", {
+          msg: formatRecordingApiError(e, t, t("common.requestFail")),
+        }),
+        { isError: true },
+      );
     }
   }, [t]);
 
