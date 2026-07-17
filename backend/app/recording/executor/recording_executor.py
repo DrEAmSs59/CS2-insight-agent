@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
+from ..platform_utils import voice_listen_mask_console_commands
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .obs_fade_controller import OBSFadeController
@@ -17,6 +18,21 @@ from .spec_controller import spec_by_slot, spec_player
 from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
+
+
+class VoiceIsolationError(RuntimeError):
+    """A managed voice mask could not be applied before recording a segment."""
+
+
+async def _inject_voice_listen_mask(mask: int) -> None:
+    commands = voice_listen_mask_console_commands(mask)
+    try:
+        ok = await asyncio.to_thread(inject_console_sequence, commands)
+    except Exception as exc:
+        raise VoiceIsolationError(f"voice mask injection raised: {exc}") from exc
+    if ok is not True:
+        raise VoiceIsolationError("voice mask injection returned false")
+
 
 def _kb_bus(segment=None):
     """Return (bus, keyboard_tick_offset, kill_fx_tick_offset).
@@ -655,6 +671,7 @@ class RecordingExecutor:
                 # voice/post-spec console injections also consume demo ticks.
                 prepare_t0 = time.monotonic()
                 spec_elapsed = 0.0
+                spec_ok = None
                 if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
                     spec_ok = await _spec_by_slot_with_retry(
@@ -665,18 +682,6 @@ class RecordingExecutor:
                         segment_index=segment.segment_index,
                     )
                     spec_elapsed = time.monotonic() - spec_t0
-
-                    if spec_ok is not False and segment.voice_listen_mask is not None:
-                        mask_val = segment.voice_listen_mask
-                        try:
-                            await asyncio.to_thread(
-                                inject_console_sequence,
-                                ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
-                            )
-                        except Exception as _e:
-                            logger.warning(
-                                "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
-                            )
 
                     if spec_ok is not False and self._post_spec_console_lines:
                         try:
@@ -719,6 +724,9 @@ class RecordingExecutor:
                         result.success = any(r.status == "ok" for r in result.segment_results)
                         result.warnings.extend(plan.warnings)
                         return result
+
+                if segment.voice_listen_mask is not None:
+                    await _inject_voice_listen_mask(segment.voice_listen_mask)
 
                 # ── 3. Sync to start_tick, then pause ───────────────────────
                 # spec_player / GSI-verify run while the demo plays in the prepare window.
@@ -789,17 +797,8 @@ class RecordingExecutor:
                             result.success = any(r.status == "ok" for r in result.segment_results)
                             result.warnings.extend(plan.warnings)
                             return result
-                        if spec_ok is not False and segment.voice_listen_mask is not None:
-                            mask_val = segment.voice_listen_mask
-                            try:
-                                await asyncio.to_thread(
-                                    inject_console_sequence,
-                                    ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
-                                )
-                            except Exception as _e:
-                                logger.warning(
-                                    "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
-                                )
+                    if segment.voice_listen_mask is not None:
+                        await _inject_voice_listen_mask(segment.voice_listen_mask)
 
                 logger.info(
                     "[RecordingV3] spec_elapsed=%.2fs prepare_elapsed=%.2fs "
@@ -1003,6 +1002,36 @@ class RecordingExecutor:
                 # confirmed paused. If it returned "fallback_stopped", the next
                 # segment loop iteration will see self._obs_force_stopped=True and break.
                 # Either way, gototick/spec_player console calls are safe from here.
+
+            except VoiceIsolationError as e:
+                logger.error(
+                    "Segment %d voice isolation failed: %s",
+                    segment.segment_index,
+                    e,
+                )
+                try:
+                    await demo_pause()
+                except Exception:
+                    pass
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="voice_filter_failed",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    error=str(e),
+                ))
+                result.error = f"voice isolation failed before recording: {e}"
+                if obs_recording_started:
+                    try:
+                        final_output_path = await self._ctrl.stop_record_safe()
+                    except Exception:
+                        pass
+                    obs_recording_started = False
+                result.output_path = final_output_path
+                result.success = False
+                result.warnings.extend(plan.warnings)
+                return result
 
             except OBSControlError as e:
                 logger.error("Segment %d OBS control error: %s", segment.segment_index, e)

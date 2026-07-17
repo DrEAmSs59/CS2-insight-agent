@@ -59,17 +59,29 @@ export function buildWarmupConsoleCommands(o) {
   }
   const vf = o.voice_filter ?? "mute";
   if (vf === "mute" || vf === "all") {
-    lines.push("snd_voipvolume 0");
+    lines.push(
+      "tv_listen_voice_indices 0",
+      "tv_listen_voice_indices_h 0",
+      "voice_modenable 0",
+      "snd_voipvolume 0",
+    );
   } else if (vf === "open") {
-    lines.push("snd_voipvolume 1");
-    lines.push("tv_listen_voice_indices -1");
+    lines.push(
+      "voice_modenable 1",
+      "snd_voipvolume 1",
+      "tv_listen_voice_indices -1",
+      "tv_listen_voice_indices_h -1",
+    );
   } else if (vf === "off") {
     // 不注入语音指令
   } else {
-    // "team" / "enemy"：先打开全员基线，per-segment 再收窄到掩码
-    // all_players 为空时以"全部可听"降级，而不是静音
-    lines.push("snd_voipvolume 1");
-    lines.push("tv_listen_voice_indices -1");
+    // "team" / "enemy"：先静音，per-segment 按当前 POV SteamID 成功解析后再放行。
+    lines.push(
+      "tv_listen_voice_indices 0",
+      "tv_listen_voice_indices_h 0",
+      "voice_modenable 1",
+      "snd_voipvolume 1",
+    );
   }
   if (o.hide_grenade_trajectory_pip) {
     lines.push("sv_grenade_trajectory 0");

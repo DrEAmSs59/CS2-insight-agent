@@ -1,5 +1,10 @@
 from ..models import RecordingSegment, SourceType, Perspective, RequestType
 from ..normalizer import NormalizedRequest
+from ..platform_utils import (
+    compute_voice_listen_mask,
+    compute_voice_listen_mask_enemy,
+    platform_slot_offset,
+)
 from .final_round_guard import apply_final_round_guard
 
 
@@ -16,6 +21,10 @@ def postprocess_segments(
     warnings: list[str] = list(extra_warnings) if extra_warnings else []
 
     processed: list[RecordingSegment] = []
+    voice_slot_offset = platform_slot_offset(
+        req.demo.demo_filename,
+        req.demo.server_name,
+    )
 
     for segment in segments:
         # Step 1: Clamp to demo bounds
@@ -29,6 +38,22 @@ def postprocess_segments(
         # Step 2: Apply FinalRoundGuard (returns tuple[segment, warnings])
         segment, guard_warnings = apply_final_round_guard(segment, req)
         warnings.extend(guard_warnings)
+
+        # Voice identity follows the actual POV target of this final segment.
+        # This deliberately overwrites planner-provided masks, because victim/killer
+        # interleaving can switch teams within one request.
+        segment = segment.model_copy(update={
+            "voice_listen_mask": compute_voice_listen_mask(
+                req.demo.all_players,
+                segment.target_steamid64,
+                voice_slot_offset,
+            ),
+            "voice_listen_mask_enemy": compute_voice_listen_mask_enemy(
+                req.demo.all_players,
+                segment.target_steamid64,
+                voice_slot_offset,
+            ),
+        })
 
         # Step 3: Warn when victim segment lacks spec_slot (executor falls back to spec_player by name).
         if (
