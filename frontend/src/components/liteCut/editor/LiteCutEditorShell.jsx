@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import LiteCutToolbar from "./LiteCutToolbar.jsx";
 import LiteCutMediaBin from "./LiteCutMediaBin.jsx";
 import LiteCutPreviewPanel from "./LiteCutPreviewPanel.jsx";
@@ -8,6 +10,7 @@ import LiteCutResizableLayout from "./LiteCutResizableLayout.jsx";
 import LiteCutPresetsDrawer from "./LiteCutPresetsDrawer.jsx";
 import LiteCutProjectStartPage from "./LiteCutProjectStartPage.jsx";
 import LiteCutExportProgressDialog from "./LiteCutExportProgressDialog.jsx";
+import FfmpegRequiredDialog from "../../FfmpegRequiredDialog.jsx";
 import { filterStyleFromColor, TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { LITECUT_PROJECT_TEMPLATES, projectBodyFromTemplate } from "./projectTemplates.js";
@@ -86,6 +89,15 @@ import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { stripMp4Extension } from "../../../utils/montageUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
+const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
+
+function ffmpegGateSubtitle(reason, t) {
+  if (reason === "not_configured") return t("montage.ffmpegGateNotConfigured");
+  if (reason === "path_not_found") return t("montage.ffmpegGatePathNotFound");
+  if (reason === "not_usable") return t("montage.ffmpegGateNotUsable");
+  return t("montage.ffmpegGateNotReady");
+}
+
 function clipToMedia(clip, mediaCache) {
   if (!clip) return null;
   if (clip.source_type === "file") {
@@ -121,6 +133,9 @@ export default function LiteCutEditorShell({
   onExportPhaseChange,
 }) {
   const t = useT();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [ffmpegGate, setFfmpegGate] = useState(FFMPEG_GATE_IDLE);
   const {
     projectId,
     projectName,
@@ -264,9 +279,44 @@ export default function LiteCutEditorShell({
     if (selectionInspectorTab) setInspectorTab(selectionInspectorTab);
   }, [selectedClipId, selectedTrackId, selectionInspectorTab]);
 
+  const checkFfmpegGate = useCallback(async () => {
+    setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    try {
+      const { data } = await API.get("config/ffmpeg-check");
+      if (data?.ok) {
+        setFfmpegGate({ loading: false, blocked: false, subtitle: "", message: "" });
+        return;
+      }
+      setFfmpegGate({
+        loading: false,
+        blocked: true,
+        subtitle: ffmpegGateSubtitle(data?.reason, t),
+        message: t("liteCut.ffmpegGateDefaultMessage"),
+      });
+    } catch {
+      setFfmpegGate({
+        loading: false,
+        blocked: true,
+        subtitle: t("montage.ffmpegGateDetectFail"),
+        message: t("montage.ffmpegGateConnectFail"),
+      });
+    }
+  }, [t]);
+
   useEffect(() => {
+    void checkFfmpegGate();
+  }, [checkFfmpegGate, location.pathname]);
+
+  useEffect(() => {
+    const onFocus = () => void checkFfmpegGate();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [checkFfmpegGate]);
+
+  useEffect(() => {
+    if (ffmpegGate.loading || ffmpegGate.blocked) return;
     void loadOrCreateProject();
-  }, [loadOrCreateProject]);
+  }, [loadOrCreateProject, ffmpegGate.loading, ffmpegGate.blocked]);
 
   useEffect(() => {
     if (dirty && projectId && body) persistRecoveryDraft();
@@ -1536,6 +1586,34 @@ export default function LiteCutEditorShell({
   );
 
   const displayName = projectNameProp || projectName;
+
+  if (ffmpegGate.loading) {
+    return (
+      <div
+        className="flex h-full items-center justify-center bg-cs2-bg-page"
+        aria-busy="true"
+        aria-label={t("montage.ffmpegChecking")}
+      >
+        <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 text-sm text-cs2-text-secondary">
+          <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
+          {t("montage.ffmpegChecking")}
+        </div>
+      </div>
+    );
+  }
+
+  if (ffmpegGate.blocked) {
+    return (
+      <div className="relative h-full min-h-0 bg-cs2-bg-page">
+        <FfmpegRequiredDialog
+          title={t("liteCut.ffmpegRequiredTitle")}
+          subtitle={ffmpegGate.subtitle}
+          message={ffmpegGate.message}
+          onGoSettings={() => navigate("/settings")}
+        />
+      </div>
+    );
+  }
 
   if (loading && !projectId) {
     return (

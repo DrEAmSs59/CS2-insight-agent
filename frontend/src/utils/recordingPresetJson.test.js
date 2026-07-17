@@ -14,7 +14,7 @@ const preset = {
   kb_overlay_tick_offset: 6,
   kb_overlay_position: "bottom_center",
   kill_fx_enabled: true,
-  kill_fx_tick_offset: 0,
+  kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
 };
 
@@ -33,15 +33,20 @@ describe("recording preset share JSON", () => {
     expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
 
-  test("defaults kill FX off for older version-1 presets", () => {
+  test("defaults kill FX off when the field is missing", () => {
     const { kill_fx_enabled: _removed, ...legacyPreset } = preset;
     const file = buildRecordingPresetFile(legacyPreset);
     expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_enabled).toBe(false);
   });
 
-  test("defaults KillFX fine-tune offset to zero for older version-1 presets", () => {
+  test("migrates a version-1 KillFX fine-tune to an independent offset", () => {
+    const file = { ...buildRecordingPresetFile({ ...preset, kb_overlay_tick_offset: 8, kill_fx_tick_offset: -2 }), version: 1 };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
+  });
+
+  test("defaults a missing version-1 KillFX fine-tune to the keyboard offset", () => {
     const { kill_fx_tick_offset: _removed, ...legacyPreset } = preset;
-    const file = buildRecordingPresetFile(legacyPreset);
-    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(0);
+    const file = { ...buildRecordingPresetFile(legacyPreset), version: 1 };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
   });
 });

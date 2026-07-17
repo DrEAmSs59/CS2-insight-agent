@@ -26,14 +26,13 @@ describe("recording batch overlay options", () => {
     });
   });
 
-  test("supports a kill-FX-only caller and still forwards its sync offset", () => {
+  test("keeps a kill-FX-only caller independent from the keyboard offset", () => {
     const [request] = applySessionKbOverlayToRequests(
       [{ request_id: "r1", options: {} }],
       { kill_fx_enabled: true, kb_overlay_tick_offset: -4, kill_fx_tick_offset: 3 },
     );
 
     expect(request.options).toEqual({
-      kb_overlay_tick_offset: -4,
       kill_fx_enabled: true,
       kill_fx_tick_offset: 3,
     });

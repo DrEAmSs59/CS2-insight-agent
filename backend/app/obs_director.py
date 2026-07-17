@@ -26,6 +26,7 @@ from obswebsocket import obsws, requests as obs_requests
 from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
+from .demo_playback_compat import repair_demo_in_place
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -2094,6 +2095,26 @@ class OBSDirector:
             logger.warning("Recording blocked because CS2 is already running")
             raise CS2AlreadyRunningError(CS2_RUNNING_MESSAGE)
 
+        game_root = self._game_root_from_cs2_exe(cs2)
+        if not game_root:
+            raise FileNotFoundError(
+                "无法从 cs2.exe 推断 game 目录（应为 .../game/bin/win64/cs2.exe）。请检查侧栏中的 CS2 路径是否指向正版安装。",
+            )
+
+        # Repair and atomically replace the source before touching CS2/OBS
+        # configuration.  A clean demo is left byte-for-byte untouched.
+        compat_report = repair_demo_in_place(demo_abs)
+        logger.info(
+            "Persisted CS2 demo repair: outcome=%s removed_type138=%d "
+            "changed_frames=%d first_tick=%s last_tick=%s source=%s",
+            compat_report.outcome,
+            compat_report.removed_messages,
+            compat_report.changed_frames,
+            compat_report.first_tick,
+            compat_report.last_tick,
+            demo_abs,
+        )
+
         # 启动 CS2 前先对用户配置做快照；CS2 运行期的 archive cvar 写入在
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
@@ -2108,12 +2129,6 @@ class OBSDirector:
                 _arm = warmup.aspect_ratio
                 _mode = _ASPECT_RATIO_VIDEOCFG_MODE.get(_arm) if _arm else None
                 self._patch_video_configs_for_resolution(int(_w), int(_h), _mode)
-
-        game_root = self._game_root_from_cs2_exe(cs2)
-        if not game_root:
-            raise FileNotFoundError(
-                "无法从 cs2.exe 推断 game 目录（应为 .../game/bin/win64/cs2.exe）。请检查侧栏中的 CS2 路径是否指向正版安装。",
-            )
 
         csgo_dir = game_root / "csgo"
         dest_name = f"_insight_{uuid.uuid4().hex}.dem"
@@ -3484,9 +3499,6 @@ class OBSDirector:
                             # 受害者视角片段不展示目标玩家的击杀特效。
                             if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
                                 continue
-                            _seg.metadata["kb_tick_offset"] = getattr(
-                                _dto.options, "kb_overlay_tick_offset", None,
-                            )
                             _seg.metadata["kill_fx_tick_offset"] = getattr(
                                 _dto.options, "kill_fx_tick_offset", None,
                             )

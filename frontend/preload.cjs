@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electron', {
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   isPackaged: () => ipcRenderer.invoke('is-packaged'),
   getVersion: () => ipcRenderer.invoke('get-version'),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   showItemInFolder: (itemPath) => ipcRenderer.invoke('show-item-in-folder', itemPath),
   chooseDirectory: (defaultPath) => ipcRenderer.invoke('choose-directory', defaultPath),
   onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),

@@ -19,14 +19,14 @@ from .gsi_verifier import verify_spec_target
 logger = logging.getLogger(__name__)
 
 def _kb_bus(segment=None):
-    """Return (bus, base_tick_offset, kill_fx_extra_offset).
+    """Return (bus, keyboard_tick_offset, kill_fx_tick_offset).
 
     Priority: if the segment carries kb_track data (injected by the queue handler
     when dto.options.kb_overlay_enabled=True) or kill_track data, activate the bus.
     Otherwise fall back to the global AppConfig flag.
 
-    Both offsets prefer per-request values stashed on segment.metadata and fall
-    back to persisted config. KillFX uses base + extra; keyboard uses base only.
+    Both independent offsets prefer per-request values stashed on
+    segment.metadata and fall back to persisted config.
     """
     def _resolve_offset(seg, metadata_key, config_key, default, cfg=None):
         if seg is not None:
@@ -51,13 +51,13 @@ def _kb_bus(segment=None):
             return None
 
     def _resolved_offsets(seg, cfg):
-        base = _resolve_offset(
+        keyboard = _resolve_offset(
             seg, "kb_tick_offset", "kb_overlay_tick_offset", 0, cfg,
         )
-        kill_fx_extra = _resolve_offset(
+        kill_fx = _resolve_offset(
             seg, "kill_fx_tick_offset", "kill_fx_tick_offset", 0, cfg,
         )
-        return base, kill_fx_extra
+        return keyboard, kill_fx
 
     try:
         if segment is not None and (
@@ -65,13 +65,13 @@ def _kb_bus(segment=None):
             or segment.metadata.get("kill_track") is not None
         ):
             from .kb_overlay_bus import kb_overlay_bus
-            base, kill_fx_extra = _resolved_offsets(segment, _load_cfg())
-            return kb_overlay_bus, base, kill_fx_extra
+            keyboard, kill_fx = _resolved_offsets(segment, _load_cfg())
+            return kb_overlay_bus, keyboard, kill_fx
         cfg = _load_cfg()
         if cfg is not None and (cfg.kb_overlay_enabled or cfg.kill_fx_enabled):
             from .kb_overlay_bus import kb_overlay_bus
-            base, kill_fx_extra = _resolved_offsets(segment, cfg)
-            return kb_overlay_bus, base, kill_fx_extra
+            keyboard, kill_fx = _resolved_offsets(segment, cfg)
+            return kb_overlay_bus, keyboard, kill_fx
     except Exception:
         pass
     return None, 0, 0
@@ -829,10 +829,10 @@ class RecordingExecutor:
                     list(segment.metadata.keys()),
                     len(_kb_frames) if _kb_frames is not None else "None(key missing)",
                 )
-                _bus, _tick_off, _fx_extra_off = _kb_bus(segment)
+                _bus, _kb_tick_off, _fx_tick_off = _kb_bus(segment)
                 logger.info(
-                    "[kb_overlay] seg=%d bus=%s base_tick_off=%s kill_fx_extra_off=%s",
-                    segment.segment_index, _bus, _tick_off, _fx_extra_off,
+                    "[overlay] seg=%d bus=%s kb_tick_off=%s kill_fx_tick_off=%s",
+                    segment.segment_index, _bus, _kb_tick_off, _fx_tick_off,
                 )
                 if _bus:
                     await _bus.broadcast({
@@ -841,9 +841,8 @@ class RecordingExecutor:
                         "start_tick": segment.start_tick,
                         "end_tick": segment.end_tick,
                         "tick_rate": plan.tick_rate,
-                        "offset_ticks": _tick_off,
-                        "kill_fx_offset_ticks": _tick_off + _fx_extra_off,
-                        "kill_fx_extra_offset_ticks": _fx_extra_off,
+                        "offset_ticks": _kb_tick_off,
+                        "kill_fx_offset_ticks": _fx_tick_off,
                         "frames": _kb_frames or [],
                         "kills": segment.metadata.get("kill_track") or [],
                     })

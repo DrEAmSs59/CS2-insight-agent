@@ -24,6 +24,8 @@ import RoundTimelineView from "./analysis/timeline/RoundTimelineView";
 import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
+import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
+import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 
 /**
  * @param {{
@@ -52,6 +54,7 @@ export default function DemoInfoModal({
   onDequeue,
 }) {
   const t = useT();
+  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
   const [tab, setTab] = useState("parse"); // "parse" | "clips" | "weapon_kills" | "timeline"
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -223,6 +226,20 @@ export default function DemoInfoModal({
       setParsing(false);
     }
   }, [demoId, selectedPlayers, freezeToDeathDraft]);
+
+  const handlePlayDemo = useCallback(async () => {
+    if (!demoId) return;
+    const label =
+      (demoData?.display_name && String(demoData.display_name).trim()) ||
+      demoData?.filename ||
+      `#${demoId}`;
+    try {
+      await playDemoInCs2({ id: demoId });
+      showPlayToast(true, label);
+    } catch (e) {
+      showPlayToast(false, playDemoErrorLabel(e));
+    }
+  }, [demoId, demoData, showPlayToast]);
 
   const handleToggleClip = useCallback((uid) => {
     if (!uid || queuedClientClipUids.has(uid)) return;
@@ -447,9 +464,12 @@ export default function DemoInfoModal({
     return total;
   }, [parsedPlayers, queuedClientClipUids]);
 
-  if (!open || !demoId) return null;
+  if (!open || !demoId) {
+    return <PlayDemoToast />;
+  }
 
   return (
+    <>
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
       role="dialog"
@@ -494,7 +514,9 @@ export default function DemoInfoModal({
             <div className="p-6 space-y-6">
               {/* Scoreboard and Player selection */}
               <div className="grid grid-cols-1 gap-6">
-                {matchMeta.map_name && <MatchScoreboard matchMeta={matchMeta} />}
+                {matchMeta.map_name && (
+                  <MatchScoreboard matchMeta={matchMeta} onPlay={handlePlayDemo} />
+                )}
                 
                 <div className="flex items-center gap-2 border-b border-cs2-border pb-2">
                    <button
@@ -657,5 +679,7 @@ export default function DemoInfoModal({
         </div>
       </div>
     </div>
+    <PlayDemoToast />
+    </>
   );
 }

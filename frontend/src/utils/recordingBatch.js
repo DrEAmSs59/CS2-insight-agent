@@ -198,7 +198,7 @@ export function applySessionKbOverlayToRequests(requests, session) {
     options: {
       ...(r.options || {}),
       ...(hasKb && { kb_overlay_enabled: session.kb_overlay_enabled }),
-      ...((hasKb || hasFx) && typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
+      ...(hasKb && typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
       ...(hasKb && typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
       ...(hasFx && { kill_fx_enabled: session.kill_fx_enabled }),
       ...(hasFx && typeof session.kill_fx_tick_offset === "number" && { kill_fx_tick_offset: session.kill_fx_tick_offset }),

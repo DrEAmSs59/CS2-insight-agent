@@ -200,7 +200,7 @@ export default function App() {
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   const [killFxEnabled, setKillFxEnabled] = useState(false);
-  const [killFxTickOffset, setKillFxTickOffset] = useState(0);
+  const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -1071,6 +1071,14 @@ export default function App() {
     try {
       const formData = new FormData();
       list.forEach((f) => formData.append("files", f));
+      const sourcePaths = list.map((f) => {
+        try {
+          return window.electron?.getPathForFile?.(f) || "";
+        } catch {
+          return "";
+        }
+      });
+      formData.append("source_paths_json", JSON.stringify(sourcePaths));
       const { data } = await API.post("/demo/upload-multiple", formData);
       const uploads = data.uploads ?? [];
       setUploadedDemos(uploads);
@@ -1814,7 +1822,7 @@ export default function App() {
       kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
       kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
       kill_fx_enabled: !!payload?.kill_fx_enabled,
-      kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 0,
+      kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {

@@ -1,5 +1,5 @@
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 1;
+export const RECORDING_PRESET_VERSION = 2;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -97,10 +97,14 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (value.version !== RECORDING_PRESET_VERSION) invalid("version", "version");
+  if (value.version !== 1 && value.version !== RECORDING_PRESET_VERSION) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
+  const kbOverlayTickOffset = requireNumber(p.kb_overlay_tick_offset, "kb_overlay_tick_offset", -6400, 6400, true);
+  const storedKillFxOffset = Object.hasOwn(p, "kill_fx_tick_offset")
+    ? requireNumber(p.kill_fx_tick_offset, "kill_fx_tick_offset", -6400, 6400, true)
+    : 0;
   const result = {
     recording_global_pacing: parsePacing(p.recording_global_pacing),
     default_record_warmup: parseWarmup(p.default_record_warmup, warmupDefaults),
@@ -110,14 +114,16 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     obs_transition_name: requireString(p.obs_transition_name, "obs_transition_name", 128),
     obs_transition_duration_ms: requireNumber(p.obs_transition_duration_ms, "obs_transition_duration_ms", 0, 10000, true),
     kb_overlay_enabled: requireBoolean(p.kb_overlay_enabled, "kb_overlay_enabled"),
-    kb_overlay_tick_offset: requireNumber(p.kb_overlay_tick_offset, "kb_overlay_tick_offset", -6400, 6400, true),
+    kb_overlay_tick_offset: kbOverlayTickOffset,
     kb_overlay_position: requireString(p.kb_overlay_position, "kb_overlay_position", 32),
     kill_fx_enabled: Object.hasOwn(p, "kill_fx_enabled")
       ? requireBoolean(p.kill_fx_enabled, "kill_fx_enabled")
       : false,
-    kill_fx_tick_offset: Object.hasOwn(p, "kill_fx_tick_offset")
-      ? requireNumber(p.kill_fx_tick_offset, "kill_fx_tick_offset", -6400, 6400, true)
-      : 0,
+    // Version 1 stored a KillFX fine-tune relative to the keyboard offset.
+    // Version 2 stores two independent absolute offsets.
+    kill_fx_tick_offset: value.version === 1
+      ? kbOverlayTickOffset + storedKillFxOffset
+      : (Object.hasOwn(p, "kill_fx_tick_offset") ? storedKillFxOffset : 6),
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {

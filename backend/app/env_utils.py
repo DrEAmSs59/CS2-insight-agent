@@ -427,11 +427,13 @@ class AppConfig(BaseModel):
     match_count: int = 20         # 20 / 50 / 100
     # 虚拟键盘 overlay（OBS Browser Source 实时合成）
     kb_overlay_enabled: bool = False
-    kb_overlay_tick_offset: int = 6   # 公共 Overlay 基础偏移；正=overlay 提前显示，负=延迟显示
+    kb_overlay_tick_offset: int = 6   # 键盘独立偏移；正=提前显示，负=延迟显示
     kb_overlay_position: str = "bottom_center"  # bottom_center | minimap_below
-    # 击杀特效 overlay（OBS Browser Source 实时合成）。专用微调叠加在公共基础偏移之上。
+    # 击杀特效 overlay（OBS Browser Source 实时合成）
     kill_fx_enabled: bool = False
-    kill_fx_tick_offset: int = 0
+    kill_fx_tick_offset: int = 6      # KillFX 独立偏移；不再与键盘偏移叠加
+    # 兼容标记：旧配置中 kill_fx_tick_offset 是叠加在键盘偏移上的额外微调。
+    overlay_offsets_independent: bool = True
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
@@ -470,6 +472,21 @@ def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = N
         if cfg.record_inject_console_lines != _DEFAULT_RECORD_INJECT_CONSOLE_LINES:
             cfg.record_inject_console_lines = _DEFAULT_RECORD_INJECT_CONSOLE_LINES
             changed = True
+
+    # 旧配置中的 KillFX offset 是相对 kb_overlay_tick_offset 的额外微调。
+    # 一次性换算为绝对 offset，升级后两个 Overlay 的时间校准互不影响。
+    if isinstance(raw, dict) and not bool(raw.get("overlay_offsets_independent", False)):
+        try:
+            kb_offset = int(raw.get("kb_overlay_tick_offset", cfg.kb_overlay_tick_offset))
+        except (TypeError, ValueError):
+            kb_offset = int(cfg.kb_overlay_tick_offset)
+        try:
+            legacy_kill_fx_extra = int(raw.get("kill_fx_tick_offset", 0))
+        except (TypeError, ValueError):
+            legacy_kill_fx_extra = 0
+        cfg.kill_fx_tick_offset = kb_offset + legacy_kill_fx_extra
+        cfg.overlay_offsets_independent = True
+        changed = True
     return changed
 
 

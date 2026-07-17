@@ -169,7 +169,7 @@ export default function RecordWarmupModal({
   initKbOverlayTickOffset = 6,
   initKbOverlayPosition = "bottom_center",
   initKillFxEnabled = false,
-  initKillFxTickOffset = 0,
+  initKillFxTickOffset = 6,
 }) {
   const t = useT();
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
@@ -181,7 +181,7 @@ export default function RecordWarmupModal({
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   const [killFxEnabled, setKillFxEnabled] = useState(false);
-  const [killFxTickOffset, setKillFxTickOffset] = useState(0);
+  const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
@@ -439,38 +439,6 @@ export default function RecordWarmupModal({
             </div>
           </section>
 
-          <section aria-labelledby="sec-overlay-sync">
-            <SectionHeader en="Keyboard & KillFX Timing" zh={t("record.warmupSecOverlaySync")} />
-            <div id="sec-overlay-sync" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
-                <input
-                  type="number"
-                  value={kbOverlayTickOffset}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
-                  }}
-                  onBlur={() => {
-                    if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
-                      setKbOverlayTickOffset(0);
-                    }
-                  }}
-                  min="-120"
-                  max="120"
-                  step="1"
-                  className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                />
-                <span className="text-xs text-cs2-text-muted tabular-nums">
-                  ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-cs2-text-muted leading-relaxed">
-                {t("record.warmupKbSyncHint")}
-              </p>
-            </div>
-          </section>
-
           <section aria-labelledby="sec-overlays">
             <SectionHeader en="Keyboard & KillFX" zh={t("record.commonSecOverlays")} />
             <div id="sec-overlays" className="grid gap-3 xl:grid-cols-2">
@@ -489,21 +457,49 @@ export default function RecordWarmupModal({
                   {t("record.warmupKbDesc")}
                 </p>
                 {kbOverlayEnabled && (
-                  <div className="mt-3 pl-7 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
-                    {KB_POSITIONS.map(({ value, labelKey }) => (
-                      <label key={value} className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="kb-pos-warmup"
-                          value={value}
-                          checked={kbOverlayPosition === value}
-                          onChange={() => setKbOverlayPosition(value)}
-                          className="accent-cs2-orange"
-                        />
-                        <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
-                      </label>
-                    ))}
+                  <div className="mt-3 pl-7 flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
+                      {KB_POSITIONS.map(({ value, labelKey }) => (
+                        <label key={value} className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="kb-pos-warmup"
+                            value={value}
+                            checked={kbOverlayPosition === value}
+                            onChange={() => setKbOverlayPosition(value)}
+                            className="accent-cs2-orange"
+                          />
+                          <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
+                      <input
+                        type="number"
+                        value={kbOverlayTickOffset}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
+                        }}
+                        onBlur={() => {
+                          if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
+                            setKbOverlayTickOffset(0);
+                          }
+                        }}
+                        min="-120"
+                        max="120"
+                        step="1"
+                        className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
+                      />
+                      <span className="text-xs text-cs2-text-muted tabular-nums">
+                        ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
+                      </span>
+                    </div>
+                    <p className="text-xs text-cs2-text-muted leading-relaxed">
+                      {t("record.warmupKbSyncHint")}
+                    </p>
                   </div>
                 )}
               </div>

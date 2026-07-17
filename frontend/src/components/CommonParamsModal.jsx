@@ -123,7 +123,7 @@ export default function CommonParamsModal({
   kbOverlayTickOffset: initKbOverlayTickOffset = 6,
   kbOverlayPosition: initKbOverlayPosition = "bottom_center",
   killFxEnabled: initKillFxEnabled = false,
-  killFxTickOffset: initKillFxTickOffset = 0,
+  killFxTickOffset: initKillFxTickOffset = 6,
   configRefreshKey = 0,
   onRegisterSave,
   onSaveUiChange,
@@ -934,36 +934,6 @@ export default function CommonParamsModal({
               </WorkflowSection>
 
               <WorkflowSection
-                title={t("record.warmupSecOverlaySync")}
-                subtitle={t("record.commonKbSyncHint")}
-                defaultOpen
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
-                  <input
-                    type="number"
-                    value={kbOverlayTickOffset}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
-                    }}
-                    onBlur={() => {
-                      if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
-                        setKbOverlayTickOffset(0);
-                      }
-                    }}
-                    min="-120"
-                    max="120"
-                    step="1"
-                    className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                  />
-                  <span className="text-xs text-cs2-text-muted tabular-nums">
-                    ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                  </span>
-                </div>
-              </WorkflowSection>
-
-              <WorkflowSection
                 title={t("record.commonSecOverlays")}
                 subtitle={t("record.commonSecOverlaysSubtitle")}
                 defaultOpen
@@ -987,21 +957,49 @@ export default function CommonParamsModal({
                       {t("record.commonKbDesc")}
                     </p>
                     {kbOverlayEnabled && (
-                      <div className="mt-3 pl-7 flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
-                        {KB_POSITIONS.map(({ value, labelKey }) => (
-                          <label key={value} className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="kb-pos-common"
-                              value={value}
-                              checked={kbOverlayPosition === value}
-                              onChange={() => setKbOverlayPosition(value)}
-                              className="accent-cs2-orange"
-                            />
-                            <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
-                          </label>
-                        ))}
+                      <div className="mt-3 pl-7 flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
+                          {KB_POSITIONS.map(({ value, labelKey }) => (
+                            <label key={value} className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="kb-pos-common"
+                                value={value}
+                                checked={kbOverlayPosition === value}
+                                onChange={() => setKbOverlayPosition(value)}
+                                className="accent-cs2-orange"
+                              />
+                              <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
+                          <input
+                            type="number"
+                            value={kbOverlayTickOffset}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
+                            }}
+                            onBlur={() => {
+                              if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
+                                setKbOverlayTickOffset(0);
+                              }
+                            }}
+                            min="-120"
+                            max="120"
+                            step="1"
+                            className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
+                          />
+                          <span className="text-xs text-cs2-text-muted tabular-nums">
+                            ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
+                          </span>
+                        </div>
+                        <p className="text-xs text-cs2-text-muted leading-relaxed">
+                          {t("record.warmupKbSyncHint")}
+                        </p>
                       </div>
                     )}
                   </div>

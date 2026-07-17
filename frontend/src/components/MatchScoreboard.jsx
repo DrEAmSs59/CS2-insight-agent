@@ -1,12 +1,14 @@
-import { Trophy } from "lucide-react";
+import { Play, Trophy } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 
 /**
  * 全局计分板 — 与 PlayerSelect 列顺序一致：
  * 左「队伍 A」= 玩家列表左列 (team_num 3) → 后端 team_b_score (winner==3)
  * 右「队伍 B」= 玩家列表右列 (team_num 2) → 后端 team_a_score (winner==2)
+ *
+ * @param {{ matchMeta: object, onPlay?: () => void }} props
  */
-export default function MatchScoreboard({ matchMeta }) {
+export default function MatchScoreboard({ matchMeta, onPlay }) {
   const t = useT();
   if (!matchMeta) return null;
 
@@ -30,6 +32,18 @@ export default function MatchScoreboard({ matchMeta }) {
         className="h-1 w-full bg-gradient-to-r from-sky-500 via-violet-500/80 to-amber-500 opacity-90"
         aria-hidden
       />
+
+      {typeof onPlay === "function" && (
+        <button
+          type="button"
+          onClick={onPlay}
+          className="absolute left-2 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface transition-all hover:bg-cs2-emerald-surface hover:text-cs2-text-primary sm:left-3 sm:top-3.5"
+          title={t("match.btnPlayCs2")}
+          aria-label={t("match.btnPlayCs2")}
+        >
+          <Play className="h-4 w-4 fill-current" />
+        </button>
+      )}
 
       <div className="px-4 pb-2.5 pt-2 sm:px-6 sm:pb-3 sm:pt-2.5">
         <div className="mb-0.5 flex items-center justify-center gap-2">

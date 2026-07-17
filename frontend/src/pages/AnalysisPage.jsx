@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import DemoUpload from "../components/DemoUpload";
 import PlayerSelect from "../components/PlayerSelect";
 import MatchScoreboard from "../components/MatchScoreboard";
@@ -12,11 +12,14 @@ import { Loader2, RefreshCw, Film, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAppShell } from "../context/AppShellContext";
 import { useT } from "../i18n/useT.js";
+import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
+import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 
 export default function AnalysisPage() {
   const s = useAppShell();
   const t = useT();
+  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
   const [analysisViewMode, setAnalysisViewMode] = useState("clips");
   const timelineRounds = s.timeline?.rounds?.length ?? 0;
   const roundTlLen = s.roundTimeline?.length ?? 0;
@@ -27,6 +30,20 @@ export default function AnalysisPage() {
     s.currentParsed &&
     (s.clips.length > 0 || s.parsedPlayerNames.length > 0 || hasTimeline);
   const showPlayerTabs = s.parsedPlayerNames.length > 1;
+  const currentUpload = s.uploadedDemos?.[s.currentMatchIndex] ?? null;
+
+  const handlePlayCurrentDemo = useCallback(async () => {
+    const label =
+      (currentUpload?.filename && String(currentUpload.filename).trim()) ||
+      s.currentFilename ||
+      "Demo";
+    try {
+      await playDemoInCs2({ id: currentUpload?.id, path: currentUpload?.path });
+      showPlayToast(true, label);
+    } catch (e) {
+      showPlayToast(false, playDemoErrorLabel(e));
+    }
+  }, [currentUpload, s.currentFilename, showPlayToast]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -95,7 +112,12 @@ export default function AnalysisPage() {
 
             {s.players.length > 0 && (
               <div className="space-y-4">
-                {s.matchMeta && <MatchScoreboard matchMeta={s.matchMeta} />}
+                {s.matchMeta && (
+                  <MatchScoreboard
+                    matchMeta={s.matchMeta}
+                    onPlay={currentUpload?.id || currentUpload?.path ? handlePlayCurrentDemo : undefined}
+                  />
+                )}
                 <PlayerSelect
                   players={s.players}
                   selected={s.selectedPlayersList}
@@ -332,6 +354,7 @@ export default function AnalysisPage() {
           canAddAllHighlights={s.canAddAllHighlights}
         />
       )}
+      <PlayDemoToast />
     </div>
   );
 }

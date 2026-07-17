@@ -471,7 +471,6 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
             # 受害者视角片段不展示目标玩家的击杀特效。
             if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
                 continue
-            _seg.metadata["kb_tick_offset"] = dto.options.kb_overlay_tick_offset
             _seg.metadata["kill_fx_tick_offset"] = dto.options.kill_fx_tick_offset
             try:
                 _seg.metadata["kill_track"] = _extract_fx(

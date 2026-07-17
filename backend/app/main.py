@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -23,7 +24,7 @@ from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,6 +49,7 @@ from .env_utils import (
 )
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
+from .demo_playback_compat import repair_demo_in_place
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import (
@@ -259,7 +261,7 @@ async def lifespan(_: FastAPI):
 
     **为什么不再自动扫描**：watchdog Observer 会在目录出现新 .dem 时立刻触发
     ``_enqueue_demo_path``，其中包含 ``get_demo_match_summary`` 的轻量解析。录制期我们会
-    ``shutil.copy2`` 一个 ``_insight_<uuid>.dem`` 到 CS2 的 ``csgo/``；若用户的监听目录与
+    准备一个兼容性复验后的 ``_insight_<uuid>.dem`` 到 CS2 的 ``csgo/``；若用户的监听目录与
     ``csgo/`` 有重叠（常见：就是把 CS2 的 replay 目录作为监听目录），**每次录制都会在后台触发
     入库与轻量读盘**（记分板元数据等），仍可能与录制争用磁盘；历史上还曾叠加「名单自动深度解析」
     加重负载，故默认不在启动时全量扫描。
@@ -464,6 +466,65 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
     except Exception as e:  # noqa: BLE001
         logger.exception("Upload metadata inspection failed for %s: %s", dem_path, e)
         return [], {}
+
+
+def _save_uploaded_demo(file: UploadFile, destination: Path) -> str:
+    """Save one upload and return the MD5 calculated during that same read."""
+
+    digest = hashlib.md5()
+    with destination.open("wb") as writer:
+        while chunk := file.file.read(1024 * 1024):
+            writer.write(chunk)
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _decode_upload_source_paths(raw: Optional[str], count: int) -> list[Optional[str]]:
+    """Decode Electron source paths; malformed browser input safely means no paths."""
+
+    if not raw:
+        return [None] * count
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Ignoring malformed demo upload source_paths_json")
+        return [None] * count
+    if not isinstance(decoded, list) or len(decoded) != count:
+        logger.warning(
+            "Ignoring demo upload source paths with unexpected count: expected=%d",
+            count,
+        )
+        return [None] * count
+    return [item.strip() if isinstance(item, str) and item.strip() else None for item in decoded]
+
+
+def _verified_upload_source_path(
+    raw_source_path: Optional[str],
+    uploaded_path: Path,
+    uploaded_md5: str,
+) -> Path:
+    """Use an Electron local path only when it is the exact uploaded demo."""
+
+    if not raw_source_path:
+        return uploaded_path
+    try:
+        source = Path(raw_source_path).resolve(strict=True)
+        if not source.is_file() or source.suffix.lower() != ".dem":
+            raise ValueError("source is not a .dem file")
+        if source.stat().st_size != uploaded_path.stat().st_size:
+            raise ValueError("source size does not match upload")
+        if file_md5_hex(source) != uploaded_md5:
+            raise ValueError("source content does not match upload")
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Demo upload source path was not trusted; using temporary copy: source=%r reason=%s",
+            raw_source_path,
+            exc,
+        )
+        return uploaded_path
+
+    logger.info("Verified original demo path for persistent repair: %s", source)
+    return source
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
@@ -1421,36 +1482,56 @@ class ParseRequest(BaseModel):
 
 
 @app.post("/api/demo/upload")
-async def upload_demo(file: UploadFile = File(...)):
-    if not file.filename or not file.filename.endswith(".dem"):
+async def upload_demo(
+    file: UploadFile = File(...),
+    source_path: Annotated[Optional[str], Form()] = None,
+):
+    if not file.filename or not str(file.filename).lower().endswith(".dem"):
         raise HTTPException(400, "Only .dem files are accepted")
 
-    dest = UPLOAD_DIR / file.filename
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    filename = Path(file.filename).name
+    dest = UPLOAD_DIR / filename
+    uploaded_md5 = _save_uploaded_demo(file, dest)
+    persistent_path = await asyncio.to_thread(
+        _verified_upload_source_path,
+        source_path,
+        dest,
+        uploaded_md5,
+    )
 
     players, match_meta = await _safe_upload_demo_meta(dest)
     return {
-        "filename": file.filename,
-        "path": str(dest),
+        "filename": filename,
+        "path": str(persistent_path),
+        "uploaded_path": str(dest),
         "players": players,
         "match_meta": match_meta,
     }
 
 
 @app.post("/api/demo/upload-multiple")
-async def upload_demos(files: Annotated[list[UploadFile], File()]):
+async def upload_demos(
+    files: Annotated[list[UploadFile], File()],
+    source_paths_json: Annotated[Optional[str], Form()] = None,
+):
     """一次上传多个 .dem，返回与单文件 upload 相同结构的数组。"""
     if not files:
         raise HTTPException(400, "请至少选择一个文件")
-    saved: list[tuple[str, Path]] = []
-    for file in files:
+    source_paths = _decode_upload_source_paths(source_paths_json, len(files))
+    saved: list[tuple[str, Path, Path]] = []
+    for file, source_path in zip(files, source_paths):
         if not file.filename or not str(file.filename).lower().endswith(".dem"):
             raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
-        dest = UPLOAD_DIR / file.filename
-        with dest.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
-        saved.append((file.filename, dest))
+        filename = Path(file.filename).name
+        dest = UPLOAD_DIR / filename
+        uploaded_md5 = _save_uploaded_demo(file, dest)
+        persistent_path = await asyncio.to_thread(
+            _verified_upload_source_path,
+            source_path,
+            dest,
+            uploaded_md5,
+        )
+        saved.append((filename, dest, persistent_path))
 
     inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
 
@@ -1458,13 +1539,14 @@ async def upload_demos(files: Annotated[list[UploadFile], File()]):
         async with inspect_sem:
             return await _safe_upload_demo_meta(dest)
 
-    inspected = await asyncio.gather(*(_inspect_one(dest) for _, dest in saved))
+    inspected = await asyncio.gather(*(_inspect_one(dest) for _, dest, _ in saved))
     out: list[dict] = []
-    for (filename, dest), (players, match_meta) in zip(saved, inspected):
+    for (filename, dest, persistent_path), (players, match_meta) in zip(saved, inspected):
         out.append(
             {
                 "filename": filename,
-                "path": str(dest),
+                "path": str(persistent_path),
+                "uploaded_path": str(dest),
                 "players": players,
                 "match_meta": match_meta,
             },
@@ -2508,20 +2590,14 @@ async def delete_demo(
     return {"status": "deleted", "demo_id": demo_id}
 
 
-@app.post("/api/demos/{demo_id}/play")
-async def play_demo_in_cs2(demo_id: int):
+def _launch_cs2_play_demo(dem_path: Path) -> None:
     """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
-    row = await demo_db.get_demo_by_id(demo_id)
-    if not row:
-        raise HTTPException(404, f"Demo not found: {demo_id}")
-
     cfg = load_config()
     cs2_path = cfg.cs2_path
     if not cs2_path or not Path(cs2_path).is_file():
         raise HTTPException(400, "CS2 路径未配置或文件不存在，请先在设置中配置 CS2 路径。")
 
-    dem_path = row.get("path") or ""
-    if not dem_path or not Path(dem_path).is_file():
+    if not dem_path.is_file():
         raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
 
     try:
@@ -2530,9 +2606,24 @@ async def play_demo_in_cs2(demo_id: int):
         game_root = cs2_bin.parents[2]
         csgo_dir = game_root / "csgo"
         dest = csgo_dir / "cs2_insight_preview.dem"
+        # Persist the verified repair at the library/source path first, then
+        # copy those already-safe bytes into CS2's fixed playback artifact.
+        compat_report = repair_demo_in_place(dem_path)
+        dest.unlink(missing_ok=True)
         shutil.copy2(dem_path, dest)
+        logger.info(
+            "Persisted direct CS2 demo repair: outcome=%s removed_type138=%d "
+            "changed_frames=%d first_tick=%s last_tick=%s source=%s",
+            compat_report.outcome,
+            compat_report.removed_messages,
+            compat_report.changed_frames,
+            compat_report.first_tick,
+            compat_report.last_tick,
+            dem_path,
+        )
         logger.info("Launch CS2 for playback: cwd=%s demo=%s", game_root, dest)
         import subprocess as _sp
+
         creationflags = 0
         if sys.platform == "win32":
             creationflags = (
@@ -2540,17 +2631,53 @@ async def play_demo_in_cs2(demo_id: int):
                 | getattr(_sp, "DETACHED_PROCESS", 0)
             )
         _sp.Popen(
-            [str(cs2_bin), "-steam", "-insecure", "-novid", "-console",
-             "+playdemo", "cs2_insight_preview.dem"],
+            [
+                str(cs2_bin),
+                "-steam",
+                "-insecure",
+                "-novid",
+                "-console",
+                "+playdemo",
+                "cs2_insight_preview.dem",
+            ],
             cwd=str(game_root),
-            stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            stdin=_sp.DEVNULL,
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
             close_fds=True,
             creationflags=creationflags,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to launch CS2 for playback")
         raise HTTPException(500, f"启动 CS2 失败: {e}") from e
 
+
+class DemoPlayByPathBody(BaseModel):
+    path: str = Field(..., min_length=1)
+
+
+@app.post("/api/demo/play")
+async def play_demo_by_path(body: DemoPlayByPathBody):
+    """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
+    dem_path = resolve_uploaded_demo_path(body.path)
+    await asyncio.to_thread(_launch_cs2_play_demo, dem_path)
+    return {"ok": True}
+
+
+@app.post("/api/demos/{demo_id}/play")
+async def play_demo_in_cs2(demo_id: int):
+    """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
+    row = await demo_db.get_demo_by_id(demo_id)
+    if not row:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
+
+    dem_path = row.get("path") or ""
+    if not dem_path or not Path(dem_path).is_file():
+        raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
+
+    await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path))
     return {"ok": True}
 
 
