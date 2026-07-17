@@ -294,7 +294,7 @@ async def lifespan(_: FastAPI):
             _FAULT_LOG_FILE.close()
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.4.0", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version="2.3.0", lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
@@ -3613,7 +3613,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.4.0"}
+    return {"status": "ok", "version": "2.3.0"}
 
 
 @app.get("/")

@@ -20,7 +20,7 @@ from .env_utils import get_data_dir
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "V2.4.0"
+APP_VERSION = "V2.3.0"
 DEFAULT_PROJECT_PROFILE = "未命名"  # 解析失败时的兜底目录名；正常由 resolve_default_project_profile_for_obs() 解析
 BACKUP_SUBDIR = ".obs_config_backups"
 
