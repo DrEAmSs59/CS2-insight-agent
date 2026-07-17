@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import os
+import threading
 
 import pandas as pd
 from demoparser2 import DemoParser
@@ -49,6 +51,77 @@ EPHEMERAL_KEYS = ("jump", "fire", "scope")
 _MAX_TICKS = 2000
 # 降采样时短按合并：全 tick 密采样上限（约 8 分钟 @64tick）
 _MAX_DENSE_TICKS = 32_000
+
+_CACHE_LOCK = threading.Lock()
+_CACHE_LOAD_LOCKS = tuple(threading.Lock() for _ in range(8))
+_TICK_CACHE_MAX = 8
+_EVENT_CACHE_MAX = 8
+_tick_table_cache: dict[tuple, pd.DataFrame] = {}
+_event_table_cache: dict[tuple, pd.DataFrame] = {}
+
+
+def _demo_cache_key(demo_path: str) -> tuple[str, int, int]:
+    try:
+        stat = os.stat(demo_path)
+        return (os.path.abspath(demo_path), int(stat.st_size), int(stat.st_mtime_ns))
+    except OSError:
+        return (os.path.abspath(demo_path), 0, 0)
+
+
+def _load_tick_table(demo_path: str, props: list[str], ticks: list[int]) -> pd.DataFrame:
+    key = (_demo_cache_key(demo_path), tuple(props), tuple(ticks))
+    with _CACHE_LOCK:
+        hit = _tick_table_cache.get(key)
+    if hit is not None:
+        return hit
+    load_lock = _CACHE_LOAD_LOCKS[hash(key) % len(_CACHE_LOAD_LOCKS)]
+    with load_lock:
+        with _CACHE_LOCK:
+            hit = _tick_table_cache.get(key)
+        if hit is not None:
+            return hit
+        table = _to_df(DemoParser(demo_path).parse_ticks(props, ticks=ticks))
+        with _CACHE_LOCK:
+            if len(_tick_table_cache) >= _TICK_CACHE_MAX:
+                _tick_table_cache.pop(next(iter(_tick_table_cache)))
+            _tick_table_cache[key] = table
+        return table
+
+
+def _load_event_table(demo_path: str, event_name: str, *, rich_fire: bool = False) -> pd.DataFrame:
+    key = (_demo_cache_key(demo_path), event_name, rich_fire)
+    with _CACHE_LOCK:
+        hit = _event_table_cache.get(key)
+    if hit is not None:
+        return hit
+    load_lock = _CACHE_LOAD_LOCKS[hash(key) % len(_CACHE_LOAD_LOCKS)]
+    with load_lock:
+        with _CACHE_LOCK:
+            hit = _event_table_cache.get(key)
+        if hit is not None:
+            return hit
+        parser = DemoParser(demo_path)
+        try:
+            if rich_fire:
+                table = _to_df(parser.parse_event(
+                    event_name,
+                    player=["FIRE", "RIGHTCLICK", "buttons"],
+                ))
+            else:
+                table = _to_df(parser.parse_event(event_name))
+        except Exception:
+            if rich_fire:
+                try:
+                    table = _to_df(parser.parse_event(event_name))
+                except Exception:
+                    table = pd.DataFrame()
+            else:
+                table = pd.DataFrame()
+        with _CACHE_LOCK:
+            if len(_event_table_cache) >= _EVENT_CACHE_MAX:
+                _event_table_cache.pop(next(iter(_event_table_cache)))
+            _event_table_cache[key] = table
+        return table
 
 
 def _resolve_col(df: pd.DataFrame, *candidates: str) -> str | None:
@@ -396,17 +469,20 @@ def extract_input_track(
     player_name: str | None = None,
     start_tick: int,
     end_tick: int,
+    shared_start_tick: int | None = None,
+    shared_end_tick: int | None = None,
 ) -> list[dict]:
     """返回 [{tick, W,A,S,D,jump,crouch,walk,reload,fire,scope}, ...]（按 tick 升序）。
 
     steamid 为主键；缺失时用 player_name 兜底（存在 steamid 缺失的真实片段）。
     """
-    parser = DemoParser(demo_path)
     start_i = int(start_tick)
     end_i = int(end_tick)
-    total = end_i - start_i + 1
+    parse_start_i = min(start_i, int(shared_start_tick)) if shared_start_tick is not None else start_i
+    parse_end_i = max(end_i, int(shared_end_tick)) if shared_end_tick is not None else end_i
+    total = parse_end_i - parse_start_i + 1
     stride = max(1, (total + _MAX_TICKS - 1) // _MAX_TICKS)
-    sample_ticks = list(range(start_i, end_i + 1, stride))
+    sample_ticks = list(range(parse_start_i, parse_end_i + 1, stride))
 
     tick_props = [
         PROP_BUTTONS,
@@ -430,7 +506,11 @@ def extract_input_track(
         "name",
         "steamid",
     ]
-    df = _to_df(parser.parse_ticks(tick_props, ticks=sample_ticks))
+    df = _load_tick_table(demo_path, tick_props, sample_ticks)
+    if df.empty:
+        return []
+    frame_ticks = pd.to_numeric(df["tick"], errors="coerce")
+    df = df.loc[(frame_ticks >= start_i) & (frame_ticks <= end_i)]
     if df.empty:
         return []
 
@@ -460,6 +540,7 @@ def extract_input_track(
     uses_usercmd_fallback = c_mask == PROP_USERCMD_BUTTONS
     mask_ints = _to_int_list(pdf[c_mask])
     n = len(mask_ints)
+    fire_events = _load_event_table(demo_path, "weapon_fire", rich_fire=True)
     if uses_usercmd_fallback:
         inferred = _infer_movement_from_motion(pdf)
         w_derived = inferred["W"]
@@ -509,9 +590,8 @@ def extract_input_track(
     ephemeral: dict[int, dict[str, bool]] = {}
     if stride > 1 and not uses_usercmd_fallback:
         dense_stride = max(1, (total + _MAX_DENSE_TICKS - 1) // _MAX_DENSE_TICKS)
-        dense_ticks = list(range(start_i, end_i + 1, dense_stride))
-        dense_df = _to_df(parser.parse_ticks(
-            [
+        dense_ticks = list(range(parse_start_i, parse_end_i + 1, dense_stride))
+        dense_props = [
                 PROP_BUTTONS,
                 PROP_USERCMD_BUTTONS,
                 PROP_FIRE,
@@ -519,9 +599,13 @@ def extract_input_track(
                 PROP_SCOPE,
                 "name",
                 "steamid",
-            ],
-            ticks=dense_ticks,
-        ))
+            ]
+        dense_df = _load_tick_table(demo_path, dense_props, dense_ticks)
+        if not dense_df.empty:
+            dense_values = pd.to_numeric(dense_df["tick"], errors="coerce")
+            dense_df = dense_df.loc[
+                (dense_values >= start_i) & (dense_values <= end_i)
+            ]
         if not dense_df.empty:
             d_mask = _resolve_button_mask_col(dense_df)
             d_fire = _resolve_col(dense_df, PROP_FIRE)
@@ -549,17 +633,15 @@ def extract_input_track(
         # New demos only expose sparse/stale usercmd snapshots through
         # demoparser2. Game events remain tick-accurate, so use them for the
         # mouse buttons instead of the repeated button mask.
-        fire_ticks = _collect_event_ticks(
-            parser,
-            "weapon_fire",
+        fire_ticks = _event_ticks_for_player(
+            fire_events,
             steamid=steamid,
             player_name=player_name,
             start_tick=start_i,
             end_tick=end_i,
         )
-        zoom_ticks = _collect_event_ticks(
-            parser,
-            "weapon_zoom",
+        zoom_ticks = _event_ticks_for_player(
+            _load_event_table(demo_path, "weapon_zoom"),
             steamid=steamid,
             player_name=player_name,
             start_tick=start_i,
@@ -575,8 +657,8 @@ def extract_input_track(
             )["scope"] = True
 
     # 投掷物出手：weapon_fire + 出手 tick 的 FIRE/RIGHTCLICK 区分左/右/双键
-    grenade_flags = _collect_grenade_throw_flags(
-        parser,
+    grenade_flags = _grenade_throw_flags_from_weapon_fire(
+        fire_events,
         steamid=steamid,
         player_name=player_name,
         start_tick=start_i,

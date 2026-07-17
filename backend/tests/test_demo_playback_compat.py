@@ -362,7 +362,7 @@ def test_in_place_repair_atomically_replaces_affected_source(tmp_path: Path):
     assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
 
 
-def test_in_place_clean_demo_is_not_replaced(tmp_path: Path):
+def test_in_place_clean_demo_is_not_replaced(tmp_path: Path, monkeypatch):
     packet_data = _packet_data([(207, b"already-clean"), (76, b"next")])
     source = _write(
         tmp_path / "source.dem",
@@ -370,6 +370,11 @@ def test_in_place_clean_demo_is_not_replaced(tmp_path: Path):
     )
     original = source.read_bytes()
     original_stat = compat._stat_fingerprint(source.stat())
+
+    def unexpected_rewrite(*_args, **_kwargs):
+        raise AssertionError("clean demo should not create a rewritten candidate")
+
+    monkeypatch.setattr(compat, "_rewrite_stream", unexpected_rewrite)
 
     report = compat.repair_demo_in_place(source)
 

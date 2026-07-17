@@ -556,6 +556,7 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
 
     monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
     monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
+    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: None)
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_list_items",

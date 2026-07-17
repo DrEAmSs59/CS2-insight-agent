@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electron', {
   isPackaged: () => ipcRenderer.invoke('is-packaged'),
   getVersion: () => ipcRenderer.invoke('get-version'),
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  chooseDemoFiles: () => ipcRenderer.invoke('choose-demo-files'),
   showItemInFolder: (itemPath) => ipcRenderer.invoke('show-item-in-folder', itemPath),
   chooseDirectory: (defaultPath) => ipcRenderer.invoke('choose-directory', defaultPath),
   onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),

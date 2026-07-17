@@ -1069,17 +1069,23 @@ export default function App() {
     setParsing(true);
 
     try {
-      const formData = new FormData();
-      list.forEach((f) => formData.append("files", f));
       const sourcePaths = list.map((f) => {
+        if (typeof f === "string") return f;
         try {
           return window.electron?.getPathForFile?.(f) || "";
         } catch {
           return "";
         }
       });
-      formData.append("source_paths_json", JSON.stringify(sourcePaths));
-      const { data } = await API.post("/demo/upload-multiple", formData);
+      let data;
+      if (sourcePaths.every(Boolean)) {
+        ({ data } = await API.post("/demo/open-local", { paths: sourcePaths }));
+      } else {
+        const formData = new FormData();
+        list.forEach((f) => formData.append("files", f));
+        formData.append("source_paths_json", JSON.stringify(sourcePaths));
+        ({ data } = await API.post("/demo/upload-multiple", formData));
+      }
       const uploads = data.uploads ?? [];
       setUploadedDemos(uploads);
       setParsedMatches(uploads.map(() => null));
@@ -1181,7 +1187,10 @@ export default function App() {
         body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
         const { data } = activeLibraryDemoId
           ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body)
-          : await API.post(`/demo/parse-multi?filename=${encodeURIComponent(fn)}`, body);
+          : await API.post(
+              `/demo/parse-multi?filename=${encodeURIComponent(fn)}&path=${encodeURIComponent(demos[idx]?.path || fn)}`,
+              body
+            );
 
         const processedPlayers = {};
         for (const [playerName, playerData] of Object.entries(data.players ?? {})) {

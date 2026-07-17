@@ -720,6 +720,21 @@ ipcMain.handle('choose-directory', async (_event, requestedPath) => {
 });
 
 // 文件选择对话框 IPC handler
+ipcMain.handle('choose-demo-files', async () => {
+  if (!mainWindow) return [];
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 CS2 Demo',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'CS2 Demo', extensions: ['dem'] }],
+    });
+    return result.canceled ? [] : result.filePaths.map((item) => path.resolve(item));
+  } catch (error) {
+    log.error('chooseDemoFiles error:', error);
+    return [];
+  }
+});
+
 ipcMain.handle('show-open-dialog', async (event, options) => {
   if (!mainWindow) return { canceled: true, filePaths: [] };
   try {

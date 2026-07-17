@@ -22,6 +22,7 @@ from .executor.obs_fade_controller import OBSFadeController, FadeConfig
 from .services.result_writer import write_result
 from ..montage_db import MontageDB
 from ..api_errors import error_detail
+from ..demo_compat_service import ensure_demo_compatible
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -695,6 +696,31 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
         # Replace demo_path with resolved absolute path
         updated_demo = dto.demo.model_copy(update={"demo_path": str(abs_path)})
         resolved_requests.append(dto.model_copy(update={"demo": updated_demo}))
+
+    # Manual upload/library analysis normally performs this once in advance.
+    # The queue keeps a fail-safe preflight for older saved queue items; cache
+    # hits read only the file metadata and two 64 KiB edge blocks.
+    unique_demo_paths = list(
+        dict.fromkeys(
+            dto.demo.demo_path
+            for dto in resolved_requests
+            if Path(dto.demo.demo_path).is_file()
+        )
+    )
+    for demo_path in unique_demo_paths:
+        try:
+            compat = await asyncio.to_thread(ensure_demo_compatible, demo_path)
+        except Exception as exc:
+            logger.exception("[RecordingV3] demo compatibility preflight failed: %s", demo_path)
+            raise HTTPException(422, f"Demo compatibility repair failed: {exc}") from exc
+        logger.info(
+            "[RecordingV3] compatibility ready: cached=%s outcome=%s "
+            "removed_type138=%d source=%s",
+            compat.cached,
+            compat.report.outcome,
+            compat.report.removed_messages,
+            demo_path,
+        )
 
     # Build warmup extras from request warmup dict.
     # Merge pov_hud fields into warmup_extras so execute_plan_queue sees them.

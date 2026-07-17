@@ -49,7 +49,7 @@ from .env_utils import (
 )
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
-from .demo_playback_compat import repair_demo_in_place
+from .demo_compat_service import ensure_demo_compatible
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import (
@@ -294,7 +294,7 @@ async def lifespan(_: FastAPI):
             _FAULT_LOG_FILE.close()
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version="2.4.0", lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
@@ -506,6 +506,7 @@ def _verified_upload_source_path(
     """Use an Electron local path only when it is the exact uploaded demo."""
 
     if not raw_source_path:
+        logger.info("Browser demo upload has no local source path; repairing uploaded copy: %s", uploaded_path)
         return uploaded_path
     try:
         source = Path(raw_source_path).resolve(strict=True)
@@ -525,6 +526,13 @@ def _verified_upload_source_path(
 
     logger.info("Verified original demo path for persistent repair: %s", source)
     return source
+
+
+def _upload_source_scope(persistent_path: Path, uploaded_path: Path) -> str:
+    try:
+        return "uploaded_copy" if persistent_path.resolve() == uploaded_path.resolve() else "original"
+    except OSError:
+        return "uploaded_copy"
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
@@ -1498,12 +1506,15 @@ async def upload_demo(
         dest,
         uploaded_md5,
     )
+    compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
 
-    players, match_meta = await _safe_upload_demo_meta(dest)
+    players, match_meta = await _safe_upload_demo_meta(persistent_path)
     return {
         "filename": filename,
         "path": str(persistent_path),
         "uploaded_path": str(dest),
+        "source_scope": _upload_source_scope(persistent_path, dest),
+        "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
         "players": players,
         "match_meta": match_meta,
     }
@@ -1518,7 +1529,7 @@ async def upload_demos(
     if not files:
         raise HTTPException(400, "请至少选择一个文件")
     source_paths = _decode_upload_source_paths(source_paths_json, len(files))
-    saved: list[tuple[str, Path, Path]] = []
+    saved: list[tuple[str, Path, Path, Any]] = []
     for file, source_path in zip(files, source_paths):
         if not file.filename or not str(file.filename).lower().endswith(".dem"):
             raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
@@ -1531,7 +1542,8 @@ async def upload_demos(
             dest,
             uploaded_md5,
         )
-        saved.append((filename, dest, persistent_path))
+        compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
+        saved.append((filename, dest, persistent_path, compat))
 
     inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
 
@@ -1539,19 +1551,65 @@ async def upload_demos(
         async with inspect_sem:
             return await _safe_upload_demo_meta(dest)
 
-    inspected = await asyncio.gather(*(_inspect_one(dest) for _, dest, _ in saved))
+    inspected = await asyncio.gather(
+        *(_inspect_one(persistent_path) for _, _, persistent_path, _ in saved)
+    )
     out: list[dict] = []
-    for (filename, dest, persistent_path), (players, match_meta) in zip(saved, inspected):
+    for (filename, dest, persistent_path, compat), (players, match_meta) in zip(saved, inspected):
         out.append(
             {
                 "filename": filename,
                 "path": str(persistent_path),
                 "uploaded_path": str(dest),
+                "source_scope": _upload_source_scope(persistent_path, dest),
+                "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
                 "players": players,
                 "match_meta": match_meta,
             },
         )
     return {"uploads": out}
+
+
+class OpenLocalDemosBody(BaseModel):
+    paths: list[str] = Field(..., min_length=1, max_length=100)
+
+
+@app.post("/api/demo/open-local")
+async def open_local_demos(body: OpenLocalDemosBody):
+    """Open Electron-selected demos by absolute path and repair each source once."""
+
+    opened: list[tuple[Path, Any]] = []
+    for raw_path in body.paths:
+        try:
+            path = Path(raw_path).resolve(strict=True)
+        except OSError as exc:
+            raise HTTPException(404, f"Demo file not found: {raw_path}") from exc
+        if not path.is_file() or path.suffix.lower() != ".dem":
+            raise HTTPException(400, f"Only .dem files are accepted: {raw_path}")
+        compat = await asyncio.to_thread(ensure_demo_compatible, path)
+        opened.append((path, compat))
+
+    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+
+    async def _inspect_local(path: Path) -> tuple[list[dict], dict]:
+        async with inspect_sem:
+            return await _safe_upload_demo_meta(path)
+
+    inspected = await asyncio.gather(*(_inspect_local(path) for path, _ in opened))
+    uploads: list[dict] = []
+    for (path, compat), (players, match_meta) in zip(opened, inspected):
+        uploads.append(
+            {
+                "filename": path.name,
+                "path": str(path),
+                "uploaded_path": None,
+                "source_scope": "original",
+                "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
+                "players": players,
+                "match_meta": match_meta,
+            }
+        )
+    return {"uploads": uploads}
 
 
 @app.post("/api/demo/parse")
@@ -1596,13 +1654,15 @@ class ParseMultiRequest(BaseModel):
 
 
 @app.post("/api/demo/parse-multi")
-async def parse_demo_multi(req: ParseMultiRequest, filename: str):
+async def parse_demo_multi(
+    req: ParseMultiRequest,
+    filename: str,
+    path: Optional[str] = None,
+):
     """多玩家解析：共享同一次 Demo 扫描，返回 { players: { name: result } }。"""
     from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
 
-    dem_path = UPLOAD_DIR / filename
-    if not dem_path.exists():
-        raise HTTPException(status_code=404, detail=f"Demo file not found: {filename}")
+    dem_path = resolve_uploaded_demo_path(path or filename)
 
     cfg = load_config()
 
@@ -2545,6 +2605,7 @@ async def get_demo_players(demo_id: int):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     dem_path = row["path"]
+    await asyncio.to_thread(ensure_demo_compatible, dem_path)
     match_meta = {
         "map_name": row.get("map_name"),
         "total_rounds": row.get("total_rounds"),
@@ -2568,6 +2629,7 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     dem_path = row["path"]
+    await asyncio.to_thread(ensure_demo_compatible, dem_path)
     out = await _run_library_demo_analyze(
         demo_id,
         dem_path,
@@ -2606,19 +2668,15 @@ def _launch_cs2_play_demo(dem_path: Path) -> None:
         game_root = cs2_bin.parents[2]
         csgo_dir = game_root / "csgo"
         dest = csgo_dir / "cs2_insight_preview.dem"
-        # Persist the verified repair at the library/source path first, then
-        # copy those already-safe bytes into CS2's fixed playback artifact.
-        compat_report = repair_demo_in_place(dem_path)
+        compat = ensure_demo_compatible(dem_path)
         dest.unlink(missing_ok=True)
         shutil.copy2(dem_path, dest)
         logger.info(
-            "Persisted direct CS2 demo repair: outcome=%s removed_type138=%d "
-            "changed_frames=%d first_tick=%s last_tick=%s source=%s",
-            compat_report.outcome,
-            compat_report.removed_messages,
-            compat_report.changed_frames,
-            compat_report.first_tick,
-            compat_report.last_tick,
+            "Direct CS2 demo compatibility ready: cached=%s outcome=%s "
+            "removed_type138=%d source=%s",
+            compat.cached,
+            compat.report.outcome,
+            compat.report.removed_messages,
             dem_path,
         )
         logger.info("Launch CS2 for playback: cwd=%s demo=%s", game_root, dest)
@@ -2743,6 +2801,7 @@ async def batch_ingest_demos(body: BatchIngestBody):
         demo_id, row, dem_path = candidate
         try:
             async with inspect_sem:
+                await asyncio.to_thread(ensure_demo_compatible, dem_path)
                 players, meta = await _inspect_demo_meta(Path(dem_path))
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
@@ -3554,7 +3613,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.0.2"}
+    return {"status": "ok", "version": "2.4.0"}
 
 
 @app.get("/")

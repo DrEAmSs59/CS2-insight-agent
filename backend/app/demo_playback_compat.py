@@ -654,7 +654,11 @@ def _validate_header_offsets(
             )
 
 
-def _scan_stream(reader: BinaryIO) -> tuple[_PatchStats, tuple[int, int]]:
+def _scan_stream(
+    reader: BinaryIO,
+    *,
+    stop_after_first_selected: bool = False,
+) -> tuple[_PatchStats, tuple[int, int]]:
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
         raise _fail("expected PBDEMS2 short header")
@@ -691,6 +695,8 @@ def _scan_stream(reader: BinaryIO) -> tuple[_PatchStats, tuple[int, int]]:
                 else payload
             )
             _patch_outer_payload(command, decoded, tick, stats)
+            if stop_after_first_selected and stats.removed_messages:
+                return stats, (old_offset_a, old_offset_b)
         old_pos += (
             len(raw_command_bytes)
             + len(raw_tick_bytes)
@@ -962,6 +968,26 @@ def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoRep
     if not source.is_file():
         raise FileNotFoundError(f"Demo file not found: {source}")
     source_before = _stat_fingerprint(source.stat())
+
+    # A clean demo needs only one read pass and no full-size temporary copy.
+    # Legacy demos normally expose the first selected message near the start,
+    # then continue through the existing rewrite + full verification path.
+    with source.open("rb") as reader:
+        if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+            raise _fail("source demo changed before compatibility scan started")
+        initial_stats, _ = _scan_stream(reader, stop_after_first_selected=True)
+    if _stat_fingerprint(source.stat()) != source_before:
+        raise _fail("source demo changed while compatibility scan was running")
+    if initial_stats.removed_messages == 0:
+        clean_scan = DemoCompatibilityScan(
+            selected_messages=0,
+            affected_frames=0,
+            first_tick=None,
+            last_tick=None,
+            max_per_frame=0,
+            outer_frames=initial_stats.outer_frames,
+        )
+        return _build_report(initial_stats, clean_scan)
 
     temp_file = tempfile.NamedTemporaryFile(
         mode="w+b",

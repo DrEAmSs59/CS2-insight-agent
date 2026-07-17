@@ -1,7 +1,9 @@
 import sys, os
+from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pandas as pd
+from app.parser import input_track as input_track_module
 from app.parser.input_track import (
     KEYS,
     _build_ephemeral_map,
@@ -180,3 +182,55 @@ def test_merge_ephemeral_buckets_or_short_presses():
     assert records[0]["jump"] is True
     assert records[0]["fire"] is False
     assert records[1]["fire"] is True
+
+
+def test_overlapping_segments_share_one_tick_and_event_parse(monkeypatch):
+    parse_tick_calls = 0
+    parse_event_calls = 0
+
+    class FakeParser:
+        def __init__(self, _path):
+            pass
+
+        def parse_ticks(self, _props, *, ticks):
+            nonlocal parse_tick_calls
+            parse_tick_calls += 1
+            rows = []
+            for tick in ticks:
+                rows.append({"tick": tick, "buttons": 1 << 3, "name": "p1", "steamid": "1"})
+                rows.append({"tick": tick, "buttons": 1 << 9, "name": "p2", "steamid": "2"})
+            return pd.DataFrame(rows)
+
+        def parse_event(self, _event_name, **_kwargs):
+            nonlocal parse_event_calls
+            parse_event_calls += 1
+            return pd.DataFrame(columns=["tick", "user_name", "user_steamid", "weapon"])
+
+    monkeypatch.setattr(input_track_module, "DemoParser", FakeParser)
+    with input_track_module._CACHE_LOCK:
+        input_track_module._tick_table_cache.clear()
+        input_track_module._event_table_cache.clear()
+
+    def extract(player, steamid, start, end):
+        return input_track_module.extract_input_track(
+            "shared.dem",
+            player_name=player,
+            steamid=steamid,
+            start_tick=start,
+            end_tick=end,
+            shared_start_tick=100,
+            shared_end_tick=105,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(extract, "p1", "1", 100, 102)
+        second = pool.submit(extract, "p2", "2", 103, 105)
+        p1_track = first.result()
+        p2_track = second.result()
+
+    assert parse_tick_calls == 1
+    assert parse_event_calls == 1
+    assert [row["tick"] for row in p1_track] == [100, 101, 102]
+    assert [row["tick"] for row in p2_track] == [103, 104, 105]
+    assert all(row["W"] and not row["A"] for row in p1_track)
+    assert all(row["A"] and not row["W"] for row in p2_track)

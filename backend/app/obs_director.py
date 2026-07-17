@@ -26,7 +26,6 @@ from obswebsocket import obsws, requests as obs_requests
 from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
-from .demo_playback_compat import repair_demo_in_place
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -2101,20 +2100,6 @@ class OBSDirector:
                 "无法从 cs2.exe 推断 game 目录（应为 .../game/bin/win64/cs2.exe）。请检查侧栏中的 CS2 路径是否指向正版安装。",
             )
 
-        # Repair and atomically replace the source before touching CS2/OBS
-        # configuration.  A clean demo is left byte-for-byte untouched.
-        compat_report = repair_demo_in_place(demo_abs)
-        logger.info(
-            "Persisted CS2 demo repair: outcome=%s removed_type138=%d "
-            "changed_frames=%d first_tick=%s last_tick=%s source=%s",
-            compat_report.outcome,
-            compat_report.removed_messages,
-            compat_report.changed_frames,
-            compat_report.first_tick,
-            compat_report.last_tick,
-            demo_abs,
-        )
-
         # 启动 CS2 前先对用户配置做快照；CS2 运行期的 archive cvar 写入在
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
@@ -3435,12 +3420,17 @@ class OBSDirector:
             if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
                 from .parser.input_track import extract_input_track as _pre_extract_kb
                 from .parser.kill_track import extract_kill_track as _pre_extract_fx
+                _kb_shared_windows: dict[int, tuple[int, int]] = {}
 
                 async def _extract_seg_pre(_seg, _demo_path):
                     if self._abort_requested():
                         _seg.metadata["kb_track"] = []
                         return
                     try:
+                        _shared_start, _shared_end = _kb_shared_windows.get(
+                            id(_seg),
+                            (_seg.start_tick, _seg.end_tick),
+                        )
                         _frames = await asyncio.to_thread(
                             _pre_extract_kb,
                             _demo_path,
@@ -3448,6 +3438,8 @@ class OBSDirector:
                             player_name=_seg.target_player_name,
                             start_tick=_seg.start_tick,
                             end_tick=_seg.end_tick,
+                            shared_start_tick=_shared_start,
+                            shared_end_tick=_shared_end,
                         )
                         _seg.metadata["kb_track"] = _frames
                         logger.info(
@@ -3484,6 +3476,7 @@ class OBSDirector:
 
                 # 收集所有需要提取的任务：(coroutine, args)
                 _kb_tasks = []
+                _kb_segments_by_demo: dict[str, list] = {}
                 for _dto in requests:
                     _plan = _plan_cache.get(_dto.request_id)
                     if not _plan:
@@ -3493,6 +3486,7 @@ class OBSDirector:
                         for _seg in _plan.segments:
                             _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
                             _kb_tasks.append((_extract_seg_pre, (_seg, _plan.demo_path)))
+                            _kb_segments_by_demo.setdefault(_plan.demo_path, []).append(_seg)
                     if _fx_on(_dto):
                         _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
                         for _seg in _plan.segments:
@@ -3505,20 +3499,59 @@ class OBSDirector:
                             _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
 
                 # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时
-                _BATCH = 8
+                # Overlapping short segments share one tick parse.  Each
+                # result is still filtered to its own player and tick range.
+                for _demo_path, _segments in _kb_segments_by_demo.items():
+                    _ordered = sorted(_segments, key=lambda item: (item.start_tick, item.end_tick))
+                    _cluster: list = []
+                    _cluster_start = 0
+                    _cluster_end = 0
+
+                    def _flush_kb_cluster() -> None:
+                        for _cluster_seg in _cluster:
+                            _kb_shared_windows[id(_cluster_seg)] = (_cluster_start, _cluster_end)
+
+                    for _seg in _ordered:
+                        if not _cluster:
+                            _cluster = [_seg]
+                            _cluster_start, _cluster_end = _seg.start_tick, _seg.end_tick
+                            continue
+                        _candidate_end = max(_cluster_end, _seg.end_tick)
+                        _overlaps = _seg.start_tick <= _cluster_end + 64
+                        _within_dense_window = _candidate_end - _cluster_start + 1 <= 2000
+                        if _overlaps and _within_dense_window:
+                            _cluster.append(_seg)
+                            _cluster_end = _candidate_end
+                        else:
+                            _flush_kb_cluster()
+                            _cluster = [_seg]
+                            _cluster_start, _cluster_end = _seg.start_tick, _seg.end_tick
+                    if _cluster:
+                        _flush_kb_cluster()
+
+                # Four input-track tasks now share one cached tick parse.  A
+                # batch of four also keeps the following kill-event parse
+                # from competing with that first full demo read.
+                _BATCH = 4
                 _kb_total = len(_kb_tasks)
                 _kb_done = 0
+                _task_batches = []
+                for _task_fn in (_extract_seg_pre, _extract_seg_fx):
+                    _same_kind = [task for task in _kb_tasks if task[0] is _task_fn]
+                    _task_batches.extend(
+                        _same_kind[index: index + _BATCH]
+                        for index in range(0, len(_same_kind), _BATCH)
+                    )
                 logger.info("[kb_overlay] Pre-extracting %d overlay tasks before CS2 launch", _kb_total)
 
                 from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
                 _kbp_start(_kb_total)
 
-                for _bi in range(0, _kb_total, _BATCH):
+                for _batch_index, _batch in enumerate(_task_batches):
                     if self._abort_requested():
-                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _bi // _BATCH)
+                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _batch_index)
                         _kbp_reset()
                         break
-                    _batch = _kb_tasks[_bi: _bi + _BATCH]
                     await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
                     _kb_done += len(_batch)
                     _kbp_update(_kb_done, _kb_total)
