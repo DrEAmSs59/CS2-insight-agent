@@ -235,6 +235,8 @@ function startBackend() {
     const spawnEnv = {
       ...process.env,
       CS2_INSIGHT_PORT: '19871',
+      PYTHONNOUSERSITE: '1',
+      PYTHONDONTWRITEBYTECODE: '1',
       PYTHONUNBUFFERED: '1',
       PYTHONFAULTHANDLER: '1',
       CS2_INSIGHT_CONFIG: configPath,
@@ -292,12 +294,15 @@ app.whenReady().then(() => {
       return callback({ error: -6 }); // net::ERR_FILE_NOT_FOUND
     }
 
-    // 现在的路径相对于 app.asar，由于我们把 dist 整个打进去了
-    let filePath = path.join(app.getAppPath(), 'dist', cleanPath || 'index.html');
+    // 正式包只保留 resources/web 一份静态文件，避免与 app.asar 重复打包。
+    const webRoot = app.isPackaged
+      ? path.join(process.resourcesPath, 'web')
+      : path.join(app.getAppPath(), 'dist');
+    let filePath = path.join(webRoot, cleanPath || 'index.html');
     
     // 如果是目录或不存在，回退到 index.html
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      filePath = path.join(app.getAppPath(), 'dist', 'index.html');
+      filePath = path.join(webRoot, 'index.html');
     }
     
     callback({ path: filePath });

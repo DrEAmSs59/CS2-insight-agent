@@ -41,6 +41,7 @@ mkdirSync(destDir, { recursive: true });
  */
 function shouldSkip(rel) {
   const lower = rel.replace(/\\/g, "/").toLowerCase();
+  if (lower.endsWith(".pdb")) return true;
   if (lower.includes("/__pycache__/") || lower.endsWith("/__pycache__")) return true;
   if (lower.includes("/lib/test/") || lower.endsWith("/lib/test")) return true;
   if (lower.includes("/lib/tkinter/test/")) return true;

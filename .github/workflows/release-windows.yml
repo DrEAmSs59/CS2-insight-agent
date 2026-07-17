@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "V*"
 
 permissions:
   contents: write
@@ -20,83 +21,87 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci && npm run build
+        run: npm ci
 
       - name: Stamp release version
         shell: pwsh
         run: ./packaging/windows/write-release-version.ps1 -Version "${{ github.ref_name }}"
 
-      - name: Bootstrap staging
-        shell: pwsh
-        run: ./packaging/windows/bootstrap-staging.ps1
-
-      - name: Verify imports
+      - name: Build lean demoparser wheel
         shell: pwsh
         run: |
-          & "dist/staging/python/python.exe" -c "import demoparser2, fastapi; print('imports-ok')"
+          $meta = Get-Content "packaging/demoparser-lean/demoparser-runtime.json" -Raw | ConvertFrom-Json
+          python -m pip install --disable-pip-version-check "maturin==$($meta.maturin_version)"
+          ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
-
-      - name: Compile installer
+      - name: Build current Electron product
         shell: pwsh
-        run: |
-          $ver = "${{ github.ref_name }}".TrimStart("v")
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc /DMyAppVersion=$ver (Join-Path (Get-Location) "packaging\windows\CS2InsightAgent.iss")
-
-      - name: Zip staging (portable)
-        shell: pwsh
-        run: |
-          $ver = "${{ github.ref_name }}".TrimStart("v")
-          $zip = "CS2InsightAgent-$ver-windows-amd64.zip"
-          Compress-Archive -Path "dist\staging\*" -DestinationPath $zip -Force
-          Get-FileHash $zip -Algorithm SHA256 | Format-List
-
-      - name: Decode signing certificate
         env:
-          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
-        shell: pwsh
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_PFX_BASE64)) {
-            Write-Host "No WINDOWS_PFX_BASE64 secret; skipping decode."
-            exit 0
+          $wheel = Get-ChildItem "dist/wheels/demoparser2-*-cp312-*.whl" | Select-Object -First 1
+          if (-not $wheel) { throw "CPython 3.12 lean demoparser wheel not found" }
+          $env:CS2_INSIGHT_DEMOPARSER_WHEEL = $wheel.FullName
+          $env:ELECTRON_REFRESH_PYTHON = "1"
+          $ver = "${{ github.ref_name }}" -replace '^[vV]', ''
+          Push-Location frontend
+          try {
+            npm.cmd run electron:build:ver -- $ver
+            if ($LASTEXITCODE -ne 0) { throw "Electron build failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
           }
-          $bytes = [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64)
-          [IO.File]::WriteAllBytes("codesign.pfx", $bytes)
 
-      - name: Sign installer
-        env:
-          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+      - name: Verify packaged runtime
         shell: pwsh
         run: |
-          if (-not (Test-Path -LiteralPath "codesign.pfx")) {
-            Write-Host "No codesign.pfx; skipping Authenticode signing."
-            exit 0
-          }
-          $setup = Get-ChildItem -Path "dist" -Filter "CS2InsightAgent-*-Setup.exe" | Select-Object -First 1
-          if (-not $setup) { throw "dist/CS2InsightAgent-*-Setup.exe not found" }
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } | Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe not found" }
-          & $signtool.FullName sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f codesign.pfx /p $env:WINDOWS_PFX_PASSWORD $setup.FullName
+          $resources = (Resolve-Path "frontend/dist_electron/win-unpacked/resources").Path
+          $py = Join-Path $resources "python/python.exe"
+          if (-not (Test-Path -LiteralPath $py)) { throw "Packaged python.exe not found" }
+          $env:PYTHONNOUSERSITE = "1"
+          $env:PYTHONDONTWRITEBYTECODE = "1"
+          $backend = Join-Path $resources "backend"
+          & $py -c "import sys; sys.path.insert(0, sys.argv[1]); import app.main, demoparser2, fastapi, importlib.metadata as m, importlib.util as u, numpy, openai, pandas, PIL, uvicorn; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None; print('runtime-ok', m.version('demoparser2'))" $backend
+          if ($LASTEXITCODE -ne 0) { throw "Packaged runtime verification failed: $LASTEXITCODE" }
+
+      - name: Report packaged runtime size
+        shell: pwsh
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/dist_electron/win-unpacked/resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 180
 
       - name: Write SHA256SUMS
         shell: pwsh
         run: |
-          $sums = @()
-          Get-ChildItem -Path "dist" -Filter "CS2InsightAgent-*-Setup.exe" | ForEach-Object { $sums += ((Get-FileHash $_.FullName -Algorithm SHA256).Hash + "  " + $_.Name) }
-          Get-ChildItem -Filter "CS2InsightAgent-*-windows-amd64.zip" | ForEach-Object { $sums += ((Get-FileHash $_.FullName -Algorithm SHA256).Hash + "  " + $_.Name) }
-          $sums | Set-Content -Encoding utf8 SHA256SUMS
+          $artifacts = @(
+            Get-ChildItem -LiteralPath "frontend/dist_electron" -File |
+              Where-Object { $_.Extension -eq ".exe" -or $_.Name -eq "latest.yml" -or $_.Name.EndsWith(".blockmap") }
+          )
+          $installer = $artifacts | Where-Object Extension -eq ".exe" | Select-Object -First 1
+          if (-not $installer) { throw "Electron installer not found" }
+          $installerMiB = $installer.Length / 1MB
+          Write-Host ("Installer size: {0:N2} MiB" -f $installerMiB)
+          if ($installerMiB -gt 175) { throw ("Installer exceeds 175 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          $sums = $artifacts | Sort-Object Name | ForEach-Object {
+            (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
+          }
+          [IO.File]::WriteAllLines((Join-Path (Get-Location) "SHA256SUMS"), $sums, [Text.UTF8Encoding]::new($false))
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/CS2InsightAgent-*-Setup.exe
-            CS2InsightAgent-*-windows-amd64.zip
+            frontend/dist_electron/*.exe
+            frontend/dist_electron/*.blockmap
+            frontend/dist_electron/latest.yml
+            dist/runtime-size-report.json
             SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

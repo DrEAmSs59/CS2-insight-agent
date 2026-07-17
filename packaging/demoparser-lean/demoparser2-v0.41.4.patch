@@ -1,0 +1,3095 @@
+diff --git a/src/csgoproto/Cargo.lock b/src/csgoproto/Cargo.lock
+index 02ff2ef..bad7fc0 100644
+--- a/src/csgoproto/Cargo.lock
++++ b/src/csgoproto/Cargo.lock
+@@ -2,46 +2,24 @@
+ # It is not intended for manual editing.
+ version = 4
+ 
+-[[package]]
+-name = "aho-corasick"
+-version = "1.1.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8e60d3430d3a69478ad0993f19238d2df97c507009a52b3c10addcd7f6bcb916"
+-dependencies = [
+- "memchr",
+-]
+-
+ [[package]]
+ name = "anyhow"
+ version = "1.0.89"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
+ 
+-[[package]]
+-name = "bitflags"
+-version = "2.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+-
+ [[package]]
+ name = "bytes"
+ version = "1.7.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
+ 
+-[[package]]
+-name = "cfg-if"
+-version = "1.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+-
+ [[package]]
+ name = "csgoproto"
+ version = "0.1.5"
+ dependencies = [
+  "phf",
+  "prost",
+- "prost-build",
+  "strum",
+  "winnow",
+ ]
+@@ -52,56 +30,12 @@ version = "1.13.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
+ 
+-[[package]]
+-name = "equivalent"
+-version = "1.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+-
+-[[package]]
+-name = "errno"
+-version = "0.3.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
+-dependencies = [
+- "libc",
+- "windows-sys 0.52.0",
+-]
+-
+-[[package]]
+-name = "fastrand"
+-version = "2.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
+-
+-[[package]]
+-name = "fixedbitset"
+-version = "0.4.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+-
+-[[package]]
+-name = "hashbrown"
+-version = "0.15.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+-
+ [[package]]
+ name = "heck"
+ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
+-[[package]]
+-name = "indexmap"
+-version = "2.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
+-dependencies = [
+- "equivalent",
+- "hashbrown",
+-]
+-
+ [[package]]
+ name = "itertools"
+ version = "0.13.0"
+@@ -111,52 +45,12 @@ dependencies = [
+  "either",
+ ]
+ 
+-[[package]]
+-name = "libc"
+-version = "0.2.160"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f0b21006cd1874ae9e650973c565615676dc4a274c965bb0a73796dac838ce4f"
+-
+-[[package]]
+-name = "linux-raw-sys"
+-version = "0.4.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
+-
+-[[package]]
+-name = "log"
+-version = "0.4.22"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
+-
+ [[package]]
+ name = "memchr"
+ version = "2.7.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
+ 
+-[[package]]
+-name = "multimap"
+-version = "0.10.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
+-
+-[[package]]
+-name = "once_cell"
+-version = "1.19.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
+-
+-[[package]]
+-name = "petgraph"
+-version = "0.6.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+-dependencies = [
+- "fixedbitset",
+- "indexmap",
+-]
+-
+ [[package]]
+ name = "phf"
+ version = "0.11.3"
+@@ -199,16 +93,6 @@ dependencies = [
+  "siphasher",
+ ]
+ 
+-[[package]]
+-name = "prettyplease"
+-version = "0.2.22"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "479cf940fbbb3426c32c5d5176f62ad57549a0bb84773423ba8be9d089f5faba"
+-dependencies = [
+- "proc-macro2",
+- "syn",
+-]
+-
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.86"
+@@ -228,27 +112,6 @@ dependencies = [
+  "prost-derive",
+ ]
+ 
+-[[package]]
+-name = "prost-build"
+-version = "0.13.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0c1318b19085f08681016926435853bbf7858f9c082d0999b80550ff5d9abe15"
+-dependencies = [
+- "bytes",
+- "heck",
+- "itertools",
+- "log",
+- "multimap",
+- "once_cell",
+- "petgraph",
+- "prettyplease",
+- "prost",
+- "prost-types",
+- "regex",
+- "syn",
+- "tempfile",
+-]
+-
+ [[package]]
+ name = "prost-derive"
+ version = "0.13.3"
+@@ -262,15 +125,6 @@ dependencies = [
+  "syn",
+ ]
+ 
+-[[package]]
+-name = "prost-types"
+-version = "0.13.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4759aa0d3a6232fb8dbdb97b61de2c20047c68aca932c7ed76da9d788508d670"
+-dependencies = [
+- "prost",
+-]
+-
+ [[package]]
+ name = "quote"
+ version = "1.0.37"
+@@ -295,48 +149,6 @@ version = "0.6.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+ 
+-[[package]]
+-name = "regex"
+-version = "1.11.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "38200e5ee88914975b69f657f0801b6f6dccafd44fd9326302a4aaeecfacb1d8"
+-dependencies = [
+- "aho-corasick",
+- "memchr",
+- "regex-automata",
+- "regex-syntax",
+-]
+-
+-[[package]]
+-name = "regex-automata"
+-version = "0.4.8"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "368758f23274712b504848e9d5a6f010445cc8b87a7cdb4d7cbee666c1288da3"
+-dependencies = [
+- "aho-corasick",
+- "memchr",
+- "regex-syntax",
+-]
+-
+-[[package]]
+-name = "regex-syntax"
+-version = "0.8.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
+-
+-[[package]]
+-name = "rustix"
+-version = "0.38.37"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8acb788b847c24f28525660c4d7758620a7210875711f79e7f663cc152726811"
+-dependencies = [
+- "bitflags",
+- "errno",
+- "libc",
+- "linux-raw-sys",
+- "windows-sys 0.52.0",
+-]
+-
+ [[package]]
+ name = "rustversion"
+ version = "1.0.19"
+@@ -382,107 +194,12 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
+-[[package]]
+-name = "tempfile"
+-version = "3.13.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
+-dependencies = [
+- "cfg-if",
+- "fastrand",
+- "once_cell",
+- "rustix",
+- "windows-sys 0.59.0",
+-]
+-
+ [[package]]
+ name = "unicode-ident"
+ version = "1.0.13"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
+ 
+-[[package]]
+-name = "windows-sys"
+-version = "0.52.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-sys"
+-version = "0.59.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-targets"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
+-dependencies = [
+- "windows_aarch64_gnullvm",
+- "windows_aarch64_msvc",
+- "windows_i686_gnu",
+- "windows_i686_gnullvm",
+- "windows_i686_msvc",
+- "windows_x86_64_gnu",
+- "windows_x86_64_gnullvm",
+- "windows_x86_64_msvc",
+-]
+-
+-[[package]]
+-name = "windows_aarch64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+-
+-[[package]]
+-name = "windows_aarch64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+-
+-[[package]]
+-name = "windows_i686_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+-
+-[[package]]
+-name = "windows_i686_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+-
+-[[package]]
+-name = "windows_i686_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+-
+-[[package]]
+-name = "windows_x86_64_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+-
+-[[package]]
+-name = "windows_x86_64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+-
+-[[package]]
+-name = "windows_x86_64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+-
+ [[package]]
+ name = "winnow"
+ version = "0.7.2"
+diff --git a/src/csgoproto/Cargo.toml b/src/csgoproto/Cargo.toml
+index d614b98..261bc0d 100644
+--- a/src/csgoproto/Cargo.toml
++++ b/src/csgoproto/Cargo.toml
+@@ -13,5 +13,3 @@ phf = { version = "0.11", features = ["macros"] }
+ strum = { version = "0.26", features = ["derive"] }
+ winnow = { version = "0.7.2", features = ["simd"] }
+ 
+-[build-dependencies]
+-prost-build = "0.13.3"
+diff --git a/src/csgoproto/build.rs b/src/csgoproto/build.rs
+index c7a3dda..ffb46fc 100644
+--- a/src/csgoproto/build.rs
++++ b/src/csgoproto/build.rs
+@@ -1,38 +1,11 @@
+-use std::{io::Result, process::Command};
++use std::io::Result;
+ 
+ fn main() -> Result<()> {
+-    println!("cargo::rerun-if-changed=GameTracking-CS2/Protobufs/demo.proto");
+-
+-    Command::new("git")
+-        .args([
+-            "clone",
+-            "https://github.com/SteamDatabase/GameTracking-CS2.git",
+-            "--depth=1",
+-        ])
+-        .status()?;
+-
+-    let protos = vec![
+-        "GameTracking-CS2/Protobufs/steammessages.proto",
+-        "GameTracking-CS2/Protobufs/gcsdk_gcmessages.proto",
+-        "GameTracking-CS2/Protobufs/demo.proto",
+-        "GameTracking-CS2/Protobufs/cstrike15_gcmessages.proto",
+-        "GameTracking-CS2/Protobufs/cstrike15_usermessages.proto",
+-        "GameTracking-CS2/Protobufs/usermessages.proto",
+-        "GameTracking-CS2/Protobufs/networkbasetypes.proto",
+-        "GameTracking-CS2/Protobufs/engine_gcmessages.proto",
+-        "GameTracking-CS2/Protobufs/netmessages.proto",
+-        "GameTracking-CS2/Protobufs/network_connection.proto",
+-        "GameTracking-CS2/Protobufs/cs_usercmd.proto",
+-        "GameTracking-CS2/Protobufs/usercmd.proto",
+-        "GameTracking-CS2/Protobufs/gameevents.proto",
+-        "GameTracking-CS2/Protobufs/cs_gameevents.proto",
+-    ];
+-
+-    prost_build::Config::new()
+-        .format(false)
+-        .out_dir("src")
+-        .default_package_filename("protobuf")
+-        .bytes(["."])
+-        .enum_attribute(".", "#[derive(::strum::EnumIter)]")
+-        .compile_protos(&protos, &["GameTracking-CS2/Protobufs/"])
++    // The tagged source already contains the generated Rust modules. Reusing
++    // them makes the wheel reproducible and avoids silently compiling against
++    // whatever happens to be current in GameTracking-CS2 on release day.
++    println!("cargo::rerun-if-changed=src/protobuf.rs");
++    println!("cargo::rerun-if-changed=src/maps.rs");
++    println!("cargo::rerun-if-changed=src/message_type.rs");
++    Ok(())
+ }
+diff --git a/src/python/Cargo.lock b/src/python/Cargo.lock
+index 2e62735..5980c48 100644
+--- a/src/python/Cargo.lock
++++ b/src/python/Cargo.lock
+@@ -24,122 +24,30 @@ dependencies = [
+  "memchr",
+ ]
+ 
+-[[package]]
+-name = "allocator-api2"
+-version = "0.2.21"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+-
+-[[package]]
+-name = "android_system_properties"
+-version = "0.1.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
+-dependencies = [
+- "libc",
+-]
+-
+ [[package]]
+ name = "anyhow"
+ version = "1.0.100"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
+ 
+-[[package]]
+-name = "ar_archive_writer"
+-version = "0.2.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f0c269894b6fe5e9d7ada0cf69b5bf847ff35bc25fc271f08e1d080fce80339a"
+-dependencies = [
+- "object",
+-]
+-
+-[[package]]
+-name = "argminmax"
+-version = "0.6.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "70f13d10a41ac8d2ec79ee34178d61e6f47a29c2edfe7ef1721c7383b0359e65"
+-dependencies = [
+- "num-traits",
+-]
+-
+-[[package]]
+-name = "array-init-cursor"
+-version = "0.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ed51fe0f224d1d4ea768be38c51f9f831dee9d05c163c11fba0b8c44387b1fc3"
+-
+-[[package]]
+-name = "atoi"
+-version = "2.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528"
+-dependencies = [
+- "num-traits",
+-]
+-
+-[[package]]
+-name = "atoi_simd"
+-version = "0.15.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9ae037714f313c1353189ead58ef9eec30a8e8dc101b2622d461418fd59e28a9"
+-
+ [[package]]
+ name = "autocfg"
+ version = "1.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+ 
+-[[package]]
+-name = "base64"
+-version = "0.22.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+-
+ [[package]]
+ name = "bit_reverse"
+ version = "0.1.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "99528ca30abb9495c7e106bf7c3177b257c62040fc0f2909fe470b0f43097296"
+ 
+-[[package]]
+-name = "bitflags"
+-version = "2.10.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+-
+ [[package]]
+ name = "bitter"
+ version = "0.7.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f777c49153c6244286ce2e3ba0352295c4cbfe4b3368bedf7ec8ffe9dc5920d7"
+ 
+-[[package]]
+-name = "bumpalo"
+-version = "3.19.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
+-
+-[[package]]
+-name = "bytemuck"
+-version = "1.24.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
+-dependencies = [
+- "bytemuck_derive",
+-]
+-
+-[[package]]
+-name = "bytemuck_derive"
+-version = "1.10.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.111",
+-]
+-
+ [[package]]
+ name = "bytes"
+ version = "1.11.0"
+@@ -153,8 +61,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c481bdbf0ed3b892f6f806287d72acd515b352a4ec27a208489b8c1bc839633a"
+ dependencies = [
+  "find-msvc-tools",
+- "jobserver",
+- "libc",
+  "shlex",
+ ]
+ 
+@@ -164,71 +70,12 @@ version = "1.0.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+ 
+-[[package]]
+-name = "chrono"
+-version = "0.4.42"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
+-dependencies = [
+- "iana-time-zone",
+- "num-traits",
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "chrono-tz"
+-version = "0.8.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d59ae0466b83e838b81a54256c39d5d7c20b9d7daa10510a242d9b75abd5936e"
+-dependencies = [
+- "chrono",
+- "chrono-tz-build",
+- "phf",
+-]
+-
+-[[package]]
+-name = "chrono-tz-build"
+-version = "0.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "433e39f13c9a060046954e0592a8d0a4bcb1040125cbf91cb8ee58964cfb350f"
+-dependencies = [
+- "parse-zoneinfo",
+- "phf",
+- "phf_codegen",
+-]
+-
+-[[package]]
+-name = "comfy-table"
+-version = "7.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b03b7db8e0b4b2fdad6c551e634134e99ec000e5c8c3b6856c65e8bbaded7a3b"
+-dependencies = [
+- "crossterm",
+- "unicode-segmentation",
+- "unicode-width",
+-]
+-
+ [[package]]
+ name = "convert_case"
+ version = "0.4.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+ 
+-[[package]]
+-name = "core-foundation-sys"
+-version = "0.8.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+-
+-[[package]]
+-name = "crossbeam-channel"
+-version = "0.5.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+-dependencies = [
+- "crossbeam-utils",
+-]
+-
+ [[package]]
+ name = "crossbeam-deque"
+ version = "0.8.6"
+@@ -248,67 +95,32 @@ dependencies = [
+  "crossbeam-utils",
+ ]
+ 
+-[[package]]
+-name = "crossbeam-queue"
+-version = "0.3.12"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+-dependencies = [
+- "crossbeam-utils",
+-]
+-
+ [[package]]
+ name = "crossbeam-utils"
+ version = "0.8.21"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+ 
+-[[package]]
+-name = "crossterm"
+-version = "0.29.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+-dependencies = [
+- "bitflags",
+- "crossterm_winapi",
+- "document-features",
+- "parking_lot",
+- "rustix",
+- "winapi",
+-]
+-
+-[[package]]
+-name = "crossterm_winapi"
+-version = "0.9.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "acdd7c62a3665c7f6830a51635d9ac9b23ed385797f70a83bb8bafe9c572ab2b"
+-dependencies = [
+- "winapi",
+-]
+-
+ [[package]]
+ name = "csgoproto"
+ version = "0.1.5"
+ dependencies = [
+  "phf",
+  "prost",
+- "prost-build",
+  "strum",
+  "winnow",
+ ]
+ 
+ [[package]]
+ name = "demoparser2"
+-version = "0.40.2"
++version = "0.41.4+cs2insight1"
+ dependencies = [
+  "ahash",
+  "csgoproto",
+  "derive_more",
+  "itertools 0.13.0",
+- "memmap2 0.9.9",
++ "memmap2",
+  "parser",
+- "polars",
+- "polars-arrow",
+  "protobuf-support",
+  "pyo3",
+ ]
+@@ -323,100 +135,21 @@ dependencies = [
+  "proc-macro2",
+  "quote",
+  "rustc_version",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "document-features"
+-version = "0.2.12"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
+-dependencies = [
+- "litrs",
++ "syn",
+ ]
+ 
+-[[package]]
+-name = "dyn-clone"
+-version = "1.0.20"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+-
+ [[package]]
+ name = "either"
+ version = "1.15.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+ 
+-[[package]]
+-name = "enum_dispatch"
+-version = "0.3.13"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
+-dependencies = [
+- "once_cell",
+- "proc-macro2",
+- "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "equivalent"
+-version = "1.0.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+-
+-[[package]]
+-name = "errno"
+-version = "0.3.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+-dependencies = [
+- "libc",
+- "windows-sys 0.61.2",
+-]
+-
+-[[package]]
+-name = "ethnum"
+-version = "1.5.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ca81e6b4777c89fd810c25a4be2b1bd93ea034fbe58e6a75216a34c6b82c539b"
+-
+-[[package]]
+-name = "fallible-streaming-iterator"
+-version = "0.1.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+-
+-[[package]]
+-name = "fast-float"
+-version = "0.2.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "95765f67b4b18863968b4a1bd5bb576f732b29a4a28c7cd84c09fa3e2875f33c"
+-
+-[[package]]
+-name = "fastrand"
+-version = "2.3.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+-
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
+ 
+-[[package]]
+-name = "fixedbitset"
+-version = "0.5.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+-
+-[[package]]
+-name = "foreign_vec"
+-version = "0.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ee1b05cbd864bcaecbd3455d6d967862d446e4ebfc3c2e5e5b9841e53cba6673"
+-
+ [[package]]
+ name = "getrandom"
+ version = "0.2.16"
+@@ -424,10 +157,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592"
+ dependencies = [
+  "cfg-if",
+- "js-sys",
+  "libc",
+  "wasi",
+- "wasm-bindgen",
+ ]
+ 
+ [[package]]
+@@ -442,85 +173,12 @@ dependencies = [
+  "wasip2",
+ ]
+ 
+-[[package]]
+-name = "glob"
+-version = "0.3.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+-
+-[[package]]
+-name = "hashbrown"
+-version = "0.14.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+-dependencies = [
+- "ahash",
+- "allocator-api2",
+- "rayon",
+- "serde",
+-]
+-
+-[[package]]
+-name = "hashbrown"
+-version = "0.16.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+-
+ [[package]]
+ name = "heck"
+ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
+-[[package]]
+-name = "hex"
+-version = "0.4.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+-
+-[[package]]
+-name = "home"
+-version = "0.5.12"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
+-dependencies = [
+- "windows-sys 0.61.2",
+-]
+-
+-[[package]]
+-name = "iana-time-zone"
+-version = "0.1.64"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "33e57f83510bb73707521ebaffa789ec8caf86f9657cad665b092b581d40e9fb"
+-dependencies = [
+- "android_system_properties",
+- "core-foundation-sys",
+- "iana-time-zone-haiku",
+- "js-sys",
+- "log",
+- "wasm-bindgen",
+- "windows-core 0.62.2",
+-]
+-
+-[[package]]
+-name = "iana-time-zone-haiku"
+-version = "0.1.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+-dependencies = [
+- "cc",
+-]
+-
+-[[package]]
+-name = "indexmap"
+-version = "2.12.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
+-dependencies = [
+- "equivalent",
+- "hashbrown 0.16.1",
+-]
+-
+ [[package]]
+ name = "indoc"
+ version = "2.0.7"
+@@ -548,38 +206,6 @@ dependencies = [
+  "either",
+ ]
+ 
+-[[package]]
+-name = "itoa"
+-version = "1.0.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
+-
+-[[package]]
+-name = "itoap"
+-version = "1.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9028f49264629065d057f340a86acb84867925865f73bbf8d47b4d149a7e88b8"
+-
+-[[package]]
+-name = "jobserver"
+-version = "0.1.34"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
+-dependencies = [
+- "getrandom 0.3.4",
+- "libc",
+-]
+-
+-[[package]]
+-name = "js-sys"
+-version = "0.3.83"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "464a3709c7f55f1f721e5389aa6ea4e3bc6aba669353300af094b29ffbdde1d8"
+-dependencies = [
+- "once_cell",
+- "wasm-bindgen",
+-]
+-
+ [[package]]
+ name = "lazy_static"
+ version = "1.5.0"
+@@ -593,55 +219,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
+ 
+ [[package]]
+-name = "libm"
+-version = "0.2.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+-
+-[[package]]
+-name = "linux-raw-sys"
+-version = "0.11.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
+-
+-[[package]]
+-name = "litrs"
+-version = "1.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+-
+-[[package]]
+-name = "lock_api"
+-version = "0.4.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+-dependencies = [
+- "scopeguard",
+-]
+-
+-[[package]]
+-name = "log"
+-version = "0.4.28"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+-
+-[[package]]
+-name = "lz4"
+-version = "1.28.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a20b523e860d03443e98350ceaac5e71c6ba89aea7d960769ec3ce37f4de5af4"
+-dependencies = [
+- "lz4-sys",
+-]
+-
+-[[package]]
+-name = "lz4-sys"
+-version = "1.11.1+lz4-1.10.0"
++name = "libmimalloc-sys"
++version = "0.1.49"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6bd8c0d6c6ed0cd30b3652886bb8711dc4bb01d637a68105a3d5158039b418e6"
++checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
+ dependencies = [
+  "cc",
+- "libc",
+ ]
+ 
+ [[package]]
+@@ -650,15 +233,6 @@ version = "2.7.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+ 
+-[[package]]
+-name = "memmap2"
+-version = "0.7.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f49388d20533534cd19360ad3d6a7dadc885944aa802ba3995040c5ec11288c6"
+-dependencies = [
+- "libc",
+-]
+-
+ [[package]]
+ name = "memmap2"
+ version = "0.9.9"
+@@ -678,117 +252,23 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "multimap"
+-version = "0.10.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
+-
+-[[package]]
+-name = "multiversion"
+-version = "0.7.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c4851161a11d3ad0bf9402d90ffc3967bf231768bfd7aeb61755ad06dbf1a142"
+-dependencies = [
+- "multiversion-macros",
+- "target-features",
+-]
+-
+-[[package]]
+-name = "multiversion-macros"
+-version = "0.7.4"
++name = "mimalloc"
++version = "0.1.52"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "79a74ddee9e0c27d2578323c13905793e91622148f138ba29738f9dddb835e90"
++checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
+ dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 1.0.109",
+- "target-features",
++ "libmimalloc-sys",
+ ]
+ 
+ [[package]]
+-name = "now"
+-version = "0.1.3"
++name = "once_cell"
++version = "1.21.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6d89e9874397a1f0a52fc1f197a8effd9735223cb2390e9dcc83ac6cd02923d0"
+-dependencies = [
+- "chrono",
+-]
++checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+ 
+ [[package]]
+-name = "ntapi"
+-version = "0.4.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e8a3895c6391c39d7fe7ebc444a87eb2991b2a0bc718fdabd071eec617fc68e4"
+-dependencies = [
+- "winapi",
+-]
+-
+-[[package]]
+-name = "num-traits"
+-version = "0.2.19"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+-dependencies = [
+- "autocfg",
+- "libm",
+-]
+-
+-[[package]]
+-name = "object"
+-version = "0.32.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a6a622008b6e321afc04970976f62ee297fdbaa6f95318ca343e3eebb9648441"
+-dependencies = [
+- "memchr",
+-]
+-
+-[[package]]
+-name = "once_cell"
+-version = "1.21.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+-
+-[[package]]
+-name = "parking_lot"
+-version = "0.12.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
+-dependencies = [
+- "lock_api",
+- "parking_lot_core",
+-]
+-
+-[[package]]
+-name = "parking_lot_core"
+-version = "0.9.12"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+-dependencies = [
+- "cfg-if",
+- "libc",
+- "redox_syscall",
+- "smallvec",
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "parquet-format-safe"
+-version = "0.2.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1131c54b167dd4e4799ce762e1ab01549ebb94d5bdd13e6ec1b467491c378e1f"
+-
+-[[package]]
+-name = "parse-zoneinfo"
+-version = "0.3.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
+-dependencies = [
+- "regex",
+-]
+-
+-[[package]]
+-name = "parser"
+-version = "0.1.1"
++name = "parser"
++version = "0.1.1"
+ dependencies = [
+  "ahash",
+  "bit_reverse",
+@@ -799,7 +279,8 @@ dependencies = [
+  "itertools 0.13.0",
+  "lazy_static",
+  "libc",
+- "memmap2 0.9.9",
++ "memmap2",
++ "mimalloc",
+  "phf",
+  "phf_macros",
+  "proc-macro2",
+@@ -811,22 +292,6 @@ dependencies = [
+  "snap",
+ ]
+ 
+-[[package]]
+-name = "percent-encoding"
+-version = "2.3.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+-
+-[[package]]
+-name = "petgraph"
+-version = "0.7.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+-dependencies = [
+- "fixedbitset",
+- "indexmap",
+-]
+-
+ [[package]]
+ name = "phf"
+ version = "0.11.3"
+@@ -837,16 +302,6 @@ dependencies = [
+  "phf_shared",
+ ]
+ 
+-[[package]]
+-name = "phf_codegen"
+-version = "0.11.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
+-dependencies = [
+- "phf_generator",
+- "phf_shared",
+-]
+-
+ [[package]]
+ name = "phf_generator"
+ version = "0.11.3"
+@@ -867,7 +322,7 @@ dependencies = [
+  "phf_shared",
+  "proc-macro2",
+  "quote",
+- "syn 2.0.111",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -879,417 +334,6 @@ dependencies = [
+  "siphasher",
+ ]
+ 
+-[[package]]
+-name = "pkg-config"
+-version = "0.3.32"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
+-
+-[[package]]
+-name = "planus"
+-version = "0.3.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fc1691dd09e82f428ce8d6310bd6d5da2557c82ff17694d2a32cad7242aea89f"
+-dependencies = [
+- "array-init-cursor",
+-]
+-
+-[[package]]
+-name = "polars"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8e3351ea4570e54cd556e6755b78fe7a2c85368d820c0307cca73c96e796a7ba"
+-dependencies = [
+- "getrandom 0.2.16",
+- "polars-arrow",
+- "polars-core",
+- "polars-error",
+- "polars-io",
+- "polars-lazy",
+- "polars-ops",
+- "polars-parquet",
+- "polars-sql",
+- "polars-time",
+- "polars-utils",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-arrow"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ba65fc4bcabbd64fca01fd30e759f8b2043f0963c57619e331d4b534576c0b47"
+-dependencies = [
+- "ahash",
+- "atoi",
+- "atoi_simd",
+- "bytemuck",
+- "chrono",
+- "chrono-tz",
+- "dyn-clone",
+- "either",
+- "ethnum",
+- "fast-float",
+- "foreign_vec",
+- "getrandom 0.2.16",
+- "hashbrown 0.14.5",
+- "itoa",
+- "itoap",
+- "lz4",
+- "multiversion",
+- "num-traits",
+- "polars-arrow-format",
+- "polars-error",
+- "polars-utils",
+- "ryu",
+- "simdutf8",
+- "streaming-iterator",
+- "strength_reduce",
+- "version_check",
+- "zstd",
+-]
+-
+-[[package]]
+-name = "polars-arrow-format"
+-version = "0.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "19b0ef2474af9396b19025b189d96e992311e6a47f90c53cd998b36c4c64b84c"
+-dependencies = [
+- "planus",
+- "serde",
+-]
+-
+-[[package]]
+-name = "polars-compute"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9f099516af30ac9ae4b4480f4ad02aa017d624f2f37b7a16ad4e9ba52f7e5269"
+-dependencies = [
+- "bytemuck",
+- "either",
+- "num-traits",
+- "polars-arrow",
+- "polars-error",
+- "polars-utils",
+- "strength_reduce",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-core"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b2439484be228b8c302328e2f953e64cfd93930636e5c7ceed90339ece7fef6c"
+-dependencies = [
+- "ahash",
+- "bitflags",
+- "bytemuck",
+- "chrono",
+- "chrono-tz",
+- "comfy-table",
+- "either",
+- "hashbrown 0.14.5",
+- "indexmap",
+- "num-traits",
+- "once_cell",
+- "polars-arrow",
+- "polars-compute",
+- "polars-error",
+- "polars-row",
+- "polars-utils",
+- "rand",
+- "rand_distr",
+- "rayon",
+- "regex",
+- "smartstring",
+- "thiserror",
+- "version_check",
+- "xxhash-rust",
+-]
+-
+-[[package]]
+-name = "polars-error"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0c9b06dfbe79cabe50a7f0a90396864b5ee2c0e0f8d6a9353b2343c29c56e937"
+-dependencies = [
+- "polars-arrow-format",
+- "regex",
+- "simdutf8",
+- "thiserror",
+-]
+-
+-[[package]]
+-name = "polars-expr"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d9c630385a56a867c410a20f30772d088f90ec3d004864562b84250b35268f97"
+-dependencies = [
+- "ahash",
+- "bitflags",
+- "once_cell",
+- "polars-arrow",
+- "polars-core",
+- "polars-io",
+- "polars-ops",
+- "polars-plan",
+- "polars-time",
+- "polars-utils",
+- "rayon",
+- "smartstring",
+-]
+-
+-[[package]]
+-name = "polars-io"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9d7363cd14e4696a28b334a56bd11013ff49cc96064818ab3f91a126e453462d"
+-dependencies = [
+- "ahash",
+- "atoi_simd",
+- "bytes",
+- "chrono",
+- "fast-float",
+- "home",
+- "itoa",
+- "memchr",
+- "memmap2 0.7.1",
+- "num-traits",
+- "once_cell",
+- "percent-encoding",
+- "polars-arrow",
+- "polars-core",
+- "polars-error",
+- "polars-time",
+- "polars-utils",
+- "rayon",
+- "regex",
+- "ryu",
+- "simdutf8",
+- "smartstring",
+-]
+-
+-[[package]]
+-name = "polars-lazy"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "03877e74e42b5340ae52ded705f6d5d14563d90554c9177b01b91ed2412a56ed"
+-dependencies = [
+- "ahash",
+- "bitflags",
+- "glob",
+- "memchr",
+- "once_cell",
+- "polars-arrow",
+- "polars-core",
+- "polars-expr",
+- "polars-io",
+- "polars-mem-engine",
+- "polars-ops",
+- "polars-pipe",
+- "polars-plan",
+- "polars-time",
+- "polars-utils",
+- "rayon",
+- "smartstring",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-mem-engine"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "dea9e17771af750c94bf959885e4b3f5b14149576c62ef3ec1c9ef5827b2a30f"
+-dependencies = [
+- "polars-arrow",
+- "polars-core",
+- "polars-error",
+- "polars-expr",
+- "polars-io",
+- "polars-ops",
+- "polars-plan",
+- "polars-time",
+- "polars-utils",
+- "rayon",
+-]
+-
+-[[package]]
+-name = "polars-ops"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6066552eb577d43b307027fb38096910b643ffb2c89a21628c7e41caf57848d0"
+-dependencies = [
+- "ahash",
+- "argminmax",
+- "base64",
+- "bytemuck",
+- "chrono",
+- "chrono-tz",
+- "either",
+- "hashbrown 0.14.5",
+- "hex",
+- "indexmap",
+- "memchr",
+- "num-traits",
+- "polars-arrow",
+- "polars-compute",
+- "polars-core",
+- "polars-error",
+- "polars-utils",
+- "rayon",
+- "regex",
+- "smartstring",
+- "unicode-reverse",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-parquet"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2b35b2592a2e7ef7ce9942dc2120dc4576142626c0e661668e4c6b805042e461"
+-dependencies = [
+- "ahash",
+- "base64",
+- "ethnum",
+- "num-traits",
+- "parquet-format-safe",
+- "polars-arrow",
+- "polars-compute",
+- "polars-error",
+- "polars-utils",
+- "simdutf8",
+- "streaming-decompression",
+-]
+-
+-[[package]]
+-name = "polars-pipe"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "021bce7768c330687d735340395a77453aa18dd70d57c184cbb302311e87c1b9"
+-dependencies = [
+- "crossbeam-channel",
+- "crossbeam-queue",
+- "enum_dispatch",
+- "hashbrown 0.14.5",
+- "num-traits",
+- "polars-arrow",
+- "polars-compute",
+- "polars-core",
+- "polars-expr",
+- "polars-io",
+- "polars-ops",
+- "polars-plan",
+- "polars-row",
+- "polars-utils",
+- "rayon",
+- "smartstring",
+- "uuid",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-plan"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "220d0d7c02d1c4375802b2813dbedcd1a184df39c43b74689e729ede8d5c2921"
+-dependencies = [
+- "ahash",
+- "bytemuck",
+- "chrono-tz",
+- "either",
+- "hashbrown 0.14.5",
+- "once_cell",
+- "percent-encoding",
+- "polars-arrow",
+- "polars-core",
+- "polars-io",
+- "polars-ops",
+- "polars-time",
+- "polars-utils",
+- "rayon",
+- "recursive",
+- "regex",
+- "smartstring",
+- "strum_macros",
+- "version_check",
+-]
+-
+-[[package]]
+-name = "polars-row"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c1d70d87a2882a64a43b431aea1329cb9a2c4100547c95c417cc426bb82408b3"
+-dependencies = [
+- "bytemuck",
+- "polars-arrow",
+- "polars-error",
+- "polars-utils",
+-]
+-
+-[[package]]
+-name = "polars-sql"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a6fc1c9b778862f09f4a347f768dfdd3d0ba9957499d306d83c7103e0fa8dc5b"
+-dependencies = [
+- "hex",
+- "once_cell",
+- "polars-arrow",
+- "polars-core",
+- "polars-error",
+- "polars-lazy",
+- "polars-ops",
+- "polars-plan",
+- "polars-time",
+- "rand",
+- "serde",
+- "serde_json",
+- "sqlparser",
+-]
+-
+-[[package]]
+-name = "polars-time"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "179f98313a15c0bfdbc8cc0f1d3076d08d567485b9952d46439f94fbc3085df5"
+-dependencies = [
+- "atoi",
+- "bytemuck",
+- "chrono",
+- "chrono-tz",
+- "now",
+- "once_cell",
+- "polars-arrow",
+- "polars-core",
+- "polars-error",
+- "polars-ops",
+- "polars-utils",
+- "regex",
+- "smartstring",
+-]
+-
+-[[package]]
+-name = "polars-utils"
+-version = "0.41.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "53e6dd89fcccb1ec1a62f752c9a9f2d482a85e9255153f46efecc617b4996d50"
+-dependencies = [
+- "ahash",
+- "bytemuck",
+- "hashbrown 0.14.5",
+- "indexmap",
+- "num-traits",
+- "once_cell",
+- "polars-error",
+- "raw-cpuid",
+- "rayon",
+- "smartstring",
+- "stacker",
+- "sysinfo",
+- "version_check",
+-]
+-
+ [[package]]
+ name = "portable-atomic"
+ version = "1.11.1"
+@@ -1305,16 +349,6 @@ dependencies = [
+  "zerocopy",
+ ]
+ 
+-[[package]]
+-name = "prettyplease"
+-version = "0.2.37"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+-dependencies = [
+- "proc-macro2",
+- "syn 2.0.111",
+-]
+-
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.103"
+@@ -1334,26 +368,6 @@ dependencies = [
+  "prost-derive",
+ ]
+ 
+-[[package]]
+-name = "prost-build"
+-version = "0.13.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
+-dependencies = [
+- "heck",
+- "itertools 0.14.0",
+- "log",
+- "multimap",
+- "once_cell",
+- "petgraph",
+- "prettyplease",
+- "prost",
+- "prost-types",
+- "regex",
+- "syn 2.0.111",
+- "tempfile",
+-]
+-
+ [[package]]
+ name = "prost-derive"
+ version = "0.13.5"
+@@ -1364,16 +378,7 @@ dependencies = [
+  "itertools 0.14.0",
+  "proc-macro2",
+  "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "prost-types"
+-version = "0.13.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+-dependencies = [
+- "prost",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1385,16 +390,6 @@ dependencies = [
+  "thiserror",
+ ]
+ 
+-[[package]]
+-name = "psm"
+-version = "0.1.28"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d11f2fedc3b7dafdc2851bc52f277377c5473d378859be234bc7ebb593144d01"
+-dependencies = [
+- "ar_archive_writer",
+- "cc",
+-]
+-
+ [[package]]
+ name = "pyo3"
+ version = "0.27.2"
+@@ -1441,7 +436,7 @@ dependencies = [
+  "proc-macro2",
+  "pyo3-macros-backend",
+  "quote",
+- "syn 2.0.111",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1454,7 +449,7 @@ dependencies = [
+  "proc-macro2",
+  "pyo3-build-config",
+  "quote",
+- "syn 2.0.111",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1512,32 +507,13 @@ dependencies = [
+ ]
+ 
+ [[package]]
+-name = "rand_distr"
+-version = "0.4.3"
++name = "rayon"
++version = "1.11.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
++checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+ dependencies = [
+- "num-traits",
+- "rand",
+-]
+-
+-[[package]]
+-name = "raw-cpuid"
+-version = "11.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
+-dependencies = [
+- "bitflags",
+-]
+-
+-[[package]]
+-name = "rayon"
+-version = "1.11.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+-dependencies = [
+- "either",
+- "rayon-core",
++ "either",
++ "rayon-core",
+ ]
+ 
+ [[package]]
+@@ -1550,35 +526,6 @@ dependencies = [
+  "crossbeam-utils",
+ ]
+ 
+-[[package]]
+-name = "recursive"
+-version = "0.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0786a43debb760f491b1bc0269fe5e84155353c67482b9e60d0cfb596054b43e"
+-dependencies = [
+- "recursive-proc-macro-impl",
+- "stacker",
+-]
+-
+-[[package]]
+-name = "recursive-proc-macro-impl"
+-version = "0.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "76009fbe0614077fc1a2ce255e3a1881a2e3a3527097d5dc6d8212c585e7e38b"
+-dependencies = [
+- "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "redox_syscall"
+-version = "0.5.18"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+-dependencies = [
+- "bitflags",
+-]
+-
+ [[package]]
+ name = "regex"
+ version = "1.12.2"
+@@ -1617,37 +564,12 @@ dependencies = [
+  "semver",
+ ]
+ 
+-[[package]]
+-name = "rustix"
+-version = "1.1.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e"
+-dependencies = [
+- "bitflags",
+- "errno",
+- "libc",
+- "linux-raw-sys",
+- "windows-sys 0.61.2",
+-]
+-
+ [[package]]
+ name = "rustversion"
+ version = "1.0.22"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+ 
+-[[package]]
+-name = "ryu"
+-version = "1.0.20"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+-
+-[[package]]
+-name = "scopeguard"
+-version = "1.2.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+-
+ [[package]]
+ name = "semver"
+ version = "1.0.27"
+@@ -1681,20 +603,7 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "serde_json"
+-version = "1.0.145"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+-dependencies = [
+- "itoa",
+- "memchr",
+- "ryu",
+- "serde",
+- "serde_core",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1703,90 +612,18 @@ version = "1.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+ 
+-[[package]]
+-name = "simdutf8"
+-version = "0.1.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+-
+ [[package]]
+ name = "siphasher"
+ version = "1.0.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+ 
+-[[package]]
+-name = "smallvec"
+-version = "1.15.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+-
+-[[package]]
+-name = "smartstring"
+-version = "1.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3fb72c633efbaa2dd666986505016c32c3044395ceaf881518399d2f4127ee29"
+-dependencies = [
+- "autocfg",
+- "static_assertions",
+- "version_check",
+-]
+-
+ [[package]]
+ name = "snap"
+ version = "1.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
+ 
+-[[package]]
+-name = "sqlparser"
+-version = "0.47.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "295e9930cd7a97e58ca2a070541a3ca502b17f5d1fa7157376d0fabd85324f25"
+-dependencies = [
+- "log",
+-]
+-
+-[[package]]
+-name = "stacker"
+-version = "0.1.22"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e1f8b29fb42aafcea4edeeb6b2f2d7ecd0d969c48b4cf0d2e64aafc471dd6e59"
+-dependencies = [
+- "cc",
+- "cfg-if",
+- "libc",
+- "psm",
+- "windows-sys 0.59.0",
+-]
+-
+-[[package]]
+-name = "static_assertions"
+-version = "1.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+-
+-[[package]]
+-name = "streaming-decompression"
+-version = "0.1.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "bf6cc3b19bfb128a8ad11026086e31d3ce9ad23f8ea37354b31383a187c44cf3"
+-dependencies = [
+- "fallible-streaming-iterator",
+-]
+-
+-[[package]]
+-name = "streaming-iterator"
+-version = "0.1.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
+-
+-[[package]]
+-name = "strength_reduce"
+-version = "0.2.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
+-
+ [[package]]
+ name = "strum"
+ version = "0.26.3"
+@@ -1806,18 +643,7 @@ dependencies = [
+  "proc-macro2",
+  "quote",
+  "rustversion",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "syn"
+-version = "1.0.109"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "unicode-ident",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1831,45 +657,12 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
+-[[package]]
+-name = "sysinfo"
+-version = "0.30.13"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3"
+-dependencies = [
+- "cfg-if",
+- "core-foundation-sys",
+- "libc",
+- "ntapi",
+- "once_cell",
+- "windows",
+-]
+-
+-[[package]]
+-name = "target-features"
+-version = "0.1.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c1bbb9f3c5c463a01705937a24fdabc5047929ac764b2d5b9cf681c1f5041ed5"
+-
+ [[package]]
+ name = "target-lexicon"
+ version = "0.13.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
+ 
+-[[package]]
+-name = "tempfile"
+-version = "3.23.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2d31c77bdf42a745371d260a26ca7163f1e0924b64afa0b688e61b5a9fa02f16"
+-dependencies = [
+- "fastrand",
+- "getrandom 0.3.4",
+- "once_cell",
+- "rustix",
+- "windows-sys 0.61.2",
+-]
+-
+ [[package]]
+ name = "thiserror"
+ version = "1.0.69"
+@@ -1887,7 +680,7 @@ checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 2.0.111",
++ "syn",
+ ]
+ 
+ [[package]]
+@@ -1896,44 +689,12 @@ version = "1.0.22"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9312f7c4f6ff9069b165498234ce8be658059c6728633667c526e27dc2cf1df5"
+ 
+-[[package]]
+-name = "unicode-reverse"
+-version = "1.0.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4b6f4888ebc23094adfb574fdca9fdc891826287a6397d2cd28802ffd6f20c76"
+-dependencies = [
+- "unicode-segmentation",
+-]
+-
+-[[package]]
+-name = "unicode-segmentation"
+-version = "1.12.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
+-
+-[[package]]
+-name = "unicode-width"
+-version = "0.2.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+-
+ [[package]]
+ name = "unindent"
+ version = "0.2.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
+ 
+-[[package]]
+-name = "uuid"
+-version = "1.18.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
+-dependencies = [
+- "getrandom 0.3.4",
+- "js-sys",
+- "wasm-bindgen",
+-]
+-
+ [[package]]
+ name = "version_check"
+ version = "0.9.5"
+@@ -1955,233 +716,6 @@ dependencies = [
+  "wit-bindgen",
+ ]
+ 
+-[[package]]
+-name = "wasm-bindgen"
+-version = "0.2.106"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0d759f433fa64a2d763d1340820e46e111a7a5ab75f993d1852d70b03dbb80fd"
+-dependencies = [
+- "cfg-if",
+- "once_cell",
+- "rustversion",
+- "wasm-bindgen-macro",
+- "wasm-bindgen-shared",
+-]
+-
+-[[package]]
+-name = "wasm-bindgen-macro"
+-version = "0.2.106"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "48cb0d2638f8baedbc542ed444afc0644a29166f1595371af4fecf8ce1e7eeb3"
+-dependencies = [
+- "quote",
+- "wasm-bindgen-macro-support",
+-]
+-
+-[[package]]
+-name = "wasm-bindgen-macro-support"
+-version = "0.2.106"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cefb59d5cd5f92d9dcf80e4683949f15ca4b511f4ac0a6e14d4e1ac60c6ecd40"
+-dependencies = [
+- "bumpalo",
+- "proc-macro2",
+- "quote",
+- "syn 2.0.111",
+- "wasm-bindgen-shared",
+-]
+-
+-[[package]]
+-name = "wasm-bindgen-shared"
+-version = "0.2.106"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cbc538057e648b67f72a982e708d485b2efa771e1ac05fec311f9f63e5800db4"
+-dependencies = [
+- "unicode-ident",
+-]
+-
+-[[package]]
+-name = "winapi"
+-version = "0.3.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+-dependencies = [
+- "winapi-i686-pc-windows-gnu",
+- "winapi-x86_64-pc-windows-gnu",
+-]
+-
+-[[package]]
+-name = "winapi-i686-pc-windows-gnu"
+-version = "0.4.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+-
+-[[package]]
+-name = "winapi-x86_64-pc-windows-gnu"
+-version = "0.4.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+-
+-[[package]]
+-name = "windows"
+-version = "0.52.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+-dependencies = [
+- "windows-core 0.52.0",
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-core"
+-version = "0.52.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-core"
+-version = "0.62.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
+-dependencies = [
+- "windows-implement",
+- "windows-interface",
+- "windows-link",
+- "windows-result",
+- "windows-strings",
+-]
+-
+-[[package]]
+-name = "windows-implement"
+-version = "0.60.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "windows-interface"
+-version = "0.59.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "windows-link"
+-version = "0.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+-
+-[[package]]
+-name = "windows-result"
+-version = "0.4.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
+-dependencies = [
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "windows-strings"
+-version = "0.5.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091"
+-dependencies = [
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "windows-sys"
+-version = "0.59.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-sys"
+-version = "0.61.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+-dependencies = [
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "windows-targets"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
+-dependencies = [
+- "windows_aarch64_gnullvm",
+- "windows_aarch64_msvc",
+- "windows_i686_gnu",
+- "windows_i686_gnullvm",
+- "windows_i686_msvc",
+- "windows_x86_64_gnu",
+- "windows_x86_64_gnullvm",
+- "windows_x86_64_msvc",
+-]
+-
+-[[package]]
+-name = "windows_aarch64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+-
+-[[package]]
+-name = "windows_aarch64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+-
+-[[package]]
+-name = "windows_i686_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+-
+-[[package]]
+-name = "windows_i686_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+-
+-[[package]]
+-name = "windows_i686_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+-
+-[[package]]
+-name = "windows_x86_64_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+-
+-[[package]]
+-name = "windows_x86_64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+-
+-[[package]]
+-name = "windows_x86_64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+-
+ [[package]]
+ name = "winnow"
+ version = "0.7.14"
+@@ -2197,12 +731,6 @@ version = "0.46.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+ 
+-[[package]]
+-name = "xxhash-rust"
+-version = "0.8.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
+-
+ [[package]]
+ name = "zerocopy"
+ version = "0.8.31"
+@@ -2220,33 +748,5 @@ checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 2.0.111",
+-]
+-
+-[[package]]
+-name = "zstd"
+-version = "0.13.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+-dependencies = [
+- "zstd-safe",
+-]
+-
+-[[package]]
+-name = "zstd-safe"
+-version = "7.2.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+-dependencies = [
+- "zstd-sys",
+-]
+-
+-[[package]]
+-name = "zstd-sys"
+-version = "2.0.16+zstd.1.5.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+-dependencies = [
+- "cc",
+- "pkg-config",
++ "syn",
+ ]
+diff --git a/src/python/Cargo.toml b/src/python/Cargo.toml
+index 99f044e..2e02806 100644
+--- a/src/python/Cargo.toml
++++ b/src/python/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "demoparser2"
+-version = "0.41.4"
++version = "0.41.4+cs2insight1"
+ edition = "2021"
+ 
+ 
+@@ -13,8 +13,6 @@ crate-type = ["cdylib"]
+ [dependencies]
+ ahash = "0.8.3"
+ pyo3 = { version = "0.27", features = ["extension-module", "generate-import-lib"] }
+-polars = "0.41.2"
+-polars-arrow = { version = "0.41.2"}
+ derive_more = "0.99.17"
+ itertools = "0.13.0"
+ memmap2 = "0.9.4"
+diff --git a/src/python/pyproject.toml b/src/python/pyproject.toml
+index 7d2deac..507e224 100644
+--- a/src/python/pyproject.toml
++++ b/src/python/pyproject.toml
+@@ -6,7 +6,7 @@ build-backend = "maturin"
+ name = "demoparser2"
+ dynamic = ["version"]
+ requires-python = ">=3.8"
+-dependencies = ["pandas>=1.5.0", "numpy", "polars", "pyarrow", "tqdm"]
++dependencies = ["pandas>=1.5.0"]
+ classifiers = [
+     "Programming Language :: Rust",
+     "Programming Language :: Python :: Implementation :: CPython",
+@@ -21,4 +21,4 @@ protobuf = "3.1.0"
+ path = "./csgoproto"
+ 
+ [profile.dev]
+-overflow-checks = false
+\ No newline at end of file
++overflow-checks = false
+diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
+index c950726..524ed0f 100644
+--- a/src/python/src/lib.rs
++++ b/src/python/src/lib.rs
+@@ -13,16 +13,7 @@ use parser::second_pass::game_events::GameEvent;
+ use parser::second_pass::parser_settings::create_huffman_lookup_table;
+ use parser::second_pass::variants::VarVec;
+ use parser::second_pass::variants::Variant;
+-use polars::prelude::ArrayRef;
+-use polars::prelude::ArrowField;
+-use polars::prelude::NamedFrom;
+-use polars::series::Series;
+-use polars_arrow::array::{
+-    Array, BooleanArray, Float32Array, Int32Array, UInt32Array, UInt64Array,
+-};
+-use polars_arrow::ffi;
+ use pyo3::exceptions::PyValueError;
+-use pyo3::ffi::Py_uintptr_t;
+ use pyo3::impl_::frompyobject::extract_struct_field;
+ use pyo3::prelude::*;
+ use pyo3::types::IntoPyDict;
+@@ -38,6 +29,22 @@ use std::sync::Arc;
+ use pyo3::create_exception;
+ create_exception!(DemoParser, Exception, pyo3::exceptions::PyException);
+ 
++fn pandas_dataframe(
++    py: Python<'_>,
++    columns: Vec<(String, Py<PyAny>)>,
++    column_order: Vec<String>,
++) -> PyResult<Py<PyAny>> {
++    let data = PyDict::new(py);
++    for (name, values) in columns {
++        data.set_item(name, values)?;
++    }
++    let pandas = py.import("pandas")?;
++    let kwargs = vec![("columns", column_order)].into_py_dict(py)?;
++    pandas
++        .call_method("DataFrame", (data,), Some(&kwargs))?
++        .into_py_any(py)
++}
++
+ #[derive(Clone)]
+ struct PyVariant(Variant);
+ 
+@@ -267,29 +274,27 @@ impl DemoParser {
+                 match &output.df[&prop_info.id].data {
+                     Some(VarVec::F32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(Float32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::I32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(Int32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::U64(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(UInt64Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::U32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(UInt32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::Bool(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(BooleanArray::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::String(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name.clone());
+-                        let s = Series::new(&prop_info.prop_friendly_name.clone(), data);
+-                        let py_series = rust_series_to_py_series(&s)?;
+-                        all_series.push(py_series);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::StringVec(data)) => {
+                         df_column_names_py.push(prop_info.prop_friendly_name);
+@@ -311,22 +316,15 @@ impl DemoParser {
+                 }
+             }
+         }
+-        Python::attach(|py| {
+-            let polars = py.import("polars")?;
+-            let all_series_py = all_series.into_py_any(py)?;
+-            let df = polars.call_method1("DataFrame", (all_series_py,))?;
+-            df.setattr("columns", df_column_names_arrow.clone())?;
+-            let pandas_df = df.call_method0("to_pandas")?;
+-            for (pyobj, col_name) in all_pyobjects.iter().zip(&df_column_names_py) {
+-                pandas_df.call_method1("insert", (0, col_name, pyobj))?;
+-            }
+-            df_column_names_arrow.extend(df_column_names_py);
+-            df_column_names_arrow.sort();
+-            let kwargs = vec![("axis", 1)].into_py_dict(py).unwrap();
+-            let args = (df_column_names_arrow,);
+-            pandas_df.call_method("reindex", args, Some(&kwargs))?;
+-            pandas_df.into_py_any(py)
+-        })
++        let mut columns: Vec<(String, Py<PyAny>)> = df_column_names_arrow
++            .iter()
++            .cloned()
++            .zip(all_series)
++            .collect();
++        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
++        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
++        column_order.extend(df_column_names_arrow);
++        pandas_dataframe(py, columns, column_order)
+     }
+ 
+     pub fn parse_player_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+@@ -359,24 +357,19 @@ impl DemoParser {
+         let names: Vec<Option<String>> = output.player_md.iter().map(|p| p.name.clone()).collect();
+ 
+         // SoA form
+-        let steamid = rust_series_to_py_series(&Series::new("Steamid", steamids))?;
+-        let team_number = arr_to_py(Box::new(Int32Array::from(team_numbers)))?;
+-        let name = rust_series_to_py_series(&Series::new("param2", names))?;
+-
+-        let polars = py.import("polars")?;
+-        let all_series_py = [steamid, name, team_number].into_py_any(py)?;
+-        Python::attach(|py| {
+-            let df = polars.call_method1("DataFrame", (all_series_py,))?;
+-            // Set column names
+-            let column_names = ["steamid", "name", "team_number"];
+-            df.setattr("columns", column_names)?;
+-            // Call to_pandas with use_pyarrow_extension_array = true
+-            let kwargs = vec![("use_pyarrow_extension_array", true)]
+-                .into_py_dict(py)
+-                .unwrap();
+-            let pandas_df = df.call_method("to_pandas", (), Some(&kwargs))?;
+-            pandas_df.into_py_any(py)
+-        })
++        pandas_dataframe(
++            py,
++            vec![
++                ("steamid".to_string(), steamids.into_py_any(py)?),
++                ("name".to_string(), names.into_py_any(py)?),
++                ("team_number".to_string(), team_numbers.into_py_any(py)?),
++            ],
++            vec![
++                "steamid".to_string(),
++                "name".to_string(),
++                "team_number".to_string(),
++            ],
++        )
+     }
+     pub fn parse_item_drops(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+         let settings = ParserInputs {
+@@ -416,52 +409,32 @@ impl DemoParser {
+             .iter()
+             .map(|x| x.custom_name.clone())
+             .collect();
+-        // SoA form
+-        let account_id = arr_to_py(Box::new(UInt32Array::from(account_id)))?;
+-        let def_index = arr_to_py(Box::new(UInt32Array::from(def_index)))?;
+-        let dropreason = arr_to_py(Box::new(UInt32Array::from(dropreason)))?;
+-        let inventory = arr_to_py(Box::new(UInt32Array::from(inventory)))?;
+-        let item_id = arr_to_py(Box::new(UInt64Array::from(item_id)))?;
+-        let paint_index = arr_to_py(Box::new(UInt32Array::from(paint_index)))?;
+-        let paint_seed = arr_to_py(Box::new(UInt32Array::from(paint_seed)))?;
+-        let paint_wear = arr_to_py(Box::new(UInt32Array::from(paint_wear)))?;
+-        let custom_name = rust_series_to_py_series(&Series::new("custom_name", custom_name))?;
+-
+-        let polars = py.import("polars")?;
+-        let all_series_py = [
+-            account_id,
+-            def_index,
+-            dropreason,
+-            inventory,
+-            item_id,
+-            paint_index,
+-            paint_seed,
+-            paint_wear,
+-            custom_name,
+-        ]
+-        .into_py_any(py)?;
+-        Python::attach(|py| {
+-            let df = polars.call_method1("DataFrame", (all_series_py,))?;
+-            // Set column names
+-            let column_names = [
+-                "account_id",
+-                "def_index",
+-                "dropreason",
+-                "inventory",
+-                "item_id",
+-                "paint_index",
+-                "paint_seed",
+-                "paint_wear",
+-                "custom_name",
+-            ];
+-            df.setattr("columns", column_names)?;
+-            // Call to_pandas with use_pyarrow_extension_array = true
+-            let kwargs = vec![("use_pyarrow_extension_array", true)]
+-                .into_py_dict(py)
+-                .unwrap();
+-            let pandas_df = df.call_method("to_pandas", (), Some(&kwargs))?;
+-            pandas_df.into_py_any(py)
+-        })
++        let names = [
++            "account_id",
++            "def_index",
++            "dropreason",
++            "inventory",
++            "item_id",
++            "paint_index",
++            "paint_seed",
++            "paint_wear",
++            "custom_name",
++        ];
++        pandas_dataframe(
++            py,
++            vec![
++                (names[0].to_string(), account_id.into_py_any(py)?),
++                (names[1].to_string(), def_index.into_py_any(py)?),
++                (names[2].to_string(), dropreason.into_py_any(py)?),
++                (names[3].to_string(), inventory.into_py_any(py)?),
++                (names[4].to_string(), item_id.into_py_any(py)?),
++                (names[5].to_string(), paint_index.into_py_any(py)?),
++                (names[6].to_string(), paint_seed.into_py_any(py)?),
++                (names[7].to_string(), paint_wear.into_py_any(py)?),
++                (names[8].to_string(), custom_name.into_py_any(py)?),
++            ],
++            names.iter().map(|name| (*name).to_string()).collect(),
++        )
+     }
+     pub fn parse_skins(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+         let settings = ParserInputs {
+@@ -497,45 +470,28 @@ impl DemoParser {
+         let custom_name: Vec<Option<String>> =
+             output.skins.iter().map(|s| s.custom_name.clone()).collect();
+ 
+-        let def_index = arr_to_py(Box::new(UInt32Array::from(def_idx_vec)))?;
+-        let item_id = arr_to_py(Box::new(UInt64Array::from(item_id)))?;
+-        let paint_index = arr_to_py(Box::new(UInt32Array::from(paint_index)))?;
+-        let paint_seed = arr_to_py(Box::new(UInt32Array::from(paint_seed)))?;
+-        let paint_wear = arr_to_py(Box::new(UInt32Array::from(paint_wear)))?;
+-        let steamid = arr_to_py(Box::new(UInt64Array::from(steamid)))?;
+-        let custom_name = rust_series_to_py_series(&Series::new("custom_name", custom_name))?;
+-
+-        let polars = py.import("polars")?;
+-        let all_series_py = [
+-            def_index,
+-            item_id,
+-            paint_index,
+-            paint_seed,
+-            paint_wear,
+-            custom_name,
+-            steamid,
+-        ]
+-        .into_py_any(py)?;
+-        Python::attach(|py| {
+-            let df = polars.call_method1("DataFrame", (all_series_py,))?;
+-            // Set column names
+-            let column_names = [
+-                "def_index",
+-                "item_id",
+-                "paint_index",
+-                "paint_seed",
+-                "paint_wear",
+-                "custom_name",
+-                "steamid",
+-            ];
+-            df.setattr("columns", column_names)?;
+-            // Call to_pandas with use_pyarrow_extension_array = true
+-            let kwargs = vec![("use_pyarrow_extension_array", true)]
+-                .into_py_dict(py)
+-                .unwrap();
+-            let pandas_df = df.call_method("to_pandas", (), Some(&kwargs))?;
+-            pandas_df.into_py_any(py)
+-        })
++        let names = [
++            "def_index",
++            "item_id",
++            "paint_index",
++            "paint_seed",
++            "paint_wear",
++            "custom_name",
++            "steamid",
++        ];
++        pandas_dataframe(
++            py,
++            vec![
++                (names[0].to_string(), def_idx_vec.into_py_any(py)?),
++                (names[1].to_string(), item_id.into_py_any(py)?),
++                (names[2].to_string(), paint_index.into_py_any(py)?),
++                (names[3].to_string(), paint_seed.into_py_any(py)?),
++                (names[4].to_string(), paint_wear.into_py_any(py)?),
++                (names[5].to_string(), custom_name.into_py_any(py)?),
++                (names[6].to_string(), steamid.into_py_any(py)?),
++            ],
++            names.iter().map(|name| (*name).to_string()).collect(),
++        )
+     }
+ 
+     #[pyo3(signature = (event_name, *, player=None, other=None))]
+@@ -773,29 +729,27 @@ impl DemoParser {
+                 match &output.df[&prop_info.id].data {
+                     Some(VarVec::F32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(Float32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::I32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(Int32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::U64(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(UInt64Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::U32(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(UInt32Array::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::Bool(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name);
+-                        all_series.push(arr_to_py(Box::new(BooleanArray::from(data)))?);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::String(data)) => {
+                         df_column_names_arrow.push(prop_info.prop_friendly_name.clone());
+-                        let s = Series::new(&prop_info.prop_friendly_name.clone(), data);
+-                        let py_series = rust_series_to_py_series(&s)?;
+-                        all_series.push(py_series);
++                        all_series.push(data.into_py_any(py)?);
+                     }
+                     Some(VarVec::StringVec(data)) => {
+                         df_column_names_py.push(prop_info.prop_friendly_name);
+@@ -863,146 +817,50 @@ impl DemoParser {
+                 }
+             }
+         }
+-        Python::attach(|py| {
+-            let polars = py.import("polars")?;
+-            let all_series_py = all_series.into_py_any(py)?;
+-            let df = polars.call_method1("DataFrame", (all_series_py,))?;
+-            df.setattr("columns", df_column_names_arrow.clone())?;
+-            let pandas_df = df.call_method0("to_pandas")?;
+-            for (pyobj, col_name) in all_pyobjects.iter().zip(&df_column_names_py) {
+-                pandas_df.call_method1("insert", (0, col_name, pyobj))?;
+-            }
+-            df_column_names_arrow.extend(df_column_names_py);
+-            df_column_names_arrow.sort();
+-            let kwargs = vec![("axis", 1)].into_py_dict(py).unwrap();
+-            let args = (df_column_names_arrow,);
+-            pandas_df.call_method("reindex", args, Some(&kwargs))?;
+-            pandas_df.into_py_any(py)
+-        })
++        let mut columns: Vec<(String, Py<PyAny>)> = df_column_names_arrow
++            .iter()
++            .cloned()
++            .zip(all_series)
++            .collect();
++        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
++        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
++        column_order.extend(df_column_names_arrow);
++        pandas_dataframe(py, columns, column_order)
+     }
+ }
+ 
+-/// <https://github.com/pola-rs/polars/blob/master/examples/python_rust_compiled_function/src/ffi.rs>
+-pub(crate) fn to_py_array(
+-    py: Python,
+-    pyarrow: &Bound<PyModule>,
+-    array: ArrayRef,
+-) -> PyResult<Py<PyAny>> {
+-    let schema = Box::new(ffi::export_field_to_c(&ArrowField::new(
+-        "",
+-        array.data_type().clone(),
+-        true,
+-    )));
+-    let array = Box::new(ffi::export_array_to_c(array));
+-
+-    let schema_ptr: *const ffi::ArrowSchema = &*schema;
+-    let array_ptr: *const ffi::ArrowArray = &*array;
+-
+-    let array = pyarrow.getattr("Array")?.call_method1(
+-        "_import_from_c",
+-        (array_ptr as Py_uintptr_t, schema_ptr as Py_uintptr_t),
+-    )?;
+-
+-    array.into_py_any(py)
+-}
+-
+-/// <https://github.com/pola-rs/polars/blob/master/examples/python_rust_compiled_function/src/ffi.rs>
+-pub fn rust_series_to_py_series(series: &Series) -> PyResult<Py<PyAny>> {
+-    // ensure we have a single chunk
+-    let series = series.rechunk();
+-    let array = series.to_arrow(0, false);
+-
+-    Python::attach(|py| {
+-        // import pyarrow
+-        let pyarrow = py.import("pyarrow")?;
+-
+-        // pyarrow array
+-        let pyarrow_array = to_py_array(py, &pyarrow, array)?;
+-
+-        // import polars
+-        let polars = py.import("polars")?;
+-        let out = polars.call_method1("from_arrow", (pyarrow_array,))?;
+-        out.into_py_any(py)
+-    })
+-}
+-
+-/// <https://github.com/pola-rs/polars/blob/master/examples/python_rust_compiled_function/src/ffi.rs>
+-pub fn arr_to_py(array: Box<dyn Array>) -> PyResult<Py<PyAny>> {
+-    //let series = series.rechunk();
+-    //let array = series.to_arrow(0);
+-    Python::attach(|py| {
+-        let pyarrow = py.import("pyarrow")?;
+-        let pyarrow_array = to_py_array(py, &pyarrow, array)?;
+-        let polars = py.import("polars")?;
+-        let out = polars.call_method1("from_arrow", (pyarrow_array,))?;
+-        out.into_py_any(py)
+-    })
+-}
+ #[pyclass]
+ struct DemoParser {
+     mmap: Mmap,
+     huf: Vec<(u8, u8)>,
+ }
+ 
+-pub fn series_from_multiple_events(
+-    events: &[GameEvent],
+-    py: Python,
+-) -> Result<Py<PyAny>, DemoParserError> {
++pub fn series_from_multiple_events(events: &[GameEvent], py: Python) -> PyResult<Py<PyAny>> {
+     let per_ge = events.iter().into_group_map_by(|x| x.name.clone());
+     let mut vv = vec![];
+     for (k, v) in per_ge {
+         let pairs: Vec<EventField> = v.iter().flat_map(|x| x.fields.clone()).collect();
+         let per_key_name = pairs.iter().into_group_map_by(|x| &x.name);
+ 
+-        let mut series_columns = vec![];
+-        let mut py_columns = vec![];
++        let mut columns = vec![];
+         let mut rows = 0;
+ 
+         for (name, vals) in per_key_name {
+-            match column_from_pairs(&vals, name, py)? {
+-                DataFrameColumn::Pyany(p) => py_columns.push((p, name)),
+-                DataFrameColumn::Series(s) => {
+-                    rows = s.len().max(rows);
+-                    series_columns.push((s, name));
++            rows = vals.len().max(rows);
++            match column_from_pairs(&vals, name, py)
++                .map_err(|error| PyValueError::new_err(error.to_string()))?
++            {
++                DataFrameColumn::Pyany(p) | DataFrameColumn::Series(p) => {
++                    columns.push((name.to_string(), p));
+                 }
+             };
+         }
+-        let mut series_col_names: Vec<String> = series_columns
+-            .iter()
+-            .map(|(_, name)| (*name).to_string())
+-            .collect();
+-        let series_columns: Vec<Py<PyAny>> = series_columns
+-            .iter()
+-            .map(|(ser, _)| rust_series_to_py_series(ser).unwrap())
+-            .collect();
+-        let py_col_names: Vec<String> = py_columns
+-            .iter()
+-            .map(|(_, name)| (*name).to_string())
+-            .collect();
+ 
+         if rows != 0 {
+-            let dfp = Python::attach(|py| {
+-                let polars = py.import("polars").unwrap();
+-                let all_series_py = series_columns.into_py_any(py).unwrap();
+-                let df = polars.call_method1("DataFrame", (all_series_py,)).unwrap();
+-                df.setattr("columns", series_col_names.clone()).unwrap();
+-                let pandas_df = df.call_method0("to_pandas").unwrap();
+-                for (pyobj, col_name) in py_columns {
+-                    pandas_df
+-                        .call_method1("insert", (0, col_name, pyobj))
+-                        .unwrap();
+-                }
+-
+-                series_col_names.extend(py_col_names);
+-                series_col_names.sort();
+-
+-                let kwargs = vec![("axis", 1)].into_py_dict(py).unwrap();
+-                let args = (series_col_names,);
+-                let df = pandas_df
+-                    .call_method("reindex", args, Some(&kwargs))
+-                    .unwrap();
+-                df.into_py_any(py).unwrap()
+-            });
++            let mut column_order: Vec<String> =
++                columns.iter().map(|(name, _)| name.clone()).collect();
++            column_order.sort();
++            let dfp = pandas_dataframe(py, columns, column_order)?;
+             vv.push((k, dfp));
+         }
+     }
+@@ -1010,66 +868,37 @@ pub fn series_from_multiple_events(
+ }
+ 
+ pub enum DataFrameColumn {
+-    Series(Series),
++    Series(pyo3::Py<PyAny>),
+     Pyany(pyo3::Py<PyAny>),
+ }
+ 
+-pub fn series_from_event(events: &[GameEvent], py: Python) -> Result<Py<PyAny>, DemoParserError> {
++pub fn series_from_event(events: &[GameEvent], py: Python) -> PyResult<Py<PyAny>> {
+     let pairs: Vec<EventField> = events.iter().flat_map(|x| x.fields.clone()).collect();
+     let per_key_name = pairs.iter().into_group_map_by(|x| &x.name);
+ 
+-    let mut series_columns = vec![];
+-    let mut py_columns = vec![];
++    let mut columns = vec![];
+     let mut rows = 0;
+ 
+     for (name, vals) in per_key_name {
+-        match column_from_pairs(&vals, name, py)? {
+-            DataFrameColumn::Pyany(p) => py_columns.push((p, name)),
+-            DataFrameColumn::Series(s) => {
+-                rows = s.len().max(rows);
+-                series_columns.push((s, name));
++        rows = vals.len().max(rows);
++        match column_from_pairs(&vals, name, py)
++            .map_err(|error| PyValueError::new_err(error.to_string()))?
++        {
++            DataFrameColumn::Pyany(p) | DataFrameColumn::Series(p) => {
++                columns.push((name.to_string(), p));
+             }
+         };
+     }
+-    let mut series_col_names: Vec<String> = series_columns
+-        .iter()
+-        .map(|(_, name)| (*name).to_string())
+-        .collect();
+-    let series_columns: Vec<Py<PyAny>> = series_columns
+-        .iter()
+-        .map(|(ser, _)| rust_series_to_py_series(ser).unwrap())
+-        .collect();
+-    let py_col_names: Vec<String> = py_columns
+-        .iter()
+-        .map(|(_, name)| (*name).to_string())
+-        .collect();
+ 
+     if rows == 0 {
+-        return Err(DemoParserError::NoEvents);
++        return Err(PyValueError::new_err(DemoParserError::NoEvents.to_string()));
+     }
+-    let dfp = Python::attach(|py| {
+-        let polars = py.import("polars").unwrap();
+-        let all_series_py = series_columns.into_py_any(py).unwrap();
+-        let df = polars.call_method1("DataFrame", (all_series_py,)).unwrap();
+-        df.setattr("columns", series_col_names.clone()).unwrap();
+-        let pandas_df = df.call_method0("to_pandas").unwrap();
+-        for (pyobj, col_name) in py_columns {
+-            pandas_df
+-                .call_method1("insert", (0, col_name, pyobj))
+-                .unwrap();
+-        }
+-        series_col_names.extend(py_col_names);
+-        series_col_names.sort();
+-        let kwargs = vec![("axis", 1)].into_py_dict(py).unwrap();
+-        let args = (series_col_names,);
+-        let df = pandas_df
+-            .call_method("reindex", args, Some(&kwargs))
+-            .unwrap();
+-        df.into_py_any(py).unwrap()
+-    });
++    let mut column_order: Vec<String> = columns.iter().map(|(name, _)| name.clone()).collect();
++    column_order.sort();
++    let dfp = pandas_dataframe(py, columns, column_order)?;
+     Ok(dfp)
+ }
+-fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_f32_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1077,9 +906,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+-fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_u32_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1087,9 +916,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+-fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_i32_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1097,9 +926,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+-fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_u64_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1107,7 +936,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+ fn to_py_string_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
+     let mut v = vec![];
+@@ -1139,7 +968,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
+     }
+     DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
+ }
+-fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_string_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1147,10 +976,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+ 
+-fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_bool_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     let mut v = vec![];
+     for pair in pairs {
+         match &pair.data {
+@@ -1158,7 +987,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+             _ => v.push(None),
+         }
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+ fn to_py_xyz_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
+     let mut v = vec![];
+@@ -1203,13 +1032,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
+     DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
+ }
+ 
+-fn to_null_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
++fn to_null_series(pairs: &Vec<&EventField>, py: Python<'_>) -> DataFrameColumn {
+     // All series are null can pick any type
+     let mut v: Vec<Option<i32>> = vec![];
+     for _ in pairs {
+         v.push(None);
+     }
+-    DataFrameColumn::Series(Series::new(name, v))
++    DataFrameColumn::Series(v.into_py_any(py).unwrap())
+ }
+ 
+ pub fn column_from_pairs(
+@@ -1220,13 +1049,13 @@ pub fn column_from_pairs(
+     let field_type = find_type_of_vals(pairs)?;
+ 
+     let s = match field_type {
+-        None => to_null_series(pairs, name),
+-        Some(Variant::Bool(_)) => to_bool_series(pairs, name),
+-        Some(Variant::F32(_)) => to_f32_series(pairs, name),
+-        Some(Variant::U32(_)) => to_u32_series(pairs, name),
+-        Some(Variant::I32(_)) => to_i32_series(pairs, name),
+-        Some(Variant::U64(_)) => to_u64_series(pairs, name),
+-        Some(Variant::String(_)) => to_string_series(pairs, name),
++        None => to_null_series(pairs, py),
++        Some(Variant::Bool(_)) => to_bool_series(pairs, py),
++        Some(Variant::F32(_)) => to_f32_series(pairs, py),
++        Some(Variant::U32(_)) => to_u32_series(pairs, py),
++        Some(Variant::I32(_)) => to_i32_series(pairs, py),
++        Some(Variant::U64(_)) => to_u64_series(pairs, py),
++        Some(Variant::String(_)) => to_string_series(pairs, py),
+         Some(Variant::StringVec(_)) => to_py_string_col(pairs, name, py),
+         Some(Variant::U64Vec(_)) => to_py_u64_col(pairs, name, py),
+         Some(Variant::U32Vec(_)) => to_py_u32_col(pairs, name, py),
