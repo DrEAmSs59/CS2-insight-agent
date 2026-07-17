@@ -13,6 +13,7 @@ if str(_BACKEND) not in sys.path:
 
 from app import update_info
 from app.update_info import (
+    _guess_download_urls,
     _github_api_token,
     _parse_release_tag_from_url,
     build_update_payload,
@@ -40,6 +41,22 @@ def test_pick_download_urls():
     setup, zip_url = pick_download_urls(assets, ver)
     assert setup == "https://example/setup"
     assert zip_url == "https://example/zip"
+
+
+def test_pick_download_urls_current_electron_asset():
+    ver = "2.2.4"
+    assets = [
+        {"name": f"CS2.Insight.Agent.Setup.{ver}.exe", "browser_download_url": "https://example/electron"},
+    ]
+    setup, zip_url = pick_download_urls(assets, ver)
+    assert setup == "https://example/electron"
+    assert zip_url is None
+
+
+def test_redirect_fallback_guesses_current_electron_asset():
+    setup, zip_url = _guess_download_urls("V2.2.4", "2.2.4")
+    assert setup.endswith("/V2.2.4/CS2.Insight.Agent.Setup.2.2.4.exe")
+    assert zip_url is None
 
 
 def test_pick_download_urls_partial():

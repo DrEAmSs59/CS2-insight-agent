@@ -22,6 +22,8 @@ export default function RecordingParamsPage({ embedded = false, onRegisterSave, 
       kbOverlayEnabled={s.kbOverlayEnabled}
       kbOverlayTickOffset={s.kbOverlayTickOffset}
       kbOverlayPosition={s.kbOverlayPosition}
+      killFxEnabled={s.killFxEnabled}
+      killFxTickOffset={s.killFxTickOffset}
       onRegisterSave={onRegisterSave}
       onSaveUiChange={onSaveUiChange}
     />

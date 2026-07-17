@@ -7,7 +7,15 @@ from typing import Optional
 import pandas as pd
 from demoparser2 import DemoParser
 
-from .parse_utils import _to_pandas_df, _int, _bool, _DEMOPARSER_RE_RAISE
+from .parse_utils import (
+    _to_pandas_df,
+    _int,
+    _bool,
+    _DEMOPARSER_RE_RAISE,
+    PLAYER_CONTROLLER_TEAM_PROP,
+    PLAYER_TEAM_PARSE_FIELDS,
+    coalesce_player_team_num,
+)
 from .tag_constants import (
     TICK_RATE,
     PISTOL_WEAPONS,
@@ -93,18 +101,22 @@ def _victim_facing_attacker(
     victim: str,
     *,
     max_angle_deg: float = 45.0,
-) -> bool:
-    """死亡瞬间受害者的 yaw 是否指向攻击者（±max_angle_deg 内）。"""
+) -> Optional[bool]:
+    """死亡瞬间受害者是否面向攻击者；空间信息不足时返回 ``None``。"""
     v = _spatial_player_row(tick_dict, victim)
     a = _spatial_player_row(tick_dict, attacker)
     if v is None or a is None:
-        return False
+        return None
     try:
         vx, vy = float(v["X"]), float(v["Y"])
         ax, ay = float(a["X"]), float(a["Y"])
         vyaw   = float(v["yaw"])
     except (TypeError, ValueError, KeyError):
-        return False
+        return None
+    if not all(math.isfinite(value) for value in (vx, vy, ax, ay, vyaw)):
+        return None
+    if math.hypot(ax - vx, ay - vy) < 1.0:
+        return None
     target_yaw = math.degrees(math.atan2(ay - vy, ax - vx))
     diff = ((target_yaw - vyaw + 180.0) % 360.0) - 180.0
     return abs(diff) <= max_angle_deg
@@ -145,6 +157,11 @@ def _alive_mates_and_enemies(
     alive_by_team: "Optional[dict[int, frozenset]]" = None,
 ) -> "Optional[tuple[int, int]]":
     """返回 (同队存活队友数不含自己, 敌方存活人数)；无法统计时返回 None。"""
+    # A controller-only identity can recover a player's team, but it cannot
+    # prove that the associated pawn is alive or dead.  Treat the whole count
+    # as unknown instead of under-counting such players into a false clutch.
+    if any(row.get("_pawn_state_known") is False for row in tick_dict.values()):
+        return None
     row_self = _spatial_player_row(tick_dict, target_player)
     if row_self is None:
         return None
@@ -250,41 +267,86 @@ def parse_spatial_snapshots(
                 "X", "Y", "Z",
                 "vel_x", "vel_y", "vel_z",
                 "yaw", "pitch",
-                "name", "is_alive", "team_num", "health", "armor",
+                "name", "is_alive", *PLAYER_TEAM_PARSE_FIELDS, "health", "armor",
             ],
             ticks=unique_ticks,
         )
     except Exception:
         try:
             result = parser.parse_ticks(
-                ["X", "Y", "Z", "vel_z", "yaw", "pitch", "name", "is_alive", "team_num", "health", "armor"],
+                [
+                    "X", "Y", "Z", "vel_z", "yaw", "pitch", "name", "is_alive",
+                    *PLAYER_TEAM_PARSE_FIELDS, "health", "armor",
+                ],
                 ticks=unique_ticks,
             )
         except Exception:
             return {}, {}
     try:
-        df = _to_pandas_df(result)
-        if df.empty:
+        raw_df = _to_pandas_df(result)
+        if raw_df.empty:
             return {}, {}
+        if "team_num" in raw_df.columns:
+            primary_team = pd.to_numeric(raw_df["team_num"], errors="coerce")
+        else:
+            primary_team = pd.Series(float("nan"), index=raw_df.index)
+        if PLAYER_CONTROLLER_TEAM_PROP in raw_df.columns:
+            controller_team = pd.to_numeric(
+                raw_df[PLAYER_CONTROLLER_TEAM_PROP], errors="coerce",
+            )
+        else:
+            controller_team = pd.Series(float("nan"), index=raw_df.index)
+        controller_only_team = (
+            ~primary_team.isin((2, 3)) & controller_team.isin((2, 3))
+        )
+        df = coalesce_player_team_num(raw_df)
+        df["_team_from_controller"] = controller_only_team
+        if df.empty or "tick" not in df.columns:
+            return {}, {}
+
+        # Materializing every row through ``iterrows`` creates a pandas Series
+        # per player/tick sample.  A full 10-player analysis can contain well
+        # over 100k samples, so keep the same stable per-tick ordering while
+        # traversing the frame once as plain tuples.
+        df = df.sort_values("tick", kind="mergesort")
+        columns = list(df.columns)
+        column_index = {column: index for index, column in enumerate(columns)}
+        tick_index = column_index["tick"]
+        name_index = column_index.get("name")
+
         cache: dict[int, dict[str, dict]] = {}
-        alive_summary: dict[int, dict[int, frozenset]] = {}
-        for tick, group in df.groupby("tick"):
-            tick_dict: dict[str, dict] = {}
-            by_team: dict[int, set] = {}
-            for _, row in group.iterrows():
-                name = str(row.get("name") or "").strip()
-                if name:
-                    row_d = row.to_dict()
-                    tick_dict[name] = row_d
-                    if row_d.get("is_alive"):
-                        try:
-                            tm = int(float(row_d["team_num"]))
-                            by_team.setdefault(tm, set()).add(name)
-                        except (TypeError, ValueError, KeyError):
-                            pass
-            tick_i = int(tick)
-            cache[tick_i] = tick_dict
-            alive_summary[tick_i] = {tm: frozenset(names) for tm, names in by_team.items()}
+        alive_names: dict[int, dict[int, set[str]]] = {}
+        for values in df.itertuples(index=False, name=None):
+            tick_i = int(values[tick_index])
+            tick_dict = cache.setdefault(tick_i, {})
+            by_team = alive_names.setdefault(tick_i, {})
+
+            name = "" if name_index is None else str(values[name_index] or "").strip()
+            if not name:
+                continue
+
+            row_d = dict(zip(columns, values))
+            try:
+                has_pawn_position = all(
+                    math.isfinite(float(row_d[key])) for key in ("X", "Y")
+                )
+            except (TypeError, ValueError, KeyError):
+                has_pawn_position = False
+            row_d["_pawn_state_known"] = not (
+                bool(row_d.get("_team_from_controller")) and not has_pawn_position
+            )
+            tick_dict[name] = row_d
+            if row_d["_pawn_state_known"] and row_d.get("is_alive"):
+                try:
+                    tm = int(float(row_d["team_num"]))
+                    by_team.setdefault(tm, set()).add(name)
+                except (TypeError, ValueError, KeyError):
+                    pass
+
+        alive_summary = {
+            tick: {team: frozenset(names) for team, names in by_team.items()}
+            for tick, by_team in alive_names.items()
+        }
         return cache, alive_summary
     except Exception:
         return {}, {}
@@ -738,7 +800,8 @@ def enrich_kill_action_tags_spatial(
 
             # ── 偷背身（枪版）：受害者背对攻击者 ──
             if weapon not in KNIFE_WEAPONS and vic_name and snap:
-                if not _victim_facing_attacker(snap, target_player, vic_name):
+                facing = _victim_facing_attacker(snap, target_player, vic_name)
+                if facing is False:
                     extra.append("🔙 偷背身")
 
             # ── 速度：用 X/Y 位置差估算（demoparser2 0.41.2 不暴露 vel_x/vel_y，会静默丢列）──

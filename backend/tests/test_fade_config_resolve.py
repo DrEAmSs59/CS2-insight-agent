@@ -59,13 +59,13 @@ def _import_resolve():
     return api_mod._resolve_fade_config
 
 
-def test_resolve_uses_appconfig_when_options_are_none():
+def test_resolve_requires_explicit_session_opt_in_when_options_are_none():
     resolve = _import_resolve()
     cfg = AppConfig(obs_transition_enabled=True, obs_transition_name="Swipe",
                     obs_transition_duration_ms=500)
     opts = RecordingOptions()  # all None
     fc = resolve(opts, cfg)
-    assert fc.enabled is True
+    assert fc.enabled is False
     assert fc.transition_name == "Swipe"
     assert fc.duration_ms == 500
     assert fc.game_scene_name == "CS2 Insight Recording"
@@ -91,6 +91,6 @@ def test_resolve_partial_override():
                     obs_transition_duration_ms=480)
     opts = RecordingOptions(obs_transition_duration_ms=200)  # only duration overridden
     fc = resolve(opts, cfg)
-    assert fc.enabled is True       # from AppConfig
+    assert fc.enabled is False      # session did not explicitly opt in
     assert fc.transition_name == "Fade"  # from AppConfig
     assert fc.duration_ms == 200    # from opts

@@ -11,7 +11,7 @@ import {
 export function canLikelyPreviewScoreboard(item) {
   const st = String(item.status ?? "").toLowerCase();
   if (st === "error") return false;
-  const hasResult = item.result && typeof item.result === "object";
+  const hasResult = (item.result && typeof item.result === "object") || item.has_result === true;
   const hasHeader =
     !!(item.map_name && String(item.map_name).trim()) ||
     (item.total_rounds != null && Number.isFinite(Number(item.total_rounds)));

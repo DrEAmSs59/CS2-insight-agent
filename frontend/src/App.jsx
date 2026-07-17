@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
@@ -9,15 +9,6 @@ import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
-import GuidePage from "./pages/GuidePage";
-import DemoLibraryPage from "./pages/DemoLibraryPage";
-import AnalysisPage from "./pages/AnalysisPage";
-import RecordingQueuePage from "./pages/RecordingQueuePage";
-import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
-import RecordingParamsPage from "./pages/RecordingParamsPage";
-import SettingsPage from "./pages/SettingsPage";
-import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
-import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
@@ -39,11 +30,27 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
+import {
+  recordingAbortToastKind,
+  recordingQueueWasAborted,
+} from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+
+const GuidePage = lazy(() => import("./pages/GuidePage"));
+const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
+const AnalysisPage = lazy(() => import("./pages/AnalysisPage"));
+const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
+const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
+const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
+const LiteCutExportPage = lazy(() => import("./pages/liteCut/LiteCutExportPage"));
+const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
+const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -196,6 +203,8 @@ export default function App() {
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
+  const [killFxEnabled, setKillFxEnabled] = useState(false);
+  const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -417,19 +426,20 @@ export default function App() {
     if (f.mapName.trim()) params.map_name = f.mapName.trim();
     if (f.status && f.status !== "all") params.status = f.status;
     const pq = f.playerQuery.trim();
-    if (!pq) return;
-    params.player_query = pq;
+    if (pq) params.player_query = pq;
+    const sq = f.steamQuery.trim();
+    if (sq) params.steam_query = sq;
     const num = (v) => {
       const s = String(v ?? "").trim();
       if (!s) return null;
       const n = parseInt(s, 10);
-      return Number.isFinite(n) ? n : null;
+      return Number.isFinite(n) && n >= 0 ? n : null;
     };
     const fl = (v) => {
       const s = String(v ?? "").trim();
       if (!s) return null;
       const n = parseFloat(s);
-      return Number.isFinite(n) ? n : null;
+      return Number.isFinite(n) && n >= 0 ? n : null;
     };
     const mk = num(f.minKills);
     if (mk != null) params.min_kills = mk;
@@ -439,6 +449,24 @@ export default function App() {
     if (ma != null) params.min_assists = ma;
     const mkd = fl(f.minKd);
     if (mkd != null) params.min_kd = mkd;
+    const roundsMin = num(f.roundsMin);
+    if (roundsMin != null) params.rounds_min = roundsMin;
+    const roundsMax = num(f.roundsMax);
+    if (roundsMax != null) params.rounds_max = roundsMax;
+    const durationMin = fl(f.durationMin);
+    if (durationMin != null) params.duration_min = durationMin;
+    const durationMax = fl(f.durationMax);
+    if (durationMax != null) params.duration_max = durationMax;
+    const dateBoundary = (value, endOfDay) => {
+      const date = String(value ?? "").trim();
+      if (!date) return null;
+      const local = new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+      return Number.isNaN(local.getTime()) ? null : local.toISOString();
+    };
+    const dateFrom = dateBoundary(f.dateFrom, false);
+    if (dateFrom) params.date_from = dateFrom;
+    const dateTo = dateBoundary(f.dateTo, true);
+    if (dateTo) params.date_to = dateTo;
   }, [libraryAdvFilters]);
 
   const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
@@ -451,7 +479,7 @@ export default function App() {
       const qEff = searchQOverride !== undefined ? searchQOverride : librarySearchQ;
       if (qEff) params.q = qEff;
       appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos", { params });
+      const { data } = await API.get("/demos/compact", { params });
       setDemoLibraryItems(data.items || []);
       const total = typeof data.total === "number" ? data.total : null;
       if (total != null) {
@@ -829,9 +857,8 @@ export default function App() {
       const params = { limit: want, offset: 0 };
       if (librarySearchQ) params.q = librarySearchQ;
       appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos", { params });
-      const rows = data.items || [];
-      setSelectedLibraryDemoIds(new Set(rows.map((it) => it.id)));
+      const { data } = await API.get("/demos/ids", { params });
+      setSelectedLibraryDemoIds(new Set(data.ids || []));
       if (libraryTotal != null && libraryTotal > cap) {
         setProgressText(t("app.librarySelectAllCapped", { cap }));
       }
@@ -876,6 +903,12 @@ export default function App() {
     }
     if (typeof data.kb_overlay_position === "string") {
       setKbOverlayPosition(data.kb_overlay_position);
+    }
+    if (typeof data.kill_fx_enabled === "boolean") {
+      setKillFxEnabled(data.kill_fx_enabled);
+    }
+    if (typeof data.kill_fx_tick_offset === "number") {
+      setKillFxTickOffset(data.kill_fx_tick_offset);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -975,13 +1008,17 @@ export default function App() {
     setConfigBackupLoading(true);
     try {
       const { data } = await API.get("/config-backup/status");
-      setConfigBackupStatus(data && typeof data === "object" ? data : null);
+      const nextStatus = data && typeof data === "object" ? data : null;
+      setConfigBackupStatus(nextStatus);
+      return nextStatus;
     } catch (e) {
       const msg = formatRecordingApiError(e, t, t("app.backendConnectFail"));
-      setConfigBackupStatus({
+      const failedStatus = {
         fetch_failed: true,
         message: msg,
-      });
+      };
+      setConfigBackupStatus(failedStatus);
+      return failedStatus;
     } finally {
       setConfigBackupLoading(false);
     }
@@ -1040,9 +1077,23 @@ export default function App() {
     setParsing(true);
 
     try {
-      const formData = new FormData();
-      list.forEach((f) => formData.append("files", f));
-      const { data } = await API.post("/demo/upload-multiple", formData);
+      const sourcePaths = list.map((f) => {
+        if (typeof f === "string") return f;
+        try {
+          return window.electron?.getPathForFile?.(f) || "";
+        } catch {
+          return "";
+        }
+      });
+      let data;
+      if (sourcePaths.every(Boolean)) {
+        ({ data } = await API.post("/demo/open-local", { paths: sourcePaths }));
+      } else {
+        const formData = new FormData();
+        list.forEach((f) => formData.append("files", f));
+        formData.append("source_paths_json", JSON.stringify(sourcePaths));
+        ({ data } = await API.post("/demo/upload-multiple", formData));
+      }
       const uploads = data.uploads ?? [];
       setUploadedDemos(uploads);
       setParsedMatches(uploads.map(() => null));
@@ -1144,7 +1195,10 @@ export default function App() {
         body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
         const { data } = activeLibraryDemoId
           ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body)
-          : await API.post(`/demo/parse-multi?filename=${encodeURIComponent(fn)}`, body);
+          : await API.post(
+              `/demo/parse-multi?filename=${encodeURIComponent(fn)}&path=${encodeURIComponent(demos[idx]?.path || fn)}`,
+              body
+            );
 
         const processedPlayers = {};
         for (const [playerName, playerData] of Object.entries(data.players ?? {})) {
@@ -1635,6 +1689,44 @@ export default function App() {
     ],
   );
 
+  const handleAddWeaponKillsToQueue = useCallback(
+    (clipData) => {
+      if (!currentParsed || !clipData?.client_clip_uid || !clipData?.kill_ticks?.length) return;
+      const meta = queueItemMetaForIndex(currentMatchIndex);
+      const uid = clipData.client_clip_uid;
+      const qk = queueItemClientUid({
+        clientClipUid: uid,
+        clipData,
+        demoFilename: meta.demoFilename,
+        clipId: clipData.clip_id,
+      });
+      if (queuedClientClipUidsGlobal.has(qk)) {
+        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
+        return;
+      }
+      addToQueue({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: clipData.clip_id,
+        clientClipUid: uid,
+        clipData,
+      });
+      setProgressText(t("app.enqueueWeaponKillsDone"), { autoDismissMs: 2000, queueLink: true });
+    },
+    [
+      currentParsed,
+      currentMatchIndex,
+      queueItemMetaForIndex,
+      queuedClientClipUidsGlobal,
+      addToQueue,
+      setProgressText,
+      t,
+    ],
+  );
+
   const handleDequeueClip = useCallback(
     (clientClipUid) => {
       removeByClientClipUid(clientClipUid);
@@ -1746,6 +1838,8 @@ export default function App() {
       kb_overlay_enabled: !!payload?.kb_overlay_enabled,
       kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
       kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
+      kill_fx_enabled: !!payload?.kill_fx_enabled,
+      kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1810,7 +1904,7 @@ export default function App() {
     async (warmupPayload) => {
       const intent = warmupIntent;
       const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
-      // 录制前参数为一次性配置：kb_overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
+      // 录制前参数为一次性配置：Overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
       // 不写入配置文件。持久化仅由「录制参数配置」页的 saveAllCommonParams 负责。
 
       setRecordWarmupOpen(false);
@@ -1822,10 +1916,10 @@ export default function App() {
         setBatchRecording(true);
         setProgressText(t("app.preparingRecording"), { loading: true });
 
-        // 如果启用了虚拟键盘 Overlay，轮询预构建进度并更新提示文字
-        const _kbOverlayOn = session.kb_overlay_enabled;
+        // 如果启用了任一事件轨道 Overlay，轮询预构建进度并更新提示文字。
+        const _overlayPrebuildOn = session.kb_overlay_enabled || session.kill_fx_enabled;
         let _kbPollTimer = null;
-        if (_kbOverlayOn) {
+        if (_overlayPrebuildOn) {
           _kbPollTimer = setInterval(async () => {
             if (recordingAbortRequestedRef.current) return;
             try {
@@ -1833,11 +1927,11 @@ export default function App() {
               if (recordingAbortRequestedRef.current) return;
               if (kbst?.active) {
                 setProgressText(
-                  t("app.kbPrebuildProgress", { done: kbst.done, total: kbst.total }),
+                  t("app.overlayPrebuildProgress", { done: kbst.done, total: kbst.total }),
                   { loading: true }
                 );
               } else if (kbst?.done > 0 && !kbst?.active) {
-                setProgressText(t("app.kbPrebuildReady"), { loading: true });
+                setProgressText(t("app.overlayPrebuildReady"), { loading: true });
               }
             } catch { /* ignore */ }
           }, 1000);
@@ -1897,7 +1991,23 @@ export default function App() {
           if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
-          setProgressText("", { autoDismissMs: 100 });
+          const wasAborted = recordingQueueWasAborted(
+            results,
+            recordingAbortRequestedRef.current,
+          );
+          if (wasAborted) {
+            const backupStatus = await refreshConfigBackupStatus();
+            const toastKind = recordingAbortToastKind(backupStatus);
+            if (toastKind === "restore_pending") {
+              setProgressText(t("app.abortRestorePending"), { isError: true });
+            } else if (toastKind === "unverified") {
+              setProgressText(t("app.abortRestoreUnverified"), { isError: true });
+            } else {
+              setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
+            }
+          } else {
+            setProgressText("", { autoDismissMs: 100 });
+          }
         } catch (e) {
           const { text: detail, code: blockedCode } = parseRecordingApiError(
             e,
@@ -1908,7 +2018,10 @@ export default function App() {
             setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
             setRecordingBlockedCode(blockedCode);
           }
-          setProgressText(t("app.batchRecordFail", { msg: detail }), { isError: true });
+          const toastKey = recordingAbortRequestedRef.current
+            ? "app.abortFail"
+            : "app.batchRecordFail";
+          setProgressText(t(toastKey, { msg: detail }), { isError: true });
         } finally {
           if (_kbPollTimer) clearInterval(_kbPollTimer);
           recordingAbortRequestedRef.current = false;
@@ -1987,7 +2100,12 @@ export default function App() {
       setRecordingAbortRequested(true);
       setProgressText(t("app.abortingRecording"), { loading: true });
     } catch (e) {
-      setProgressText(t("app.abortFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      setProgressText(
+        t("app.abortFail", {
+          msg: formatRecordingApiError(e, t, t("common.requestFail")),
+        }),
+        { isError: true },
+      );
     }
   }, [t]);
 
@@ -2674,6 +2792,7 @@ export default function App() {
     handleAddTimelineEventToQueue,
     handleAddTimelineRoundToQueue,
     handleAddTimelineEventsBatchToQueue,
+    handleAddWeaponKillsToQueue,
     handleDequeueClip,
     handleRemoveTimelineEventFromQueue,
     handleRemoveTimelineRoundFromQueue,
@@ -2744,6 +2863,8 @@ export default function App() {
     kbOverlayEnabled,
     kbOverlayTickOffset,
     kbOverlayPosition,
+    killFxEnabled,
+    killFxTickOffset,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2812,18 +2933,25 @@ export default function App() {
             ) : null}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
+                <Route path="/lite-cut" element={<LiteCutEditorPage />} />
+                <Route path="/lite-cut/editor" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/text" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/color" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/export" element={<LiteCutExportPage />} />
                 <Route path="/params" element={<RecordingParamsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </Suspense>
             </div>
           </main>
         </div>
@@ -2871,6 +2999,8 @@ export default function App() {
           initKbOverlayEnabled={kbOverlayEnabled}
           initKbOverlayTickOffset={kbOverlayTickOffset}
           initKbOverlayPosition={kbOverlayPosition}
+          initKillFxEnabled={killFxEnabled}
+          initKillFxTickOffset={killFxTickOffset}
         />
 
         <LibraryLoadModeModal

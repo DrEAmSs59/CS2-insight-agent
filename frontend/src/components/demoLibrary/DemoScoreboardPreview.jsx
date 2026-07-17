@@ -50,7 +50,7 @@ function DemoScoreboardPreview({ demoItem, highlightQuery, steamHighlightQuery }
   const focusPlayerName = useMemo(() => {
     const r = demoItem.result && typeof demoItem.result === "object" ? demoItem.result : null;
     const mm = r?.match_meta && typeof r.match_meta === "object" ? r.match_meta : {};
-    const v = r?.auto_target_player ?? mm.target_player;
+    const v = r?.auto_target_player ?? mm.target_player ?? demoItem.primary_target;
     return v ? String(v).trim() : "";
   }, [demoItem]);
 

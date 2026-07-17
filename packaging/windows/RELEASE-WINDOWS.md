@@ -1,15 +1,12 @@
 # Windows release (maintainer)
 
-## Secrets (repository)
+正式 Windows 产品是 Electron + NSIS。`release-windows.yml` 与本地标准命令现在走同一条
+`electron:build:ver` 链路，不再把历史 Inno/browser staging 当成正式 release。
 
-- `WINDOWS_PFX_BASE64`: Base64 of a `.pfx` code-signing certificate.
-- `WINDOWS_PFX_PASSWORD`: Password for that `.pfx`.
+最终用户不需要安装 Python、Rust、Polars 或 PyArrow；Python 与 lean demoparser 都会嵌入安装包。
 
-Generate Base64 (PowerShell):
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("codesign.pfx")) | Set-Clipboard
-```
+如果仓库配置了 `WINDOWS_PFX_BASE64` 与 `WINDOWS_PFX_PASSWORD`，workflow 会把它们传给
+electron-builder，对 NSIS 安装包签名；未配置时维持当前 unsigned 构建行为。
 
 ## Version file before packaging
 
@@ -19,40 +16,60 @@ From repo root (PowerShell), after choosing semver from git tag:
 ./packaging/windows/write-release-version.ps1 -Version $env:GITHUB_REF_NAME
 ```
 
-(`GITHUB_REF_NAME` is like `v1.2.3` on tag builds. The GitHub Actions `Release Windows` workflow runs this automatically before staging bootstrap.)
+(`GITHUB_REF_NAME` is like `v1.2.3` on tag builds. The GitHub Actions `Release Windows` workflow runs this automatically before the Electron build.)
 
 ## Cut a release
 
-1. Ensure `frontend` builds (`npm ci && npm run build`).
-2. Tag: `git tag v1.2.3 && git push origin v1.2.3`.
-3. Workflow `Release Windows` uploads `CS2InsightAgent-1.2.3-Setup.exe` into `dist/` on the runner, `CS2InsightAgent-1.2.3-windows-amd64.zip` at the repo root, and `SHA256SUMS`.
+1. Ensure `frontend` dependencies are locked (`npm ci`).
+2. Tag: `git tag v1.2.3 && git push origin v1.2.3`（大小写 `V1.2.3` 也会触发）。
+3. Workflow `Release Windows` builds and uploads:
+   - `CS2.Insight.Agent.Setup.1.2.3.exe`
+   - `CS2.Insight.Agent.Setup.1.2.3.exe.blockmap`
+   - `latest.yml`
+   - `runtime-size-report.json`
+   - `SHA256SUMS`
+
+安装包、blockmap 与 `latest.yml` 必须来自同一次 electron-builder 构建；不要在构建后单独改名或修改安装包，否则自动更新元数据会失效。
 
 ## Local smoke (unsigned)
 
-1. Build frontend (`npm run build` in `frontend/`).
-2. Bootstrap staging:
+1. Build the lean demoparser wheel with CPython 3.12（与 Electron 内嵌 Python 一致）：
 
 ```powershell
-./packaging/windows/bootstrap-staging.ps1
+$meta = Get-Content ./packaging/demoparser-lean/demoparser-runtime.json -Raw | ConvertFrom-Json
+$python312 = py -3.12 -c "import sys; print(sys.executable)"
+& $python312 -m pip install "maturin==$($meta.maturin_version)"
+./packaging/demoparser-lean/build-wheel.ps1 -PythonExe $python312 -OutputDir dist/wheels
 ```
 
-Bootstrap 会去掉 Python 自带的 `Lib/test`、头文件 `Include`、各 wheel 里的 `tests` 目录、`backend/tests`、前端 `*.map`，并用 `pip install --no-cache-dir`；再配合 Inno 的 **`lzma2/max`** 压缩，安装包通常可比「未裁剪树 + 默认 lzma2」**再小一截**（具体取决于依赖版本，常见为几十 MB 量级；`Lib/test` 等单独就很大）。
-
-3. Compile with **ISCC.exe**. Default install path:
+2. Build the actual Electron product:
 
 ```powershell
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.0.0 ./packaging/windows/CS2InsightAgent.iss
+$env:CS2_INSIGHT_DEMOPARSER_WHEEL = (Get-ChildItem ./dist/wheels/demoparser2-*-cp312-*.whl | Select-Object -First 1).FullName
+$env:ELECTRON_REFRESH_PYTHON = "1"
+./packaging/windows/write-release-version.ps1 -Version 0.0.0
+Push-Location frontend
+npm ci
+npm.cmd run electron:build:ver -- 0.0.0
+Pop-Location
 ```
 
-If Inno Setup is elsewhere, get the install folder:
+构建会去掉 Polars/PyArrow、Python 调试符号、pip/setuptools/wheel 与测试文件，同时保留 pandas/numpy 等当前业务代码实际使用的依赖。
+
+3. Verify and report the packaged runtime:
 
 ```powershell
-reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1" /v InstallLocation
+$py = Resolve-Path ./frontend/dist_electron/win-unpacked/resources/python/python.exe
+$backend = Resolve-Path ./frontend/dist_electron/win-unpacked/resources/backend
+$env:PYTHONNOUSERSITE = "1"
+& $py -c "import sys; sys.path.insert(0, sys.argv[1]); import app.main, demoparser2, importlib.metadata as m, importlib.util as u; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None; print(m.version('demoparser2'))" $backend
+./packaging/windows/report-runtime-size.ps1 -Root frontend/dist_electron/win-unpacked/resources -OutputPath dist/runtime-size-report.json
 ```
 
-Then run `& "<InstallLocation>ISCC.exe" /DMyAppVersion=0.0.0 ./packaging/windows/CS2InsightAgent.iss` from the repo root.
+CI 根据当前实测结果设置两道回归预算：unpacked `resources` 不超过 `180 MiB`，NSIS 安装包不超过 `175 MiB`。
+超过任一上限都会中止 release，而不是悄悄把重量加回来。
 
-Output: `dist\CS2InsightAgent-<version>-Setup.exe` (for example `dist\CS2InsightAgent-0.0.0-Setup.exe`).
+`bootstrap-staging.ps1` 与 `CS2InsightAgent.iss` 暂时保留为 legacy/manual 工具，但不属于正式发布真源。
 
 ## 检查更新与国内镜像（用户侧）
 

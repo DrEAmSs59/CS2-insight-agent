@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
+from ..platform_utils import voice_listen_mask_console_commands
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .obs_fade_controller import OBSFadeController
@@ -18,43 +19,78 @@ from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
 
+
+class VoiceIsolationError(RuntimeError):
+    """A managed voice mask could not be applied before recording a segment."""
+
+
+async def _inject_voice_listen_mask(mask: int) -> None:
+    commands = voice_listen_mask_console_commands(mask)
+    try:
+        ok = await asyncio.to_thread(inject_console_sequence, commands)
+    except Exception as exc:
+        raise VoiceIsolationError(f"voice mask injection raised: {exc}") from exc
+    if ok is not True:
+        raise VoiceIsolationError("voice mask injection returned false")
+
+
 def _kb_bus(segment=None):
-    """Return (bus, tick_offset) when kb overlay should fire, else (None, 0).
+    """Return (bus, keyboard_tick_offset, kill_fx_tick_offset).
 
     Priority: if the segment carries kb_track data (injected by the queue handler
-    when dto.options.kb_overlay_enabled=True), activate the bus unconditionally.
+    when dto.options.kb_overlay_enabled=True) or kill_track data, activate the bus.
     Otherwise fall back to the global AppConfig flag.
 
-    Tick offset priority: a per-request override stashed on the segment
-    (segment.metadata["kb_tick_offset"], set from dto.options.kb_overlay_tick_offset
-    by the录制前一次性参数) wins; otherwise fall back to the persisted global config.
+    Both independent offsets prefer per-request values stashed on
+    segment.metadata and fall back to persisted config.
     """
-    def _resolve_offset(seg, cfg=None):
+    def _resolve_offset(seg, metadata_key, config_key, default, cfg=None):
         if seg is not None:
-            v = seg.metadata.get("kb_tick_offset")
+            v = seg.metadata.get(metadata_key)
             if v is not None:
                 try:
                     return int(v)
                 except (TypeError, ValueError):
                     pass
+        if cfg is not None:
+            try:
+                return int(getattr(cfg, config_key))
+            except (AttributeError, TypeError, ValueError):
+                pass
+        return default
+
+    def _load_cfg():
         try:
             from ...env_utils import load_config
-            return int((cfg or load_config()).kb_overlay_tick_offset)
+            return load_config()
         except Exception:
-            return 0
+            return None
+
+    def _resolved_offsets(seg, cfg):
+        keyboard = _resolve_offset(
+            seg, "kb_tick_offset", "kb_overlay_tick_offset", 0, cfg,
+        )
+        kill_fx = _resolve_offset(
+            seg, "kill_fx_tick_offset", "kill_fx_tick_offset", 0, cfg,
+        )
+        return keyboard, kill_fx
 
     try:
-        if segment is not None and segment.metadata.get("kb_track") is not None:
+        if segment is not None and (
+            segment.metadata.get("kb_track") is not None
+            or segment.metadata.get("kill_track") is not None
+        ):
             from .kb_overlay_bus import kb_overlay_bus
-            return kb_overlay_bus, _resolve_offset(segment)
-        from ...env_utils import load_config
-        cfg = load_config()
-        if cfg.kb_overlay_enabled:
+            keyboard, kill_fx = _resolved_offsets(segment, _load_cfg())
+            return kb_overlay_bus, keyboard, kill_fx
+        cfg = _load_cfg()
+        if cfg is not None and (cfg.kb_overlay_enabled or cfg.kill_fx_enabled):
             from .kb_overlay_bus import kb_overlay_bus
-            return kb_overlay_bus, _resolve_offset(segment, cfg)
+            keyboard, kill_fx = _resolved_offsets(segment, cfg)
+            return kb_overlay_bus, keyboard, kill_fx
     except Exception:
         pass
-    return None, 0
+    return None, 0, 0
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
@@ -635,6 +671,7 @@ class RecordingExecutor:
                 # voice/post-spec console injections also consume demo ticks.
                 prepare_t0 = time.monotonic()
                 spec_elapsed = 0.0
+                spec_ok = None
                 if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
                     spec_ok = await _spec_by_slot_with_retry(
@@ -645,18 +682,6 @@ class RecordingExecutor:
                         segment_index=segment.segment_index,
                     )
                     spec_elapsed = time.monotonic() - spec_t0
-
-                    if spec_ok is not False and segment.voice_listen_mask is not None:
-                        mask_val = segment.voice_listen_mask
-                        try:
-                            await asyncio.to_thread(
-                                inject_console_sequence,
-                                ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
-                            )
-                        except Exception as _e:
-                            logger.warning(
-                                "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
-                            )
 
                     if spec_ok is not False and self._post_spec_console_lines:
                         try:
@@ -699,6 +724,9 @@ class RecordingExecutor:
                         result.success = any(r.status == "ok" for r in result.segment_results)
                         result.warnings.extend(plan.warnings)
                         return result
+
+                if segment.voice_listen_mask is not None:
+                    await _inject_voice_listen_mask(segment.voice_listen_mask)
 
                 # ── 3. Sync to start_tick, then pause ───────────────────────
                 # spec_player / GSI-verify run while the demo plays in the prepare window.
@@ -769,17 +797,8 @@ class RecordingExecutor:
                             result.success = any(r.status == "ok" for r in result.segment_results)
                             result.warnings.extend(plan.warnings)
                             return result
-                        if spec_ok is not False and segment.voice_listen_mask is not None:
-                            mask_val = segment.voice_listen_mask
-                            try:
-                                await asyncio.to_thread(
-                                    inject_console_sequence,
-                                    ["tv_listen_voice_indices -1", f"tv_listen_voice_indices {mask_val}"],
-                                )
-                            except Exception as _e:
-                                logger.warning(
-                                    "[RecordingV3] tv_listen_voice_indices inject failed: %s", _e
-                                )
+                    if segment.voice_listen_mask is not None:
+                        await _inject_voice_listen_mask(segment.voice_listen_mask)
 
                 logger.info(
                     "[RecordingV3] spec_elapsed=%.2fs prepare_elapsed=%.2fs "
@@ -809,8 +828,11 @@ class RecordingExecutor:
                     list(segment.metadata.keys()),
                     len(_kb_frames) if _kb_frames is not None else "None(key missing)",
                 )
-                _bus, _tick_off = _kb_bus(segment)
-                logger.info("[kb_overlay] seg=%d bus=%s tick_off=%s", segment.segment_index, _bus, _tick_off)
+                _bus, _kb_tick_off, _fx_tick_off = _kb_bus(segment)
+                logger.info(
+                    "[overlay] seg=%d bus=%s kb_tick_off=%s kill_fx_tick_off=%s",
+                    segment.segment_index, _bus, _kb_tick_off, _fx_tick_off,
+                )
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -818,14 +840,16 @@ class RecordingExecutor:
                         "start_tick": segment.start_tick,
                         "end_tick": segment.end_tick,
                         "tick_rate": plan.tick_rate,
-                        "offset_ticks": _tick_off,
+                        "offset_ticks": _kb_tick_off,
+                        "kill_fx_offset_ticks": _fx_tick_off,
                         "frames": _kb_frames or [],
+                        "kills": segment.metadata.get("kill_track") or [],
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
-                _bus_resume, _ = _kb_bus(segment)
+                _bus_resume, _, _ = _kb_bus(segment)
 
                 if not obs_recording_started:
                     logger.info(
@@ -964,12 +988,12 @@ class RecordingExecutor:
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
                     # ── kb overlay: end ─────────────────────────────────────
-                    _bus, _ = _kb_bus(segment)
+                    _bus, _, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "end"})
                 else:
                     # ── kb overlay: pause ───────────────────────────────────
-                    _bus, _ = _kb_bus(segment)
+                    _bus, _, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "pause"})
 
@@ -978,6 +1002,36 @@ class RecordingExecutor:
                 # confirmed paused. If it returned "fallback_stopped", the next
                 # segment loop iteration will see self._obs_force_stopped=True and break.
                 # Either way, gototick/spec_player console calls are safe from here.
+
+            except VoiceIsolationError as e:
+                logger.error(
+                    "Segment %d voice isolation failed: %s",
+                    segment.segment_index,
+                    e,
+                )
+                try:
+                    await demo_pause()
+                except Exception:
+                    pass
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="voice_filter_failed",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    error=str(e),
+                ))
+                result.error = f"voice isolation failed before recording: {e}"
+                if obs_recording_started:
+                    try:
+                        final_output_path = await self._ctrl.stop_record_safe()
+                    except Exception:
+                        pass
+                    obs_recording_started = False
+                result.output_path = final_output_path
+                result.success = False
+                result.warnings.extend(plan.warnings)
+                return result
 
             except OBSControlError as e:
                 logger.error("Segment %d OBS control error: %s", segment.segment_index, e)
@@ -1032,6 +1086,16 @@ class RecordingExecutor:
             await self._ctrl.force_stop_recording()
 
         result.output_path = final_output_path
-        result.success = any(r.status == "ok" for r in result.segment_results)
+        was_aborted = self._is_aborted() or any(
+            str(item.error or "").strip().lower() == "aborted"
+            for item in result.segment_results
+        )
+        if was_aborted:
+            # Keep partial output_path information, but make the request-level
+            # state unambiguous for the API and result modal.
+            result.error = "aborted"
+            result.success = False
+        else:
+            result.success = any(r.status == "ok" for r in result.segment_results)
         result.warnings.extend(plan.warnings)
         return result

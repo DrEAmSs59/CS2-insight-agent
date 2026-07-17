@@ -52,6 +52,10 @@ from .gsi_ready import (
     wait_gsi_payload_after,
 )
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
+from .recording.platform_utils import (
+    normalize_voice_filter,
+    select_voice_listen_mask,
+)
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -1780,7 +1784,8 @@ class RecordingWarmupExtras:
     third_person_camera: bool = False
     # Demo 观战闪光弹亮度；None 表示不注入。POV HUD 录制时由 pov_constants 强制 1.0
     spectator_flashbang_opacity: Optional[float] = None
-    # "mute"=全部静音, "open"=所有玩家, "team"=只听主角队伍, "enemy"=只听对方队伍, "off"=不注入
+    # "mute"=全部静音, "open"=所有玩家, "team"=当前 POV 队伍,
+    # "enemy"=当前 POV 对方队伍, "off"=不管理语音
     voice_filter: str = "mute"
     # Demo 底部时间轴 / 回放控制条：社区常用需先 sv_cheats 1 再 demoui false
     hide_demo_playback_ui: bool = True
@@ -1854,6 +1859,12 @@ def _parse_record_inject_console_lines(raw: str) -> tuple[str, ...]:
 # 依赖"已第一人称观战某玩家"才生效的 cvar：warmup 阶段注入无效，
 # 必须在每片段 spec_player 锁定后再注入一次（参考 tv_listen_voice_indices 处理）。
 _POST_SPEC_CVAR_NAMES: frozenset[str] = frozenset({"cl_demo_predict"})
+_VOICE_CVAR_NAMES: frozenset[str] = frozenset({
+    "voice_modenable",
+    "snd_voipvolume",
+    "tv_listen_voice_indices",
+    "tv_listen_voice_indices_h",
+})
 
 
 def _filter_post_spec_console_lines(lines) -> list[str]:
@@ -1867,6 +1878,64 @@ def _filter_post_spec_console_lines(lines) -> list[str]:
         if cvar in _POST_SPEC_CVAR_NAMES:
             out.append(s)
     return out
+
+
+def _without_voice_console_lines(lines) -> list[str]:
+    """Remove stale client-generated voice commands; backend policy is authoritative."""
+    out: list[str] = []
+    for line in lines or ():
+        value = str(line).strip()
+        if not value:
+            continue
+        if value.split()[0].lower() not in _VOICE_CVAR_NAMES:
+            out.append(value)
+    return out
+
+
+def _voice_filter_warmup_console_lines(voice_filter) -> list[str]:
+    """Return the authoritative final voice state for the selected mode."""
+    mode = normalize_voice_filter(voice_filter)
+    if mode == "off":
+        return []
+    if mode == "open":
+        return [
+            "voice_modenable 1",
+            "snd_voipvolume 1",
+            "tv_listen_voice_indices -1",
+            "tv_listen_voice_indices_h -1",
+        ]
+
+    # Restricted modes start silent. Per-segment team/enemy masks are applied only
+    # after the POV SteamID has been selected and verified.
+    lines = [
+        "tv_listen_voice_indices 0",
+        "tv_listen_voice_indices_h 0",
+    ]
+    if mode in ("team", "enemy"):
+        lines.extend(("voice_modenable 1", "snd_voipvolume 1"))
+    else:
+        lines.extend(("voice_modenable 0", "snd_voipvolume 0"))
+    return lines
+
+
+def _apply_voice_filter_to_plan(plan, voice_filter) -> str:
+    """Resolve each final segment mask, muting when roster identity is incomplete."""
+    mode = normalize_voice_filter(voice_filter)
+    for segment in plan.segments:
+        selected = select_voice_listen_mask(
+            mode,
+            segment.voice_listen_mask or 0,
+            segment.voice_listen_mask_enemy or 0,
+        )
+        if mode in ("team", "enemy") and selected == 0:
+            warning = (
+                f"segment {segment.segment_index}: {mode} voice roster unavailable for "
+                f"POV SteamID {segment.target_steamid64 or '(missing)'}; muted fail-closed"
+            )
+            if warning not in plan.warnings:
+                plan.warnings.append(warning)
+        segment.voice_listen_mask = selected
+    return mode
 
 
 class OBSDirector:
@@ -2094,6 +2163,12 @@ class OBSDirector:
             logger.warning("Recording blocked because CS2 is already running")
             raise CS2AlreadyRunningError(CS2_RUNNING_MESSAGE)
 
+        game_root = self._game_root_from_cs2_exe(cs2)
+        if not game_root:
+            raise FileNotFoundError(
+                "无法从 cs2.exe 推断 game 目录（应为 .../game/bin/win64/cs2.exe）。请检查侧栏中的 CS2 路径是否指向正版安装。",
+            )
+
         # 启动 CS2 前先对用户配置做快照；CS2 运行期的 archive cvar 写入在
         # _kill_cs2 末尾会被整段回滚，保护用户自定义设置不受录制影响。
         self._snapshot_user_configs()
@@ -2108,12 +2183,6 @@ class OBSDirector:
                 _arm = warmup.aspect_ratio
                 _mode = _ASPECT_RATIO_VIDEOCFG_MODE.get(_arm) if _arm else None
                 self._patch_video_configs_for_resolution(int(_w), int(_h), _mode)
-
-        game_root = self._game_root_from_cs2_exe(cs2)
-        if not game_root:
-            raise FileNotFoundError(
-                "无法从 cs2.exe 推断 game 目录（应为 .../game/bin/win64/cs2.exe）。请检查侧栏中的 CS2 路径是否指向正版安装。",
-            )
 
         csgo_dir = game_root / "csgo"
         dest_name = f"_insight_{uuid.uuid4().hex}.dem"
@@ -3284,10 +3353,11 @@ class OBSDirector:
         我们 SendInput 投到默认 F10 / ``~`` 失效。
         """
         if w.console_cmds:
-            cmds = [str(x).strip() for x in w.console_cmds if str(x).strip()]
-            return self._append_config_warmup_console_lines(
+            cmds = _without_voice_console_lines(w.console_cmds)
+            lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
+            return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
         if w.cl_draw_only_deathnotices:
@@ -3333,24 +3403,13 @@ class OBSDirector:
                 _fb_f = 0.6
             _fb_f = max(0.2, min(1.0, _fb_f))
             lines.append(f"r_spectator_flashbang_opacity {_fb_f:g}")
-        _vf = getattr(w, "voice_filter", "mute")
-        if _vf in ("mute", "all"):  # "all" 为旧值向后兼容
-            lines.append("snd_voipvolume 0")
-        elif _vf == "open":
-            lines.append("snd_voipvolume 1")
-            lines.append("tv_listen_voice_indices -1")
-        elif _vf == "off":
-            pass  # 不注入任何语音指令
-        else:  # "team" or "enemy" — 先打开全员基线，per-segment 再收窄到掩码
-            # all_players 为空时以"全部可听"降级，而不是静音
-            lines.append("snd_voipvolume 1")
-            lines.append("tv_listen_voice_indices -1")
         if w.hide_grenade_trajectory_pip:
             lines.append("sv_grenade_trajectory 0")
             lines.append("sv_grenade_trajectory_prac_pipreview 0")
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
-        return self._append_config_warmup_console_lines(lines)
+        lines = self._append_config_warmup_console_lines(lines)
+        return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
 
     async def execute_plan_queue(
         self,
@@ -3394,10 +3453,21 @@ class OBSDirector:
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
 
         try:
-            # ── Phase 0: 预构建 plan + 提取 kb_track（CS2 启动前完成，避免进游戏后卡顿）────
+            # ── Phase 0: 预构建 plan + 提取 overlay 轨道（CS2 启动前完成，避免进游戏后卡顿）────
+            from .env_utils import load_config as _phase0_load_cfg
+            _phase0_cfg = _phase0_load_cfg()
+
+            def _fx_on(_dto) -> bool:
+                value = getattr(_dto.options, "kill_fx_enabled", None)
+                return bool(_phase0_cfg.kill_fx_enabled) if value is None else bool(value)
+
             _plan_cache: dict = {}   # {request_id: RecordingPlan}
             _kb_any = any(getattr(dto.options, "kb_overlay_enabled", False) for dto in requests)
-            logger.info("[RecordingV3] Pre-building %d plans (kb_overlay=%s)", len(requests), _kb_any)
+            _fx_any = any(_fx_on(dto) for dto in requests)
+            logger.info(
+                "[RecordingV3] Pre-building %d plans (kb_overlay=%s kill_fx=%s)",
+                len(requests), _kb_any, _fx_any,
+            )
             for dto in requests:
                 if self._abort_requested():
                     break
@@ -3406,8 +3476,13 @@ class OBSDirector:
                 except Exception as _bp_e:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
-            if _kb_any and _plan_cache and not self._abort_requested():
-                from .parser.input_track import extract_input_track as _pre_extract_kb
+            if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
+                from .parser.input_track import (
+                    extract_input_track as _pre_extract_kb,
+                    prepare_input_track_batch as _prepare_kb_batch,
+                )
+                from .parser.kill_track import extract_kill_track as _pre_extract_fx
+                _kb_prepared_by_demo: dict = {}
 
                 async def _extract_seg_pre(_seg, _demo_path):
                     if self._abort_requested():
@@ -3421,6 +3496,7 @@ class OBSDirector:
                             player_name=_seg.target_player_name,
                             start_tick=_seg.start_tick,
                             end_tick=_seg.end_tick,
+                            prepared=_kb_prepared_by_demo.get(_demo_path),
                         )
                         _seg.metadata["kb_track"] = _frames
                         logger.info(
@@ -3431,39 +3507,108 @@ class OBSDirector:
                         logger.warning("[kb_overlay] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
                         _seg.metadata["kb_track"] = []
 
-                # 收集所有需要提取的任务
+                async def _extract_seg_fx(_seg, _demo_path, _ctx_tags):
+                    if self._abort_requested():
+                        _seg.metadata["kill_track"] = []
+                        return
+                    try:
+                        _kills = await asyncio.to_thread(
+                            _pre_extract_fx,
+                            _demo_path,
+                            steamid=_seg.target_steamid64,
+                            player_name=_seg.target_player_name,
+                            start_tick=_seg.start_tick,
+                            end_tick=_seg.end_tick,
+                            context_tags=_ctx_tags,
+                            round_number=_seg.round,
+                        )
+                        _seg.metadata["kill_track"] = _kills
+                        logger.info(
+                            "[kill_fx] pre-extract seg=%d %d kills (ticks %d-%d)",
+                            _seg.segment_index, len(_kills), _seg.start_tick, _seg.end_tick,
+                        )
+                    except Exception as _e:
+                        logger.warning("[kill_fx] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
+                        _seg.metadata["kill_track"] = []
+
+                # 收集所有需要提取的任务：(coroutine, args)
                 _kb_tasks = []
+                _kb_segments_by_demo: dict[str, list] = {}
                 for _dto in requests:
-                    if not getattr(_dto.options, "kb_overlay_enabled", False):
-                        continue
                     _plan = _plan_cache.get(_dto.request_id)
-                    if _plan:
+                    if not _plan:
+                        continue
+                    if getattr(_dto.options, "kb_overlay_enabled", False):
                         _kb_off_req = getattr(_dto.options, "kb_overlay_tick_offset", None)
                         for _seg in _plan.segments:
                             _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
-                            _kb_tasks.append((_seg, _plan.demo_path))
+                            _kb_tasks.append((_extract_seg_pre, (_seg, _plan.demo_path)))
+                            _kb_segments_by_demo.setdefault(_plan.demo_path, []).append(_seg)
+                    if _fx_on(_dto):
+                        _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
+                        for _seg in _plan.segments:
+                            # 受害者视角片段不展示目标玩家的击杀特效。
+                            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
+                                continue
+                            _seg.metadata["kill_fx_tick_offset"] = getattr(
+                                _dto.options, "kill_fx_tick_offset", None,
+                            )
+                            _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
 
-                # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时
-                _BATCH = 8
+                # Tick/event tables are parsed once per demo below.  Segment
+                # tasks only filter those shared tables and build their frames.
+                _BATCH = 4
                 _kb_total = len(_kb_tasks)
                 _kb_done = 0
-                logger.info("[kb_overlay] Pre-extracting %d segments before CS2 launch", _kb_total)
+                _task_batches = []
+                for _task_fn in (_extract_seg_pre, _extract_seg_fx):
+                    _same_kind = [task for task in _kb_tasks if task[0] is _task_fn]
+                    _task_batches.extend(
+                        _same_kind[index: index + _BATCH]
+                        for index in range(0, len(_same_kind), _BATCH)
+                    )
+                logger.info("[kb_overlay] Pre-extracting %d overlay tasks before CS2 launch", _kb_total)
 
                 from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
                 _kbp_start(_kb_total)
 
-                for _bi in range(0, _kb_total, _BATCH):
+                for _demo_path, _segments in _kb_segments_by_demo.items():
                     if self._abort_requested():
-                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _bi // _BATCH)
+                        break
+                    try:
+                        _kb_prepared_by_demo[_demo_path] = await asyncio.to_thread(
+                            _prepare_kb_batch,
+                            _demo_path,
+                            [(_seg.start_tick, _seg.end_tick) for _seg in _segments],
+                        )
+                        logger.info(
+                            "[kb_overlay] prepared shared demo tables: demo=%s segments=%d",
+                            _demo_path, len(_segments),
+                        )
+                    except Exception as _prepare_e:
+                        # Preserve recording correctness if an unsupported demo
+                        # cannot use the optimized batch path.
+                        logger.warning(
+                            "[kb_overlay] shared demo preparation failed; falling back to "
+                            "per-segment extraction: demo=%s error=%s",
+                            _demo_path, _prepare_e,
+                        )
+
+                for _batch_index, _batch in enumerate(_task_batches):
+                    if self._abort_requested():
+                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _batch_index)
                         _kbp_reset()
                         break
-                    _batch = _kb_tasks[_bi: _bi + _BATCH]
-                    await asyncio.gather(*[_extract_seg_pre(s, p) for s, p in _batch])
+                    await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
                     _kb_done += len(_batch)
                     _kbp_update(_kb_done, _kb_total)
                 else:
                     _kbp_finish()
                 logger.info("[kb_overlay] Pre-extraction done")
+
+            # An abort may arrive while plans/overlay tracks are being built.
+            # Do not continue into POV installation or launch CS2 after that.
+            self._check_abort()
 
             # ── POV HUD install (before first CS2 launch) ─────────────────────
             if pov_on_v3:
@@ -3529,6 +3674,10 @@ class OBSDirector:
                 # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
                 # can send a keypress instead of opening the console during recording.
                 _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
+                _voice_mode = normalize_voice_filter(
+                    getattr(warmup, "voice_filter", "mute") if warmup else "mute"
+                )
+                _warmup_inject_ok = False
                 if warmup is not None:
                     warmup_cmds = self._recording_warmup_console_lines(warmup)
                     warmup_cmds = [*warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
@@ -3548,15 +3697,50 @@ class OBSDirector:
                             for _cmd in pov_cmds:
                                 logger.info("[RecordingV3][POV] inject command: %s", _cmd)
                         try:
-                            await asyncio.to_thread(inject_console_sequence, warmup_cmds)
+                            _warmup_inject_ok = bool(
+                                await asyncio.to_thread(inject_console_sequence, warmup_cmds)
+                            )
+                            if not _warmup_inject_ok:
+                                logger.warning("[RecordingV3] warmup console injection returned false")
                         except Exception as _wce:
                             logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
                 else:
-                    # No warmup object — still inject the demo control key bindings.
+                    # No warmup object means the safe default: mute via both mask halves.
                     try:
-                        await asyncio.to_thread(inject_console_sequence, list(_V3_DEMO_KEY_BINDINGS))
+                        _warmup_inject_ok = bool(await asyncio.to_thread(
+                            inject_console_sequence,
+                            [
+                                *_V3_DEMO_KEY_BINDINGS,
+                                *_voice_filter_warmup_console_lines("mute"),
+                            ],
+                        ))
+                        if not _warmup_inject_ok:
+                            logger.warning("[RecordingV3] default mute warmup injection returned false")
                     except Exception as _wce:
                         logger.warning("[RecordingV3] demo key bindings inject failed: %s", _wce)
+
+                if _voice_mode in ("mute", "team", "enemy") and not _warmup_inject_ok:
+                    error = "voice isolation warmup injection failed; recording aborted fail-closed"
+                    logger.error("[RecordingV3] %s", error)
+                    for dto in demo_requests:
+                        all_results.append({
+                            "request_id": dto.request_id,
+                            "success": False,
+                            "error": error,
+                            "segment_results": [],
+                            "warnings": [],
+                        })
+                    await self._run_cleanup_step(
+                        "CS2 shutdown after voice isolation failure",
+                        self._kill_cs2,
+                        timeout=30.0,
+                    )
+                    await self._run_cleanup_step(
+                        "CS2 artifact cleanup after voice isolation failure",
+                        self._cleanup_cs2_artifacts,
+                        timeout=8.0,
+                    )
+                    continue
 
                 # ── Connect OBS right before recording (fresh connection avoids dead recv thread)
                 if obs_client.is_connected():
@@ -3620,14 +3804,9 @@ class OBSDirector:
                         logger.info("[RecordingV3] using pre-built plan: request_id=%s type=%s",
                                     dto.request_id, dto.request_type.value)
 
-                    # ── voice_filter: patch segment masks before execution ────────
-                    _vf = getattr(warmup, "voice_filter", "mute") if warmup else "mute"
-                    if _vf in ("off", "open", "mute", "all"):
-                        for _seg in plan.segments:
-                            _seg.voice_listen_mask = None
-                    elif _vf == "enemy":
-                        for _seg in plan.segments:
-                            _seg.voice_listen_mask = _seg.voice_listen_mask_enemy
+                    # Resolve every segment explicitly. Missing roster data is mask 0;
+                    # only an explicit "off" leaves voice state unmanaged (None).
+                    _apply_voice_filter_to_plan(plan, _voice_mode)
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
                     _pre_execute_wall = time.time()
@@ -3812,6 +3991,24 @@ class OBSDirector:
                 await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
                 await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
 
+        except RecordingAborted:
+            logger.info("[RecordingV3] queue aborted by user; entering final cleanup")
+            self._set_state(DirectorState.STOPPING, "aborted")
+            completed_request_ids = {
+                str(item.get("request_id"))
+                for item in all_results
+                if item.get("request_id") is not None
+            }
+            for dto in requests:
+                if str(dto.request_id) in completed_request_ids:
+                    continue
+                all_results.append({
+                    "request_id": dto.request_id,
+                    "success": False,
+                    "error": "aborted",
+                    "segment_results": [],
+                    "warnings": [],
+                })
         except (CS2AlreadyRunningError, CS2NotReadyError):
             raise
         except Exception as e:
@@ -3830,6 +4027,20 @@ class OBSDirector:
                 await asyncio.to_thread(obs_client.disconnect)
             except Exception:
                 pass
+            # This must be unconditional.  Abort can raise while CS2 is still
+            # launching or waiting for GSI, before the per-demo cleanup below
+            # is reached.  _kill_cs2 restores the player config snapshot after
+            # the process exits; both operations are safe to repeat.
+            await self._run_cleanup_step(
+                "CS2 shutdown during final recording cleanup",
+                self._kill_cs2,
+                timeout=30.0,
+            )
+            await self._run_cleanup_step(
+                "CS2 artifact cleanup during final recording cleanup",
+                self._cleanup_cs2_artifacts,
+                timeout=8.0,
+            )
             if pov_mgr_v3 is not None:
                 try:
                     logger.info("[RecordingV3][POV] restore gameinfo.gi")

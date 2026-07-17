@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Upload, FileCode2 } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 
@@ -7,10 +7,11 @@ function collectDemFiles(fileList) {
   return Array.from(fileList).filter((f) => f.name?.toLowerCase().endsWith(".dem"));
 }
 
-/** @param {{ onUpload: (files: File[]) => void }} props */
+/** @param {{ onUpload: (files: File[] | string[]) => void }} props */
 export default function DemoUpload({ onUpload }) {
   const t = useT();
   const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef(null);
 
   const handleDrop = useCallback(
     (e) => {
@@ -31,6 +32,15 @@ export default function DemoUpload({ onUpload }) {
     [onUpload]
   );
 
+  const handleBrowse = useCallback(async () => {
+    if (window.electron?.chooseDemoFiles) {
+      const paths = await window.electron.chooseDemoFiles();
+      if (paths?.length) onUpload(paths);
+      return;
+    }
+    inputRef.current?.click();
+  }, [onUpload]);
+
   return (
     <div
       onDragOver={(e) => {
@@ -39,6 +49,15 @@ export default function DemoUpload({ onUpload }) {
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
+      onClick={handleBrowse}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleBrowse();
+        }
+      }}
+      role="button"
+      tabIndex={0}
       className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 cursor-pointer py-14 sm:py-16 ${
         dragOver
           ? "border-cs2-accent bg-cs2-accent/5 shadow-[0_0_30px_rgba(255,140,0,0.1)]"
@@ -46,11 +65,13 @@ export default function DemoUpload({ onUpload }) {
       }`}
     >
       <input
+        ref={inputRef}
         type="file"
         accept=".dem"
         multiple
         onChange={handleFileInput}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        onClick={(e) => e.stopPropagation()}
+        className="hidden"
       />
 
       <div

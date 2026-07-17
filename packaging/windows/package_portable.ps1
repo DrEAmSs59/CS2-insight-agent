@@ -25,6 +25,10 @@
   Only populate repo-root .\python\ using the same rules as the portable pack (embeddable or -PortablePythonDir + pip install).
   Then exit — use before npm run electron:build (electron-builder extraResources reads ..\python).
 
+.PARAMETER DemoparserWheel
+  Optional locally built lean demoparser wheel. It is installed before requirements.txt,
+  preventing the release runtime from pulling Polars and PyArrow.
+
 #>
 param(
     [string]$PortablePythonDir = "",
@@ -33,7 +37,8 @@ param(
     [switch]$CleanNpm,
     [switch]$SkipBundlePython,
     [string]$EmbeddedPythonVersion = "3.12.7",
-    [switch]$ElectronStagePythonOnly
+    [switch]$ElectronStagePythonOnly,
+    [string]$DemoparserWheel = $env:CS2_INSIGHT_DEMOPARSER_WHEEL
 )
 
 $ErrorActionPreference = "Stop"
@@ -127,13 +132,63 @@ function Install-BackendRequirements {
         [Parameter(Mandatory)][string]$PythonExe,
         [Parameter(Mandatory)][string]$RequirementsPath
     )
+    $previousNoUserSite = $env:PYTHONNOUSERSITE
+    $env:PYTHONNOUSERSITE = "1"
+    try {
     Write-Step "pip install -r requirements.txt (this can take several minutes)"
     & $PythonExe -m pip install -U pip
     if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)" }
+    if ($DemoparserWheel.Trim()) {
+        $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
+        Write-Step "Install lean demoparser wheel"
+        & $PythonExe -m pip install --no-deps $leanWheel
+        if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed (exit $LASTEXITCODE)" }
+    }
     & $PythonExe -m pip install -r $RequirementsPath
     if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)" }
+    if ($DemoparserWheel.Trim()) {
+        & $PythonExe -m pip uninstall -y polars pyarrow polars-runtime-32
+        $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
+        & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; assert m.version('demoparser2') == sys.argv[1]; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+        if ($LASTEXITCODE -ne 0) { throw "lean demoparser runtime verification failed (exit $LASTEXITCODE)" }
+    }
     Write-Step "Remove pip / setuptools / wheel (not needed at runtime)"
     & $PythonExe -m pip uninstall -y pip setuptools wheel
+    if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed (exit $LASTEXITCODE)" }
+    $pythonRoot = Split-Path -Parent $PythonExe
+    $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
+    foreach ($rel in @(
+        "Scripts",
+        "Lib\site-packages\pandas\tests",
+        "Lib\site-packages\websocket\tests",
+        "Lib\site-packages\aiosqlite\tests",
+        "Lib\site-packages\colorama\tests"
+    )) {
+        $path = Join-Path $pythonRoot $rel
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
+    }
+    $numpyRoot = Join-Path $sitePackages "numpy"
+    if (Test-Path -LiteralPath $numpyRoot) {
+        Get-ChildItem -LiteralPath $numpyRoot -Recurse -Directory -Filter "tests" -ErrorAction SilentlyContinue |
+            Sort-Object { $_.FullName.Length } -Descending |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    & $PythonExe -c "import demoparser2, fastapi, numpy, openai, pandas, PIL, uvicorn"
+    if ($LASTEXITCODE -ne 0) { throw "trimmed runtime import verification failed (exit $LASTEXITCODE)" }
+    Get-ChildItem -LiteralPath $pythonRoot -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath $pythonRoot -Recurse -File -Filter "*.pdb" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    } finally {
+        if ($null -eq $previousNoUserSite) {
+            Remove-Item Env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONNOUSERSITE = $previousNoUserSite
+        }
+    }
 }
 
 function Bundle-PythonInto {

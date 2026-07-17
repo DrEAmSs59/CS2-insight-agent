@@ -11,6 +11,8 @@ from .parse_utils import (
     _to_pandas_df,
     _cell_str,
     _cell_team,
+    PLAYER_TEAM_PARSE_FIELDS,
+    coalesce_player_team_num,
     _user_id_cell,
     _steam_id_cell,
     _pick_assister_column,
@@ -33,7 +35,11 @@ def _player_info_team_col(pi: pd.DataFrame) -> Optional[str]:
     return next((c for c in ("team_number", "team_num", "team") if c in pi.columns), None)
 
 
-def build_steam_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
+def build_steam_to_team_from_player_info(
+    parser: DemoParser,
+    *,
+    player_info_df: Optional[pd.DataFrame] = None,
+) -> dict[str, int]:
     """steamid64(str) -> 末段（第二阶段）队伍号 2/3，来自 parse_player_info。
 
     parse_player_info 是最可靠的全员队伍来源：即便逐 tick 的 team_num 字段在某些
@@ -41,7 +47,11 @@ def build_steam_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
     用作稳定的「队伍身份」分组键（两支 5 人队整局不变，换边只改阵营号）。
     """
     try:
-        pi = _to_pandas_df(parser.parse_player_info())
+        pi = (
+            player_info_df
+            if player_info_df is not None
+            else _to_pandas_df(parser.parse_player_info())
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -61,10 +71,18 @@ def build_steam_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
     return out
 
 
-def build_name_to_team_from_player_info(parser: DemoParser) -> dict[str, int]:
+def build_name_to_team_from_player_info(
+    parser: DemoParser,
+    *,
+    player_info_df: Optional[pd.DataFrame] = None,
+) -> dict[str, int]:
     """玩家名(小写) -> 末段队伍号 2/3，来自 parse_player_info（剔除 bot/观察者）。"""
     try:
-        pi = _to_pandas_df(parser.parse_player_info())
+        pi = (
+            player_info_df
+            if player_info_df is not None
+            else _to_pandas_df(parser.parse_player_info())
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -137,8 +155,8 @@ def _build_tick_team_lookup(parser: DemoParser, ticks: list[int]) -> dict[int, d
         return {}
     uniq = sorted({int(t) for t in ticks})
     try:
-        raw = parser.parse_ticks(["team_num", "name"], ticks=uniq)
-        df = _to_pandas_df(raw)
+        raw = parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name"], ticks=uniq)
+        df = coalesce_player_team_num(_to_pandas_df(raw))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -176,31 +194,66 @@ def _lookup_team_at_tick(
     return None
 
 
-def build_player_name_to_user_id(parser: DemoParser, match_start_tick: int) -> dict[str, int]:
+def _player_tick_snapshot_at(
+    df: Optional[pd.DataFrame],
+    desired_tick: int,
+) -> pd.DataFrame:
+    """Reuse a materialized player snapshot only when its tick is exact."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    work = coalesce_player_team_num(df)
+    if "tick" not in work.columns:
+        return pd.DataFrame()
+    numeric_ticks = pd.to_numeric(work["tick"], errors="coerce")
+    exact = work.loc[numeric_ticks == int(desired_tick)]
+    return exact.copy() if not exact.empty else pd.DataFrame()
+
+
+def build_player_name_to_user_id(
+    parser: DemoParser,
+    match_start_tick: int,
+    *,
+    death_events: Optional[pd.DataFrame] = None,
+) -> dict[str, int]:
     """从 player_death 的 user_id 扩展字段建立「昵称 -> 引擎 user id」。"""
+    def _mapping(frame: pd.DataFrame) -> tuple[dict[str, int], set[str]]:
+        if frame.empty:
+            return {}, set()
+        work = frame
+        if match_start_tick > 0 and "tick" in work.columns:
+            work = work.loc[
+                pd.to_numeric(work["tick"], errors="coerce").fillna(0).astype(int)
+                >= match_start_tick
+            ]
+        out: dict[str, int] = {}
+        expected: set[str] = set()
+        for _, row in work.iterrows():
+            vn = _cell_str(row.get("user_name"))
+            vu = _user_id_cell(row.get("user_user_id"))
+            if vn:
+                expected.add(vn.lower())
+                if vu is not None:
+                    out[vn] = vu
+            an = _cell_str(row.get("attacker_name"))
+            au = _user_id_cell(row.get("attacker_user_id"))
+            if an:
+                expected.add(an.lower())
+                if au is not None:
+                    out[an] = au
+        return out, expected
+
+    cached = death_events if death_events is not None else pd.DataFrame()
+    cached_out, expected = _mapping(cached)
+    if expected and expected.issubset({name.lower() for name in cached_out}):
+        return cached_out
     try:
-        de = _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
+        fresh = _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
-        return {}
-    if de.empty:
-        return {}
-    if match_start_tick > 0 and "tick" in de.columns:
-        de = de.loc[
-            pd.to_numeric(de["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
-        ].copy()
-    out: dict[str, int] = {}
-    for _, row in de.iterrows():
-        vn = _cell_str(row.get("user_name"))
-        vu = _user_id_cell(row.get("user_user_id"))
-        if vn and vu is not None:
-            out[vn] = vu
-        an = _cell_str(row.get("attacker_name"))
-        au = _user_id_cell(row.get("attacker_user_id"))
-        if an and au is not None:
-            out[an] = au
-    return out
+        return cached_out
+    fresh_out, _ = _mapping(fresh)
+    return {**cached_out, **fresh_out}
 
 
 def _lookup_user_id_for_name(name_to_uid: dict[str, int], player_name: str) -> Optional[int]:
@@ -216,31 +269,51 @@ def _lookup_user_id_for_name(name_to_uid: dict[str, int], player_name: str) -> O
     return None
 
 
-def build_player_name_to_steam_id(parser: DemoParser, match_start_tick: int) -> dict[str, int]:
+def build_player_name_to_steam_id(
+    parser: DemoParser,
+    match_start_tick: int,
+    *,
+    death_events: Optional[pd.DataFrame] = None,
+) -> dict[str, int]:
     """player_death 中 user_steamid / attacker_steamid 汇总为「昵称 -> Steam64」。"""
+    def _mapping(frame: pd.DataFrame) -> tuple[dict[str, int], set[str]]:
+        if frame.empty:
+            return {}, set()
+        work = frame
+        if match_start_tick > 0 and "tick" in work.columns:
+            work = work.loc[
+                pd.to_numeric(work["tick"], errors="coerce").fillna(0).astype(int)
+                >= match_start_tick
+            ]
+        out: dict[str, int] = {}
+        expected: set[str] = set()
+        for _, row in work.iterrows():
+            vn = _cell_str(row.get("user_name"))
+            vs = _steam_id_cell(row.get("user_steamid"))
+            if vn:
+                expected.add(vn.lower())
+                if vs is not None:
+                    out[vn] = vs
+            an = _cell_str(row.get("attacker_name"))
+            ast = _steam_id_cell(row.get("attacker_steamid"))
+            if an:
+                expected.add(an.lower())
+                if ast is not None:
+                    out[an] = ast
+        return out, expected
+
+    cached = death_events if death_events is not None else pd.DataFrame()
+    cached_out, expected = _mapping(cached)
+    if expected and expected.issubset({name.lower() for name in cached_out}):
+        return cached_out
     try:
-        de = _to_pandas_df(parser.parse_event("player_death"))
+        fresh = _to_pandas_df(parser.parse_event("player_death"))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
-        return {}
-    if de.empty:
-        return {}
-    if match_start_tick > 0 and "tick" in de.columns:
-        de = de.loc[
-            pd.to_numeric(de["tick"], errors="coerce").fillna(0).astype(int) >= match_start_tick
-        ].copy()
-    out: dict[str, int] = {}
-    for _, row in de.iterrows():
-        vn = _cell_str(row.get("user_name"))
-        vs = _steam_id_cell(row.get("user_steamid"))
-        if vn and vs is not None:
-            out[vn] = vs
-        an = _cell_str(row.get("attacker_name"))
-        ast = _steam_id_cell(row.get("attacker_steamid"))
-        if an and ast is not None:
-            out[an] = ast
-    return out
+        return cached_out
+    fresh_out, _ = _mapping(fresh)
+    return {**cached_out, **fresh_out}
 
 
 def _lookup_steam_id_for_name(name_to_sid: dict[str, int], player_name: str) -> Optional[int]:
@@ -261,14 +334,52 @@ def _build_all_players_roster(
     match_start_tick: int,
     spec_slots: dict[str, int],
     name_to_sid: dict[str, int],
+    *,
+    name_to_team_pi: Optional[dict[str, int]] = None,
+    player_ticks_df: Optional[pd.DataFrame] = None,
+    expected_names: Optional[list[str] | tuple[str, ...] | set[str]] = None,
 ) -> list[dict]:
     """全员名单：[{name, steamid64, spec_slot, team_num}, ...]。"""
-    try:
-        df = _to_pandas_df(parser.parse_ticks(["name", "team_num"], ticks=[max(1, match_start_tick)]))
-    except BaseException as e:
-        if isinstance(e, _DEMOPARSER_RE_RAISE):
-            raise
-        return []
+    desired_tick = max(1, match_start_tick)
+    cached_df = _player_tick_snapshot_at(player_ticks_df, desired_tick)
+    expected_name_keys = {
+        str(name).strip().lower()
+        for name in (
+            *name_to_sid.keys(),
+            *spec_slots.keys(),
+            *(name_to_team_pi or {}).keys(),
+            *(expected_names or ()),
+        )
+        if str(name).strip()
+    }
+    cached_usable_names = (
+        {
+            name.strip().lower()
+            for _, row in cached_df.iterrows()
+            if (name := _cell_str(row.get("name")))
+            and _cell_team(row.get("team_num")) in (2, 3)
+        }
+        if not cached_df.empty
+        else set()
+    )
+    cache_complete = bool(cached_usable_names) and (
+        not expected_name_keys or expected_name_keys.issubset(cached_usable_names)
+    )
+    df = cached_df
+    if not cache_complete:
+        try:
+            fresh_df = coalesce_player_team_num(_to_pandas_df(parser.parse_ticks(
+                ["name", "steamid", *PLAYER_TEAM_PARSE_FIELDS],
+                ticks=[desired_tick],
+            )))
+        except BaseException as e:
+            if isinstance(e, _DEMOPARSER_RE_RAISE):
+                raise
+            fresh_df = pd.DataFrame()
+        if not fresh_df.empty:
+            # Prefer the dedicated exact-tick read while retaining any names
+            # that were present only in the shared cache.
+            df = pd.concat([fresh_df, cached_df], ignore_index=True)
     if df.empty:
         return []
     players: list[dict] = []
@@ -285,7 +396,11 @@ def _build_all_players_roster(
         if team_num not in (2, 3):
             continue
         seen.add(name)
-        sid_int = name_to_sid.get(name) or name_to_sid.get(name.lower())
+        sid_int = (
+            name_to_sid.get(name)
+            or name_to_sid.get(name.lower())
+            or _steam_id_cell(row.get("steamid"))
+        )
         players.append({
             "name": name,
             "steamid64": str(sid_int) if sid_int is not None else "",
@@ -296,19 +411,32 @@ def _build_all_players_roster(
     # 逐 tick team_num 在部分国服 demo 上几乎全为空，会导致名单残缺/单边。
     # 此时用 parse_player_info 的可靠队伍补全全员。
     distinct = {p["team_num"] for p in players}
-    if len(players) < 6 or len(distinct) < 2:
-        name_to_team_pi = build_name_to_team_from_player_info(parser)
-        if name_to_team_pi:
-            df_names = [str(r.get("name", "")).strip() for _, r in df.iterrows()]
-            existing = {p["name"] for p in players}
-            for name in df_names:
-                if not name or name in existing:
+    output_name_keys = {str(player["name"]).strip().lower() for player in players}
+    missing_expected = expected_name_keys - output_name_keys
+    if len(players) < 6 or len(distinct) < 2 or missing_expected:
+        name_to_team_pi_resolved = (
+            name_to_team_pi
+            if name_to_team_pi is not None
+            else build_name_to_team_from_player_info(parser)
+        )
+        if name_to_team_pi_resolved:
+            candidate_names = [
+                str(row.get("name", "")).strip()
+                for _, row in df.iterrows()
+            ]
+            candidate_names.extend(str(name).strip() for name in expected_names or ())
+            candidate_names.extend(str(name).strip() for name in name_to_sid)
+            candidate_names.extend(str(name).strip() for name in spec_slots)
+            existing = {str(player["name"]).strip().lower() for player in players}
+            for name in candidate_names:
+                name_key = name.lower()
+                if not name or name_key in existing:
                     continue
-                tm = name_to_team_pi.get(name.lower())
+                tm = name_to_team_pi_resolved.get(name_key)
                 if tm not in (2, 3):
                     continue
-                existing.add(name)
-                sid_int = name_to_sid.get(name) or name_to_sid.get(name.lower())
+                existing.add(name_key)
+                sid_int = _lookup_steam_id_for_name(name_to_sid, name)
                 players.append({
                     "name": name,
                     "steamid64": str(sid_int) if sid_int is not None else "",
@@ -372,16 +500,42 @@ def build_player_name_to_spec_player_slot_dict(
     parser: DemoParser,
     tick_i: int,
     dem_path: str | Path | None = None,
+    *,
+    player_ticks_df: Optional[pd.DataFrame] = None,
+    expected_names: Optional[list[str] | tuple[str, ...] | set[str]] = None,
 ) -> dict[str, int]:
     """在某一 tick 快照上建立「玩家昵称(小写) -> spec_player 应传入的整数」。"""
     observed: list[int] = []
     t = max(1, int(tick_i)) if int(tick_i) <= 0 else int(tick_i)
-    try:
-        df = _to_pandas_df(parser.parse_ticks(["user_id", "name"], ticks=[t]))
-    except BaseException as e:
-        if isinstance(e, _DEMOPARSER_RE_RAISE):
-            raise
-        return {}
+    cached_df = _player_tick_snapshot_at(player_ticks_df, t)
+    valid_cached_names: set[str] = set()
+    if not cached_df.empty and "user_id" in cached_df.columns and "name" in cached_df.columns:
+        valid_cached_names = {
+            str(name).strip().lower()
+            for _, row in cached_df.iterrows()
+            if (name := _cell_str(row.get("name")))
+            and _user_id_cell(row.get("user_id")) is not None
+        }
+    expected = {
+        str(name).strip().lower()
+        for name in expected_names or ()
+        if str(name).strip()
+    }
+    cache_complete = bool(valid_cached_names) and (
+        not expected or expected.issubset(valid_cached_names)
+    )
+    df = cached_df
+    if not cache_complete:
+        try:
+            fresh_df = _to_pandas_df(parser.parse_ticks(["user_id", "name"], ticks=[t]))
+        except BaseException as e:
+            if isinstance(e, _DEMOPARSER_RE_RAISE):
+                raise
+            fresh_df = pd.DataFrame()
+        if not fresh_df.empty:
+            # Fresh rows are appended so duplicate names overwrite cached IDs
+            # when the mapping dict is built below.
+            df = pd.concat([cached_df, fresh_df], ignore_index=True)
     if df.empty or "user_id" not in df.columns or "name" not in df.columns:
         return {}
     out: dict[str, int] = {}
@@ -412,9 +566,12 @@ def _compute_spec_slot_legacy_team_steam_sort(
     """旧版启发式：(team_num, steamid) 排序；仅作无 user_id 时的回退。"""
     try:
         parser = DemoParser(str(dem_path))
-        df = _to_pandas_df(
-            parser.parse_ticks(["name", "steamid", "team_num"], ticks=[tick_i]),
-        )
+        df = coalesce_player_team_num(_to_pandas_df(
+            parser.parse_ticks(
+                ["name", "steamid", *PLAYER_TEAM_PARSE_FIELDS],
+                ticks=[tick_i],
+            ),
+        ))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -472,9 +629,12 @@ def compute_spec_player_slot_one_based(
         except BaseException as e:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
                 raise
-        df = _to_pandas_df(
-            parser.parse_ticks(["user_id", "name", "steamid", "team_num"], ticks=[tick_i]),
-        )
+        df = coalesce_player_team_num(_to_pandas_df(
+            parser.parse_ticks(
+                ["user_id", "name", "steamid", *PLAYER_TEAM_PARSE_FIELDS],
+                ticks=[tick_i],
+            ),
+        ))
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -506,13 +666,25 @@ def compute_spec_player_slot_one_based(
     return (leg + off) if leg is not None else None
 
 
-def get_player_list(dem_path: str | Path) -> list[dict]:
+def get_player_list(
+    dem_path: str | Path,
+    *,
+    parser: Optional[DemoParser] = None,
+    match_start_tick: Optional[int] = None,
+    death_events: Optional[pd.DataFrame] = None,
+    player_info_df: Optional[pd.DataFrame] = None,
+) -> list[dict]:
     """扫描 Demo 所有在 player_death 出现过的玩家，汇总 K/D/A 与队伍。"""
-    parser = DemoParser(str(dem_path))
-    match_start_tick = _get_match_start_tick(parser)
+    parser = parser or DemoParser(str(dem_path))
+    if match_start_tick is None:
+        match_start_tick = _get_match_start_tick(parser)
     # 单次扫描同时取 user_id + steamid + 所有默认列（3次扫描合1次）
     try:
-        events = _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
+        events = (
+            death_events
+            if death_events is not None and not death_events.empty
+            else _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -618,9 +790,9 @@ def get_player_list(dem_path: str | Path) -> list[dict]:
 
     if match_start_tick > 0 and stats:
         try:
-            fix_df = _to_pandas_df(
-                parser.parse_ticks(["team_num", "name"], ticks=[match_start_tick]),
-            )
+            fix_df = coalesce_player_team_num(_to_pandas_df(
+                parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name"], ticks=[match_start_tick]),
+            ))
         except BaseException as e:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
                 raise
@@ -640,7 +812,11 @@ def get_player_list(dem_path: str | Path) -> list[dict]:
     player_info_team_by_name: dict[str, int] = {}
     player_info_team_by_sid: dict[str, int] = {}
     try:
-        pi = _to_pandas_df(parser.parse_player_info())
+        pi = (
+            player_info_df
+            if player_info_df is not None and not player_info_df.empty
+            else _to_pandas_df(parser.parse_player_info())
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise

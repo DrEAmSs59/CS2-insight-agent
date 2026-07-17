@@ -80,7 +80,7 @@ def ffprobe_streams(path: Path, ffprobe: Path) -> dict[str, Any]:
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=index,codec_type,width,height,r_frame_rate,channels,sample_rate",
+            "format=duration:stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,width,height,r_frame_rate,channels,sample_rate:stream_tags=alpha_mode",
             "-of",
             "json",
             str(path),
@@ -115,9 +115,11 @@ def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
     except (TypeError, ValueError):
         dur_s = None
     streams = data.get("streams") or []
-    vw = vh = 1920, 1080
+    vw, vh = 1920, 1080
     fps = 60.0
     has_audio = False
+    pixel_format = ""
+    codec_name = ""
     for st in streams:
         if not isinstance(st, dict):
             continue
@@ -129,9 +131,21 @@ def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
             fps = parse_r_frame_rate(str(st.get("r_frame_rate") or ""))
+            pixel_format = str(st.get("pix_fmt") or "").strip().lower()
+            codec_name = str(st.get("codec_name") or "").strip().lower()
         elif ct == "audio":
             has_audio = True
-    return {"width": vw, "height": vh, "fps": fps, "has_audio": has_audio, "duration": dur_s}
+    has_alpha = pixel_format.startswith("yuva") or pixel_format in {"rgba", "argb", "bgra", "abgr", "gbrap", "gbrap10le", "gbrap12le", "gbrap16le"}
+    return {
+        "width": vw,
+        "height": vh,
+        "fps": fps,
+        "has_audio": has_audio,
+        "duration": dur_s,
+        "pixel_format": pixel_format,
+        "codec_name": codec_name,
+        "has_alpha": has_alpha,
+    }
 
 
 def validate_output_path(path_str: str) -> Path:
@@ -229,7 +243,24 @@ def _finalize_mp4_for_common_players(
         raise MontageComposerError("MONTAGE_FINALIZE_FAILED")
 
 
-_VALID_XFADE_TYPES = frozenset({"fade", "cut", "flash", "dip_black", "zoom", "none"})
+_VALID_XFADE_TYPES = frozenset({
+    "fade",
+    "cut",
+    "flash",
+    "dip_black",
+    "zoom",
+    "none",
+    # LiteCut extended built-ins → ffmpeg xfade transition names
+    "wipe_l",
+    "wipe_r",
+    "slide_left",
+    "slide_right",
+    "slide_up",
+    "slide_down",
+    "blur",
+    "glitch",
+    "spin",
+})
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"})
 
@@ -286,13 +317,22 @@ def _image_to_ts_with_fade(
 
 def _xfade_transition_name(trans_type: str) -> str:
     """映射到 ffmpeg xfade 的 transition 名称。"""
-    if trans_type == "flash":
-        return "fadewhite"
-    if trans_type == "dip_black":
-        return "fadeblack"
-    if trans_type == "zoom":
-        return "zoomin"
-    return "fade"
+    mapping = {
+        "fade": "fade",
+        "flash": "fadewhite",
+        "dip_black": "fadeblack",
+        "zoom": "zoomin",
+        "wipe_l": "wipeleft",
+        "wipe_r": "wiperight",
+        "slide_left": "slideleft",
+        "slide_right": "slideright",
+        "slide_up": "slideup",
+        "slide_down": "slidedown",
+        "blur": "hblur",
+        "glitch": "pixelize",
+        "spin": "radial",
+    }
+    return mapping.get(trans_type, "fade")
 
 
 def _parse_transition_for_edge(transitions: dict[str, Any], clip_row_id: int) -> tuple[str, float]:

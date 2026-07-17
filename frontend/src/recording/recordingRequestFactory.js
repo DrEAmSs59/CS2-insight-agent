@@ -117,7 +117,8 @@ function buildSourceRef(clipData, queueItem) {
     original_clip_id: clipData.clip_id || null,
     timeline_event_id: clipData.timeline_event_id || null,
     queue_item_id: queueItem.id || null,
-    group_id: null,
+    // Preserve the new subtype through the generic kill_compilation DTO.
+    group_id: clipData.compilation_kind === "weapon_kills" ? "weapon_kills" : null,
     context_tags: Array.isArray(clipData.context_tags) ? clipData.context_tags : [],
   };
 }

@@ -404,11 +404,14 @@ class OBSClient:
         scene_name: str,
         overlay_url: str,
         source_name: str = "CS2 Keyboard Overlay",
+        *,
+        reroute_audio: bool = False,
     ) -> bool:
-        """确保当前场景中存在键盘 Overlay Browser Source。
+        """确保当前场景中存在 Overlay Browser Source。
 
         - 如果已存在同名 source，仅更新 URL（幂等）。
         - 如果不存在，创建并全屏对齐到场景画布。
+        - reroute_audio=True 时启用「通过 OBS 控制音频」，让素材音轨进入录制混音。
         返回 True 表示操作成功（或已存在）。
         """
         self._require_connected()
@@ -422,7 +425,7 @@ class OBSClient:
                 "width": width,
                 "height": height,
                 "fps": 60,
-                "reroute_audio": False,
+                "reroute_audio": bool(reroute_audio),
                 "restart_when_active": False,  # 保持 WebSocket 常连，避免录制开始时刷新导致错过 load/resume 广播
             }
 
@@ -433,6 +436,7 @@ class OBSClient:
                 try:
                     self.set_input_settings(source_name, {
                         "url": overlay_url,
+                        "reroute_audio": bool(reroute_audio),
                         "restart_when_active": False,
                     }, overlay=True)
                     logger.info("OBSClient: kb overlay %r already in scene %r — settings updated", source_name, scene_name)

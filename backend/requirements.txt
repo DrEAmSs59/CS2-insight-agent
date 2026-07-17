@@ -3,6 +3,7 @@ uvicorn[standard]>=0.32.0
 websockets>=12.0
 python-multipart>=0.0.12
 demoparser2>=0.41.2
+cramjam>=2.11.0,<3
 numpy>=1.24.0
 pandas>=2.0.0
 python-dateutil>=2.8.0

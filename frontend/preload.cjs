@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('electron', {
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   isPackaged: () => ipcRenderer.invoke('is-packaged'),
   getVersion: () => ipcRenderer.invoke('get-version'),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  chooseDemoFiles: () => ipcRenderer.invoke('choose-demo-files'),
+  showItemInFolder: (itemPath) => ipcRenderer.invoke('show-item-in-folder', itemPath),
+  chooseDirectory: (defaultPath) => ipcRenderer.invoke('choose-directory', defaultPath),
   onMaximizeChange: (callback) => ipcRenderer.on('window-maximize-change', (_event, isMaximized) => callback(isMaximized)),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   cancelUpdate: () => ipcRenderer.send('cancel-update'),
@@ -18,7 +22,5 @@ contextBridge.exposeInMainWorld('electron', {
   },
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
   // 打开外部链接（使用系统默认浏览器）
-  openExternal: (url) => ipcRenderer.invoke('open-external', url),
-  // H1 fix: 获取后端认证 Token
-  getAuthToken: () => ipcRenderer.invoke('get-auth-token')
+  openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

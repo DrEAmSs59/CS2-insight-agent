@@ -35,6 +35,7 @@ Thumbs.db
 # Local demo files (do not upload)
 cs2_demo/
 cs2_demo_lib
+debugtest/
 
 # Local / agent plans and specs (not versioned)
 docs/superpowers/
@@ -61,6 +62,7 @@ debug_parse_demo.py
 # Root scripts/ is for ad-hoc local scripts; tracked exceptions below.
 /scripts/*
 !/scripts/github-bootstrap.ps1
+!/scripts/litecut_visual_regression.py
 build_portable.bat
 !build_electron.bat
 rebuild_frontend.ps1
@@ -78,6 +80,13 @@ cs2-insight.db-shm
 data/**
 !data/cs2-insight.config.example.json
 !data/basic.ini
+!data/lite_cut_effect_contract.json
+!data/lite_cut_visual_acceptance.json
+
+# Alternate local data root used by development/testing
+/data1/
+frontend/public/__litecut_visual_tmp/
+/artifacts/
 
 # Electron distribution
 frontend/dist_electron/
@@ -85,3 +94,6 @@ frontend/build/
 
 # Local generated preview artifacts (match report preview, etc.)
 frontend/preview/
+
+# Local UI design backups created before visual refactors
+backups/

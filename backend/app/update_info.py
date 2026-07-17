@@ -89,14 +89,18 @@ def unwrap_github_url(url: str) -> str:
 def pick_download_urls(assets: list[dict[str, Any]], version_without_v: str) -> tuple[Optional[str], Optional[str]]:
     setup_url: Optional[str] = None
     zip_url: Optional[str] = None
-    want_setup = f"CS2InsightAgent-{version_without_v}-Setup.exe"
+    setup_names = {
+        f"CS2.Insight.Agent.Setup.{version_without_v}.exe",
+        f"CS2 Insight Agent Setup {version_without_v}.exe",
+        f"CS2InsightAgent-{version_without_v}-Setup.exe",
+    }
     want_zip = f"CS2InsightAgent-{version_without_v}-windows-amd64.zip"
     for a in assets:
         name = str(a.get("name") or "")
         url = a.get("browser_download_url")
         if not url:
             continue
-        if name == want_setup:
+        if name in setup_names:
             setup_url = str(url)
         elif name == want_zip:
             zip_url = str(url)
@@ -289,12 +293,12 @@ def _parse_release_tag_from_url(url: str) -> str:
     return m.group(1).strip()
 
 
-def _guess_download_urls(tag_raw: str, tag_norm: str) -> tuple[str, str]:
+def _guess_download_urls(tag_raw: str, tag_norm: str) -> tuple[str, None]:
     enc_tag = quote(tag_raw, safe="")
     base = f"https://github.com/{_GITHUB_OWNER_REPO}/releases/download/{enc_tag}"
     return (
-        f"{base}/CS2InsightAgent-{tag_norm}-Setup.exe",
-        f"{base}/CS2InsightAgent-{tag_norm}-windows-amd64.zip",
+        f"{base}/CS2.Insight.Agent.Setup.{tag_norm}.exe",
+        None,
     )
 
 
@@ -320,15 +324,14 @@ def _fetch_latest_release_dict_via_redirect(mirror_prefix: str | None = None, *,
         final_url = str(resp.url)
     tag_raw = _parse_release_tag_from_url(final_url)
     tag_norm = normalize_release_tag(tag_raw)
-    setup_u, zip_u = _guess_download_urls(tag_raw, tag_norm)
+    setup_u, _ = _guess_download_urls(tag_raw, tag_norm)
     release_page = unwrap_github_url(final_url)
     return {
         "tag_name": tag_raw,
         "html_url": release_page,
         "body": "",
         "assets": [
-            {"name": f"CS2InsightAgent-{tag_norm}-Setup.exe", "browser_download_url": setup_u},
-            {"name": f"CS2InsightAgent-{tag_norm}-windows-amd64.zip", "browser_download_url": zip_u},
+            {"name": f"CS2.Insight.Agent.Setup.{tag_norm}.exe", "browser_download_url": setup_u},
         ],
     }
 

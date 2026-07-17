@@ -71,17 +71,14 @@ class TestMontageEncoder(unittest.TestCase):
             self.assertTrue(calls["probe_nvenc"])
             self.assertTrue(calls["probe_qsv"])
 
-    def test_explicit_missing_hw_raises(self):
+    def test_explicit_missing_hw_falls_back_to_software(self):
         import app.montage_encoder as me
 
         fake = " V..... libx264\n"
         with patch.object(me.subprocess, "run") as m_run:
             m_run.return_value = MagicMock(stdout=fake, stderr="", returncode=0)
             from app.montage_encoder import resolve_h264_codec_name
-            from app.video_composer import MontageComposerError
-
-            with self.assertRaises(MontageComposerError):
-                resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "h264_nvenc")
+            self.assertEqual(resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "h264_nvenc"), "libx264")
 
     def test_h264_encode_cli_args_nvenc(self):
         from app.montage_encoder import h264_encode_cli_args

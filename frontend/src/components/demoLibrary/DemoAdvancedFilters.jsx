@@ -2,7 +2,6 @@ import { useT } from "../../i18n/useT.js";
 
 export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFilters, idPrefix = "adv" }) {
   const t = useT();
-  const pq = libraryAdvFilters.playerQuery?.trim?.() ?? "";
 
   return (
     <div
@@ -25,6 +24,16 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
             placeholder={t("library.advPlayerPlaceholder")}
           />
         </label>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[11px] text-cs2-text-muted">{t("library.advSteamLabel")}</span>
+          <input
+            id={`${idPrefix}-steam`}
+            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
+            value={libraryAdvFilters.steamQuery}
+            onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, steamQuery: e.target.value }))}
+            placeholder={t("library.advSteamPlaceholder")}
+          />
+        </label>
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -32,8 +41,8 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <span className="text-[11px] text-cs2-text-muted">{t("library.advKillsLabel")}</span>
           <input
             inputMode="numeric"
-            disabled={!pq}
-            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45 disabled:cursor-not-allowed disabled:opacity-40"
+            min="0"
+            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
             value={libraryAdvFilters.minKills}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, minKills: e.target.value }))}
           />
@@ -42,8 +51,8 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <span className="text-[11px] text-cs2-text-muted">{t("library.advDeathsLabel")}</span>
           <input
             inputMode="numeric"
-            disabled={!pq}
-            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45 disabled:cursor-not-allowed disabled:opacity-40"
+            min="0"
+            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
             value={libraryAdvFilters.maxDeaths}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, maxDeaths: e.target.value }))}
           />
@@ -52,8 +61,8 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <span className="text-[11px] text-cs2-text-muted">{t("library.advAssistsLabel")}</span>
           <input
             inputMode="numeric"
-            disabled={!pq}
-            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45 disabled:cursor-not-allowed disabled:opacity-40"
+            min="0"
+            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
             value={libraryAdvFilters.minAssists}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, minAssists: e.target.value }))}
           />
@@ -62,8 +71,8 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <span className="text-[11px] text-cs2-text-muted">{t("library.advKdLabel")}</span>
           <input
             inputMode="decimal"
-            disabled={!pq}
-            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45 disabled:cursor-not-allowed disabled:opacity-40"
+            min="0"
+            className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
             value={libraryAdvFilters.minKd}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, minKd: e.target.value }))}
           />
@@ -76,6 +85,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <div className="flex items-center gap-1">
             <input
               inputMode="numeric"
+              min="0"
               className="min-w-0 flex-1 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
               placeholder={t("library.advRoundsMin")}
               value={libraryAdvFilters.roundsMin}
@@ -84,6 +94,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
             <span className="text-cs2-text-muted">—</span>
             <input
               inputMode="numeric"
+              min="0"
               className="min-w-0 flex-1 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
               placeholder={t("library.advRoundsMax")}
               value={libraryAdvFilters.roundsMax}
@@ -96,6 +107,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
           <div className="flex items-center gap-1">
             <input
               inputMode="decimal"
+              min="0"
               className="min-w-0 flex-1 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
               placeholder={t("library.advDurationMin")}
               value={libraryAdvFilters.durationMin}
@@ -104,6 +116,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
             <span className="text-cs2-text-muted">—</span>
             <input
               inputMode="decimal"
+              min="0"
               className="min-w-0 flex-1 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] outline-none focus:border-cs2-accent/45"
               placeholder={t("library.advDurationMax")}
               value={libraryAdvFilters.durationMax}

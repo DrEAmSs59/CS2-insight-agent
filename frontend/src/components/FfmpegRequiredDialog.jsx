@@ -2,9 +2,9 @@ import { Clapperboard } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 
 /**
- * 合辑工作台门控：FFmpeg 未配置或不可用时展示，不可通过遮罩/关闭按钮 dismiss。
+ * FFmpeg 门控：未配置或不可用时展示，不可通过遮罩/关闭按钮 dismiss。
  */
-export default function FfmpegRequiredDialog({ subtitle, message, onGoSettings }) {
+export default function FfmpegRequiredDialog({ title, subtitle, message, onGoSettings }) {
   const t = useT();
   return (
     <div
@@ -20,7 +20,7 @@ export default function FfmpegRequiredDialog({ subtitle, message, onGoSettings }
           </div>
           <div className="min-w-0">
             <h2 id="ffmpeg-required-title" className="text-sm font-bold text-cs2-text-primary">
-              {t("dialog.ffmpegRequiredTitle")}
+              {title || t("dialog.ffmpegRequiredTitle")}
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">
               {subtitle || t("dialog.ffmpegRequiredSubtitleDefault")}

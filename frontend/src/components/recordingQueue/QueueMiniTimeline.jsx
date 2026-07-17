@@ -171,7 +171,7 @@ export default function QueueMiniTimeline({ clipData, pacingOverride, globalPaci
   const src = clipData?.source_ticks;
   const isGroupedCompilation =
     clipData?.category === "compilation" &&
-    (kind === "rival_kills" || kind === "all_kills") &&
+    ["rival_kills", "all_kills", "weapon_kills"].includes(kind) &&
     Array.isArray(src) &&
     src.length > 0;
 

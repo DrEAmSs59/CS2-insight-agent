@@ -21,7 +21,11 @@ import PlayerSelect from "./PlayerSelect";
 import ClipList from "./ClipList";
 import ActionBar from "./ActionBar";
 import RoundTimelineView from "./analysis/timeline/RoundTimelineView";
+import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
+import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
+import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
+import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 
 /**
  * @param {{
@@ -50,7 +54,8 @@ export default function DemoInfoModal({
   onDequeue,
 }) {
   const t = useT();
-  const [tab, setTab] = useState("parse"); // "parse" | "clips" | "timeline"
+  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
+  const [tab, setTab] = useState("parse"); // "parse" | "clips" | "weapon_kills" | "timeline"
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [demoData, setDemoData] = useState(null);
@@ -221,6 +226,20 @@ export default function DemoInfoModal({
       setParsing(false);
     }
   }, [demoId, selectedPlayers, freezeToDeathDraft]);
+
+  const handlePlayDemo = useCallback(async () => {
+    if (!demoId) return;
+    const label =
+      (demoData?.display_name && String(demoData.display_name).trim()) ||
+      demoData?.filename ||
+      `#${demoId}`;
+    try {
+      await playDemoInCs2({ id: demoId });
+      showPlayToast(true, label);
+    } catch (e) {
+      showPlayToast(false, playDemoErrorLabel(e));
+    }
+  }, [demoId, demoData, showPlayToast]);
 
   const handleToggleClip = useCallback((uid) => {
     if (!uid || queuedClientClipUids.has(uid)) return;
@@ -426,9 +445,14 @@ export default function DemoInfoModal({
     onEnqueueNotice?.(t("app.enqueueTimelineBatchDone", { n: rows.length }), { autoDismissMs: 2000, queueLink: true });
   }, [onAddToQueue, onEnqueueNotice, queueMetaForActivePlayer, queuedClientClipUids, t]);
 
+  const handleAddWeaponKills = useCallback((clipData) => {
+    enqueueTimelineClip(clipData, "app.enqueueWeaponKillsDone");
+  }, [enqueueTimelineClip]);
+
   const activePlayerData = parsedPlayers[activePlayerTab] || null;
   const clips = activePlayerData?.clips || [];
   const roundTimeline = activePlayerData?.round_timeline || [];
+  const weaponKillSummary = summarizeWeaponKills(roundTimeline);
   const matchMeta = demoData?.match_meta || {};
   const parsedPlayerNames = useMemo(() => Object.keys(parsedPlayers), [parsedPlayers]);
   
@@ -440,9 +464,12 @@ export default function DemoInfoModal({
     return total;
   }, [parsedPlayers, queuedClientClipUids]);
 
-  if (!open || !demoId) return null;
+  if (!open || !demoId) {
+    return <PlayDemoToast />;
+  }
 
   return (
+    <>
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
       role="dialog"
@@ -487,7 +514,9 @@ export default function DemoInfoModal({
             <div className="p-6 space-y-6">
               {/* Scoreboard and Player selection */}
               <div className="grid grid-cols-1 gap-6">
-                {matchMeta.map_name && <MatchScoreboard matchMeta={matchMeta} />}
+                {matchMeta.map_name && (
+                  <MatchScoreboard matchMeta={matchMeta} onPlay={handlePlayDemo} />
+                )}
                 
                 <div className="flex items-center gap-2 border-b border-cs2-border pb-2">
                    <button
@@ -509,6 +538,13 @@ export default function DemoInfoModal({
                      className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "timeline" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
                      {t("dialog.demoInfoTabTimeline")}
+                   </button>
+                   <button
+                     onClick={() => setTab("weapon_kills")}
+                     disabled={!parsedPlayerNames.length || weaponKillSummary.killCount === 0}
+                     className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "weapon_kills" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
+                   >
+                     {t("dialog.demoInfoTabWeaponKills")}
                    </button>
                 </div>
 
@@ -545,41 +581,61 @@ export default function DemoInfoModal({
                         </button>
                       ))}
                     </div>
-                    {tab === "clips" ? <ClipList
-                      clips={clips}
-                      targetPlayer={activePlayerTab}
-                      selectedIds={selectedClipUids}
-                      onToggle={handleToggleClip}
-                      aiMode={aiMode}
-                      queuedClientClipUids={queuedClientClipUids}
-                      playerTabs={[]}
-                      activePlayerTab={activePlayerTab}
-                      onPlayerTabChange={setActivePlayerTab}
-                      parsedPlayers={parsedPlayers}
-                      matchTotalRounds={matchMeta.total_rounds || 24}
-                      freezeToDeathDraft={freezeToDeathDraft}
-                      onFreezeToDeathDraftChange={setFreezeToDeathDraft}
-                      roundMontagePickerDisabled={parsing}
-                    /> : <RoundTimelineView
-                      roundTimeline={roundTimeline}
-                      focusedPlayer={activePlayerTab}
-                      demoFilename={demoData?.filename || ""}
-                      mapName={activePlayerData?.match_meta?.map_name || matchMeta.map_name || ""}
-                      queuedClientClipUids={queuedClientClipUids}
-                      onAddEvent={handleAddTimelineEvent}
-                      onAddRound={handleAddTimelineRound}
-                      onAddEventsBatch={handleAddTimelineEventsBatch}
-                      onRemoveEvent={onDequeue ? (event, roundRow) => {
-                        const meta = queueMetaForActivePlayer();
-                        const cd = buildTimelineEventClipData({ event, mapName: meta.matchMeta?.map_name || "", targetPlayer: meta.targetPlayer, round: roundRow?.round_number ?? roundRow?.round, t, locale: useLocaleStore.getState().locale });
-                        onDequeue(cd.client_clip_uid);
-                      } : undefined}
-                      onRemoveRound={onDequeue ? (roundRow) => {
-                        const meta = queueMetaForActivePlayer();
-                        const cd = buildTimelineRoundClipData({ roundRow, mapName: meta.matchMeta?.map_name || "", targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename, t });
-                        onDequeue(cd.client_clip_uid);
-                      } : undefined}
-                    />}
+                    {tab === "clips" ? (
+                      <ClipList
+                        clips={clips}
+                        targetPlayer={activePlayerTab}
+                        selectedIds={selectedClipUids}
+                        onToggle={handleToggleClip}
+                        aiMode={aiMode}
+                        queuedClientClipUids={queuedClientClipUids}
+                        playerTabs={[]}
+                        activePlayerTab={activePlayerTab}
+                        onPlayerTabChange={setActivePlayerTab}
+                        parsedPlayers={parsedPlayers}
+                        matchTotalRounds={matchMeta.total_rounds || 24}
+                        freezeToDeathDraft={freezeToDeathDraft}
+                        onFreezeToDeathDraftChange={setFreezeToDeathDraft}
+                        roundMontagePickerDisabled={parsing}
+                      />
+                    ) : tab === "weapon_kills" ? (
+                      <WeaponKillsView
+                        roundTimeline={roundTimeline}
+                        focusedPlayer={activePlayerTab}
+                        demoFilename={demoData?.filename || ""}
+                        mapName={activePlayerData?.match_meta?.map_name || matchMeta.map_name || ""}
+                        queuedClientClipUids={queuedClientClipUids}
+                        onAdd={handleAddWeaponKills}
+                        onRemove={onDequeue}
+                        onAddEvent={handleAddTimelineEvent}
+                        onRemoveEvent={onDequeue ? (event, roundRow) => {
+                          const meta = queueMetaForActivePlayer();
+                          const cd = buildTimelineEventClipData({ event, mapName: meta.matchMeta?.map_name || "", targetPlayer: meta.targetPlayer, round: roundRow?.round_number ?? roundRow?.round, t, locale: useLocaleStore.getState().locale });
+                          onDequeue(cd.client_clip_uid);
+                        } : undefined}
+                      />
+                    ) : (
+                      <RoundTimelineView
+                        roundTimeline={roundTimeline}
+                        focusedPlayer={activePlayerTab}
+                        demoFilename={demoData?.filename || ""}
+                        mapName={activePlayerData?.match_meta?.map_name || matchMeta.map_name || ""}
+                        queuedClientClipUids={queuedClientClipUids}
+                        onAddEvent={handleAddTimelineEvent}
+                        onAddRound={handleAddTimelineRound}
+                        onAddEventsBatch={handleAddTimelineEventsBatch}
+                        onRemoveEvent={onDequeue ? (event, roundRow) => {
+                          const meta = queueMetaForActivePlayer();
+                          const cd = buildTimelineEventClipData({ event, mapName: meta.matchMeta?.map_name || "", targetPlayer: meta.targetPlayer, round: roundRow?.round_number ?? roundRow?.round, t, locale: useLocaleStore.getState().locale });
+                          onDequeue(cd.client_clip_uid);
+                        } : undefined}
+                        onRemoveRound={onDequeue ? (roundRow) => {
+                          const meta = queueMetaForActivePlayer();
+                          const cd = buildTimelineRoundClipData({ roundRow, mapName: meta.matchMeta?.map_name || "", targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename, t });
+                          onDequeue(cd.client_clip_uid);
+                        } : undefined}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -623,5 +679,7 @@ export default function DemoInfoModal({
         </div>
       </div>
     </div>
+    <PlayDemoToast />
+    </>
   );
 }

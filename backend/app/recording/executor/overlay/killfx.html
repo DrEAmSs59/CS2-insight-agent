@@ -1,0 +1,443 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  body.is-preview {
+    background: radial-gradient(circle at 50% 48%, #68717a, #2c3238 72%);
+  }
+
+  #fx-main-stage {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .fx-video {
+    position: absolute;
+    inset: 0;
+    display: none;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  #fx-badge-rack {
+    position: fixed;
+    top: 50%;
+    right: clamp(40px, 4.2vw, 82px);
+    z-index: 30;
+    display: flex;
+    width: clamp(250px, 17vw, 326px);
+    flex-direction: column;
+    gap: clamp(9px, 0.8vw, 14px);
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .fx-badge {
+    --badge-color: #ef5a43;
+    --stagger-delay: 300ms;
+    position: relative;
+    display: flex;
+    min-height: clamp(32px, 3.7vw, 56px);
+    align-items: center;
+    box-sizing: border-box;
+    overflow: visible;
+    padding: 0 clamp(11px, 1.2vw, 24px) 0 clamp(15px, 1.6vw, 31px);
+    border-radius: 3px;
+    filter: drop-shadow(0 5px 7px rgba(0, 0, 0, 0.22));
+  }
+
+  .fx-badge::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    width: clamp(3px, 0.3vw, 6px);
+    border-radius: 2px;
+    background: var(--badge-color);
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    transform: scaleY(0.2);
+    transform-origin: center;
+  }
+
+  .fx-badge::after {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 3px;
+    background: linear-gradient(90deg, rgba(8, 10, 13, 0.80), rgba(8, 10, 13, 0.60) 68%, rgba(8, 10, 13, 0.08));
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+
+  .fx-badge-label {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    color: #fff;
+    font-family: "Bahnschrift SemiCondensed", "Arial Narrow", "Roboto Condensed", "Microsoft YaHei UI", sans-serif;
+    font-size: clamp(13px, 1.36vw, 26px);
+    font-weight: 600;
+    letter-spacing: 0.7px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.72);
+    white-space: nowrap;
+    clip-path: inset(0 100% 0 0);
+    opacity: 0;
+  }
+
+  .fx-badge.is-visible::before {
+    animation: fx-badge-line-ignite 240ms ease-out var(--stagger-delay) forwards;
+  }
+
+  .fx-badge.is-visible::after {
+    animation: fx-badge-panel-wipe 220ms cubic-bezier(0.2, 0.75, 0.2, 1) calc(var(--stagger-delay) + 45ms) forwards;
+  }
+
+  .fx-badge.is-visible .fx-badge-label {
+    animation: fx-badge-text-wipe 170ms ease-out calc(var(--stagger-delay) + 80ms) forwards;
+  }
+
+  .fx-badge.is-leaving {
+    animation: fx-badge-out 220ms ease-in forwards;
+  }
+
+  @keyframes fx-badge-line-ignite {
+    0% { opacity: 0; transform: scaleY(0.2); box-shadow: 0 0 0 transparent; }
+    38% { opacity: 1; transform: scaleY(1); box-shadow: 0 0 14px var(--badge-color); }
+    100% { opacity: 1; transform: scaleY(1); box-shadow: 0 0 4px var(--badge-color); }
+  }
+
+  @keyframes fx-badge-panel-wipe {
+    from { opacity: 0.4; transform: scaleX(0); }
+    to { opacity: 1; transform: scaleX(1); }
+  }
+
+  @keyframes fx-badge-text-wipe {
+    from { clip-path: inset(0 100% 0 0); opacity: 0; }
+    to { clip-path: inset(0 0 0 0); opacity: 1; }
+  }
+
+  @keyframes fx-badge-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="fx-main-stage"></div>
+<div id="fx-badge-rack" aria-hidden="true"></div>
+
+<script>
+const PORT = location.port || "19871";
+const mainStage = document.getElementById("fx-main-stage");
+const badgeRack = document.getElementById("fx-badge-rack");
+
+const ICON_ASSETS = {
+  air_noscope: "tag-videos/air_noscope.webm",
+  collateral: "tag-videos/collateral.webm",
+  one_tap: "tag-videos/one_tap.webm",
+  humiliation: "tag-videos/humiliation.webm",
+  revenge: "tag-videos/revenge.webm",
+  first_blood: "tag-videos/first_blood.webm",
+  wallbang: "tag-videos/wallbang.webm",
+  no_scope: "tag-videos/no_scope.webm",
+  smoke_kill: "tag-videos/smoke_kill.webm",
+};
+
+const BANNER_ASSETS = {
+  double: "tag-videos/double.webm",
+  triple: "tag-videos/triple.webm",
+  quad: "tag-videos/quad.webm",
+  ace: "tag-videos/ace.webm",
+  clutch_1v5_to_1v4: "tag-videos/clutch_1v5_to_1v4.webm",
+  clutch_1v4_to_1v3: "tag-videos/clutch_1v4_to_1v3.webm",
+  clutch_1v3_to_1v2: "tag-videos/clutch_1v3_to_1v2.webm",
+  clutch_1v2_to_1v1: "tag-videos/clutch_1v2_to_1v1.webm",
+};
+
+const TAG_META = {
+  air_noscope: { label: "AIR NO SCOPE", color: "#7edaff" },
+  collateral: { label: "COLLATERAL", color: "#ffb13b" },
+  one_tap: { label: "ONE TAP", color: "#ef654f" },
+  humiliation: { label: "HUMILIATION", color: "#d9473f" },
+  revenge: { label: "REVENGE", color: "#ef5a43" },
+  first_blood: { label: "FIRST BLOOD", color: "#e35d49" },
+  wallbang: { label: "WALLBANG", color: "#f0b64c" },
+  no_scope: { label: "NO SCOPE", color: "#9ecaff" },
+  smoke_kill: { label: "SMOKE KILL", color: "#c6ccd2" },
+};
+
+const ICON_PRIORITY = Object.keys(ICON_ASSETS);
+const MAX_BADGES = 3;
+const BADGE_BASE_DELAY_MS = 300;
+const BADGE_STAGGER_MS = 130;
+const BADGE_LIFETIME_MS = 2200;
+const BADGE_EXIT_MS = 220;
+const players = new Map();
+const badges = new Map();
+let currentMainKey = null;
+
+function createPlayer(key, assetPath) {
+  const video = document.createElement("video");
+  video.className = "fx-video";
+  video.preload = "auto";
+  video.playsInline = true;
+  video.muted = false;
+  video.volume = 1;
+  video.disablePictureInPicture = true;
+  video.src = new URL(assetPath, location.href).href;
+  video.dataset.fxKey = key;
+  video.addEventListener("ended", () => {
+    video.style.display = "none";
+    video.currentTime = 0;
+    if (currentMainKey === key) currentMainKey = null;
+  });
+  video.addEventListener("error", () => {
+    console.error(`[killfx] failed to load ${key}`, video.error, video.src);
+  });
+  mainStage.appendChild(video);
+  video.load();
+  players.set(key, video);
+}
+
+for (const [key, path] of Object.entries({ ...ICON_ASSETS, ...BANNER_ASSETS })) {
+  createPlayer(key, path);
+}
+
+function stopVideo(video) {
+  video.pause();
+  video.style.display = "none";
+  try { video.currentTime = 0; } catch (_) { /* metadata may still be loading */ }
+}
+
+function stopMain() {
+  for (const video of players.values()) stopVideo(video);
+  currentMainKey = null;
+}
+
+function playMain(key) {
+  const video = players.get(key);
+  if (!video) return false;
+  stopMain();
+  currentMainKey = key;
+  video.style.display = "block";
+  try { video.currentTime = 0; } catch (_) { /* play() will wait for metadata */ }
+  const promise = video.play();
+  if (promise) {
+    promise.catch((error) => {
+      video.style.display = "none";
+      if (currentMainKey === key) currentMainKey = null;
+      console.error(`[killfx] playback failed for ${key}`, error);
+    });
+  }
+  return true;
+}
+
+function finishBadge(key, immediate = false) {
+  const entry = badges.get(key);
+  if (!entry) return;
+  clearTimeout(entry.lifeTimer);
+  clearTimeout(entry.exitTimer);
+  if (immediate) {
+    badges.delete(key);
+    entry.element.remove();
+    return;
+  }
+  entry.element.classList.add("is-leaving");
+  entry.exitTimer = setTimeout(() => {
+    if (badges.get(key) === entry) badges.delete(key);
+    entry.element.remove();
+  }, BADGE_EXIT_MS);
+}
+
+function scheduleBadgeExit(key, entry) {
+  entry.lifeTimer = setTimeout(
+    () => finishBadge(key),
+    BADGE_BASE_DELAY_MS + BADGE_LIFETIME_MS,
+  );
+}
+
+function restartBadgeAnimation(element, staggerIndex) {
+  const delayMs = BADGE_BASE_DELAY_MS + staggerIndex * BADGE_STAGGER_MS;
+  element.style.setProperty("--stagger-delay", `${delayMs}ms`);
+  element.classList.remove("is-visible", "is-leaving");
+  void element.offsetWidth;
+  element.classList.add("is-visible");
+}
+
+function addBadge(key, staggerIndex = 0) {
+  const meta = TAG_META[key];
+  if (!meta) return;
+
+  const existing = badges.get(key);
+  if (existing) {
+    clearTimeout(existing.lifeTimer);
+    clearTimeout(existing.exitTimer);
+    badgeRack.appendChild(existing.element);
+    badges.delete(key);
+    badges.set(key, existing);
+    restartBadgeAnimation(existing.element, staggerIndex);
+    scheduleBadgeExit(key, existing);
+    return;
+  }
+
+  while (badges.size >= MAX_BADGES) {
+    const oldestKey = badges.keys().next().value;
+    finishBadge(oldestKey, true);
+  }
+
+  const element = document.createElement("div");
+  element.className = "fx-badge";
+  element.style.setProperty("--badge-color", meta.color);
+  const label = document.createElement("span");
+  label.className = "fx-badge-label";
+  label.textContent = meta.label;
+  element.appendChild(label);
+  badgeRack.appendChild(element);
+  restartBadgeAnimation(element, staggerIndex);
+
+  const entry = { element, lifeTimer: 0, exitTimer: 0 };
+  badges.set(key, entry);
+  scheduleBadgeExit(key, entry);
+}
+
+function clearBadges() {
+  for (const key of [...badges.keys()]) finishBadge(key, true);
+}
+
+function stopAll() {
+  stopMain();
+  clearBadges();
+}
+
+function isBanner(key) {
+  return Object.prototype.hasOwnProperty.call(BANNER_ASSETS, key);
+}
+
+function shouldTakeMain(key) {
+  if (!currentMainKey) return true;
+  if (isBanner(key)) return true;
+  if (isBanner(currentMainKey)) return false;
+  return ICON_PRIORITY.indexOf(key) < ICON_PRIORITY.indexOf(currentMainKey);
+}
+
+function fireKill(kill) {
+  const iconKeys = [...new Set(kill.icons || [])].filter((key) => ICON_ASSETS[key]);
+  const bannerKey = BANNER_ASSETS[kill.banner] ? kill.banner : null;
+  const mainKey = bannerKey || iconKeys[0] || null;
+  const badgeKeys = bannerKey ? iconKeys : iconKeys.slice(1);
+
+  if (mainKey) {
+    if (shouldTakeMain(mainKey)) playMain(mainKey);
+    else badgeKeys.unshift(mainKey);
+  }
+
+  for (const [index, key] of badgeKeys.slice(0, MAX_BADGES).entries()) {
+    addBadge(key, index);
+  }
+}
+
+let kills = [];
+let tickRate = 64;
+let startTick = 0;
+let offset = 0;
+let running = false;
+let resumeAt = 0;
+let activeMs = 0;
+let cursor = 0;
+
+// 晚连接或浏览器瞬时卡顿超过一秒时跳过旧事件，避免错误补播。
+const FIRE_WINDOW_TICKS = () => Math.max(32, tickRate);
+
+function loadTrack(msg) {
+  kills = (msg.kills || []).filter((kill) => {
+    const hasIcon = (kill.icons || []).some((key) => players.has(key));
+    return hasIcon || (kill.banner && players.has(kill.banner));
+  });
+  kills.sort((a, b) => a.tick - b.tick);
+  tickRate = msg.tick_rate || 64;
+  startTick = msg.start_tick || 0;
+  offset = Number.isFinite(msg.kill_fx_offset_ticks)
+    ? msg.kill_fx_offset_ticks
+    : (msg.offset_ticks || 0);
+  activeMs = 0;
+  running = false;
+  cursor = 0;
+  stopAll();
+}
+
+function loop() {
+  if (running && kills.length) {
+    const elapsedMs = activeMs + (performance.now() - resumeAt);
+    const currentTick = startTick + offset + Math.round(elapsedMs / 1000 * tickRate);
+    while (cursor < kills.length && kills[cursor].tick <= currentTick) {
+      if (currentTick - kills[cursor].tick <= FIRE_WINDOW_TICKS()) fireKill(kills[cursor]);
+      cursor += 1;
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function connect() {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws/kb-overlay`);
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "load") {
+      loadTrack(message);
+    } else if (message.type === "resume") {
+      if (typeof message.elapsed_ms === "number") activeMs = message.elapsed_ms;
+      resumeAt = performance.now();
+      running = true;
+    } else if (message.type === "pause") {
+      if (running) activeMs += performance.now() - resumeAt;
+      running = false;
+    } else if (message.type === "end") {
+      running = false;
+      activeMs = 0;
+      stopAll();
+    }
+  };
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+
+// 仅供本地预览和自动化检查使用，不影响 OBS 消息驱动流程。
+window.killFxPreview = { fireKill, playMain, addBadge, stopAll };
+
+if (new URLSearchParams(location.search).get("preview") === "badges") {
+  document.body.classList.add("is-preview");
+  for (const video of players.values()) video.muted = true;
+  setTimeout(() => {
+    fireKill({
+      icons: ["revenge", "wallbang", "no_scope"],
+      banner: "ace",
+    });
+  }, 350);
+} else {
+  connect();
+}
+</script>
+</body>
+</html>

@@ -25,4 +25,19 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replace(/\\/g, "/");
+          if (!normalized.includes("/node_modules/")) return undefined;
+          if (/\/node_modules\/(react|react-dom|react-router|react-router-dom)\//.test(normalized)) return "vendor-react";
+          if (/\/node_modules\/(antd|@ant-design|rc-[^/]+)\//.test(normalized)) return "vendor-antd";
+          if (normalized.includes("/node_modules/lucide-react/")) return "vendor-icons";
+          if (normalized.includes("/node_modules/axios/")) return "vendor-http";
+          return undefined;
+        },
+      },
+    },
+  },
 });

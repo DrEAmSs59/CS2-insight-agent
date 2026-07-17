@@ -20,6 +20,30 @@ export function getDemosStreamUrl() {
   return API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";
 }
 
+/** Recorded clip HTTP Range stream for LiteCut / montage <video> preview */
+export function getRecordedClipStreamUrl(clipId) {
+  const id = encodeURIComponent(String(clipId));
+  return API_BASE_URL
+    ? `${API_BASE_URL}/api/recorded-clips/${id}/stream`
+    : `/api/recorded-clips/${id}/stream`;
+}
+
+/** LiteCut uploaded overlay asset stream (WebM/PNG/GIF). */
+export function getLiteCutAssetStreamUrl(assetId, previewVersion = "") {
+  const id = encodeURIComponent(String(assetId));
+  const base = API_BASE_URL
+    ? `${API_BASE_URL}/api/lite-cut/assets/${id}/stream`
+    : `/api/lite-cut/assets/${id}/stream`;
+  return previewVersion ? `${base}?preview=${encodeURIComponent(String(previewVersion))}` : base;
+}
+
+export function getLiteCutBuiltinFontUrl(fontName) {
+  const name = encodeURIComponent(String(fontName));
+  return API_BASE_URL
+    ? `${API_BASE_URL}/api/lite-cut/fonts/${name}`
+    : `/api/lite-cut/fonts/${name}`;
+}
+
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
 
 // H1 fix: 缓存认证 Token，Electron 环境下从主进程获取
