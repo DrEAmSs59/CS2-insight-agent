@@ -318,11 +318,28 @@ def build_fail_clips(
     *,
     map_name: str,
     grenade_detonate_points: Optional[list[tuple[int, float, float]]] = None,
+    precomputed_equip_timeline: Optional[list[tuple[int, str]] | tuple[tuple[int, str], ...]] = None,
+    precomputed_fire_index: Optional[list[tuple[int, str]] | tuple[tuple[int, str], ...]] = None,
+    precomputed_hurt_index: Optional[
+        list[tuple[int, str, int]] | tuple[tuple[int, str, int], ...]
+    ] = None,
 ) -> tuple[list[Clip], set[tuple[int, int]]]:
-    equip_timeline = build_equip_timeline(target_player, equip_df)
+    equip_timeline = (
+        precomputed_equip_timeline
+        if precomputed_equip_timeline is not None
+        else build_equip_timeline(target_player, equip_df)
+    )
     from .spatial_analysis import build_fire_index, build_hurt_index
-    fire_index = build_fire_index(target_player, fire_df)
-    hurt_index = build_hurt_index(target_player, hurt_df)
+    fire_index = (
+        precomputed_fire_index
+        if precomputed_fire_index is not None
+        else build_fire_index(target_player, fire_df)
+    )
+    hurt_index = (
+        precomputed_hurt_index
+        if precomputed_hurt_index is not None
+        else build_hurt_index(target_player, hurt_df)
+    )
 
     clips: list[Clip] = []
     fail_death_keys: set[tuple[int, int]] = set()

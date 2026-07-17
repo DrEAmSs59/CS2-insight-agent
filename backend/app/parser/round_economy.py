@@ -187,20 +187,46 @@ def extract_target_team_map(
     target_player: str,
 ) -> dict[int, int]:
     """Per-player: which team the player was on each round, derived from the shared economy_ticks_df."""
-    target_team_map: dict[int, int] = {}
-    if economy_ticks_df.empty or "tick" not in economy_ticks_df.columns:
-        return target_team_map
-    tp = str(target_player or "").strip().lower()
-    if not tp:
-        return target_team_map
+    target_key = str(target_player or "").strip().lower()
+    if not target_key:
+        return {}
+    return extract_player_team_maps(
+        economy_ticks_df,
+        tick_to_round,
+        target_players=[target_player],
+    ).get(target_key, {})
+
+
+def extract_player_team_maps(
+    economy_ticks_df: pd.DataFrame,
+    tick_to_round: dict[int, int],
+    *,
+    target_players: Optional[list[str]] = None,
+) -> dict[str, dict[int, int]]:
+    """Build all requested per-round player team maps in one grouped pass."""
+    target_team_maps: dict[str, dict[int, int]] = {}
+    if (
+        economy_ticks_df.empty
+        or "tick" not in economy_ticks_df.columns
+        or "team_num" not in economy_ticks_df.columns
+    ):
+        return target_team_maps
     name_col = "name" if "name" in economy_ticks_df.columns else None
     if name_col is None:
-        return target_team_map
+        return target_team_maps
+
+    requested = {
+        str(player or "").strip().lower()
+        for player in (target_players or [])
+        if str(player or "").strip()
+    }
+    if requested:
+        target_team_maps = {player: {} for player in requested}
 
     for tick, grp in economy_ticks_df.groupby("tick", sort=False):
         tick_i = int(tick)
         rn = tick_to_round.get(tick_i)
-        if rn is None or rn in target_team_map:
+        if rn is None:
             continue
         if "is_alive" in grp.columns:
             alive = grp[grp["is_alive"].astype(bool)]
@@ -209,20 +235,29 @@ def extract_target_team_map(
         search_groups = [alive, grp] if (
             "is_alive" in grp.columns and len(alive) < len(grp)
         ) else [alive]
-        for sg in search_groups:
-            if rn in target_team_map:
-                break
-            for _, r in sg.iterrows():
-                nm = str(r.get(name_col) or "").strip().lower()
-                if nm != tp:
+        for search_group in search_groups:
+            # Match the legacy per-player lookup: only the first observation
+            # for a player in each preferred/fallback group is considered.
+            seen_players: set[str] = set()
+            for name, team_num in search_group[[name_col, "team_num"]].itertuples(
+                index=False,
+                name=None,
+            ):
+                player_key = str(name or "").strip().lower()
+                if not player_key or (requested and player_key not in requested):
+                    continue
+                if player_key in seen_players:
+                    continue
+                seen_players.add(player_key)
+                player_map = target_team_maps.setdefault(player_key, {})
+                if rn in player_map:
                     continue
                 try:
-                    target_team_map[rn] = int(float(r["team_num"]))
+                    player_map[rn] = int(float(team_num))
                 except (TypeError, ValueError):
                     pass
-                break
 
-    return target_team_map
+    return target_team_maps
 
 
 def build_round_economy(

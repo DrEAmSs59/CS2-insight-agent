@@ -427,21 +427,32 @@ def _analyze_demo_sync(
     return analyze_demo_isolated(dem_path, target_player, freeze_to_death_rounds)
 
 
+def _demo_inspect_concurrency() -> int:
+    try:
+        configured = int(os.environ.get("CS2_INSIGHT_DEMO_INSPECT_CONCURRENCY", "2"))
+    except ValueError:
+        configured = 2
+    return max(1, min(4, configured))
+
+
+async def _inspect_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
+    from .demo_parse_isolation import inspect_demo_isolated
+
+    inspection = await asyncio.to_thread(inspect_demo_isolated, str(dem_path))
+    players = inspection.get("players")
+    match_meta = inspection.get("match_meta")
+    if not isinstance(players, list) or not isinstance(match_meta, dict):
+        raise ValueError("Demo inspection returned invalid metadata")
+    return players, match_meta
+
+
 async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
     """Best-effort metadata for upload responses; upload must not fail if parsing does."""
-    from .demo_parse_isolation import get_demo_match_summary_isolated, get_player_list_isolated
-
-    players: list[dict] = []
-    match_meta: dict = {}
     try:
-        players = await asyncio.to_thread(get_player_list_isolated, str(dem_path))
+        return await _inspect_demo_meta(dem_path)
     except Exception as e:  # noqa: BLE001
-        logger.exception("Upload player-list parse failed for %s: %s", dem_path, e)
-    try:
-        match_meta = await asyncio.to_thread(get_demo_match_summary_isolated, str(dem_path))
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Upload summary parse failed for %s: %s", dem_path, e)
-    return players, match_meta
+        logger.exception("Upload metadata inspection failed for %s: %s", dem_path, e)
+        return [], {}
 
 
 # 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
@@ -1412,17 +1423,27 @@ async def upload_demos(files: Annotated[list[UploadFile], File()]):
     """一次上传多个 .dem，返回与单文件 upload 相同结构的数组。"""
     if not files:
         raise HTTPException(400, "请至少选择一个文件")
-    out: list[dict] = []
+    saved: list[tuple[str, Path]] = []
     for file in files:
         if not file.filename or not str(file.filename).lower().endswith(".dem"):
             raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
         dest = UPLOAD_DIR / file.filename
         with dest.open("wb") as f:
             shutil.copyfileobj(file.file, f)
-        players, match_meta = await _safe_upload_demo_meta(dest)
+        saved.append((file.filename, dest))
+
+    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+
+    async def _inspect_one(dest: Path) -> tuple[list[dict], dict]:
+        async with inspect_sem:
+            return await _safe_upload_demo_meta(dest)
+
+    inspected = await asyncio.gather(*(_inspect_one(dest) for _, dest in saved))
+    out: list[dict] = []
+    for (filename, dest), (players, match_meta) in zip(saved, inspected):
         out.append(
             {
-                "filename": file.filename,
+                "filename": filename,
                 "path": str(dest),
                 "players": players,
                 "match_meta": match_meta,
@@ -1651,12 +1672,21 @@ def _demo_roster_source_fingerprint(demo_path: str) -> tuple[str, int | None, in
         return normalized_path, None, None
 
 
-async def index_demo_player_stats(demo_id: int, demo_path: str) -> dict[str, Any]:
+async def index_demo_player_stats(
+    demo_id: int,
+    demo_path: str,
+    *,
+    precomputed_players: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     from .demo_parse_isolation import get_player_list_isolated
 
     normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
     try:
-        raw = await asyncio.to_thread(get_player_list_isolated, demo_path)
+        raw: Any = (
+            precomputed_players
+            if precomputed_players is not None
+            else await asyncio.to_thread(get_player_list_isolated, demo_path)
+        )
         if isinstance(raw, dict):
             players = raw.get("players") or raw.get("roster") or []
         elif isinstance(raw, list):
@@ -2539,8 +2569,13 @@ async def batch_ingest_demos(body: BatchIngestBody):
     """批量入库：对每个 pending demo 运行轻量元数据提取，状态改为 loaded。"""
     ingested = 0
     failed: list[dict[str, Any]] = []
+    rows_by_id = {
+        int(row["id"]): row
+        for row in await demo_db.get_demo_list_items(body.demo_ids)
+    }
+    candidates: list[tuple[int, dict[str, Any], str]] = []
     for demo_id in body.demo_ids:
-        row = await demo_db.get_demo_by_id(demo_id)
+        row = rows_by_id.get(int(demo_id))
         if not row:
             failed.append({"demo_id": demo_id, "error": "Demo 不存在"})
             continue
@@ -2551,19 +2586,46 @@ async def batch_ingest_demos(body: BatchIngestBody):
         if not Path(dem_path).is_file():
             failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": "文件不存在"})
             continue
-        try:
-            from .demo_parse_isolation import get_demo_match_summary_isolated
+        candidates.append((int(demo_id), row, dem_path))
 
-            meta = await asyncio.to_thread(get_demo_match_summary_isolated, dem_path)
+    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+
+    async def _inspect_candidate(
+        candidate: tuple[int, dict[str, Any], str],
+    ) -> tuple[int, dict[str, Any], str, Optional[list[dict]], Optional[dict], Optional[Exception]]:
+        demo_id, row, dem_path = candidate
+        try:
+            async with inspect_sem:
+                players, meta = await _inspect_demo_meta(Path(dem_path))
+            return demo_id, row, dem_path, players, meta, None
+        except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
+            return demo_id, row, dem_path, None, None, exc
+
+    inspected = await asyncio.gather(*(_inspect_candidate(item) for item in candidates))
+    for demo_id, row, dem_path, players, meta, error in inspected:
+        if error is not None:
+            logger.error(
+                "Ingest inspection failed demo_id=%s path=%s: %s",
+                demo_id,
+                dem_path,
+                error,
+            )
+            failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": str(error)})
+            continue
+        try:
             if isinstance(meta, dict):
                 refined_source = infer_demo_source(Path(dem_path).name, server_name=meta.get("server_name"))
                 await demo_db.update_lightweight_meta(dem_path, meta, source=refined_source)
-            await index_demo_player_stats(demo_id, dem_path)
+            await index_demo_player_stats(
+                demo_id,
+                dem_path,
+                precomputed_players=players or [],
+            )
             await demo_db.update_status(dem_path, "loaded", error_msg=None, parsed_at=utc_now_iso())
             ingested += 1
-        except Exception as e:
-            logger.exception("Ingest failed demo_id=%s path=%s", demo_id, dem_path)
-            failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": str(e)})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Ingest persist failed demo_id=%s path=%s", demo_id, dem_path)
+            failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": str(exc)})
     if ingested:
         await demo_library_hub.notify("enqueue")
     return {"ingested": ingested, "failed": failed}

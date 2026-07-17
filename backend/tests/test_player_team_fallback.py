@@ -21,6 +21,7 @@ from app.parser.player_roster import (
 from app.parser.round_economy import (
     build_group_side_by_round,
     build_round_economy_shared,
+    extract_player_team_maps,
     extract_target_team_map,
 )
 from app.parser.spatial_analysis import parse_spatial_snapshots
@@ -104,6 +105,32 @@ def test_round_economy_recovers_all_players_without_an_extra_parse():
     )
     assert economy == {1: {2: 1000, 3: 2000}, 2: {2: 4000, 3: 3000}}
     assert extract_target_team_map(ticks_df, tick_to_round, "alpha") == {1: 2, 2: 3}
+
+
+def test_player_team_maps_build_all_targets_with_alive_preference():
+    ticks_df = pd.DataFrame([
+        {"tick": 100, "name": "alpha", "team_num": 3, "is_alive": False},
+        {"tick": 100, "name": "alpha", "team_num": 2, "is_alive": True},
+        {"tick": 100, "name": "bravo", "team_num": 3, "is_alive": False},
+        {"tick": 100, "name": "charlie", "team_num": float("nan"), "is_alive": True},
+        {"tick": 100, "name": "charlie", "team_num": 2, "is_alive": True},
+        {"tick": 200, "name": "alpha", "team_num": 3, "is_alive": False},
+        {"tick": 200, "name": "bravo", "team_num": 2, "is_alive": True},
+        {"tick": 200, "name": "ignored", "team_num": 3, "is_alive": True},
+    ])
+
+    result = extract_player_team_maps(
+        ticks_df,
+        {100: 1, 200: 2},
+        target_players=["Alpha", "bravo", "charlie", "missing"],
+    )
+
+    assert result == {
+        "alpha": {1: 2, 2: 3},
+        "bravo": {1: 3, 2: 2},
+        "charlie": {},
+        "missing": {},
+    }
 
 
 def test_round_economy_retries_missing_requested_ticks():

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import demo_parse_isolation, main
+from app import demo_parse_isolation, main, parse_worker
 from app.demo_db import DemoDB
 from app.env_utils import AppConfig
 
@@ -457,3 +457,126 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     composite = save_result.await_args.args[1]
     assert composite["auto_target_player"] == "alpha"
     assert composite["analyzed_target_players"] == ["alpha"]
+
+
+def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
+    expected = {
+        "players": [{"name": "alpha"}],
+        "match_meta": {"map_name": "de_nuke", "total_rounds": 24},
+    }
+    calls = []
+
+    def fake_inspect(dem_path):
+        calls.append(dem_path)
+        return expected
+
+    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
+
+    players, match_meta = asyncio.run(main._safe_upload_demo_meta(Path("match.dem")))
+
+    assert players == expected["players"]
+    assert match_meta == expected["match_meta"]
+    assert calls == ["match.dem"]
+
+
+def test_parse_worker_dispatches_combined_inspection(monkeypatch):
+    expected = {
+        "players": [{"name": "alpha"}],
+        "match_meta": {"map_name": "de_nuke"},
+    }
+    calls = []
+
+    def fake_inspect(dem_path):
+        calls.append(dem_path)
+        return expected
+
+    monkeypatch.setattr(parse_worker, "inspect_demo", fake_inspect)
+
+    assert parse_worker._run({"action": "inspect", "dem_path": "match.dem"}) == expected
+    assert calls == ["match.dem"]
+
+
+def test_index_demo_player_stats_reuses_precomputed_roster(monkeypatch):
+    players = [{"name": "alpha", "team": 2}]
+    worker_calls = []
+
+    def worker_must_not_run(dem_path):
+        worker_calls.append(dem_path)
+        raise AssertionError("roster worker should not run")
+
+    monkeypatch.setattr(
+        demo_parse_isolation,
+        "get_player_list_isolated",
+        worker_must_not_run,
+    )
+    replace_stats = AsyncMock()
+    save_cache = AsyncMock()
+    monkeypatch.setattr(main.demo_db, "replace_demo_player_stats", replace_stats)
+    monkeypatch.setattr(main.demo_db, "save_demo_roster_cache", save_cache)
+
+    result = asyncio.run(
+        main.index_demo_player_stats(
+            7,
+            "match.dem",
+            precomputed_players=players,
+        )
+    )
+
+    assert worker_calls == []
+    assert result["players"] == players
+    replace_stats.assert_awaited_once_with(7, "match.dem", players)
+    assert save_cache.await_args.kwargs["row_count"] == 1
+
+
+def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
+    monkeypatch,
+    tmp_path,
+):
+    rows = []
+    for demo_id in (1, 2, 3):
+        demo_path = tmp_path / f"match-{demo_id}.dem"
+        demo_path.write_bytes(b"demo")
+        rows.append({
+            "id": demo_id,
+            "path": str(demo_path),
+            "filename": demo_path.name,
+            "status": "pending",
+        })
+
+    active = 0
+    max_active = 0
+
+    async def fake_inspect(dem_path):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return ([{"name": dem_path.stem}], {"map_name": "de_test"})
+
+    monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
+    monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_list_items",
+        AsyncMock(return_value=rows),
+    )
+    monkeypatch.setattr(main.demo_db, "update_lightweight_meta", AsyncMock())
+    monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
+    index_stats = AsyncMock(return_value={"indexed": True, "error": None})
+    monkeypatch.setattr(main, "index_demo_player_stats", index_stats)
+    notify = AsyncMock()
+    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=notify))
+
+    response = asyncio.run(
+        main.batch_ingest_demos(main.BatchIngestBody(demo_ids=[1, 2, 3]))
+    )
+
+    assert response == {"ingested": 3, "failed": []}
+    assert max_active == 2
+    assert [call.args[0] for call in index_stats.await_args_list] == [1, 2, 3]
+    assert [
+        call.kwargs["precomputed_players"][0]["name"]
+        for call in index_stats.await_args_list
+    ] == ["match-1", "match-2", "match-3"]
+    notify.assert_awaited_once_with("enqueue")

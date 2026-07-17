@@ -23,7 +23,7 @@ from .player_roster import (
     get_player_list, spec_player_extra_offset_for_gsi_failure,
     build_player_name_to_spec_player_slot_dict, lookup_spec_player_slot_for_name,
 )
-from .analyzer import DemoAnalyzer, get_demo_match_summary, collect_match_summary_metrics
+from .analyzer import DemoAnalyzer, get_demo_match_summary, inspect_demo, collect_match_summary_metrics
 
 __all__ = [
     # models
@@ -44,5 +44,5 @@ __all__ = [
     "get_player_list", "spec_player_extra_offset_for_gsi_failure",
     "build_player_name_to_spec_player_slot_dict", "lookup_spec_player_slot_for_name",
     # analyzer
-    "DemoAnalyzer", "get_demo_match_summary", "collect_match_summary_metrics",
+    "DemoAnalyzer", "get_demo_match_summary", "inspect_demo", "collect_match_summary_metrics",
 ]

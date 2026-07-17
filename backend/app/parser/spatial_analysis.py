@@ -301,37 +301,52 @@ def parse_spatial_snapshots(
         )
         df = coalesce_player_team_num(raw_df)
         df["_team_from_controller"] = controller_only_team
-        if df.empty:
+        if df.empty or "tick" not in df.columns:
             return {}, {}
+
+        # Materializing every row through ``iterrows`` creates a pandas Series
+        # per player/tick sample.  A full 10-player analysis can contain well
+        # over 100k samples, so keep the same stable per-tick ordering while
+        # traversing the frame once as plain tuples.
+        df = df.sort_values("tick", kind="mergesort")
+        columns = list(df.columns)
+        column_index = {column: index for index, column in enumerate(columns)}
+        tick_index = column_index["tick"]
+        name_index = column_index.get("name")
+
         cache: dict[int, dict[str, dict]] = {}
-        alive_summary: dict[int, dict[int, frozenset]] = {}
-        for tick, group in df.groupby("tick"):
-            tick_dict: dict[str, dict] = {}
-            by_team: dict[int, set] = {}
-            for _, row in group.iterrows():
-                name = str(row.get("name") or "").strip()
-                if name:
-                    row_d = row.to_dict()
-                    try:
-                        has_pawn_position = all(
-                            math.isfinite(float(row_d[key])) for key in ("X", "Y")
-                        )
-                    except (TypeError, ValueError, KeyError):
-                        has_pawn_position = False
-                    row_d["_pawn_state_known"] = not (
-                        bool(row_d.get("_team_from_controller"))
-                        and not has_pawn_position
-                    )
-                    tick_dict[name] = row_d
-                    if row_d["_pawn_state_known"] and row_d.get("is_alive"):
-                        try:
-                            tm = int(float(row_d["team_num"]))
-                            by_team.setdefault(tm, set()).add(name)
-                        except (TypeError, ValueError, KeyError):
-                            pass
-            tick_i = int(tick)
-            cache[tick_i] = tick_dict
-            alive_summary[tick_i] = {tm: frozenset(names) for tm, names in by_team.items()}
+        alive_names: dict[int, dict[int, set[str]]] = {}
+        for values in df.itertuples(index=False, name=None):
+            tick_i = int(values[tick_index])
+            tick_dict = cache.setdefault(tick_i, {})
+            by_team = alive_names.setdefault(tick_i, {})
+
+            name = "" if name_index is None else str(values[name_index] or "").strip()
+            if not name:
+                continue
+
+            row_d = dict(zip(columns, values))
+            try:
+                has_pawn_position = all(
+                    math.isfinite(float(row_d[key])) for key in ("X", "Y")
+                )
+            except (TypeError, ValueError, KeyError):
+                has_pawn_position = False
+            row_d["_pawn_state_known"] = not (
+                bool(row_d.get("_team_from_controller")) and not has_pawn_position
+            )
+            tick_dict[name] = row_d
+            if row_d["_pawn_state_known"] and row_d.get("is_alive"):
+                try:
+                    tm = int(float(row_d["team_num"]))
+                    by_team.setdefault(tm, set()).add(name)
+                except (TypeError, ValueError, KeyError):
+                    pass
+
+        alive_summary = {
+            tick: {team: frozenset(names) for team, names in by_team.items()}
+            for tick, by_team in alive_names.items()
+        }
         return cache, alive_summary
     except Exception:
         return {}, {}

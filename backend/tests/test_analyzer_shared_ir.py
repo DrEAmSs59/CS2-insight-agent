@@ -7,13 +7,18 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.parser import analyzer as analyzer_module
-from app.parser.analyzer import DemoAnalyzer
+from app.parser.analyzer import DemoAnalyzer, _build_shared_player_indexes
 from app.parser.parse_utils import _max_demo_tick
 from app.parser.player_roster import (
     build_player_name_to_steam_id,
     build_player_name_to_user_id,
 )
 from app.parser.round_economy import build_round_scores
+from app.parser.spatial_analysis import (
+    build_equip_timeline,
+    build_fire_index,
+    build_hurt_index,
+)
 
 
 class _ParserMustNotRun:
@@ -379,3 +384,111 @@ def test_shared_facts_materialize_event_indexes_and_copy_rosters(monkeypatch):
 def test_per_player_finish_path_has_no_native_parser_access():
     source = inspect.getsource(DemoAnalyzer._finish_single_player_analysis)
     assert "self.parser" not in source
+
+
+def test_shared_player_indexes_match_legacy_player_indexes():
+    equip = pd.DataFrame([
+        {"user_name": "alpha", "tick": 30, "item": "weapon_ak47"},
+        {"user_name": "bravo", "tick": 20, "item": "weapon_m4a1"},
+        {"user_name": "alpha", "tick": 10, "item": "weapon_knife"},
+    ])
+    fire = pd.DataFrame([
+        {"user_name": "alpha", "tick": 35, "weapon": "weapon_ak47"},
+        {"user_name": "alpha", "tick": 15, "weapon": "weapon_glock"},
+        {"user_name": "bravo", "tick": 25, "weapon": "weapon_m4a1"},
+    ])
+    hurt = pd.DataFrame([
+        {
+            "attacker_name": "alpha",
+            "user_name": "enemy",
+            "tick": 40,
+            "dmg_health": 30,
+            "weapon": "weapon_ak47",
+            "total_rounds_played": 0,
+            "attacker_team": 2,
+            "user_team": 3,
+        },
+        {
+            "attacker_name": "bravo",
+            "user_name": "enemy",
+            "tick": 20,
+            "dmg_health": 12,
+            "weapon": "weapon_m4a1",
+            "total_rounds_played": 0,
+            "attacker_team": 2,
+            "user_team": 3,
+        },
+        {
+            "attacker_name": "alpha",
+            "user_name": "enemy-two",
+            "tick": 10,
+            "dmg_health": 18,
+            "weapon": "weapon_glock",
+            "total_rounds_played": 1,
+            "attacker_team": 2,
+            "user_team": 3,
+        },
+    ])
+    deaths = pd.DataFrame([
+        {
+            "attacker_name": "alpha",
+            "user_name": "enemy",
+            "total_rounds_played": 0,
+            "attackerteam": 2,
+            "userteam": 3,
+        },
+        {
+            "attacker_name": "bravo",
+            "user_name": "enemy-two",
+            "total_rounds_played": 0,
+            "attackerteam": 2,
+            "userteam": 3,
+        },
+        {
+            "attacker_name": "enemy",
+            "user_name": "bravo",
+            "total_rounds_played": 1,
+            "attackerteam": 3,
+            "userteam": 2,
+        },
+    ])
+    begin_defuse = pd.DataFrame([
+        {"user_name": "alpha", "tick": 100, "total_rounds_played": 0},
+        {"user_name": "alpha", "tick": 300, "total_rounds_played": 1},
+    ])
+    defused = pd.DataFrame([
+        {"user_name": "alpha", "tick": 150},
+        {"user_name": "alpha", "tick": 350},
+    ])
+
+    indexes = _build_shared_player_indexes(
+        events=deaths,
+        fire_df=fire,
+        hurt_df=hurt,
+        equip_df=equip,
+        begindefuse_df=begin_defuse,
+        defused_df=defused,
+        round_freeze_end_ticks={1: 1, 2: 200},
+    )
+
+    for player in ("alpha", "bravo"):
+        assert indexes.equip_by_player.get(player, ()) == tuple(
+            build_equip_timeline(player, equip)
+        )
+        assert indexes.fire_by_player.get(player, ()) == tuple(
+            build_fire_index(player, fire)
+        )
+        assert indexes.hurt_by_attacker.get(player, ()) == tuple(
+            build_hurt_index(player, hurt)
+        )
+    assert indexes.defuse_windows_by_player["alpha"] == {
+        1: (100, 150),
+        2: (300, 350),
+    }
+    assert indexes.round_hurt_by_victim["enemy"] == {
+        1: ((20, 12, "m4a1"), (40, 30, "ak47")),
+    }
+    assert indexes.team_kills == {
+        1: {2: {"alpha": 1, "bravo": 1}},
+        2: {3: {"enemy": 1}},
+    }

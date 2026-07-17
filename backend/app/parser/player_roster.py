@@ -666,13 +666,25 @@ def compute_spec_player_slot_one_based(
     return (leg + off) if leg is not None else None
 
 
-def get_player_list(dem_path: str | Path) -> list[dict]:
+def get_player_list(
+    dem_path: str | Path,
+    *,
+    parser: Optional[DemoParser] = None,
+    match_start_tick: Optional[int] = None,
+    death_events: Optional[pd.DataFrame] = None,
+    player_info_df: Optional[pd.DataFrame] = None,
+) -> list[dict]:
     """扫描 Demo 所有在 player_death 出现过的玩家，汇总 K/D/A 与队伍。"""
-    parser = DemoParser(str(dem_path))
-    match_start_tick = _get_match_start_tick(parser)
+    parser = parser or DemoParser(str(dem_path))
+    if match_start_tick is None:
+        match_start_tick = _get_match_start_tick(parser)
     # 单次扫描同时取 user_id + steamid + 所有默认列（3次扫描合1次）
     try:
-        events = _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
+        events = (
+            death_events
+            if death_events is not None and not death_events.empty
+            else _to_pandas_df(parser.parse_event("player_death", player=["user_id"]))
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
@@ -800,7 +812,11 @@ def get_player_list(dem_path: str | Path) -> list[dict]:
     player_info_team_by_name: dict[str, int] = {}
     player_info_team_by_sid: dict[str, int] = {}
     try:
-        pi = _to_pandas_df(parser.parse_player_info())
+        pi = (
+            player_info_df
+            if player_info_df is not None and not player_info_df.empty
+            else _to_pandas_df(parser.parse_player_info())
+        )
     except BaseException as e:
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise

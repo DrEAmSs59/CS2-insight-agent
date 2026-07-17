@@ -22,6 +22,7 @@ from .parser import (
     # parse_worker.py
     DemoAnalyzer,
     get_demo_match_summary,
+    inspect_demo,
     # ai_reviewer.py
     Clip,
     meme_series_badges_for_kd,
