@@ -442,7 +442,21 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
     if _kb_overlay_req is None:
         _kb_overlay_req = load_config().kb_overlay_enabled
     if _kb_overlay_req:
-        from ..parser.input_track import extract_input_track as _extract_kb
+        from ..parser.input_track import (
+            extract_input_track as _extract_kb,
+            prepare_input_track_batch as _prepare_kb_batch,
+        )
+        try:
+            _kb_prepared = _prepare_kb_batch(
+                plan.demo_path,
+                [(_seg.start_tick, _seg.end_tick) for _seg in plan.segments],
+            )
+        except Exception as _kb_prepare_e:
+            logger.warning(
+                "kb_track shared preparation failed; using per-segment extraction: %s",
+                _kb_prepare_e,
+            )
+            _kb_prepared = None
         _kb_off_req = dto.options.kb_overlay_tick_offset  # None → executor falls back to global config
         for _seg in plan.segments:
             _seg.metadata["kb_tick_offset"] = _kb_off_req
@@ -453,6 +467,7 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
                     player_name=_seg.target_player_name,
                     start_tick=_seg.start_tick,
                     end_tick=_seg.end_tick,
+                    prepared=_kb_prepared,
                 )
             except Exception as _kb_e:
                 logger.warning(

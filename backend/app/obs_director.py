@@ -3477,19 +3477,18 @@ class OBSDirector:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
             if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
-                from .parser.input_track import extract_input_track as _pre_extract_kb
+                from .parser.input_track import (
+                    extract_input_track as _pre_extract_kb,
+                    prepare_input_track_batch as _prepare_kb_batch,
+                )
                 from .parser.kill_track import extract_kill_track as _pre_extract_fx
-                _kb_shared_windows: dict[int, tuple[int, int]] = {}
+                _kb_prepared_by_demo: dict = {}
 
                 async def _extract_seg_pre(_seg, _demo_path):
                     if self._abort_requested():
                         _seg.metadata["kb_track"] = []
                         return
                     try:
-                        _shared_start, _shared_end = _kb_shared_windows.get(
-                            id(_seg),
-                            (_seg.start_tick, _seg.end_tick),
-                        )
                         _frames = await asyncio.to_thread(
                             _pre_extract_kb,
                             _demo_path,
@@ -3497,8 +3496,7 @@ class OBSDirector:
                             player_name=_seg.target_player_name,
                             start_tick=_seg.start_tick,
                             end_tick=_seg.end_tick,
-                            shared_start_tick=_shared_start,
-                            shared_end_tick=_shared_end,
+                            prepared=_kb_prepared_by_demo.get(_demo_path),
                         )
                         _seg.metadata["kb_track"] = _frames
                         logger.info(
@@ -3557,40 +3555,8 @@ class OBSDirector:
                             )
                             _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
 
-                # 分批并行（每批 8 个），批次间检查 abort，保证中止响应及时
-                # Overlapping short segments share one tick parse.  Each
-                # result is still filtered to its own player and tick range.
-                for _demo_path, _segments in _kb_segments_by_demo.items():
-                    _ordered = sorted(_segments, key=lambda item: (item.start_tick, item.end_tick))
-                    _cluster: list = []
-                    _cluster_start = 0
-                    _cluster_end = 0
-
-                    def _flush_kb_cluster() -> None:
-                        for _cluster_seg in _cluster:
-                            _kb_shared_windows[id(_cluster_seg)] = (_cluster_start, _cluster_end)
-
-                    for _seg in _ordered:
-                        if not _cluster:
-                            _cluster = [_seg]
-                            _cluster_start, _cluster_end = _seg.start_tick, _seg.end_tick
-                            continue
-                        _candidate_end = max(_cluster_end, _seg.end_tick)
-                        _overlaps = _seg.start_tick <= _cluster_end + 64
-                        _within_dense_window = _candidate_end - _cluster_start + 1 <= 2000
-                        if _overlaps and _within_dense_window:
-                            _cluster.append(_seg)
-                            _cluster_end = _candidate_end
-                        else:
-                            _flush_kb_cluster()
-                            _cluster = [_seg]
-                            _cluster_start, _cluster_end = _seg.start_tick, _seg.end_tick
-                    if _cluster:
-                        _flush_kb_cluster()
-
-                # Four input-track tasks now share one cached tick parse.  A
-                # batch of four also keeps the following kill-event parse
-                # from competing with that first full demo read.
+                # Tick/event tables are parsed once per demo below.  Segment
+                # tasks only filter those shared tables and build their frames.
                 _BATCH = 4
                 _kb_total = len(_kb_tasks)
                 _kb_done = 0
@@ -3605,6 +3571,28 @@ class OBSDirector:
 
                 from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
                 _kbp_start(_kb_total)
+
+                for _demo_path, _segments in _kb_segments_by_demo.items():
+                    if self._abort_requested():
+                        break
+                    try:
+                        _kb_prepared_by_demo[_demo_path] = await asyncio.to_thread(
+                            _prepare_kb_batch,
+                            _demo_path,
+                            [(_seg.start_tick, _seg.end_tick) for _seg in _segments],
+                        )
+                        logger.info(
+                            "[kb_overlay] prepared shared demo tables: demo=%s segments=%d",
+                            _demo_path, len(_segments),
+                        )
+                    except Exception as _prepare_e:
+                        # Preserve recording correctness if an unsupported demo
+                        # cannot use the optimized batch path.
+                        logger.warning(
+                            "[kb_overlay] shared demo preparation failed; falling back to "
+                            "per-segment extraction: demo=%s error=%s",
+                            _demo_path, _prepare_e,
+                        )
 
                 for _batch_index, _batch in enumerate(_task_batches):
                     if self._abort_requested():

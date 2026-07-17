@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 import os
 import threading
@@ -58,6 +59,50 @@ _TICK_CACHE_MAX = 8
 _EVENT_CACHE_MAX = 8
 _tick_table_cache: dict[tuple, pd.DataFrame] = {}
 _event_table_cache: dict[tuple, pd.DataFrame] = {}
+
+_TICK_PROPS = (
+    PROP_BUTTONS,
+    PROP_USERCMD_BUTTONS,
+    PROP_X,
+    PROP_Y,
+    PROP_YAW,
+    PROP_WALK,
+    PROP_SCOPE,
+    PROP_DUCKING,
+    PROP_DESIRES_DUCK,
+    PROP_RELOAD,
+    PROP_FIRE,
+    PROP_RIGHTCLICK,
+    PROP_FORWARD,
+    PROP_MOVELEFT,
+    PROP_MOVERIGHT,
+    PROP_MOVEBACK,
+    PROP_WALK_BTN,
+    PROP_RELOAD_BTN,
+    "name",
+    "steamid",
+)
+_DENSE_PROPS = (
+    PROP_BUTTONS,
+    PROP_USERCMD_BUTTONS,
+    PROP_FIRE,
+    PROP_RIGHTCLICK,
+    PROP_SCOPE,
+    "name",
+    "steamid",
+)
+
+
+@dataclass(frozen=True)
+class PreparedInputTrackBatch:
+    """Demo-level parse tables shared by every keyboard-overlay segment."""
+
+    demo_key: tuple[str, int, int]
+    sample_table: pd.DataFrame
+    dense_table: pd.DataFrame
+    sample_ticks_by_window: dict[tuple[int, int], frozenset[int]]
+    dense_ticks_by_window: dict[tuple[int, int], frozenset[int]]
+    event_tables: dict[str, pd.DataFrame]
 
 
 def _demo_cache_key(demo_path: str) -> tuple[str, int, int]:
@@ -122,6 +167,124 @@ def _load_event_table(demo_path: str, event_name: str, *, rich_fire: bool = Fals
                 _event_table_cache.pop(next(iter(_event_table_cache)))
             _event_table_cache[key] = table
         return table
+
+
+def _window_tick_schedule(start_tick: int, end_tick: int) -> tuple[list[int], list[int]]:
+    start_i, end_i = int(start_tick), int(end_tick)
+    if end_i < start_i:
+        raise ValueError(f"Invalid input-track tick window: {start_i}-{end_i}")
+    total = end_i - start_i + 1
+    stride = max(1, (total + _MAX_TICKS - 1) // _MAX_TICKS)
+    sample_ticks = list(range(start_i, end_i + 1, stride))
+    if stride <= 1:
+        return sample_ticks, []
+    dense_stride = max(1, (total + _MAX_DENSE_TICKS - 1) // _MAX_DENSE_TICKS)
+    return sample_ticks, list(range(start_i, end_i + 1, dense_stride))
+
+
+def _parse_input_event_tables(demo_path: str) -> dict[str, pd.DataFrame]:
+    """Parse all keyboard-overlay events in one demo scan when supported."""
+    names = ("weapon_fire", "weapon_zoom")
+    parser = DemoParser(demo_path)
+    parsed = None
+    try:
+        parsed = parser.parse_events(
+            list(names),
+            player=["FIRE", "RIGHTCLICK", "buttons"],
+        )
+    except Exception:
+        try:
+            parsed = parser.parse_events(list(names))
+        except Exception:
+            parsed = None
+
+    if parsed is None:
+        return {
+            "weapon_fire": _load_event_table(demo_path, "weapon_fire", rich_fire=True),
+            "weapon_zoom": _load_event_table(demo_path, "weapon_zoom"),
+        }
+
+    out = {name: pd.DataFrame() for name in names}
+    for item in parsed:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+        event_name, table = item
+        if event_name in out:
+            out[event_name] = _to_df(table)
+    return out
+
+
+def prepare_input_track_batch(
+    demo_path: str,
+    windows: list[tuple[int, int]],
+) -> PreparedInputTrackBatch:
+    """Parse the union of all requested ticks once, preserving per-window density."""
+    sample_ticks_by_window: dict[tuple[int, int], frozenset[int]] = {}
+    dense_ticks_by_window: dict[tuple[int, int], frozenset[int]] = {}
+    all_sample_ticks: set[int] = set()
+    all_dense_ticks: set[int] = set()
+
+    for raw_start, raw_end in windows:
+        window = (int(raw_start), int(raw_end))
+        if window in sample_ticks_by_window:
+            continue
+        sample_ticks, dense_ticks = _window_tick_schedule(*window)
+        sample_set = frozenset(sample_ticks)
+        dense_set = frozenset(dense_ticks)
+        sample_ticks_by_window[window] = sample_set
+        dense_ticks_by_window[window] = dense_set
+        all_sample_ticks.update(sample_set)
+        all_dense_ticks.update(dense_set)
+
+    if not sample_ticks_by_window:
+        empty = pd.DataFrame()
+        return PreparedInputTrackBatch(
+            demo_key=_demo_cache_key(demo_path),
+            sample_table=empty,
+            dense_table=empty,
+            sample_ticks_by_window={},
+            dense_ticks_by_window={},
+            event_tables={},
+        )
+
+    parser = DemoParser(demo_path)
+    sample_table = _to_df(parser.parse_ticks(list(_TICK_PROPS), ticks=sorted(all_sample_ticks)))
+    sample_mask = _resolve_button_mask_col(sample_table)
+    dense_table = (
+        _to_df(parser.parse_ticks(list(_DENSE_PROPS), ticks=sorted(all_dense_ticks)))
+        if all_dense_ticks and sample_mask not in (None, PROP_USERCMD_BUTTONS)
+        else pd.DataFrame()
+    )
+    return PreparedInputTrackBatch(
+        demo_key=_demo_cache_key(demo_path),
+        sample_table=sample_table,
+        dense_table=dense_table,
+        sample_ticks_by_window=sample_ticks_by_window,
+        dense_ticks_by_window=dense_ticks_by_window,
+        event_tables=_parse_input_event_tables(demo_path),
+    )
+
+
+def _prepared_tick_table(
+    prepared: PreparedInputTrackBatch | None,
+    demo_path: str,
+    window: tuple[int, int],
+    *,
+    dense: bool = False,
+) -> pd.DataFrame | None:
+    if prepared is None or prepared.demo_key != _demo_cache_key(demo_path):
+        return None
+    ticks_by_window = (
+        prepared.dense_ticks_by_window if dense else prepared.sample_ticks_by_window
+    )
+    ticks = ticks_by_window.get(window)
+    if ticks is None:
+        return None
+    table = prepared.dense_table if dense else prepared.sample_table
+    if table.empty or "tick" not in table.columns:
+        return table
+    table_ticks = pd.to_numeric(table["tick"], errors="coerce")
+    return table.loc[table_ticks.isin(ticks)]
 
 
 def _resolve_col(df: pd.DataFrame, *candidates: str) -> str | None:
@@ -471,6 +634,7 @@ def extract_input_track(
     end_tick: int,
     shared_start_tick: int | None = None,
     shared_end_tick: int | None = None,
+    prepared: PreparedInputTrackBatch | None = None,
 ) -> list[dict]:
     """返回 [{tick, W,A,S,D,jump,crouch,walk,reload,fire,scope}, ...]（按 tick 升序）。
 
@@ -484,29 +648,10 @@ def extract_input_track(
     stride = max(1, (total + _MAX_TICKS - 1) // _MAX_TICKS)
     sample_ticks = list(range(parse_start_i, parse_end_i + 1, stride))
 
-    tick_props = [
-        PROP_BUTTONS,
-        PROP_USERCMD_BUTTONS,
-        PROP_X,
-        PROP_Y,
-        PROP_YAW,
-        PROP_WALK,
-        PROP_SCOPE,
-        PROP_DUCKING,
-        PROP_DESIRES_DUCK,
-        PROP_RELOAD,
-        PROP_FIRE,
-        PROP_RIGHTCLICK,
-        PROP_FORWARD,
-        PROP_MOVELEFT,
-        PROP_MOVERIGHT,
-        PROP_MOVEBACK,
-        PROP_WALK_BTN,
-        PROP_RELOAD_BTN,
-        "name",
-        "steamid",
-    ]
-    df = _load_tick_table(demo_path, tick_props, sample_ticks)
+    parse_window = (parse_start_i, parse_end_i)
+    df = _prepared_tick_table(prepared, demo_path, parse_window)
+    if df is None:
+        df = _load_tick_table(demo_path, list(_TICK_PROPS), sample_ticks)
     if df.empty:
         return []
     frame_ticks = pd.to_numeric(df["tick"], errors="coerce")
@@ -540,7 +685,13 @@ def extract_input_track(
     uses_usercmd_fallback = c_mask == PROP_USERCMD_BUTTONS
     mask_ints = _to_int_list(pdf[c_mask])
     n = len(mask_ints)
-    fire_events = _load_event_table(demo_path, "weapon_fire", rich_fire=True)
+    fire_events = (
+        prepared.event_tables.get("weapon_fire")
+        if prepared is not None and prepared.demo_key == _demo_cache_key(demo_path)
+        else None
+    )
+    if fire_events is None:
+        fire_events = _load_event_table(demo_path, "weapon_fire", rich_fire=True)
     if uses_usercmd_fallback:
         inferred = _infer_movement_from_motion(pdf)
         w_derived = inferred["W"]
@@ -591,16 +742,9 @@ def extract_input_track(
     if stride > 1 and not uses_usercmd_fallback:
         dense_stride = max(1, (total + _MAX_DENSE_TICKS - 1) // _MAX_DENSE_TICKS)
         dense_ticks = list(range(parse_start_i, parse_end_i + 1, dense_stride))
-        dense_props = [
-                PROP_BUTTONS,
-                PROP_USERCMD_BUTTONS,
-                PROP_FIRE,
-                PROP_RIGHTCLICK,
-                PROP_SCOPE,
-                "name",
-                "steamid",
-            ]
-        dense_df = _load_tick_table(demo_path, dense_props, dense_ticks)
+        dense_df = _prepared_tick_table(prepared, demo_path, parse_window, dense=True)
+        if dense_df is None:
+            dense_df = _load_tick_table(demo_path, list(_DENSE_PROPS), dense_ticks)
         if not dense_df.empty:
             dense_values = pd.to_numeric(dense_df["tick"], errors="coerce")
             dense_df = dense_df.loc[
@@ -640,8 +784,15 @@ def extract_input_track(
             start_tick=start_i,
             end_tick=end_i,
         )
+        zoom_events = (
+            prepared.event_tables.get("weapon_zoom")
+            if prepared is not None and prepared.demo_key == _demo_cache_key(demo_path)
+            else None
+        )
+        if zoom_events is None:
+            zoom_events = _load_event_table(demo_path, "weapon_zoom")
         zoom_ticks = _event_ticks_for_player(
-            _load_event_table(demo_path, "weapon_zoom"),
+            zoom_events,
             steamid=steamid,
             player_name=player_name,
             start_tick=start_i,
