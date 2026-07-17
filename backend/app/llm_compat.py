@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import ipaddress
 import json
-import logging
 from typing import Any, Optional
-from urllib.parse import urlparse
-
-logger = logging.getLogger(__name__)
 
 
 def normalize_llm_base_url(base_url: Optional[str]) -> Optional[str]:
@@ -21,49 +16,6 @@ def normalize_llm_base_url(base_url: Optional[str]) -> Optional[str]:
         if raw.endswith(suffix):
             raw = raw[: -len(suffix)].rstrip("/")
     return raw or None
-
-
-def validate_llm_base_url(base_url: Optional[str]) -> None:
-    """Warn when a remote LLM base URL can expose the API key in transit.
-
-    HTTP remains available for local model servers on loopback addresses. Remote
-    URLs are not blocked, but every non-HTTPS transport is logged regardless of
-    provider identity.
-    """
-    raw = (base_url or "").strip()
-    if not raw:
-        return
-    if "://" not in raw:
-        raw = "http://" + raw
-    try:
-        parsed = urlparse(raw)
-        host = (parsed.hostname or "").lower()
-    except ValueError:
-        logger.warning("LLM base_url 解析失败: %r", base_url)
-        return
-
-    if parsed.scheme.lower() == "https":
-        return
-    if host == "localhost" or host.endswith(".localhost"):
-        return
-    try:
-        if ipaddress.ip_address(host).is_loopback:
-            return
-    except ValueError:
-        pass
-
-    logger.warning(
-        "LLM base_url '%s' 未使用 HTTPS，API Key 将以明文传输。"
-        "建议远程服务使用 HTTPS；HTTP 仅用于本机模型服务。",
-        base_url,
-    )
-
-
-def prepare_llm_base_url(base_url: Optional[str]) -> Optional[str]:
-    """Normalize and validate a base URL before constructing an LLM client."""
-    normalized = normalize_llm_base_url(base_url)
-    validate_llm_base_url(normalized)
-    return normalized
 
 
 def is_zhipu_glm_model(model: str, base_url: Optional[str]) -> bool:

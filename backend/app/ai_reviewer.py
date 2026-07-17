@@ -18,7 +18,7 @@ from .llm_compat import (
     ai_review_fallback_message,
     completion_extra_body,
     message_text,
-    prepare_llm_base_url,
+    normalize_llm_base_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class AIReviewer:
         key = (api_key or "").strip()
         if not key or key.startswith("****"):
             raise ValueError("AIReviewer: invalid or masked api_key")
-        bu = prepare_llm_base_url((base_url or "").strip() or None)
+        bu = normalize_llm_base_url((base_url or "").strip() or None)
         self._client = AsyncOpenAI(api_key=key, base_url=bu, timeout=timeout_seconds)
         self._model = (model_name or "").strip() or "gpt-4o-mini"
         self._base_url = bu

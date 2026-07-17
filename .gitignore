@@ -18,7 +18,6 @@ frontend/dist/
 # IDE
 .vscode/
 .idea/
-.qoder/
 
 # OS
 .DS_Store

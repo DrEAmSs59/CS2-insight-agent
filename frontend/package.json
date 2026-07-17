@@ -31,7 +31,6 @@
     },
     "files": [
       "electron-main.cjs",
-      "backend-auth.cjs",
       "preload.cjs",
       "public/cs2-insight-logo.png",
       "build/icon.ico"

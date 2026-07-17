@@ -26,7 +26,7 @@ import faulthandler
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -299,24 +299,13 @@ app = FastAPI(title="CS2 Insight Agent", version="2.3.0", lifespan=lifespan)
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
 
-# H1 fix: 从环境变量读取认证 Token，要求所有请求携带该 Token
-_AUTH_TOKEN: str = os.environ.get("CS2_INSIGHT_AUTH_TOKEN", "")
-
-
-@app.middleware("http")
-async def auth_token_middleware(request: Request, call_next):
-    """Token 认证中间件：SSE 推送端点豁免（不支持自定义头），其余均须携带有效 Token。"""
-    # SSE 端点豁免：EventSource API 不支持自定义请求头
-    if request.url.path == "/api/demos/stream":
-        return await call_next(request)
-    if _AUTH_TOKEN:
-        token = request.headers.get("X-CS2-Insight-Token", "")
-        if token != _AUTH_TOKEN:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Unauthorized: invalid or missing X-CS2-Insight-Token"},
-            )
-    return await call_next(request)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.middleware("http")
@@ -326,18 +315,6 @@ async def log_unhandled_http_errors(request: Request, call_next):
     except Exception:
         logger.exception("Unhandled request error: %s %s", request.method, request.url.path)
         raise
-
-
-# Keep CORS outermost so preflight requests and auth failures receive the
-# headers required by the Electron renderer.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["app://local", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "cs2_insight_demos"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -450,24 +427,6 @@ def resolve_uploaded_demo_path(p: str) -> Path:
     if dest.is_file():
         return dest
     raise HTTPException(404, f"未找到 Demo 文件: {raw}")
-
-
-def resolve_demo_upload_path(filename: str) -> Path:
-    """Resolve an uploaded demo without allowing paths outside ``UPLOAD_DIR``."""
-    raw = (filename or "").strip()
-    if not raw:
-        raise HTTPException(400, "Demo 文件名为空")
-
-    upload_root = UPLOAD_DIR.resolve()
-    candidate = (upload_root / raw).resolve()
-    try:
-        candidate.relative_to(upload_root)
-    except ValueError as exc:
-        raise HTTPException(400, "Demo 文件路径超出上传目录") from exc
-
-    if not candidate.is_file():
-        raise HTTPException(404, f"Demo file not found: {filename}")
-    return candidate
 
 
 def _analyze_demo_sync(
@@ -1010,9 +969,7 @@ async def test_llm_connection():
 
     from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
-    from .llm_compat import prepare_llm_base_url
-
-    bu = prepare_llm_base_url(llm.base_url)
+    bu = (llm.base_url or "").strip() or None
     model = (llm.model or "").strip() or "gpt-4o-mini"
     try:
         client = AsyncOpenAI(api_key=api_key, base_url=bu, timeout=12.0)
@@ -1659,7 +1616,9 @@ async def open_local_demos(body: OpenLocalDemosBody):
 async def parse_demo(req: ParseRequest, filename: str):
     from .demo_parse_isolation import IsolatedParseError
 
-    dem_path = resolve_demo_upload_path(filename)
+    dem_path = UPLOAD_DIR / filename
+    if not dem_path.exists():
+        raise HTTPException(404, f"Demo file not found: {filename}")
 
     try:
         result = await asyncio.to_thread(
@@ -3530,30 +3489,15 @@ class RevealFileInExplorerBody(BaseModel):
 
 @app.post("/api/open-folder")
 def open_folder(body: OpenFolderBody):
-    """在文件管理器中打开指定目录。
-
-    H3 fix: 仅允许打开**已存在的目录**，拒绝文件和含路径穿越的输入，
-    防止通过 os.startfile 启动任意可执行程序。
-    """
     import os, subprocess as sp, sys
-    raw = body.path.strip()
-    # 拒绝路径穿越
-    if ".." in raw.split("/") or ".." in raw.split("\\"):
-        raise HTTPException(400, "路径不允许包含 '..'")
-    try:
-        p = Path(raw).expanduser().resolve()
-    except OSError as exc:
-        raise HTTPException(400, f"无效路径: {exc}") from exc
-    if not p.is_dir():
-        raise HTTPException(400, "仅支持打开目录，不支持打开文件或可执行程序")
-    path_str = str(p)
+    p = body.path.strip()
     try:
         if sys.platform == "win32":
-            os.startfile(path_str)  # noqa: S606
+            os.startfile(p)  # noqa: S606
         elif sys.platform == "darwin":
-            sp.run(["open", path_str], check=False, timeout=10)
+            sp.run(["open", p], check=False, timeout=10)
         else:
-            sp.run(["xdg-open", path_str], check=False, timeout=10)
+            sp.run(["xdg-open", p], check=False, timeout=10)
     except Exception as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True}
@@ -3561,37 +3505,26 @@ def open_folder(body: OpenFolderBody):
 
 @app.post("/api/reveal-file-in-explorer")
 def reveal_file_in_explorer(body: RevealFileInExplorerBody):
-    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。
-
-    H3 fix: 仅允许显示已存在的文件，拒绝含路径穿越的输入和可执行程序。
-    """
+    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。"""
     import subprocess as sp
     import sys
 
     raw = (body.path or "").strip().strip('"')
     if not raw:
         raise HTTPException(400, "path 为空")
-    # 拒绝路径穿越
-    if ".." in raw.split("/") or ".." in raw.split("\\"):
-        raise HTTPException(400, "路径不允许包含 '..'")
     try:
         p = Path(raw).expanduser().resolve(strict=False)
     except OSError as exc:
         raise HTTPException(400, f"无效路径: {exc}") from exc
     if not p.exists():
         raise HTTPException(404, f"路径不存在: {p}")
-    if not p.is_file():
-        raise HTTPException(400, "仅支持显示文件，不支持目录或可执行程序")
-    # 拒绝可执行程序
-    if p.suffix.lower() in (".exe", ".bat", ".cmd", ".ps1", ".msi", ".com"):
-        raise HTTPException(400, "不允许打开可执行程序文件")
     try:
         if sys.platform == "win32":
             if p.is_dir():
                 os.startfile(str(p))  # noqa: S606
             else:
                 # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
-                # Explorer 在含空格/特殊字符场景下可能退回默认"文档"目录。
+                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
                 sp.Popen(["explorer.exe", "/select,", str(p)])
         elif sys.platform == "darwin":
             sp.run(["open", "-R", str(p)], check=False, timeout=20)

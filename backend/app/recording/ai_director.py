@@ -13,7 +13,7 @@ from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, R
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..env_utils import LLMConfig, llm_api_key_configured, llm_base_url_is_local_host, load_config, resolve_config_path
-from ..llm_compat import completion_extra_body, message_text, prepare_llm_base_url
+from ..llm_compat import completion_extra_body, message_text, normalize_llm_base_url
 from .normalizer import NormalizedRequest
 from .models import EventInfo
 
@@ -765,7 +765,7 @@ async def suggest_recording_outline(
         return _heuristic_outline(req), "heuristic", err
 
     model = (cfg_llm.model or "").strip() or "gpt-4o-mini"
-    base_url = prepare_llm_base_url(cfg_llm.base_url)
+    base_url = normalize_llm_base_url(cfg_llm.base_url)
     client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_sec)
 
     user_msg = (

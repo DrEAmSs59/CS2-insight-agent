@@ -46,25 +46,14 @@ export function getLiteCutBuiltinFontUrl(fontName) {
 
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
 
-// H1 fix: 缓存认证 Token，Electron 环境下从主进程获取
-let _authToken = null;
-
 const API = axios.create({
   baseURL: `${API_BASE_URL}/api`,
 });
 
-API.interceptors.request.use(async (config) => {
+API.interceptors.request.use((config) => {
   const locale = useLocaleStore.getState().locale || "zh";
   config.headers = config.headers ?? {};
   config.headers["X-CS2-Insight-Locale"] = locale;
-
-  // H1 fix: 注入认证 Token
-  if (!_authToken && IS_ELECTRON_APP && window.electron?.getAuthToken) {
-    _authToken = await window.electron.getAuthToken();
-  }
-  if (_authToken) {
-    config.headers["X-CS2-Insight-Token"] = _authToken;
-  }
   return config;
 });
 
