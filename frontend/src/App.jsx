@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
 import SidebarNav from "./components/SidebarNav";
@@ -9,15 +9,6 @@ import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
-import GuidePage from "./pages/GuidePage";
-import DemoLibraryPage from "./pages/DemoLibraryPage";
-import AnalysisPage from "./pages/AnalysisPage";
-import RecordingQueuePage from "./pages/RecordingQueuePage";
-import MontageWorkbenchPage from "./pages/MontageWorkbenchPage";
-import RecordingParamsPage from "./pages/RecordingParamsPage";
-import SettingsPage from "./pages/SettingsPage";
-import PlayerGameConfigPage from "./pages/PlayerGameConfigPage";
-import MatchHistoryPage from "./pages/MatchHistoryPage";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
@@ -44,6 +35,18 @@ import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+
+const GuidePage = lazy(() => import("./pages/GuidePage"));
+const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
+const AnalysisPage = lazy(() => import("./pages/AnalysisPage"));
+const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
+const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
+const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
+const LiteCutExportPage = lazy(() => import("./pages/liteCut/LiteCutExportPage"));
+const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
+const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -2881,18 +2884,25 @@ export default function App() {
             ) : null}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
+                <Route path="/lite-cut" element={<LiteCutEditorPage />} />
+                <Route path="/lite-cut/editor" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/text" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/color" element={<Navigate to="/lite-cut" replace />} />
+                <Route path="/lite-cut/export" element={<LiteCutExportPage />} />
                 <Route path="/params" element={<RecordingParamsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </Suspense>
             </div>
           </main>
         </div>

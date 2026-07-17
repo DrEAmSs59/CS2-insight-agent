@@ -72,6 +72,13 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           <Clapperboard className="h-4 w-4 shrink-0 opacity-90" />
           {t("nav.montage")}
         </NavLink>
+        <NavLink
+          to="/lite-cut"
+          className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle} ${disabled ? "pointer-events-none opacity-40" : ""}`}
+        >
+          <Clapperboard className="h-4 w-4 shrink-0 opacity-90 text-amber-400" />
+          LiteCut
+        </NavLink>
       </nav>
 
       <div className="space-y-1 border-t border-cs2-border px-1.5 py-2">

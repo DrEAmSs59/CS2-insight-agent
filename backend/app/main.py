@@ -65,6 +65,9 @@ from .name_card_meta import (
 )
 from . import obs_config_center
 from .recording.api import router as recording_router
+from .lite_cut.api import router as lite_cut_router
+from .lite_cut.db import LiteCutDB
+from .lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
 from .cs2_config_backup import (
     build_config_backup_status_payload,
     is_cs2_running,
@@ -112,6 +115,7 @@ except Exception:
 DB_PATH = resolve_config_path().parent / "cs2-insight.db"
 demo_db = DemoDB(DB_PATH)
 montage_db = MontageDB(DB_PATH)
+lite_cut_db = LiteCutDB(DB_PATH)
 demo_watcher: DemoWatcher | None = None
 _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
     weakref.WeakValueDictionary()
@@ -265,6 +269,12 @@ async def lifespan(_: FastAPI):
     global demo_watcher
     await demo_db.init_db()
     await montage_db.init_tables()
+    await lite_cut_db.init_tables()
+    stale_lite_cut_outputs = await lite_cut_db.recover_interrupted_exports()
+    if stale_lite_cut_outputs:
+        from .lite_cut.export_preflight import cleanup_stale_export_artifacts
+
+        await asyncio.to_thread(cleanup_stale_export_artifacts, stale_lite_cut_outputs)
     cfg = load_config()
     removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
     if removed_gsi_configs:
@@ -285,6 +295,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="CS2 Insight Agent", version="2.0.2", lifespan=lifespan)
 
 app.include_router(recording_router)
+app.include_router(lite_cut_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2754,6 +2765,64 @@ async def list_recorded_clips(
     return {"items": rows, "limit": limit, "offset": offset}
 
 
+class RecordedClipDurationPatch(BaseModel):
+    duration_sec: float = Field(gt=0.05, le=86400)
+
+
+@app.patch("/api/recorded-clips/{clip_id}/duration")
+async def patch_recorded_clip_duration(clip_id: int, body: RecordedClipDurationPatch):
+    """Store the duration measured by the browser from the completed media file."""
+    updated = await montage_db.update_recorded_clip_duration(clip_id, body.duration_sec)
+    if not updated:
+        from .api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
+    return {"id": int(clip_id), "duration_sec": float(body.duration_sec)}
+
+
+@app.get("/api/recorded-clips/{clip_id}/stream")
+async def stream_recorded_clip(clip_id: int, request: Request):
+    """HTTP Range streaming for LiteCut / montage preview (<video> seek)."""
+    rows = await montage_db.get_recorded_clips_by_ids([int(clip_id)])
+    row = rows.get(int(clip_id))
+    if not row:
+        from .api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
+    file_path = validate_recorded_clip_path(str(row.get("output_path") or ""))
+    return await stream_file_with_range(file_path, request)
+
+
+@app.get("/api/recorded-clips/{clip_id}/waveform")
+async def get_recorded_clip_waveform(
+    clip_id: int,
+    buckets: int = Query(default=72, ge=8, le=512),
+    start_sec: float = Query(default=0, ge=0),
+    end_sec: float | None = Query(default=None, ge=0),
+):
+    rows = await montage_db.get_recorded_clips_by_ids([int(clip_id)])
+    row = rows.get(int(clip_id))
+    if not row:
+        from .api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
+    from .lite_cut.waveform import load_or_create_waveform_cache, waveform_view
+    from .video_composer import resolve_ffmpeg_binary
+
+    file_path = validate_recorded_clip_path(str(row.get("output_path") or ""))
+    try:
+        payload, cached = await asyncio.to_thread(
+            load_or_create_waveform_cache,
+            file_path,
+            ffmpeg_bin=resolve_ffmpeg_binary(load_config().ffmpeg_path),
+            duration_sec=row.get("duration_sec"),
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Recorded clip waveform generation failed for %s", file_path.name, exc_info=True)
+        raise HTTPException(422, str(exc) or "无法生成素材波形") from exc
+    return {**waveform_view(payload, start_sec=start_sec, end_sec=end_sec, buckets=buckets), "cached": cached}
+
+
 @app.delete("/api/recorded-clips/{clip_id}")
 async def delete_recorded_clip(clip_id: int):
     try:
@@ -3192,6 +3261,35 @@ async def file_picker(body: FilePickerBody):
     except Exception as exc:
         raise HTTPException(500, f"文件选择器失败: {exc}") from exc
 
+    return {"path": path or None}
+
+
+@app.post("/api/directory-picker")
+async def directory_picker():
+    """Windows directory chooser fallback for browser-based development mode."""
+    if sys.platform != "win32":
+        raise HTTPException(400, "文件夹选择对话框仅 Windows 可用")
+    ps = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$d.Description = '选择 LiteCut 素材存储目录';"
+        "$d.ShowNewFolderButton = $true;"
+        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }"
+    )
+
+    def _run_directory_picker() -> str:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True,
+            timeout=120,
+        )
+        return (result.stdout or b"").decode("utf-8", errors="replace").strip()
+
+    try:
+        path = await asyncio.to_thread(_run_directory_picker)
+    except Exception as exc:
+        raise HTTPException(500, f"文件夹选择器失败: {exc}") from exc
     return {"path": path or None}
 
 

@@ -38,6 +38,96 @@ log.info('App starting...');
 
 let mainWindow;
 let backendProcess;
+const ELECTRON_SMOKE = process.env.CS2_INSIGHT_ELECTRON_SMOKE === '1';
+let electronSmokeStarted = false;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runElectronSmokeCheck() {
+  if (!ELECTRON_SMOKE || electronSmokeStarted) return;
+  electronSmokeStarted = true;
+  const reportPath = process.env.CS2_INSIGHT_ELECTRON_SMOKE_REPORT
+    || path.join(app.getPath('userData'), 'electron-smoke-report.json');
+  const report = {
+    ok: false,
+    packaged: app.isPackaged,
+    launchMode: process.env.CS2_INSIGHT_ELECTRON_SMOKE_ASAR === '1' ? 'packaged-asar' : 'packaged-exe',
+    version: app.getVersion(),
+    resourcesPath: process.resourcesPath,
+    checks: {},
+    error: '',
+    finishedAt: new Date().toISOString(),
+  };
+  try {
+    const resourceBase = [process.resourcesPath, path.join(__dirname, '..'), path.join(__dirname, '../..')]
+      .find((base) => fs.existsSync(path.join(base, 'python', 'python.exe')) && fs.existsSync(path.join(base, 'backend', 'app', 'run_server.py')));
+    if (!resourceBase) throw new Error('Could not resolve packaged resource directory');
+    report.resourceBase = resourceBase;
+    const requiredResources = [
+      path.join(resourceBase, 'python', 'python.exe'),
+      path.join(resourceBase, 'backend', 'app', 'run_server.py'),
+      path.join(resourceBase, 'backend', 'assets', 'fonts', 'NotoSansSC-Medium.ttf'),
+      path.join(resourceBase, 'data', 'lite_cut_effect_contract.json'),
+    ];
+    report.checks.resources = requiredResources.map((itemPath) => ({ path: itemPath, exists: fs.existsSync(itemPath) }));
+    if ((!app.isPackaged && report.launchMode !== 'packaged-asar') || report.checks.resources.some((item) => !item.exists)) {
+      throw new Error('Packaged resources are incomplete');
+    }
+
+    let health = null;
+    const deadline = Date.now() + 45000;
+    while (Date.now() < deadline) {
+      try {
+        const response = await net.fetch('http://127.0.0.1:19871/api/health');
+        if (response.ok) {
+          health = await response.json();
+          break;
+        }
+      } catch (_) {}
+      await delay(350);
+    }
+    report.checks.backendHealth = health;
+    if (!health) throw new Error('Packaged backend did not become healthy');
+
+    const renderer = await mainWindow.webContents.executeJavaScript(`(async () => {
+      history.pushState({}, '', '/lite-cut');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline && !document.querySelector('[data-litecut-start-page], .litecut-editor-interactive')) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return {
+        href: location.href,
+        title: document.title,
+        rootChildren: document.getElementById('root')?.childElementCount || 0,
+        bodyTextLength: document.body?.innerText?.trim()?.length || 0,
+        hasElectronBridge: Boolean(window.electron?.getVersion),
+        liteCutReady: Boolean(document.querySelector('[data-litecut-start-page], .litecut-editor-interactive')),
+      };
+    })()`, true);
+    report.checks.renderer = renderer;
+    if (!String(renderer.href || '').startsWith('app://local/lite-cut') || !renderer.hasElectronBridge || !renderer.liteCutReady || renderer.rootChildren < 1 || renderer.bodyTextLength < 10) {
+      throw new Error('Packaged renderer did not initialize correctly');
+    }
+
+    const dataRoot = path.join(app.getPath('userData'), 'data');
+    report.checks.writableDataRoot = { path: dataRoot, exists: fs.existsSync(dataRoot) };
+    if (!report.checks.writableDataRoot.exists) throw new Error('Writable Electron data directory was not created');
+    report.ok = true;
+  } catch (error) {
+    report.error = error?.stack || error?.message || String(error);
+  }
+  report.finishedAt = new Date().toISOString();
+  try {
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
+  } catch (error) {
+    log.error('[Electron smoke] Could not write report:', error);
+  }
+  log.info('[Electron smoke] Result:', report);
+  killBackend();
+  setTimeout(() => app.exit(report.ok ? 0 : 1), 100);
+}
 
 function resolveWindowIconPath() {
   const icoPath = path.join(__dirname, 'build', 'icon.ico');
@@ -63,6 +153,7 @@ function createWindow() {
     frame: false, // 移除原生菜单和标题栏
     titleBarStyle: 'hidden',
     icon: resolveWindowIconPath(),
+    show: !ELECTRON_SMOKE,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -96,6 +187,7 @@ function createWindow() {
   });
   mainWindow.webContents.on('did-finish-load', () => {
     log.info('Renderer: did-finish-load');
+    void runElectronSmokeCheck();
   });
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
     log.error(`Renderer: did-fail-load - ${errorCode} ${errorDescription} at ${validatedURL}`);
@@ -594,6 +686,37 @@ ipcMain.handle('is-packaged', () => {
 
 ipcMain.handle('get-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('show-item-in-folder', (_event, itemPath) => {
+  if (typeof itemPath !== 'string' || !itemPath.trim()) return false;
+  try {
+    shell.showItemInFolder(path.resolve(itemPath));
+    return true;
+  } catch (error) {
+    log.warn('[Shell] failed to reveal export output:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('choose-directory', async (_event, requestedPath) => {
+  const options = {
+    title: 'Choose export folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  if (typeof requestedPath === 'string' && requestedPath.trim()) {
+    const candidate = path.resolve(requestedPath.trim());
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      options.defaultPath = candidate;
+    }
+  }
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, options);
+    return result.canceled ? '' : String(result.filePaths?.[0] || '');
+  } catch (error) {
+    log.warn('[Shell] failed to choose export directory:', error);
+    return '';
+  }
 });
 
 // 文件选择对话框 IPC handler

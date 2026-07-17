@@ -88,6 +88,228 @@
   --cs2-transition-normal: 200ms ease;
 }
 
+.litecut-property-collapse > .ant-collapse-item > .ant-collapse-header {
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 11px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 45%, var(--cs2-bg-card)), var(--cs2-bg-card));
+  transition: background-color 160ms ease;
+}
+
+.litecut-property-collapse > .ant-collapse-item > .ant-collapse-header:hover {
+  background: var(--cs2-bg-hover);
+}
+
+.litecut-property-collapse > .ant-collapse-item-active > .ant-collapse-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 60%, var(--cs2-bg-card)), var(--cs2-bg-card));
+  border-bottom: 1px solid color-mix(in srgb, var(--cs2-border) 75%, transparent);
+}
+
+.litecut-property-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+  padding: 10px 9px 11px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cs2-bg-card) 88%, var(--cs2-bg-elevated)), var(--cs2-bg-sidebar));
+}
+
+.litecut-property-number.ant-input-number .ant-input-number-input {
+  height: 26px;
+  padding: 0 6px;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.litecut-property-number.ant-input-number {
+  border-color: color-mix(in srgb, var(--cs2-border) 78%, transparent);
+  background: color-mix(in srgb, var(--cs2-bg-page) 70%, var(--cs2-bg-input));
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.16);
+}
+
+.litecut-property-number.ant-input-number:hover,
+.litecut-property-number.ant-input-number-focused {
+  border-color: color-mix(in srgb, var(--cs2-accent) 55%, var(--cs2-border));
+}
+
+.litecut-property-slider .ant-slider-rail {
+  height: 3px;
+}
+
+.litecut-property-slider .ant-slider-track {
+  height: 3px;
+}
+
+.litecut-property-slider .ant-slider-handle::after {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 2px var(--cs2-accent);
+}
+
+.litecut-inspector-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-card) 90%, var(--cs2-bg-elevated)), var(--cs2-bg-card));
+}
+
+.litecut-inspector-rail {
+  background: linear-gradient(90deg, var(--cs2-bg-card), color-mix(in srgb, var(--cs2-bg-card) 82%, var(--cs2-bg-elevated)));
+  box-shadow: -5px 0 18px rgba(0, 0, 0, 0.12);
+}
+
+.litecut-selected-media {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--cs2-bg-elevated) 35%, var(--cs2-bg-card)), var(--cs2-bg-card));
+}
+
+.litecut-property-control-row + .litecut-property-control-row {
+  margin-top: 2px;
+}
+
+.litecut-property-panel {
+  container-name: litecut-property;
+  container-type: inline-size;
+}
+
+@container litecut-property (max-width: 370px) {
+  .litecut-property-control-row {
+    grid-template-columns: minmax(0, 1fr) 56px 24px;
+    row-gap: 2px;
+  }
+
+  .litecut-property-control-row > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .litecut-property-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+    padding-inline: 7px;
+  }
+}
+
+@container litecut-property (max-width: 310px) {
+  .litecut-property-control-row {
+    grid-template-columns: minmax(0, 1fr) 50px 20px;
+    column-gap: 2px;
+    padding-inline: 0;
+  }
+
+  .litecut-property-control-row > button:last-child {
+    width: 20px;
+  }
+
+  .litecut-inspector-rail {
+    width: 50px;
+    padding-inline: 3px;
+  }
+
+  .litecut-inspector-rail > button {
+    width: 40px;
+  }
+}
+
+/* LiteCut 时间轴采用同一组低饱和冷色，避免素材与状态标记互相抢色。 */
+.litecut-timeline-clip {
+  --litecut-clip-rgb: 55, 91, 126;
+  border-color: rgba(var(--litecut-clip-rgb), 0.62);
+  background:
+    linear-gradient(135deg, rgba(var(--litecut-clip-rgb), 0.3), rgba(var(--litecut-clip-rgb), 0.14)),
+    var(--cs2-bg-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.litecut-timeline-clip--video { --litecut-clip-rgb: 55, 91, 126; }
+.litecut-timeline-clip--audio { --litecut-clip-rgb: 54, 112, 75; }
+.litecut-timeline-clip--text  { --litecut-clip-rgb: 156, 116, 45; }
+.litecut-timeline-clip--image { --litecut-clip-rgb: 112, 76, 126; }
+
+.litecut-timeline-clip--selected {
+  border-color: var(--cs2-accent) !important;
+}
+
+.litecut-timeline-clip--invalid {
+  border-color: rgba(244, 114, 182, 0.8) !important;
+  background: rgba(190, 24, 93, 0.26) !important;
+}
+
+.litecut-speed-ramp {
+  border-color: rgba(var(--litecut-clip-rgb), 0.72);
+  background: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 28%, rgba(12, 14, 16, 0.96));
+}
+
+.litecut-speed-ramp-segment {
+  border-color: rgba(var(--litecut-clip-rgb), 0.52);
+}
+
+.litecut-speed-ramp-segment--even { background: rgba(var(--litecut-clip-rgb), 0.72); }
+.litecut-speed-ramp-segment--odd  { background: rgba(var(--litecut-clip-rgb), 0.52); }
+
+.litecut-timeline-track-header {
+  background: var(--cs2-bg-card);
+}
+
+.litecut-timeline-track-header--selected {
+  /* The sticky header must stay opaque while clips scroll underneath it. */
+  background: color-mix(in srgb, var(--cs2-bg-card) 90%, var(--cs2-accent));
+}
+
+.litecut-transition-marker {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 22%, white);
+  border-color: rgba(var(--litecut-clip-rgb), 0.82);
+  background-color: rgba(var(--litecut-clip-rgb), 0.88);
+  box-shadow: 0 -1px 4px rgba(var(--litecut-clip-rgb), 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.litecut-transition-marker--in {
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0 2px, transparent 2px 5px);
+  border-radius: 0 3px 0 0;
+}
+
+.litecut-transition-marker--out {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.18) 0 2px, transparent 2px 5px);
+  border-radius: 3px 0 0 0;
+}
+
+/* The filled strip is the true, zoom-scaled duration. Its caption remains
+   attached to that strip instead of becoming a separate timeline object. */
+.litecut-transition-marker__label {
+  display: block;
+  line-height: 15px;
+  color: inherit;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+/* A very short transition still owns a real, zoom-scaled strip.  Keep its
+   caption readable by letting it extend across the parent clip, rather than
+   silently replacing the caption with an unexplained three-pixel bar. */
+.litecut-transition-marker {
+  overflow: visible !important;
+}
+
+.litecut-transition-marker > span {
+  display: none;
+}
+
+.litecut-transition-marker::after {
+  content: attr(title);
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  line-height: 15px;
+  color: inherit;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+}
+
+.litecut-transition-marker--in::after { left: 0; }
+.litecut-transition-marker--out::after { right: 0; text-align: right; }
+
+.litecut-transition-marker--compact::after {
+  display: none;
+}
+
+.litecut-transition-label-layout {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 18%, white);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+}
+
 /* ===== 浅色主题 ===== */
 .light {
   /* 背景层次 */
@@ -280,6 +502,55 @@ html {
   background: var(--cs2-scrollbar-thumb-hover);
 }
 
+/* LiteCut 时间轴：主区域仅纵向滚动，横向由底部横条驱动 */
+.litecut-timeline-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  overflow-x: hidden !important;
+}
+
+.litecut-timeline-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 0;
+}
+
+.litecut-timeline-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+}
+
+.litecut-timeline-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 140, 0, 0.55);
+}
+
+.litecut-timeline-hbar {
+  height: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 140, 0, 0.5) rgba(255, 255, 255, 0.04);
+}
+
+.litecut-timeline-hbar::-webkit-scrollbar {
+  height: 10px;
+}
+
+.litecut-timeline-hbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+  margin: 0 2px;
+}
+
+.litecut-timeline-hbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, rgba(255, 165, 0, 0.45), rgba(255, 140, 0, 0.65));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.litecut-timeline-hbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, rgba(255, 183, 77, 0.75), rgba(255, 140, 0, 0.9));
+  background-clip: padding-box;
+}
+
 body {
   font-family: var(--font-sans);
 }
@@ -287,4 +558,16 @@ body {
 /* 浅色模式下击杀图标反色（SVG 为白色填充） */
 .light .killfeed-icon-strip img {
   filter: invert(1);
+}
+.litecut-editor-interactive {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+.litecut-editor-interactive input,
+.litecut-editor-interactive textarea,
+.litecut-editor-interactive [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }

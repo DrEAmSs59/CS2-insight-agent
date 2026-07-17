@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "canvas_presets": [
+    { "id": "16:9", "width": 320, "height": 180 },
+    { "id": "9:16", "width": 180, "height": 320 },
+    { "id": "1:1", "width": 240, "height": 240 }
+  ],
+  "source_candidates": {
+    "primary": ["debugtest/debug3.mp4", "debugtest/debug2.mp4", "debugtest/debug1.mp4"],
+    "secondary": ["debugtest/debug2.mp4", "debugtest/debug3.mp4", "debugtest/debug1.mp4"],
+    "transparent_mov": ["debugtest/1V4-1V3样式2.mov", "debugtest/1V5-1V4样式2.mov"],
+    "images": ["debugtest/CS2-insight-agent-LOGO.png", "asset/ali.jpg", "asset/output-1080.gif"]
+  },
+  "filter_presets": ["none", "esports", "cold", "warm", "vintage", "highcon", "fade", "night"],
+  "transform_cases": [
+    { "id": "identity", "x": 0.5, "y": 0.5, "width": 1.0, "height": 1.0, "scale": 1.0, "rotation": 0, "opacity": 1.0 },
+    { "id": "position-scale", "x": 0.34, "y": 0.62, "width": 0.72, "height": 0.72, "scale": 0.82, "rotation": 0, "opacity": 0.86 },
+    { "id": "stretch-rotate", "x": 0.58, "y": 0.43, "width": 0.78, "height": 0.48, "scale": 0.9, "rotation": 18, "opacity": 0.72 }
+  ],
+  "transitions": ["fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down", "blur", "glitch", "spin"],
+  "transition_progress": [0.25, 0.5, 0.75],
+  "fonts": [
+    { "id": "source-han-medium", "family": "思源黑体 Medium", "file": "backend/assets/fonts/NotoSansSC-Medium.ttf", "kind": "builtin" },
+    { "id": "noto-sans-sc", "family": "Noto Sans SC", "file": "backend/assets/fonts/NotoSansSC-Bold.ttf", "kind": "builtin" },
+    { "id": "microsoft-yahei", "family": "微软雅黑", "file": "C:/Windows/Fonts/msyhbd.ttc", "kind": "system" },
+    { "id": "impact", "family": "Impact", "file": "C:/Windows/Fonts/impact.ttf", "kind": "system" },
+    { "id": "imported-font", "family": "LiteCutVisualImported", "file": "backend/assets/fonts/Rajdhani-SemiBold.ttf", "kind": "imported" }
+  ]
+}

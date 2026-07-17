@@ -382,6 +382,11 @@ class AppConfig(BaseModel):
     ffmpeg_path: str = ""
     # 合辑 H.264：auto=按 NVENC→QSV→AMF→libx264 顺序，对硬件编码器做单帧实测后再选用；亦可指定编码器名
     montage_encoder: str = "auto"
+    # LiteCut 导入素材、预览代理和工程导出的独立存储根目录；留空时沿用应用 data/lite_cut_assets。
+    lite_cut_assets_dir: str = ""
+    # LiteCut 浏览器预览代理的最长边（像素）。更低的值节省空间并提升预览流畅度；
+    # 修改后由代理管理中心重新生成已存在的代理。
+    lite_cut_proxy_resolution: int = 720
     cs2_path: str = ""
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)

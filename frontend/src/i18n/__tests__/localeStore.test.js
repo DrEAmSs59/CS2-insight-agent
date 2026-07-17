@@ -9,7 +9,7 @@ import { useLocaleStore } from "../localeStore.js";
 describe("localeStore", () => {
   beforeEach(() => {
     putMock.mockClear();
-    useLocaleStore.setState({ locale: "zh" });
+    useLocaleStore.getState().hydrate("zh");
   });
 
   test("默认 locale 为 zh", () => {
@@ -22,9 +22,10 @@ describe("localeStore", () => {
     expect(putMock).not.toHaveBeenCalled();
   });
 
-  test("hydrate 非法值回退到 zh", () => {
+  test("hydrate 非法值回退到 auto 并解析系统语言", () => {
     useLocaleStore.getState().hydrate("fr");
-    expect(useLocaleStore.getState().locale).toBe("zh");
+    expect(useLocaleStore.getState().locale).toBe("auto");
+    expect(["zh", "en"]).toContain(useLocaleStore.getState().effectiveLocale);
   });
 
   test("setLocale 更新 state 并持久化到 config", () => {
@@ -33,9 +34,9 @@ describe("localeStore", () => {
     expect(putMock).toHaveBeenCalledWith("config", { locale: "en" });
   });
 
-  test("setLocale 非法值回退到 zh", () => {
+  test("setLocale 非法值回退到 auto", () => {
     useLocaleStore.getState().setLocale("fr");
-    expect(useLocaleStore.getState().locale).toBe("zh");
-    expect(putMock).toHaveBeenCalledWith("config", { locale: "zh" });
+    expect(useLocaleStore.getState().locale).toBe("auto");
+    expect(putMock).toHaveBeenCalledWith("config", { locale: "auto" });
   });
 });

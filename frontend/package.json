@@ -15,6 +15,7 @@
     "electron:icons": "node scripts/generate-windows-icon.mjs",
     "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:icons && npm run electron:clean && electron-builder",
     "electron:build:ver": "node scripts/electron-build-version.mjs",
+    "electron:smoke": "node scripts/run-electron-smoke.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -85,6 +86,7 @@
           "!**/.cs2_config_backup/**",
           "!**/.obs_config_backups/**",
           "!**/logs/**",
+          "!**/qa_color/**",
           "!**/cs2-insight.config.json",
           "!**/cs2-insight.db",
           "!**/cs2-insight.db-wal",
@@ -124,6 +126,7 @@
     "@aws-sdk/client-s3": "3.1047.0",
     "@aws-sdk/lib-storage": "3.1047.0",
     "@electron/windows-sign": "1.2.2",
+    "antd": "^5.26.0",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

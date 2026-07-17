@@ -142,6 +142,8 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
 
     if raw not in avail:
         if raw in _HW_ORDER:
+            if "libx264" in avail:
+                return "libx264"
             _composer_err(
                 f"当前 FFmpeg 未编译 {raw}，请在配置中将「合辑视频编码」改为「自动」或 libx264，"
                 "或安装带对应编码器的 FFmpeg 构建。",
@@ -149,6 +151,11 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
         if raw == "libx264" and "libx264" not in avail:
             _composer_err("当前 FFmpeg 未包含 libx264。")
         _composer_err(f"当前 FFmpeg 不包含编码器: {raw}")
+
+    if raw in _HW_ORDER and not _hw_encoder_runtime_ok(ffmpeg_bin, raw):
+        if "libx264" in avail:
+            return "libx264"
+        _composer_err(f"{raw} 当前不可用，且 FFmpeg 未包含可回退的 libx264 编码器。")
 
     return raw
 

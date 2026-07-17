@@ -7,6 +7,7 @@ import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
+import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import {
   Settings as SettingsIcon,
   Search,
@@ -364,6 +365,11 @@ export default function SettingsPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState(() => resolveTabFromSearch(searchParams));
   const [dataDirInfo, setDataDirInfo] = useState(null);
+  const [liteCutStorage, setLiteCutStorage] = useState(null);
+  const [liteCutStorageDraft, setLiteCutStorageDraft] = useState("");
+  const [liteCutStorageBusy, setLiteCutStorageBusy] = useState(false);
+  const [liteCutStorageMsg, setLiteCutStorageMsg] = useState(null);
+  const [liteCutStorageJob, setLiteCutStorageJob] = useState(null);
   const recordingSaveRef = useRef(null);
   const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
 
@@ -416,6 +422,88 @@ export default function SettingsPage() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await API.get("lite-cut/storage");
+        if (!cancelled) {
+          setLiteCutStorage(data);
+          setLiteCutStorageDraft(data?.path ?? "");
+        }
+      } catch (e) {
+        if (!cancelled) console.error("Failed to load LiteCut storage info:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const browseLiteCutStorage = useCallback(async () => {
+    try {
+      let selected = "";
+      if (window.electron?.chooseDirectory) {
+        selected = await window.electron.chooseDirectory(liteCutStorageDraft);
+      } else {
+        const { data } = await API.post("directory-picker");
+        selected = data?.path ?? "";
+      }
+      if (selected) {
+        setLiteCutStorageDraft(selected);
+        setLiteCutStorageMsg(null);
+      }
+    } catch (e) {
+      setLiteCutStorageMsg({ tone: "error", text: e.response?.data?.detail || e.message });
+    }
+  }, [liteCutStorageDraft]);
+
+  const migrateLiteCutStorage = useCallback(async () => {
+    const destination = liteCutStorageDraft.trim();
+    if (!destination || liteCutStorageBusy) return;
+    if (!window.confirm(t("settings.liteCutStorageConfirm"))) return;
+    setLiteCutStorageBusy(true);
+    setLiteCutStorageMsg(null);
+    try {
+      let { data } = await API.post("lite-cut/storage/migrate", { destination });
+      setLiteCutStorageJob(data);
+      while (data?.job_id && ["queued", "running", "cancelling"].includes(data?.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        ({ data } = await API.get(`lite-cut/storage/migrate/${data.job_id}`));
+        setLiteCutStorageJob(data);
+      }
+      if (data?.status === "cancelled") {
+        setLiteCutStorageDraft(data.path || liteCutStorage?.path || destination);
+        setLiteCutStorageMsg({ tone: "warn", text: data.error || t("settings.liteCutStorageCancelled") });
+        return;
+      }
+      if (data?.status !== "done") throw new Error(data?.error || t("settings.liteCutStorageFailed"));
+      setLiteCutStorage((prev) => ({
+        ...(prev || {}),
+        ...data,
+        custom: data.path !== prev?.default_path,
+      }));
+      setLiteCutStorageDraft(data.path);
+      setConfig((prev) => prev ? { ...prev, lite_cut_assets_dir: data.path } : prev);
+      setLiteCutStorageMsg({
+        tone: data.warning ? "warn" : "ok",
+        text: data.warning || t("settings.liteCutStorageSuccess"),
+      });
+    } catch (e) {
+      setLiteCutStorageMsg({ tone: "error", text: e.response?.data?.detail || e.message || t("settings.liteCutStorageFailed") });
+    } finally {
+      setLiteCutStorageBusy(false);
+    }
+  }, [liteCutStorage?.path, liteCutStorageBusy, liteCutStorageDraft, t]);
+
+  const cancelLiteCutStorageMigration = useCallback(async () => {
+    if (!liteCutStorageJob?.job_id || !liteCutStorageBusy) return;
+    try {
+      const { data } = await API.delete(`lite-cut/storage/migrate/${liteCutStorageJob.job_id}`);
+      setLiteCutStorageJob(data);
+    } catch (e) {
+      setLiteCutStorageMsg({ tone: "error", text: e.response?.data?.detail || e.message });
+    }
+  }, [liteCutStorageBusy, liteCutStorageJob?.job_id]);
 
   // Get app version (Electron only, fallback to "dev")
   const [appVersion, setAppVersion] = useState("dev");
@@ -855,6 +943,87 @@ export default function SettingsPage() {
                     >
                       {t("settings.openDirBtn")}
                     </button>
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelLiteCutStorage")} hint={t("settings.hintLiteCutStorage")} search={search && !matches(t("settings.labelLiteCutStorage") + " " + liteCutStorageDraft)}>
+                  <div className="space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={liteCutStorageDraft}
+                        onChange={(event) => {
+                          setLiteCutStorageDraft(event.target.value);
+                          setLiteCutStorageMsg(null);
+                        }}
+                        placeholder="D:\\CS2 Insight\\LiteCut"
+                        className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none"
+                      />
+                      <span className="shrink-0 text-xs text-cs2-text-muted">
+                        {formatFileSize(Number(liteCutStorage?.size_bytes) || 0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={browseLiteCutStorage}
+                        disabled={liteCutStorageBusy}
+                        className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-50"
+                      >
+                        {t("settings.browseBtn")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={migrateLiteCutStorage}
+                        disabled={liteCutStorageBusy || !liteCutStorageDraft.trim() || liteCutStorageDraft.trim() === liteCutStorage?.path}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-cs2-accent px-3 py-2 text-xs font-bold text-black hover:bg-cs2-accent-light disabled:opacity-45"
+                      >
+                        {liteCutStorageBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {liteCutStorageBusy ? t("settings.liteCutStorageMigrating") : t("settings.liteCutStorageMigrate")}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLiteCutStorageDraft(liteCutStorage?.default_path ?? "")}
+                        disabled={liteCutStorageBusy || !liteCutStorage?.default_path}
+                        className="text-[11px] text-cs2-text-muted hover:text-cs2-accent disabled:opacity-50"
+                      >
+                        {t("settings.liteCutStorageUseDefault")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => API.post("open-folder", { path: liteCutStorage?.path }).catch(() => {})}
+                        disabled={!liteCutStorage?.path}
+                        className="text-[11px] text-cs2-text-muted hover:text-cs2-accent disabled:opacity-50"
+                      >
+                        {t("settings.liteCutStorageOpenCurrent")}
+                      </button>
+                      {liteCutStorageBusy && liteCutStorageJob?.job_id && liteCutStorageJob.status !== "cancelling" ? (
+                        <button
+                          type="button"
+                          onClick={cancelLiteCutStorageMigration}
+                          className="text-[11px] text-rose-300 hover:text-rose-200"
+                        >
+                          {t("settings.liteCutStorageCancel")}
+                        </button>
+                      ) : null}
+                    </div>
+                    {liteCutStorageBusy && liteCutStorageJob ? (
+                      <div className="rounded-md border border-cs2-border bg-cs2-bg-input p-2">
+                        <div className="flex items-center justify-between text-[10px] text-cs2-text-muted">
+                          <span>{t(`settings.liteCutStorageStage.${liteCutStorageJob.stage || "copying"}`)}</span>
+                          <span>{Math.round((Number(liteCutStorageJob.progress) || 0) * 100)}% · {Number(liteCutStorageJob.copied_files) || 0}/{Number(liteCutStorageJob.total_files) || 0}</span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/30">
+                          <div className="h-full bg-cs2-accent transition-[width]" style={{ width: `${Math.round((Number(liteCutStorageJob.progress) || 0) * 100)}%` }} />
+                        </div>
+                      </div>
+                    ) : null}
+                    {liteCutStorageMsg && (
+                      <p className={`text-[11px] ${
+                        liteCutStorageMsg.tone === "error" ? "text-red-400" : liteCutStorageMsg.tone === "warn" ? "text-amber-400" : "text-emerald-400"
+                      }`}>
+                        {liteCutStorageMsg.text}
+                      </p>
+                    )}
                   </div>
                 </FieldRow>
               </SectionCard>

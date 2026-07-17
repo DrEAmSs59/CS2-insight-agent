@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "transform_limits": {
+    "position_min": 0,
+    "position_max": 1,
+    "size_min": 0.01,
+    "size_max": 3,
+    "scale_min": 0.1,
+    "scale_max": 3,
+    "rotation_min": -180,
+    "rotation_max": 180,
+    "opacity_min": 0,
+    "opacity_max": 1
+  },
+  "canvas_presets": [
+    { "id": "16:9", "width": 1920, "height": 1080 },
+    { "id": "9:16", "width": 1080, "height": 1920 },
+    { "id": "1:1", "width": 1080, "height": 1080 }
+  ],
+  "filter_presets": [
+    { "id": "none", "label_zh": "原片", "css": "none", "ffmpeg": "", "thumb": "from-zinc-600 to-zinc-800" },
+    { "id": "esports", "label_zh": "电竞", "css": "saturate(1.35) contrast(1.12)", "ffmpeg": "eq=contrast=1.12:saturation=1.35", "thumb": "from-emerald-700 to-zinc-900" },
+    { "id": "cold", "label_zh": "冷色", "css": "saturate(0.9) hue-rotate(15deg) brightness(1.05)", "ffmpeg": "eq=saturation=0.9,hue=h=15,colorchannelmixer=rr=1.05:gg=1.05:bb=1.05", "thumb": "from-cyan-800 to-slate-900" },
+    { "id": "warm", "label_zh": "暖色", "css": "sepia(0.35) saturate(1.2)", "ffmpeg": "colorchannelmixer=rr=0.78755:rg=0.26915:rb=0.06615:gr=0.12215:gg=0.89010:gb=0.05880:br=0.09520:bg=0.18690:bb=0.69585,eq=saturation=1.2", "thumb": "from-amber-800 to-stone-900" },
+    { "id": "vintage", "label_zh": "复古", "css": "sepia(0.55) contrast(1.08) brightness(0.95)", "ffmpeg": "colorchannelmixer=rr=0.66615:rg=0.42295:rb=0.10395:gr=0.19195:gg=0.82730:gb=0.09240:br=0.14960:bg=0.29370:bb=0.52205,eq=contrast=1.08,colorchannelmixer=rr=0.95:gg=0.95:bb=0.95", "thumb": "from-amber-900/80 to-stone-950" },
+    { "id": "highcon", "label_zh": "高对比", "css": "contrast(1.35) saturate(1.1)", "ffmpeg": "eq=contrast=1.35:saturation=1.1", "thumb": "from-neutral-700 to-black" },
+    { "id": "fade", "label_zh": "褪色", "css": "saturate(0.55) brightness(1.08)", "ffmpeg": "eq=saturation=0.55,colorchannelmixer=rr=1.08:gg=1.08:bb=1.08", "thumb": "from-stone-500 to-stone-800" },
+    { "id": "night", "label_zh": "夜战", "css": "brightness(0.82) saturate(0.75) hue-rotate(-8deg)", "ffmpeg": "colorchannelmixer=rr=0.82:gg=0.82:bb=0.82,eq=saturation=0.75,hue=h=-8", "thumb": "from-indigo-950 to-black" }
+  ],
+  "media_extensions": ["mp4", "m4v", "mov", "mkv", "avi", "webm", "png", "jpg", "jpeg", "gif"]
+}

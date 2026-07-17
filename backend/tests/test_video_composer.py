@@ -15,6 +15,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 from app.video_composer import (
     MontageComposerError,
     build_bgm_filter,
+    probe_video_audio_summary,
     resolve_ffmpeg_binary,
     validate_output_path,
 )
@@ -72,6 +73,27 @@ class TestBgmFilter(unittest.TestCase):
         s = build_bgm_filter(120.5)
         self.assertIn("aloop", s)
         self.assertIn("atrim=0:120.500000", s)
+
+
+class TestProbeVideoSummary(unittest.TestCase):
+    def test_detects_prores_4444_alpha_pixel_format(self):
+        payload = {
+            "format": {"duration": "2.5"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "prores",
+                    "pix_fmt": "yuva444p12le",
+                    "width": 1920,
+                    "height": 1080,
+                    "r_frame_rate": "60/1",
+                }
+            ],
+        }
+        with patch("app.video_composer.ffprobe_streams", return_value=payload):
+            info = probe_video_audio_summary(Path("alpha.mov"), Path("ffprobe.exe"))
+        self.assertTrue(info["has_alpha"])
+        self.assertEqual(info["pixel_format"], "yuva444p12le")
 
 
 if __name__ == "__main__":

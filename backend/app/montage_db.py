@@ -157,6 +157,20 @@ class MontageDB:
             rows = await cur.fetchall()
         return {int(r["id"]): self._expand_clip_meta_row(dict(r)) for r in rows}
 
+    async def update_recorded_clip_duration(self, clip_id: int, duration_sec: float) -> bool:
+        """Persist a duration measured from the finished media file."""
+        cid = int(clip_id)
+        duration = float(duration_sec)
+        if cid <= 0 or duration <= 0.05:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "UPDATE recorded_clips SET duration_sec = ? WHERE id = ?",
+                (duration, cid),
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
     async def delete_recorded_clip(self, clip_id: int) -> Optional[dict[str, Any]]:
         """删除 recorded_clips 行；若 output_path 指向本地文件则尝试一并删除。"""
         cid = int(clip_id)
@@ -177,6 +191,14 @@ class MontageDB:
                 removed_file = True
             except OSError as e:
                 raise ValueError(f"无法删除本地文件: {e}") from e
+        try:
+            from .lite_cut.waveform import waveform_cache_path
+
+            waveform_cache_path(out).unlink(missing_ok=True)
+        except OSError:
+            # The source clip is already gone; an optional cache must not make
+            # the recorded-clip row impossible to remove.
+            pass
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM recorded_clips WHERE id = ?", (cid,))
             await conn.commit()
