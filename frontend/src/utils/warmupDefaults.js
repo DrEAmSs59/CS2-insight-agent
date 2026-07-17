@@ -220,6 +220,8 @@ export function splitRecordWarmupConfirmPayload(payload) {
     kb_overlay_enabled,
     kb_overlay_tick_offset,
     kb_overlay_position,
+    kill_fx_enabled,
+    kill_fx_tick_offset,
     ...warmupForApi
   } = src;
   return {
@@ -240,6 +242,8 @@ export function splitRecordWarmupConfirmPayload(payload) {
       kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
       kb_overlay_tick_offset: typeof kb_overlay_tick_offset === "number" ? kb_overlay_tick_offset : undefined,
       kb_overlay_position: typeof kb_overlay_position === "string" ? kb_overlay_position : undefined,
+      kill_fx_enabled: typeof kill_fx_enabled === "boolean" ? kill_fx_enabled : undefined,
+      kill_fx_tick_offset: typeof kill_fx_tick_offset === "number" ? kill_fx_tick_offset : undefined,
     },
   };
 }

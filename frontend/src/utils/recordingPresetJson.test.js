@@ -13,6 +13,8 @@ const preset = {
   kb_overlay_enabled: false,
   kb_overlay_tick_offset: 6,
   kb_overlay_position: "bottom_center",
+  kill_fx_enabled: true,
+  kill_fx_tick_offset: 0,
   experimental_pov_enabled: false,
 };
 
@@ -29,5 +31,17 @@ describe("recording preset share JSON", () => {
   test("rejects invalid values", () => {
     const file = buildRecordingPresetFile({ ...preset, recording_global_pacing: { pre_first_sec: -1 } });
     expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
+  });
+
+  test("defaults kill FX off for older version-1 presets", () => {
+    const { kill_fx_enabled: _removed, ...legacyPreset } = preset;
+    const file = buildRecordingPresetFile(legacyPreset);
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_enabled).toBe(false);
+  });
+
+  test("defaults KillFX fine-tune offset to zero for older version-1 presets", () => {
+    const { kill_fx_tick_offset: _removed, ...legacyPreset } = preset;
+    const file = buildRecordingPresetFile(legacyPreset);
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(0);
   });
 });

@@ -196,6 +196,8 @@ export default function App() {
   const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
   const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
   const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
+  const [killFxEnabled, setKillFxEnabled] = useState(false);
+  const [killFxTickOffset, setKillFxTickOffset] = useState(0);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -894,6 +896,12 @@ export default function App() {
     }
     if (typeof data.kb_overlay_position === "string") {
       setKbOverlayPosition(data.kb_overlay_position);
+    }
+    if (typeof data.kill_fx_enabled === "boolean") {
+      setKillFxEnabled(data.kill_fx_enabled);
+    }
+    if (typeof data.kill_fx_tick_offset === "number") {
+      setKillFxTickOffset(data.kill_fx_tick_offset);
     }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
@@ -1802,6 +1810,8 @@ export default function App() {
       kb_overlay_enabled: !!payload?.kb_overlay_enabled,
       kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
       kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
+      kill_fx_enabled: !!payload?.kill_fx_enabled,
+      kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 0,
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1866,7 +1876,7 @@ export default function App() {
     async (warmupPayload) => {
       const intent = warmupIntent;
       const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
-      // 录制前参数为一次性配置：kb_overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
+      // 录制前参数为一次性配置：Overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
       // 不写入配置文件。持久化仅由「录制参数配置」页的 saveAllCommonParams 负责。
 
       setRecordWarmupOpen(false);
@@ -1878,10 +1888,10 @@ export default function App() {
         setBatchRecording(true);
         setProgressText(t("app.preparingRecording"), { loading: true });
 
-        // 如果启用了虚拟键盘 Overlay，轮询预构建进度并更新提示文字
-        const _kbOverlayOn = session.kb_overlay_enabled;
+        // 如果启用了任一事件轨道 Overlay，轮询预构建进度并更新提示文字。
+        const _overlayPrebuildOn = session.kb_overlay_enabled || session.kill_fx_enabled;
         let _kbPollTimer = null;
-        if (_kbOverlayOn) {
+        if (_overlayPrebuildOn) {
           _kbPollTimer = setInterval(async () => {
             if (recordingAbortRequestedRef.current) return;
             try {
@@ -1889,11 +1899,11 @@ export default function App() {
               if (recordingAbortRequestedRef.current) return;
               if (kbst?.active) {
                 setProgressText(
-                  t("app.kbPrebuildProgress", { done: kbst.done, total: kbst.total }),
+                  t("app.overlayPrebuildProgress", { done: kbst.done, total: kbst.total }),
                   { loading: true }
                 );
               } else if (kbst?.done > 0 && !kbst?.active) {
-                setProgressText(t("app.kbPrebuildReady"), { loading: true });
+                setProgressText(t("app.overlayPrebuildReady"), { loading: true });
               }
             } catch { /* ignore */ }
           }, 1000);
@@ -2801,6 +2811,8 @@ export default function App() {
     kbOverlayEnabled,
     kbOverlayTickOffset,
     kbOverlayPosition,
+    killFxEnabled,
+    killFxTickOffset,
   };
 
   const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
@@ -2928,6 +2940,8 @@ export default function App() {
           initKbOverlayEnabled={kbOverlayEnabled}
           initKbOverlayTickOffset={kbOverlayTickOffset}
           initKbOverlayPosition={kbOverlayPosition}
+          initKillFxEnabled={killFxEnabled}
+          initKillFxTickOffset={killFxTickOffset}
         />
 
         <LibraryLoadModeModal

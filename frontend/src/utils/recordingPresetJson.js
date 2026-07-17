@@ -112,6 +112,12 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     kb_overlay_enabled: requireBoolean(p.kb_overlay_enabled, "kb_overlay_enabled"),
     kb_overlay_tick_offset: requireNumber(p.kb_overlay_tick_offset, "kb_overlay_tick_offset", -6400, 6400, true),
     kb_overlay_position: requireString(p.kb_overlay_position, "kb_overlay_position", 32),
+    kill_fx_enabled: Object.hasOwn(p, "kill_fx_enabled")
+      ? requireBoolean(p.kill_fx_enabled, "kill_fx_enabled")
+      : false,
+    kill_fx_tick_offset: Object.hasOwn(p, "kill_fx_tick_offset")
+      ? requireNumber(p.kill_fx_tick_offset, "kill_fx_tick_offset", -6400, 6400, true)
+      : 0,
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {

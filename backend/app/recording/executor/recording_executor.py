@@ -19,42 +19,62 @@ from .gsi_verifier import verify_spec_target
 logger = logging.getLogger(__name__)
 
 def _kb_bus(segment=None):
-    """Return (bus, tick_offset) when kb overlay should fire, else (None, 0).
+    """Return (bus, base_tick_offset, kill_fx_extra_offset).
 
     Priority: if the segment carries kb_track data (injected by the queue handler
-    when dto.options.kb_overlay_enabled=True), activate the bus unconditionally.
+    when dto.options.kb_overlay_enabled=True) or kill_track data, activate the bus.
     Otherwise fall back to the global AppConfig flag.
 
-    Tick offset priority: a per-request override stashed on the segment
-    (segment.metadata["kb_tick_offset"], set from dto.options.kb_overlay_tick_offset
-    by the录制前一次性参数) wins; otherwise fall back to the persisted global config.
+    Both offsets prefer per-request values stashed on segment.metadata and fall
+    back to persisted config. KillFX uses base + extra; keyboard uses base only.
     """
-    def _resolve_offset(seg, cfg=None):
+    def _resolve_offset(seg, metadata_key, config_key, default, cfg=None):
         if seg is not None:
-            v = seg.metadata.get("kb_tick_offset")
+            v = seg.metadata.get(metadata_key)
             if v is not None:
                 try:
                     return int(v)
                 except (TypeError, ValueError):
                     pass
+        if cfg is not None:
+            try:
+                return int(getattr(cfg, config_key))
+            except (AttributeError, TypeError, ValueError):
+                pass
+        return default
+
+    def _load_cfg():
         try:
             from ...env_utils import load_config
-            return int((cfg or load_config()).kb_overlay_tick_offset)
+            return load_config()
         except Exception:
-            return 0
+            return None
+
+    def _resolved_offsets(seg, cfg):
+        base = _resolve_offset(
+            seg, "kb_tick_offset", "kb_overlay_tick_offset", 0, cfg,
+        )
+        kill_fx_extra = _resolve_offset(
+            seg, "kill_fx_tick_offset", "kill_fx_tick_offset", 0, cfg,
+        )
+        return base, kill_fx_extra
 
     try:
-        if segment is not None and segment.metadata.get("kb_track") is not None:
+        if segment is not None and (
+            segment.metadata.get("kb_track") is not None
+            or segment.metadata.get("kill_track") is not None
+        ):
             from .kb_overlay_bus import kb_overlay_bus
-            return kb_overlay_bus, _resolve_offset(segment)
-        from ...env_utils import load_config
-        cfg = load_config()
-        if cfg.kb_overlay_enabled:
+            base, kill_fx_extra = _resolved_offsets(segment, _load_cfg())
+            return kb_overlay_bus, base, kill_fx_extra
+        cfg = _load_cfg()
+        if cfg is not None and (cfg.kb_overlay_enabled or cfg.kill_fx_enabled):
             from .kb_overlay_bus import kb_overlay_bus
-            return kb_overlay_bus, _resolve_offset(segment, cfg)
+            base, kill_fx_extra = _resolved_offsets(segment, cfg)
+            return kb_overlay_bus, base, kill_fx_extra
     except Exception:
         pass
-    return None, 0
+    return None, 0, 0
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
@@ -809,8 +829,11 @@ class RecordingExecutor:
                     list(segment.metadata.keys()),
                     len(_kb_frames) if _kb_frames is not None else "None(key missing)",
                 )
-                _bus, _tick_off = _kb_bus(segment)
-                logger.info("[kb_overlay] seg=%d bus=%s tick_off=%s", segment.segment_index, _bus, _tick_off)
+                _bus, _tick_off, _fx_extra_off = _kb_bus(segment)
+                logger.info(
+                    "[kb_overlay] seg=%d bus=%s base_tick_off=%s kill_fx_extra_off=%s",
+                    segment.segment_index, _bus, _tick_off, _fx_extra_off,
+                )
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -819,13 +842,16 @@ class RecordingExecutor:
                         "end_tick": segment.end_tick,
                         "tick_rate": plan.tick_rate,
                         "offset_ticks": _tick_off,
+                        "kill_fx_offset_ticks": _tick_off + _fx_extra_off,
+                        "kill_fx_extra_offset_ticks": _fx_extra_off,
                         "frames": _kb_frames or [],
+                        "kills": segment.metadata.get("kill_track") or [],
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
-                _bus_resume, _ = _kb_bus(segment)
+                _bus_resume, _, _ = _kb_bus(segment)
 
                 if not obs_recording_started:
                     logger.info(
@@ -964,12 +990,12 @@ class RecordingExecutor:
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
                     # ── kb overlay: end ─────────────────────────────────────
-                    _bus, _ = _kb_bus(segment)
+                    _bus, _, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "end"})
                 else:
                     # ── kb overlay: pause ───────────────────────────────────
-                    _bus, _ = _kb_bus(segment)
+                    _bus, _, _ = _kb_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "pause"})
 

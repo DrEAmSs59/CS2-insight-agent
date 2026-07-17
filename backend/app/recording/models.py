@@ -124,6 +124,9 @@ class RecordingOptions(BaseModel):
     kb_overlay_enabled: Optional[bool] = None
     kb_overlay_tick_offset: Optional[int] = None
     kb_overlay_position: Optional[str] = None
+    kill_fx_enabled: Optional[bool] = None
+    # 叠加在 kb_overlay_tick_offset（公共 Overlay 基础偏移）之上的 KillFX 专用微调。
+    kill_fx_tick_offset: Optional[int] = None
     # LLM 导播大纲：合并击杀簇 + 精选受害者 POV（替代纯规则/全量 K→V）
     use_ai_director: bool = False
 
