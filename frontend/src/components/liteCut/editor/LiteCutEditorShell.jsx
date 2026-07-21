@@ -279,8 +279,10 @@ export default function LiteCutEditorShell({
     if (selectionInspectorTab) setInspectorTab(selectionInspectorTab);
   }, [selectedClipId, selectedTrackId, selectionInspectorTab]);
 
-  const checkFfmpegGate = useCallback(async () => {
-    setFfmpegGate((prev) => ({ ...prev, loading: true }));
+  const checkFfmpegGate = useCallback(async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    }
     try {
       const { data } = await API.get("config/ffmpeg-check");
       if (data?.ok) {
@@ -308,7 +310,10 @@ export default function LiteCutEditorShell({
   }, [checkFfmpegGate, location.pathname]);
 
   useEffect(() => {
-    const onFocus = () => void checkFfmpegGate();
+    // Native file pickers temporarily blur the window. Recheck FFmpeg after
+    // focus returns without unmounting the editor and losing the file input's
+    // pending change event or the media-bin tab state.
+    const onFocus = () => void checkFfmpegGate({ showLoading: false });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [checkFfmpegGate]);
