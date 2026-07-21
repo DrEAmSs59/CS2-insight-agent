@@ -277,7 +277,8 @@ check("7c: end_tick from last", plan.segments[0].end_tick == exp_end,
 # next_round_freeze_start_tick=35_000 > next_round_start_tick=30_100 and freeze_end=null
 # → normalizer rewrites: next_round_freeze_end=35_000, next_round_freeze_start=null
 # round_end_tick=30_000 is reliable (< next_round_start=30_100, not derived from freeze_end-5s)
-# Planner Case A: end = round_end_tick=30_000; min(30_000, 30_100) = 30_000
+# Planner Case A: add the 3 s result tail, then cap 0.5 s before the next round:
+# min(30_000 + 192, 30_100 - 32) = 30_068
 print("\nTest 8: Round compilation — player alive (no death tick)")
 next_freeze = 35_000
 r = make_round(round_num=5, freeze_end_tick=10_000, round_end_tick=30_000,
@@ -293,8 +294,8 @@ exp_start = 10_000 - int(opts.round_freeze_preroll_sec * TICK_RATE)
 check("8a: 1 segment", len(plan.segments) == 1, f"got {len(plan.segments)}")
 check("8b: start = freeze_end - preroll", plan.segments[0].start_tick == exp_start,
       f"got {plan.segments[0].start_tick}, want {exp_start}")
-check("8c: end = round_end_tick (reliable, < next_round_start)", plan.segments[0].end_tick == 30_000,
-      f"got {plan.segments[0].end_tick}, want 30_000")
+check("8c: round-result tail capped before next round", plan.segments[0].end_tick == 30_068,
+      f"got {plan.segments[0].end_tick}, want 30_068")
 check("8d: next_freeze_start rewrite warning emitted",
       any("round_metadata_next_freeze_start_rewritten_to_freeze_end" in w for w in plan.warnings),
       f"warnings={plan.warnings}")

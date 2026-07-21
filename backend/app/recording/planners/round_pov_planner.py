@@ -1,10 +1,17 @@
 import logging
 
-from ..models import RecordingSegment, SourceType, Perspective
+from ..models import RecordingSegment, SourceType, Perspective, RequestType
 from ..normalizer import NormalizedRequest, RoundInfo
 from ..platform_utils import platform_slot_offset, compute_voice_listen_mask, compute_voice_listen_mask_enemy
 
 logger = logging.getLogger(__name__)
+
+
+# Keep the round-result beat visible in round compilations.  ``round_end_tick`` is
+# the instant CS2 decides the round (often the same tick as the last kill), not the
+# end of the post-round presentation.  This mirrors the 3 s tail used by the round
+# timeline path while still being capped before the next round's freeze phase.
+_ROUND_COMPILATION_POST_ROUND_END_SEC = 3.0
 
 
 def sec_to_ticks(sec: float, tick_rate: float) -> int:
@@ -70,18 +77,28 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
         reliable_round_end = (
             round_info.round_end_tick is not None and round_info.round_end_tick_reliable
         )
+        is_final_round = (round_info.round == req.demo.final_round)
+        is_round_compilation = req.request_type == RequestType.round_compilation
+        round_end_post_ticks = sec_to_ticks(
+            _ROUND_COMPILATION_POST_ROUND_END_SEC, tick_rate
+        )
 
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
             # Case A: player alive this round.
-            # Stop just before next_round_start_tick — the demo tick when the next round's
-            # freeze phase begins.  We subtract alive_end_guard_ticks so OBS stops cleanly
-            # before the freeze frame appears (poll latency + OBS stop latency ≈ 0.15 s).
-            # Priority: reliable round_end_tick → next_round_start_tick - guard
+            # For round compilations, retain 3 s after a reliable round_end so the
+            # final kill/result presentation can finish.  Regardless of the chosen
+            # source, cap just before next_round_start_tick so OBS latency cannot
+            # capture the following freeze frame.
+            # Priority: reliable round_end_tick (+ compilation tail)
+            #            → next_round_start_tick - guard
             #            → next_round_freeze_start_tick → demo_end
             if reliable_round_end:
                 end_tick = round_info.round_end_tick  # type: ignore[assignment]
                 end_reason = "round_end"
+                if is_round_compilation and not is_final_round:
+                    end_tick += round_end_post_ticks
+                    end_reason = "round_end_post"
             elif round_info.next_round_start_tick is not None:
                 end_tick = round_info.next_round_start_tick - alive_end_guard_ticks
                 end_reason = "fallback_next_round_start"
@@ -105,18 +122,30 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
             end_tick = round_info.target_death_tick + death_post_ticks
             end_reason = "target_death_post"
 
-            # Clamp to reliable round_end_tick to avoid spilling into the next freeze.
+            # A round-ending death can share the same tick as round_end.  Round
+            # compilations must retain the configured death tail instead of clamping
+            # it away at that instant.  The 3 s post-round ceiling and next-round cap
+            # below still prevent footage from spilling into the following round.
             if reliable_round_end and end_tick > round_info.round_end_tick:  # type: ignore[operator]
-                end_tick = round_info.round_end_tick  # type: ignore[assignment]
-                end_reason = "target_death_post_clamped_to_round_end"
+                if is_round_compilation:
+                    post_round_cap = round_info.round_end_tick + round_end_post_ticks  # type: ignore[operator]
+                    if end_tick > post_round_cap:
+                        end_tick = post_round_cap
+                        end_reason = "target_death_post_clamped_to_round_end_post"
+                else:
+                    end_tick = round_info.round_end_tick  # type: ignore[assignment]
+                    end_reason = "target_death_post_clamped_to_round_end"
 
-            # Always clamp to next_round_start_tick.
+            # Always clamp before next_round_start_tick.  For compilations, keep the
+            # same 0.5 s safety margin as alive rounds so poll/OBS latency cannot leak
+            # a buy-phase frame into the output.
             if round_info.next_round_start_tick is not None:
-                if end_tick > round_info.next_round_start_tick:
-                    end_tick = round_info.next_round_start_tick
+                next_round_cap = round_info.next_round_start_tick
+                if is_round_compilation:
+                    next_round_cap -= alive_end_guard_ticks
+                if end_tick > next_round_cap:
+                    end_tick = next_round_cap
                     end_reason = "target_death_post_clamped_to_next_round_start"
-
-        is_final_round = (round_info.round == req.demo.final_round)
 
         # Final round where the target SURVIVED: extend past round_end into the
         # post-round so the match-winning moment / scoreboard beat doesn't cut

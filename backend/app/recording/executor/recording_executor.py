@@ -143,8 +143,9 @@ def _get_gsi_round_phase() -> Optional[str]:
     """Return the current round phase string from the latest GSI payload, or None.
 
     Possible values: "live", "over", "freezetime", "warmup", etc.
-    "over" means the round has just ended; "freezetime" means the next round's
-    buy-phase is active — both are reliable signals that the current round is done.
+    "over" means the round-result presentation is active; "freezetime" means the
+    next round's buy phase has started.  Only the latter is a safe hard stop for a
+    round compilation that deliberately keeps a post-round tail.
     """
     try:
         from ...gsi_ready import gsi_status
@@ -207,8 +208,8 @@ async def _record_until_tick_round_segment(
     Round-segment tick watcher: stops OBS as soon as the demo reaches segment.end_tick.
 
     Stop conditions (first to fire wins):
-      1. GSI round.phase == "over" or "freezetime" — round has definitively ended.
-      2. GSI map.round > target_round — demo entered the next round.
+      1. GSI round.phase == "freezetime" — demo entered the next round's buy phase.
+      2. GSI map.round > target_round outside phase "over" — demo entered the next round.
       3. Wall-clock estimated tick >= effective_end_tick.
       4. Hard deadline (full duration + 10 s grace).
 
@@ -326,6 +327,9 @@ async def _record_until_tick_round_segment(
                     return "done"
 
         # GSI round guard: fire as soon as the demo has entered a later round.
+        # Some GSI payloads increment map.round while phase is still "over".  That is
+        # the result presentation we intentionally retain, not the next playable
+        # round, so defer to the planned tick tail until freezetime arrives.
         # Skip for final-round alive player — map.round may transiently exceed
         # target_round during the end-game transition and must not stop recording.
         gsi_round = _get_gsi_current_round()
@@ -336,6 +340,12 @@ async def _record_until_tick_round_segment(
                     logger.info(
                         "[RecordingV3][TickWatcher] segment=%d final_round_alive: "
                         "ignoring GSI round advance to %d (end-game transition)",
+                        seg_idx, gsi_round,
+                    )
+                elif gsi_phase == "over":
+                    logger.info(
+                        "[RecordingV3][TickWatcher] segment=%d ignoring GSI round advance "
+                        "to %d while phase=over; preserving post-round tail",
                         seg_idx, gsi_round,
                     )
                 else:
