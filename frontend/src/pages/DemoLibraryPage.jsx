@@ -18,8 +18,7 @@ import {
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
-import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
-import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
+import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 import { useT } from "../i18n/useT.js";
 
 const INITIAL_ADV_FILTERS = {
@@ -53,7 +52,7 @@ export default function DemoLibraryPage() {
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
   const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
-  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
+  const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
 
   const queuedClientClipUids = useMemo(
     () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
@@ -84,16 +83,11 @@ export default function DemoLibraryPage() {
     }
   }, [s]);
 
-  const handleCardPlay = useCallback(async (demoId) => {
+  const handleCardPlay = useCallback((demoId) => {
     const item = s.demoLibraryItems.find((it) => it.id === demoId);
     const label = (item?.display_name && String(item.display_name).trim()) || item?.filename || `#${demoId}`;
-    try {
-      await playDemoInCs2({ id: demoId });
-      showPlayToast(true, label);
-    } catch (e) {
-      showPlayToast(false, playDemoErrorLabel(e));
-    }
-  }, [s, showPlayToast]);
+    void requestPlayDemo({ id: demoId, label });
+  }, [requestPlayDemo, s.demoLibraryItems]);
 
   const handleOpenFile = useCallback(
     async (demoId) => {
@@ -434,7 +428,7 @@ export default function DemoLibraryPage() {
         onSaveConfig={s.handleSaveConfig}
       />
 
-      <PlayDemoToast />
+      <DemoPlaybackUi />
 
       {s.libraryRename ? (
         <div
