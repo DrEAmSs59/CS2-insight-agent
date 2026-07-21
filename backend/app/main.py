@@ -1162,10 +1162,10 @@ def experimental_pov_restore():
     cfg = ensure_cs2_path(cfg)
     try:
         mgr = PovHudManager(cfg)
-        mgr.restore()
+        verification = mgr.restore()
     except PovHudError as e:
         raise HTTPException(400, str(e)) from e
-    return {"ok": True, "message": "POV HUD 修改已恢复"}
+    return {"ok": bool(verification.get("verified")), "restore": verification}
 
 
 def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
@@ -2717,6 +2717,12 @@ async def demo_playback_preflight():
     """Preflight for the playback dialog; launch performs the authoritative recheck."""
     cfg = ensure_cs2_path(load_config())
     return await asyncio.to_thread(demo_playback_service.preflight, cfg)
+
+
+@app.get("/api/demo/playback/status")
+async def demo_playback_status(session_id: str = Query(..., min_length=1, max_length=128)):
+    """Return the measured lifecycle and POV file-restoration result for one playback session."""
+    return await asyncio.to_thread(demo_playback_service.session_status, session_id)
 
 
 @app.post("/api/demo/play")

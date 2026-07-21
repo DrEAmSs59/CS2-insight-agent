@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import DemoPlayOptionsModal from "../components/DemoPlayOptionsModal.jsx";
+import DemoPlaybackRestoreModal from "../components/DemoPlaybackRestoreModal.jsx";
 import { useT } from "../i18n/useT.js";
-import { getDemoPlaybackPreflight, playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
+import { getDemoPlaybackPreflight, getDemoPlaybackStatus, playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 import { parseApiDetail } from "../utils/apiErrorMessages.js";
 import { usePlayDemoToast } from "./usePlayDemoToast.jsx";
 
@@ -30,6 +31,38 @@ export function useDemoPlaybackDialog() {
   const [blockedReason, setBlockedReason] = useState("");
   const [launchingMode, setLaunchingMode] = useState("");
   const [error, setError] = useState("");
+  const [restoreMonitor, setRestoreMonitor] = useState(null);
+  const [restorePollError, setRestorePollError] = useState("");
+
+  useEffect(() => {
+    const sessionId = restoreMonitor?.sessionId;
+    if (!sessionId) return undefined;
+    let stopped = false;
+    let timer = null;
+    const poll = async () => {
+      try {
+        const data = await getDemoPlaybackStatus(sessionId);
+        if (!data?.found) throw new Error(t("playDemo.restoreSessionMissing"));
+        if (stopped) return;
+        setRestorePollError("");
+        setRestoreMonitor((current) => (
+          current?.sessionId === sessionId ? { ...current, status: data } : current
+        ));
+        if (!["completed", "restore_failed"].includes(String(data.state || ""))) {
+          timer = setTimeout(poll, 1000);
+        }
+      } catch (statusError) {
+        if (stopped) return;
+        setRestorePollError(playDemoErrorLabel(statusError, t));
+        timer = setTimeout(poll, 2000);
+      }
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer != null) clearTimeout(timer);
+    };
+  }, [restoreMonitor?.sessionId, t]);
 
   const runPreflight = useCallback(async () => {
     setChecking(true);
@@ -66,7 +99,7 @@ export function useDemoPlaybackDialog() {
     setLaunchingMode(mode);
     setError("");
     try {
-      await playDemoInCs2({
+      const launchResult = await playDemoInCs2({
         id: target.id,
         path: target.path,
         povHud: {
@@ -78,6 +111,19 @@ export function useDemoPlaybackDialog() {
       setOpen(false);
       setTarget(null);
       setBlockedReason("");
+      if (mode === "pov" && launchResult?.session_id) {
+        setRestorePollError("");
+        setRestoreMonitor({
+          sessionId: String(launchResult.session_id),
+          status: {
+            found: true,
+            session_id: String(launchResult.session_id),
+            state: "running",
+            pov_hud_enabled: true,
+            restore: null,
+          },
+        });
+      }
       showPlayToast(true, target.label || "Demo");
     } catch (launchError) {
       const nextBlockedReason = blockedReasonFromError(launchError);
@@ -90,6 +136,21 @@ export function useDemoPlaybackDialog() {
       setLaunchingMode("");
     }
   }, [launchingMode, showPlayToast, t, target]);
+
+  const retryRestoreStatus = useCallback(async () => {
+    const sessionId = restoreMonitor?.sessionId;
+    if (!sessionId) return;
+    try {
+      const data = await getDemoPlaybackStatus(sessionId);
+      if (!data?.found) throw new Error(t("playDemo.restoreSessionMissing"));
+      setRestorePollError("");
+      setRestoreMonitor((current) => (
+        current?.sessionId === sessionId ? { ...current, status: data } : current
+      ));
+    } catch (statusError) {
+      setRestorePollError(playDemoErrorLabel(statusError, t));
+    }
+  }, [restoreMonitor?.sessionId, t]);
 
   const DemoPlaybackUi = useCallback(() => (
     <>
@@ -106,8 +167,18 @@ export function useDemoPlaybackDialog() {
         onPlayPov={() => void launch("pov")}
       />
       <PlayDemoToast />
+      <DemoPlaybackRestoreModal
+        open={Boolean(restoreMonitor)}
+        status={restoreMonitor?.status}
+        pollError={restorePollError}
+        onRetry={() => void retryRestoreStatus()}
+        onClose={() => {
+          setRestoreMonitor(null);
+          setRestorePollError("");
+        }}
+      />
     </>
-  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, runPreflight, target?.label]);
+  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, target?.label]);
 
   return { requestPlayDemo, DemoPlaybackUi };
 }

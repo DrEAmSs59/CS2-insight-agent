@@ -20,7 +20,11 @@ class _FakePovManager:
         self.__class__.instances.append(self)
 
     def status(self):
-        return {"needs_restore": self.needs_restore, "warnings": []}
+        return {
+            "needs_restore": self.needs_restore,
+            "warnings": [],
+            "original_gameinfo_sha256": "a" * 64 if self.needs_restore else None,
+        }
 
     def install(self):
         self.installed += 1
@@ -29,6 +33,18 @@ class _FakePovManager:
     def restore(self):
         self.restored += 1
         self.needs_restore = False
+        return self.verify_restoration("a" * 64)
+
+    def verify_restoration(self, expected_gameinfo_sha256=None):
+        restored = not self.needs_restore
+        return {
+            "verified": restored,
+            "gameinfo_restored": restored,
+            "pov_vpk_removed": restored,
+            "expected_gameinfo_sha256": expected_gameinfo_sha256,
+            "actual_gameinfo_sha256": expected_gameinfo_sha256 if restored else "b" * 64,
+            "error": "" if restored else "not restored",
+        }
 
 
 class _FakeProcess:
@@ -149,6 +165,16 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert not session.copied_demo.exists()
     assert not session.copied_cfg.exists()
     assert service._active is None
+    status = service.session_status(result["session_id"])
+    assert status["state"] == "completed"
+    assert status["restore"]["verified"] is True
+    assert status["restore"]["gameinfo_restored"] is True
+    assert status["restore"]["pov_vpk_removed"] is True
+
+    manager.needs_restore = True
+    rechecked = service.session_status(result["session_id"])
+    assert rechecked["state"] == "restore_failed"
+    assert rechecked["restore"]["verified"] is False
 
 
 def test_pov_launch_failure_rolls_back_files(monkeypatch, tmp_path: Path):

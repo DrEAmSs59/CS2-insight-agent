@@ -8,7 +8,7 @@ vi.mock("../api/api.js", () => ({
 }));
 
 import API from "../api/api.js";
-import { getDemoPlaybackPreflight, playDemoErrorLabel, playDemoInCs2 } from "./playDemoInCs2.js";
+import { getDemoPlaybackPreflight, getDemoPlaybackStatus, playDemoErrorLabel, playDemoInCs2 } from "./playDemoInCs2.js";
 
 describe("playDemoInCs2", () => {
   beforeEach(() => {
@@ -48,6 +48,18 @@ describe("playDemoInCs2", () => {
     API.get.mockResolvedValue({ data: { cs2_running: true } });
     await expect(getDemoPlaybackPreflight()).resolves.toEqual({ cs2_running: true });
     expect(API.get).toHaveBeenCalledWith("/demo/playback/preflight");
+  });
+
+  it("loads the factual restoration status for one playback session", async () => {
+    API.get.mockResolvedValue({ data: { found: true, state: "completed", restore: { verified: true } } });
+    await expect(getDemoPlaybackStatus("session-123")).resolves.toEqual({
+      found: true,
+      state: "completed",
+      restore: { verified: true },
+    });
+    expect(API.get).toHaveBeenCalledWith("/demo/playback/status", {
+      params: { session_id: "session-123" },
+    });
   });
 
   it("rejects when neither id nor path", async () => {

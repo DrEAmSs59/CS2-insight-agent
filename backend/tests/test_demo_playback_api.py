@@ -79,3 +79,25 @@ def test_preflight_delegates_to_playback_service(monkeypatch, tmp_path: Path):
     result = asyncio.run(main.demo_playback_preflight())
 
     assert result == {"ok": False, "cs2_running": True}
+
+
+def test_playback_status_returns_measured_session_report(monkeypatch):
+    monkeypatch.setattr(
+        main.demo_playback_service,
+        "session_status",
+        lambda session_id: {
+            "found": True,
+            "session_id": session_id,
+            "state": "completed",
+            "restore": {"verified": True},
+        },
+    )
+
+    result = asyncio.run(main.demo_playback_status("session-123"))
+
+    assert result == {
+        "found": True,
+        "session_id": "session-123",
+        "state": "completed",
+        "restore": {"verified": True},
+    }
