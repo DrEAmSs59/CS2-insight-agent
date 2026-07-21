@@ -50,6 +50,12 @@ from .env_utils import (
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_compat_service import ensure_demo_compatible
+from .demo_playback_service import (
+    DemoPlaybackBusyError,
+    DemoPlaybackCs2RunningError,
+    DemoPlaybackPovOptions,
+    demo_playback_service,
+)
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import (
@@ -77,6 +83,8 @@ from .cs2_config_backup import (
     open_backup_directory,
     restore_latest_user_config_backup,
 )
+from .api_errors import error_detail
+from .pov_hud_manager import PovHudError
 import httpx
 
 from .steam_match_history import (
@@ -2652,80 +2660,77 @@ async def delete_demo(
     return {"status": "deleted", "demo_id": demo_id}
 
 
-def _launch_cs2_play_demo(dem_path: Path) -> None:
-    """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
-    cfg = load_config()
-    cs2_path = cfg.cs2_path
-    if not cs2_path or not Path(cs2_path).is_file():
-        raise HTTPException(400, "CS2 路径未配置或文件不存在，请先在设置中配置 CS2 路径。")
+class DemoPlaybackPovBody(BaseModel):
+    enabled: bool = False
+    radar_mode: Literal[-1, 0] = 0
+    teamcounter_numeric: bool = False
 
+
+class DemoPlaybackOptionsBody(BaseModel):
+    pov_hud: DemoPlaybackPovBody = Field(default_factory=DemoPlaybackPovBody)
+
+
+class DemoPlayByPathBody(DemoPlaybackOptionsBody):
+    path: str = Field(..., min_length=1)
+
+
+def _launch_cs2_play_demo(
+    dem_path: Path,
+    options: Optional[DemoPlaybackOptionsBody] = None,
+) -> dict[str, Any]:
+    """Launch managed direct playback; both normal and POV modes require CS2 to be closed."""
+    cfg = ensure_cs2_path(load_config())
+    if not cfg.cs2_path or not Path(cfg.cs2_path).is_file():
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING"))
     if not dem_path.is_file():
-        raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
+        raise HTTPException(422, error_detail("DEMO_PLAYBACK_DEMO_NOT_FOUND", path=str(dem_path)))
 
+    body = options or DemoPlaybackOptionsBody()
+    pov = body.pov_hud
     try:
-        cs2_bin = Path(cs2_path)
-        # 约定路径结构: …/game/bin/win64/cs2.exe → game/
-        game_root = cs2_bin.parents[2]
-        csgo_dir = game_root / "csgo"
-        dest = csgo_dir / "cs2_insight_preview.dem"
-        compat = ensure_demo_compatible(dem_path)
-        dest.unlink(missing_ok=True)
-        shutil.copy2(dem_path, dest)
-        logger.info(
-            "Direct CS2 demo compatibility ready: cached=%s outcome=%s "
-            "removed_type138=%d source=%s",
-            compat.cached,
-            compat.report.outcome,
-            compat.report.removed_messages,
+        return demo_playback_service.launch(
             dem_path,
+            cfg,
+            DemoPlaybackPovOptions(
+                enabled=bool(pov.enabled),
+                radar_mode=int(pov.radar_mode),
+                teamcounter_numeric=bool(pov.teamcounter_numeric),
+            ),
         )
-        logger.info("Launch CS2 for playback: cwd=%s demo=%s", game_root, dest)
-        import subprocess as _sp
-
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = (
-                getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(_sp, "DETACHED_PROCESS", 0)
-            )
-        _sp.Popen(
-            [
-                str(cs2_bin),
-                "-steam",
-                "-insecure",
-                "-novid",
-                "-console",
-                "+playdemo",
-                "cs2_insight_preview.dem",
-            ],
-            cwd=str(game_root),
-            stdin=_sp.DEVNULL,
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
-            close_fds=True,
-            creationflags=creationflags,
-        )
+    except DemoPlaybackCs2RunningError as exc:
+        raise HTTPException(409, error_detail("DEMO_PLAYBACK_CS2_RUNNING")) from exc
+    except DemoPlaybackBusyError as exc:
+        raise HTTPException(409, error_detail("DEMO_PLAYBACK_BUSY")) from exc
+    except PovHudError as exc:
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_POV_FAILED", err=str(exc))) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING")) from exc
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception("Failed to launch CS2 for playback")
-        raise HTTPException(500, f"启动 CS2 失败: {e}") from e
+    except Exception as exc:
+        logger.exception("Failed to launch CS2 for direct playback")
+        raise HTTPException(500, error_detail("DEMO_PLAYBACK_LAUNCH_FAILED", err=str(exc))) from exc
 
 
-class DemoPlayByPathBody(BaseModel):
-    path: str = Field(..., min_length=1)
+@app.get("/api/demo/playback/preflight")
+async def demo_playback_preflight():
+    """Preflight for the playback dialog; launch performs the authoritative recheck."""
+    cfg = ensure_cs2_path(load_config())
+    return await asyncio.to_thread(demo_playback_service.preflight, cfg)
 
 
 @app.post("/api/demo/play")
 async def play_demo_by_path(body: DemoPlayByPathBody):
     """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
     dem_path = resolve_uploaded_demo_path(body.path)
-    await asyncio.to_thread(_launch_cs2_play_demo, dem_path)
-    return {"ok": True}
+    return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
 
 
 @app.post("/api/demos/{demo_id}/play")
-async def play_demo_in_cs2(demo_id: int):
+async def play_demo_in_cs2(
+    demo_id: int,
+    body: Annotated[Optional[DemoPlaybackOptionsBody], Body()] = None,
+):
     """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
@@ -2735,8 +2740,7 @@ async def play_demo_in_cs2(demo_id: int):
     if not dem_path or not Path(dem_path).is_file():
         raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
 
-    await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path))
-    return {"ok": True}
+    return await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path), body)
 
 
 @app.post("/api/demos/{demo_id}/delete-file")

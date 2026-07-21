@@ -24,8 +24,7 @@ import RoundTimelineView from "./analysis/timeline/RoundTimelineView";
 import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
-import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
-import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
+import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 
 /**
  * @param {{
@@ -54,7 +53,7 @@ export default function DemoInfoModal({
   onDequeue,
 }) {
   const t = useT();
-  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
+  const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
   const [tab, setTab] = useState("parse"); // "parse" | "clips" | "weapon_kills" | "timeline"
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -227,19 +226,14 @@ export default function DemoInfoModal({
     }
   }, [demoId, selectedPlayers, freezeToDeathDraft]);
 
-  const handlePlayDemo = useCallback(async () => {
+  const handlePlayDemo = useCallback(() => {
     if (!demoId) return;
     const label =
       (demoData?.display_name && String(demoData.display_name).trim()) ||
       demoData?.filename ||
       `#${demoId}`;
-    try {
-      await playDemoInCs2({ id: demoId });
-      showPlayToast(true, label);
-    } catch (e) {
-      showPlayToast(false, playDemoErrorLabel(e));
-    }
-  }, [demoId, demoData, showPlayToast]);
+    void requestPlayDemo({ id: demoId, label });
+  }, [demoId, demoData, requestPlayDemo]);
 
   const handleToggleClip = useCallback((uid) => {
     if (!uid || queuedClientClipUids.has(uid)) return;
@@ -465,7 +459,7 @@ export default function DemoInfoModal({
   }, [parsedPlayers, queuedClientClipUids]);
 
   if (!open || !demoId) {
-    return <PlayDemoToast />;
+    return <DemoPlaybackUi />;
   }
 
   return (
@@ -679,7 +673,7 @@ export default function DemoInfoModal({
         </div>
       </div>
     </div>
-    <PlayDemoToast />
+    <DemoPlaybackUi />
     </>
   );
 }

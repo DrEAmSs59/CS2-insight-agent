@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .obs_director import is_cs2_running
+from .cs2_config_backup import is_cs2_running
 
 CS2_RUNNING_POV_MSG = (
     "检测到 CS2 正在运行。POV HUD 需要修改本地资源加载配置，请先关闭 CS2 后再继续。"
@@ -218,18 +218,16 @@ class PovHudManager:
 
         # 若残留 manifest，先尝试恢复再重装，避免重复备份错乱
         if manifest_path.is_file():
-            try:
-                self.restore()
-            except PovHudError:
-                pass
+            self.restore()
 
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         raw_gi = gi_path.read_text(encoding="utf-8", errors="surrogateescape")
         original_sha = sha256_file(gi_path)
 
-        if not bak_path.is_file():
-            shutil.copy2(gi_path, bak_path)
+        # Each session must back up the current gameinfo.gi. Reusing an older
+        # successful session's backup can roll back later Steam updates.
+        shutil.copy2(gi_path, bak_path)
 
         try:
             shutil.copy2(pov_src, pov_dst)
@@ -271,6 +269,16 @@ class PovHudManager:
         try:
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as e:
+            # Do not leave a patched game without a manifest that startup recovery can find.
+            try:
+                shutil.copy2(bak_path, gi_path)
+            except OSError:
+                pass
+            try:
+                if pov_dst.is_file():
+                    pov_dst.unlink()
+            except OSError:
+                pass
             raise PovHudError("无法写入 CS2 目录，请尝试以管理员权限运行，或检查 Steam / CS2 目录权限。") from e
 
     def restore(self) -> None:
@@ -296,15 +304,23 @@ class PovHudManager:
             raise PovHudError("POV HUD 自动恢复失败，请到 .cs2_insight_pov_backup 目录手动恢复 gameinfo.gi.bak。") from e
 
         try:
-            manifest_path.unlink()
-        except OSError:
-            pass
-
-        try:
             if pov_dst.is_file():
                 pov_dst.unlink()
         except OSError as e:
             raise PovHudError("POV HUD 自动恢复失败：无法删除 pov.vpk。") from e
+
+        try:
+            manifest_path.unlink()
+        except OSError as e:
+            raise PovHudError("POV HUD 自动恢复失败：无法删除恢复记录。") from e
+
+        try:
+            if bak_path.is_file():
+                bak_path.unlink()
+        except OSError:
+            # gameinfo and pov.vpk are already restored; an orphan backup is harmless
+            # and will be overwritten on the next install.
+            pass
 
         try:
             if backup_dir.is_dir() and not any(backup_dir.iterdir()):
