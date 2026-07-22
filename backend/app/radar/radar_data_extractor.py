@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
+from bisect import bisect_left
 from typing import Any
 
 from app.demo_parse_isolation import extract_radar_timeline_isolated
@@ -193,6 +195,7 @@ def extract_radar_timeline(
     radar_sync_offset_sec: float = 0.0,
     record_segments: list[dict[str, Any]] | None = None,
     radar_timing: dict[str, Any] | None = None,
+    include_all_players: bool = False,
 ) -> list[dict[str, Any]]:
     """Wrap isolated worker (demoparser native crashes cannot kill FastAPI)."""
     try:
@@ -209,6 +212,7 @@ def extract_radar_timeline(
             radar_sync_offset_sec=float(radar_sync_offset_sec),
             record_segments=record_segments,
             radar_timing=radar_timing,
+            include_all_players=bool(include_all_players),
         )
     except Exception as e:
         logger.warning("radar timeline isolated parse failed: %s", e)
@@ -232,6 +236,7 @@ def extract_radar_timeline_impl(
     radar_sync_offset_sec: float = 0.0,
     record_segments: list[dict[str, Any]] | None = None,
     radar_timing: dict[str, Any] | None = None,
+    include_all_players: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Runs inside parse_worker child process.
@@ -252,6 +257,48 @@ def extract_radar_timeline_impl(
         if s.endswith(".0") and s[:-2].isdigit():
             s = s[:-2]
         return s
+
+    def _safe_number(val: object, default: float = 0.0) -> float:
+        try:
+            parsed = float(val)
+        except (TypeError, ValueError):
+            return default
+        return default if pd.isna(parsed) else parsed
+
+    def _safe_text(value: object) -> str:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        text = str(value).strip()
+        return "" if text.lower() in {"nan", "nat", "none", "null", "undefined"} else text
+
+    def _safe_weapon_text(value: object) -> str:
+        text = _safe_text(value).removeprefix("weapon_")
+        if not text:
+            return ""
+        try:
+            float(text)
+        except ValueError:
+            return text
+        return ""
+
+    def _safe_bool(value: object) -> bool:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return False
+        return bool(value)
+
+    def _first_text(record: pd.Series, *keys: str) -> str:
+        for key in keys:
+            value = _safe_text(record.get(key))
+            if value:
+                return value
+        return ""
+
+    def _first_number(record: pd.Series, *keys: str, default: float = 0.0) -> float:
+        for key in keys:
+            value = _safe_number(record.get(key), math.nan)
+            if math.isfinite(value):
+                return value
+        return default
 
     def _team_side(team_num: float | int) -> str:
         try:
@@ -315,7 +362,7 @@ def extract_radar_timeline_impl(
                     pov_team = None
                 pov_display_name = str(hit.iloc[0].get(name_col) or "").strip()
 
-    if pov_team is None:
+    if pov_team is None and not include_all_players:
         return []
 
     n_frames = max(1, int(round(max(0.01, duration_sec) * max(0.01, fps))))
@@ -365,6 +412,12 @@ def extract_radar_timeline_impl(
         "team_num",
         "is_alive",
         "health",
+        "armor",
+        "active_weapon",
+        "active_weapon_name",
+        "has_defuser",
+        "has_c4",
+        "flash_duration",
         "player_color",
     ]
 
@@ -396,7 +449,7 @@ def extract_radar_timeline_impl(
         grp = snap_by_tick.get(tick)
         players_out: list[dict[str, Any]] = []
         if grp is not None and not grp.empty and "team_num" in grp.columns:
-            if "is_alive" in grp.columns:
+            if "is_alive" in grp.columns and not include_all_players:
                 alive_df = grp[grp["is_alive"].astype(bool)]
                 work = alive_df if not alive_df.empty else grp
             else:
@@ -406,9 +459,9 @@ def extract_radar_timeline_impl(
                     tm = int(float(r.get("team_num")))
                 except (TypeError, ValueError):
                     continue
-                if tm != pov_team:
+                if not include_all_players and tm != pov_team:
                     continue
-                nm = str(r.get("name") or "").strip()
+                nm = _safe_text(r.get("name"))
                 sid_c = _norm_sid(r.get("steamid")) if "steamid" in work.columns else ""
                 try:
                     hx = float(r.get("X"))
@@ -424,10 +477,7 @@ def extract_radar_timeline_impl(
                         yaw_v = 0.0
                 alive = True
                 if "is_alive" in work.columns:
-                    try:
-                        alive = bool(r.get("is_alive"))
-                    except Exception:
-                        alive = True
+                    alive = _safe_bool(r.get("is_alive"))
                 is_pov = False
                 if pov_sid and sid_c and sid_c == pov_sid:
                     is_pov = True
@@ -464,8 +514,14 @@ def extract_radar_timeline_impl(
                         "z": hz,
                         "yaw": yaw_v,
                         "is_alive": alive,
+                        "health": max(0, int(_safe_number(r.get("health"), 0))),
+                        "armor": max(0, int(_safe_number(r.get("armor"), 0))),
+                        "weapon": _safe_weapon_text(r.get("active_weapon_name")) or _safe_weapon_text(r.get("active_weapon")),
+                        "has_defuser": _safe_bool(r.get("has_defuser")) if "has_defuser" in work.columns else False,
+                        "has_c4": _safe_bool(r.get("has_c4")) if "has_c4" in work.columns else False,
+                        "flash_duration": max(0.0, _safe_number(r.get("flash_duration"), 0.0)),
                         "is_pov": is_pov,
-                        "is_teammate": True,
+                        "is_teammate": pov_team is not None and tm == pov_team,
                         "slot_color_index": color_slot if 0 <= color_slot <= 4 else -1,
                     },
                 )
@@ -482,5 +538,51 @@ def extract_radar_timeline_impl(
                 "players": players_out,
             },
         )
+
+    # Keep replay self-contained for workspaces cached before the shots field
+    # existed.  Attaching shots to the nearest 8 Hz frame avoids a second demo
+    # parse in the API process and preserves native-parser crash isolation.
+    try:
+        raw_fire = parser.parse_event(
+            "weapon_fire",
+            player=["steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch"],
+            other=["weapon"],
+        )
+        fire_df = _to_pandas_df(raw_fire)
+    except Exception:
+        fire_df = pd.DataFrame()
+
+    non_bullet_weapons = {
+        "", "c4", "knife", "knife_t", "taser", "hegrenade", "flashbang",
+        "smokegrenade", "molotov", "incgrenade", "incendiary", "decoy",
+    }
+    if timeline and not fire_df.empty and "tick" in fire_df.columns:
+        for _, shot_row in fire_df.iterrows():
+            shot_tick = int(_safe_number(shot_row.get("tick"), 0))
+            if shot_tick < start_i or shot_tick > end_i:
+                continue
+            weapon = _safe_weapon_text(shot_row.get("weapon"))
+            if weapon.lower() in non_bullet_weapons:
+                continue
+            actor = _first_text(shot_row, "user_name", "player_name", "name")
+            if not actor:
+                continue
+            insertion = bisect_left(sample_ticks, shot_tick)
+            candidates = [index for index in (insertion - 1, insertion) if 0 <= index < len(sample_ticks)]
+            if not candidates:
+                continue
+            frame_index = min(candidates, key=lambda index: abs(sample_ticks[index] - shot_tick))
+            payload: dict[str, Any] = {
+                "tick": shot_tick,
+                "actor": actor,
+                "weapon": weapon,
+                "yaw": _first_number(shot_row, "user_yaw", "player_yaw", "yaw"),
+                "pitch": _first_number(shot_row, "user_pitch", "player_pitch", "pitch"),
+            }
+            x = _first_number(shot_row, "user_X", "player_X", "X", default=math.nan)
+            y = _first_number(shot_row, "user_Y", "player_Y", "Y", default=math.nan)
+            if math.isfinite(x) and math.isfinite(y):
+                payload.update({"x": x, "y": y})
+            timeline[frame_index].setdefault("shots", []).append(payload)
 
     return timeline

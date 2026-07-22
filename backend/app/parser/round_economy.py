@@ -124,13 +124,24 @@ def build_round_economy_shared(
         return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
     economy_fields = PLAYER_TEAM_PARSE_FIELDS + [
-        "current_equip_value", "is_alive", "name", "steamid", "user_id",
+        "current_equip_value", "cash_spent_this_round", "start_balance",
+        "armor", "has_helmet", "has_defuser", "inventory",
+        "is_alive", "name", "steamid", "user_id",
     ]
     try:
         raw = parser.parse_ticks(economy_fields, ticks=ticks)
         economy_ticks_df = coalesce_player_team_num(_to_pandas_df(raw))
     except Exception:
-        return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
+        # Older demoparser builds can reject one of the optional economy
+        # fields. Preserve the original Insight Agent equipment-value path.
+        economy_fields = PLAYER_TEAM_PARSE_FIELDS + [
+            "current_equip_value", "is_alive", "name", "steamid", "user_id",
+        ]
+        try:
+            raw = parser.parse_ticks(economy_fields, ticks=ticks)
+            economy_ticks_df = coalesce_player_team_num(_to_pandas_df(raw))
+        except Exception:
+            return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()
 
     if economy_ticks_df.empty or "tick" not in economy_ticks_df.columns:
         return {}, round_freeze_end_ticks, round_freeze_start_ticks, tick_to_round, pd.DataFrame()

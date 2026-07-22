@@ -51,14 +51,9 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
           <Library className="h-4 w-4 shrink-0 opacity-90" />
           {t("nav.demoLibrary")}
         </NavLink>
-        <NavLink to="/demo-analysis-preview" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
+        <NavLink to="/analysis" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <BarChart3 className="h-4 w-4 shrink-0 opacity-90" />
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span>Demo 分析</span>
-            <span className="rounded border border-cs2-accent/30 bg-cs2-accent-soft px-1 py-0.5 font-mono text-[8px] leading-none text-cs2-accent">
-              PREVIEW
-            </span>
-          </span>
+          Demo 分析
         </NavLink>
         <NavLink
           to="/queue"

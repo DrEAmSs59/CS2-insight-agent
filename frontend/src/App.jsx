@@ -45,7 +45,6 @@ import CustomTitleBar from "./components/CustomTitleBar";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
-const AnalysisPage = lazy(() => import("./pages/AnalysisPage"));
 const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
@@ -145,6 +144,7 @@ export default function App() {
   const [parsedMatches, setParsedMatches] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const currentMatchIndexRef = useRef(0);
+  const autoParseLoadedDemosRef = useRef(null);
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
@@ -156,6 +156,8 @@ export default function App() {
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
   const [activePlayerTabs, setActivePlayerTabs] = useState({});
+  const [aiReviewingPlayers, setAiReviewingPlayers] = useState({});
+  const aiReviewInFlightRef = useRef(new Set());
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
@@ -282,13 +284,11 @@ export default function App() {
     [currentParsed]
   );
 
-  // ── 当前 Tab 内的活跃玩家（默认第一个） ──
-  const currentActivePlayer =
-    activePlayerTabs[currentMatchIndex] ??
-    parsedPlayerNames[0] ??
-    "";
+  // ── 当前 Tab 内的活跃玩家（默认不选，避免全员解析后误触发 AI） ──
+  const currentActivePlayer = activePlayerTabs[currentMatchIndex] ?? "";
 
   const activePlayerData = currentParsed?.players?.[currentActivePlayer] ?? null;
+  const analysisWorkspace = currentParsed?.analysis_workspace ?? null;
   const clips = activePlayerData?.clips ?? [];
   const timeline = activePlayerData?.timeline ?? null;
   const roundTimeline = activePlayerData?.round_timeline ?? null;
@@ -737,6 +737,7 @@ export default function App() {
             if (!Object.keys(players).length) return null;
             return {
               players,
+              analysis_workspace: r.analysis_workspace ?? null,
               demo_path: d.path,
               demo_filename: d.filename,
             };
@@ -752,6 +753,7 @@ export default function App() {
                 round_timeline: r.round_timeline ?? null,
               },
             },
+            analysis_workspace: r.analysis_workspace ?? null,
             demo_path: d.path,
             demo_filename: d.filename,
           };
@@ -759,13 +761,11 @@ export default function App() {
       );
       const idMap = {};
       const selectedMap = {};
-      const tabMap = {};
       loaded.forEach((x, i) => {
         idMap[i] = x.id;
         if (resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id)) {
           const r = resolvedByDemoId[x.id] ?? [];
           selectedMap[i] = r;
-          if (r.length) tabMap[i] = r[0];
         } else if (x.cached_result) {
           const r = x.cached_result;
           let names = [];
@@ -776,10 +776,8 @@ export default function App() {
           }
           if (names.length) {
             selectedMap[i] = names;
-            tabMap[i] = names[0];
           } else if (x.cached_auto_player) {
             selectedMap[i] = [x.cached_auto_player];
-            tabMap[i] = x.cached_auto_player;
           }
         }
         if (!(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))) {
@@ -787,13 +785,12 @@ export default function App() {
             .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
             .filter((name) => typeof name === "string" && name.trim());
           selectedMap[i] = rosterNames;
-          if (!tabMap[i] && rosterNames.length) tabMap[i] = rosterNames[0];
         }
       });
       setLibraryDemoIdsByIndex(idMap);
       setCurrentMatchIndex(0);
       setSelectedPlayers(selectedMap);
-      setActivePlayerTabs(tabMap);
+      setActivePlayerTabs({});
       const ftdByIndex = {};
       loaded.forEach((x, i) => {
         const r = x.cached_result;
@@ -849,7 +846,12 @@ export default function App() {
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
-      await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
+      const loaded = await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
+      if (loaded?.length) {
+        const idMap = Object.fromEntries(loaded.map((demo, index) => [index, demo.id]));
+        setLibraryLoadingOverlay(false);
+        await autoParseLoadedDemosRef.current?.(loaded, idMap);
+      }
     } catch (e) {
       const failed = e.response?.data?.detail?.failed;
       if (Array.isArray(failed) && failed.length) {
@@ -1123,16 +1125,14 @@ export default function App() {
       setLibraryDemoIdsByIndex({});
       setCurrentMatchIndex(0);
       const selectedMap = {};
-      const tabMap = {};
       uploads.forEach((upload, index) => {
         const names = (upload.players || [])
           .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
           .filter((name) => typeof name === "string" && name.trim());
         selectedMap[index] = names;
-        if (names.length) tabMap[index] = names[0];
       });
       setSelectedPlayers(selectedMap);
-      setActivePlayerTabs(tabMap);
+      setActivePlayerTabs({});
       setFreezeToDeathRoundsByMatch({});
       setSelectedClientClipUids(new Set());
       const uploadDoneMsg =
@@ -1142,6 +1142,7 @@ export default function App() {
       setProgressText("");
       setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
       navigate("/analysis");
+      await autoParseLoadedDemosRef.current?.(uploads, {});
     } catch (e) {
       setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     } finally {
@@ -1246,6 +1247,7 @@ export default function App() {
           const mergedPlayers = { ...(cur?.players || {}), ...processedPlayers };
           base[idx] = {
             players: mergedPlayers,
+            analysis_workspace: data.analysis_workspace ?? cur?.analysis_workspace ?? null,
             demo_path: demos[idx].path,
             demo_filename: fn,
           };
@@ -1278,8 +1280,6 @@ export default function App() {
             : { picked: [] },
         }));
 
-        setActivePlayerTabs((prev) => ({ ...prev, [idx]: names[0] }));
-
         const rounds = firstMeta?.total_rounds ?? "?";
         const totalRegular = Object.values(processedPlayers).reduce(
           (s, pd) => s + (pd.clips ?? []).filter((c) => c.category !== "meme_death").length,
@@ -1299,12 +1299,14 @@ export default function App() {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
           else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
         }
+        return true;
       } catch (e) {
         const err = t("app.parseFail", { fn, msg: e.response?.data?.detail || e.message });
         if (!quietProgress) {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
           else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
         }
+        return false;
       } finally {
         setParsingByIndex((prev) => {
           const next = { ...prev };
@@ -1321,6 +1323,100 @@ export default function App() {
   }, [currentMatchIndex, handleParseForIndex]);
 
   const LIBRARY_PARSE_CONCURRENCY = 2;
+
+  const autoParseLoadedDemos = useCallback(async (loaded, demoIdsByIndex = {}) => {
+    const demos = Array.isArray(loaded) ? loaded : [];
+    const specs = demos
+      .map((demo, index) => ({
+        index,
+        players: (demo?.players || [])
+          .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+          .filter((name) => typeof name === "string" && name.trim()),
+      }))
+      .filter((spec) => spec.players.length > 0);
+    if (!specs.length) return;
+
+    let done = 0;
+    let succeeded = 0;
+    const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
+    setAnalysisInlineProgress({
+      active: true,
+      text: `正在自动解析 ${specs.length} 个 Demo 的全部 ${totalPlayers} 名玩家（0/${specs.length}）…`,
+    });
+    const ctx = {
+      demos,
+      libraryDemoIdsByIndex: demoIdsByIndex,
+      suppressProgressText: true,
+    };
+    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
+      const ok = await handleParseForIndex(spec.index, spec.players, ctx);
+      done += 1;
+      if (ok) succeeded += 1;
+      setAnalysisInlineProgress({
+        active: done < specs.length,
+        text: done < specs.length
+          ? `正在自动解析每个 Demo 的全部玩家（${done}/${specs.length}）…`
+          : succeeded === specs.length
+            ? `已自动解析 ${specs.length} 个 Demo，共 ${totalPlayers} 名玩家`
+            : `自动解析完成：成功 ${succeeded} 个，失败 ${specs.length - succeeded} 个`,
+      });
+    });
+  }, [handleParseForIndex]);
+  autoParseLoadedDemosRef.current = autoParseLoadedDemos;
+
+  const ensurePlayerAiReview = useCallback(async (playerName, matchIndex = currentMatchIndex) => {
+    const name = String(playerName || "").trim();
+    if (!aiMode || !name) return false;
+    const playerData = parsedMatches?.[matchIndex]?.players?.[name];
+    const clipsToReview = Array.isArray(playerData?.clips) ? playerData.clips : [];
+    if (!clipsToReview.length) return false;
+    const alreadyReviewed = Boolean(playerData?.ai_reviewed) || clipsToReview.some((clip) => (
+      clip?.ai_score != null
+      || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
+    ));
+    if (alreadyReviewed) return true;
+
+    const requestKey = `${matchIndex}:${name}`;
+    if (aiReviewInFlightRef.current.has(requestKey)) return false;
+    aiReviewInFlightRef.current.add(requestKey);
+    setAiReviewingPlayers((previous) => ({ ...previous, [requestKey]: true }));
+    try {
+      const { data } = await API.post("/demo/review-clips", {
+        clips: clipsToReview,
+        match_meta: playerData?.match_meta || {},
+        locale: useLocaleStore.getState().locale,
+      });
+      const reviewedClips = ensureClientClipUidsOnClips(data?.clips || clipsToReview);
+      setParsedMatches((previous) => {
+        if (!Array.isArray(previous) || !previous[matchIndex]?.players?.[name]) return previous;
+        const next = [...previous];
+        const current = next[matchIndex];
+        next[matchIndex] = {
+          ...current,
+          players: {
+            ...current.players,
+            [name]: {
+              ...current.players[name],
+              clips: reviewedClips,
+              ai_reviewed: true,
+            },
+          },
+        };
+        return next;
+      });
+      return true;
+    } catch (error) {
+      setProgressText(`AI 锐评生成失败：${error.response?.data?.detail || error.message}`, { isError: true });
+      return false;
+    } finally {
+      aiReviewInFlightRef.current.delete(requestKey);
+      setAiReviewingPlayers((previous) => {
+        const next = { ...previous };
+        delete next[requestKey];
+        return next;
+      });
+    }
+  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText]);
 
   const runLibraryBatchLoad = useCallback(
     async ({ mode, manualLines }) => {
@@ -2324,6 +2420,8 @@ export default function App() {
     setCurrentMatchIndex(0);
     setSelectedPlayers({});
     setActivePlayerTabs({});
+    setAiReviewingPlayers({});
+    aiReviewInFlightRef.current.clear();
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
@@ -2857,6 +2955,7 @@ export default function App() {
     players,
     matchMeta,
     currentParsed,
+    analysisWorkspace,
     selectedPlayersList,
     setSelectedPlayers,
     handleParse,
@@ -2881,6 +2980,8 @@ export default function App() {
     parsedPlayerNames,
     currentActivePlayer,
     setActivePlayerTabs,
+    ensurePlayerAiReview,
+    aiReviewingPlayers,
     roundMontageMaxRounds,
     freezeToDeathDraft,
     setFreezeToDeathDraft,
@@ -2946,18 +3047,15 @@ export default function App() {
     killFxTickOffset,
   };
 
-  const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
   const parsingShownInline =
     location.pathname === "/analysis" &&
-    hasDemosInline &&
-    (Boolean(parsingByIndex[currentMatchIndex]) || analysisInlineProgress?.active === true);
+    (parsing || anyDemoParsing || analysisInlineProgress?.active === true);
 
   const showGlobalNotice =
     batchRecording ||
-    Boolean(progressText?.trim()) ||
+    (Boolean(progressText?.trim()) && !parsingShownInline) ||
     (anyDemoParsing && !parsingShownInline);
   const isStandalonePreview = [
-    "/demo-analysis-preview",
     "/obs-ai-preview",
     "/obs-ai-entry-preview",
   ].includes(location.pathname);
@@ -3021,8 +3119,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<AnalysisPage />} />
-                <Route path="/demo-analysis-preview" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/analysis" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
                 <Route path="/lite-cut" element={<LiteCutEditorPage />} />

@@ -27,4 +27,15 @@ describe("DemoUpload", () => {
       expect(onUpload).toHaveBeenCalledWith(["C:\\Demos\\one.dem", "D:\\two.dem"]);
     });
   });
+
+  test("keeps parsing progress inside the upload box and disables picking", async () => {
+    const onUpload = vi.fn();
+    render(<DemoUpload onUpload={onUpload} loading loadingText="正在自动解析 5 个 Demo（2/5）…" />);
+
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByText("正在自动解析 5 个 Demo（2/5）…")).toBeTruthy();
+    fireEvent.click(screen.getByRole("status"));
+    expect(desktopBridgeMock.chooseDemoFiles).not.toHaveBeenCalled();
+    expect(onUpload).not.toHaveBeenCalled();
+  });
 });

@@ -445,7 +445,7 @@ function estimatedApplyProgress(elapsedSeconds, testSeconds) {
   if (elapsedSeconds < 5) return { index: 4, detail: "正在读取 OBS 的实际生效值。" };
   if (elapsedSeconds < recordingStart) return { index: 5, detail: "正在设置硬件录制方式。" };
   if (elapsedSeconds < recordingEnd) return { index: 6, detail: `正在进行 ${testSeconds} 秒短录制：约第 ${Math.max(1, elapsedSeconds - recordingStart + 1)} 秒。` };
-  return { index: 7, detail: elapsedSeconds < recordingEnd + 15 ? "短录制已结束，正在保存视频并检查帧率、掉帧和日志。" : "OBS 保存或媒体检查比平时更久，系统仍在等待明确结果，最长等待 2 分钟。" };
+  return { index: 7, detail: elapsedSeconds < recordingEnd + 15 ? "短录制已结束，正在确认文件并检查帧率、掉帧和日志。" : "文件验收响应比平时更久；超过 75 秒会停止等待并显示重试按钮。" };
 }
 
 function ApplyWorkspace({ result, loading, elapsedSeconds = 0, testSeconds = 10, onBack, onRetry, onViewReport }) {
@@ -811,7 +811,7 @@ export default function ObsAiSettingsPanel({
     } catch (error) {
       const timedOut = error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT";
       const message = timedOut
-        ? "OBS 保存测试视频或验收用时超过 2 分钟。请查看 OBS 是否仍在录制，再重新检查连接；系统不会自动降低你的设置。"
+        ? "OBS 测试在 75 秒内没有返回结果，页面已停止等待。请确认 OBS 已停止录制后再点“重新执行”；系统不会自动降低你的设置。"
         : error?.response?.data?.detail || error?.message || "自动设置 OBS 时出现问题";
       setApplyResult({ ok: false, status: "request_failed", message, events: [] });
     } finally {
