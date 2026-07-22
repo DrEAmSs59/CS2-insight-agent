@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -275,13 +276,42 @@ def _ws_connect(obs_cfg, *, timeout: float = 60.0) -> obsws:
     return ws
 
 
-def _ws_disconnect(ws: Optional[obsws]) -> None:
+def _ws_disconnect(ws: Optional[obsws], *, timeout: float = 2.0) -> None:
     if not ws:
         return
-    try:
-        ws.disconnect()
-    except Exception:  # noqa: BLE001
-        pass
+    # obs-websocket-py's disconnect() closes the socket and then performs an
+    # unbounded join() on its receiver thread. After StopRecord, some OBS/
+    # websocket combinations leave that receiver blocked even though recording
+    # and file finalization have completed. Never let cleanup hold an HTTP
+    # response forever.
+    finished = threading.Event()
+
+    def disconnect_worker() -> None:
+        try:
+            ws.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=disconnect_worker, name="obs-ws-disconnect", daemon=True)
+    worker.start()
+    if finished.wait(max(0.05, float(timeout))):
+        return
+
+    receiver = getattr(ws, "thread_recv", None)
+    if receiver is not None:
+        try:
+            receiver.running = False
+        except Exception:  # noqa: BLE001
+            pass
+    transport = getattr(ws, "ws", None)
+    if transport is not None:
+        try:
+            transport.close()
+        except Exception:  # noqa: BLE001
+            pass
+    logger.warning("Timed out while closing OBS WebSocket; response will continue without waiting for receiver thread")
 
 
 def _obs_is_recording(ws: obsws) -> bool:

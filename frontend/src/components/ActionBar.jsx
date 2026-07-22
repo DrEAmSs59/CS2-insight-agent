@@ -13,10 +13,18 @@ export default function ActionBar({
   queueLength,
   batchRecording,
   canAddCurrentPlayerHighlights,
+  sticky = false,
 }) {
   const t = useT();
   return (
-    <div className="border-t border-cs2-border bg-cs2-bg-sidebar px-4 py-3 sm:px-5">
+    <div
+      data-testid="clip-selection-action-bar"
+      className={`border-t border-cs2-border bg-cs2-bg-sidebar px-4 py-3 sm:px-5 ${
+        sticky
+          ? "sticky bottom-0 z-40 shadow-[0_-12px_30px_rgba(0,0,0,0.28)]"
+          : ""
+      }`}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-4">
           <div className="font-mono text-sm">

@@ -75,6 +75,8 @@ _SHARED_BATCH_EVENT_NAMES = (
     "bomb_defused",
     "bomb_exploded",
     "bomb_begindefuse",
+    "bomb_dropped",
+    "bomb_pickup",
     "item_equip",
     "item_pickup",
     "weapon_fire",
@@ -92,7 +94,7 @@ _SHARED_BATCH_EVENT_NAMES = (
 )
 
 _SHARED_BATCH_PLAYER_FIELDS = (
-    "steamid", "name", "team_num", "X", "Y", "Z", "last_place_name",
+    "steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch", "last_place_name",
 )
 
 _SHARED_BATCH_OTHER_FIELDS = tuple(dict.fromkeys(
@@ -408,6 +410,7 @@ class DemoAnalyzer:
     def __init__(self, dem_path: str | Path):
         self.dem_path = Path(dem_path)
         self.parser = DemoParser(str(self.dem_path))
+        self.analysis_workspace: dict[str, Any] = {}
 
     def _detect_map(self) -> str:
         try:
@@ -461,7 +464,10 @@ class DemoAnalyzer:
         fallback: dict[str, pd.DataFrame] = {}
         fallback.update(safe_parse_events_batch(
             self.parser,
-            ["bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse"],
+            [
+                "bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse",
+                "bomb_dropped", "bomb_pickup",
+            ],
             other=["site", "total_rounds_played"],
             player=["steamid", "X", "Y", "Z", "last_place_name"],
         ))
@@ -474,6 +480,8 @@ class DemoAnalyzer:
         fallback.update(safe_parse_events_batch(
             self.parser,
             ["weapon_fire", "player_hurt"],
+            player=["steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch"],
+            other=["weapon", "total_rounds_played"],
         ))
         fallback.update(safe_parse_events_batch(
             self.parser,
@@ -531,6 +539,8 @@ class DemoAnalyzer:
         defused_df    = _filter_ms(_event_batch["bomb_defused"])
         bomb_exploded = _filter_ms(_event_batch["bomb_exploded"])
         begindefuse   = _filter_ms(_event_batch["bomb_begindefuse"])
+        bomb_dropped  = _filter_ms(_event_batch["bomb_dropped"])
+        bomb_pickup   = _filter_ms(_event_batch["bomb_pickup"])
         equip_df      = _filter_ms(_event_batch["item_equip"])
         pickup_df     = _filter_ms(_event_batch["item_pickup"])
 
@@ -627,7 +637,10 @@ class DemoAnalyzer:
         )
 
         # Name strip on all relevant DataFrames
-        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
+        for _df in (
+            events, equip_df, fire_df, hurt_df, planted_df, defused_df,
+            bomb_exploded, begindefuse, bomb_dropped, bomb_pickup,
+        ):
             if _df is None or _df.empty:
                 continue
             for _col in _NAME_COLS:
@@ -659,6 +672,8 @@ class DemoAnalyzer:
             "defused_df":                    defused_df,
             "bomb_exploded_df":              bomb_exploded,
             "begindefuse_df":               begindefuse,
+            "bomb_dropped_df":               bomb_dropped,
+            "bomb_pickup_df":                bomb_pickup,
             "nade_batch":                    nade_batch,
             "re_df_cached":                  re_df,
             "win_panel_match_tick":          win_panel_match_tick,
@@ -1270,6 +1285,36 @@ class DemoAnalyzer:
                 shared_facts=shared_facts,
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
+
+        try:
+            from .match_workspace import build_match_workspace
+
+            raw_tick_rate = header.get("tick_rate") or header.get("tickrate") or TICK_RATE
+            try:
+                tick_rate = float(raw_tick_rate)
+            except (TypeError, ValueError):
+                tick_rate = float(TICK_RATE)
+            self.analysis_workspace = build_match_workspace(
+                map_name=map_name,
+                tick_rate=tick_rate,
+                match_start_tick=match_start_tick,
+                shared_events=_shared,
+                shared_facts=shared_facts,
+                player_results=results,
+                parser=self.parser,
+            )
+        except BaseException as exc:
+            if isinstance(exc, _DEMOPARSER_RE_RAISE):
+                raise
+            logger.exception("build_match_workspace failed for %s", self.dem_path)
+            self.analysis_workspace = {
+                "version": 1,
+                "map_name": map_name,
+                "tick_rate": float(TICK_RATE),
+                "players": [],
+                "rounds": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
         return results
 

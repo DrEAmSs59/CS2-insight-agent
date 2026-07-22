@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -28,6 +29,9 @@ ConnectionFactory = Callable[[Any], Any]
 BackupCreator = Callable[[], dict[str, str]]
 MediaProbe = Callable[[str, str], dict[str, Any]]
 LogReader = Callable[[float], dict[str, Any]]
+
+
+logger = logging.getLogger(__name__)
 
 
 def _connect_for_tuning(obs_cfg: Any) -> Any:
@@ -303,6 +307,48 @@ def _wait_record_state(
             return last
         sleep_fn(0.1)
     raise RuntimeError("OBS 录像状态确认超时")
+
+
+def _stop_test_recording(
+    ws: Any,
+    *,
+    obs_cfg: Any,
+    connection_factory: ConnectionFactory,
+    disconnect: Callable[[Any], None],
+    sleep_fn: Callable[[float], None],
+) -> str:
+    """Stop the test recording without trusting stale state on the command socket.
+
+    OBS can finish and return ``outputPath`` while ``GetRecordStatus`` on the
+    same long-lived websocket continues to report the previous active state.
+    A successful StopRecord response containing a path is already OBS's
+    acknowledgement that the file was finalized.  Only when that response has
+    no path (or times out) do we confirm on a fresh websocket connection.
+    """
+    stop_error: Optional[Exception] = None
+    try:
+        response = ws.call(obs_requests.StopRecord())
+        output_path = str(_response_data(response).get("outputPath") or "").strip()
+        if output_path:
+            return output_path
+    except Exception as exc:  # noqa: BLE001
+        stop_error = exc
+
+    confirmation_ws: Any = None
+    try:
+        confirmation_ws = connection_factory(obs_cfg)
+        stopped = _wait_record_state(confirmation_ws, False, sleep_fn=sleep_fn)
+        output_path = str(stopped.get("outputPath") or "").strip()
+        if output_path:
+            return output_path
+        raise RuntimeError("OBS 已停止录像，但没有返回测试文件路径")
+    except Exception as confirm_error:  # noqa: BLE001
+        if stop_error is not None:
+            raise RuntimeError("OBS 停止了录像，但没有返回可用的测试文件信息") from stop_error
+        raise confirm_error
+    finally:
+        if confirmation_ws is not None and confirmation_ws is not ws:
+            disconnect(confirmation_ws)
 
 
 def _rate_value(raw: str) -> float:
@@ -723,6 +769,7 @@ def apply_video_tuning_plan(
         test_started_at = time.time()
         output_path = ""
         record_started = False
+        stop_attempted = False
         stats_before: dict[str, float] = {}
         stats_after: dict[str, float] = {}
         try:
@@ -741,22 +788,38 @@ def apply_video_tuning_plan(
                     f"正在按目标设置录制 {request.goal.test_seconds} 秒。",
                 )
             )
+            logger.info(
+                "OBS tuning short recording started: seconds=%s target=%sx%s@%s/%s",
+                request.goal.test_seconds,
+                target_video["output_width"],
+                target_video["output_height"],
+                target_video["fps_num"],
+                target_video["fps_den"],
+            )
             sleep_fn(float(request.goal.test_seconds))
             stats_after = _parse_stats(ws.call(get_stats()))
-            stop_response = ws.call(obs_requests.StopRecord())
+            stop_attempted = True
+            output_path = _stop_test_recording(
+                ws,
+                obs_cfg=app_cfg.obs,
+                connection_factory=connection_factory,
+                disconnect=disconnect,
+                sleep_fn=sleep_fn,
+            )
             record_started = False
-            stop_data = getattr(stop_response, "datain", None) or {}
-            output_path = str(stop_data.get("outputPath") or "").strip()
-            stopped = _wait_record_state(ws, False, sleep_fn=sleep_fn)
-            output_path = output_path or str(stopped.get("outputPath") or "").strip()
-            if not output_path:
-                raise RuntimeError("OBS 已停止录像，但没有返回测试文件路径")
+            logger.info("OBS tuning short recording stopped: output=%s", output_path)
             events[-1] = _event("record", "进行短录制测试", "ok", f"已完成 {request.goal.test_seconds} 秒测试录制。")
         except Exception as exc:  # noqa: BLE001
-            if record_started:
+            logger.warning("OBS tuning short recording failed: %s", exc)
+            if record_started and not stop_attempted:
                 try:
-                    stop_response = ws.call(obs_requests.StopRecord())
-                    output_path = str((getattr(stop_response, "datain", None) or {}).get("outputPath") or "").strip()
+                    output_path = _stop_test_recording(
+                        ws,
+                        obs_cfg=app_cfg.obs,
+                        connection_factory=connection_factory,
+                        disconnect=disconnect,
+                        sleep_fn=sleep_fn,
+                    )
                 except Exception:  # noqa: BLE001
                     pass
             events.append(_event("record", "进行短录制测试", "failed", str(exc)))
@@ -774,6 +837,7 @@ def apply_video_tuning_plan(
 
         try:
             sleep_fn(0.4)
+            logger.info("OBS tuning validating test file: output=%s", output_path)
             media = media_probe(output_path, str((discovery.get("ffmpeg") or {}).get("ffprobe_path") or ""))
             stats = _stats_report(stats_before, stats_after, int(target_video["fps_num"]))
             logs = log_reader(test_started_at)
@@ -792,7 +856,9 @@ def apply_video_tuning_plan(
                     "ffprobe、OBS Stats 与日志检查完成。",
                 )
             )
+            logger.info("OBS tuning validation finished: passed=%s", validation["passed"])
         except Exception as exc:  # noqa: BLE001
+            logger.warning("OBS tuning validation failed: %s", exc)
             events.append(_event("probe", "检查测试视频和掉帧", "failed", str(exc)))
             return _result(
                 ok=False,

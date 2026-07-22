@@ -1,3 +1,5 @@
+import threading
+import time
 from types import SimpleNamespace
 
 from app import obs_config_center
@@ -51,6 +53,35 @@ def test_tuning_connection_uses_bounded_websocket_timeout(monkeypatch):
 
     assert _connect_for_tuning(obs_cfg) is expected
     assert captured == {"obs_cfg": obs_cfg, "timeout": 12.0}
+
+
+def test_websocket_disconnect_cannot_block_http_result_forever():
+    release = threading.Event()
+
+    class Transport:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            release.set()
+
+    class HungWs:
+        def __init__(self):
+            self.thread_recv = SimpleNamespace(running=True)
+            self.ws = Transport()
+
+        def disconnect(self):
+            release.wait(5)
+
+    ws = HungWs()
+    started = time.monotonic()
+
+    obs_config_center._ws_disconnect(ws, timeout=0.01)
+
+    assert time.monotonic() - started < 0.5
+    assert ws.thread_recv.running is False
+    assert ws.ws.closed is True
 
 
 class FakeWs:
@@ -133,6 +164,34 @@ class FakeWs:
         raise AssertionError(f"unexpected OBS request: {name}")
 
 
+class StaleStatusAfterStopWs(FakeWs):
+    """Models OBS returning a finalized path while the command socket is stale."""
+
+    def __init__(self, video):
+        super().__init__(video)
+        self.stop_returned = False
+
+    def call(self, request):
+        name = type(request).__name__
+        if name == "StopRecord":
+            response = super().call(request)
+            self.stop_returned = True
+            return response
+        if name == "GetRecordStatus" and self.stop_returned:
+            return SimpleNamespace(datain={"outputActive": True, "outputPath": ""}, status=True)
+        return super().call(request)
+
+
+class NoPathStopWs(FakeWs):
+    """Models OBS builds that expose the path only via GetRecordStatus."""
+
+    def call(self, request):
+        if type(request).__name__ == "StopRecord":
+            self.recording_active = False
+            return SimpleNamespace(datain={})
+        return super().call(request)
+
+
 def _run(discovery, request, ws, backup_calls, *, media_probe=None, log_reader=None):
     cfg = SimpleNamespace(obs=SimpleNamespace(host="localhost", port=4455, password=""))
     default_probe = lambda path, _ffprobe: {
@@ -192,6 +251,30 @@ def test_apply_preserves_canvas_and_sets_exact_integer_fps():
     assert result["actual"]["recording"]["values"]["RecEncoder"] == "jim_nvenc"
     assert result["actual"]["recording"]["values"]["RecFormat2"] == "hybrid_mp4"
     assert ws.disconnected is True
+
+
+def test_finalized_stop_response_does_not_wait_on_stale_command_socket():
+    discovery = _discovery()
+    ws = StaleStatusAfterStopWs(discovery["obs"]["video"])
+    backups = []
+
+    started = time.monotonic()
+    result = _run(discovery, _request(discovery), ws, backups)
+
+    assert time.monotonic() - started < 1.0
+    assert result["status"] == "passed", result
+    assert result["test_file"] == ws.output_path
+
+
+def test_missing_stop_response_path_uses_fresh_status_confirmation():
+    discovery = _discovery()
+    ws = NoPathStopWs(discovery["obs"]["video"])
+    backups = []
+
+    result = _run(discovery, _request(discovery), ws, backups)
+
+    assert result["status"] == "passed", result
+    assert result["test_file"] == ws.output_path
 
 
 def test_stale_plan_stops_before_connecting_or_backing_up():

@@ -660,6 +660,7 @@ async def _run_library_demo_analyze(
             target_players,
             freeze_to_death_rounds,
         )
+        analysis_workspace = batch_result.pop("__analysis_workspace__", None)
         players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
         missing = [p for p in target_players if p not in players_out]
         if missing:
@@ -680,30 +681,6 @@ async def _run_library_demo_analyze(
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, msg)
 
-    cfg = load_config()
-    if cfg.ai_mode and cfg.llm.api_key:
-        from .ai_reviewer import enrich_clips_dicts_with_reviewer
-
-        async def _enrich_library_player(player: str) -> None:
-            pdata = players_out.get(player)
-            if not isinstance(pdata, dict):
-                return
-            clips = pdata.get("clips") or []
-            meta = pdata.get("match_meta")
-            if not clips or not isinstance(meta, dict):
-                return
-            try:
-                pdata["clips"] = await enrich_clips_dicts_with_reviewer(clips, meta, cfg.llm, locale=locale)
-            except Exception:
-                logger.exception(
-                    "AI review failed for library demo_id=%s path=%s player=%s",
-                    demo_id,
-                    dem_path,
-                    player,
-                )
-
-        await asyncio.gather(*[_enrich_library_player(p) for p in target_players])
-
     first_player = next(
         (player for player in target_players if player in players_out),
         next(iter(players_out)),
@@ -712,6 +689,7 @@ async def _run_library_demo_analyze(
     players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
     composite: dict[str, Any] = {
         "players": players_payload,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
         "analyzed_target_players": [p for p in target_players if p in players_payload],
         "auto_target_player": first_player,
         # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
@@ -728,7 +706,11 @@ async def _run_library_demo_analyze(
             await demo_db.replace_timeline_events(dem_path, player, pdata)
     await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
     await demo_library_hub.notify("analyzed")
-    return {"players": players_out, "demo_path": dem_path}
+    return {
+        "players": players_out,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
+        "demo_path": dem_path,
+    }
 
 
 
@@ -1502,8 +1484,12 @@ async def obs_tuning_plan(payload: ObsTuningPlanRequest):
 def obs_tuning_apply(payload: ObsTuningApplyRequest):
     """备份并应用已确认的视频/录制设置，再用短录制、ffprobe、Stats 与日志完成验收。"""
     cfg = load_config()
-    with _obs_launch_lock:
+    if not _obs_launch_lock.acquire(timeout=5.0):
+        raise HTTPException(409, "上一次 OBS 自动设置仍在收尾，请稍等几秒后重新检查；不会重复开始录制。")
+    try:
         return apply_video_tuning_plan(cfg, payload)
+    finally:
+        _obs_launch_lock.release()
 
 
 @app.post("/api/obs-config/diagnose")
@@ -1733,8 +1719,6 @@ async def parse_demo_multi(
 
     dem_path = resolve_uploaded_demo_path(path or filename)
 
-    cfg = load_config()
-
     try:
         results_by_player = await asyncio.to_thread(
             analyze_multi_isolated,
@@ -1745,24 +1729,11 @@ async def parse_demo_multi(
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
-    if cfg.ai_mode and cfg.llm.api_key:
-        from .ai_reviewer import enrich_clips_dicts_with_reviewer
-
-        async def _review(player: str, result) -> None:
-            try:
-                result["clips"] = await enrich_clips_dicts_with_reviewer(
-                    result.get("clips") or [],
-                    result.get("match_meta") or {},
-                    cfg.llm,
-                    locale=req.locale,
-                )
-            except Exception as e:
-                logging.error("AI review failed for %s: %s", player, e)
-
-        await asyncio.gather(*[_review(p, r) for p, r in results_by_player.items()])
+    analysis_workspace = results_by_player.pop("__analysis_workspace__", None)
 
     return {
-        "players": results_by_player
+        "players": results_by_player,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
     }
 
 
@@ -2711,6 +2682,142 @@ class DemoAnalyzeRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
     freeze_to_death_rounds: Optional[list[int]] = None
     locale: str = "zh"
+
+
+class DemoReplayRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    map_name: str = "unknown"
+    start_tick: int = Field(..., ge=0)
+    end_tick: int = Field(..., gt=0)
+    tick_rate: float = Field(64.0, gt=0, le=256)
+    fps: float = Field(8.0, ge=1, le=16)
+    pov_player_name: Optional[str] = None
+    pov_steamid64: Optional[str] = None
+
+
+class PlayerAnalysisReviewRequest(BaseModel):
+    player: dict[str, Any]
+    match: dict[str, Any] = Field(default_factory=dict)
+    locale: str = "zh"
+
+
+class PlayerClipReviewRequest(BaseModel):
+    clips: list[dict[str, Any]] = Field(..., min_length=1)
+    match_meta: dict[str, Any] = Field(default_factory=dict)
+    locale: str = "zh"
+
+
+@app.get("/api/demo/radar-map/{map_name}")
+async def get_demo_radar_map(map_name: str):
+    """Serve the bundled Insight Agent overhead radar used by 2D replay."""
+    map_key = str(map_name or "").strip().lower()
+    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
+        raise HTTPException(400, "Invalid map name")
+    if not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+    from .radar.radar_map_assets import resolve_map_png_path
+    try:
+        map_path = resolve_map_png_path(map_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"No bundled radar map for {map_key}") from exc
+    return FileResponse(str(map_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/api/demo/replay")
+async def get_demo_replay(req: DemoReplayRequest):
+    """Return one active-round 2D replay from the original Insight Agent parser."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
+    from .radar.radar_data_extractor import extract_radar_timeline
+    from .radar.radar_map_assets import lookup_map_data
+
+    frames = await asyncio.to_thread(
+        extract_radar_timeline,
+        demo_path=str(dem_path),
+        map_name=req.map_name,
+        pov_player_name=req.pov_player_name,
+        pov_steamid64=req.pov_steamid64,
+        start_tick=req.start_tick,
+        end_tick=req.end_tick,
+        fps=req.fps,
+        duration_sec=duration_sec,
+        demo_tick_rate=req.tick_rate,
+        include_all_players=True,
+    )
+    try:
+        transform = lookup_map_data(req.map_name)
+    except (KeyError, OSError):
+        transform = None
+    map_key = str(req.map_name or "unknown").strip().lower()
+    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+    return {
+        "frames": frames,
+        "map_name": map_key or "unknown",
+        "map_transform": transform,
+        "tick_rate": req.tick_rate,
+        "fps": req.fps,
+        "start_tick": req.start_tick,
+        "end_tick": req.end_tick,
+    }
+
+
+@app.post("/api/demo/player-review")
+async def review_demo_player(req: PlayerAnalysisReviewRequest):
+    """Generate a player-level review from the current Insight Agent parse."""
+    cfg = load_config()
+    if not (
+        llm_api_key_configured(cfg.llm.api_key)
+        or llm_base_url_is_local_host(cfg.llm.base_url)
+    ):
+        raise HTTPException(400, "请先在设置中配置 AI 服务")
+    try:
+        from .ai_reviewer import review_player_stats_with_reviewer
+
+        commentary = await review_player_stats_with_reviewer(
+            req.player,
+            req.match,
+            cfg.llm,
+            locale=req.locale,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Player review failed: %s", exc)
+        raise HTTPException(502, f"AI 点评生成失败：{exc}") from exc
+    return {"commentary": commentary}
+
+
+@app.post("/api/demo/review-clips")
+async def review_demo_player_clips(req: PlayerClipReviewRequest):
+    """Review one selected player's existing clips without re-parsing the Demo."""
+    cfg = load_config()
+    if not cfg.ai_mode:
+        raise HTTPException(409, "AI 洞察模式未开启")
+    if not (
+        llm_api_key_configured(cfg.llm.api_key)
+        or llm_base_url_is_local_host(cfg.llm.base_url)
+    ):
+        raise HTTPException(400, "请先在设置中配置 AI 服务")
+    try:
+        from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
+        clips = await enrich_clips_dicts_with_reviewer(
+            req.clips,
+            req.match_meta,
+            cfg.llm,
+            locale=req.locale,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Selected-player clip review failed: %s", exc)
+        raise HTTPException(502, f"AI 锐评生成失败：{exc}") from exc
+    return {"clips": clips, "reviewed": True}
 
 
 @app.get("/api/demos/{demo_id}/players")

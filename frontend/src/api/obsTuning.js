@@ -25,7 +25,7 @@ export async function createObsTuningPlan(goal) {
 }
 
 export async function applyObsTuningPlan(goal, planHash) {
-  const { data } = await API.post("/obs-tuning/apply", { goal, plan_hash: planHash }, { timeout: 120000 });
+  const { data } = await API.post("/obs-tuning/apply", { goal, plan_hash: planHash }, { timeout: 75000 });
   return data;
 }
 

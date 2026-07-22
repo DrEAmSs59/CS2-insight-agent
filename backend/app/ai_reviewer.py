@@ -333,6 +333,52 @@ class AIReviewer:
             return score, None
         return score, text
 
+    async def review_player_stats(
+        self,
+        player: dict[str, Any],
+        match_meta: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Generate an on-demand review from one player's parsed match statistics."""
+        if self._locale == "en":
+            system_prompt = (
+                "You are a concise CS2 match analyst. Explain the player's impact, one clear strength, "
+                "and one actionable weakness using only the supplied statistics. Do not invent events. "
+                "Return two short plain-text sentences, no markdown."
+            )
+        else:
+            system_prompt = (
+                "你是专业、简洁的 CS2 比赛分析师。只依据给出的原始比赛统计，概括该玩家的比赛影响、"
+                "一个明确优势和一个可执行的改进点；不得虚构回合或操作。输出两句中文纯文本，不要 Markdown。"
+            )
+        user_content = json.dumps(
+            {"match": match_meta or {}, "player": player or {}},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        create_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": 0.4,
+            "max_tokens": 300,
+        }
+        extra_body = completion_extra_body(self._model, self._base_url)
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
+        async with self._sem:
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(**create_kwargs),
+                timeout=self._timeout + 5.0,
+            )
+        choice = response.choices[0] if response.choices else None
+        text = message_text(choice.message if choice else None)
+        cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not cleaned:
+            raise ValueError("AI did not return a player review")
+        return cleaned[:500]
+
     async def review_clips(
         self,
         clips: list[Clip],
@@ -379,3 +425,13 @@ async def enrich_clips_dicts_with_reviewer(
     if text_m:
         meta["ai_meme_montage_commentary"] = text_m
     return [c.to_dict() for c in objs]
+
+
+async def review_player_stats_with_reviewer(
+    player: dict[str, Any],
+    match_meta: dict[str, Any],
+    llm: LLMConfig,
+    locale: str = "zh",
+) -> str:
+    reviewer = AIReviewer.from_llm_config(llm, locale=locale, max_concurrency=1)
+    return await reviewer.review_player_stats(player, match_meta)

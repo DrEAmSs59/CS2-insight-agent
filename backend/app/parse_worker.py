@@ -57,10 +57,14 @@ def _run(payload: dict) -> object:
             if not isinstance(ftd_raw, list):
                 raise ValueError("freeze_to_death_rounds must be a list of integers or null")
             ftd_list = [int(x) for x in ftd_raw]
-        results = DemoAnalyzer(dem_path).analyze_multi_players(
+        analyzer = DemoAnalyzer(dem_path)
+        results = analyzer.analyze_multi_players(
             target_players, freeze_to_death_rounds=ftd_list
         )
-        return {player: result.to_dict() for player, result in results.items()}
+        return {
+            "__analysis_workspace__": analyzer.analysis_workspace,
+            **{player: result.to_dict() for player, result in results.items()},
+        }
     if action == "players":
         return get_player_list(dem_path)
     if action == "summary":
