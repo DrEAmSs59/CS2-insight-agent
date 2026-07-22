@@ -27,13 +27,38 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Stamp release version
+      - name: Import Windows code-signing certificate
         shell: pwsh
-        run: ./packaging/windows/write-release-version.ps1 -Version "${{ github.ref_name }}"
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_PFX_BASE64) {
+            Write-Host "WINDOWS_PFX_BASE64 is not configured; producing an unsigned installer"
+            exit 0
+          }
+          if (-not $env:WINDOWS_PFX_PASSWORD) { throw "WINDOWS_PFX_PASSWORD is required when WINDOWS_PFX_BASE64 is configured" }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "cs2-insight-agent-code-signing.pfx"
+          try {
+            $encoded = $env:WINDOWS_PFX_BASE64 -replace '-----BEGIN [^-]+-----', '' -replace '-----END [^-]+-----', '' -replace '\s', ''
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($encoded))
+            $password = ConvertTo-SecureString $env:WINDOWS_PFX_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password |
+              Where-Object HasPrivateKey |
+              Select-Object -First 1
+            if (-not $certificate) { throw "The imported PFX did not contain a code-signing certificate with a private key" }
+            "CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Build lean demoparser wheel
         shell: pwsh
@@ -42,53 +67,69 @@ jobs:
           python -m pip install --disable-pip-version-check "maturin==$($meta.maturin_version)"
           ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
 
-      - name: Build current Electron product
+      - name: Build Tauri desktop installer
         shell: pwsh
         env:
-          WIN_CSC_LINK: ${{ secrets.WINDOWS_PFX_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           $wheel = Get-ChildItem "dist/wheels/demoparser2-*-cp312-*.whl" | Select-Object -First 1
           if (-not $wheel) { throw "CPython 3.12 lean demoparser wheel not found" }
           $env:CS2_INSIGHT_DEMOPARSER_WHEEL = $wheel.FullName
-          $env:ELECTRON_REFRESH_PYTHON = "1"
-          $ver = "${{ github.ref_name }}" -replace '^[vV]', ''
+          $env:CS2_INSIGHT_REFRESH_PYTHON = "1"
+          $ver = $env:RELEASE_TAG -replace '^[vV]', ''
           Push-Location frontend
           try {
-            npm.cmd run electron:build:ver -- $ver
-            if ($LASTEXITCODE -ne 0) { throw "Electron build failed: $LASTEXITCODE" }
+            npm.cmd run desktop:build:ver -- $ver
+            if ($LASTEXITCODE -ne 0) { throw "Tauri build failed: $LASTEXITCODE" }
           } finally {
             Pop-Location
           }
 
-      - name: Verify packaged runtime
+      - name: Verify bundled Python runtime
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $resources = (Resolve-Path "frontend/dist_electron/win-unpacked/resources").Path
+          $resources = (Resolve-Path "frontend/src-tauri/bundle-resources").Path
           $py = Join-Path $resources "python/python.exe"
-          if (-not (Test-Path -LiteralPath $py)) { throw "Packaged python.exe not found" }
+          if (-not (Test-Path -LiteralPath $py)) { throw "Bundled python.exe not found" }
           $env:PYTHONNOUSERSITE = "1"
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $backend = Join-Path $resources "backend"
           & $py -c "import sys; sys.path.insert(0, sys.argv[1]); import app.main, demoparser2, fastapi, importlib.metadata as m, importlib.util as u, numpy, openai, pandas, PIL, uvicorn; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None; print('runtime-ok', m.version('demoparser2'))" $backend
-          if ($LASTEXITCODE -ne 0) { throw "Packaged runtime verification failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Bundled runtime verification failed: $LASTEXITCODE" }
+          $expectedVersion = $env:RELEASE_TAG -replace '^[vV]', ''
+          $bundledVersion = (Get-Content (Join-Path $backend "app/release_version.txt") -Raw).Trim()
+          if ($bundledVersion -ne $expectedVersion) { throw "Bundled backend version mismatch: expected $expectedVersion, got $bundledVersion" }
 
-      - name: Report packaged runtime size
+      - name: Report bundled runtime size
         shell: pwsh
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/dist_electron/win-unpacked/resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 180
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 150
 
       - name: Write SHA256SUMS
         shell: pwsh
         run: |
-          $artifacts = @(
-            Get-ChildItem -LiteralPath "frontend/dist_electron" -File |
-              Where-Object { $_.Extension -eq ".exe" -or $_.Name -eq "latest.yml" -or $_.Name.EndsWith(".blockmap") }
-          )
-          $installer = $artifacts | Where-Object Extension -eq ".exe" | Select-Object -First 1
-          if (-not $installer) { throw "Electron installer not found" }
+          $artifacts = @(Get-ChildItem -LiteralPath "frontend/src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File)
+          $installer = $artifacts | Select-Object -First 1
+          if (-not $installer) { throw "Tauri NSIS installer not found" }
           $installerMiB = $installer.Length / 1MB
           Write-Host ("Installer size: {0:N2} MiB" -f $installerMiB)
-          if ($installerMiB -gt 175) { throw ("Installer exceeds 175 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          if ($installerMiB -gt 70) { throw ("Installer exceeds 70 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          $appExe = Get-Item "frontend/src-tauri/target/release/cs2-insight-agent-desktop.exe"
+          if ($env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT) {
+            $expectedThumbprint = $env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', ''
+            foreach ($artifact in @($appExe, $installer)) {
+              $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+              if ($signature.Status -ne 'Valid') { throw "Authenticode validation failed for $($artifact.Name): $($signature.Status)" }
+              if ($signature.SignerCertificate.Thumbprint -ne $expectedThumbprint) {
+                throw "Unexpected signing certificate for $($artifact.Name): $($signature.SignerCertificate.Thumbprint)"
+              }
+            }
+          }
+          $resourceBytes = (Get-ChildItem "frontend/src-tauri/bundle-resources" -Recurse -File | Measure-Object Length -Sum).Sum
+          $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
+          Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
+          if ($installedMiB -gt 180) { throw ("Installed footprint exceeds 180 MiB budget: {0:N2} MiB" -f $installedMiB) }
           $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }
@@ -98,9 +139,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            frontend/dist_electron/*.exe
-            frontend/dist_electron/*.blockmap
-            frontend/dist_electron/latest.yml
+            frontend/src-tauri/target/release/bundle/nsis/*.exe
             dist/runtime-size-report.json
             SHA256SUMS
         env:

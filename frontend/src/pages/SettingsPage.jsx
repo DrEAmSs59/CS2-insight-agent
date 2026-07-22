@@ -5,6 +5,7 @@ import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
 import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
@@ -39,11 +40,9 @@ import {
  * ------------------------------------------------------------------------ */
 
 function openExternalLink(url) {
-  // Electron 环境：使用 shell.openExternal 打开系统默认浏览器
-  if (window.electron?.openExternal) {
-    window.electron.openExternal(url);
+  if (desktopBridge) {
+    void desktopBridge.openExternal(url);
   } else {
-    // 非 Electron 环境（浏览器）：使用 window.open
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 }
@@ -191,7 +190,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       }
     }
 
-    // 后端原生文件选择（Windows；Vite dev 与 Electron 均可返回完整路径）
+    // 后端原生文件选择（Windows；浏览器开发模式也可返回完整路径）
     try {
       const { data } = await API.post("file-picker", { file_type: "exe" });
       if (data?.path) {
@@ -202,11 +201,11 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       // 非 Windows 或选择器不可用，继续 fallback
     }
 
-    // Electron 文件选择对话框
-    if (window.electron?.showOpenDialog) {
+    // 桌面壳文件选择对话框
+    if (desktopBridge) {
       try {
         const defaultPath = value && value.trim() ? value : undefined;
-        const result = await window.electron.showOpenDialog({
+        const result = await desktopBridge.showOpenDialog({
           title: t("settings.browseFileTitle"),
           defaultPath,
           filters: [{ name: exeName, extensions: ["exe"] }],
@@ -217,7 +216,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
         }
         return;
       } catch (e) {
-        console.error("Electron dialog error:", e);
+        console.error("Desktop dialog error:", e);
       }
     }
 
@@ -242,7 +241,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       >
         {detecting ? <Loader2 className="h-3 w-3 animate-spin" /> : t("settings.browseBtn")}
       </button>
-      {/* Fallback file input for non-Electron environments */}
+      {/* 浏览器环境的最后兜底 */}
       <input
         ref={fileRef}
         type="file"
@@ -442,8 +441,8 @@ export default function SettingsPage() {
   const browseLiteCutStorage = useCallback(async () => {
     try {
       let selected = "";
-      if (window.electron?.chooseDirectory) {
-        selected = await window.electron.chooseDirectory(liteCutStorageDraft);
+      if (desktopBridge) {
+        selected = await desktopBridge.chooseDirectory(liteCutStorageDraft);
       } else {
         const { data } = await API.post("directory-picker");
         selected = data?.path ?? "";
@@ -505,11 +504,11 @@ export default function SettingsPage() {
     }
   }, [liteCutStorageBusy, liteCutStorageJob?.job_id]);
 
-  // Get app version (Electron only, fallback to "dev")
-  const [appVersion, setAppVersion] = useState("dev");
+  // 桌面包读取 Tauri 版本；浏览器预览使用 Vite 构建版本。
+  const [appVersion, setAppVersion] = useState(__APP_VERSION__);
   useEffect(() => {
-    if (window.electron?.getVersion) {
-      window.electron.getVersion().then((v) => {
+    if (desktopBridge) {
+      desktopBridge.getVersion().then((v) => {
         if (v) setAppVersion(v);
       }).catch(() => {});
     }

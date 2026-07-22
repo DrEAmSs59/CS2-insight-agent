@@ -26,6 +26,7 @@ import { ConfigProvider } from "antd";
 import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
 import { useT } from "../../../i18n/useT.js";
 import API from "../../../api/api.js";
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import ColorPropertyPane from "./ColorPropertyPane.jsx";
 import SpeedPropertyPane from "./SpeedPropertyPane.jsx";
@@ -1208,7 +1209,7 @@ function ExportPane({
   const revealExportPath = async (path) => {
     if (!path) return;
     try {
-      if (window.electron?.showItemInFolder && await window.electron.showItemInFolder(path)) return;
+      if (desktopBridge?.showItemInFolder && await desktopBridge.showItemInFolder(path)) return;
     } catch {
       // Copying the path remains a useful fallback in browser mode.
     }
@@ -1216,7 +1217,7 @@ function ExportPane({
   };
   const chooseOutputDir = async () => {
     try {
-      const chosen = await window.electron?.chooseDirectory?.(outputDir.trim() || outputDirHint);
+      const chosen = await desktopBridge?.chooseDirectory?.(outputDir.trim() || outputDirHint);
       if (chosen) onOutputDirChange?.(chosen);
     } catch {
       // The text field remains available when the desktop shell cannot open a picker.
@@ -1495,7 +1496,7 @@ function ExportPane({
               placeholder={outputDirHint || "D:\\Videos\\CS2Exports\\lite-cut"}
               className="min-w-0 flex-1 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 font-mono text-[11px] text-cs2-text-primary"
             />
-            {window.electron?.chooseDirectory ? (
+            {desktopBridge?.chooseDirectory ? (
               <button
                 type="button"
                 title="选择导出文件夹"

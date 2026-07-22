@@ -16,6 +16,7 @@ import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { LITECUT_PROJECT_TEMPLATES, projectBodyFromTemplate } from "./projectTemplates.js";
 import { inspectorTabForTimelineSelection } from "./inspectorSelectionUtils.js";
 import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
 import { collectUsedLiteCutAssetIds, mapAssetRow } from "../../../stores/liteCut/assetUtils.js";
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
@@ -1572,8 +1573,8 @@ export default function LiteCutEditorShell({
     // Desktop builds use the native folder chooser so the final location is
     // explicit. Browser builds retain a normal download after preparation.
     let destination = "";
-    if (window.electron?.chooseDirectory) {
-      destination = await window.electron.chooseDirectory("");
+    if (desktopBridge?.chooseDirectory) {
+      destination = await desktopBridge.chooseDirectory("");
       if (!destination) return { cancelled: true };
     }
     const { data } = await API.post(`/lite-cut/projects/${projectId}/portable-package/start`, { destination });

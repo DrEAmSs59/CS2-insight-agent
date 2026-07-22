@@ -13,6 +13,7 @@ import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
+import { getPlayerClipScope } from "./utils/playerClipScope";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
@@ -211,6 +212,7 @@ export default function App() {
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
+  const [demoWatchScanDepth, setDemoWatchScanDepth] = useState(2);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
   const [demoLibraryItems, setDemoLibraryItems] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -586,11 +588,15 @@ export default function App() {
       const { data } = await API.post("/demos/scan");
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
       const n = data?.discovered_count;
-      if (typeof n === "number" && n > 0) {
-        setProgressText(t("app.scanDone", { n }));
-      }
+      setProgressText(
+        typeof n === "number" && n > 0
+          ? t("app.scanDone", { n })
+          : t("app.scanDoneEmpty", { scanned: data?.scanned || 0 })
+      );
+      return data;
     } catch (e) {
       setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      return null;
     } finally {
       setLibraryScanning(false);
     }
@@ -766,6 +772,13 @@ export default function App() {
             selectedMap[i] = [x.cached_auto_player];
             tabMap[i] = x.cached_auto_player;
           }
+        }
+        if (!(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))) {
+          const rosterNames = (x.players || [])
+            .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+            .filter((name) => typeof name === "string" && name.trim());
+          selectedMap[i] = rosterNames;
+          if (!tabMap[i] && rosterNames.length) tabMap[i] = rosterNames[0];
         }
       });
       setLibraryDemoIdsByIndex(idMap);
@@ -983,6 +996,7 @@ export default function App() {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
           if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
+          if (Number.isInteger(data.demo_watch_scan_depth)) setDemoWatchScanDepth(data.demo_watch_scan_depth);
           if (Array.isArray(data.expected_parse_players)) {
             setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
           }
@@ -1099,8 +1113,17 @@ export default function App() {
       setParsedMatches(uploads.map(() => null));
       setLibraryDemoIdsByIndex({});
       setCurrentMatchIndex(0);
-      setSelectedPlayers({});
-      setActivePlayerTabs({});
+      const selectedMap = {};
+      const tabMap = {};
+      uploads.forEach((upload, index) => {
+        const names = (upload.players || [])
+          .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+          .filter((name) => typeof name === "string" && name.trim());
+        selectedMap[index] = names;
+        if (names.length) tabMap[index] = names[0];
+      });
+      setSelectedPlayers(selectedMap);
+      setActivePlayerTabs(tabMap);
       setFreezeToDeathRoundsByMatch({});
       setSelectedClientClipUids(new Set());
       const uploadDoneMsg =
@@ -1149,17 +1172,16 @@ export default function App() {
     ]
   );
 
-  const canAddAllHighlights = useMemo(
+  const currentPlayerClipScope = useMemo(
     () =>
-      Boolean(
-        parsedMatches?.some((pm) =>
-          Object.values(pm?.players ?? {}).some((pd) =>
-            pd.clips?.some((c) => c.category === "highlight")
-          )
-        )
+      getPlayerClipScope(
+        currentParsed?.players,
+        currentActivePlayer,
+        queuedClientClipUidsForCurrentDemo,
       ),
-    [parsedMatches]
+    [currentParsed, currentActivePlayer, queuedClientClipUidsForCurrentDemo],
   );
+  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
 
   /**
    * @param {number} idx
@@ -1507,39 +1529,43 @@ export default function App() {
     t,
   ]);
 
-  const handleAddAllHighlightsAllMatches = useCallback(() => {
-    if (!parsedMatches?.length) return;
+  const handleAddCurrentPlayerHighlights = useCallback(() => {
+    if (!currentParsed || !currentActivePlayer) return;
     const toAdd = [];
-    parsedMatches.forEach((pm, index) => {
-      if (!pm?.players) return;
-      Object.entries(pm.players).forEach(([playerName, playerData]) => {
-        const meta = queueItemMetaForPlayer(index, playerName);
-        for (const c of playerData.clips ?? []) {
-          if (c.category !== "highlight") continue;
-          if (!c.client_clip_uid || queuedClientClipUidsGlobal.has(c.client_clip_uid)) continue;
-          toAdd.push({
-            demoPath: meta.demoPath,
-            demoFilename: meta.demoFilename,
-            targetPlayer: meta.targetPlayer,
-            targetPlayerUserId: meta.targetPlayerUserId,
-            targetSteamId: meta.targetSteamId,
-            clipId: c.clip_id,
-            clientClipUid: c.client_clip_uid,
-            clipData: c,
-          });
-        }
+    const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
+    for (const c of currentPlayerClipScope.queueableHighlights) {
+      toAdd.push({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: c.clip_id,
+        clientClipUid: c.client_clip_uid,
+        clipData: c,
       });
-    });
+    }
     if (!toAdd.length) {
-      setProgressText(t("app.enqueueAllHighlightsEmpty"));
+      setProgressText(t("app.enqueuePlayerHighlightsEmpty", { player: currentActivePlayer }));
       return;
     }
     addToQueue(toAdd);
-    setProgressText(t("app.enqueueAllHighlightsDone", { n: toAdd.length }), {
+    setProgressText(t("app.enqueuePlayerHighlightsDone", {
+      player: currentActivePlayer,
+      n: toAdd.length,
+    }), {
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal, t]);
+  }, [
+    currentParsed,
+    currentActivePlayer,
+    currentPlayerClipScope,
+    currentMatchIndex,
+    addToQueue,
+    queueItemMetaForPlayer,
+    t,
+  ]);
 
   const handleAddTimelineEventToQueue = useCallback(
     (event, roundRow) => {
@@ -2112,10 +2138,12 @@ export default function App() {
   const handleSaveConfig = useCallback(async (config) => {
     try {
       await API.put("config", config);
-    } catch {
-      // silent
+      return true;
+    } catch (error) {
+      setProgressText(t("app.saveConfigFail", { msg: error?.response?.data?.detail || error?.message || t("common.requestFail") }), { isError: true });
+      return false;
     }
-  }, []);
+  }, [t]);
 
   const handleSaveExpectedParsePlayers = useCallback(async () => {
     const arr = expectedParsePlayersText
@@ -2362,6 +2390,10 @@ export default function App() {
       if (Array.isArray(raw.demo_watch_paths)) {
         put.demo_watch_paths = raw.demo_watch_paths;
         setDemoWatchPaths(raw.demo_watch_paths);
+      }
+      if (Number.isInteger(raw.demo_watch_scan_depth)) {
+        put.demo_watch_scan_depth = Math.max(0, Math.min(32, raw.demo_watch_scan_depth));
+        setDemoWatchScanDepth(put.demo_watch_scan_depth);
       }
       if (Array.isArray(raw.expected_parse_players)) {
         put.expected_parse_players = raw.expected_parse_players;
@@ -2740,6 +2772,8 @@ export default function App() {
     setMontageEncoder,
     demoWatchPaths,
     setDemoWatchPaths,
+    demoWatchScanDepth,
+    setDemoWatchScanDepth,
     handleSaveConfig,
     fetchUpdateInfo,
     startupInitDone,
@@ -2810,8 +2844,8 @@ export default function App() {
     handleSelectAll,
     handleDeselectAll,
     handleAddSelectedToQueue,
-    handleAddAllHighlightsAllMatches,
-    canAddAllHighlights,
+    handleAddCurrentPlayerHighlights,
+    canAddCurrentPlayerHighlights,
     handleResetDemo,
     removeFromQueue,
     clearQueue,

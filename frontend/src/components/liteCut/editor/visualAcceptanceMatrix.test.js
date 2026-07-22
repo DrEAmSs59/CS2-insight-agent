@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import acceptance from "../../../../../data/lite_cut_visual_acceptance.json";
 import effectContract from "../../../../../data/lite_cut_effect_contract.json";
-import packageConfig from "../../../../package.json";
+import tauriConfig from "../../../../src-tauri/tauri.conf.json";
 import { FILTER_PRESETS, FONT_OPTIONS, TRANSITION_OPTIONS } from "./editorPresets.js";
 
 describe("LiteCut visual acceptance matrix", () => {
@@ -15,9 +15,7 @@ describe("LiteCut visual acceptance matrix", () => {
     expect(acceptance.fonts.some((item) => item.kind === "imported")).toBe(true);
   });
 
-  it("packages the backend font resources for Electron", () => {
-    const backendResources = packageConfig.build.extraResources.find((item) => item.from === "../backend");
-    expect(backendResources?.to).toBe("backend");
-    expect(backendResources?.filter).toContain("**/*");
+  it("packages the staged backend font resources for Tauri", () => {
+    expect(tauriConfig.bundle.resources).toHaveProperty("bundle-resources/");
   });
 });

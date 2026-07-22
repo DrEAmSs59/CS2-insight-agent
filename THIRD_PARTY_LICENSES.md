@@ -32,11 +32,8 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 | @tailwindcss/vite       | MIT     | https://github.com/tailwindlabs/tailwindcss            |
 | vite                    | MIT     | https://github.com/vitejs/vite                         |
 | @vitejs/plugin-react    | MIT     | https://github.com/vitejs/vite-plugin-react            |
-| concurrently            | MIT     | https://github.com/open-cli-tools/concurrently         |
-| cross-env               | MIT     | https://github.com/kentcdodds/cross-env                |
-| electron                | MIT     | https://github.com/electron/electron                   |
-| electron-builder        | MIT     | https://github.com/electron-userland/electron-builder  |
-| wait-on                 | MIT     | https://github.com/jeffbski/wait-on                    |
+| Tauri                   | MIT / Apache-2.0 | https://github.com/tauri-apps/tauri            |
+| Tauri Plugins           | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 
 
 ## Trademark Notices

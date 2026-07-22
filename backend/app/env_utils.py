@@ -390,6 +390,8 @@ class AppConfig(BaseModel):
     cs2_path: str = ""
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
+    # Demo 库扫描深度：0=仅所选目录，1=再含一级子目录，依此类推。
+    demo_watch_scan_depth: int = Field(default=2, ge=0, le=32)
     ai_mode: bool = False
     # 前端界面语言：auto=跟随操作系统（中文系统→zh，其他→en）；亦可显式设为 zh / en
     locale: str = "auto"

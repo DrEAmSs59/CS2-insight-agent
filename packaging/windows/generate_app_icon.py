@@ -14,10 +14,7 @@ def main() -> None:
         raise SystemExit(f"missing logo: {png}")
     img = Image.open(png).convert("RGBA")
     sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-    icons: list[Image.Image] = []
-    for w, h in sizes:
-        icons.append(img.resize((w, h), Image.Resampling.LANCZOS))
-    icons[0].save(out, format="ICO", sizes=[(i.width, i.height) for i in icons], append_images=icons[1:])
+    img.save(out, format="ICO", sizes=sizes)
     print(f"wrote {out}")
 
 

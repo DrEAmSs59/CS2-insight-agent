@@ -16,7 +16,7 @@ git checkout -b feat/my-change
 | Layer | Technology |
 | --- | --- |
 | Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand |
-| Desktop | Electron 42（Windows 安装包 / `electron-updater` 程序内自动更新） |
+| Desktop | Tauri 2 + 系统 WebView2（Windows NSIS 安装包） |
 | Backend | Python 3.12 + FastAPI + uvicorn |
 | 解析引擎 | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程） |
 | AI 网关 | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等） |
@@ -60,6 +60,7 @@ CS2-insight-agent/
 │       ├── env_utils.py               # 配置管理 & CS2 路径探测
 │       └── radar/                     # 雷达图渲染（POV HUD / 录制叠加）
 ├── frontend/
+│   ├── src-tauri/                     # Tauri 桌面壳（Python 生命周期 / NSIS resources）
 │   └── src/
 │       ├── App.jsx                    # 路由壳、全局状态、录制队列提交 / 阻断弹窗
 │       ├── main.jsx                   # React Router 入口
@@ -77,7 +78,6 @@ CS2-insight-agent/
 │       │   ├── RecordWarmupModal.jsx  # 录制前观战预热 & POV HUD 选项
 │       │   └── RecordingBlockedDialog.jsx
 │       └── utils/                     # recordingBatch、timelineQueue、warmupDefaults 等
-├── frontend/electron-main.cjs         # Electron 主进程（内嵌 Python 后端）
 └── README.md
 ```
 
@@ -115,11 +115,11 @@ python -m uvicorn app.main:app --reload --port 8000
 cd frontend
 npm install
 
-# 仅启动前端开发服务器（不含 Electron 壳）
+# 仅启动浏览器前端开发服务器
 npm run dev
 
-# 启动 Electron 开发模式（内嵌前端 + 自动重载）
-npm run electron:dev
+# 启动 Tauri 桌面开发模式（自动启动 Python 后端）
+npm run desktop:dev
 ```
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
@@ -130,9 +130,11 @@ npm run electron:dev
 # 仅打包前端静态资源
 npm run build
 
-# 打包 Electron 安装包（输出至 frontend/dist_electron/）
-npm run electron:build
+# 打包 Tauri NSIS 安装包
+npm run desktop:build
 ```
+
+安装包输出至 `frontend/src-tauri/target/release/bundle/nsis/`。正式发布版不启用应用内自动更新，用户从 Releases 页面下载新版。
 
 ---
 

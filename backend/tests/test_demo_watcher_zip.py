@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from app.demo_watcher import _extract_dems_from_zip_sync, _iter_local_header_zip_dems
+from app.demo_watcher import (
+    _extract_dems_from_zip_sync,
+    _iter_local_header_zip_dems,
+    iter_candidate_files,
+    normalize_scan_depth,
+)
 
 
 def _build_local_header_only_zip(name: str, payload: bytes) -> bytes:
@@ -58,3 +63,28 @@ def test_extract_dems_from_zip_sync_falls_back_to_local_header(tmp_path: Path):
     extracted = _extract_dems_from_zip_sync(zip_path)
     assert len(extracted) == 1
     assert extracted[0].read_bytes() == payload
+
+
+def test_iter_candidate_files_respects_configured_depth(tmp_path: Path):
+    root_demo = tmp_path / "root.dem"
+    level_one = tmp_path / "season" / "match.dem"
+    level_two = tmp_path / "season" / "day" / "deep.dem"
+    ignored = tmp_path / "season" / "notes.txt"
+    level_one.parent.mkdir()
+    level_two.parent.mkdir()
+    for path in (root_demo, level_one, level_two, ignored):
+        path.write_bytes(b"demo")
+
+    depth_zero = {path.name for path in iter_candidate_files(tmp_path, (".dem",), max_depth=0)}
+    depth_one = {path.name for path in iter_candidate_files(tmp_path, (".dem",), max_depth=1)}
+    depth_two = {path.name for path in iter_candidate_files(tmp_path, (".dem",), max_depth=2)}
+
+    assert depth_zero == {"root.dem"}
+    assert depth_one == {"root.dem", "match.dem"}
+    assert depth_two == {"root.dem", "match.dem", "deep.dem"}
+
+
+def test_normalize_scan_depth_clamps_invalid_values():
+    assert normalize_scan_depth("bad") == 2
+    assert normalize_scan_depth(-5) == 0
+    assert normalize_scan_depth(100) == 32
