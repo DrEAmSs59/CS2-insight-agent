@@ -1,6 +1,7 @@
 # Python
 python/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.egg-info/
 dist/
@@ -27,6 +28,7 @@ Thumbs.db
 .packaging-cache/
 
 # Temp
+/tmp/
 *.tmp
 *.log
 .empty-git-hooks/
@@ -39,14 +41,14 @@ debugtest/
 # Local / agent plans and specs (not versioned)
 docs/superpowers/
 
-# Local GitHub PAT for update check (never commit)
+# Local GitHub PAT for the legacy update-info endpoint (never commit)
 .cs2-insight-github-token
-
-# Stamped by packaging/windows/write-release-version.ps1 (local/CI); not kept in git
-backend/app/release_version.txt
 
 # Local portable zip from Compress-Archive (repo root)
 CS2InsightAgent-*-windows-amd64.zip
+
+# Stale metadata from pre-Tauri release builds
+backend/app/release_version.txt
 
 # Project doc not tracked
 开发白皮书.md
@@ -63,7 +65,6 @@ debug_parse_demo.py
 !/scripts/github-bootstrap.ps1
 !/scripts/litecut_visual_regression.py
 build_portable.bat
-!build_electron.bat
 rebuild_frontend.ps1
 dev.sh
 
@@ -87,9 +88,15 @@ data/**
 frontend/public/__litecut_visual_tmp/
 /artifacts/
 
-# Electron distribution
+# Legacy Electron distribution (local artifacts may still exist after migration)
 frontend/dist_electron/
 frontend/build/
+
+# Tauri build output and staged runtime resources
+frontend/src-tauri/target/
+frontend/src-tauri/gen/schemas/
+frontend/src-tauri/bundle-resources/*
+!frontend/src-tauri/bundle-resources/.gitkeep
 
 # Local generated preview artifacts (match report preview, etc.)
 frontend/preview/

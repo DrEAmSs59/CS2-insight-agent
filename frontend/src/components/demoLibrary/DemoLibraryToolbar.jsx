@@ -1,10 +1,11 @@
-import { Database, FolderOpen, LayoutGrid, List, Loader2 } from "lucide-react";
+import { Database, FilePlus2, FolderOpen, LayoutGrid, List, Loader2, ScanSearch } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 
 export default function DemoLibraryToolbar({
   onOpenWatchPaths,
   onScan,
   onOpenIngest,
+  onOpenLocalDemo,
   libraryLoading,
   libraryScanning,
   pageSelectableCount,
@@ -49,34 +50,38 @@ export default function DemoLibraryToolbar({
         </button>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 rounded-md border border-cs2-accent/40 bg-cs2-accent/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-accent hover:bg-cs2-accent/20"
+          disabled={libraryLoading || libraryScanning}
+          className="inline-flex items-center gap-1.5 rounded-md border border-cs2-accent/40 bg-cs2-accent/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-accent hover:bg-cs2-accent/20 disabled:opacity-45"
+          onClick={() => void onScan()}
+        >
+          {libraryScanning ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden /> : <ScanSearch className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+          {libraryScanning ? t("library.btnScanning") : t("library.btnScan")}
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-hover px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:opacity-45"
           onClick={() => onOpenIngest?.()}
         >
-          <Database className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <Database className="h-3.5 w-3.5 shrink-0 text-cs2-accent/90" aria-hidden />
           {t("library.btnPending")}
         </button>
         <button
           type="button"
-          disabled={libraryLoading || libraryScanning}
-          className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-hover px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:opacity-45"
-          onClick={() => void onScan()}
+          className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-hover px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
+          onClick={() => void onOpenLocalDemo?.()}
+          title={t("library.btnOpenLocalHint")}
         >
-          {libraryScanning ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-cs2-accent" aria-hidden />
-              <span>{t("library.btnScanning")}</span>
-            </>
-          ) : (
-            t("library.btnScan")
-          )}
+          <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" aria-hidden />
+          {t("library.btnOpenLocal")}
         </button>
+        <span className="mx-1 hidden h-5 w-px bg-cs2-border sm:block" aria-hidden />
         <button
           type="button"
           disabled={libraryLoading || pageSelectableCount === 0}
           className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
           onClick={onSelectPage}
         >
-          {t("library.btnSelectPage")}
+          {t("library.btnSelectPage", { count: pageSelectableCount })}
         </button>
         <button
           type="button"
@@ -84,7 +89,7 @@ export default function DemoLibraryToolbar({
           className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
           onClick={() => void onSelectAllLibrary()}
         >
-          {t("library.btnSelectAll")}
+          {t("library.btnSelectAll", { count: libraryTotal ?? 0 })}
         </button>
       </div>
     </div>

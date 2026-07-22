@@ -1,0 +1,18 @@
+[package]
+name = "cs2-insight-agent-desktop"
+version = "2.3.0"
+description = "Lightweight Windows desktop shell for CS2 Insight Agent"
+authors = ["CS2 Insight Agent contributors"]
+edition = "2021"
+
+[lib]
+name = "cs2_insight_agent_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"

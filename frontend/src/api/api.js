@@ -1,21 +1,17 @@
 import axios from "axios";
 import { useLocaleStore } from "../i18n/localeStore.js";
 
-// 同步检测环境：
-// 1. 检查协议是否为自定义的 app:
-// 2. 检查 User Agent 是否包含 Electron (兜底方案)
-const IS_ELECTRON_APP = 
-  window.location.protocol === "app:" || 
-  navigator.userAgent.toLowerCase().includes("electron");
+// Tauri 开发模式仍使用 http://localhost，因此以注入的 IPC 对象判断桌面环境。
+const IS_DESKTOP_APP = Boolean(window.__TAURI_INTERNALS__);
 
-export const API_BASE_URL = IS_ELECTRON_APP ? "http://127.0.0.1:19871" : "";
+export const API_BASE_URL = IS_DESKTOP_APP ? "http://127.0.0.1:19871" : "";
 
-/** 启动屏展示的连接目标（dev 走 Vite 代理到 8000，Electron 直连 19871） */
-export const BACKEND_CONNECT_LABEL = IS_ELECTRON_APP
+/** 启动屏展示的连接目标（浏览器 dev 走 Vite 代理，桌面壳直连 19871）。 */
+export const BACKEND_CONNECT_LABEL = IS_DESKTOP_APP
   ? "127.0.0.1:19871"
   : "127.0.0.1:8000 (Vite proxy)";
 
-/** Electron 下须用绝对 URL；浏览器 dev 用相对路径走 Vite 代理 */
+/** 桌面壳须用绝对 URL；浏览器 dev 用相对路径走 Vite 代理。 */
 export function getDemosStreamUrl() {
   return API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";
 }
@@ -44,7 +40,7 @@ export function getLiteCutBuiltinFontUrl(fontName) {
     : `/api/lite-cut/fonts/${name}`;
 }
 
-console.log(`[API Init] Protocol: ${window.location.protocol}, IsElectron: ${IS_ELECTRON_APP}, BaseURL: ${API_BASE_URL}`);
+console.log(`[API Init] Protocol: ${window.location.protocol}, IsDesktop: ${IS_DESKTOP_APP}, BaseURL: ${API_BASE_URL}`);
 
 const API = axios.create({
   baseURL: `${API_BASE_URL}/api`,

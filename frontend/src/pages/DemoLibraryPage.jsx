@@ -20,6 +20,7 @@ import {
 } from "../utils/demoLibraryDisplay";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 import { useT } from "../i18n/useT.js";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -234,12 +235,18 @@ export default function DemoLibraryPage() {
     [s]
   );
 
+  const handleOpenLocalDemo = useCallback(async () => {
+    const paths = await desktopBridge?.chooseDemoFiles?.();
+    if (paths?.length) await s.handleUpload(paths);
+  }, [s]);
+
   return (
     <PageContainer className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
-        onScan={() => void s.handleScanDemos()}
+        onScan={s.handleScanDemos}
         onOpenIngest={() => setIngestModalOpen(true)}
+        onOpenLocalDemo={handleOpenLocalDemo}
         libraryLoading={s.libraryLoading}
         libraryScanning={s.libraryScanning}
         pageSelectableCount={filteredRows.length}
@@ -424,8 +431,15 @@ export default function DemoLibraryPage() {
         open={watchPathsModalOpen}
         onClose={() => setWatchPathsModalOpen(false)}
         demoWatchPaths={s.demoWatchPaths}
+        demoWatchScanDepth={s.demoWatchScanDepth}
         onDemoWatchPathsChange={s.setDemoWatchPaths}
+        onDemoWatchScanDepthChange={s.setDemoWatchScanDepth}
         onSaveConfig={s.handleSaveConfig}
+        onScan={s.handleScanDemos}
+        onOpenIngest={() => {
+          setWatchPathsModalOpen(false);
+          setIngestModalOpen(true);
+        }}
       />
 
       <DemoPlaybackUi />
@@ -493,7 +507,6 @@ export default function DemoLibraryPage() {
         isOpen={ingestModalOpen}
         onClose={() => setIngestModalOpen(false)}
         onIngest={handleBatchIngest}
-        onUpload={s.handleUpload}
       />
     </PageContainer>
   );

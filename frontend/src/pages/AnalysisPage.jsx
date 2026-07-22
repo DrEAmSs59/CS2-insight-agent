@@ -342,10 +342,11 @@ export default function AnalysisPage() {
           onSelectAll={s.handleSelectAll}
           onDeselectAll={s.handleDeselectAll}
           onAddSelectedToQueue={s.handleAddSelectedToQueue}
-          onAddAllHighlightsAllMatches={s.handleAddAllHighlightsAllMatches}
+          onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
+          currentPlayer={s.currentActivePlayer}
           queueLength={s.queue.length}
           batchRecording={s.batchRecording}
-          canAddAllHighlights={s.canAddAllHighlights}
+          canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}
         />
       )}
       <DemoPlaybackUi />

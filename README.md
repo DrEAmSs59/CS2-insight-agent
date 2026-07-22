@@ -113,9 +113,9 @@
 
 前往 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载最新的 `CS2-Insight-Agent-Setup-x.x.x.exe`，双击运行安装包，按提示完成安装。
 
-安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**，Electron 主进程会自动在内部启动 Python 后端服务。
+安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**。轻量 Tauri 桌面壳会自动启动内嵌 Python 后端，并使用 Windows 系统 WebView2 显示界面。
 
-程序内置**在线更新**功能：启动时会自动检测是否有新版本，有更新时右上角会弹出提示，点击即可在程序内完成下载和安装，无需手动重新下载安装包。
+当前不运行后台自动更新器；需要升级时，请直接从 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载新版安装包。
 
 > **建议安装路径不含中文字符。** 例如 `D:\CS2-Insight-Agent\` ✅，`D:\游戏工具\CS2-Insight-Agent\` ❌
 
@@ -128,7 +128,7 @@
    - [X] AI 锐评
    - [X] 全自动导播
 - **V2**
-   - [X] Electron 桌面端、程序内在线更新
+   - [X] Tauri 轻量桌面端
    - [X] 合辑工作台（FFmpeg 导出）
    - [X] POV HUD 实验性功能
    - [X] 回合时间线浏览与入队录制
