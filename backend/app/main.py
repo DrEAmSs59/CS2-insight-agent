@@ -72,6 +72,17 @@ from .name_card_meta import (
     resolve_name_card_eyebrow,
 )
 from . import obs_config_center
+from .obs_tuning import (
+    ObsTuningApplyRequest,
+    ObsTuningPlanRequest,
+    ObsTuningRecommendationRequest,
+    build_change_plan as build_obs_tuning_plan,
+    discover_environment as discover_obs_tuning_environment,
+    recommend as recommend_obs_tuning_goal,
+)
+from .obs_tuning_executor import apply_video_tuning_plan
+from .obs_tuning_agent import review_tuning_plan
+from .obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .lite_cut.db import LiteCutDB
@@ -738,6 +749,7 @@ class ConfigPayload(BaseModel):
     cs2_path: Optional[str] = None
     demo_watch_paths: Optional[list[str]] = None
     ai_mode: Optional[bool] = None
+    obs_agent_auto_prepare: Optional[bool] = None
     locale: Optional[str] = None
     expected_parse_players: Optional[list[str]] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
@@ -1033,6 +1045,8 @@ async def update_config(payload: ConfigPayload):
         cfg.demo_watch_paths = [str(Path(p).expanduser()) for p in payload.demo_watch_paths if str(p).strip()]
     if payload.ai_mode is not None:
         cfg.ai_mode = payload.ai_mode
+    if payload.obs_agent_auto_prepare is not None:
+        cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
@@ -1443,6 +1457,51 @@ def obs_launch():
 def obs_config_status():
     cfg = load_config()
     return obs_config_center.get_status_payload(cfg.obs)
+
+
+@app.get("/api/obs-tuning/discovery")
+def obs_tuning_discovery():
+    """只读探测 OBS、硬件编码器、FFmpeg 与录制磁盘，不返回任何密码或密钥。"""
+    cfg = load_config()
+    payload = discover_obs_tuning_environment(cfg)
+    payload["ai_mode_enabled"] = bool(cfg.ai_mode)
+    payload["auto_prepare_enabled"] = bool(cfg.obs_agent_auto_prepare)
+    return payload
+
+
+@app.post("/api/obs-tuning/bootstrap")
+def obs_tuning_bootstrap(payload: ObsBootstrapRequest):
+    """受控准备 OBS 与 WebSocket；不修改 Profile、场景、音频或直播配置。"""
+    cfg = load_config()
+    with _obs_launch_lock:
+        return bootstrap_obs_environment(cfg, payload)
+
+
+@app.post("/api/obs-tuning/recommendation")
+def obs_tuning_recommendation(payload: ObsTuningRecommendationRequest):
+    """根据真实探测快照生成确定性推荐；推荐是预测，不代表稳定性已经通过。"""
+    cfg = load_config()
+    discovery = payload.discovery or discover_obs_tuning_environment(cfg)
+    return recommend_obs_tuning_goal(payload.goal, discovery)
+
+
+@app.post("/api/obs-tuning/plan")
+async def obs_tuning_plan(payload: ObsTuningPlanRequest):
+    """重新探测环境，调用受限 AI 评估并生成可审计计划；本接口不会写入 OBS。"""
+    cfg = load_config()
+    discovery = await asyncio.to_thread(discover_obs_tuning_environment, cfg)
+    recommendation = recommend_obs_tuning_goal(payload.goal, discovery)
+    plan = build_obs_tuning_plan(payload.goal, discovery, recommendation)
+    plan["ai_review"] = await review_tuning_plan(cfg.llm, payload.goal, discovery, recommendation)
+    return plan
+
+
+@app.post("/api/obs-tuning/apply")
+def obs_tuning_apply(payload: ObsTuningApplyRequest):
+    """备份并应用已确认的视频/录制设置，再用短录制、ffprobe、Stats 与日志完成验收。"""
+    cfg = load_config()
+    with _obs_launch_lock:
+        return apply_video_tuning_plan(cfg, payload)
 
 
 @app.post("/api/obs-config/diagnose")

@@ -67,6 +67,23 @@ def _read_global_profile_names(obs_root: Path) -> tuple[Optional[str], Optional[
     return prof, sc
 
 
+def _read_global_profile_dir(obs_root: Path) -> Optional[str]:
+    """Read OBS' active profile directory name without assuming it matches the display name."""
+    global_ini = obs_root / "global.ini"
+    if not global_ini.is_file():
+        return None
+    try:
+        raw = global_ini.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("currentprofiledir="):
+            value = stripped.split("=", 1)[1].strip()
+            return value or None
+    return None
+
+
 def _set_global_ini_current_profile(obs_root: Path, profile_name: str) -> bool:
     g = obs_root / "global.ini"
     if not g.is_file():
@@ -169,6 +186,7 @@ def _parse_simple_output(ini_path: Path) -> dict[str, str]:
     if not ini_path.is_file():
         return {}
     cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
     try:
         cp.read(ini_path, encoding="utf-8-sig")
     except configparser.Error:
@@ -183,6 +201,7 @@ def _parse_adv_output_rec_path(ini_path: Path) -> str:
     if not ini_path.is_file():
         return ""
     cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
     try:
         cp.read(ini_path, encoding="utf-8-sig")
     except configparser.Error:
@@ -250,8 +269,8 @@ def _ensure_project_profile_folder(obs_root: Path, project_profile: str) -> Path
     return tgt
 
 
-def _ws_connect(obs_cfg) -> obsws:
-    ws = obsws(obs_cfg.host, obs_cfg.port, obs_cfg.password)
+def _ws_connect(obs_cfg, *, timeout: float = 60.0) -> obsws:
+    ws = obsws(obs_cfg.host, obs_cfg.port, obs_cfg.password, timeout=timeout)
     ws.connect()
     return ws
 
@@ -330,6 +349,17 @@ def _detect_use_stream_encoder(simple: dict[str, str], obs_ws: Optional[obsws]) 
 
 def _recording_output_path_from_simple(simple: dict[str, str]) -> str:
     return (simple.get("FilePath") or simple.get("FilePath2") or "").strip()
+
+
+def _get_profile_parameter(ws: obsws, category: str, name: str) -> str:
+    response = ws.call(
+        obs_requests.GetProfileParameter(
+            parameterCategory=category,
+            parameterName=name,
+        )
+    )
+    value = (getattr(response, "datain", None) or {}).get("parameterValue")
+    return str(value or "").strip()
 
 
 def _scene_item_transform(ws: obsws, scene_name: str, source_name: str) -> Optional[dict]:
@@ -419,6 +449,48 @@ def _create_backup(
     return backup_id, dest
 
 
+def create_active_profile_backup(*, reason: str = "ai_obs_tuning") -> dict[str, str]:
+    """Create a restorable backup of the active OBS profile before AI tuning writes.
+
+    OBS keeps a user-facing profile name and a filesystem directory name. They are
+    often identical, but not guaranteed to be, so prefer ``CurrentProfileDir`` and
+    verify the resolved directory before reporting success.
+    """
+    obs_root = _obs_studio_root()
+    if obs_root is None or not obs_root.is_dir():
+        raise ValueError("没有找到 OBS 设置目录，未修改任何设置")
+
+    profiles_root = obs_root / "basic" / "profiles"
+    active_name, _ = _read_global_profile_names(obs_root)
+    candidates = [_read_global_profile_dir(obs_root), active_name]
+    profile_dir = next(
+        (
+            str(candidate).strip()
+            for candidate in candidates
+            if candidate and (profiles_root / str(candidate).strip()).is_dir()
+        ),
+        "",
+    )
+    if not profile_dir:
+        resolved = _resolve_obs_profile_folder_name(obs_root)
+        if (profiles_root / resolved).is_dir():
+            profile_dir = resolved
+    if not profile_dir:
+        raise ValueError("没有找到 OBS 当前使用的录制配置，未修改任何设置")
+
+    backup_id, backup_path = _create_backup(
+        obs_root,
+        reason=reason,
+        project_profile=profile_dir,
+    )
+    return {
+        "id": backup_id,
+        "path": str(backup_path),
+        "profile": active_name or profile_dir,
+        "profile_dir": profile_dir,
+    }
+
+
 def _restore_backup_pack(backup_dir: Path, obs_root: Path, project_profile: str) -> bool:
     g_bak = backup_dir / "global.ini"
     if g_bak.is_file():
@@ -485,8 +557,11 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             "output_width": 0,
             "output_height": 0,
             "fps": 0,
+            "fps_num": 0,
+            "fps_den": 1,
         },
         "recording": {
+            "output_mode": "",
             "use_stream_encoder": False,
             "encoder": "",
             "format": "",
@@ -536,6 +611,8 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             "output_width": vd["output_width"],
             "output_height": vd["output_height"],
             "fps": _fps_from_video_dict(vd),
+            "fps_num": vd["fps_num"],
+            "fps_den": vd["fps_den"],
         }
         scene_name = _dedicated_scene_name()
         cap_name = _dedicated_capture_name()
@@ -567,8 +644,19 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         simple: dict[str, str] = {}
         if obs_root and prof_name:
             simple = _parse_simple_output(obs_root / "basic" / "profiles" / prof_name / "basic.ini")
+        try:
+            output_mode = _get_profile_parameter(ws, "Output", "Mode") or "Simple"
+        except Exception:  # noqa: BLE001
+            output_mode = "Simple"
+        advanced = output_mode.strip().lower() == "advanced"
+        category = "AdvOut" if advanced else "SimpleOutput"
+        base["recording"]["output_mode"] = "Advanced" if advanced else "Simple"
         base["recording"]["use_stream_encoder"] = _detect_use_stream_encoder(simple, ws)
-        base["recording"]["encoder"] = (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
+        try:
+            encoder_value = _get_profile_parameter(ws, category, "RecEncoder")
+        except Exception:  # noqa: BLE001
+            encoder_value = ""
+        base["recording"]["encoder"] = encoder_value or (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
         # 三路兜底：Simple 输出 INI → Advanced 输出 INI → WebSocket GetRecordDirectory
         _ini_path = (obs_root / "basic" / "profiles" / prof_name / "basic.ini") if (obs_root and prof_name) else None
         _out_path = (
@@ -579,21 +667,16 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         base["recording"]["output_path"] = _out_path
         # 优先从 OBS WebSocket 读取格式和质量，避免 INI 路径检测失败导致"未知"
         try:
-            fmt_resp = ws.call(obs_requests.GetProfileParameter(
-                parameterCategory="SimpleOutput", parameterName="RecFormat2"
-            ))
-            fmt_val = (getattr(fmt_resp, "datain", None) or {}).get("parameterValue", "")
+            fmt_val = _get_profile_parameter(ws, category, "RecFormat2")
             base["recording"]["format"] = fmt_val or (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
         except Exception:  # noqa: BLE001
             base["recording"]["format"] = (simple.get("RecFormat2") or simple.get("RecFormat") or "").strip()
-        try:
-            q_resp = ws.call(obs_requests.GetProfileParameter(
-                parameterCategory="SimpleOutput", parameterName="RecQuality"
-            ))
-            q_val = (getattr(q_resp, "datain", None) or {}).get("parameterValue", "")
-            base["recording"]["rec_quality"] = q_val or (simple.get("RecQuality") or "").strip()
-        except Exception:  # noqa: BLE001
-            base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
+        if not advanced:
+            try:
+                q_val = _get_profile_parameter(ws, category, "RecQuality")
+                base["recording"]["rec_quality"] = q_val or (simple.get("RecQuality") or "").strip()
+            except Exception:  # noqa: BLE001
+                base["recording"]["rec_quality"] = (simple.get("RecQuality") or "").strip()
     except Exception as e:  # noqa: BLE001
         base["ws_error"] = str(e)
     finally:
@@ -1034,23 +1117,41 @@ def restore_backup(backup_id: str, obs_cfg, *, project_profile: Optional[str] = 
     obs_root = _obs_studio_root()
     if obs_root is None:
         raise ValueError("无法定位 OBS 配置目录")
-    pp = _effective_project_profile(obs_root, project_profile)
     bdir = _backup_root() / backup_id
     if not bdir.is_dir():
         raise ValueError("备份不存在")
-    ws: Optional[obsws] = None
+    manifest: dict[str, Any] = {}
     try:
-        ws = _ws_connect(obs_cfg)
-        if _obs_is_recording(ws):
-            raise ValueError("OBS 正在录制中，请停止录制后再恢复备份。")
-    finally:
-        _ws_disconnect(ws)
+        manifest = json.loads((bdir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    pp = _effective_project_profile(
+        obs_root,
+        project_profile or str(manifest.get("project_profile") or ""),
+    )
+
+    if sys.platform == "win32":
+        exe_name = Path(str(getattr(obs_cfg, "obs_path", "") or "obs64.exe")).name or "obs64.exe"
+        try:
+            running = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/NH", "/FO", "CSV"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if exe_name.lower() in running.stdout.lower():
+                raise ValueError("请先在 OBS 中正常退出程序，再点击恢复。运行时不会直接覆盖 OBS 配置文件。")
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"无法确认 OBS 是否已经关闭：{exc}") from exc
     _restore_backup_pack(bdir, obs_root, pp)
     return {
         "ok": True,
         "restored": True,
         "restart_obs_required": True,
-        "message": "OBS 配置已恢复，请重启 OBS 后生效。",
+        "message": "原设置已经恢复，现在可以重新打开 OBS。",
     }
 
 

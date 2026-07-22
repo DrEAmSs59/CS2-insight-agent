@@ -32,7 +32,9 @@ import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatR
 import { progressToastShowsBusy } from "./utils/progressToast";
 import {
   recordingAbortToastKind,
+  recordingQueueHadUnexpectedCs2Exit,
   recordingQueueWasAborted,
+  unexpectedCs2ExitRecoveryMessageKey,
 } from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { Loader2 } from "lucide-react";
@@ -43,6 +45,7 @@ import CustomTitleBar from "./components/CustomTitleBar";
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
 const AnalysisPage = lazy(() => import("./pages/AnalysisPage"));
+const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
 const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
@@ -51,6 +54,8 @@ const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
 const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
+const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
+const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -182,6 +187,10 @@ export default function App() {
   const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordingBlockedCode, setRecordingBlockedCode] = useState(null);
+  const [recordingRecoveryPrompt, setRecordingRecoveryPrompt] = useState({
+    configRecoveryNeeded: null,
+    povRecoveryNeeded: false,
+  });
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
   /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
@@ -1913,6 +1922,7 @@ export default function App() {
         if (!queue.length) return;
         recordingAbortRequestedRef.current = false;
         setRecordingAbortRequested(false);
+        setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
         setBatchRecording(true);
         setProgressText(t("app.preparingRecording"), { loading: true });
 
@@ -1991,11 +2001,46 @@ export default function App() {
           if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
+          const hadUnexpectedCs2Exit = recordingQueueHadUnexpectedCs2Exit(results);
           const wasAborted = recordingQueueWasAborted(
             results,
             recordingAbortRequestedRef.current,
           );
-          if (wasAborted) {
+          if (hadUnexpectedCs2Exit) {
+            const unexpectedExitResult = results.find(
+              (item) => item?.error_code === "RECORDING_CS2_EXITED" ||
+                String(item?.error || "").toLowerCase() === "cs2_exited_unexpectedly",
+            );
+            const reportedRecovery = unexpectedExitResult?.recovery;
+            const backupStatus = await refreshConfigBackupStatus();
+            let povStatus = null;
+            if (session.experimental_pov_enabled) {
+              try {
+                const { data: nextPovStatus } = await API.get("experimental/pov/status");
+                povStatus = nextPovStatus && typeof nextPovStatus === "object"
+                  ? nextPovStatus
+                  : { fetch_failed: true };
+              } catch {
+                povStatus = { fetch_failed: true };
+              }
+            }
+            const configRecoveryNeeded = reportedRecovery?.player_config_restore_verified
+              ? reportedRecovery.player_config_restored !== true
+              : Boolean(backupStatus?.restore_required || backupStatus?.fetch_failed);
+            const povRecoveryNeeded = !session.experimental_pov_enabled
+              ? false
+              : reportedRecovery?.pov_restore_verified
+                ? reportedRecovery.pov_restored !== true
+                : Boolean(povStatus?.needs_restore || povStatus?.fetch_failed);
+            setRecordingRecoveryPrompt({ configRecoveryNeeded, povRecoveryNeeded });
+            setRecordingBlockedMessage(t(unexpectedCs2ExitRecoveryMessageKey({
+              configRecoveryNeeded,
+              povEnabled: session.experimental_pov_enabled,
+              povRecoveryNeeded,
+            })));
+            setRecordingBlockedCode("RECORDING_CS2_EXITED");
+            setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });
+          } else if (wasAborted) {
             const backupStatus = await refreshConfigBackupStatus();
             const toastKind = recordingAbortToastKind(backupStatus);
             if (toastKind === "restore_pending") {
@@ -2877,6 +2922,11 @@ export default function App() {
     batchRecording ||
     Boolean(progressText?.trim()) ||
     (anyDemoParsing && !parsingShownInline);
+  const isStandalonePreview = [
+    "/demo-analysis-preview",
+    "/obs-ai-preview",
+    "/obs-ai-entry-preview",
+  ].includes(location.pathname);
 
   return (
     <AppShellProvider value={shell}>
@@ -2897,7 +2947,7 @@ export default function App() {
             onCheckUpdate={() => void fetchUpdateInfo({ manual: true })}
           />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
-            {!backendReady ? (
+            {!isStandalonePreview && (!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
                   <div className="relative">
@@ -2930,7 +2980,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : null}
+            ) : null)}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
@@ -2938,6 +2988,7 @@ export default function App() {
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/demo-analysis-preview" element={<DemoAnalysisPreviewPage />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
                 <Route path="/lite-cut" element={<LiteCutEditorPage />} />
@@ -2949,6 +3000,8 @@ export default function App() {
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />
+                <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
+                <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
               </Suspense>
@@ -3031,9 +3084,12 @@ export default function App() {
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
           errorCode={recordingBlockedCode}
+          configRecoveryNeeded={recordingRecoveryPrompt.configRecoveryNeeded}
+          povRecoveryNeeded={recordingRecoveryPrompt.povRecoveryNeeded}
           onClose={() => {
             setRecordingBlockedMessage("");
             setRecordingBlockedCode(null);
+            setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
           }}
         />
 
