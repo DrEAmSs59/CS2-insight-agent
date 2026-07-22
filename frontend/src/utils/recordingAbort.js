@@ -15,3 +15,27 @@ export function recordingAbortToastKind(configBackupStatus) {
   if (configBackupStatus?.fetch_failed === true) return "unverified";
   return "completed";
 }
+
+export function isUnexpectedCs2ExitResult(result) {
+  if (!result || typeof result !== "object") return false;
+  if (result.error_code === "RECORDING_CS2_EXITED") return true;
+  return String(result.error || "").trim().toLowerCase() === "cs2_exited_unexpectedly";
+}
+
+export function recordingQueueHadUnexpectedCs2Exit(results) {
+  return Array.isArray(results) && results.some(isUnexpectedCs2ExitResult);
+}
+
+export function unexpectedCs2ExitRecoveryMessageKey({
+  configRecoveryNeeded = false,
+  povEnabled = false,
+  povRecoveryNeeded = false,
+} = {}) {
+  if (configRecoveryNeeded && povEnabled && povRecoveryNeeded) {
+    return "app.unexpectedCs2ExitBothPending";
+  }
+  if (configRecoveryNeeded) return "app.unexpectedCs2ExitConfigPending";
+  if (povEnabled && povRecoveryNeeded) return "app.unexpectedCs2ExitPovPending";
+  if (povEnabled) return "app.unexpectedCs2ExitRecoveredWithPov";
+  return "app.unexpectedCs2ExitRecovered";
+}

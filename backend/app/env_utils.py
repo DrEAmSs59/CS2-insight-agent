@@ -375,6 +375,8 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     obs: OBSConfig = Field(default_factory=OBSConfig)
+    # 用户首次明确授权后，进入 AI OBS 调优时可自动准备 OBS 与 WebSocket。
+    obs_agent_auto_prepare: bool = False
     llm: LLMConfig = Field(default_factory=LLMConfig)
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
     spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)

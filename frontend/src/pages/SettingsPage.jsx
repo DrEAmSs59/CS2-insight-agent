@@ -7,6 +7,7 @@ import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
+import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import {
   Settings as SettingsIcon,
@@ -565,6 +566,7 @@ export default function SettingsPage() {
       payload.ffmpeg_path = config.ffmpeg_path ?? "";
       payload.montage_encoder = config.montage_encoder ?? "auto";
       payload.ai_mode = !!config.ai_mode;
+      payload.obs_agent_auto_prepare = !!config.obs_agent_auto_prepare;
       payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
@@ -785,7 +787,15 @@ export default function SettingsPage() {
 
       {/* Content */}
       <div className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
-        <div className={activeTab === "recording" ? "flex min-h-0 flex-1 flex-col" : "mx-auto max-w-4xl px-4 pb-24 pt-2"}>
+        <div
+          className={
+            activeTab === "recording"
+              ? "flex min-h-0 flex-1 flex-col"
+              : activeTab === "video" && config.ai_mode
+                ? "w-full px-4 pb-24 pt-2 xl:px-6 2xl:px-8"
+                : "mx-auto max-w-4xl px-4 pb-24 pt-2"
+          }
+        >
 
           {/* ======================== 通用设置 ======================== */}
           {activeTab === "general" && (
@@ -1113,44 +1123,54 @@ export default function SettingsPage() {
           {/* ======================== 视频设置 ======================== */}
           {activeTab === "video" && (
             <div className="space-y-4">
-              {/* Paths: OBS + FFmpeg */}
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}>
-                <FieldRow label={t("settings.labelObsPath")} hint={t("settings.hintObsPath")} search={search && !matches(t("settings.labelObsPath") + " " + (obs.obs_path ?? ""))}>
-                  <PathPicker
-                    value={obs.obs_path ?? ""}
-                    onChange={(v) => set("obs.obs_path", v)}
-                    placeholder="obs64.exe"
-                    exeName="obs64.exe"
-                    detectApi="config/detect-obs"
-                    detectField="obs_path"
-                    t={t}
-                  />
-                </FieldRow>
-                <FieldRow label={t("settings.labelFfmpegPath")} hint={t("settings.hintFfmpegPath")} search={search && !matches(t("settings.labelFfmpegPath") + " " + (config.ffmpeg_path ?? ""))}>
-                  <PathPicker
-                    value={config.ffmpeg_path ?? ""}
-                    onChange={(v) => set("ffmpeg_path", v)}
-                    placeholder="ffmpeg.exe"
-                    exeName="ffmpeg.exe"
-                    detectApi="config/detect-ffmpeg"
-                    detectField="ffmpeg_path"
-                    t={t}
-                  />
-                </FieldRow>
-              </SectionCard>
+              <div className={config.ai_mode ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "contents"}>
+                {/* Paths: OBS + FFmpeg */}
+                <SectionCard
+                  title={t("settings.sectionPaths")}
+                  hint={config.ai_mode ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
+                  search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}
+                >
+                  {!config.ai_mode && (
+                    <FieldRow label={t("settings.labelObsPath")} hint={t("settings.hintObsPath")} search={search && !matches(t("settings.labelObsPath") + " " + (obs.obs_path ?? ""))}>
+                      <PathPicker
+                        value={obs.obs_path ?? ""}
+                        onChange={(v) => set("obs.obs_path", v)}
+                        placeholder="obs64.exe"
+                        exeName="obs64.exe"
+                        detectApi="config/detect-obs"
+                        detectField="obs_path"
+                        t={t}
+                      />
+                    </FieldRow>
+                  )}
+                  <FieldRow label={t("settings.labelFfmpegPath")} hint={t("settings.hintFfmpegPath")} search={search && !matches(t("settings.labelFfmpegPath") + " " + (config.ffmpeg_path ?? ""))}>
+                    <PathPicker
+                      value={config.ffmpeg_path ?? ""}
+                      onChange={(v) => set("ffmpeg_path", v)}
+                      placeholder="ffmpeg.exe"
+                      exeName="ffmpeg.exe"
+                      detectApi="config/detect-ffmpeg"
+                      detectField="ffmpeg_path"
+                      t={t}
+                    />
+                  </FieldRow>
+                </SectionCard>
 
-              {/* Encoder */}
-              <SectionCard title={t("settings.sectionEncoder")} hint={t("settings.sectionEncoderHint")} search={search && !matches(t("settings.sectionEncoder") + " " + t("settings.labelMontageEncoder"))}>
-                <FieldRow label={t("settings.labelMontageEncoder")} search={search && !matches(t("settings.labelMontageEncoder"))}>
-                  <SelectInput
-                    value={config.montage_encoder ?? "auto"}
-                    onChange={(v) => set("montage_encoder", v)}
-                    options={ENCODER_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                  />
-                </FieldRow>
-              </SectionCard>
+                {/* Encoder */}
+                <SectionCard title={t("settings.sectionEncoder")} hint={t("settings.sectionEncoderHint")} search={search && !matches(t("settings.sectionEncoder") + " " + t("settings.labelMontageEncoder"))}>
+                  <FieldRow label={t("settings.labelMontageEncoder")} search={search && !matches(t("settings.labelMontageEncoder"))}>
+                    <SelectInput
+                      value={config.montage_encoder ?? "auto"}
+                      onChange={(v) => set("montage_encoder", v)}
+                      options={ENCODER_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
+                    />
+                  </FieldRow>
+                </SectionCard>
+              </div>
 
-              {/* OBS connection */}
+              {/* OBS: manual controls or AI workspace */}
+              {!config.ai_mode ? (
+                <>
               <SectionCard title={t("settings.sectionObs")} hint={t("settings.sectionObsHint")} search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-cs2-text-secondary">{t("settings.labelObsVerified")}</span>
@@ -1292,6 +1312,18 @@ export default function SettingsPage() {
                   </div>
                 )}
               </SectionCard>
+                </>
+              ) : (
+                (!search || matches("AI OBS 调优 FPS 分辨率 推荐程度 安全变更计划")) && (
+                  <ObsAiSettingsPanel
+                    obsPath={obs.obs_path ?? ""}
+                    obsConnected={Boolean(status?.obs_connected)}
+                    ffmpegReady={Boolean(config.ffmpeg_path)}
+                    autoPrepare={Boolean(config.obs_agent_auto_prepare)}
+                    onAutoPrepareChange={(value) => set("obs_agent_auto_prepare", value)}
+                  />
+                )
+              )}
             </div>
           )}
 
@@ -1388,7 +1420,7 @@ export default function SettingsPage() {
       {/* Footer save bar */}
       {
         <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
-          <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
+          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && config.ai_mode ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
             <div className="min-w-0 flex-1">
               {activeTab !== "recording" && saveMsg && (
                 <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>

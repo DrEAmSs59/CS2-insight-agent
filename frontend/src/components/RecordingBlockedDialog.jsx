@@ -71,12 +71,22 @@ function isConfigBackupMessage(message, errorCode) {
   );
 }
 
-export default function RecordingBlockedDialog({ message, errorCode = null, onClose }) {
+export default function RecordingBlockedDialog({
+  message,
+  errorCode = null,
+  configRecoveryNeeded = null,
+  povRecoveryNeeded = false,
+  onClose,
+}) {
   const t = useT();
   const navigate = useNavigate();
   if (!message) return null;
+  const unexpectedCs2Exit = errorCode === "RECORDING_CS2_EXITED";
   const subtitleKey = recordingBlockedSubtitleKey(message, errorCode);
-  const showConfigLink = isConfigBackupMessage(message, errorCode);
+  const showConfigLink =
+    configRecoveryNeeded == null
+      ? isConfigBackupMessage(message, errorCode)
+      : configRecoveryNeeded;
   return (
     <div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
@@ -103,7 +113,7 @@ export default function RecordingBlockedDialog({ message, errorCode = null, onCl
           </div>
           <div className="min-w-0 pr-7">
             <h2 id="recording-blocked-title" className="text-sm font-bold text-cs2-text-primary">
-              {t("dialog.recordBlockedTitle")}
+              {t(unexpectedCs2Exit ? "dialog.recordingInterruptedTitle" : "dialog.recordBlockedTitle")}
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-muted">{t(subtitleKey)}</p>
           </div>
@@ -113,7 +123,7 @@ export default function RecordingBlockedDialog({ message, errorCode = null, onCl
           <p className="text-sm leading-6 text-cs2-text-secondary whitespace-pre-wrap break-words">{message}</p>
         </div>
 
-        <div className="flex justify-end gap-2.5 border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
+        <div className="flex flex-wrap justify-end gap-2.5 border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">
           {showConfigLink ? (
             <button
               type="button"
@@ -121,6 +131,15 @@ export default function RecordingBlockedDialog({ message, errorCode = null, onCl
               className="rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-4 py-2 text-sm font-bold text-cs2-accent transition-colors hover:bg-cs2-accent/20"
             >
               {t("dialog.recordBlockedGoConfig")}
+            </button>
+          ) : null}
+          {unexpectedCs2Exit && povRecoveryNeeded ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); navigate("/params"); }}
+              className="rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-4 py-2 text-sm font-bold text-cs2-accent transition-colors hover:bg-cs2-accent/20"
+            >
+              {t("dialog.recordBlockedGoPov")}
             </button>
           ) : null}
           <button

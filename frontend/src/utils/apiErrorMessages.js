@@ -60,6 +60,7 @@ export const API_ERROR_I18N_KEYS = {
 };
 
 export const API_ERROR_SUBTITLE_KEYS = {
+  RECORDING_CS2_EXITED: "dialog.recordingInterruptedSubtitle",
   RECORDING_CS2_RUNNING: "dialog.recordBlockedSubRunning",
   RECORDING_CONFIG_RESTORE_REQUIRED: "dialog.recordBlockedSubConfigRestore",
   RECORDING_ALREADY_RUNNING: "dialog.recordBlockedSubAlreadyRecording",
