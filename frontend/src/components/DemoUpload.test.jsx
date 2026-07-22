@@ -3,17 +3,22 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import DemoUpload from "./DemoUpload.jsx";
 
+const desktopBridgeMock = vi.hoisted(() => ({
+  chooseDemoFiles: vi.fn(),
+}));
+
+vi.mock("../desktop/desktopBridge.js", () => ({
+  desktopBridge: desktopBridgeMock,
+}));
 
 describe("DemoUpload", () => {
   afterEach(() => {
-    delete window.electron;
+    vi.clearAllMocks();
   });
 
-  test("uses Electron's native picker and forwards real local paths", async () => {
+  test("uses the desktop native picker and forwards real local paths", async () => {
     const onUpload = vi.fn();
-    window.electron = {
-      chooseDemoFiles: vi.fn().mockResolvedValue(["C:\\Demos\\one.dem", "D:\\two.dem"]),
-    };
+    desktopBridgeMock.chooseDemoFiles.mockResolvedValue(["C:\\Demos\\one.dem", "D:\\two.dem"]);
 
     render(<DemoUpload onUpload={onUpload} />);
     fireEvent.click(screen.getByRole("button"));

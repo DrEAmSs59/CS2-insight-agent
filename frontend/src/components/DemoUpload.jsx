@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Upload, FileCode2 } from "lucide-react";
 import { useT } from "../i18n/useT.js";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 
 function collectDemFiles(fileList) {
   if (!fileList?.length) return [];
@@ -33,8 +34,8 @@ export default function DemoUpload({ onUpload }) {
   );
 
   const handleBrowse = useCallback(async () => {
-    if (window.electron?.chooseDemoFiles) {
-      const paths = await window.electron.chooseDemoFiles();
+    if (desktopBridge?.chooseDemoFiles) {
+      const paths = await desktopBridge.chooseDemoFiles();
       if (paths?.length) onUpload(paths);
       return;
     }

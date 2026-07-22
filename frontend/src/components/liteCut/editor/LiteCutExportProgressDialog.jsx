@@ -1,5 +1,6 @@
 import { CheckCircle2, Copy, FolderOpen, Loader2, X } from "lucide-react";
 import API from "../../../api/api.js";
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
 
 function basenameFromPath(path) {
   const normalized = String(path || "").replace(/\\/g, "/");
@@ -36,14 +37,14 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
     try {
       await navigator.clipboard.writeText(outputPath);
     } catch {
-      // Clipboard access may be unavailable outside Electron.
+      // Clipboard access may be unavailable outside the desktop shell.
     }
   };
 
   const revealOutput = async () => {
     if (!outputPath) return;
     try {
-      if (window.electron?.showItemInFolder && await window.electron.showItemInFolder(outputPath)) return;
+      if (desktopBridge?.showItemInFolder && await desktopBridge.showItemInFolder(outputPath)) return;
       await API.post("/reveal-file-in-explorer", { path: outputPath });
     } catch {
       // Keep the completed export visible even if Explorer could not open.

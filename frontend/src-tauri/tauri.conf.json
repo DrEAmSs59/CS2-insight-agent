@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CS2 Insight Agent",
+  "version": "2.3.0",
+  "identifier": "com.cs2insightagent.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CS2 Insight Agent",
+        "width": 1540,
+        "height": 900,
+        "minWidth": 1540,
+        "minHeight": 900,
+        "center": true,
+        "decorations": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../../packaging/windows/app-icon.ico"],
+    "resources": {
+      "bundle-resources/": ""
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "../../packaging/windows/app-icon.ico",
+        "installerHooks": "windows/upgrade-hooks.nsh",
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

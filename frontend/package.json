@@ -3,152 +3,42 @@
   "private": true,
   "version": "2.3.0",
   "type": "module",
-  "main": "electron-main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on tcp:5173 && electron .\"",
-    "electron:clean": "node scripts/clean-dist-electron.mjs",
-    "electron:copy-python": "node scripts/copy-python-for-bundle.mjs",
-    "electron:stage-python": "node scripts/run-electron-stage-python.mjs",
-    "electron:icons": "node scripts/generate-windows-icon.mjs",
-    "electron:build": "npm run build && npm run electron:stage-python && node scripts/check-electron-bundle-prereqs.mjs && npm run electron:icons && npm run electron:clean && electron-builder",
-    "electron:build:ver": "node scripts/electron-build-version.mjs",
-    "electron:smoke": "node scripts/run-electron-smoke.mjs",
+    "desktop:dev": "tauri dev",
+    "desktop:stage-python": "node scripts/stage-python-runtime.mjs",
+    "desktop:stage-resources": "node scripts/stage-tauri-resources.mjs",
+    "desktop:build": "npm run desktop:stage-python && npm run desktop:stage-resources && tauri build",
+    "desktop:build:ver": "node scripts/tauri-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "build": {
-    "appId": "com.cs2insightagent.app",
-    "productName": "CS2 Insight Agent",
-    "directories": {
-      "output": "dist_electron"
-    },
-    "toolsets": {
-      "winCodeSign": null
-    },
-    "files": [
-      "electron-main.cjs",
-      "preload.cjs",
-      "public/cs2-insight-logo.png",
-      "build/icon.ico"
-    ],
-    "afterPack": "./scripts/after-pack-win-icon.cjs",
-    "extraResources": [
-      {
-        "from": "dist",
-        "to": "web",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!**/__pycache__",
-          "!**/*.pyc",
-          "!**/.pytest_cache",
-          "!dist/**",
-          "!logs/**",
-          "!scripts/**",
-          "!tests/**",
-          "!*.db",
-          "!*.exe",
-          "!debug_*.py"
-        ]
-      },
-      {
-        "from": "../python",
-        "to": "python",
-        "filter": [
-          "**/*",
-          "!**/__pycache__",
-          "!**/*.pyc"
-        ]
-      },
-      {
-        "from": "../pov",
-        "to": "pov",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../data",
-        "to": "data",
-        "filter": [
-          "**/*",
-          "!**/lite_cut_assets/**",
-          "!**/.cs2_config_backup/**",
-          "!**/.obs_config_backups/**",
-          "!**/logs/**",
-          "!**/qa_color/**",
-          "!**/cs2-insight.config.json",
-          "!**/cs2-insight.db",
-          "!**/cs2-insight.db-wal",
-          "!**/cs2-insight.db-shm"
-        ]
-      }
-    ],
-    "publish": {
-      "provider": "generic",
-      "url": "https://cs2-demo-agent.trswnca.cc"
-    },
-    "win": {
-      "target": "nsis",
-      "artifactName": "CS2.Insight.Agent.Setup.${version}.${ext}",
-      "icon": "build/icon.ico",
-      "signAndEditExecutable": false,
-      "verifyUpdateCodeSignature": false
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "public/cs2-insight-logo.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
-    }
-  },
   "dependencies": {
-    "builder-util-runtime": "9.5.1",
-    "electron-log": "5.4.4",
-    "electron-updater": "6.8.3"
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-opener": "^2.0.0"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1047.0",
     "@aws-sdk/lib-storage": "3.1047.0",
-    "@electron/windows-sign": "1.2.2",
-    "antd": "^5.26.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^4.3.0",
+    "antd": "^5.26.0",
     "axios": "^1.7.0",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron": "^42.0.1",
-    "electron-builder": "^26.8.1",
     "jsdom": "^25.0.1",
     "lucide-react": "^0.460.0",
-    "mime-types": "3.0.2",
-    "png-to-ico": "^3.0.1",
-    "pngjs": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.15.0",
-    "rcedit": "^4.0.1",
     "tailwindcss": "^4.0.0",
     "vite": "^6.0.0",
     "vitest": "^2.1.9",
-    "wait-on": "^9.0.10",
     "zustand": "^5.0.12"
   }
 }

@@ -405,24 +405,8 @@ export function PovSection({ item, updateItemPacing }) {
   );
 }
 
-function countVictimPovEligibleHighlights(queue) {
-  return queue.filter((q) => {
-    const victims = Array.isArray(q.clipData?.victims) ? q.clipData.victims : [];
-    const kind = q.clipData?.compilation_kind;
-    return (
-      (q.clipData?.category === "highlight" ||
-        (q.clipData?.category === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(kind))) &&
-      victims.some((v) => String(v ?? "").trim().length > 0)
-    );
-  }).length;
-}
-
-function countKillerPovEligible(queue) {
-  return queue.filter((q) => clipKillerPovEnqueueEligible(q.clipData)).length;
-}
-
-/** 符合条件的高光是否已全部打开「受害者视角」 */
-function allEligibleVictimPovEnabled(queue) {
+/** 汇总批量视角的明确状态，避免用“打开/关闭”按钮文案让用户反推当前状态。 */
+function victimPovStatus(queue) {
   const eligible = queue.filter((q) => {
     const victims = Array.isArray(q.clipData?.victims) ? q.clipData.victims : [];
     const kind = q.clipData?.compilation_kind;
@@ -432,14 +416,22 @@ function allEligibleVictimPovEnabled(queue) {
       victims.some((v) => String(v ?? "").trim().length > 0)
     );
   });
-  if (eligible.length === 0) return false;
-  return eligible.every((q) => Boolean(q.pacing_override?.victim_pov));
+  const enabled = eligible.filter((q) => Boolean(q.pacing_override?.victim_pov)).length;
+  return {
+    eligible: eligible.length,
+    enabled,
+    state: enabled === 0 ? "off" : enabled === eligible.length ? "on" : "partial",
+  };
 }
 
-function allEligibleKillerPovEnabled(queue) {
+function killerPovStatus(queue) {
   const eligible = queue.filter((q) => clipKillerPovEnqueueEligible(q.clipData));
-  if (eligible.length === 0) return false;
-  return eligible.every((q) => Boolean(q.pacing_override?.killer_pov));
+  const enabled = eligible.filter((q) => Boolean(q.pacing_override?.killer_pov)).length;
+  return {
+    eligible: eligible.length,
+    enabled,
+    state: enabled === 0 ? "off" : enabled === eligible.length ? "on" : "partial",
+  };
 }
 
 /** 全局节奏面板（始终展开常驻） */
@@ -457,10 +449,8 @@ export function GlobalPacingPanel({
   const post = globalPacing.post_last_sec ?? DEFAULT_PACING.post_last_sec;
   const pre  = globalPacing.pre_first_sec ?? DEFAULT_PACING.pre_first_sec;
   const gap  = globalPacing.max_gap_sec   ?? DEFAULT_PACING.max_gap_sec;
-  const victimPovEligible = useMemo(() => countVictimPovEligibleHighlights(queue), [queue]);
-  const allVictimPovOn = useMemo(() => allEligibleVictimPovEnabled(queue), [queue]);
-  const killerPovEligible = useMemo(() => countKillerPovEligible(queue), [queue]);
-  const allKillerPovOn = useMemo(() => allEligibleKillerPovEnabled(queue), [queue]);
+  const victimStatus = useMemo(() => victimPovStatus(queue), [queue]);
+  const killerStatus = useMemo(() => killerPovStatus(queue), [queue]);
 
   const commit = (partial) => {
     const next = Object.fromEntries(
@@ -512,77 +502,43 @@ export function GlobalPacingPanel({
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
           {t("queue.batchPovTitle")}
         </p>
-        <div className="grid min-w-0 grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={victimPovEligible === 0}
-            title={
-              victimPovEligible === 0
-                ? t("queue.victimPovNoClips")
-                : allVictimPovOn
-                  ? t("queue.closeVictimPovTitle")
-                  : t("queue.openVictimPovTitle")
-            }
-            onClick={onToggleAllVictimPov}
-            className={
-              "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
-              (allVictimPovOn
-                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
-                : "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface hover:border-cs2-cyan-on-surface/60 hover:bg-cs2-cyan-surface")
-            }
-          >
-            {allVictimPovOn ? (
-              <EyeOff className="h-3 w-3 shrink-0" />
-            ) : (
-              <Eye className="h-3 w-3 shrink-0" />
-            )}
-            <span className="shrink-0">{allVictimPovOn ? t("queue.btnCloseVictimPov") : t("queue.btnOpenVictimPov")}</span>
-            {victimPovEligible > 0 ? (
-              <span
-                className={
-                  "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allVictimPovOn ? "text-cs2-text-secondary/90" : "text-cs2-cyan-on-surface/80")
-                }
-              >
-                ({victimPovEligible})
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            disabled={killerPovEligible === 0}
-            title={
-              killerPovEligible === 0
-                ? t("queue.victimPovNoClips")
-                : allKillerPovOn
-                  ? t("queue.closeKillerPovTitle")
-                  : t("queue.openKillerPovTitle")
-            }
-            onClick={onToggleAllKillerPov}
-            className={
-              "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
-              (allKillerPovOn
-                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
-                : "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:border-cs2-amber-on-surface/60 hover:bg-cs2-amber-surface")
-            }
-          >
-            {allKillerPovOn ? (
-              <EyeOff className="h-3 w-3 shrink-0" />
-            ) : (
-              <Eye className="h-3 w-3 shrink-0" />
-            )}
-            <span className="shrink-0">{allKillerPovOn ? t("queue.btnCloseKillerPov") : t("queue.btnOpenKillerPov")}</span>
-            {killerPovEligible > 0 ? (
-              <span
-                className={
-                  "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allKillerPovOn ? "text-cs2-text-secondary/90" : "text-cs2-amber-on-surface/80")
-                }
-              >
-                ({killerPovEligible})
-              </span>
-            ) : null}
-          </button>
+        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+          {[
+            { key: "victim", label: t("queue.victimPovLabel"), status: victimStatus, onToggle: onToggleAllVictimPov, accent: "cyan" },
+            { key: "killer", label: t("queue.killerPovLabel"), status: killerStatus, onToggle: onToggleAllKillerPov, accent: "amber" },
+          ].map(({ key, label, status, onToggle, accent }) => {
+            const fullyOn = status.state === "on";
+            const stateLabel = t(`queue.povState${status.state[0].toUpperCase()}${status.state.slice(1)}`);
+            return (
+              <div key={key} className="rounded-md border border-cs2-border bg-cs2-bg-input/55 p-2">
+                <div className="flex items-center gap-2">
+                  {fullyOn ? <Eye className={`h-3.5 w-3.5 ${accent === "cyan" ? "text-cs2-cyan-on-surface" : "text-cs2-amber-on-surface"}`} /> : <EyeOff className="h-3.5 w-3.5 text-cs2-text-muted" />}
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-cs2-text-primary">{label}</span>
+                  <span className={[
+                    "rounded border px-1.5 py-0.5 text-[9px] font-bold",
+                    status.state === "on"
+                      ? "border-cs2-emerald-surface bg-cs2-emerald-surface text-cs2-emerald-on-surface"
+                      : status.state === "partial"
+                        ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface"
+                        : "border-cs2-border bg-cs2-bg-hover text-cs2-text-muted",
+                  ].join(" ")}>{stateLabel}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="font-mono text-[9px] tabular-nums text-cs2-text-muted">
+                    {t("queue.povEnabledCount", { enabled: status.enabled, total: status.eligible })}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={status.eligible === 0}
+                    onClick={onToggle}
+                    className="rounded border border-cs2-border bg-cs2-bg-hover px-2 py-1 text-[9px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/40 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {fullyOn ? t("queue.povDisableAll") : t("queue.povEnableAll")}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

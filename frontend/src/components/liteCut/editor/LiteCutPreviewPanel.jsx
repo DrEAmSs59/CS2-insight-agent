@@ -27,7 +27,7 @@ function ensurePreviewFontLoaded(family, url, sample = "") {
   let promise;
   if (document.fonts?.load) {
     // The matching @font-face rule is rendered with the overlay. FontFaceSet.load
-    // works in Electron/WebView builds where the global FontFace constructor is
+    // works in desktop WebView builds where the global FontFace constructor is
     // unavailable, and also gives us a reliable point at which to repaint text.
     promise = document.fonts.load(`700 64px ${cssString(family)}`, String(sample || ""));
   } else if (typeof FontFace !== "undefined") {
