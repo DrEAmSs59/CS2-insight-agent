@@ -1,8 +1,12 @@
 use std::{
     fs::{self, OpenOptions},
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -14,7 +18,35 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Default)]
-struct BackendProcess(Mutex<Option<Child>>);
+struct BackendProcess(Mutex<Option<ManagedBackend>>);
+
+struct ManagedBackend {
+    child: Child,
+    instance_id: String,
+    data_root: PathBuf,
+}
+
+fn backend_http(method: &str, path: &str) -> Option<String> {
+    let address = SocketAddr::from(([127, 0, 0, 1], 19871));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    Some(response)
+}
+
+fn new_instance_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{}-{nanos}", std::process::id())
+}
 
 fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
@@ -147,11 +179,13 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         .try_clone()
         .map_err(|error| format!("无法复制后端日志句柄：{error}"))?;
 
+    let instance_id = new_instance_id();
     let mut command = Command::new(&python);
     command
         .arg(&run_server)
         .current_dir(&backend_dir)
         .env("CS2_INSIGHT_PORT", "19871")
+        .env("CS2_INSIGHT_INSTANCE_ID", &instance_id)
         .env("PYTHONNOUSERSITE", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONUNBUFFERED", "1")
@@ -171,14 +205,40 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|error| format!("无法启动 Python 后端：{error}"))?;
+    let mut verified = false;
+    for _ in 0..120 {
+        if child.try_wait().ok().flatten().is_some() {
+            break;
+        }
+        if backend_http("GET", "/api/app/runtime-state")
+            .is_some_and(|response| response.contains(&instance_id))
+        {
+            verified = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    if !verified {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(
+            "Backend startup identity check failed; port 19871 may belong to another process."
+                .to_string(),
+        );
+    }
     let state = app.state::<BackendProcess>();
-    *state
+    let mut backend_state = state
         .0
         .lock()
-        .map_err(|_| "后端进程状态锁已损坏".to_string())? = Some(child);
+        .map_err(|_| "后端进程状态锁已损坏".to_string())?;
+    *backend_state = Some(ManagedBackend {
+        child,
+        instance_id,
+        data_root,
+    });
     Ok(())
 }
 
@@ -187,26 +247,55 @@ fn stop_backend(app: &AppHandle) {
     let Ok(mut guard) = state.0.lock() else {
         return;
     };
-    let Some(mut child) = guard.take() else {
+    let Some(mut backend) = guard.take() else {
         return;
     };
-    if child.try_wait().ok().flatten().is_some() {
+    drop(guard);
+    if backend.child.try_wait().ok().flatten().is_some() {
         return;
     }
+
+    let response = backend_http("POST", "/api/app/shutdown");
+    append_desktop_log(
+        &backend.data_root.join("logs"),
+        &format!(
+            "[desktop] shutdown requested for instance {} response={}",
+            backend.instance_id,
+            response.as_deref().unwrap_or("unavailable")
+        ),
+    );
+    for _ in 0..180 {
+        if backend.child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = fs::write(
+        backend.data_root.join("recovery-required.json"),
+        "{\"reason\":\"desktop forced backend termination after graceful shutdown timeout\"}\n",
+    );
 
     #[cfg(windows)]
     {
         let mut taskkill = Command::new("taskkill");
-        taskkill.args(["/pid", &child.id().to_string(), "/f", "/t"]);
+        taskkill.args(["/pid", &backend.child.id().to_string(), "/f", "/t"]);
         taskkill.creation_flags(CREATE_NO_WINDOW);
         let _ = taskkill.status();
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = backend.child.kill();
+    let _ = backend.child.wait();
 }
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(BackendProcess::default())
@@ -218,7 +307,8 @@ pub fn run() {
                     ))
                     .title("CS2 Insight Agent — 后端启动失败")
                     .kind(MessageDialogKind::Error)
-                    .show(|_| {});
+                    .blocking_show();
+                return Err(std::io::Error::other(error).into());
             }
             Ok(())
         })

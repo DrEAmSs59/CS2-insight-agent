@@ -17,10 +17,11 @@ from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..api_errors import error_detail
 from ..env_utils import get_data_dir, load_config, resolve_config_path, save_config
+from ..file_quarantine import QuarantineBatch, quarantine_files
 from ..montage_db import MontageDB
 from .db import LiteCutDB
 from .models import (
@@ -46,6 +47,26 @@ _portable_package_jobs: dict[str, "LiteCutPortablePackageJob"] = {}
 _preview_proxy_slots: asyncio.Semaphore | None = None
 _preview_proxy_slots_loop: asyncio.AbstractEventLoop | None = None
 _LITE_CUT_ENCODERS = {"auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"}
+
+
+async def shutdown_lite_cut_jobs(timeout_sec: float = 10.0) -> bool:
+    """Cancel background FFmpeg/copy jobs and wait briefly for their cleanup."""
+    jobs = [
+        *_export_jobs.values(),
+        *_preview_proxy_jobs.values(),
+        *_storage_migration_jobs.values(),
+        *_portable_package_jobs.values(),
+    ]
+    active = [job for job in jobs if job.task is not None and not job.task.done()]
+    for job in active:
+        job.cancel_event.set()
+    if not active:
+        return True
+    _done, pending = await asyncio.wait(
+        [job.task for job in active if job.task is not None],
+        timeout=max(0.0, timeout_sec),
+    )
+    return not pending
 
 
 def _resolve_lite_cut_encoder(project_body: dict[str, Any], configured_encoder: str | None) -> str:
@@ -326,7 +347,16 @@ def _get_montage_db() -> MontageDB:
 
 
 def _normalize_project_body(raw: dict[str, Any] | None) -> dict[str, Any]:
-    return parse_project_body(raw).model_dump(mode="json")
+    try:
+        return parse_project_body(raw).model_dump(mode="json")
+    except ValidationError as exc:
+        raise HTTPException(
+            422,
+            {
+                "code": "LITECUT_PROJECT_INVALID",
+                "message": str(exc),
+            },
+        ) from exc
 
 
 def _directory_size(path: Path) -> int:
@@ -716,6 +746,22 @@ async def _delete_project_asset_files(project_id: int) -> None:
         for asset in assets
         if asset.get("file_path")
     ])
+
+
+async def _quarantine_project_asset_files(project_ids: list[int]) -> QuarantineBatch:
+    from .assets import asset_file_bundle_paths
+
+    assets: list[dict[str, Any]] = []
+    for project_id in project_ids:
+        assets.extend(await _get_lite_cut_db().list_project_assets(project_id))
+    for asset in assets:
+        await _stop_preview_proxy_job(int(asset["id"]))
+    bundle_paths: list[Path] = []
+    for asset in assets:
+        raw_path = str(asset.get("file_path") or "")
+        if raw_path:
+            bundle_paths.extend(await asyncio.to_thread(asset_file_bundle_paths, raw_path))
+    return await asyncio.to_thread(quarantine_files, bundle_paths, "lite-cut")
 
 
 @router.get("/projects")
@@ -1142,11 +1188,22 @@ async def import_lite_cut_portable_package(file: UploadFile = File(...)):
 async def delete_lite_cut_project(project_id: int):
     if not await _get_lite_cut_db().get_project(project_id):
         raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
-    await _delete_project_asset_files(project_id)
-    ok = await _get_lite_cut_db().delete_project(project_id)
-    if not ok:
-        raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
-    return {"deleted": True, "id": project_id}
+    try:
+        quarantined = await _quarantine_project_asset_files([project_id])
+    except OSError as exc:
+        raise HTTPException(409, f"Project assets could not be moved to the recovery area: {exc}") from exc
+    try:
+        ok = await _get_lite_cut_db().delete_project(project_id)
+        if not ok:
+            raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
+    except Exception:
+        await asyncio.to_thread(quarantined.restore)
+        raise
+    return {
+        "deleted": True,
+        "id": project_id,
+        "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+    }
 
 
 class LiteCutProjectBatchDeleteBody(BaseModel):
@@ -1158,10 +1215,20 @@ async def batch_delete_lite_cut_projects(body: LiteCutProjectBatchDeleteBody):
     ids = sorted({int(value) for value in body.ids if int(value) > 0})
     if not ids or len(ids) > 500:
         raise HTTPException(400, "project ids must contain 1 to 500 items")
-    for project_id in ids:
-        await _delete_project_asset_files(project_id)
-    deleted_ids = await _get_lite_cut_db().delete_projects(ids)
-    return {"deleted": len(deleted_ids), "ids": deleted_ids}
+    try:
+        quarantined = await _quarantine_project_asset_files(ids)
+    except OSError as exc:
+        raise HTTPException(409, f"Project assets could not be moved to the recovery area: {exc}") from exc
+    try:
+        deleted_ids = await _get_lite_cut_db().delete_projects(ids)
+    except Exception:
+        await asyncio.to_thread(quarantined.restore)
+        raise
+    return {
+        "deleted": len(deleted_ids),
+        "ids": deleted_ids,
+        "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+    }
 
 
 @router.get("/presets")
@@ -1310,7 +1377,7 @@ async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
     from ..env_utils import load_config
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
-    from .composer import _main_video_clips_sorted, _recorded_source_ids_for_export
+    from .composer import _main_video_clips_sorted, _recorded_source_ids_for_export, _timeline_overlap_pair
     from .export_preflight import (
         ensure_ffmpeg_runnable,
         ensure_files_readable,
@@ -1337,10 +1404,23 @@ async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
 
     if not project_body:
         raise HTTPException(400, error_detail("LITECUT_EXPORT_NO_BODY"))
+    # Direct export bodies and stored projects pass through the same schema
+    # boundary so malformed numbers/IDs cannot bypass create/update validation.
+    project_body = _normalize_project_body(project_body)
 
     clips = _main_video_clips_sorted(project_body)
     if not clips:
         raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))
+    overlap = _timeline_overlap_pair(clips)
+    if overlap is not None:
+        raise HTTPException(
+            422,
+            error_detail(
+                "LITECUT_TIMELINE_OVERLAP",
+                previous_clip_id=overlap[0],
+                clip_id=overlap[1],
+            ),
+        )
 
     source_ids = _recorded_source_ids_for_export(project_body)
     rows = await _get_montage_db().get_recorded_clips_by_ids(source_ids) if source_ids else {}
@@ -1788,16 +1868,26 @@ async def retry_lite_cut_asset_preview_proxy(asset_id: int):
 
 @router.delete("/assets/{asset_id}")
 async def delete_lite_cut_asset(asset_id: int):
-    from pathlib import Path
-
-    from .assets import delete_asset_file_bundle
+    from .assets import asset_file_bundle_paths
 
     row = await _get_lite_cut_db().get_asset(int(asset_id))
     if not row:
         raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
     await _stop_preview_proxy_job(int(asset_id))
-    await asyncio.to_thread(delete_asset_file_bundle, str(row["file_path"]))
-    ok = await _get_lite_cut_db().delete_asset(int(asset_id))
-    if not ok:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
-    return {"deleted": True, "id": asset_id}
+    paths = await asyncio.to_thread(asset_file_bundle_paths, str(row["file_path"]))
+    try:
+        quarantined = await asyncio.to_thread(quarantine_files, paths, "lite-cut")
+    except OSError as exc:
+        raise HTTPException(409, f"Asset files could not be moved to the recovery area: {exc}") from exc
+    try:
+        ok = await _get_lite_cut_db().delete_asset(int(asset_id))
+        if not ok:
+            raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+    except Exception:
+        await asyncio.to_thread(quarantined.restore)
+        raise
+    return {
+        "deleted": True,
+        "id": asset_id,
+        "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+    }

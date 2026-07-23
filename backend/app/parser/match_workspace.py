@@ -891,10 +891,25 @@ def build_match_workspace(
     mvp = stats[0] if stats else None
     return {
         "version": 1,
+        "algorithm_version": "match-workspace-2026.07.1",
+        "data_source": "demo_parser_with_derived_metrics",
+        "team_assignment_source": (
+            "round_side_groups" if group_side_by_round else "roster_order_fallback"
+        ),
+        "derived_fields": [
+            "rating",
+            "kast",
+            "trade_kills",
+            "trade_deaths",
+            "economy_type",
+            "mvp_player",
+        ],
         "map_name": map_name,
         "tick_rate": float(tick_rate),
         "match_start_tick": int(match_start_tick),
-        "demo_end_tick": int(shared_facts.demo_max_tick),
+        "demo_end_tick": int(
+            getattr(shared_facts, "demo_end_tick", shared_facts.demo_max_tick)
+        ),
         "duration_mins": int(duration_mins),
         "match_date": match_date,
         "team_a_name": team_a_name,

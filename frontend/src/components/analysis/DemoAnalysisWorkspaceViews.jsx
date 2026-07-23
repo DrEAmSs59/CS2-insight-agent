@@ -217,7 +217,7 @@ export function OverviewView({ data, onSelectPlayer }) {
           <ol className="space-y-1.5">{reportLines.map((line, index) => <li key={line} className="flex gap-2 text-[10px] leading-relaxed text-cs2-text-secondary"><span className="mt-0.5 font-mono text-[9px] font-bold text-cs2-accent">{String(index + 1).padStart(2, "0")}</span><span>{line}</span></li>)}</ol>
         </div>
       </Panel>
-      <Panel title="全场计分板" eyebrow="双方阵容 · 原始比赛数据"><div className="grid gap-3 p-3 xl:grid-cols-2"><TeamScoreboard teamKey="a" name={data.team_a_name} score={data.team_a_score} players={playersA} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /><TeamScoreboard teamKey="b" name={data.team_b_name} score={data.team_b_score} players={playersB} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /></div></Panel>
+      <Panel title="全场计分板" eyebrow="双方阵容 · Demo 解析与推导统计"><div className="grid gap-3 p-3 xl:grid-cols-2"><TeamScoreboard teamKey="a" name={data.team_a_name} score={data.team_a_score} players={playersA} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /><TeamScoreboard teamKey="b" name={data.team_b_name} score={data.team_b_score} players={playersB} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /></div></Panel>
     </div>
   );
 }

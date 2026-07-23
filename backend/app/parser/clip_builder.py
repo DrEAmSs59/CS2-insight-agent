@@ -854,10 +854,8 @@ def build_rival_compilations(
                 e = max(s + 1, min(e, _ftd_demo_mx))
             # round_end_tick: the *real* round_end event tick (when the round was
             # decided). It is intentionally independent of `end_tick` (which is the
-            # freeze→death+2s recording window). Downstream the planner/guard uses it
-            # to keep a mid-round death clip from being clamped before the death by the
-            # post-round scoreboard guard — critical for the final round, where the
-            # round can run on long after the target dies.
+            # freeze→death+2s recording window). Downstream the planner uses it
+            # to distinguish a mid-round death from the natural round boundary.
             _re_tick = (round_end_tick_map or {}).get(rnd)
             ftd_round_windows.append({
                 "round": int(rnd),

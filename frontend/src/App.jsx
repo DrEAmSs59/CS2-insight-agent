@@ -781,7 +781,10 @@ export default function App() {
             selectedMap[i] = [x.cached_auto_player];
           }
         }
-        if (!(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))) {
+        if (
+          !(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))
+          && !Object.prototype.hasOwnProperty.call(selectedMap, i)
+        ) {
           const rosterNames = (x.players || [])
             .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
             .filter((name) => typeof name === "string" && name.trim());

@@ -640,9 +640,8 @@ class RecordingExecutor:
             # prepare_seek_tick: always 5 s before start_tick so that spec_player /
             # GSI-verify run in the prepare window, not the recording window.
             #
-            # Exception: if the planner / FinalRoundGuard already set a specific
-            # safe_seek_tick that is earlier than start_tick, that value already
-            # encodes timing intent (e.g. locked to round freeze-end) — use it.
+            # If a planner set an earlier safe_seek_tick (for example, round
+            # freeze-end), preserve that timing intent.
             prepare_ticks = int(PREPARE_PREROLL_SEC * plan.tick_rate)
             if segment.safe_seek_tick < segment.start_tick:
                 seek_tick = segment.safe_seek_tick

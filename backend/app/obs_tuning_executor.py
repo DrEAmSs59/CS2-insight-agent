@@ -798,7 +798,6 @@ def apply_video_tuning_plan(
             )
             sleep_fn(float(request.goal.test_seconds))
             stats_after = _parse_stats(ws.call(get_stats()))
-            stop_attempted = True
             output_path = _stop_test_recording(
                 ws,
                 obs_cfg=app_cfg.obs,
@@ -806,6 +805,7 @@ def apply_video_tuning_plan(
                 disconnect=disconnect,
                 sleep_fn=sleep_fn,
             )
+            stop_attempted = True
             record_started = False
             logger.info("OBS tuning short recording stopped: output=%s", output_path)
             events[-1] = _event("record", "进行短录制测试", "ok", f"已完成 {request.goal.test_seconds} 秒测试录制。")

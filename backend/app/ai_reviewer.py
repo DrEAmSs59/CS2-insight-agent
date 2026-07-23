@@ -406,19 +406,27 @@ async def enrich_clips_dicts_with_reviewer(
     if not clips:
         return clips
     try:
+        max_review_clips = min(
+            64,
+            max(1, int(os.environ.get("CS2_INSIGHT_AI_REVIEW_MAX_CLIPS", "32"))),
+        )
         reviewer = AIReviewer.from_llm_config(
             llm,
             locale=locale,
-            max_concurrency=int(os.environ.get("CS2_INSIGHT_AI_REVIEW_CONCURRENCY", "6")),
+            max_concurrency=min(
+                12,
+                max(1, int(os.environ.get("CS2_INSIGHT_AI_REVIEW_CONCURRENCY", "6"))),
+            ),
         )
     except ValueError as e:
         logger.error("AIReviewer init failed: %s", e)
         return clips
     objs = [clip_from_dict(c) for c in clips]
+    review_objs = objs[:max_review_clips]
     meta = match_meta if isinstance(match_meta, dict) else {}
     _, (score_m, text_m) = await asyncio.gather(
-        reviewer.review_clips(objs, match_meta=meta),
-        reviewer.review_meme_montage(meta, objs),
+        reviewer.review_clips(review_objs, match_meta=meta),
+        reviewer.review_meme_montage(meta, review_objs),
     )
     if score_m is not None:
         meta["ai_meme_montage_score"] = score_m

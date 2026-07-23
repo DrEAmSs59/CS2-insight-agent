@@ -64,7 +64,9 @@ def main() -> None:
         port = int(os.environ.get("CS2_INSIGHT_PORT", "19871"))
     except ValueError:
         port = 19871
-    uvicorn.run(
+    from app.shutdown_state import register_server_shutdown
+
+    config = uvicorn.Config(
         "app.main:app",
         host=host,
         port=port,
@@ -73,6 +75,9 @@ def main() -> None:
         access_log=True,
         app_dir=backend,
     )
+    server = uvicorn.Server(config)
+    register_server_shutdown(lambda: setattr(server, "should_exit", True))
+    server.run()
 
 
 if __name__ == "__main__":

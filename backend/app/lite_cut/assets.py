@@ -211,15 +211,26 @@ def _unlink_with_retry(path: Path, *, attempts: int = 50, delay_sec: float = 0.1
 
 
 def delete_asset_file_bundle(raw_path: str | Path) -> None:
+    for candidate in asset_file_bundle_paths(raw_path):
+        _unlink_with_retry(candidate)
+    remove_empty_asset_directory(raw_path)
+
+
+def asset_file_bundle_paths(raw_path: str | Path) -> list[Path]:
+    """Return existing files in one managed asset bundle without mutating disk."""
     root = lite_cut_assets_dir().resolve()
     path = Path(raw_path).expanduser().resolve()
     try:
         path.relative_to(root)
     except ValueError:
         logger.warning("Refusing to delete LiteCut asset outside storage: %s", path)
-        return
-    for candidate in [*asset_companion_paths(path), path]:
-        _unlink_with_retry(candidate)
+        return []
+    return [candidate for candidate in [*asset_companion_paths(path), path] if candidate.is_file()]
+
+
+def remove_empty_asset_directory(raw_path: str | Path) -> None:
+    root = lite_cut_assets_dir().resolve()
+    path = Path(raw_path).expanduser().resolve()
     parent = path.parent
     if parent != root:
         try:

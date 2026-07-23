@@ -65,6 +65,22 @@ def test_extract_dems_from_zip_sync_falls_back_to_local_header(tmp_path: Path):
     assert extracted[0].read_bytes() == payload
 
 
+def test_same_name_and_size_with_different_content_is_not_reused(tmp_path: Path):
+    existing = tmp_path / "match.dem"
+    existing.write_bytes(b"AAAA")
+    zip_path = tmp_path / "match.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("match.dem", b"BBBB")
+
+    extracted = _extract_dems_from_zip_sync(zip_path)
+
+    assert len(extracted) == 1
+    assert extracted[0] != existing.resolve()
+    assert extracted[0].read_bytes() == b"BBBB"
+    assert existing.read_bytes() == b"AAAA"
+    assert list(tmp_path.glob("*.part")) == []
+
+
 def test_iter_candidate_files_respects_configured_depth(tmp_path: Path):
     root_demo = tmp_path / "root.dem"
     level_one = tmp_path / "season" / "match.dem"

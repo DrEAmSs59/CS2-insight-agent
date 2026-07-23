@@ -291,10 +291,12 @@ class DemoPlaybackService:
                 compat = ensure_demo_compatible(dem_path)
                 shutil.copy2(dem_path, copied_demo)
                 logger.info(
-                    "Direct playback compatibility ready: cached=%s outcome=%s removed_type138=%d source=%s",
+                    "Direct playback compatibility ready: cached=%s outcome=%s "
+                    "removed_type138=%d removed_win_panel=%d source=%s",
                     compat.cached,
                     compat.report.outcome,
                     compat.report.removed_messages,
+                    getattr(compat.report, "removed_win_panel_events", 0),
                     dem_path,
                 )
 

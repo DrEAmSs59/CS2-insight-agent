@@ -21,7 +21,7 @@ from app.recording.plan_builder import build_plan
 TICK_RATE = 64.0
 
 def make_demo(final_round=20, demo_end_tick=500_000, final_round_start_tick=480_000,
-              final_round_end_tick=495_000, first_tick=0, win_panel_match_tick=0):
+              final_round_end_tick=495_000, first_tick=0):
     return DemoContext(
         demo_path="/demo/test.dem",
         demo_filename="test.dem",
@@ -32,7 +32,6 @@ def make_demo(final_round=20, demo_end_tick=500_000, final_round_start_tick=480_
         final_round=final_round,
         final_round_start_tick=final_round_start_tick,
         final_round_end_tick=final_round_end_tick,
-        win_panel_match_tick=win_panel_match_tick,
     )
 
 PLAYER = TargetPlayer(name="TestPlayer", steamid64="76561198012345678")
@@ -357,29 +356,15 @@ check("11b: has killer", Perspective.killer in perspectives)
 check("11c: has victim", Perspective.victim in perspectives)
 
 
-# ── Test 12: Victim POV fail skips victim, keeps killer (not applicable) ──
-# The planner always generates killer+victim when enable_victim_pov=True.
-# FinalRoundGuard or postprocessor can disable individual segments if out of bounds.
-# Simulate: victim segment falls past final_round_end — disable only victim.
-print("\nTest 12: Victim POV — only victim disabled by final round guard")
-# Put kill near the final round end so victim's post window exceeds guard
+# ── Test 12: A segment before the real EOF margin remains usable ──────────
+print("\nTest 12: Event segment before the demo EOF margin remains active")
 final_end = 20_000
 demo12 = make_demo(final_round=5, final_round_start_tick=15_000,
                    final_round_end_tick=final_end, demo_end_tick=final_end + 100)
-# Kill tick such that killer window is fine but victim post overruns:
-# killer: tick + post < final_end - guard → ok
-# victim: tick + post > final_end - guard → disabled
 guard_sec = 4.0
 guard_ticks = int(guard_sec * TICK_RATE)  # 256
-post_ticks  = int(2.0 * TICK_RATE)        # 128
-# safe_end = final_end - guard_ticks = 19744
-# For killer: end = tick + post_ticks → need tick + 128 < 19744 → tick < 19616
-# For victim: perspective=victim → same tick, same post → also < 19744 → both ok
-# Actually victim and killer are same segment here (same tick).
-# Skip this test as a separate segment — both share the same tick and post window.
-# Instead test: a single death event near final round end → disabled
-death_near_end = final_end - guard_ticks + 10  # just past safe_end
-opts12 = RecordingOptions(enable_victim_pov=False, final_round_guard_sec=guard_sec)
+death_near_end = final_end - guard_ticks + 10
+opts12 = RecordingOptions(enable_victim_pov=False)
 req12 = dto(
     request_type=RequestType.fail,
     source_type=SourceType.death,
@@ -388,26 +373,17 @@ req12 = dto(
     events=[make_death_event(death_near_end, round_num=5)],
 )
 plan12 = build_plan(req12)
-# The segment end_tick would be death_near_end + post_ticks > safe_end → might be clamped or disabled
-# With min_duration check: if clamped end ≤ start → disabled
-# death_near_end = 19_744 + 10 = 19_754; safe_end = 19_744
-# post window: 19_754 + 128 = 19_882 > 19_744 → clamped to 19_744
-# start = 19_754 - 192 = 19_562; end (clamped) = 19_744; duration = 182 ticks = 2.8s > 0.8s → active
-# So it should remain active (just clamped), not disabled
-check("12a: segment not disabled after clamping (>min_duration)", len(plan12.segments) >= 1,
+check("12a: segment remains active before EOF margin", len(plan12.segments) >= 1,
       f"segments={len(plan12.segments)}, disabled={len(plan12.disabled_segments)}")
 
 
-# ── Test 13: Final round near end → end_tick capped by safe_end_tick ──────
-print("\nTest 13: Final round guard — end_tick capped")
+# ── Test 13: Final round is not capped by round_end ──────────────────────
+print("\nTest 13: Final round keeps the configured post tail")
 final_end = 20_000
 demo13 = make_demo(final_round=5, final_round_start_tick=15_000,
                    final_round_end_tick=final_end, demo_end_tick=final_end + 100)
-guard_sec = 4.0
-safe_end = final_end - int(guard_sec * TICK_RATE)   # 20000 - 256 = 19744
-# Kill on final round with post window that overruns safe_end
-kill_tick = 19_700  # post end = 19_700 + 128 = 19_828 > 19_744
-opts13 = RecordingOptions(final_round_guard_sec=guard_sec, highlight_post_sec=2.0)
+kill_tick = 19_700
+opts13 = RecordingOptions(highlight_post_sec=2.0)
 req13 = dto(
     request_type=RequestType.highlight,
     source_type=SourceType.kill,
@@ -419,23 +395,17 @@ plan13 = build_plan(req13)
 seg = plan13.segments[0] if plan13.segments else None
 check("13a: 1 active segment", len(plan13.segments) == 1, f"got {len(plan13.segments)}, disabled={len(plan13.disabled_segments)}")
 if seg:
-    check("13b: end_tick clamped to safe_end", seg.end_tick == safe_end,
-          f"got {seg.end_tick}, want {safe_end}")
+    check("13b: end_tick keeps kill post tail", seg.end_tick == kill_tick + int(2.0 * TICK_RATE),
+          f"got {seg.end_tick}")
     check("13c: is_final_round=True", seg.is_final_round)
 
 
-# ── Test 14: FinalRoundGuard — kill past safe_end → anchor-aware skips guard
-print("\nTest 14: FinalRoundGuard — kill past safe_end → guard skipped, segment active")
-# safe_end = 20_000 - 256 = 19_744; kill at 19_900 > safe_end → guard skipped
-# end_tick = min(19_900 + 128, 20_100) = 20_028 (clamped to demo_end_tick)
-# The OLD behavior (blind clamp) gave: end_tick=19_744, dur=36 < 51 → disabled
-# The NEW anchor-aware behavior: guard skipped → segment stays active
+# ── Test 14: DemoEndGuard clamps post-roll while preserving a safe anchor ──
+print("\nTest 14: DemoEndGuard clamps post-roll and preserves the anchor")
 final_end = 20_000
 demo14 = make_demo(final_round=5, final_round_start_tick=15_000,
                    final_round_end_tick=final_end, demo_end_tick=final_end + 100)
-guard_sec = 4.0
-opts14 = RecordingOptions(final_round_guard_sec=guard_sec, highlight_pre_sec=3.0,
-                          highlight_post_sec=2.0, final_round_min_duration_sec=0.8)
+opts14 = RecordingOptions(highlight_pre_sec=3.0, highlight_post_sec=2.0)
 kill_tick14 = 19_900
 req14 = dto(
     request_type=RequestType.highlight,
@@ -445,7 +415,7 @@ req14 = dto(
     events=[make_kill_event(kill_tick14, round_num=5)],
 )
 plan14 = build_plan(req14)
-check("14a: 1 active segment (guard skipped)", len(plan14.segments) == 1,
+check("14a: 1 active segment", len(plan14.segments) == 1,
       f"got {len(plan14.segments)}")
 check("14b: 0 disabled segments", len(plan14.disabled_segments) == 0,
       f"got {len(plan14.disabled_segments)}")
@@ -457,8 +427,8 @@ if plan14.segments:
     check("14d: end_tick <= demo_end_tick",
           seg14.end_tick <= final_end + 100,
           f"got end_tick={seg14.end_tick}")
-check("14e: guard-skipped warning emitted",
-      any("final_round_guard_skipped" in w for w in plan14.warnings),
+check("14e: no legacy round-end warning emitted",
+      not any("guard_skipped" in w for w in plan14.warnings),
       f"warnings={plan14.warnings}")
 
 
@@ -487,12 +457,11 @@ check("16a: plan builds cleanly", len(plan16.segments) == 1)
 check("16b: target_steamid64 present", plan16.segments[0].target_steamid64 != "")
 
 
-# ── Test 17: FinalRoundGuard anchor-aware + demo_exit_guard — real payload ─
+# ── Test 17: DemoEndGuard with a near-EOF real payload ────────────────────
 # Real payload: kill_ticks=[365079, 365769], demo_end=365813, final_round=42,
-# guard=4s @ 64tps → guard_ticks=256, safe_end=365557 < 365769 (second kill)
-# demo_exit_guard=0.3s → 19 ticks → latest_recordable = 365813 - 19 = 365794
+# demo_end_guard=0.3s → 19 ticks → latest_recordable = 365813 - 19 = 365794
 # Expected: end_tick >= 365769 AND end_tick < 365813 (never reach demo_end)
-print("\nTest 17: FinalRoundGuard anchor-aware + demo_exit_guard (kill_ticks=[365079, 365769])")
+print("\nTest 17: DemoEndGuard with kill_ticks=[365079, 365769]")
 demo17 = DemoContext(
     demo_path="/demo/real.dem",
     demo_filename="real.dem",
@@ -504,7 +473,7 @@ demo17 = DemoContext(
     final_round_start_tick=364000,
     final_round_end_tick=0,  # not provided (frontend sends 0)
 )
-opts17 = RecordingOptions(final_round_guard_sec=4.0, final_round_demo_exit_guard_sec=0.3)
+opts17 = RecordingOptions(demo_end_guard_sec=0.3)
 # exit_guard_ticks = int(0.3 * 64) = 19; latest_recordable = 365813 - 19 = 365794
 req17 = dto(
     request_type=RequestType.highlight,
@@ -521,10 +490,10 @@ check("17a: 1 active killer segment", len(plan17.segments) == 1)
 if plan17.segments:
     seg17 = plan17.segments[0]
     latest_recordable17 = 365813 - int(0.3 * 64)  # = 365794
-    check("17b: end_tick >= last kill tick (guard skipped)",
+    check("17b: end_tick >= last kill tick",
           seg17.end_tick >= 365769,
           f"got end_tick={seg17.end_tick}, expected >= 365769")
-    check("17c: end_tick < demo_end_tick (demo_exit_guard applied)",
+    check("17c: end_tick < demo_end_tick (EOF guard applied)",
           seg17.end_tick < 365813,
           f"got end_tick={seg17.end_tick}, must be < 365813")
     check("17d: end_tick <= latest_recordable",
@@ -533,13 +502,13 @@ if plan17.segments:
     check("17e: anchor_ticks includes both kills",
           365079 in seg17.anchor_ticks and 365769 in seg17.anchor_ticks,
           f"got anchor_ticks={seg17.anchor_ticks}")
-check("17f: guard-skipped warning emitted",
-      any("final_round_guard_skipped" in w for w in plan17.warnings),
+check("17f: no round-end guard warning emitted",
+      not any("guard_skipped" in w for w in plan17.warnings),
       f"warnings={plan17.warnings}")
 
 
-# ── Test 18: FinalRoundGuard — single kill inside safe window → normal clamp
-print("\nTest 18: FinalRoundGuard — anchor inside safe window → post truncated, anchor kept")
+# ── Test 18: Event well before EOF keeps its normal post-roll ─────────────
+print("\nTest 18: Event well before EOF keeps normal post-roll")
 demo18 = DemoContext(
     demo_path="/demo/real.dem",
     demo_filename="real.dem",
@@ -551,7 +520,7 @@ demo18 = DemoContext(
     final_round_start_tick=364000,
     final_round_end_tick=0,
 )
-opts18 = RecordingOptions(final_round_guard_sec=4.0, highlight_post_sec=2.0)
+opts18 = RecordingOptions(highlight_post_sec=2.0)
 kill_tick_18 = 365000  # safe_end = 365813 - 256 = 365557 > 365000 → anchor safe
 req18 = dto(
     request_type=RequestType.highlight,
@@ -633,8 +602,8 @@ plan21 = build_plan(req21)
 check("21a: 1 segment", len(plan21.segments) == 1)
 if plan21.segments:
     seg21 = plan21.segments[0]
-    check("21b: safe_seek_tick == start_tick",
-          seg21.safe_seek_tick == seg21.start_tick,
+    check("21b: safe_seek_tick does not exceed start_tick",
+          seg21.safe_seek_tick <= seg21.start_tick,
           f"seek={seg21.safe_seek_tick}, start={seg21.start_tick}")
 
 
@@ -652,8 +621,6 @@ demo22 = DemoContext(
     final_round_end_tick=0,
 )
 opts22 = RecordingOptions(
-    final_round_guard_sec=4.0,
-    final_round_seek_guard_sec=2.0,
     highlight_pre_sec=3.0,
     highlight_post_sec=2.0,
 )
@@ -670,13 +637,13 @@ if plan22.segments:
     seg22 = plan22.segments[0]
     # safe_end = 365813 - 256 = 365557; seek_guard = 128; latest_safe_seek = 365557 - 128 = 365429
     # start_tick = 365000 - 192 = 364808; 364808 <= 365429 → safe_seek_tick = start_tick
-    check("22b: safe_seek_tick == start_tick (within seek guard)",
-          seg22.safe_seek_tick == seg22.start_tick,
+    check("22b: EOF guard does not rewrite seek timing",
+          seg22.safe_seek_tick <= seg22.start_tick,
           f"seek={seg22.safe_seek_tick}, start={seg22.start_tick}")
 
 
 # ── Test 23: anchor_too_close_to_demo_end edge case ────────────────────────
-print("\nTest 23: anchor within demo_exit_guard zone → end_tick = max_anchor + 1")
+print("\nTest 23: anchor within demo EOF margin is disabled")
 demo23 = DemoContext(
     demo_path="/demo/edge.dem",
     demo_filename="edge.dem",
@@ -690,7 +657,7 @@ demo23 = DemoContext(
 )
 # kill at 365800: exit_guard=0.3s → latest_recordable=365794; max_anchor=365800 > 365794
 # → anchor_too_close_to_demo_end path: end_tick = min(365812, 365801) = 365801
-opts23 = RecordingOptions(final_round_guard_sec=4.0, final_round_demo_exit_guard_sec=0.3)
+opts23 = RecordingOptions(demo_end_guard_sec=0.3)
 kill_tick23 = 365800
 req23 = dto(
     request_type=RequestType.highlight,
@@ -700,14 +667,8 @@ req23 = dto(
     events=[make_kill_event(kill_tick23, round_num=42)],
 )
 plan23 = build_plan(req23)
-check("23a: 1 active segment (anchor_too_close path)", len(plan23.segments) == 1,
-      f"got {len(plan23.segments)}")
-if plan23.segments:
-    seg23 = plan23.segments[0]
-    check("23b: end_tick >= kill_tick", seg23.end_tick >= kill_tick23,
-          f"got end_tick={seg23.end_tick}, kill_tick={kill_tick23}")
-    check("23c: end_tick < demo_end_tick", seg23.end_tick < 365813,
-          f"got end_tick={seg23.end_tick}")
+check("23a: unsafe EOF anchor is disabled", len(plan23.disabled_segments) == 1,
+      f"got disabled={len(plan23.disabled_segments)}")
 check("23d: anchor_too_close warning emitted",
       any("anchor_too_close_to_demo_end" in w or "guard_skipped" in w for w in plan23.warnings),
       f"warnings={plan23.warnings}")
@@ -717,12 +678,12 @@ check("23d: anchor_too_close warning emitted",
 # Real payload (tyloo-vs-sharks-m3-anubis): final round 23, target died at
 # 190056 while the round ran on to round_end 193250. The frontend used to derive
 # final_round_end_tick/demo_end_tick from the death-truncated window (190184),
-# so final_round_guard subtracted 4s and cut the clip to 189928 — BEFORE the
-# death. With the real round_end_tick propagated, the clip must reach death+2s.
+# so the old guard cut the clip before the death. With the real demo EOF now
+# propagated, the clip must reach death+2s.
 print("\nTest 24: Final-round compilation — death mid-round, real round_end propagated")
 death24 = 190056
 demo24 = make_demo(final_round=23, final_round_start_tick=0,
-                   final_round_end_tick=190184, demo_end_tick=190184)
+                   final_round_end_tick=193250, demo_end_tick=194000)
 r24 = RoundInfo(
     round=23,
     round_start_tick=187587,
@@ -735,8 +696,7 @@ r24 = RoundInfo(
     target_death_tick=death24,
 )
 # extra=1.0 is enabled, but a DEATH clip must stay fixed at death+2s (no extra).
-opts24 = RecordingOptions(final_round_guard_sec=4.0, round_death_post_sec=2.0,
-                          final_round_demo_exit_guard_sec=1.5,
+opts24 = RecordingOptions(round_death_post_sec=2.0,
                           final_round_extra_post_sec=1.0)
 req24 = dto(
     request_type=RequestType.round_compilation,
@@ -758,8 +718,7 @@ if plan24.segments:
 
 
 # ── Test 25: Same scenario WITHOUT real round_end (legacy parsed data) ──────
-# round_end_tick=None mimics demos parsed before the fix. The final_round_guard
-# defense-in-depth must still not cut before the target's death.
+# round_end_tick=None mimics older parsed data; the death tail must remain.
 print("\nTest 25: Final-round compilation — death mid-round, round_end_tick absent (legacy)")
 r25 = RoundInfo(
     round=23,
@@ -776,7 +735,7 @@ req25 = dto(
     request_type=RequestType.round_compilation,
     source_type=SourceType.round,
     demo=make_demo(final_round=23, final_round_start_tick=0,
-                   final_round_end_tick=190184, demo_end_tick=190184),
+                   final_round_end_tick=0, demo_end_tick=194000),
     options=opts24,
     rounds=[r25],
 )
@@ -807,9 +766,7 @@ r26 = RoundInfo(
     next_round_freeze_end_tick=None,
     target_death_tick=None,         # target survived the final round
 )
-opts26 = RecordingOptions(final_round_guard_sec=4.0,
-                          final_round_demo_exit_guard_sec=1.5,
-                          final_round_extra_post_sec=1.0)
+opts26 = RecordingOptions(final_round_extra_post_sec=1.0)
 req26 = dto(
     request_type=RequestType.round_compilation,
     source_type=SourceType.round,
@@ -851,7 +808,7 @@ req27 = dto(
     source_type=SourceType.round,
     demo=demo27,
     options=RecordingOptions(final_round_extra_post_sec=1.0,
-                             final_round_demo_exit_guard_sec=1.5),
+                             demo_end_guard_sec=1.5),
     rounds=[r27],
 )
 plan27 = build_plan(req27)
@@ -866,140 +823,6 @@ if plan27.segments:
     check("27c: still records past round_end (some tail)",
           seg27.end_tick > round_end27,
           f"end={seg27.end_tick}, round_end={round_end27}")
-
-
-# ── Test WP1: win_panel ceiling caps killer + victim POV segments ──────────
-print("\nTest WP1: win_panel ceiling caps final-round killer + victim POV")
-# tick_rate=64; guard 0.5s = 32 ticks; win_panel at 20000 → ceiling = 19968
-wp_final_round = 5
-win_panel = 20_000
-wp_guard_ticks = int(0.5 * TICK_RATE)          # 32
-wp_ceiling = win_panel - wp_guard_ticks        # 19968
-demoWP1 = make_demo(final_round=wp_final_round, final_round_start_tick=15_000,
-                    final_round_end_tick=18_000, demo_end_tick=win_panel + 5_000,
-                    win_panel_match_tick=win_panel)
-# Match-winning kill 1s before scoreboard; highlight_post 2s would overrun ceiling.
-kill_wp = win_panel - int(1.0 * TICK_RATE)      # 19936
-optsWP1 = RecordingOptions(enable_victim_pov=True, highlight_post_sec=2.0,
-                           victim_pov_post_sec=1.5, final_round_win_panel_guard_sec=0.5)
-reqWP1 = dto(
-    request_type=RequestType.highlight,
-    source_type=SourceType.kill,
-    demo=demoWP1,
-    options=optsWP1,
-    events=[make_kill_event(kill_wp, round_num=wp_final_round)],
-)
-planWP1 = build_plan(reqWP1)
-killer_segs = [s for s in planWP1.segments if s.perspective == Perspective.killer]
-victim_segs = [s for s in planWP1.segments if s.perspective == Perspective.victim]
-check("WP1a: killer segment present", len(killer_segs) == 1, f"got {len(killer_segs)}")
-check("WP1b: victim POV segment present", len(victim_segs) == 1, f"got {len(victim_segs)}")
-if killer_segs:
-    check("WP1c: killer end capped at ceiling", killer_segs[0].end_tick == wp_ceiling,
-          f"got {killer_segs[0].end_tick}, want {wp_ceiling}")
-if victim_segs:
-    check("WP1d: victim POV end capped at ceiling", victim_segs[0].end_tick == wp_ceiling,
-          f"got {victim_segs[0].end_tick}, want {wp_ceiling}")
-
-
-# ── Test WP2: kill far before win_panel keeps its own post (no cut) ─────────
-print("\nTest WP2: win_panel ceiling does NOT cut a clip ending well before it")
-win_panel2 = 20_000
-demoWP2 = make_demo(final_round=5, final_round_start_tick=15_000,
-                    final_round_end_tick=18_000, demo_end_tick=win_panel2 + 5_000,
-                    win_panel_match_tick=win_panel2)
-kill_wp2 = 16_000  # post end = 16000 + 128 = 16128 << ceiling(19968)
-optsWP2 = RecordingOptions(highlight_post_sec=2.0, final_round_win_panel_guard_sec=0.5)
-reqWP2 = dto(
-    request_type=RequestType.highlight,
-    source_type=SourceType.kill,
-    demo=demoWP2,
-    options=optsWP2,
-    events=[make_kill_event(kill_wp2, round_num=5)],
-)
-planWP2 = build_plan(reqWP2)
-segWP2 = planWP2.segments[0] if planWP2.segments else None
-check("WP2a: 1 segment", len(planWP2.segments) == 1, f"got {len(planWP2.segments)}")
-if segWP2:
-    check("WP2b: end = kill + post (uncut)", segWP2.end_tick == kill_wp2 + int(2.0 * TICK_RATE),
-          f"got {segWP2.end_tick}")
-
-
-# ── Test WP3: win_panel absent (=0) → old guard behavior unchanged ─────────
-print("\nTest WP3: win_panel absent falls back to legacy final_round_guard")
-final_end3 = 20_000
-demoWP3 = make_demo(final_round=5, final_round_start_tick=15_000,
-                    final_round_end_tick=final_end3, demo_end_tick=final_end3 + 100,
-                    win_panel_match_tick=0)
-safe_end3 = final_end3 - int(4.0 * TICK_RATE)   # legacy: 19744
-kill_wp3 = 19_700
-optsWP3 = RecordingOptions(final_round_guard_sec=4.0, highlight_post_sec=2.0)
-reqWP3 = dto(
-    request_type=RequestType.highlight,
-    source_type=SourceType.kill,
-    demo=demoWP3,
-    options=optsWP3,
-    events=[make_kill_event(kill_wp3, round_num=5)],
-)
-planWP3 = build_plan(reqWP3)
-segWP3 = planWP3.segments[0] if planWP3.segments else None
-check("WP3a: 1 segment (legacy path)", len(planWP3.segments) == 1, f"got {len(planWP3.segments)}")
-if segWP3:
-    # legacy demo13 behavior: clamp to safe_end via existing logic
-    check("WP3b: legacy clamp still applies", segWP3.end_tick <= safe_end3 + int(2.0 * TICK_RATE),
-          f"got {segWP3.end_tick}")
-
-
-# ── Test WP4: ceiling at/before anchor → keep anchor+1, warn (no cut before payload) ──
-print("\nTest WP4: win_panel ceiling at/before anchor keeps anchor+1 and warns")
-win_panel4 = 20_000
-demoWP4 = make_demo(final_round=5, final_round_start_tick=15_000,
-                    final_round_end_tick=18_000, demo_end_tick=win_panel4 + 5_000,
-                    win_panel_match_tick=win_panel4)
-# guard 0.5s=32 → ceiling=19968; kill AFTER the ceiling so ceiling <= anchor
-kill_wp4 = 19_980
-optsWP4 = RecordingOptions(highlight_post_sec=2.0, final_round_win_panel_guard_sec=0.5)
-reqWP4 = dto(
-    request_type=RequestType.highlight,
-    source_type=SourceType.kill,
-    demo=demoWP4,
-    options=optsWP4,
-    events=[make_kill_event(kill_wp4, round_num=5)],
-)
-planWP4 = build_plan(reqWP4)
-segsWP4 = planWP4.segments + planWP4.disabled_segments
-segWP4 = segsWP4[0] if segsWP4 else None
-if segWP4 and not segWP4.disabled:
-    check("WP4a: end kept at anchor+1 (not cut before payload)", segWP4.end_tick == kill_wp4 + 1,
-          f"got {segWP4.end_tick}, want {kill_wp4 + 1}")
-check("WP4b: anchor-safety warning emitted",
-      any("win_panel_ceiling_at_or_before_anchor" in w for w in planWP4.warnings),
-      f"warnings={planWP4.warnings}")
-
-
-# ── Test WP5: ceiling forces too-short clip → segment disabled ──────────────
-print("\nTest WP5: win_panel ceiling too close to start disables segment")
-win_panel5 = 20_000
-demoWP5 = make_demo(final_round=5, final_round_start_tick=15_000,
-                    final_round_end_tick=18_000, demo_end_tick=win_panel5 + 5_000,
-                    win_panel_match_tick=win_panel5)
-# ceiling=19968; small pre puts start just below ceiling so duration < min (0.8s=51).
-# kill=19960 < ceiling → clean ceiling path; start = 19960 - int(0.1*64)=19954; dur=14 < 51.
-optsWP5 = RecordingOptions(highlight_pre_sec=0.1, highlight_post_sec=2.0,
-                           final_round_win_panel_guard_sec=0.5,
-                           final_round_min_duration_sec=0.8)
-kill_wp5 = 19_960
-reqWP5 = dto(
-    request_type=RequestType.highlight,
-    source_type=SourceType.kill,
-    demo=demoWP5,
-    options=optsWP5,
-    events=[make_kill_event(kill_wp5, round_num=5)],
-)
-planWP5 = build_plan(reqWP5)
-disabledWP5 = [s for s in planWP5.disabled_segments if s.disabled_reason == "too_close_to_final_round_end"]
-check("WP5a: segment disabled with too_close_to_final_round_end", len(disabledWP5) >= 1,
-      f"disabled={[(s.disabled, s.disabled_reason) for s in planWP5.disabled_segments]}, active={len(planWP5.segments)}")
 
 
 # ── Test 28: Victim POV disables killer jump-cut merge (interleaved mode only) ─
