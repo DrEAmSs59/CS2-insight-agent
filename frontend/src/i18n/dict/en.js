@@ -823,8 +823,9 @@ export default {
 
   // Tabs
   "settings.tabGeneral": "General",
+  "settings.tabPaths": "Game & Cache Paths",
   "settings.tabParse": "Parse",
-  "settings.tabVideo": "Video",
+  "settings.tabVideo": "OBS/FFmpeg Configuration",
   "settings.tabRecording": "Recording Presets",
 
   // Section headers
@@ -1833,7 +1834,7 @@ export default {
   "guide.tagOptional": "Optional",
   "guide.setupGoTo": "Go to {link}",
   "guide.setupObsLabel": "OBS config verified",
-  "guide.setupObsDesc": "Required for recording. Click \"Config Check\" under Settings → Video; once connected successfully it will be marked as verified. OBS is checked automatically before each recording.",
+  "guide.setupObsDesc": "Required for recording. Click \"Config Check\" under Settings → OBS/FFmpeg Configuration; once connected successfully it will be marked as verified. OBS is checked automatically before each recording.",
   "guide.setupCs2Label": "CS2 path configured",
   "guide.setupCs2Desc": "Required for recording. Must point to cs2.exe. The app auto-detects Steam installations; you can also enter the path manually.",
   "guide.setupFfmpegLabel": "FFmpeg available",
