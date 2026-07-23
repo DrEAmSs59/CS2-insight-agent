@@ -286,6 +286,20 @@ def extract_radar_timeline_impl(
             return False
         return bool(value)
 
+    def _safe_inventory(value: object) -> list[str]:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return []
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if not isinstance(value, (list, tuple, set)):
+            return []
+        inventory: list[str] = []
+        for item in value:
+            text = _safe_weapon_text(item) or _safe_text(item)
+            if text:
+                inventory.append(text)
+        return inventory
+
     def _first_text(record: pd.Series, *keys: str) -> str:
         for key in keys:
             value = _safe_text(record.get(key))
@@ -413,6 +427,10 @@ def extract_radar_timeline_impl(
         "is_alive",
         "health",
         "armor",
+        "has_helmet",
+        "balance",
+        "current_equip_value",
+        "inventory",
         "active_weapon",
         "active_weapon_name",
         "has_defuser",
@@ -504,6 +522,15 @@ def extract_radar_timeline_impl(
                     except (TypeError, ValueError):
                         color_slot = -1
 
+                inventory = _safe_inventory(r.get("inventory")) if "inventory" in work.columns else []
+                inventory_keys = {
+                    item.lower().replace("weapon_", "").replace(" ", "_")
+                    for item in inventory
+                }
+                has_c4 = (
+                    _safe_bool(r.get("has_c4")) if "has_c4" in work.columns else False
+                ) or bool({"c4", "c4_explosive"} & inventory_keys)
+
                 players_out.append(
                     {
                         "steamid64": sid_c or None,
@@ -516,9 +543,13 @@ def extract_radar_timeline_impl(
                         "is_alive": alive,
                         "health": max(0, int(_safe_number(r.get("health"), 0))),
                         "armor": max(0, int(_safe_number(r.get("armor"), 0))),
+                        "has_helmet": _safe_bool(r.get("has_helmet")) if "has_helmet" in work.columns else False,
+                        "money": max(0, int(_safe_number(r.get("balance"), 0))),
+                        "equipment_value": max(0, int(_safe_number(r.get("current_equip_value"), 0))),
+                        "inventory": inventory,
                         "weapon": _safe_weapon_text(r.get("active_weapon_name")) or _safe_weapon_text(r.get("active_weapon")),
                         "has_defuser": _safe_bool(r.get("has_defuser")) if "has_defuser" in work.columns else False,
-                        "has_c4": _safe_bool(r.get("has_c4")) if "has_c4" in work.columns else False,
+                        "has_c4": has_c4,
                         "flash_duration": max(0.0, _safe_number(r.get("flash_duration"), 0.0)),
                         "is_pov": is_pov,
                         "is_teammate": pov_team is not None and tm == pov_team,
@@ -540,7 +571,7 @@ def extract_radar_timeline_impl(
         )
 
     # Keep replay self-contained for workspaces cached before the shots field
-    # existed.  Attaching shots to the nearest 8 Hz frame avoids a second demo
+    # existed. Attaching shots to the nearest requested replay frame avoids a second demo
     # parse in the API process and preserves native-parser crash isolation.
     try:
         raw_fire = parser.parse_event(
