@@ -55,7 +55,7 @@ function SetupChecklist() {
       required: true,
       label: t("guide.setupCs2Label"),
       desc: t("guide.setupCs2Desc"),
-      to: "/settings",
+      to: "/settings?tab=paths",
       linkLabel: t("guide.setupSettingsLink"),
     },
     {
@@ -63,7 +63,7 @@ function SetupChecklist() {
       required: false,
       label: t("guide.setupFfmpegLabel"),
       desc: t("guide.setupFfmpegDesc"),
-      to: "/settings",
+      to: "/settings?tab=video",
       linkLabel: t("guide.setupSettingsLink"),
     },
     {
@@ -71,7 +71,7 @@ function SetupChecklist() {
       required: false,
       label: t("guide.setupAiLabel"),
       desc: t("guide.setupAiDesc"),
-      to: "/settings",
+      to: "/settings?tab=parse",
       linkLabel: t("guide.setupSettingsLink"),
     },
   ];
