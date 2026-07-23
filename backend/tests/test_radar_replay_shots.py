@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.radar.radar_data_extractor import extract_radar_timeline_impl
+from app.radar.radar_map_assets import lookup_map_data, resolve_map_png_path
 
 
 class _FakeParser:
@@ -24,9 +25,12 @@ class _FakeParser:
                     "yaw": 90.0,
                     "health": 100,
                     "armor": 100,
+                    "has_helmet": True,
+                    "balance": 2450,
+                    "current_equip_value": 4700,
+                    "inventory": ["Karambit", "AK-47", "C4 Explosive", "Smoke Grenade", "Flashbang", "Flashbang"],
                     "active_weapon_name": "ak47",
                     "has_defuser": False,
-                    "has_c4": True,
                 }
                 for tick in ticks
             ],
@@ -79,6 +83,20 @@ def test_replay_frames_include_bullet_shots_for_legacy_workspaces(monkeypatch):
     )
 
     shots = [shot for frame in frames for shot in frame.get("shots", [])]
+    player = frames[0]["players"][0]
+    assert player["armor"] == 100
+    assert player["has_helmet"] is True
+    assert player["money"] == 2450
+    assert player["equipment_value"] == 4700
+    assert player["has_c4"] is True
+    assert player["inventory"] == [
+        "Karambit",
+        "AK-47",
+        "C4 Explosive",
+        "Smoke Grenade",
+        "Flashbang",
+        "Flashbang",
+    ]
     assert shots == [
         {
             "tick": 132,
@@ -90,3 +108,21 @@ def test_replay_frames_include_bullet_shots_for_legacy_workspaces(monkeypatch):
             "y": 200.0,
         },
     ]
+
+
+def test_resolves_nuke_upper_and_lower_radar_layers():
+    assert resolve_map_png_path("de_nuke").name == "de_nuke.png"
+    assert resolve_map_png_path("de_nuke", layer="upper").name == "de_nuke.png"
+    assert resolve_map_png_path("de_nuke", layer="lower").name == "de_nuke_lower.png"
+
+
+def test_resolves_locally_extracted_cache_radar_and_calibration():
+    assert resolve_map_png_path("de_cache").name == "de_cache.png"
+    assert lookup_map_data("de_cache") == {
+        "pos_x": -2000,
+        "pos_y": 3250,
+        "scale": 5.5,
+        "rotate": None,
+        "zoom": None,
+        "lower_level_max_units": -1000000.0,
+    }

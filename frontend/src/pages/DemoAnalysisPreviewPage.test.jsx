@@ -9,8 +9,10 @@ vi.mock("../api/api", () => ({
   default: {
     post: vi.fn().mockResolvedValue({
       data: {
+        fps: 32,
+        map_transform: { pos_x: 0, pos_y: 1024, scale: 1 },
         frames: [
-          { tick: 200, time_sec: 0, players: [{ name: "ZywOo", team: "CT", x: 500, y: 500, yaw: 90, health: 100, weapon: "ak47", is_alive: true, has_defuser: true }] },
+          { tick: 200, time_sec: 0, players: [{ name: "ZywOo", team: "CT", x: 500, y: 500, yaw: 90, health: 100, armor: 100, has_helmet: true, money: 2450, equipment_value: 4700, inventory: ["AK-47", "Smoke Grenade", "Flashbang", "Flashbang", "C4 Explosive"], weapon: "ak47", is_alive: true, has_defuser: true, has_c4: true }] },
           { tick: 600, time_sec: 6.25, players: [{ name: "ZywOo", team: "CT", x: 502, y: 502, yaw: 80, health: 100, weapon: "ak47", is_alive: true, has_defuser: true }] },
           { tick: 700, time_sec: 7.8, players: [{ name: "ZywOo", team: "CT", x: 504, y: 504, yaw: 70, health: 100, weapon: "ak47", is_alive: true, has_defuser: true }] },
           { tick: 800, time_sec: 9.4, players: [{ name: "ZywOo", team: "CT", x: 506, y: 506, yaw: 60, health: 100, weapon: "ak47", is_alive: true, has_defuser: true }] },
@@ -93,7 +95,7 @@ function buildShell(overrides = {}) {
           { type: "grenade", tick: 800, time_text: "00:08", actor: "ZywOo", kind: "闪光弹", x: 508, y: 508 },
           { type: "grenade", tick: 900, throw_tick: 820, time_text: "00:10", actor: "ZywOo", kind: "烟雾弹", x: 512, y: 512, trajectory: [{ tick: 820, x: 490, y: 490 }, { tick: 860, x: 500, y: 500 }, { tick: 900, x: 512, y: 512 }] },
           { type: "plant", tick: 950, time_text: "00:11", actor: "ZywOo", site: "B", x: 516, y: 516 },
-          { type: "kill", tick: 1000, time_text: "00:12", actor: "ZywOo", target: "b1t", weapon: "ak47", headshot: true },
+          { type: "kill", tick: 1000, time_text: "00:12", actor: "ZywOo", target: "b1t", weapon: "ak47", headshot: true, actor_x: 512, actor_y: 512, target_x: 520, target_y: 520 },
           { type: "explode", tick: 1100, time_text: "00:14", actor: "ZywOo" },
           { type: "explode", tick: 1200, time_text: "00:16", actor: "ZywOo" },
           { type: "kill", tick: 4300, time_text: "01:04", actor: "b1t", target: "ZywOo", weapon: "glock" },
@@ -261,12 +263,25 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
     expect(screen.getByAltText("de_mirage 雷达地图")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("8 Hz", { exact: false })).toBeTruthy());
-    expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 100, end_tick: 4299, fps: 8 }));
+    await waitFor(() => expect(screen.getByText("32 Hz", { exact: false })).toBeTruthy());
+    expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 32 }));
     expect(screen.queryByText(/^nan$/i)).toBeNull();
     expect(screen.queryByText("16777215")).toBeNull();
+    expect(screen.getByText("1:55")).toBeTruthy();
+    expect(screen.getByText("$2,450")).toBeTruthy();
+    const weaponDisplay = screen.getByLabelText(/ZywOo 当前武器/);
+    expect(weaponDisplay.textContent).toBe("");
+    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-[18px]");
+    expect(screen.getByLabelText("ZywOo 头盔和防弹衣")).toBeTruthy();
+    expect(screen.queryByText("100 头甲")).toBeNull();
+    expect(view.container.querySelector('img[src$="/ak47.svg"]')).toBeTruthy();
+    expect(view.container.querySelector('img[src$="/armor_helmet.svg"]')).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 持有烟雾弹")).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 持有烟雾弹").querySelector('img[src$="/smokegrenade.svg"]')).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 持有闪光弹 2 枚")).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 携带拆弹器")).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 携带 C4")).toBeTruthy();
     expect(screen.getAllByText("C4").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("KIT").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" }));
     await waitFor(() => expect(screen.getByTitle("ZywOo HE 手雷")).toBeTruthy());
@@ -276,8 +291,9 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 燃烧弹" }));
     await waitFor(() => expect(screen.getByTitle(/ZywOo 燃烧弹 · 剩余/)).toBeTruthy());
     expect(view.container.querySelector(".demo-fire-effect")).toBeTruthy();
-    expect(view.container.querySelector(".demo-fire-effect")?.parentElement?.className).toContain("h-[50px]");
-    expect(view.container.querySelector(".demo-fire-effect svg")).toBeTruthy();
+    expect(view.container.querySelector(".demo-fire-effect")?.parentElement?.className).toContain("h-[30px]");
+    expect(view.container.querySelector(".demo-fire-effect")?.parentElement?.getAttribute("style")).not.toContain("border");
+    expect(view.container.querySelector('.demo-fire-effect img[src$="/molotov.svg"]')).toBeTruthy();
     expect(view.container.querySelector(".demo-fire-effect")?.textContent).not.toContain("火");
     expect(view.container.querySelector(".demo-duration-ring")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 闪光弹" }));
@@ -285,13 +301,16 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector(".demo-flash-effect")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 烟雾弹" }));
     await waitFor(() => expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/)).toBeTruthy());
-    expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/).className).toContain("h-[54px]");
+    expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/).className).toContain("h-[32px]");
+    expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/).getAttribute("style")).not.toContain("border");
     expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke")).toBe("#38bdf8");
+    expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke-width")).toBe("0.205");
+    expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke-dasharray")).toBeNull();
     fireEvent.change(screen.getByRole("slider", { name: "回放时间轴" }), { target: { value: "4" } });
     await waitFor(() => expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')).toBeTruthy());
     expect(view.container.querySelector(".demo-grenade-projectile")?.parentElement?.className).toContain("transition-[left,top]");
     expect(view.container.querySelector(".demo-grenade-projectile")?.parentElement?.getAttribute("data-side")).toBe("CT");
-    expect(view.container.querySelector(".demo-grenade-projectile")?.getAttribute("style")).toContain("border-color: rgb(56, 189, 248)");
+    expect(view.container.querySelector(".demo-grenade-projectile")?.getAttribute("style")).toContain("background-color: rgb(56, 189, 248)");
     expect(view.container.querySelector("style")?.textContent).not.toContain("demo-projectile-pulse");
     const killMarker = screen.getByRole("button", { name: "定位事件：ZywOo 使用 ak47 击杀 b1t（爆头）" });
     fireEvent.click(killMarker);
@@ -299,7 +318,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/)).toBeTruthy();
     expect(screen.getByTitle(/ZywOo 燃烧弹 · 剩余/)).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区")).toBeTruthy();
-    expect(screen.getByTitle("C4 已放置 · B 区").querySelector("svg")).toBeNull();
+    expect(screen.getByTitle("C4 已放置 · B 区").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区").className).toContain("z-[5]");
     const killFeed = view.container.querySelector('[aria-live="polite"]');
     expect(within(killFeed).getByText("ZywOo").getAttribute("data-side")).toBe("CT");
@@ -307,7 +326,17 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(within(killFeed).getByText("b1t").getAttribute("data-side")).toBe("T");
     expect(within(killFeed).getByText("b1t").className).toContain("text-amber-300");
     expect(view.container.querySelector(".demo-player-direction-arrow")).toBeTruthy();
-    expect(view.container.querySelector(".demo-shot-tracer")).toBeTruthy();
+    expect(view.container.querySelector(".demo-player-marker")?.className).toContain("h-[14px]");
+    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
+    expect(view.container.querySelector(".demo-player-trace")?.getAttribute("stroke-width")).toBe("0.175");
+    expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("stroke-width")).toBe("0.12");
+    expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("opacity")).toBe("1");
+    await waitFor(() => expect(view.container.querySelector(".demo-death-line")).toBeTruthy());
+    expect(view.container.querySelector(".demo-death-line")?.getAttribute("stroke-width")).toBe("0.14");
+    expect(view.container.querySelector(".demo-death-circle")?.getAttribute("stroke-width")).toBe("0.09");
+    expect(view.container.querySelector(".demo-death-x")?.getAttribute("stroke-width")).toBe("0.07");
+    expect(screen.getByRole("slider", { name: "回放时间轴" }).getAttribute("step")).toBe("0.01");
+    expect(view.container.querySelector("style")?.textContent).toContain(".demo-shot-tracer { filter:none; }");
     expect(screen.getAllByText("b1t", { selector: "span" }).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "回合" }));
@@ -335,6 +364,62 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getAllByText("R1").length).toBeGreaterThan(0);
     expect(screen.queryByText("平均装备差")).toBeNull();
     expect(screen.queryByText("双方最低装备总值")).toBeNull();
+  });
+
+  test("repairs a cached workspace missing radar coordinates from the replay response", async () => {
+    const shell = buildShell();
+    shell.analysisWorkspace = {
+      ...shell.analysisWorkspace,
+      map_name: "cache",
+      map_transform: null,
+    };
+    const view = renderPage(shell);
+
+    fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
+
+    await waitFor(() => expect(API.post).toHaveBeenCalledWith(
+      "/demo/replay",
+      expect.objectContaining({ map_name: "de_cache", fps: 32 }),
+    ));
+    await waitFor(() => expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')).toBeTruthy());
+    expect(screen.getByAltText("de_cache 雷达地图")).toBeTruthy();
+    expect(screen.queryByText("当前地图缺少坐标变换元数据")).toBeNull();
+  });
+
+  test("switches Nuke upper and lower radar floors and enlarges its map plane", async () => {
+    const shell = buildShell();
+    shell.analysisWorkspace = {
+      ...shell.analysisWorkspace,
+      map_name: "de_nuke",
+      map_transform: { pos_x: 0, pos_y: 1024, scale: 1, lower_level_max_units: -495 },
+    };
+    API.post.mockResolvedValueOnce({
+      data: {
+        frames: [{
+          tick: 200,
+          time_sec: 0,
+          players: [
+            { name: "ZywOo", team: "CT", x: 500, y: 500, z: 0, yaw: 90, health: 100, weapon: "ak47", is_alive: true },
+            { name: "b1t", team: "T", x: 520, y: 520, z: -600, yaw: 0, health: 100, weapon: "glock", is_alive: true },
+          ],
+        }],
+      },
+    });
+    const view = renderPage(shell);
+    fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
+
+    await waitFor(() => expect(screen.getByAltText("de_nuke 上层 雷达地图")).toBeTruthy());
+    expect(screen.getByRole("group", { name: "地图楼层" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "上层" }).getAttribute("aria-pressed")).toBe("true");
+    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("scale(1.28)");
+    expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeTruthy();
+    expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "下层" }));
+    expect(screen.getByAltText("de_nuke 下层 雷达地图").getAttribute("src")).toContain("layer=lower");
+    expect(screen.getByRole("button", { name: "下层" }).getAttribute("aria-pressed")).toBe("true");
+    expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeNull();
+    expect(view.container.querySelector('[title^="b1t ·"]')).toBeTruthy();
   });
 
   test("keeps every player unselected until the user chooses one, then requests only that player's AI review", () => {
@@ -411,8 +496,11 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     await waitFor(() => expect(API.post).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("slider", { name: "回放时间轴" }), { target: { value: "4" } });
+    await waitFor(() => expect(view.container.querySelectorAll(".demo-grenade-projectile")).toHaveLength(1));
     fireEvent.click(screen.getAllByRole("button", { name: /定位事件：ZywOo 投掷 烟雾弹/ })[0]);
     await waitFor(() => expect(view.container.querySelectorAll(".demo-grenade-trajectory")).toHaveLength(1));
+    expect(screen.getAllByTitle(/ZywOo 烟雾弹 · 剩余/)).toHaveLength(1);
   });
 
   test("rejects stale smoke paths whose long stationary tail belongs to another landing", async () => {

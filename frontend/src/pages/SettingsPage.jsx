@@ -36,6 +36,10 @@ import {
   X,
 } from "lucide-react";
 
+// The AI insight mode remains available for demo review, but OBS recommendation
+// is intentionally kept behind a local release gate until the workflow is ready.
+const AI_OBS_RECOMMENDATION_ENABLED = false;
+
 /* ---------------------------------------------------------------------------
  * Helper function to open external links in system default browser
  * ------------------------------------------------------------------------ */
@@ -734,6 +738,7 @@ export default function SettingsPage() {
 
   const obs = config.obs ?? {};
   const llm = config.llm ?? {};
+  const aiObsRecommendationEnabled = AI_OBS_RECOMMENDATION_ENABLED && Boolean(config.ai_mode);
   const isLocalEndpoint = llm.base_url && (
     llm.base_url.includes("localhost") || llm.base_url.includes("127.0.0.1")
   );
@@ -790,7 +795,7 @@ export default function SettingsPage() {
           className={
             activeTab === "recording"
               ? "flex min-h-0 flex-1 flex-col"
-              : activeTab === "video" && config.ai_mode
+              : activeTab === "video" && aiObsRecommendationEnabled
                 ? "w-full px-4 pb-24 pt-2 xl:px-6 2xl:px-8"
                 : "mx-auto max-w-4xl px-4 pb-24 pt-2"
           }
@@ -1122,14 +1127,14 @@ export default function SettingsPage() {
           {/* ======================== 视频设置 ======================== */}
           {activeTab === "video" && (
             <div className="space-y-4">
-              <div className={config.ai_mode ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "contents"}>
+              <div className={aiObsRecommendationEnabled ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "contents"}>
                 {/* Paths: OBS + FFmpeg */}
                 <SectionCard
                   title={t("settings.sectionPaths")}
-                  hint={config.ai_mode ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
+                  hint={aiObsRecommendationEnabled ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
                   search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}
                 >
-                  {!config.ai_mode && (
+                  {!aiObsRecommendationEnabled && (
                     <FieldRow label={t("settings.labelObsPath")} hint={t("settings.hintObsPath")} search={search && !matches(t("settings.labelObsPath") + " " + (obs.obs_path ?? ""))}>
                       <PathPicker
                         value={obs.obs_path ?? ""}
@@ -1168,7 +1173,7 @@ export default function SettingsPage() {
               </div>
 
               {/* OBS: manual controls or AI workspace */}
-              {!config.ai_mode ? (
+              {!aiObsRecommendationEnabled ? (
                 <>
               <SectionCard title={t("settings.sectionObs")} hint={t("settings.sectionObsHint")} search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}>
                 <div className="mb-2 flex items-center justify-between">
@@ -1419,7 +1424,7 @@ export default function SettingsPage() {
       {/* Footer save bar */}
       {
         <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
-          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && config.ai_mode ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
+          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
             <div className="min-w-0 flex-1">
               {activeTab !== "recording" && saveMsg && (
                 <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>

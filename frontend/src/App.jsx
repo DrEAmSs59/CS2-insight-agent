@@ -31,6 +31,7 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
+import { buildPendingDemoAnalysisSpecs } from "./utils/demoAnalysisCache";
 import {
   recordingAbortToastKind,
   recordingQueueHadUnexpectedCs2Exit,
@@ -1326,15 +1327,11 @@ export default function App() {
 
   const autoParseLoadedDemos = useCallback(async (loaded, demoIdsByIndex = {}) => {
     const demos = Array.isArray(loaded) ? loaded : [];
-    const specs = demos
-      .map((demo, index) => ({
-        index,
-        players: (demo?.players || [])
-          .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
-          .filter((name) => typeof name === "string" && name.trim()),
-      }))
-      .filter((spec) => spec.players.length > 0);
-    if (!specs.length) return;
+    const specs = buildPendingDemoAnalysisSpecs(demos);
+    if (!specs.length) {
+      setAnalysisInlineProgress({ active: false, text: "" });
+      return;
+    }
 
     let done = 0;
     let succeeded = 0;

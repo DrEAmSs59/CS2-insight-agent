@@ -2690,7 +2690,7 @@ class DemoReplayRequest(BaseModel):
     start_tick: int = Field(..., ge=0)
     end_tick: int = Field(..., gt=0)
     tick_rate: float = Field(64.0, gt=0, le=256)
-    fps: float = Field(8.0, ge=1, le=16)
+    fps: float = Field(32.0, ge=1, le=32)
     pov_player_name: Optional[str] = None
     pov_steamid64: Optional[str] = None
 
@@ -2708,16 +2708,19 @@ class PlayerClipReviewRequest(BaseModel):
 
 
 @app.get("/api/demo/radar-map/{map_name}")
-async def get_demo_radar_map(map_name: str):
+async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
     """Serve the bundled Insight Agent overhead radar used by 2D replay."""
     map_key = str(map_name or "").strip().lower()
     if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
         raise HTTPException(400, "Invalid map name")
     if not map_key.startswith(("de_", "cs_", "ar_")):
         map_key = f"de_{map_key}"
+    normalized_layer = str(layer or "upper").strip().lower()
+    if normalized_layer not in {"upper", "lower"}:
+        raise HTTPException(400, "Invalid radar layer")
     from .radar.radar_map_assets import resolve_map_png_path
     try:
-        map_path = resolve_map_png_path(map_key)
+        map_path = resolve_map_png_path(map_key, layer=normalized_layer)
     except FileNotFoundError as exc:
         raise HTTPException(404, f"No bundled radar map for {map_key}") from exc
     return FileResponse(str(map_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
@@ -2737,10 +2740,14 @@ async def get_demo_replay(req: DemoReplayRequest):
     from .radar.radar_data_extractor import extract_radar_timeline
     from .radar.radar_map_assets import lookup_map_data
 
+    map_key = str(req.map_name or "unknown").strip().lower()
+    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+
     frames = await asyncio.to_thread(
         extract_radar_timeline,
         demo_path=str(dem_path),
-        map_name=req.map_name,
+        map_name=map_key,
         pov_player_name=req.pov_player_name,
         pov_steamid64=req.pov_steamid64,
         start_tick=req.start_tick,
@@ -2751,12 +2758,9 @@ async def get_demo_replay(req: DemoReplayRequest):
         include_all_players=True,
     )
     try:
-        transform = lookup_map_data(req.map_name)
+        transform = lookup_map_data(map_key)
     except (KeyError, OSError):
         transform = None
-    map_key = str(req.map_name or "unknown").strip().lower()
-    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
-        map_key = f"de_{map_key}"
     return {
         "frames": frames,
         "map_name": map_key or "unknown",
