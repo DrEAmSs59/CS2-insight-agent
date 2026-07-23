@@ -342,9 +342,10 @@ const UPDATE_FREQUENCY_OPTIONS = [
  * Tab definitions
  * ------------------------------------------------------------------------ */
 const TABS = [
-  { key: "general", icon: FolderOpen, labelKey: "settings.tabGeneral" },
-  { key: "parse", icon: Brain, labelKey: "settings.tabParse" },
+  { key: "general", icon: SettingsIcon, labelKey: "settings.tabGeneral" },
+  { key: "paths", icon: FolderOpen, labelKey: "settings.tabPaths" },
   { key: "video", icon: Monitor, labelKey: "settings.tabVideo" },
+  { key: "parse", icon: Brain, labelKey: "settings.tabParse" },
   { key: "recording", icon: SlidersHorizontal, labelKey: "settings.tabRecording" },
 ];
 
@@ -802,8 +803,10 @@ export default function SettingsPage() {
         >
 
           {/* ======================== 通用设置 ======================== */}
-          {activeTab === "general" && (
+          {(activeTab === "general" || activeTab === "paths") && (
             <div className="space-y-4">
+              {activeTab === "general" && (
+                <>
               {/* System + Language */}
               <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.labelUpdateFrequency"))}>
                 <FieldRow label={t("settings.currentVersion")} search={search && !matches(t("settings.currentVersion") + " version")}>
@@ -925,9 +928,12 @@ export default function SettingsPage() {
                   />
                 </FieldRow>
               </SectionCard>
+                </>
+              )}
 
-              {/* Paths (CS2 + Demo Directory only) */}
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelDataDirectory"))}>
+              {/* Paths (CS2 + application and LiteCut data directories) */}
+              {activeTab === "paths" && (
+              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}
@@ -938,43 +944,6 @@ export default function SettingsPage() {
                     detectField="cs2_path"
                     t={t}
                   />
-                </FieldRow>
-                <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={dataDirInfo?.path ?? ""}
-                      readOnly
-                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
-                    />
-                    <span className="text-xs text-cs2-text-muted min-w-[80px]">
-                      {dataDirInfo?.size_str ?? "—"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => API.post("config/open-dir").catch(() => {})}
-                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
-                    >
-                      {t("settings.openDirBtn")}
-                    </button>
-                  </div>
-                </FieldRow>
-                <FieldRow label={t("settings.labelLogDirectory")} hint={t("settings.hintLogDirectory")} search={search && !matches(t("settings.labelLogDirectory") + " " + (dataDirInfo?.logs_path ?? ""))}>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={dataDirInfo?.logs_path ?? ""}
-                      readOnly
-                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => API.post("config/open-logs").catch(() => {})}
-                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
-                    >
-                      {t("settings.openLogsBtn")}
-                    </button>
-                  </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelLiteCutStorage")} hint={t("settings.hintLiteCutStorage")} search={search && !matches(t("settings.labelLiteCutStorage") + " " + liteCutStorageDraft)}>
                   <div className="space-y-2">
@@ -1057,9 +1026,48 @@ export default function SettingsPage() {
                     )}
                   </div>
                 </FieldRow>
+                <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={dataDirInfo?.path ?? ""}
+                      readOnly
+                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
+                    />
+                    <span className="text-xs text-cs2-text-muted min-w-[80px]">
+                      {dataDirInfo?.size_str ?? "—"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => API.post("config/open-dir").catch(() => {})}
+                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                    >
+                      {t("settings.openDirBtn")}
+                    </button>
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelLogDirectory")} hint={t("settings.hintLogDirectory")} search={search && !matches(t("settings.labelLogDirectory") + " " + (dataDirInfo?.logs_path ?? ""))}>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={dataDirInfo?.logs_path ?? ""}
+                      readOnly
+                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => API.post("config/open-logs").catch(() => {})}
+                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                    >
+                      {t("settings.openLogsBtn")}
+                    </button>
+                  </div>
+                </FieldRow>
               </SectionCard>
+              )}
 
               {/* Player Game Config */}
+              {activeTab === "general" && (
               <SectionCard title={t("playercfg.pageTitle")} hint={t("playercfg.pageSubtitle")} search={search && !matches(t("playercfg.pageTitle") + " player config")}>
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                   <button
@@ -1138,13 +1146,14 @@ export default function SettingsPage() {
                   </div>
                 )}
               </SectionCard>
+              )}
             </div>
           )}
 
           {/* ======================== 视频设置 ======================== */}
           {activeTab === "video" && (
             <div className="space-y-4">
-              <div className={aiObsRecommendationEnabled ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "contents"}>
+              <div className={aiObsRecommendationEnabled ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "space-y-4"}>
                 {/* Paths: OBS + FFmpeg */}
                 <SectionCard
                   title={t("settings.sectionPaths")}

@@ -824,8 +824,9 @@ export default {
 
   // Tabs
   "settings.tabGeneral": "通用设置",
+  "settings.tabPaths": "游戏与缓存路径",
   "settings.tabParse": "解析设置",
-  "settings.tabVideo": "视频设置",
+  "settings.tabVideo": "OBS/FFmpeg配置",
   "settings.tabRecording": "录制预设",
 
   // Section headers
@@ -1834,7 +1835,7 @@ export default {
   "guide.tagOptional": "可选",
   "guide.setupGoTo": "前往 {link} 配置",
   "guide.setupObsLabel": "OBS 配置已验证",
-  "guide.setupObsDesc": "录制功能必需。需在设置 → 视频设置中点击「配置检查」，成功连接后标记为已验证。录制前会自动检测 OBS 是否运行。",
+  "guide.setupObsDesc": "录制功能必需。需在设置 → OBS/FFmpeg配置中点击「配置检查」，成功连接后标记为已验证。录制前会自动检测 OBS 是否运行。",
   "guide.setupCs2Label": "CS2 路径已配置",
   "guide.setupCs2Desc": "录制功能必需。需要指向 cs2.exe 可执行文件，程序会自动探测 Steam 安装，也可手动填写。",
   "guide.setupFfmpegLabel": "FFmpeg 可用",

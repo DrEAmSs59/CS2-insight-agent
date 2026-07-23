@@ -1191,7 +1191,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         <FfmpegRequiredDialog
           subtitle={ffmpegGate.subtitle}
           message={ffmpegGate.message}
-          onGoSettings={() => navigate("/settings")}
+          onGoSettings={() => navigate("/settings?tab=video")}
         />
       ) : null}
     <div className={shellClass}>
