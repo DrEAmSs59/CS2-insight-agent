@@ -48,6 +48,15 @@ LEGACY_ROOT_DIRECTORIES = (
     ".cs2_config_backup",
     ".obs_config_backups",
 )
+CANONICAL_PAYLOAD_DIRECTORIES = (
+    ".cs2_config_backup",
+    ".obs_config_backups",
+    "demo_compat_cache",
+    "lite_cut_assets",
+    "lite_cut_packages",
+    "montage_avatars",
+    "trash",
+)
 
 
 class DesktopDataMigrationError(RuntimeError):
@@ -85,13 +94,44 @@ def _directory_has_payload(path: Path) -> bool:
     return any(item.is_file() for item in path.rglob("*"))
 
 
+def _canonical_data_has_payload(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    if any((path / name).is_file() for name in ("cs2-insight.config.json", "cs2-insight.db")):
+        return True
+    return any(_directory_has_payload(path / name) for name in CANONICAL_PAYLOAD_DIRECTORIES)
+
+
+def _directory_size(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    total = 0
+    for item in path.rglob("*"):
+        if item.is_file():
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _ensure_copy_space(source: Path, destination_parent: Path) -> None:
+    required = _directory_size(source)
+    reserve = max(64 * 1024 * 1024, required // 10)
+    free = shutil.disk_usage(destination_parent).free
+    if free < required + reserve:
+        raise DesktopDataMigrationError(
+            f"Insufficient disk space for migration: need {required + reserve} bytes, have {free} bytes"
+        )
+
+
 def _legacy_root_has_payload(container: Path) -> bool:
     return any((container / name).exists() for name in (*LEGACY_ROOT_FILES, *LEGACY_ROOT_DIRECTORIES))
 
 
 def _source_for(label: str, container: Path) -> Optional[MigrationSource]:
     data = container / CANONICAL_DATA_DIR_NAME
-    if _directory_has_payload(data):
+    if _canonical_data_has_payload(data):
         return MigrationSource(label=label, container=container, payload=data, layout="data-tree")
     if _legacy_root_has_payload(container):
         return MigrationSource(label=label, container=container, payload=container, layout="legacy-root")
@@ -268,7 +308,7 @@ def migrate_desktop_data(appdata: Path) -> MigrationResult:
         destination.joinpath("logs").mkdir(parents=True, exist_ok=True)
         return completed
 
-    if _directory_has_payload(destination):
+    if _canonical_data_has_payload(destination):
         validate_data_root(destination)
         destination.joinpath("logs").mkdir(parents=True, exist_ok=True)
         sources = discover_legacy_sources(appdata)
@@ -301,6 +341,7 @@ def migrate_desktop_data(appdata: Path) -> MigrationResult:
 
     staging = Path(tempfile.mkdtemp(prefix="data.migrating-", dir=container))
     try:
+        _ensure_copy_space(selected.payload, container)
         _copy_source(selected, staging)
         source_database = (
             selected.payload / "cs2-insight.db"
@@ -312,13 +353,26 @@ def migrate_desktop_data(appdata: Path) -> MigrationResult:
         validate_data_root(staging)
         staging.joinpath("logs").mkdir(parents=True, exist_ok=True)
 
+        displaced_destination: Path | None = None
         if destination.exists():
-            if _directory_has_payload(destination):
+            if _canonical_data_has_payload(destination):
                 raise DesktopDataMigrationError(
                     f"迁移目标在复制期间出现了数据，已中止以避免覆盖：{destination}"
                 )
-            shutil.rmtree(destination)
-        os.replace(staging, destination)
+            displaced_destination = container / (
+                "data.pre-migration-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            )
+            suffix = 1
+            while displaced_destination.exists():
+                displaced_destination = container / f"data.pre-migration-{suffix}"
+                suffix += 1
+            os.replace(destination, displaced_destination)
+        try:
+            os.replace(staging, destination)
+        except Exception:
+            if displaced_destination is not None and not destination.exists():
+                os.replace(displaced_destination, destination)
+            raise
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise

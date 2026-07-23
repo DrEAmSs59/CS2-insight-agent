@@ -198,7 +198,6 @@ def test_shared_event_groups_use_one_native_batch(monkeypatch):
         )
         frames["round_start"] = pd.DataFrame([{"tick": 120}])
         frames["round_announce_match_start"] = pd.DataFrame([{"tick": 100}])
-        frames["cs_win_panel_match"] = pd.DataFrame([{"tick": 250}])
         return frames
 
     class Parser:
@@ -247,7 +246,7 @@ def test_shared_event_groups_use_one_native_batch(monkeypatch):
     assert batch_calls[0][1] == list(analyzer_module._SHARED_BATCH_PLAYER_FIELDS)
     assert batch_calls[0][2] == list(analyzer_module._SHARED_BATCH_OTHER_FIELDS)
     assert analyzer.parser.event_calls == ["player_death", "player_blind"]
-    assert shared["win_panel_match_tick"] == 250
+    assert "win_panel_match_tick" not in shared
 
 
 def test_empty_unified_event_batch_retries_legacy_groups(monkeypatch):
@@ -264,8 +263,7 @@ def test_empty_unified_event_batch_retries_legacy_groups(monkeypatch):
 
     class Parser:
         def parse_event(self, event_name, **_kwargs):
-            assert event_name == "cs_win_panel_match"
-            return pd.DataFrame([{"tick": 99}])
+            raise AssertionError(event_name)
 
     monkeypatch.setattr(analyzer_module, "safe_parse_events_batch", fake_batch)
     analyzer = object.__new__(DemoAnalyzer)
@@ -277,7 +275,7 @@ def test_empty_unified_event_batch_retries_legacy_groups(monkeypatch):
     assert batch_calls[0] == analyzer_module._SHARED_BATCH_EVENT_NAMES
     assert len(batch_calls) == 6
     assert not batch["weapon_fire"].empty
-    assert batch["cs_win_panel_match"].iloc[0]["tick"] == 99
+    assert "cs_win_panel_match" not in batch
 
 
 def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
@@ -294,7 +292,6 @@ def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
         "begindefuse_df": empty,
         "nade_batch": {},
         "re_df_cached": empty,
-        "win_panel_match_tick": 0,
         "blind_df": empty,
         "economy_map_shared": {},
         "round_freeze_end_ticks_shared": {},

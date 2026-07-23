@@ -438,7 +438,8 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
     monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
     monkeypatch.setattr(main, "load_config", AppConfig)
-    monkeypatch.setattr(main.demo_db, "clear_result", AsyncMock())
+    clear_result = AsyncMock(side_effect=AssertionError("last-known-good result must not be cleared before parse"))
+    monkeypatch.setattr(main.demo_db, "clear_result", clear_result)
     monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
     save_result = AsyncMock()
     monkeypatch.setattr(main.demo_db, "save_result", save_result)
@@ -457,6 +458,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     composite = save_result.await_args.args[1]
     assert composite["auto_target_player"] == "alpha"
     assert composite["analyzed_target_players"] == ["alpha"]
+    clear_result.assert_not_awaited()
 
 
 def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):

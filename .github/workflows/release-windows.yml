@@ -35,6 +35,30 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Install backend test dependencies
+        run: python -m pip install -c backend/constraints.txt -r backend/requirements.txt pytest==8.4.2
+
+      - name: Run backend tests
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest backend/tests -q
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Check Rust formatting
+        working-directory: frontend/src-tauri
+        run: cargo fmt --check
+
+      - name: Run Rust lints
+        working-directory: frontend/src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: frontend/src-tauri
+        run: cargo test --locked
+
       - name: Import Windows code-signing certificate
         shell: pwsh
         env:

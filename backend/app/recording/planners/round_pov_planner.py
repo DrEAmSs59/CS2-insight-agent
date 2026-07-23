@@ -150,8 +150,8 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
         # Final round where the target SURVIVED: extend past round_end into the
         # post-round so the match-winning moment / scoreboard beat doesn't cut
         # abruptly. A mid-round death keeps its fixed death+post tail (no extra) —
-        # spectating-after-death footage isn't worth lingering on. The demo_end_tick
-        # clamp below and the final_round_guard bound this to the real demo end.
+        # spectating-after-death footage isn't worth lingering on. The generic
+        # demo-end guard bounds this against the real PBDEMS2 EOF.
         if (
             is_final_round
             and round_info.target_death_tick is None

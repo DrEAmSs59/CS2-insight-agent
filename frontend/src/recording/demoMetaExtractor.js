@@ -9,11 +9,10 @@ export function extractDemoContext(demoPath, demoFilename, clips, matchMeta) {
     map_name: mapName,
     tick_rate: tickRate,
     first_tick: 0,
-    demo_end_tick: deriveDemoEndTick(clips),
+    demo_end_tick: Number(matchMeta?.demo_end_tick) || deriveDemoEndTick(clips),
     final_round: finalRound,
     final_round_start_tick: deriveFinalRoundStartTick(clips, finalRound),
     final_round_end_tick: deriveFinalRoundEndTick(clips, finalRound),
-    win_panel_match_tick: Number(matchMeta?.win_panel_match_tick) || 0,
   };
 }
 

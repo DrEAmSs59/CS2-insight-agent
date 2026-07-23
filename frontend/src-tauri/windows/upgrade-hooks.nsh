@@ -45,7 +45,7 @@ Function CS2_RunElectronUninstaller
   ; Inputs: $R8 = uninstall command, $R9 = registry key for verification.
   IfSilent cs2_uninstall_no_notice cs2_uninstall_notice
   cs2_uninstall_notice:
-    MessageBox MB_ICONINFORMATION|MB_OK "检测到旧版 Electron 安装。安装程序将先安全卸载旧程序；用户配置、Demo 数据库、日志和备份不会被删除。"
+    MessageBox MB_ICONINFORMATION|MB_OK "新版已安装且用户数据迁移校验完成。现在将安全卸载旧版 Electron；用户配置、Demo 数据库、日志和备份不会被删除。"
   cs2_uninstall_no_notice:
 
   ClearErrors
@@ -157,7 +157,9 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
-  Call CS2_RemoveLegacyElectron
+  ; Keep the runnable Electron installation intact until both the Tauri files
+  ; and the user-data migration have completed successfully.
+  Call CS2_EnsureElectronStopped
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -173,4 +175,9 @@ FunctionEnd
     StrCpy $R7 "用户数据迁移校验失败（退出码 $R0）。旧数据仍然保留，应用不会以空配置启动。请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
+
+  ; Only retire the old application after the new installation and migration
+  ; are known-good. Any earlier installer failure therefore leaves a runnable
+  ; Electron fallback in place.
+  Call CS2_RemoveLegacyElectron
 !macroend

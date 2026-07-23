@@ -1,3 +1,4 @@
+# Install with ``-c constraints.txt`` (packaging and Release CI do this).
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 websockets>=12.0

@@ -1,5 +1,8 @@
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+
+from ..demo_playback_compat import read_demo_end_tick
 
 from .models import (
     RecordingRequestDTO,
@@ -38,13 +41,38 @@ class NormalizedRequest:
 def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
     warnings = []
 
-    if dto.demo.tick_rate <= 0:
+    # The request may come from an old saved analysis whose clip-derived end is
+    # not the PBDEMS2 playback boundary.  When the source is available, always
+    # re-read the outer-frame EOF here so a stale frontend value cannot let CS2
+    # naturally finish the demo and return to the main menu.
+    demo = dto.demo
+    demo_path = Path(demo.demo_path)
+    if demo_path.is_file():
+        try:
+            actual_demo_end_tick = read_demo_end_tick(demo_path)
+        except (OSError, ValueError) as exc:
+            raise NormalizationError(
+                f"could not determine demo EOF for {demo_path}: {exc}"
+            ) from exc
+        if actual_demo_end_tick <= demo.first_tick:
+            raise NormalizationError(
+                f"demo EOF must be greater than first_tick, got {actual_demo_end_tick}"
+            )
+        if actual_demo_end_tick != demo.demo_end_tick:
+            logger.info(
+                "[RecordingV3][DemoEnd] replacing request demo_end_tick=%d with PBDEMS2 EOF=%d",
+                demo.demo_end_tick,
+                actual_demo_end_tick,
+            )
+        demo = demo.model_copy(update={"demo_end_tick": actual_demo_end_tick})
+
+    if demo.tick_rate <= 0:
         raise NormalizationError("demo.tick_rate must be > 0")
 
-    if dto.demo.first_tick < 0:
+    if demo.first_tick < 0:
         raise NormalizationError("demo.first_tick must be >= 0")
 
-    if dto.demo.demo_end_tick <= dto.demo.first_tick:
+    if demo.demo_end_tick <= demo.first_tick:
         raise NormalizationError("demo.demo_end_tick must be > demo.first_tick")
 
     types_needing_events = {
@@ -85,13 +113,10 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         "death_compilation_merge_gap_sec",
         "round_freeze_preroll_sec",
         "round_death_post_sec",
-        "final_round_guard_sec",
-        "final_round_seek_guard_sec",
-        "final_round_min_duration_sec",
+        "demo_end_guard_sec",
         "victim_pov_post_sec",
         "fail_killer_pre_sec",
         "fail_killer_post_sec",
-        "final_round_win_panel_guard_sec",
     ]:
         value = getattr(dto.options, option_name)
         if value < 0:
@@ -110,7 +135,7 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         nxt_freeze_end = round_info.next_round_freeze_end_tick
         nxt_start = round_info.next_round_start_tick
         round_end = round_info.round_end_tick
-        tick_rate = dto.demo.tick_rate
+        tick_rate = demo.tick_rate
         round_end_reliable = True
 
         # Defensive rewrite: next_round_freeze_start_tick was filled with freeze_end_tick
@@ -183,14 +208,14 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         )
 
     events = list(dto.events)
-    events, roster_notes = enrich_events_victims_from_roster(events, dto.demo.all_players or [])
+    events, roster_notes = enrich_events_victims_from_roster(events, demo.all_players or [])
     warnings.extend(roster_notes)
 
     return NormalizedRequest(
         request_id=dto.request_id,
         request_type=dto.request_type,
         source_type=dto.source_type,
-        demo=dto.demo,
+        demo=demo,
         target_player=dto.target_player,
         events=events,
         rounds=normalized_rounds,

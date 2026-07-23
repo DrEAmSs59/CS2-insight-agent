@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "CS2 Insight Agent",
-        "width": 1540,
+        "width": 1440,
         "height": 900,
-        "minWidth": 1540,
-        "minHeight": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
         "center": true,
         "decorations": false,
         "dragDropEnabled": false

@@ -61,6 +61,7 @@ $Frontend = Join-Path $Root "frontend"
 $Backend = Join-Path $Root "backend"
 $CacheDir = Join-Path $Root ".packaging-cache"
 $ReqFile = Join-Path $Backend "requirements.txt"
+$ConstraintsFile = Join-Path $Backend "constraints.txt"
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
@@ -144,7 +145,7 @@ function Install-BackendRequirements {
         & $PythonExe -m pip install --no-deps $leanWheel
         if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed (exit $LASTEXITCODE)" }
     }
-    & $PythonExe -m pip install -r $RequirementsPath
+    & $PythonExe -m pip install -c $ConstraintsFile -r $RequirementsPath
     if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)" }
     if ($DemoparserWheel.Trim()) {
         & $PythonExe -m pip uninstall -y polars pyarrow polars-runtime-32
@@ -398,7 +399,7 @@ if not exist "%ROOT%python\python.exe" (
 )
 echo 正在重新安装/修复 Python 依赖（与发行包一致）...
 "%ROOT%python\python.exe" -m pip install -U pip
-"%ROOT%python\python.exe" -m pip install -r "%ROOT%backend\requirements.txt"
+"%ROOT%python\python.exe" -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
 echo.
 echo 完成。可再运行「启动.bat」。
 pause
@@ -492,19 +493,19 @@ set "ROOT=%~dp0"
 
 if exist "%ROOT%python\python.exe" (
   "%ROOT%python\python.exe" -m pip install -U pip
-  "%ROOT%python\python.exe" -m pip install -r "%ROOT%backend\requirements.txt"
+  "%ROOT%python\python.exe" -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
   goto :done
 )
 where python >nul 2>&1
 if %errorlevel% equ 0 (
   python -m pip install -U pip
-  python -m pip install -r "%ROOT%backend\requirements.txt"
+  python -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
   goto :done
 )
 where py >nul 2>&1
 if %errorlevel% equ 0 (
   py -3 -m pip install -U pip
-  py -3 -m pip install -r "%ROOT%backend\requirements.txt"
+  py -3 -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
   goto :done
 )
 echo [错误] 未找到 python / py。

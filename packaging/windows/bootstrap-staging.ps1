@@ -60,7 +60,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed: $LASTEXITCODE" }
   }
   $req = Join-Path $repoRoot "backend\requirements.txt"
-  & $py -m pip install --no-cache-dir -r $req
+  $constraints = Join-Path $repoRoot "backend\constraints.txt"
+  & $py -m pip install --no-cache-dir -c $constraints -r $req
   if ($LASTEXITCODE -ne 0) { throw "backend requirements install failed: $LASTEXITCODE" }
   if ($DemoparserWheel.Trim()) {
     & $py -m pip uninstall -y polars pyarrow polars-runtime-32

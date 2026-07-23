@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import aiosqlite
+import pytest
 
 from app.demo_db import DemoDB
 
@@ -186,6 +187,62 @@ def test_init_backfills_summary_for_legacy_match_results(tmp_path: Path):
         assert cleared[0]["has_result"] is False
         assert cleared[0]["clip_count"] == 0
         assert cleared[0]["primary_target"] is None
+
+    _run(scenario())
+
+
+def test_save_result_rolls_back_result_and_all_timelines_together(tmp_path: Path, monkeypatch):
+    async def scenario():
+        db = DemoDB(tmp_path / "atomic-result.sqlite3")
+        await db.init_db()
+        demo_path = str(tmp_path / "match.dem")
+        await db.add_demo(demo_path, status="done")
+        old_player = {
+            "round_timeline": [
+                {
+                    "round_number": 1,
+                    "events": [{"id": "old-kill", "type": "kill", "tick": 100}],
+                }
+            ]
+        }
+        await db.save_result(
+            demo_path,
+            {"auto_target_player": "alpha", "clips": [{"id": "old"}], **old_player},
+        )
+
+        original = db._replace_timeline_events_in_connection
+
+        async def fail_on_second_player(conn, path, target_player, result, *, created_at):
+            await original(
+                conn,
+                path,
+                target_player,
+                result,
+                created_at=created_at,
+            )
+            if target_player == "bravo":
+                raise RuntimeError("simulated timeline write failure")
+
+        monkeypatch.setattr(db, "_replace_timeline_events_in_connection", fail_on_second_player)
+        with pytest.raises(RuntimeError, match="simulated timeline write failure"):
+            await db.save_result(
+                demo_path,
+                {"auto_target_player": "alpha", "clips": [{"id": "new"}]},
+                timeline_results={
+                    "alpha": {"round_timeline": []},
+                    "bravo": {"round_timeline": []},
+                },
+            )
+
+        assert (await db.get_result(demo_path))["clips"] == [{"id": "old"}]
+        async with aiosqlite.connect(db.db_path) as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT event_id FROM demo_timeline_events WHERE demo_path = ?",
+                    (demo_path,),
+                )
+            ).fetchone()
+        assert row == ("old-kill",)
 
     _run(scenario())
 

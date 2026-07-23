@@ -131,6 +131,21 @@ def test_empty_canonical_directories_do_not_mask_legacy_data(tmp_path: Path):
     assert config["demo_directory"] == "legacy"
 
 
+def test_unrelated_canonical_file_does_not_mask_legacy_and_is_preserved(tmp_path: Path):
+    destination = _canonical(tmp_path)
+    destination.mkdir(parents=True)
+    (destination / "installer.log").write_text("diagnostic", encoding="utf-8")
+    _write_config(tmp_path / "cs2-insight-agent" / "data", "legacy")
+
+    result = migrate_desktop_data(tmp_path)
+
+    assert result.mode == "migrated"
+    assert json.loads((destination / "cs2-insight.config.json").read_text())["demo_directory"] == "legacy"
+    backups = list((tmp_path / CANONICAL_CONTAINER_NAME).glob("data.pre-migration-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "installer.log").read_text(encoding="utf-8") == "diagnostic"
+
+
 def test_migrates_legacy_product_name_root_layout(tmp_path: Path):
     container = tmp_path / CANONICAL_CONTAINER_NAME
     _write_config(container, "root-layout")

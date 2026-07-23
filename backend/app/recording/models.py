@@ -45,8 +45,6 @@ class DemoContext(BaseModel):
     final_round_end_tick: int
     server_name: str = ""
     all_players: list = []
-    # 比赛结算界面（cs_win_panel_match）出现的 tick；0 = demo 无该事件，回退旧 guard 逻辑
-    win_panel_match_tick: int = 0
 
 
 class TargetPlayer(BaseModel):
@@ -107,17 +105,12 @@ class RecordingOptions(BaseModel):
     enable_fail_killer_pov: bool = False
     fail_killer_pre_sec: float = 3.0
     fail_killer_post_sec: float = 2.0
-    final_round_guard_sec: float = 4.0
-    final_round_seek_guard_sec: float = 2.0
-    final_round_min_duration_sec: float = 0.8
-    final_round_demo_exit_guard_sec: float = 1.5
-    # Extra tail for the final round's clip so the match-deciding moment doesn't
-    # cut abruptly. Capped at the real round_end so it never spills into the scoreboard.
+    # Stop before the real PBDEMS2 EOF so CS2 cannot finish playback and
+    # return to the main menu. This guard applies to every segment.
+    demo_end_guard_sec: float = 1.5
+    # Extra tail for the final round's clip so the match-deciding moment does
+    # not cut abruptly. The generic demo EOF guard remains the final cap.
     final_round_extra_post_sec: float = 1.0
-    # win_panel 可用时，结束上限 = win_panel_tick − 本守护；远小于 final_round_guard_sec。
-    # cs_win_panel_match 事件 tick 比结算界面「视觉出现」晚约 1.5~2s，故守护取 2.0s，
-    # 使终局整回合/合集的收尾与事件高光(击杀+post)大致对齐，停在结算出现前。
-    final_round_win_panel_guard_sec: float = 2.0
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None

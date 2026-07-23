@@ -1469,6 +1469,10 @@ export default function LiteCutEditorShell({
   const handleImportProject = useCallback(
     async (file) => {
       try {
+        if (dirty || saving) {
+          const saved = await saveProject();
+          if (!saved?.ok) return { ok: false };
+        }
         const raw = JSON.parse(await file.text());
         const importedBody = raw?.body && typeof raw.body === "object" ? raw.body : raw;
         if (!importedBody || typeof importedBody !== "object" || !Array.isArray(importedBody.tracks)) return { ok: false };
@@ -1483,7 +1487,7 @@ export default function LiteCutEditorShell({
         return { ok: false };
       }
     },
-    [importProject, setPlayhead, clearSelection],
+    [dirty, saving, saveProject, importProject, setPlayhead, clearSelection],
   );
 
   const handleOpenProject = useCallback(
@@ -1559,6 +1563,10 @@ export default function LiteCutEditorShell({
   }, [projectId, dirty, saving, saveProject, projectName, setPlaying, setPlayhead, clearSelection]);
 
   const handleImportPortable = useCallback(async (file) => {
+    if (dirty || saving) {
+      const saved = await saveProject();
+      if (!saved?.ok) return { ok: false };
+    }
     const form = new FormData();
     form.append("file", file);
     const { data } = await API.post("/lite-cut/projects/portable-import", form, { headers: { "Content-Type": "multipart/form-data" } });
@@ -1566,7 +1574,7 @@ export default function LiteCutEditorShell({
     setPlayhead(0);
     clearSelection();
     return { ok: true };
-  }, [openProject, setPlayhead, clearSelection]);
+  }, [dirty, saving, saveProject, openProject, setPlayhead, clearSelection]);
 
   const handleStartPortableExport = useCallback(async () => {
     if (!projectId) return { cancelled: true };

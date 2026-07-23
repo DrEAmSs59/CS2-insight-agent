@@ -42,6 +42,7 @@ def iter_candidate_files(
     suffixes: Iterable[str] = (".dem", ".zip"),
     *,
     max_depth: int = 2,
+    on_error: Callable[[OSError], None] | None = None,
 ) -> Iterable[Path]:
     """Yield candidate files under ``root`` up to a user-visible depth.
 
@@ -56,7 +57,11 @@ def iter_candidate_files(
         return
     if not resolved_root.is_dir():
         return
-    for current, dirnames, filenames in os.walk(resolved_root, followlinks=False):
+    for current, dirnames, filenames in os.walk(
+        resolved_root,
+        followlinks=False,
+        onerror=on_error,
+    ):
         current_path = Path(current)
         try:
             current_depth = len(current_path.relative_to(resolved_root).parts)
@@ -149,17 +154,52 @@ def _iter_local_header_zip_dems(zip_path: Path) -> list[tuple[str, bytes]]:
     return out
 
 
-def _reuse_existing_dem_if_same_size(dest_dir: Path, base: str, size: int) -> Path | None:
+def _file_crc32(path: Path) -> int:
+    checksum = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            checksum = zlib.crc32(chunk, checksum)
+    return checksum & 0xFFFFFFFF
+
+
+def _reuse_existing_dem_if_same_content(
+    dest_dir: Path,
+    base: str,
+    size: int,
+    crc32: int,
+) -> Path | None:
     existing_target = dest_dir / base
     if not existing_target.is_file():
         return None
     try:
-        if existing_target.stat().st_size == size:
-            logger.info("Demo 已解压（同名且大小一致），跳过: %s", existing_target)
+        if existing_target.stat().st_size == size and _file_crc32(existing_target) == crc32:
+            logger.info("Demo already extracted with matching size and CRC, reuse: %s", existing_target)
             return existing_target.resolve()
     except OSError:
         pass
     return None
+
+
+def _atomic_write_bytes(target: Path, body: bytes) -> None:
+    temporary = target.with_name(f"{target.name}.{os.urandom(6).hex()}.part")
+    try:
+        temporary.write_bytes(body)
+        os.replace(temporary, target)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _atomic_extract_member(zf: zipfile.ZipFile, member: str, target: Path) -> None:
+    temporary = target.with_name(f"{target.name}.{os.urandom(6).hex()}.part")
+    try:
+        with zf.open(member, "r") as src, temporary.open("xb") as dst:
+            while chunk := src.read(1024 * 1024):
+                dst.write(chunk)
+        os.replace(temporary, target)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _pick_extract_path(dest_dir: Path, member_base: str, zip_path: Path) -> Path:
@@ -194,24 +234,25 @@ def _extract_dems_from_zip_sync(zip_path: Path) -> list[Path]:
                 if not base:
                     continue
                 info = zf.getinfo(m)
-                reused = _reuse_existing_dem_if_same_size(dest_dir, base, info.file_size)
+                reused = _reuse_existing_dem_if_same_content(dest_dir, base, info.file_size, info.CRC)
                 if reused:
                     out.append(reused)
                     continue
                 target = _pick_extract_path(dest_dir, base, zip_path)
-                with zf.open(m, "r") as src, target.open("wb") as dst:
-                    dst.write(src.read())
+                _atomic_extract_member(zf, m, target)
                 out.append(target.resolve())
         return out
     except zipfile.BadZipFile:
         logger.info("Standard zip parse failed, trying local-header fallback: %s", zip_path)
     for base, raw in _iter_local_header_zip_dems(zip_path):
-        reused = _reuse_existing_dem_if_same_size(dest_dir, base, len(raw))
+        reused = _reuse_existing_dem_if_same_content(
+            dest_dir, base, len(raw), zlib.crc32(raw) & 0xFFFFFFFF
+        )
         if reused:
             out.append(reused)
             continue
         target = _pick_extract_path(dest_dir, base, zip_path)
-        target.write_bytes(raw)
+        _atomic_write_bytes(target, raw)
         out.append(target.resolve())
     return out
 
@@ -228,7 +269,12 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
     dest_dir = zip_path.parent
 
     def _write_deduped(base: str, raw: bytes, size_hint: int | None = None) -> None:
-        reused = _reuse_existing_dem_if_same_size(dest_dir, base, size_hint if size_hint is not None else len(raw))
+        reused = _reuse_existing_dem_if_same_content(
+            dest_dir,
+            base,
+            size_hint if size_hint is not None else len(raw),
+            zlib.crc32(raw) & 0xFFFFFFFF,
+        )
         if reused:
             out.append(reused)
             return
@@ -238,7 +284,7 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
         md5_hex = h.hexdigest()
         if md5_hex in seen:
             return
-        target.write_bytes(raw)
+        _atomic_write_bytes(target, raw)
         seen.add(md5_hex)
         out.append(target.resolve())
 
@@ -252,14 +298,15 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
                 if not base:
                     continue
                 info = zf.getinfo(m)
-                reused = _reuse_existing_dem_if_same_size(dest_dir, base, info.file_size)
+                reused = _reuse_existing_dem_if_same_content(dest_dir, base, info.file_size, info.CRC)
                 if reused:
                     out.append(reused)
                     continue
                 target = _pick_extract_path(dest_dir, base, zip_path)
+                temporary = target.with_name(f"{target.name}.{os.urandom(6).hex()}.part")
                 h = hashlib.md5()
                 try:
-                    with zf.open(m, "r") as src, target.open("wb") as dst:
+                    with zf.open(m, "r") as src, temporary.open("xb") as dst:
                         while True:
                             chunk = src.read(1024 * 1024)
                             if not chunk:
@@ -267,20 +314,17 @@ def _extract_zip_dems_dedupe_sync(zip_path: Path, existing_md5s: frozenset[str])
                             h.update(chunk)
                             dst.write(chunk)
                 except Exception:
-                    try:
-                        if target.is_file():
-                            target.unlink()
-                    except OSError:
-                        pass
+                    temporary.unlink(missing_ok=True)
                     raise
                 md5_hex = h.hexdigest()
                 if md5_hex in seen:
-                    try:
-                        if target.is_file():
-                            target.unlink()
-                    except OSError:
-                        pass
+                    temporary.unlink(missing_ok=True)
                     continue
+                try:
+                    os.replace(temporary, target)
+                except Exception:
+                    temporary.unlink(missing_ok=True)
+                    raise
                 seen.add(md5_hex)
                 out.append(target.resolve())
         return out
@@ -297,10 +341,7 @@ class _DemoEventHandler(FileSystemEventHandler):
         self._loop = loop
         self._watcher = watcher
 
-    def on_created(self, event) -> None:  # type: ignore[override]
-        if event.is_directory:
-            return
-        path = Path(event.src_path)
+    def _schedule(self, path: Path) -> None:
         if not self._watcher.path_in_scope(path):
             return
         suf = path.suffix.lower()
@@ -308,6 +349,21 @@ class _DemoEventHandler(FileSystemEventHandler):
             asyncio.run_coroutine_threadsafe(self._watcher._on_raw_dem_detected(path), self._loop)
         elif suf == ".zip":
             asyncio.run_coroutine_threadsafe(self._watcher._on_raw_zip_detected(path), self._loop)
+
+    def on_created(self, event) -> None:  # type: ignore[override]
+        if event.is_directory:
+            return
+        self._schedule(Path(event.src_path))
+
+    def on_modified(self, event) -> None:  # type: ignore[override]
+        if event.is_directory:
+            return
+        self._schedule(Path(event.src_path))
+
+    def on_moved(self, event) -> None:  # type: ignore[override]
+        if event.is_directory:
+            return
+        self._schedule(Path(event.dest_path))
 
 
 class DemoWatcher:
@@ -361,8 +417,26 @@ class DemoWatcher:
             out.append(cand)
         return out
 
+    def watch_root_for(self, path: Path) -> str | None:
+        """Return the configured watch root owning *path*, if any."""
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            return None
+        matches: list[Path] = []
+        for root in self._normalized_paths():
+            try:
+                resolved.relative_to(root.resolve())
+            except (OSError, ValueError):
+                continue
+            matches.append(root.resolve())
+        if not matches:
+            return None
+        # Nested roots are legal; the most specific root owns the record.
+        return str(max(matches, key=lambda item: len(item.parts)))
+
     async def _wait_until_stable(self, path: Path, timeout_sec: int = 30) -> bool:
-        prev_size = -1
+        previous_signature: tuple[int, int] | None = None
         stable_count = 0
         checks = max(1, timeout_sec)
         for _ in range(checks):
@@ -370,17 +444,18 @@ class DemoWatcher:
                 await asyncio.sleep(1)
                 continue
             try:
-                size = path.stat().st_size
+                stat = path.stat()
+                signature = (int(stat.st_size), int(stat.st_mtime_ns))
             except OSError:
                 await asyncio.sleep(1)
                 continue
-            if size > 0 and size == prev_size:
+            if signature[0] > 0 and signature == previous_signature:
                 stable_count += 1
                 if stable_count >= 2:
                     return True
             else:
                 stable_count = 0
-            prev_size = size
+            previous_signature = signature
             await asyncio.sleep(1)
         return False
 
@@ -568,21 +643,39 @@ class DemoWatcher:
             max_conc = max(2, min(8, (os.cpu_count() or 4)))
         sem = asyncio.Semaphore(max_conc)
 
-        # 收集磁盘上所有真实存在的 .dem 绝对路径，用于清理已删除的 DB 记录
-        existing_paths: set[str] = set()
+        # Reconcile one successfully enumerated watch root at a time.  Never use
+        # a local path set to purge unrelated/manual records from the whole DB.
         for p in self._normalized_paths():
-            for dem in iter_candidate_files(p, (".dem",), max_depth=self._max_depth):
+            existing_paths: set[str] = set()
+            scan_errors: list[OSError] = []
+            zip_paths = iter_candidate_files(
+                p,
+                (".zip",),
+                max_depth=self._max_depth,
+                on_error=scan_errors.append,
+            )
+            for archive in _sort_paths_by_mtime_newest_first(zip_paths):
+                await self._on_raw_zip_detected(archive, enqueue_extracted=False, assume_stable=True)
+                count += 1
+            for dem in iter_candidate_files(
+                p,
+                (".dem",),
+                max_depth=self._max_depth,
+                on_error=scan_errors.append,
+            ):
                 try:
                     existing_paths.add(str(dem.resolve()))
                 except OSError:
-                    pass
-
-        # 清理物理已删除但仍在库中的记录（在入库新文件之前执行）
-        if existing_paths and self._demo_db is not None:
+                    scan_errors.append(OSError(f"cannot resolve {dem}"))
+            if scan_errors:
+                logger.warning("Skip demo reconciliation for %s after scan errors: %s", p, scan_errors[-1])
+                continue
+            if self._demo_db is None:
+                continue
             try:
-                await self._demo_db.purge_deleted_demo_files(existing_paths)
+                await self._demo_db.purge_deleted_demo_files(str(p.resolve()), existing_paths)
             except Exception:
-                logger.exception("purge_deleted_demo_files failed during scan")
+                logger.exception("purge_deleted_demo_files failed during scan for root %s", p)
 
         async def _enqueue_dem(path: Path) -> None:
             async with sem:
@@ -592,12 +685,8 @@ class DemoWatcher:
                     logger.exception("scan_existing: enqueue failed for %s", path)
 
         for p in self._normalized_paths():
-            # 先 zip 再 .dem：本轮解压出的文件可立即随后面的 glob 入库，避免「先扫 dem 再解压」需二次扫描才登记
-            # 同类文件按 mtime 降序，优先处理最近写入的（用户刚下的 replay 等）
-            zip_paths = iter_candidate_files(p, (".zip",), max_depth=self._max_depth)
-            for z in _sort_paths_by_mtime_newest_first(zip_paths):
-                await self._on_raw_zip_detected(z, enqueue_extracted=False, assume_stable=True)
-                count += 1
+            # ZIP extraction already ran before reconciliation, so newly
+            # materialized .dem files cannot be purged before they are indexed.
             dem_paths = _sort_paths_by_mtime_newest_first(
                 iter_candidate_files(p, (".dem",), max_depth=self._max_depth)
             )

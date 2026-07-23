@@ -548,7 +548,11 @@ def enrich_kill_events_from_library(req: NormalizedRequest) -> tuple[NormalizedR
     if not req.events or not any(_event_needs_meta_enrich(ev) for ev in req.events):
         return req, notes
 
-    clips = _load_match_clips_for_demo(req.demo.demo_path)
+    clips = _load_match_clips_for_demo(
+        req.demo.demo_path,
+        target_player_name=req.target_player.name,
+        target_steamid64=req.target_player.steamid64,
+    )
     if not clips:
         notes.append("AI director: 部分击杀缺少标签，且 demo 库无解析结果可补全")
         return req, notes
@@ -595,11 +599,14 @@ def enrich_kill_events_from_library(req: NormalizedRequest) -> tuple[NormalizedR
     return replace(req, events=new_events), notes
 
 
-def _load_match_clips_for_demo(demo_path: str) -> Optional[list[dict[str, Any]]]:
+def _load_match_clips_for_demo(
+    demo_path: str,
+    *,
+    target_player_name: str = "",
+    target_steamid64: str = "",
+) -> Optional[list[dict[str, Any]]]:
     """Load parsed clips from cs2-insight.db (sync; for AI director enrichment)."""
     import sqlite3
-    from pathlib import Path
-
     raw = (demo_path or "").strip()
     if not raw:
         return None
@@ -620,22 +627,39 @@ def _load_match_clips_for_demo(demo_path: str) -> Optional[list[dict[str, Any]]]
 
     blob = _fetch(raw)
     if not blob:
-        base = Path(raw).name
-        conn = sqlite3.connect(db_path)
-        try:
-            row = conn.execute(
-                "SELECT result_json FROM match_results WHERE demo_path LIKE ? ORDER BY id DESC LIMIT 1",
-                (f"%{base}",),
-            ).fetchone()
-            blob = row[0] if row else None
-        finally:
-            conn.close()
-    if not blob:
         return None
     try:
         data = json.loads(blob)
     except json.JSONDecodeError:
         return None
+    players = data.get("players")
+    if isinstance(players, dict) and players:
+        expected_name = target_player_name.strip().casefold()
+        expected_steamid = target_steamid64.strip()
+        for player_name, player_result in players.items():
+            if not isinstance(player_result, dict):
+                continue
+            meta = player_result.get("match_meta")
+            meta = meta if isinstance(meta, dict) else {}
+            candidate_names = {
+                str(player_name).strip().casefold(),
+                str(meta.get("target_player") or "").strip().casefold(),
+            }
+            candidate_steamids = {
+                str(player_result.get(key) or "").strip()
+                for key in ("steamid64", "steam_id64", "target_steamid64")
+            } | {
+                str(meta.get(key) or "").strip()
+                for key in ("steamid64", "steam_id64", "target_steamid64")
+            }
+            name_matches = bool(expected_name and expected_name in candidate_names)
+            steamid_matches = bool(expected_steamid and expected_steamid in candidate_steamids)
+            if name_matches or steamid_matches:
+                clips = player_result.get("clips")
+                return clips if isinstance(clips, list) else None
+        return None
+
+    # Legacy single-player records have no ``players`` map.
     clips = data.get("clips")
     return clips if isinstance(clips, list) else None
 

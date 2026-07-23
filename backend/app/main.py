@@ -24,7 +24,7 @@ from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -82,6 +82,7 @@ from .obs_tuning import (
 )
 from .obs_tuning_executor import apply_video_tuning_plan
 from .obs_tuning_agent import review_tuning_plan
+from .runtime_session import runtime_session_dependency, runtime_session_state
 from .obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
@@ -224,6 +225,7 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
         except OSError:
             pass
         source = infer_demo_source(path.name)
+        watch_root = demo_watcher.watch_root_for(path) if demo_watcher is not None else None
 
         md5_hex: str | None = None
         if use_md5:
@@ -243,6 +245,7 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
             added_at=mtime_iso,
             content_md5=md5_hex if use_md5 else None,
             origin_zip=origin_zip if use_md5 else None,
+            watch_root=watch_root,
         )
         if not inserted:
             if can_store_md5:
@@ -306,6 +309,19 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        try:
+            from .recording.api import get_queue_abort_event
+
+            abort_event = get_queue_abort_event()
+            if abort_event is not None:
+                abort_event.set()
+            from .lite_cut.api import shutdown_lite_cut_jobs
+
+            await shutdown_lite_cut_jobs(timeout_sec=5.0)
+            if demo_watcher is not None:
+                await demo_watcher.stop()
+        except Exception:
+            logger.exception("Application shutdown cleanup failed")
         if _FAULT_LOG_FILE and not _FAULT_LOG_FILE.closed:
             _FAULT_LOG_FILE.close()
 
@@ -322,6 +338,71 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _recovery_marker_path() -> Path:
+    return get_data_dir() / "recovery-required.json"
+
+
+def _write_recovery_marker(reason: str) -> None:
+    marker = _recovery_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {"reason": reason, "created_at": datetime.now().astimezone().isoformat()},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+@app.get("/api/app/runtime-state")
+async def app_runtime_state():
+    return {
+        "pid": os.getpid(),
+        "instance_id": (os.getenv("CS2_INSIGHT_INSTANCE_ID") or "").strip(),
+        "version": app.version,
+        "data_dir": str(get_data_dir()),
+        "recovery_required": _recovery_marker_path().is_file(),
+        "runtime_session": runtime_session_state(),
+    }
+
+
+@app.post("/api/app/shutdown")
+async def app_shutdown():
+    """Abort owned jobs, flush cleanup and then ask uvicorn to exit normally."""
+    from .lite_cut.api import shutdown_lite_cut_jobs
+    from .recording.api import get_queue_abort_event
+    from .shutdown_state import request_server_shutdown
+
+    abort_event = get_queue_abort_event()
+    if abort_event is not None:
+        abort_event.set()
+    jobs_clean = await shutdown_lite_cut_jobs(timeout_sec=8.0)
+    if demo_watcher is not None:
+        await demo_watcher.stop()
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 8.0
+    while runtime_session_state()["busy"] and loop.time() < deadline:
+        await asyncio.sleep(0.1)
+    session_clean = not bool(runtime_session_state()["busy"])
+    safe_to_exit = jobs_clean and session_clean
+    if safe_to_exit:
+        _recovery_marker_path().unlink(missing_ok=True)
+    else:
+        reason = "runtime cleanup timed out before desktop exit"
+        await asyncio.to_thread(_write_recovery_marker, reason)
+
+    # Delay until the HTTP response has been handed back to the desktop shell.
+    loop.call_later(0.25, request_server_shutdown)
+    return {
+        "safe_to_exit": safe_to_exit,
+        "jobs_clean": jobs_clean,
+        "session_clean": session_clean,
+        "recovery_marker": str(_recovery_marker_path()) if not safe_to_exit else None,
+    }
 
 
 @app.middleware("http")
@@ -648,11 +729,10 @@ async def _run_library_demo_analyze(
             demo_id,
             idx.get("error"),
         )
-    await demo_db.clear_result(dem_path)
     await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
     try:
-        from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
+        from .demo_parse_isolation import analyze_multi_isolated
 
         batch_result = await asyncio.to_thread(
             analyze_multi_isolated,
@@ -668,7 +748,7 @@ async def _run_library_demo_analyze(
                 "analyze_multi_isolated missing players demo_id=%s missing=%s",
                 demo_id, missing,
             )
-    except IsolatedParseError as e:
+    except Exception as e:
         msg = f"Demo 解析失败：{e}"
         logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, dem_path, e)
         await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
@@ -698,13 +778,21 @@ async def _run_library_demo_analyze(
         "timeline": first_pdata.get("timeline"),
         "round_timeline": first_pdata.get("round_timeline"),
     }
-    await demo_db.save_result(dem_path, composite)
-    for player, pdata in players_out.items():
-        if player == first_player:
-            continue
-        if isinstance(pdata, dict):
-            await demo_db.replace_timeline_events(dem_path, player, pdata)
-    await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
+    try:
+        # save_result replaces the previous snapshot transactionally; the old
+        # result remains readable until the new parse is complete.
+        await demo_db.save_result(
+            dem_path,
+            composite,
+            timeline_results=players_out,
+        )
+        await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
+    except Exception as e:
+        msg = f"保存新的 Demo 分析结果失败：{e}"
+        logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, dem_path)
+        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        await demo_library_hub.notify("parse_error")
+        raise HTTPException(500, msg) from e
     await demo_library_hub.notify("analyzed")
     return {
         "players": players_out,
@@ -1481,7 +1569,10 @@ async def obs_tuning_plan(payload: ObsTuningPlanRequest):
 
 
 @app.post("/api/obs-tuning/apply")
-def obs_tuning_apply(payload: ObsTuningApplyRequest):
+def obs_tuning_apply(
+    payload: ObsTuningApplyRequest,
+    _runtime_session: None = Depends(runtime_session_dependency),
+):
     """备份并应用已确认的视频/录制设置，再用短录制、ffprobe、Stats 与日志完成验收。"""
     cfg = load_config()
     if not _obs_launch_lock.acquire(timeout=5.0):
@@ -2702,7 +2793,7 @@ class PlayerAnalysisReviewRequest(BaseModel):
 
 
 class PlayerClipReviewRequest(BaseModel):
-    clips: list[dict[str, Any]] = Field(..., min_length=1)
+    clips: list[dict[str, Any]] = Field(..., min_length=1, max_length=32)
     match_meta: dict[str, Any] = Field(default_factory=dict)
     locale: str = "zh"
 
@@ -2737,6 +2828,12 @@ async def get_demo_replay(req: DemoReplayRequest):
 
     dem_path = resolve_uploaded_demo_path(req.path)
     duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
+    estimated_frame_count = int(duration_sec * req.fps) + 1
+    if estimated_frame_count > 6000:
+        raise HTTPException(
+            422,
+            f"Replay request would generate about {estimated_frame_count} frames; maximum is 6000",
+        )
     from .radar.radar_data_extractor import extract_radar_timeline
     from .radar.radar_map_assets import lookup_map_data
 
@@ -2943,7 +3040,10 @@ async def demo_playback_status(session_id: str = Query(..., min_length=1, max_le
 
 
 @app.post("/api/demo/play")
-async def play_demo_by_path(body: DemoPlayByPathBody):
+async def play_demo_by_path(
+    body: DemoPlayByPathBody,
+    _runtime_session: None = Depends(runtime_session_dependency),
+):
     """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
     dem_path = resolve_uploaded_demo_path(body.path)
     return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
@@ -2953,6 +3053,7 @@ async def play_demo_by_path(body: DemoPlayByPathBody):
 async def play_demo_in_cs2(
     demo_id: int,
     body: Annotated[Optional[DemoPlaybackOptionsBody], Body()] = None,
+    _runtime_session: None = Depends(runtime_session_dependency),
 ):
     """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
     row = await demo_db.get_demo_by_id(demo_id)
@@ -2973,23 +3074,31 @@ async def delete_demo_file(demo_id: int):
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     disk_path = str(demo["path"])
-    import os as _os
-    deleted_files: list[str] = []
-    errors: list[str] = []
-    for target in (disk_path, disk_path.rsplit(".", 1)[0] + ".zip" if "." in _os.path.basename(disk_path) else None):
-        if target is None:
-            continue
+    from .file_quarantine import quarantine_files
+
+    targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
+    try:
+        quarantined = await asyncio.to_thread(quarantine_files, targets, "demos")
+    except OSError as exc:
+        raise HTTPException(409, f"Demo 文件无法安全移入回收区，数据库记录未删除：{exc}") from exc
+    # Only commit the database deletion after every owned file is recoverable.
+    try:
+        deleted = await demo_db.delete_demo(demo_id, rescan="reimport")
+        if not deleted:
+            raise HTTPException(404, f"Demo not found: {demo_id}")
+    except Exception:
         try:
-            _os.remove(target)
-            deleted_files.append(target)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            errors.append(f"{target}: {e}")
-    # 无论文件删除成功与否，都删除库内记录
-    await demo_db.delete_demo(demo_id, rescan="skip")
+            await asyncio.to_thread(quarantined.restore)
+        except OSError:
+            logger.exception("Failed to restore quarantined demo files for demo_id=%s", demo_id)
+        raise
     await demo_library_hub.notify("deleted")
-    return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
+    return {
+        "status": "deleted",
+        "demo_id": demo_id,
+        "quarantined_files": [str(item.original) for item in quarantined.files],
+        "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+    }
 
 
 class BatchIngestBody(BaseModel):

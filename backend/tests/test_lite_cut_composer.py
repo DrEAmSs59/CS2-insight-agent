@@ -65,6 +65,7 @@ from app.lite_cut.composer import (
     _overlay_track_clips,
     _timeline_video_layer_clip,
     _timeline_gap_plan,
+    _timeline_overlap_pair,
     _has_soft_positional_transition,
     _lite_cut_clip_to_ts,
     _boundary_transition_filter_complex,
@@ -321,6 +322,10 @@ def test_main_timeline_gap_plan_preserves_initial_and_internal_empty_ranges():
         {"timeline_start": 0, "trim_out": 4},
         {"timeline_start": 3.5, "trim_out": 6},
     ]) is None
+    assert _timeline_overlap_pair([
+        {"id": "first", "timeline_start": 0, "trim_out": 4},
+        {"id": "second", "timeline_start": 3.5, "trim_out": 6},
+    ]) == ("first", "second")
 
 
 def test_soft_transition_detection_distinguishes_boundaries_from_hard_cuts():
