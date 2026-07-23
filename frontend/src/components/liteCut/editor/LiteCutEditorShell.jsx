@@ -1623,7 +1623,7 @@ export default function LiteCutEditorShell({
           title={t("liteCut.ffmpegRequiredTitle")}
           subtitle={ffmpegGate.subtitle}
           message={ffmpegGate.message}
-          onGoSettings={() => navigate("/settings")}
+          onGoSettings={() => navigate("/settings?tab=video")}
         />
       </div>
     );
