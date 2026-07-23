@@ -1,4 +1,5 @@
 import json
+import socket
 import sqlite3
 from pathlib import Path
 
@@ -8,8 +9,11 @@ from app.desktop_data_migration import (
     CANONICAL_CONTAINER_NAME,
     DesktopDataMigrationError,
     MIGRATION_MARKER_NAME,
+    ensure_backend_stopped,
+    main,
     migrate_desktop_data,
 )
+from app.electron_ui_state_migration import ElectronUiStateResult, UI_STATE_FILE_NAME
 
 
 def _write_config(data_root: Path, marker: str) -> None:
@@ -42,6 +46,63 @@ def _read_database(data_root: Path) -> str:
 
 def _canonical(appdata: Path) -> Path:
     return appdata / CANONICAL_CONTAINER_NAME / "data"
+
+
+def test_installer_refuses_migration_while_backend_port_is_active():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        with pytest.raises(DesktopDataMigrationError, match="still listening"):
+            ensure_backend_stopped(port=port)
+
+    ensure_backend_stopped(port=port)
+
+
+def test_cli_exports_renderer_state_before_snapshotting_backend_data(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "cs2-insight-agent" / "data"
+    _write_config(source, "before-renderer-export")
+    calls: list[Path] = []
+
+    def fake_ui_migration(_appdata, data_root, **_kwargs):
+        data_root = Path(data_root)
+        calls.append(data_root)
+        if len(calls) == 1:
+            # Simulate the legacy backend's final write while its renderer is
+            # alive for localStorage export. The following data snapshot must
+            # include this write.
+            _write_config(source, "after-renderer-closed")
+            data_root.mkdir(parents=True, exist_ok=True)
+            state_file = data_root / UI_STATE_FILE_NAME
+            state_file.write_text(
+                json.dumps({"version": 1, "local_storage": {"cs2-insight-theme": "light"}}),
+                encoding="utf-8",
+            )
+            return ElectronUiStateResult(
+                "exported", str(state_file), (), (), ("cs2-insight-theme",)
+            )
+        return ElectronUiStateResult(
+            "existing",
+            str(data_root / UI_STATE_FILE_NAME),
+            (),
+            (),
+            ("cs2-insight-theme",),
+        )
+
+    monkeypatch.setattr(
+        "app.desktop_data_migration.migrate_electron_ui_state",
+        fake_ui_migration,
+    )
+
+    assert main(["--appdata", str(tmp_path), "--require-electron-ui-export"]) == 0
+
+    migrated = json.loads((_canonical(tmp_path) / "cs2-insight.config.json").read_text())
+    assert migrated["demo_directory"] == "after-renderer-closed"
+    assert calls[0].name == ".electron-ui-migration-v1"
+    assert calls[1] == _canonical(tmp_path)
+    assert (_canonical(tmp_path) / UI_STATE_FILE_NAME).is_file()
 
 
 def test_migrates_full_electron_data_tree_and_keeps_source(tmp_path: Path):

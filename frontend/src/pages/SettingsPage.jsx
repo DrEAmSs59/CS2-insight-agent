@@ -959,6 +959,23 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </FieldRow>
+                <FieldRow label={t("settings.labelLogDirectory")} hint={t("settings.hintLogDirectory")} search={search && !matches(t("settings.labelLogDirectory") + " " + (dataDirInfo?.logs_path ?? ""))}>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={dataDirInfo?.logs_path ?? ""}
+                      readOnly
+                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => API.post("config/open-logs").catch(() => {})}
+                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                    >
+                      {t("settings.openLogsBtn")}
+                    </button>
+                  </div>
+                </FieldRow>
                 <FieldRow label={t("settings.labelLiteCutStorage")} hint={t("settings.hintLiteCutStorage")} search={search && !matches(t("settings.labelLiteCutStorage") + " " + liteCutStorageDraft)}>
                   <div className="space-y-2">
                     <div className="flex gap-2 items-center">

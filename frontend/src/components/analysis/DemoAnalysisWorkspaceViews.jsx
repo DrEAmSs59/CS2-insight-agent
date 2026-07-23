@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
 import {
   Activity,
+  ArrowLeft,
   Bomb,
-  Bot,
   Crosshair,
   Filter,
   Gauge,
-  Loader2,
   MapPin,
   ShieldCheck,
   Swords,
@@ -333,7 +332,7 @@ function StatGroup({ title, rows }) {
   return <section className="rounded-lg border border-cs2-border bg-cs2-bg-input/20 p-3"><h3 className="mb-3 text-[9px] font-black uppercase tracking-wider text-cs2-text-secondary">{title}</h3><div className="space-y-2.5">{rows.map((row) => <StatBar key={row.label} {...row} />)}</div></section>;
 }
 
-export function PlayersView({ data, selectedPlayer, onSelectPlayer, onGenerateReview, review, reviewLoading }) {
+export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOverview }) {
   const player = data.players.find((item) => item.name === selectedPlayer) || data.players[0];
   if (!player) return <Panel title="全部玩家"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有玩家统计。</div></Panel>;
   const groups = [
@@ -346,8 +345,7 @@ export function PlayersView({ data, selectedPlayer, onSelectPlayer, onGenerateRe
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
       <Panel title="全部玩家" eyebrow={`${data.players.length} / ${data.players.length} 已分析`}><div className="divide-y divide-cs2-border">{data.players.map((item) => <button key={item.name} type="button" onClick={() => onSelectPlayer(item.name)} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${player.name === item.name ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}><span className={`h-2 w-2 rounded-full ${teamDot(item.team_key)}`} /><div className="min-w-0 flex-1"><p className={`truncate text-[11px] font-bold ${player.name === item.name ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{item.name}</p><p className="font-mono text-[9px] text-cs2-text-muted">{item.kills}–{item.deaths} · {Number(item.adr || 0).toFixed(1)} ADR</p></div><span className="font-mono text-[10px] font-bold text-cs2-text-secondary">{Number(item.kast || 0).toFixed(0)}%</span></button>)}</div></Panel>
       <div className="space-y-4">
-        <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-xl text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><Badge variant="orange">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</Badge></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={() => onGenerateReview(player)} disabled={reviewLoading}>{reviewLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}生成 AI 点评</Button></div></Panel>
-        {review && <div className="rounded-lg border border-violet-500/25 bg-violet-500/10 px-4 py-3 text-[10px] leading-relaxed text-violet-100"><Bot className="mr-2 inline h-4 w-4" />{review}</div>}
+        <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-xl text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><Badge variant="orange">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</Badge></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>
         <Panel title="详细数据" eyebrow="全场表现拆分 · 原始统计"><div className="grid gap-3 p-4 xl:grid-cols-2">{groups.map((group) => <StatGroup key={group.title} {...group} />)}</div></Panel>
       </div>

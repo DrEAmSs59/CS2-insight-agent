@@ -40,6 +40,13 @@ export function getLiteCutBuiltinFontUrl(fontName) {
     : `/api/lite-cut/fonts/${name}`;
 }
 
+/** Bundled radar map image served by the local desktop backend. */
+export function getDemoRadarMapUrl(mapName, layer = "") {
+  const name = encodeURIComponent(String(mapName || ""));
+  const query = layer ? `?layer=${encodeURIComponent(String(layer))}` : "";
+  return `${API_BASE_URL}/api/demo/radar-map/${name}${query}`;
+}
+
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsDesktop: ${IS_DESKTOP_APP}, BaseURL: ${API_BASE_URL}`);
 
 const API = axios.create({

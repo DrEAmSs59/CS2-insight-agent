@@ -49,16 +49,12 @@ copyFiltered("backend", (rel) => {
 });
 writeFileSync(join(destination, "backend", "app", "release_version.txt"), `${appVersion}\n`);
 copyFiltered("pov", () => true);
-copyFiltered("data", (rel) => {
-  const path = rel.toLowerCase();
-  if (
-    path === "lite_cut_assets" || path.startsWith("lite_cut_assets/") ||
-    path === "qa_color" || path.startsWith("qa_color/") ||
-    path === ".cs2_config_backup" || path.startsWith(".cs2_config_backup/") ||
-    path === ".obs_config_backups" || path.startsWith(".obs_config_backups/")
-  ) return false;
-  if (path.startsWith("logs/") || path.endsWith("cs2-insight.config.json")) return false;
-  return !/cs2-insight\.db(?:-wal|-shm)?$/i.test(path);
-});
+const bundledDataFiles = new Set([
+  "basic.ini",
+  "cs2-insight.config.example.json",
+  "lite_cut_effect_contract.json",
+  "lite_cut_visual_acceptance.json",
+]);
+copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
 console.log(`[desktop] staged Tauri resources at ${destination}`);

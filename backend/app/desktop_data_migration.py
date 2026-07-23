@@ -12,9 +12,11 @@ the migration, so a failed or interrupted upgrade remains recoverable.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -23,6 +25,19 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
+
+try:
+    from .electron_ui_state_migration import migrate_electron_ui_state, result_as_dict
+except ImportError:  # Direct ``python -I desktop_data_migration.py`` installer entry.
+    module_path = Path(__file__).with_name("electron_ui_state_migration.py")
+    spec = importlib.util.spec_from_file_location("electron_ui_state_migration", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load Electron UI migration module: {module_path}")
+    migration_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = migration_module
+    spec.loader.exec_module(migration_module)
+    migrate_electron_ui_state = migration_module.migrate_electron_ui_state
+    result_as_dict = migration_module.result_as_dict
 
 
 CANONICAL_CONTAINER_NAME = "CS2 Insight Agent"
@@ -61,6 +76,17 @@ CANONICAL_PAYLOAD_DIRECTORIES = (
 
 class DesktopDataMigrationError(RuntimeError):
     """Raised when migration cannot prove that the destination is usable."""
+
+
+def ensure_backend_stopped(host: str = "127.0.0.1", port: int = 19871) -> None:
+    """Refuse an installer migration while any process owns the backend port."""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.4)
+        if probe.connect_ex((host, port)) == 0:
+            raise DesktopDataMigrationError(
+                f"CS2 Insight backend is still listening on {host}:{port}; close the old app before upgrading"
+            )
 
 
 @dataclass(frozen=True)
@@ -403,14 +429,48 @@ def _append_error_log(appdata: Path, error: BaseException) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Migrate CS2 Insight desktop user data")
     parser.add_argument("--appdata", required=True, type=Path)
+    parser.add_argument(
+        "--require-electron-ui-export",
+        action="store_true",
+        help="fail before uninstalling Electron if its durable renderer state cannot be exported",
+    )
+    parser.add_argument(
+        "--require-desktop-stopped",
+        action="store_true",
+        help="fail when the desktop backend port is still active",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.require_desktop_stopped:
+            ensure_backend_stopped()
+
+        # Export browser-owned state before snapshotting the SQLite/config
+        # tree. Starting the legacy renderer also starts its bundled backend;
+        # the exporter closes both and waits for port 19871 to be released.
+        # Keeping this staging root outside canonical ``data`` prevents the
+        # data-tree atomic replacement from displacing the exported files.
+        ui_staging_root = canonical_container(args.appdata.expanduser().resolve()).joinpath(
+            ".electron-ui-migration-v1"
+        )
+        ui_result = migrate_electron_ui_state(
+            args.appdata,
+            ui_staging_root,
+            require_export=args.require_electron_ui_export,
+        )
         result = migrate_desktop_data(args.appdata)
+        final_data_root = Path(result.canonical_data_root)
+        if ui_staging_root.is_dir():
+            shutil.copytree(ui_staging_root, final_data_root, dirs_exist_ok=True)
+        if ui_result.state_file is not None:
+            # Re-read at its final path so the reported result and the Tauri
+            # bootstrap both refer to canonical data, without relaunching the
+            # legacy renderer.
+            ui_result = migrate_electron_ui_state(args.appdata, final_data_root)
     except Exception as exc:
         _append_error_log(args.appdata, exc)
         print(f"desktop data migration failed: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(asdict(result), ensure_ascii=False))
+    print(json.dumps({**asdict(result), "electron_ui": result_as_dict(ui_result)}, ensure_ascii=False))
     return 0
 
 

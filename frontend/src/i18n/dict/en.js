@@ -860,6 +860,7 @@ export default {
   "settings.labelObsPath": "OBS Executable",
   "settings.labelFfmpegPath": "FFmpeg Executable",
   "settings.labelDataDirectory": "Data Directory",
+  "settings.labelLogDirectory": "Log Directory",
   "settings.labelObsHost": "OBS Host",
   "settings.labelObsPort": "OBS Port",
   "settings.labelObsPassword": "OBS Password",
@@ -891,6 +892,7 @@ export default {
   "settings.hintObsPath": "OBS is auto-launched before recording; enter the full path to obs64.exe.",
   "settings.hintFfmpegPath": "Used for montage export; leave blank to use ffmpeg from PATH.",
   "settings.hintDataDirectory": "Application data storage (database, config, logs, etc.).",
+  "settings.hintLogDirectory": "Desktop shell, backend output, and runtime errors are stored here; the title-bar document icon opens it too.",
   "settings.labelLiteCutStorage": "LiteCut Project Media Folder",
   "settings.hintLiteCutStorage": "Stores imported media, preview proxies, and project exports. You can migrate it off the system drive; stop playback and exports first.",
   "settings.liteCutStorageMigrate": "Migrate and Use",
@@ -950,6 +952,7 @@ export default {
   "settings.browseBtn": "Browse…",
   "settings.browseFileTitle": "Select executable file",
   "settings.openDirBtn": "Open",
+  "settings.openLogsBtn": "Open logs",
 
   // Save
   "settings.saveAllBtn": "Save Settings",

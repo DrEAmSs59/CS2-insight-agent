@@ -12,7 +12,7 @@ import {
   Route,
   Swords,
 } from "lucide-react";
-import API from "../../api/api";
+import API, { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 
@@ -313,6 +313,20 @@ function formatClock(seconds) {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
+function replayPositionForTime(frames, targetSeconds) {
+  if (!frames.length) return 0;
+  const target = Number(targetSeconds);
+  if (!Number.isFinite(target) || target <= Number(frames[0]?.time_sec || 0)) return 0;
+  for (let index = 1; index < frames.length; index += 1) {
+    const previousTime = Number(frames[index - 1]?.time_sec || 0);
+    const nextTime = Number(frames[index]?.time_sec || previousTime);
+    if (target > nextTime) continue;
+    const ratio = clamp((target - previousTime) / Math.max(0.0001, nextTime - previousTime), 0, 1);
+    return index - 1 + ratio;
+  }
+  return frames.length - 1;
+}
+
 function mapKey(value) {
   const raw = String(value || "unknown").trim().toLowerCase();
   if (!raw || raw === "unknown") return "unknown";
@@ -461,6 +475,7 @@ export default function Demo2DReplayPreview({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [mapLayer, setMapLayer] = useState("upper");
+  const [playerLabelMode, setPlayerLabelMode] = useState("number");
   const [responseTransform, setResponseTransform] = useState(null);
   const [replayFps, setReplayFps] = useState(SAMPLE_HZ);
   const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, shots: true });
@@ -800,7 +815,7 @@ export default function Demo2DReplayPreview({
   const roundClockRemaining = currentTick >= roundEndTick
     ? 0
     : Math.max(0, ROUND_CLOCK_SECONDS - activeRoundElapsed);
-  const eventMarkers = roundEvents;
+  const eventMarkers = roundEvents.filter((event) => event.type === "kill" || event.type === "grenade");
   const killFeed = useMemo(() => roundEvents
     .filter((event) => event.type === "kill" && Number(event.tick) <= currentTick && currentTick - Number(event.tick) <= tickRate * 7)
     .slice(-5)
@@ -812,6 +827,14 @@ export default function Demo2DReplayPreview({
     const eventTick = Number(event?.tick || 0);
     const firstFrameAfterEvent = frames.findIndex((item) => Number(item.tick || 0) >= eventTick);
     setFrameIndex(firstFrameAfterEvent >= 0 ? firstFrameAfterEvent : frames.length - 1);
+    setPlaying(false);
+  };
+
+  const seekBySeconds = (seconds) => {
+    if (!frames.length) return;
+    const currentSeconds = Number(frame.time_sec || 0);
+    const lastSeconds = Number(frames.at(-1)?.time_sec || currentSeconds);
+    setFrameIndex(replayPositionForTime(frames, clamp(currentSeconds + seconds, 0, lastSeconds)));
     setPlaying(false);
   };
 
@@ -852,15 +875,14 @@ export default function Demo2DReplayPreview({
           </select>
           <button type="button" onClick={() => changeRound(roundIndex + 1)} disabled={roundIndex >= rounds.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
           <button type="button" onClick={() => setPlaying((value) => !value)} disabled={!frames.length} className="flex h-9 w-9 items-center justify-center rounded-full bg-cs2-accent text-cs2-text-on-accent disabled:opacity-40">{playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}</button>
+          <button type="button" aria-label="后退 5 秒" onClick={() => seekBySeconds(-5)} disabled={!frames.length} className="h-8 rounded-md border border-cs2-border px-2 font-mono text-[9px] font-bold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-35">-5s</button>
+          <button type="button" aria-label="前进 5 秒" onClick={() => seekBySeconds(5)} disabled={!frames.length} className="h-8 rounded-md border border-cs2-border px-2 font-mono text-[9px] font-bold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-35">+5s</button>
           <div className="relative min-w-[240px] flex-1 pt-3">
             <div className="absolute left-2 right-2 top-0 z-10 h-3">
               {eventMarkers.map((event) => {
                 const ratio = eventFrameRatio(event, frames, selectedRound);
-                const markerColor = event.type === "grenade"
-                  ? replaySideColor(sideForPlayerName(event.actor), teamKeyForPlayerName(event.actor) === "a")
-                  : null;
                 const markerTone = event.type === "kill" ? "bg-rose-400" : "bg-amber-300";
-                return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-1 rounded ${markerColor ? "" : markerTone}`} style={markerColor ? { backgroundColor: markerColor } : undefined} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
+                return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={event.type === "kill" ? "kill" : "utility"} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
               })}
             </div>
             <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={frameIndex} onChange={(event) => { setFrameIndex(Number(event.target.value)); setPlaying(false); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
@@ -872,7 +894,11 @@ export default function Demo2DReplayPreview({
           <div className="flex flex-wrap gap-2">
             {[{ key: "traces", icon: Route, label: "走位轨迹" }, { key: "kills", icon: Swords, label: "击杀连线" }, { key: "shots", icon: Crosshair, label: "射击弹道" }, { key: "grenades", icon: Bomb, label: "投掷物" }].map(({ key, icon: Icon, label }) => <button key={key} type="button" aria-pressed={layers[key]} onClick={() => toggleLayer(key)} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-semibold ${layers[key] ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border text-cs2-text-muted"}`}><Icon className="h-3 w-3" />{label}</button>)}
           </div>
-          <div className="flex rounded-md border border-cs2-border bg-cs2-bg-input p-0.5">{[0.5, 1, 2, 4].map((value) => <button key={value} type="button" onClick={() => setSpeed(value)} className={`rounded px-2 py-1 font-mono text-[8px] ${speed === value ? "bg-cs2-text-primary text-cs2-bg-page" : "text-cs2-text-muted"}`}>{value}x</button>)}</div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-[9px] font-semibold text-cs2-text-muted" aria-label="时间轴事件图例"><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-rose-400" />击杀</span><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-300" />道具</span></div>
+            <div role="group" aria-label="人物标识" className="flex rounded-md border border-cs2-border bg-cs2-bg-input p-0.5">{[["number", "序号"], ["id", "ID"]].map(([value, label]) => <button key={value} type="button" aria-pressed={playerLabelMode === value} onClick={() => setPlayerLabelMode(value)} className={`rounded px-2 py-1 text-[8px] font-bold ${playerLabelMode === value ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{label}</button>)}</div>
+            <div className="flex rounded-md border border-cs2-border bg-cs2-bg-input p-0.5">{[0.5, 1, 2, 4].map((value) => <button key={value} type="button" onClick={() => setSpeed(value)} className={`rounded px-2 py-1 font-mono text-[8px] ${speed === value ? "bg-cs2-text-primary text-cs2-bg-page" : "text-cs2-text-muted"}`}>{value}x</button>)}</div>
+          </div>
         </div>
       </section>
 
@@ -894,7 +920,7 @@ export default function Demo2DReplayPreview({
           {loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-cs2-bg-page/70"><Loader2 className="h-6 w-6 animate-spin text-cs2-accent" /></div>}
           {error && <div className="absolute inset-0 z-30 flex items-center justify-center p-8 text-center text-[11px] text-cs2-text-muted">{error}</div>}
           <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: `translate(-50%, -50%) scale(${radarZoom})` }}>
-            <img src={`/api/demo/radar-map/${mapName}${hasMapLayers ? `?layer=${mapLayer}` : ""}`} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
+            <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
             <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
               {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
               {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
@@ -909,7 +935,8 @@ export default function Demo2DReplayPreview({
               const playerNumber = playerNumberByName.get(displayName.toLowerCase());
               const yaw = Number.isFinite(Number(player.yaw)) ? Number(player.yaw) : 0;
               const markerTitle = `${displayName} · ${Number.isFinite(Number(player.health)) ? player.health : 0} HP · $${Math.max(0, Number(player.money) || 0).toLocaleString("en-US")} · ${armorText(player)} · ${safeWeapon(player.weapon, "—")}${player.has_c4 ? " · C4" : ""}${player.has_defuser ? " · 拆弹器" : ""}`;
-              return <div key={player.steamid64 || displayName} className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: motionDuration }} title={markerTitle}><div data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined} className={`demo-player-marker relative flex h-[14px] w-[14px] items-center justify-center rounded-full border border-white/80 font-mono text-[6px] font-black leading-none text-white shadow-sm ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}><span className="demo-player-direction-arrow pointer-events-none absolute -inset-[3px]" style={{ transform: `rotate(${90 - yaw}deg)` }}><i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[2px] border-b-[4px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} /></span>{Number.isInteger(playerNumber) ? playerNumber : "?"}{player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}{player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}</div></div>;
+              const markerLabel = playerLabelMode === "id" ? displayName : (Number.isInteger(playerNumber) ? playerNumber : "?");
+              return <div key={player.steamid64 || displayName} className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: motionDuration }} title={markerTitle}><div data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined} data-player-label-mode={playerLabelMode} className={`demo-player-marker relative flex items-center justify-center border border-white/80 font-mono font-black leading-none text-white shadow-sm ${playerLabelMode === "id" ? "h-[16px] min-w-[28px] max-w-[76px] rounded-full px-1 text-[6px]" : "h-[14px] w-[14px] rounded-full text-[6px]"} ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}><span className="demo-player-direction-arrow pointer-events-none absolute -inset-[3px]" style={{ transform: `rotate(${90 - yaw}deg)` }}><i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[2px] border-b-[4px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} /></span><span className="truncate">{markerLabel}</span>{player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}{player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}</div></div>;
             })}
           </div>
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}

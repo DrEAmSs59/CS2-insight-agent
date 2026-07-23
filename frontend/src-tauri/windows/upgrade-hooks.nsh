@@ -4,6 +4,12 @@
 ; product name is the same. Detect the old electron-builder uninstaller by
 ; its executable name instead of relying on a single generated registry GUID.
 
+; tauri-build copies the GNU WebView2 loader beside the release executable,
+; but tauri-bundler 2.6 does not add that sibling DLL to NSIS automatically.
+; Capture this directory while the hook is included so macro expansion later
+; does not change __FILEDIR__ to the generated NSIS directory.
+!define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\..\target\release"
+
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
   cs2_abort_interactive:
@@ -160,13 +166,20 @@ FunctionEnd
   ; Keep the runnable Electron installation intact until both the Tauri files
   ; and the user-data migration have completed successfully.
   Call CS2_EnsureElectronStopped
+
+  ; GNU builds import WebView2Loader.dll dynamically. Keep it beside the main
+  ; executable so Windows can resolve the dependency before Rust/Tauri starts.
+  !if /FileExists "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
+    SetOutPath "$INSTDIR"
+    File /a "/oname=WebView2Loader.dll" "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
+  !endif
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.
   ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA"' $R0
+  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export' $R0
   ${If} ${Errors}
     StrCpy $R7 "Tauri 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
@@ -180,4 +193,11 @@ FunctionEnd
   ; are known-good. Any earlier installer failure therefore leaves a runnable
   ; Electron fallback in place.
   Call CS2_RemoveLegacyElectron
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  Delete "$INSTDIR\WebView2Loader.dll"
+  ; The generated uninstaller tries to remove $INSTDIR before this custom
+  ; file is deleted. Retry non-recursively once the loader is gone.
+  RmDir "$INSTDIR"
 !macroend

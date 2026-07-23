@@ -48,6 +48,29 @@ fn new_instance_id() -> String {
     format!("{}-{nanos}", std::process::id())
 }
 
+#[tauri::command]
+fn read_legacy_ui_state() -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let app_data = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .ok_or_else(|| "Windows APPDATA 环境变量不存在".to_string())?;
+        let state_file = app_data
+            .join("CS2 Insight Agent")
+            .join("data")
+            .join("desktop-ui-state-v1.json");
+        if !state_file.is_file() {
+            return Ok(None);
+        }
+        return fs::read_to_string(&state_file)
+            .map(Some)
+            .map_err(|error| format!("无法读取旧版界面状态 {}：{error}", state_file.display()));
+    }
+
+    #[cfg(not(windows))]
+    Ok(None)
+}
+
 fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
@@ -299,6 +322,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(BackendProcess::default())
+        .invoke_handler(tauri::generate_handler![read_legacy_ui_state])
         .setup(|app| {
             if let Err(error) = start_backend(app.handle()) {
                 app.dialog()
@@ -321,10 +345,14 @@ pub fn run() {
             event: WindowEvent::CloseRequested { api, .. },
             ..
         } if label == "main" => {
-            // Closing Tauri's last window does not necessarily terminate the
-            // event loop. Exit explicitly so the app cannot remain headless
-            // with the bundled Python backend still running.
+            // Destroy the webview first so EventSource/HTTP connections close
+            // immediately. Otherwise uvicorn waits on the still-live renderer
+            // while this handler waits on uvicorn, making the X button appear
+            // frozen until the forced-shutdown timeout expires.
             api.prevent_close();
+            if let Some(window) = handle.get_webview_window(&label) {
+                let _ = window.destroy();
+            }
             stop_backend(handle);
             handle.exit(0);
         }

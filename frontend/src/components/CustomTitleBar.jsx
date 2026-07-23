@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Copy, Minus, Square, X } from "lucide-react";
+import { Copy, FileText, Minus, Square, X } from "lucide-react";
+import API from "../api/api";
 import { desktopBridge, isDesktopApp } from "../desktop/desktopBridge";
 
 export default function CustomTitleBar() {
@@ -24,14 +25,7 @@ export default function CustomTitleBar() {
       className="flex w-full shrink-0 items-center justify-between bg-[#111111] text-white z-50"
       style={{ height: "50px" }}
       data-tauri-drag-region
-      onMouseDown={(event) => {
-        if (event.button !== 0 || event.target.closest("button")) return;
-        if (event.detail === 2) {
-          runWindowAction(() => desktopBridge.toggleMaximize());
-          return;
-        }
-        runWindowAction(() => desktopBridge.startDragging());
-      }}
+      data-testid="custom-titlebar"
     >
       <div className="flex items-center px-4" data-tauri-drag-region>
         <img
@@ -44,6 +38,15 @@ export default function CustomTitleBar() {
       </div>
 
       <div className="flex h-full">
+        <button
+          type="button"
+          aria-label="打开日志目录"
+          title="打开日志目录（%APPDATA%\\CS2 Insight Agent\\data\\logs）"
+          onClick={() => runWindowAction(() => API.post("config/open-logs"))}
+          className="flex h-full w-12 items-center justify-center transition-colors hover:bg-white/10"
+        >
+          <FileText size={15} />
+        </button>
         <button
           type="button"
           aria-label="Minimize"

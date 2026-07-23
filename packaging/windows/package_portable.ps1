@@ -163,7 +163,8 @@ function Install-BackendRequirements {
         "Lib\site-packages\pandas\tests",
         "Lib\site-packages\websocket\tests",
         "Lib\site-packages\aiosqlite\tests",
-        "Lib\site-packages\colorama\tests"
+        "Lib\site-packages\colorama\tests",
+        "Lib\site-packages\images"
     )) {
         $path = Join-Path $pythonRoot $rel
         if (Test-Path -LiteralPath $path) {
@@ -183,6 +184,21 @@ function Install-BackendRequirements {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     Get-ChildItem -LiteralPath $pythonRoot -Recurse -File -Filter "*.pdb" -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath $sitePackages -Recurse -File -Filter "*.pyi" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath $sitePackages -Recurse -File -Filter "py.typed" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath $sitePackages -Recurse -File -Filter "RECORD" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -like "*.dist-info" } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath $sitePackages -Recurse -Directory -Filter "sboms" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Parent.Name -like "*.dist-info" } |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem -LiteralPath (Join-Path $sitePackages "PIL") -File -Filter "_avif*.pyd" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    & $PythonExe -c "from PIL import Image; import demoparser2, fastapi, numpy, openai, pandas, uvicorn"
+    if ($LASTEXITCODE -ne 0) { throw "final trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     } finally {
         if ($null -eq $previousNoUserSite) {
             Remove-Item Env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue

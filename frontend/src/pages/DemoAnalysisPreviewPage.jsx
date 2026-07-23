@@ -34,7 +34,6 @@ import {
 } from "../components/analysis/DemoAnalysisWorkspaceViews";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
-import API from "../api/api";
 import { useAppShell } from "../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
@@ -45,8 +44,8 @@ const TABS = [
   { key: "highlights", label: "高光与录制", icon: Film },
   { key: "replay", label: "2D 回放", icon: MapPin },
   { key: "overview", label: "概览", icon: Activity },
-  { key: "rounds", label: "回合", icon: ListChecks },
   { key: "players", label: "玩家", icon: Users },
+  { key: "rounds", label: "回合", icon: ListChecks },
   { key: "economy", label: "经济", icon: CircleDollarSign },
 ];
 
@@ -315,8 +314,6 @@ export default function DemoAnalysisPreviewPage() {
   const [selectedRound, setSelectedRound] = useState(null);
   const [replayRound, setReplayRound] = useState(null);
   const [statsPlayer, setStatsPlayer] = useState("");
-  const [playerReview, setPlayerReview] = useState("");
-  const [reviewLoading, setReviewLoading] = useState(false);
   const matches = s.matchTabsData || [];
   const uploadedDemoCount = s.uploadedDemos?.length || 0;
   const parsedDemoCount = matches.filter((match) => match?.parsed).length;
@@ -378,7 +375,6 @@ export default function DemoAnalysisPreviewPage() {
     setSelectedRound(null);
     setReplayRound(null);
     setStatsPlayer("");
-    setPlayerReview("");
   }, [s.currentMatchIndex]);
 
   const selectPlayer = (name) => {
@@ -399,7 +395,6 @@ export default function DemoAnalysisPreviewPage() {
 
   const openPlayerStats = (name) => {
     setStatsPlayer(name);
-    setPlayerReview("");
     setActiveTab("players");
   };
 
@@ -411,29 +406,6 @@ export default function DemoAnalysisPreviewPage() {
   const openReplayRound = (roundNumber) => {
     setReplayRound(roundNumber);
     setActiveTab("replay");
-  };
-
-  const generatePlayerReview = async (player) => {
-    setReviewLoading(true);
-    setPlayerReview("");
-    try {
-      const { data } = await API.post("/demo/player-review", {
-        player,
-        match: {
-          map_name: workspace.map_name || meta.map_name,
-          team_a_name: workspace.team_a_name,
-          team_b_name: workspace.team_b_name,
-          team_a_score: workspace.team_a_score,
-          team_b_score: workspace.team_b_score,
-          total_rounds: workspace.rounds.length,
-        },
-      });
-      setPlayerReview(data?.commentary || "AI 未返回有效点评。");
-    } catch (error) {
-      setPlayerReview(error?.response?.data?.detail || error?.message || "AI 点评生成失败。");
-    } finally {
-      setReviewLoading(false);
-    }
   };
 
   if (!s.hasDemos) {
@@ -554,13 +526,8 @@ export default function DemoAnalysisPreviewPage() {
             <PlayersView
               data={workspace}
               selectedPlayer={statsPlayer || activePlayer}
-              onSelectPlayer={(name) => {
-                setStatsPlayer(name);
-                setPlayerReview("");
-              }}
-              onGenerateReview={generatePlayerReview}
-              review={playerReview}
-              reviewLoading={reviewLoading}
+              onSelectPlayer={setStatsPlayer}
+              onBackToOverview={() => setActiveTab("overview")}
             />
           )}
 

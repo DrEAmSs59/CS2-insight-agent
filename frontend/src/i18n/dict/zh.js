@@ -861,6 +861,7 @@ export default {
   "settings.labelObsPath": "OBS 可执行文件",
   "settings.labelFfmpegPath": "FFmpeg 可执行文件",
   "settings.labelDataDirectory": "数据路径",
+  "settings.labelLogDirectory": "日志目录",
   "settings.labelObsHost": "OBS 主机",
   "settings.labelObsPort": "OBS 端口",
   "settings.labelObsPassword": "OBS 密码",
@@ -892,6 +893,7 @@ export default {
   "settings.hintObsPath": "录制前自动启动 OBS；填写 obs64.exe 完整路径。",
   "settings.hintFfmpegPath": "合辑导出使用；留空则使用 PATH 中的 ffmpeg。",
   "settings.hintDataDirectory": "应用数据存储位置（数据库、配置、日志等）。",
+  "settings.hintLogDirectory": "桌面壳、后端标准输出、运行错误都保存在这里；顶栏文档图标也可直接打开。",
   "settings.labelLiteCutStorage": "LiteCut 工程素材目录",
   "settings.hintLiteCutStorage": "保存导入素材、预览代理和工程导出。可迁移到非系统盘；迁移时请停止播放和导出。",
   "settings.liteCutStorageMigrate": "迁移并使用",
@@ -951,6 +953,7 @@ export default {
   "settings.browseBtn": "浏览…",
   "settings.browseFileTitle": "选择可执行文件",
   "settings.openDirBtn": "打开",
+  "settings.openLogsBtn": "打开日志",
 
   // Save
   "settings.saveAllBtn": "保存设置",

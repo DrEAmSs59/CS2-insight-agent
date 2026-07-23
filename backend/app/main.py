@@ -108,6 +108,8 @@ from .steam_match_history import (
     is_demo_expired,
 )
 
+APP_VERSION, _APP_VERSION_SOURCE = resolve_local_version_info()
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 install_gsi_access_log_filter()
 
@@ -326,7 +328,7 @@ async def lifespan(_: FastAPI):
             _FAULT_LOG_FILE.close()
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.3.0", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
@@ -950,6 +952,25 @@ def open_config_data_dir():
         return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
 
 
+@app.post("/api/config/open-logs")
+def open_log_directory():
+    """Open the desktop log directory used by Rust and the bundled backend."""
+    logs_dir = get_data_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    folder = str(logs_dir.resolve())
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", folder], check=False, timeout=30)
+        else:
+            subprocess.run(["xdg-open", folder], check=False, timeout=30)
+        return {"ok": True, "path": folder}
+    except Exception as e:  # noqa: BLE001
+        logging.warning("open log dir failed: %s", e)
+        return {"ok": False, "path": folder, "message": "无法自动打开日志目录，请手动复制路径。"}
+
+
 def _get_dir_size(path: Path) -> int:
     """计算文件夹总大小（字节）。"""
     if not path.is_dir():
@@ -987,6 +1008,7 @@ def get_data_dir_info():
     size_str = _format_size(size_bytes)
     return {
         "path": str(data_dir.resolve()),
+        "logs_path": str((data_dir / "logs").resolve()),
         "exists": data_dir.exists(),
         "size_bytes": size_bytes,
         "size_str": size_str,
@@ -3949,7 +3971,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.3.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/")
