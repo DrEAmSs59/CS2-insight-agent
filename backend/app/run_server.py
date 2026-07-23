@@ -73,7 +73,6 @@ def main() -> None:
         loop="asyncio",
         log_level="info",
         access_log=True,
-        app_dir=backend,
     )
     server = uvicorn.Server(config)
     register_server_shutdown(lambda: setattr(server, "should_exit", True))

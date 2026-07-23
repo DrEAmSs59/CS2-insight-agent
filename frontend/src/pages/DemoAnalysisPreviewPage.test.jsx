@@ -6,6 +6,7 @@ import DemoAnalysisPreviewPage from "./DemoAnalysisPreviewPage";
 import API from "../api/api";
 
 vi.mock("../api/api", () => ({
+  getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
   default: {
     post: vi.fn().mockResolvedValue({
       data: {
@@ -260,10 +261,23 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
   test("keeps all six prototype workspaces backed by parsed match data", async () => {
     const view = renderPage(buildShell());
 
+    const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
+    expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "高光与录制", "2D 回放", "概览", "玩家", "回合", "经济",
+    ]);
+
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
-    expect(screen.getByAltText("de_mirage 雷达地图")).toBeTruthy();
+    expect(screen.getByAltText("de_mirage 雷达地图").getAttribute("src")).toBe("http://127.0.0.1:19871/api/demo/radar-map/de_mirage");
     await waitFor(() => expect(screen.getByText("32 Hz", { exact: false })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "前进 5 秒" }));
+    expect(Number(screen.getByRole("slider", { name: "回放时间轴" }).value)).toBeCloseTo(0.8);
+    fireEvent.click(screen.getByRole("button", { name: "后退 5 秒" }));
+    expect(Number(screen.getByRole("slider", { name: "回放时间轴" }).value)).toBeCloseTo(0);
+    expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("击杀");
+    expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("道具");
+    expect(view.container.querySelector('[data-event-kind="kill"] > span')?.className).toContain("rounded-full");
+    expect(view.container.querySelector('[data-event-kind="utility"] > span')?.className).toContain("rounded-full");
     expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 32 }));
     expect(screen.queryByText(/^nan$/i)).toBeNull();
     expect(screen.queryByText("16777215")).toBeNull();
@@ -328,6 +342,11 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector(".demo-player-direction-arrow")).toBeTruthy();
     expect(view.container.querySelector(".demo-player-marker")?.className).toContain("h-[14px]");
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
+    fireEvent.click(screen.getByRole("button", { name: "ID" }));
+    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.getAttribute("data-player-label-mode")).toBe("id");
+    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toContain("ZywOo");
+    fireEvent.click(screen.getByRole("button", { name: "序号" }));
+    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
     expect(view.container.querySelector(".demo-player-trace")?.getAttribute("stroke-width")).toBe("0.175");
     expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("stroke-width")).toBe("0.12");
     expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("opacity")).toBe("1");
@@ -357,7 +376,9 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "玩家" }));
     expect(screen.getByText("详细数据")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /生成 AI 点评/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /生成 AI 点评/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "返回概览" }));
+    expect(screen.getByRole("heading", { name: "比赛主线" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "经济" }));
     expect(screen.getByRole("heading", { name: "经济走势" })).toBeTruthy();
