@@ -558,7 +558,13 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
 
     monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
     monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
-    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: None)
+    compat_calls: list[str] = []
+
+    def fake_ensure(path):
+        compat_calls.append(str(path))
+        raise AssertionError("batch ingest must not call ensure_demo_compatible")
+
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_list_items",
@@ -576,6 +582,7 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
     )
 
     assert response == {"ingested": 3, "failed": []}
+    assert compat_calls == []
     assert max_active == 2
     assert [call.args[0] for call in index_stats.await_args_list] == [1, 2, 3]
     assert [
