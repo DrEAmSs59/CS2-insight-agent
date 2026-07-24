@@ -268,7 +268,7 @@ async def _persist_v3_results(
         clip_meta = build_v3_recorded_clip_meta(dto, None, r)
 
         try:
-            await db.insert_recorded_clip(
+            recorded_clip_id = await db.insert_recorded_clip(
                 clip_id=clip_id,
                 demo_path=demo_path,
                 demo_filename=demo_filename,
@@ -278,9 +278,15 @@ async def _persist_v3_results(
                 status="ready",
                 clip_meta=clip_meta,
             )
+            # The completion dialog is rendered immediately from this response.
+            # Return the material-library row id so it can stream the finished
+            # video as its preview frame without exposing an arbitrary file path.
+            r["recorded_clip_id"] = recorded_clip_id
+            if dur_f is not None:
+                r["recorded_clip_duration_sec"] = dur_f
             logger.info(
-                "[RecordingV3][DB] persisted clip_id=%s output=%s",
-                clip_id, output_path,
+                "[RecordingV3][DB] persisted recorded_clip_id=%s clip_id=%s output=%s",
+                recorded_clip_id, clip_id, output_path,
             )
             logger.info(
                 "[RecordingV3][DB] meta request_type=%s workbench_clip_kind=%s category=%s "
