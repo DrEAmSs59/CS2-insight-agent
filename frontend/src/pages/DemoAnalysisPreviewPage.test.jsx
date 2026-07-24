@@ -53,6 +53,8 @@ function buildShell(overrides = {}) {
     four_kill_rounds: 0,
     five_kill_rounds: 0,
     awp_kills: index === 0 ? 3 : 0,
+    clutch_attempts: index === 0 ? 3 : 1,
+    clutch_wins: index === 0 ? 2 : 0,
     utility_damage: 90 - index * 10,
     utility_damage_per_round: 8,
     average_equipment_value: 4300,
@@ -67,6 +69,7 @@ function buildShell(overrides = {}) {
     team_b_name: "NAVI",
     team_a_score: 13,
     team_b_score: 9,
+    duration_mins: 35,
     players: stats,
     rounds: [
       {
@@ -255,6 +258,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText(/Vitality 的.*半场奠定比赛走势/)).toBeNull();
     expect(screen.getByRole("heading", { name: "全场计分板" })).toBeTruthy();
     expect(screen.getByText("详细战报")).toBeTruthy();
+    expect(screen.getByText(/35 分钟/)).toBeTruthy();
+    expect(screen.queryByText(/、Rating /)).toBeNull();
     expect(screen.queryByText(/DAK|analysis-kit|数据包/i)).toBeNull();
   });
 
@@ -340,13 +345,15 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(within(killFeed).getByText("b1t").getAttribute("data-side")).toBe("T");
     expect(within(killFeed).getByText("b1t").className).toContain("text-amber-300");
     expect(view.container.querySelector(".demo-player-direction-arrow")).toBeTruthy();
-    expect(view.container.querySelector(".demo-player-marker")?.className).toContain("h-[14px]");
+    expect(view.container.querySelector(".demo-player-marker")?.className).toContain("rounded-full");
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
     fireEvent.click(screen.getByRole("button", { name: "ID" }));
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.getAttribute("data-player-label-mode")).toBe("id");
-    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toContain("ZywOo");
+    expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("Z");
+    expect(view.container.querySelector(".demo-player-id-label")?.textContent).toBe("ZywOo");
     fireEvent.click(screen.getByRole("button", { name: "序号" }));
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
+    expect(view.container.querySelector(".demo-player-id-label")).toBeNull();
     expect(view.container.querySelector(".demo-player-trace")?.getAttribute("stroke-width")).toBe("0.175");
     expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("stroke-width")).toBe("0.12");
     expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("opacity")).toBe("1");
@@ -432,7 +439,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     await waitFor(() => expect(screen.getByAltText("de_nuke 上层 雷达地图")).toBeTruthy());
     expect(screen.getByRole("group", { name: "地图楼层" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "上层" }).getAttribute("aria-pressed")).toBe("true");
-    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("scale(1.28)");
+    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("scale(1.536)");
     expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeTruthy();
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
 

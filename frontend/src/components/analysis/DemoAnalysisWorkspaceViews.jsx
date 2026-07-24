@@ -121,13 +121,20 @@ export function useWorkspaceData(workspace, fallback) {
       const scoreBeforeB = teamBScore;
       if (winnerKey === "a") teamAScore += 1;
       if (winnerKey === "b") teamBScore += 1;
-      const winnerLabel = winnerKey === "a" ? "A 队" : winnerKey === "b" ? "B 队" : "本回合胜方";
+      const teamAName = base.team_a_name || fallback.teamAName || "Team A";
+      const teamBName = base.team_b_name || fallback.teamBName || "Team B";
+      const winnerLabel = winnerKey === "a" ? teamAName : winnerKey === "b" ? teamBName : "本回合胜方";
+      const rawHeadline = String(round.headline || "");
+      const headline = rawHeadline
+        .replaceAll("本回合胜方", winnerLabel)
+        .replaceAll("A 队", teamAName)
+        .replaceAll("B 队", teamBName);
       return {
         ...round,
         round_end_tick: formalEndTick,
         end_tick: replayEndTick,
         winner_team_key: winnerKey,
-        headline: String(round.headline || "").replace("本回合胜方", winnerLabel),
+        headline,
         duration_seconds: replayEndTick > Number(round.freeze_end_tick || 0)
           ? Math.round((replayEndTick - Number(round.freeze_end_tick || 0)) / Math.max(1, Number(base.tick_rate || 64)))
           : Number(round.duration_seconds || 0),
@@ -203,7 +210,7 @@ export function OverviewView({ data, onSelectPlayer }) {
   const streakName = streak.teamKey === "a" ? data.team_a_name : data.team_b_name;
   const reportLines = [
     `${winnerName} 以 ${Math.max(data.team_a_score, data.team_b_score)}:${Math.min(data.team_a_score, data.team_b_score)} 战胜 ${loserName}；上半场 ${halfScore(firstHalf, "a")}:${halfScore(firstHalf, "b")}，换边后 ${halfScore(secondHalf, "a")}:${halfScore(secondHalf, "b")}。`,
-    `${mvp?.name || "—"} 交出 ${mvp?.kills || 0}/${mvp?.deaths || 0}/${mvp?.assists || 0}、ADR ${Number(mvp?.adr || 0).toFixed(1)}、Rating ${Number(mvp?.rating || 0).toFixed(2)}，是全场综合表现最突出的选手。`,
+    `${mvp?.name || "—"} 交出 ${mvp?.kills || 0}/${mvp?.deaths || 0}/${mvp?.assists || 0}、ADR ${Number(mvp?.adr || 0).toFixed(1)}，是全场综合表现最突出的选手。`,
     `${entryLeader?.name || "—"} 取得 ${entryLeader?.first_kills || 0} 次首杀，是开局对抗贡献最高的选手。`,
     `${pistolRounds.length} 个手枪局中，${winnerName} 拿下 ${pistolWins} 个；手枪局后的经济衔接${pistolWins === pistolRounds.length && pistolRounds.length ? "非常稳定" : "仍有继续提升空间"}。`,
     streak.length > 1 ? `${streakName} 在 R${streak.start}–R${streak.end} 打出 ${streak.length} 连胜，这是本场最长连续得分阶段。` : "全场没有超过 1 回合的连续得分，双方回合交换非常频繁。",
@@ -343,7 +350,7 @@ export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOver
   ];
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <Panel title="全部玩家" eyebrow={`${data.players.length} / ${data.players.length} 已分析`}><div className="divide-y divide-cs2-border">{data.players.map((item) => <button key={item.name} type="button" onClick={() => onSelectPlayer(item.name)} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${player.name === item.name ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}><span className={`h-2 w-2 rounded-full ${teamDot(item.team_key)}`} /><div className="min-w-0 flex-1"><p className={`truncate text-[11px] font-bold ${player.name === item.name ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{item.name}</p><p className="font-mono text-[9px] text-cs2-text-muted">{item.kills}–{item.deaths} · {Number(item.adr || 0).toFixed(1)} ADR</p></div><span className="font-mono text-[10px] font-bold text-cs2-text-secondary">{Number(item.kast || 0).toFixed(0)}%</span></button>)}</div></Panel>
+      <Panel title="全部玩家" eyebrow={`${data.players.length} / ${data.players.length} 已分析`}><div className="divide-y divide-cs2-border">{data.players.map((item) => <button key={item.name} type="button" onClick={() => onSelectPlayer(item.name)} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${player.name === item.name ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}><span className={`h-2 w-2 rounded-full ${teamDot(item.team_key)}`} /><div className="min-w-0 flex-1"><p className={`truncate text-[11px] font-bold ${player.name === item.name ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{item.name}</p><p className="font-mono text-[9px] text-cs2-text-muted">{item.kills}–{item.deaths} · {Number(item.adr || 0).toFixed(1)} ADR</p></div></button>)}</div></Panel>
       <div className="space-y-4">
         <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-xl text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><Badge variant="orange">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</Badge></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>

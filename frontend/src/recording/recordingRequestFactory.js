@@ -24,7 +24,7 @@ export const DEFAULT_RECORDING_OPTIONS = {
   fail_killer_pre_sec: 3.0,
   fail_killer_post_sec: 2.0,
   demo_end_guard_sec: 1.5,
-  final_round_extra_post_sec: 1.0,
+  final_round_extra_post_sec: 2.0,
   obs_transition_enabled: null,
   obs_transition_name: null,
   obs_transition_duration_ms: null,
@@ -371,7 +371,7 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
   // demo_end_tick must give the backend headroom for the final round's tail:
   //  - death window: end_tick is death+2s, round_end_tick is the real (later) round end
   //  - alive window: end_tick ≈ real demo end (freeze+150s capped to demo_max)
-  // Take the larger of the two per window so an alive final round can linger 1s past
+  // Take the larger of the two per window so an alive final round can linger 2s past
   // round_end into the post-round. Falls back gracefully when round_end_tick is absent.
   const maxRoundEndTick = (clipData.freeze_to_death_round_windows || [])
     .filter((w) => filterSet === null || filterSet.has(Number(w.round)))

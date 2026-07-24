@@ -748,10 +748,10 @@ if plan25.segments:
           f"end={seg25.end_tick}, death={death24}")
 
 
-# ── Test 26: Final round the target SURVIVED → extra 1s tail past round_end ─
-# Alive final round (target_death_tick=None). The clip should linger 1s past the
+# ── Test 26: Final round the target SURVIVED → extra 2s tail past round_end ─
+# Alive final round (target_death_tick=None). The clip should linger 2s past the
 # real round_end to capture the match-winning moment, with demo headroom for it.
-print("\nTest 26: Final-round compilation — alive, extra 1s tail past round_end")
+print("\nTest 26: Final-round compilation — alive, extra 2s tail past round_end")
 round_end26 = 193250
 demo26 = make_demo(final_round=23, final_round_start_tick=0,
                    final_round_end_tick=200000, demo_end_tick=200000)
@@ -766,7 +766,7 @@ r26 = RoundInfo(
     next_round_freeze_end_tick=None,
     target_death_tick=None,         # target survived the final round
 )
-opts26 = RecordingOptions(final_round_extra_post_sec=1.0)
+opts26 = RecordingOptions(final_round_extra_post_sec=2.0)
 req26 = dto(
     request_type=RequestType.round_compilation,
     source_type=SourceType.round,
@@ -778,8 +778,8 @@ plan26 = build_plan(req26)
 check("26a: 1 segment", len(plan26.segments) == 1, f"got {len(plan26.segments)}")
 if plan26.segments:
     seg26 = plan26.segments[0]
-    exp_end26 = round_end26 + int(opts26.final_round_extra_post_sec * TICK_RATE)  # round_end+1s
-    check("26b: end = round_end + 1s (lingers past the win)",
+    exp_end26 = round_end26 + int(opts26.final_round_extra_post_sec * TICK_RATE)  # round_end+2s
+    check("26b: end = round_end + 2s (lingers past the win)",
           seg26.end_tick == exp_end26,
           f"got {seg26.end_tick}, want {exp_end26}")
 

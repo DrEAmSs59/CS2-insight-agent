@@ -102,8 +102,8 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
         },
     ])
     hurt = pd.DataFrame([
-        {"tick": 149, "attacker_name": "Alpha", "user_name": "Bravo", "weapon": "ak47", "dmg_health": 100},
-        {"tick": 349, "attacker_name": "Bravo", "user_name": "Alpha", "weapon": "awp", "dmg_health": 100},
+        {"tick": 149, "attacker_name": "Alpha", "user_name": "Bravo", "weapon": "ak47", "dmg_health": 120, "health": 0, "user_steamid": "2"},
+        {"tick": 349, "attacker_name": "Bravo", "user_name": "Alpha", "weapon": "awp", "dmg_health": 100, "health": 0, "user_steamid": "1"},
     ])
     round_end = pd.DataFrame([
         {"tick": 250, "total_rounds_played": 1, "winner": 2, "reason": "TargetSaved"},
@@ -226,3 +226,11 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
         "x": 180.0,
         "y": 280.0,
     }]
+    by_name = {row["name"]: row for row in result["players"]}
+    # Overkill 120 on full HP still counts as 100 → ADR 50.0 across 2 rounds.
+    assert by_name["Alpha"]["adr"] == 50.0
+    assert by_name["Bravo"]["adr"] == 50.0
+    assert "Alpha Team" in result["rounds"][0]["headline"]
+    assert "A 队" not in result["rounds"][0]["headline"]
+    assert "clutch_attempts" in by_name["Alpha"]
+    assert "clutch_wins" in by_name["Alpha"]

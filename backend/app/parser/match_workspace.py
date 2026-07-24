@@ -556,6 +556,87 @@ def _trade_pairs(kills: list[dict[str, Any]], player_team: dict[str, str]) -> tu
     return trade_kill_indexes, traded_death_indexes
 
 
+def _hurt_damage_value(row: pd.Series) -> int:
+    for column in ("dmg_health", "health_damage", "damage"):
+        if column in row.index and row.get(column) is not None and not (isinstance(row.get(column), float) and pd.isna(row.get(column))):
+            return max(0, _int(row.get(column)))
+    return 0
+
+
+def _accumulate_capped_damage(
+    hurt_df: pd.DataFrame,
+    player_team: dict[str, str],
+    windows: list[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Sum enemy health damage with overkill capped to remaining HP.
+
+    demoparser2 often reports weapon damage in ``dmg_health`` (e.g. 123 on a
+    kill from 100 HP). HLTV-style ADR only counts the HP actually removed.
+    """
+    total: dict[str, int] = defaultdict(int)
+    utility: dict[str, int] = defaultdict(int)
+    if hurt_df is None or hurt_df.empty:
+        return total, utility
+
+    freeze_ticks = sorted(
+        _int(window.get("freeze_end_tick"))
+        for window in windows
+        if _int(window.get("freeze_end_tick")) > 0
+    )
+    hp_by_victim: dict[str, int] = {}
+    freeze_index = 0
+    work = hurt_df
+    if "tick" in work.columns:
+        work = work.sort_values("tick", kind="mergesort")
+
+    for _, row in work.iterrows():
+        tick = _int(row.get("tick"))
+        while freeze_index < len(freeze_ticks) and freeze_ticks[freeze_index] <= tick:
+            hp_by_victim.clear()
+            freeze_index += 1
+
+        attacker = _clean_name(row.get("attacker_name"))
+        victim = _clean_name(row.get("user_name"))
+        victim_key = (
+            _clean_name(row.get("user_steamid"))
+            or victim.lower()
+        )
+        health_after = max(0, _int(row.get("health"))) if "health" in row.index else None
+
+        if not attacker or not victim or attacker == victim:
+            if victim_key and health_after is not None:
+                hp_by_victim[victim_key] = health_after
+            continue
+
+        atk_key = attacker.lower()
+        if player_team.get(atk_key) and player_team.get(atk_key) == player_team.get(victim.lower()):
+            if victim_key and health_after is not None:
+                hp_by_victim[victim_key] = health_after
+            continue
+
+        raw_damage = _hurt_damage_value(row)
+        previous_hp = hp_by_victim.get(victim_key, 100)
+        dealt = min(raw_damage, max(0, previous_hp))
+        if victim_key:
+            hp_by_victim[victim_key] = health_after if health_after is not None else max(0, previous_hp - dealt)
+        if dealt <= 0:
+            continue
+        total[atk_key] += dealt
+        if _normalize_weapon(row.get("weapon")) in _UTILITY_WEAPONS:
+            utility[atk_key] += dealt
+    return total, utility
+
+
+def _note_clutch_solos(alive_by_team: dict[str, set[str]], clutch_attempted: set[str]) -> None:
+    for team_key, members in alive_by_team.items():
+        if len(members) != 1:
+            continue
+        solo = next(iter(members))
+        enemy_key = "b" if team_key == "a" else "a"
+        if len(alive_by_team.get(enemy_key, ())) >= 1:
+            clutch_attempted.add(solo)
+
+
 def _player_stats(
     *,
     roster: list[dict[str, Any]],
@@ -565,6 +646,8 @@ def _player_stats(
     player_team: dict[str, str],
     round_numbers: list[int],
     economy_rows_by_player: dict[str, list[dict[str, Any]]],
+    windows: list[dict[str, Any]] | None = None,
+    round_winner_team: dict[int, Optional[str]] | None = None,
 ) -> list[dict[str, Any]]:
     names: list[str] = []
     roster_by_name: dict[str, dict[str, Any]] = {}
@@ -585,12 +668,20 @@ def _player_stats(
     rounds_traded: dict[str, set[int]] = defaultdict(set)
     counters: dict[str, Counter] = defaultdict(Counter)
     multi_kills: dict[str, Counter] = defaultdict(Counter)
+    winners = round_winner_team or {}
 
     for round_number in round_numbers:
         kills = [event for event in events_by_round.get(round_number, []) if event.get("type") == "kill"]
         trade_kills, traded_deaths = _trade_pairs(kills, player_team)
         kills_this_round: Counter = Counter()
         valid_kill_indexes: list[int] = []
+        alive_by_team: dict[str, set[str]] = {"a": set(), "b": set()}
+        for player_key, team_key in player_team.items():
+            if team_key in alive_by_team:
+                alive_by_team[team_key].add(player_key)
+        clutch_attempted: set[str] = set()
+        _note_clutch_solos(alive_by_team, clutch_attempted)
+
         for index, kill in enumerate(kills):
             killer = _clean_name(kill.get("actor"))
             victim = _clean_name(kill.get("target"))
@@ -598,6 +689,11 @@ def _player_stats(
             if victim:
                 counters[victim.lower()]["deaths"] += 1
                 rounds_with_death[victim.lower()].add(round_number)
+                victim_key = victim.lower()
+                victim_team = player_team.get(victim_key)
+                if victim_team in alive_by_team:
+                    alive_by_team[victim_team].discard(victim_key)
+                _note_clutch_solos(alive_by_team, clutch_attempted)
             if killer and victim and killer != victim and killer.lower() != "world":
                 key = killer.lower()
                 counters[key]["kills"] += 1
@@ -617,6 +713,12 @@ def _player_stats(
                 counters[victim.lower()]["trade_deaths"] += 1
                 rounds_traded[victim.lower()].add(round_number)
 
+        winner_key = winners.get(round_number)
+        for solo_key in clutch_attempted:
+            counters[solo_key]["clutch_attempts"] += 1
+            if winner_key and player_team.get(solo_key) == winner_key:
+                counters[solo_key]["clutch_wins"] += 1
+
         if valid_kill_indexes:
             first = kills[valid_kill_indexes[0]]
             killer = _clean_name(first.get("actor"))
@@ -628,20 +730,13 @@ def _player_stats(
         for key, count in kills_this_round.items():
             multi_kills[key][min(5, count)] += 1
 
-    if hurt_df is not None and not hurt_df.empty:
-        for _, row in hurt_df.iterrows():
-            attacker = _clean_name(row.get("attacker_name"))
-            victim = _clean_name(row.get("user_name"))
-            if not attacker or not victim or attacker == victim:
-                continue
-            atk_key = attacker.lower()
-            victim_key = victim.lower()
-            if player_team.get(atk_key) and player_team.get(atk_key) == player_team.get(victim_key):
-                continue
-            damage = max(0, _int(row.get("dmg_health") or row.get("health_damage")))
-            counters[atk_key]["damage"] += damage
-            if _normalize_weapon(row.get("weapon")) in _UTILITY_WEAPONS:
-                counters[atk_key]["utility_damage"] += damage
+    damage_by_attacker, utility_by_attacker = _accumulate_capped_damage(
+        hurt_df, player_team, windows or [],
+    )
+    for atk_key, damage in damage_by_attacker.items():
+        counters[atk_key]["damage"] += int(damage)
+    for atk_key, damage in utility_by_attacker.items():
+        counters[atk_key]["utility_damage"] += int(damage)
 
     total_rounds = max(1, len(round_numbers))
     all_rounds = set(round_numbers)
@@ -693,6 +788,8 @@ def _player_stats(
             "three_kill_rounds": int(multi_kills[key][3]),
             "four_kill_rounds": int(multi_kills[key][4]),
             "five_kill_rounds": int(multi_kills[key][5]),
+            "clutch_attempts": int(counter["clutch_attempts"]),
+            "clutch_wins": int(counter["clutch_wins"]),
             "awp_kills": int(counter["awp_kills"]),
             "utility_damage": int(counter["utility_damage"]),
             "utility_damage_per_round": round(counter["utility_damage"] / total_rounds, 1),
@@ -738,6 +835,9 @@ def build_match_workspace(
     )
     round_numbers = [int(row["round_number"]) for row in windows]
     halftime_round = _detect_halftime_round(group_side_by_round)
+    team_a_score, team_b_score, match_date, duration_mins, team_a_name, team_b_name = shared_facts.match_summary
+    team_a_label = _clean_name(team_a_name) or "A 队"
+    team_b_label = _clean_name(team_b_name) or "B 队"
 
     economy_rows_by_player: dict[str, list[dict[str, Any]]] = defaultdict(list)
     economy_types_by_round_team: dict[tuple[int, str], list[str]] = defaultdict(list)
@@ -792,6 +892,24 @@ def build_match_workspace(
         tick_rate,
     )
 
+    round_winner_team: dict[int, Optional[str]] = {}
+    for window in windows:
+        round_number = int(window["round_number"])
+        group_sides = group_side_by_round.get(round_number) or {}
+        if group_sides:
+            side_a = group_sides.get(team_a_group) if team_a_group is not None else 2
+            side_b = group_sides.get(team_b_group) if team_b_group is not None else 3
+        else:
+            opening_half = round_number <= 12
+            side_a = 2 if opening_half else 3
+            side_b = 3 if opening_half else 2
+        winner_side = window.get("winner_side")
+        winner_group = next((group for group, side in group_sides.items() if side == winner_side), None)
+        winner_key = _team_key_for_group(winner_group, team_a_group, team_b_group)
+        if winner_key not in {"a", "b"}:
+            winner_key = "a" if winner_side == side_a else "b" if winner_side == side_b else None
+        round_winner_team[round_number] = winner_key
+
     stats = _player_stats(
         roster=roster,
         player_results=player_results,
@@ -800,6 +918,8 @@ def build_match_workspace(
         player_team=player_team,
         round_numbers=round_numbers,
         economy_rows_by_player=economy_rows_by_player,
+        windows=windows,
+        round_winner_team=round_winner_team,
     )
     stats_by_name = {str(row["name"]).lower(): row for row in stats}
 
@@ -841,7 +961,11 @@ def build_match_workspace(
         top_player, top_kills = (kill_counts.most_common(1)[0] if kill_counts else ("", 0))
         plant = next((event for event in events if event.get("type") == "plant"), None)
         site = _clean_name((plant or {}).get("site"))
-        winner_label = "A 队" if winner_key == "a" else "B 队" if winner_key == "b" else "本回合胜方"
+        winner_label = (
+            team_a_label if winner_key == "a"
+            else team_b_label if winner_key == "b"
+            else "本回合胜方"
+        )
         if top_kills >= 2:
             numeral = {2: "双", 3: "三", 4: "四", 5: "五"}.get(min(5, top_kills), str(top_kills))
             headline = f"{top_player} {numeral}杀帮助 {winner_label} 拿下回合"
@@ -887,7 +1011,6 @@ def build_match_workspace(
     except (KeyError, OSError):
         map_transform = None
 
-    team_a_score, team_b_score, match_date, duration_mins, team_a_name, team_b_name = shared_facts.match_summary
     mvp = stats[0] if stats else None
     return {
         "version": 1,
@@ -903,6 +1026,8 @@ def build_match_workspace(
             "trade_deaths",
             "economy_type",
             "mvp_player",
+            "clutch_attempts",
+            "clutch_wins",
         ],
         "map_name": map_name,
         "tick_rate": float(tick_rate),

@@ -9,10 +9,12 @@ export R2_ENDPOINT="https://<your-account-id>.r2.cloudflarestorage.com"
 export R2_ACCESS_KEY_ID="<your-access-key-id>"
 export R2_SECRET_ACCESS_KEY="<your-secret-access-key>"
 export R2_BUCKET="<your-bucket-name>"
-# 可选：R2 公共访问域名（默认 pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev）
-export R2_PUBLIC_BASE_URL="https://pub-xxxxxxxx.r2.dev"
+# 可选：R2 公共访问域名（默认与 tauri.conf.json endpoints 一致）
+export R2_PUBLIC_BASE_URL="https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev"
 # 可选：本次更新说明，会写入 latest.json 的 notes 字段
 export RELEASE_NOTES="修复 xxx"
+# 可选：更新策略 — normal（可稍后再说，默认）或 force（强制更新）
+export UPDATE_MODE="normal"
 ```
 
 ## How to Deploy
@@ -36,6 +38,7 @@ export RELEASE_NOTES="修复 xxx"
 - `CS2 Insight Agent_<ver>_x64-setup.exe`：完整安装包，同时是 Tauri updater 的更新包。
 - `latest.json`：Tauri updater 版本清单（内嵌同名 `.sig` 文件的更新签名），
   客户端端点为 `<R2_PUBLIC_BASE_URL>/latest.json`。
+  额外字段 `update_mode`：`normal`（可稍后再说）或 `force`（必需更新）。
 - `latest.yml`：electron-updater 桥接清单。仍在旧 Electron 版本上的用户会把
   Tauri 安装包当作普通更新下载并以 `/S` 静默执行，NSIS 升级 hook 负责完成
   数据迁移与旧版卸载（用户数据保留在 `%APPDATA%`）。

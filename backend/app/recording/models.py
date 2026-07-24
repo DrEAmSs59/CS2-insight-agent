@@ -110,7 +110,7 @@ class RecordingOptions(BaseModel):
     demo_end_guard_sec: float = 1.5
     # Extra tail for the final round's clip so the match-deciding moment does
     # not cut abruptly. The generic demo EOF guard remains the final cap.
-    final_round_extra_post_sec: float = 1.0
+    final_round_extra_post_sec: float = 2.0
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None

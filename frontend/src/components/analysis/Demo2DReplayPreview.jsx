@@ -501,7 +501,8 @@ export default function Demo2DReplayPreview({
   // use it as a live repair without forcing a full demo analysis again.
   const transform = workspace?.map_transform || responseTransform;
   const hasMapLayers = mapLayerThreshold(transform) != null && ["de_nuke", "de_vertigo"].includes(mapName);
-  const radarZoom = mapName === "de_nuke" ? 1.28 : 1;
+  const radarZoom = (mapName === "de_nuke" ? 1.28 : 1) * 1.2;
+  const playerMarkerSizePx = 17;
   useEffect(() => setMapLayer("upper"), [mapName]);
   const workspacePlayers = useMemo(() => (
     workspace?.players?.length
@@ -904,7 +905,7 @@ export default function Demo2DReplayPreview({
 
       <div className="grid gap-3 xl:grid-cols-[260px_minmax(460px,1fr)_260px]">
         <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={frame.players} bombCarrierName={bombState.carrier} />
-        <section className={`relative overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e] ${mapName === "de_nuke" ? "min-h-[680px]" : "min-h-[620px]"}`}>
+        <section className={`relative overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e] ${mapName === "de_nuke" ? "min-h-[780px]" : "min-h-[720px]"}`}>
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-md border border-cs2-border bg-cs2-bg-card/90 px-2.5 py-1.5 text-[9px] text-cs2-text-secondary"><MapIcon className="h-3.5 w-3.5 text-cs2-accent" />{mapName.replace(/^de_/, "")} · R{selectedRound.round_number} · {selectedRound.team_a_score_after} : {selectedRound.team_b_score_after}</div>
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
@@ -935,8 +936,31 @@ export default function Demo2DReplayPreview({
               const playerNumber = playerNumberByName.get(displayName.toLowerCase());
               const yaw = Number.isFinite(Number(player.yaw)) ? Number(player.yaw) : 0;
               const markerTitle = `${displayName} · ${Number.isFinite(Number(player.health)) ? player.health : 0} HP · $${Math.max(0, Number(player.money) || 0).toLocaleString("en-US")} · ${armorText(player)} · ${safeWeapon(player.weapon, "—")}${player.has_c4 ? " · C4" : ""}${player.has_defuser ? " · 拆弹器" : ""}`;
-              const markerLabel = playerLabelMode === "id" ? displayName : (Number.isInteger(playerNumber) ? playerNumber : "?");
-              return <div key={player.steamid64 || displayName} className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: motionDuration }} title={markerTitle}><div data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined} data-player-label-mode={playerLabelMode} className={`demo-player-marker relative flex items-center justify-center border border-white/80 font-mono font-black leading-none text-white shadow-sm ${playerLabelMode === "id" ? "h-[16px] min-w-[28px] max-w-[76px] rounded-full px-1 text-[6px]" : "h-[14px] w-[14px] rounded-full text-[6px]"} ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}><span className="demo-player-direction-arrow pointer-events-none absolute -inset-[3px]" style={{ transform: `rotate(${90 - yaw}deg)` }}><i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[2px] border-b-[4px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} /></span><span className="truncate">{markerLabel}</span>{player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}{player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}</div></div>;
+              const idMaxLen = 8;
+              const idLabel = displayName.length > idMaxLen ? `${displayName.slice(0, idMaxLen)}…` : displayName;
+              const circleLabel = playerLabelMode === "id"
+                ? (displayName.slice(0, 1).toUpperCase() || "?")
+                : (Number.isInteger(playerNumber) ? playerNumber : "?");
+              return (
+                <div key={player.steamid64 || displayName} className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: motionDuration }} title={markerTitle}>
+                  <div
+                    data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
+                    data-player-label-mode={playerLabelMode}
+                    className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white shadow-sm ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
+                    style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
+                  >
+                    <span className="demo-player-direction-arrow pointer-events-none absolute -inset-[3px]" style={{ transform: `rotate(${90 - yaw}deg)` }}>
+                      <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[2px] border-b-[4px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
+                    </span>
+                    <span>{circleLabel}</span>
+                    {player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}
+                    {player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}
+                  </div>
+                  {playerLabelMode === "id" && (
+                    <span className="demo-player-id-label mt-0.5 max-w-[52px] truncate text-center text-[6px] font-bold leading-none text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,.85)]">{idLabel}</span>
+                  )}
+                </div>
+              );
             })}
           </div>
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}

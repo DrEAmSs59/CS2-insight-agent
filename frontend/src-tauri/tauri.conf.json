@@ -29,7 +29,7 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev/latest.json"],
+      "endpoints": ["https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev/latest.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyMEQxOUIwQUJBQkM3NDgKUldSSXg2dXJzQmtOb25Pamc0c3lEcVJ4WEtkN2JLVWcwcUNxR3dpRDJVMDV5T0pBc3ZRQ2E3dnIK",
       "windows": {
         "installMode": "passive"
