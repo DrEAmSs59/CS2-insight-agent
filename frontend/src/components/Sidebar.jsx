@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
+import { shouldCheckAppUpdates } from "../utils/shouldCheckAppUpdates";
+import { createDesktopUpdateCheck } from "../utils/desktopUpdater";
 import {
   Settings,
   Brain,
@@ -75,20 +77,18 @@ export default function Sidebar({
   const [systemOpen, setSystemOpen] = useState(true);
   const [updateStatus, setUpdateStatus] = useState(null);
   const [isPackaged, setIsPackaged] = useState(false);
+  const updateControllerRef = useRef(null);
 
   useEffect(() => {
-    if (window.electron?.isPackaged) {
-      window.electron.isPackaged().then(setIsPackaged);
-    }
-
-    if (window.electron?.onUpdateStatus) {
-      window.electron.onUpdateStatus((status) => {
-        setUpdateStatus(status);
-        if (status.status === "not-available" || status.status === "error") {
-          setTimeout(() => setUpdateStatus(null), 5000);
-        }
-      });
-    }
+    let cancelled = false;
+    shouldCheckAppUpdates().then((ok) => {
+      if (!cancelled) setIsPackaged(ok);
+    });
+    return () => {
+      cancelled = true;
+      updateControllerRef.current?.cancel();
+      updateControllerRef.current = null;
+    };
   }, []);
 
   const handleCheckUpdates = () => {
@@ -97,10 +97,32 @@ export default function Sidebar({
       setTimeout(() => setUpdateStatus(null), 3000);
       return;
     }
-    if (window.electron?.checkForUpdates) {
-      setUpdateStatus({ status: "checking", message: t("settings.updateChecking") });
-      window.electron.checkForUpdates();
-    }
+    updateControllerRef.current?.cancel();
+    const controller = createDesktopUpdateCheck((payload) => {
+      if (updateControllerRef.current !== controller) return;
+      const status = String(payload?.status || "");
+      const message =
+        status === "checking"
+          ? t("settings.updateChecking")
+          : status === "not-available"
+            ? t("dialog.updateUpToDate")
+            : status === "available"
+              ? t("app.updateFound")
+              : status === "downloading"
+                ? t("dialog.updateDownloading")
+                : status === "downloaded"
+                  ? t("dialog.updateDownloaded")
+                  : status === "cancelled"
+                    ? t("dialog.updateCancelled")
+                    : String(payload?.error || t("app.updateConnectFail"));
+      setUpdateStatus({ ...payload, status, message });
+      if (status === "not-available" || status === "error" || status === "cancelled") {
+        setTimeout(() => setUpdateStatus(null), 5000);
+      }
+    });
+    updateControllerRef.current = controller;
+    setUpdateStatus({ status: "checking", message: t("settings.updateChecking") });
+    controller.start();
   };
 
   const handleDetectCs2 = async () => {

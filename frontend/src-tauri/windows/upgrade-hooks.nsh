@@ -1,14 +1,28 @@
-; One-time Electron -> Tauri installer bridge.
+; Electron -> Tauri installer bridge + self-upgrade hardening.
 ;
-; electron-builder and Tauri use different NSIS identities even though the
-; product name is the same. Detect the old electron-builder uninstaller by
-; its executable name instead of relying on a single generated registry GUID.
+; Design goals (every path must also work fully silent, e.g. when the Tauri
+; updater or electron-updater runs this installer with /S):
+;   * User data under %APPDATA% is never touched by anything in this file.
+;   * A legacy Electron install in a DIFFERENT directory is only uninstalled
+;     after the new files and the user-data migration are verified
+;     (postinstall), keeping a runnable fallback until that point.
+;   * A legacy Electron install in the SAME directory must be uninstalled
+;     BEFORE files are copied: electron-builder's uninstaller deletes the
+;     whole install directory and would otherwise wipe the freshly installed
+;     Tauri files.
+;   * A still-running Tauri shell is usually just finishing its graceful
+;     backend shutdown; wait for it instead of aborting, and only force-kill
+;     (including the Python backend child tree) as a last resort.
 
 ; tauri-build copies the GNU WebView2 loader beside the release executable,
 ; but tauri-bundler 2.6 does not add that sibling DLL to NSIS automatically.
 ; Capture this directory while the hook is included so macro expansion later
 ; does not change __FILEDIR__ to the generated NSIS directory.
 !define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\..\target\release"
+
+Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
+Var CS2ElectronDir       ; lowercased install dir of the legacy entry, no trailing backslash
+Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -19,41 +33,155 @@ Function CS2_AbortMigrationInstall
     Abort
 FunctionEnd
 
-Function CS2_EnsureElectronStopped
-  ; installerHooks are included before Tauri registers its additional plugin
-  ; directory, so use the stock NSIS nsExec plugin and Windows tasklist here.
-  ; /FO CSV keeps the full image name intact and makes the exact lookup stable.
-  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /FI "IMAGENAME eq CS2 Insight Agent.exe" /FO CSV /NH'
+; In: $R9 = image name. Out: $R0 = 1 running / 0 not running.
+; installerHooks are included before Tauri registers its additional plugin
+; directory, so use the stock NSIS nsExec plugin and Windows tasklist here.
+; /FO CSV keeps the full image name intact and makes the exact lookup stable.
+Function CS2_IsProcessRunning
+  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /FI "IMAGENAME eq $R9" /FO CSV /NH'
   Pop $R0
   Pop $R1
   ${StrCase} $R2 $R1 "L"
-  ${StrLoc} $R3 $R2 '"cs2 insight agent.exe"' ">"
-  ${If} $R3 != ""
-    StrCpy $R7 "检测到旧版 CS2 Insight Agent (Electron) 正在运行。$\r$\n$\r$\n为避免配置或数据库损坏，请先正常关闭旧版应用，再重新运行安装程序。"
-    Call CS2_AbortMigrationInstall
-  ${EndIf}
-
-  ; Check the existing Tauri build before uninstalling Electron. The generated
-  ; installer checks it again later, but that would be after this preinstall
-  ; hook has already changed the old installation.
-  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /FI "IMAGENAME eq cs2-insight-agent-desktop.exe" /FO CSV /NH'
-  Pop $R0
-  Pop $R1
-  ${StrCase} $R2 $R1 "L"
-  ${StrLoc} $R3 $R2 '"cs2-insight-agent-desktop.exe"' ">"
-  ${If} $R3 != ""
-    StrCpy $R7 "检测到 CS2 Insight Agent (Tauri) 正在运行。$\r$\n$\r$\n请先正常关闭应用，再重新运行安装程序。旧版 Electron 尚未被卸载。"
-    Call CS2_AbortMigrationInstall
+  ${StrCase} $R3 $R9 "L"
+  ${StrLoc} $R4 $R2 '"$R3"' ">"
+  ${If} $R4 != ""
+    StrCpy $R0 1
+  ${Else}
+    StrCpy $R0 0
   ${EndIf}
 FunctionEnd
 
-Function CS2_RunElectronUninstaller
-  ; Inputs: $R8 = uninstall command, $R9 = registry key for verification.
-  IfSilent cs2_uninstall_no_notice cs2_uninstall_notice
-  cs2_uninstall_notice:
-    MessageBox MB_ICONINFORMATION|MB_OK "新版已安装且用户数据迁移校验完成。现在将安全卸载旧版 Electron；用户配置、Demo 数据库、日志和备份不会被删除。"
-  cs2_uninstall_no_notice:
+; In: $R9 = image name, $R8 = max iterations (500ms each).
+; Out: $R0 = 1 still running / 0 gone.
+Function CS2_WaitProcessGone
+  StrCpy $R5 0
+  cs2_wait_proc_loop:
+    Call CS2_IsProcessRunning
+    ${If} $R0 = 0
+      Return
+    ${EndIf}
+    IntOp $R5 $R5 + 1
+    ${If} $R5 >= $R8
+      Return
+    ${EndIf}
+    Sleep 500
+    Goto cs2_wait_proc_loop
+FunctionEnd
 
+Function CS2_PrepareRunningApps
+  ; The Tauri shell closes its window instantly but the process can keep
+  ; running for several seconds while the Python backend shuts down. Wait for
+  ; that instead of aborting; force-kill the whole child tree only if it never
+  ; exits (e.g. a hung backend).
+  StrCpy $R9 "cs2-insight-agent-desktop.exe"
+  Call CS2_IsProcessRunning
+  ${If} $R0 = 1
+    DetailPrint "等待正在退出的 CS2 Insight Agent 进程结束…"
+    StrCpy $R8 50
+    Call CS2_WaitProcessGone
+    ${If} $R0 = 1
+      DetailPrint "强制结束仍在运行的 CS2 Insight Agent…"
+      nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T'
+      Pop $R0
+      Pop $R1
+      Sleep 1500
+      StrCpy $R9 "cs2-insight-agent-desktop.exe"
+      Call CS2_IsProcessRunning
+      ${If} $R0 = 1
+        StrCpy $R7 "无法结束仍在运行的 CS2 Insight Agent。$\r$\n$\r$\n请手动关闭应用（必要时在任务管理器结束进程），再重新运行安装程序。"
+        Call CS2_AbortMigrationInstall
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+
+  ; A backend orphaned by an earlier force-kill keeps port 19871 busy and
+  ; would make the freshly installed app fail its startup identity check.
+  ; Only python.exe listeners on that port are terminated.
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 19871 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $$proc = Get-Process -Id $$_.OwningProcess -ErrorAction SilentlyContinue; if ($$proc -and $$proc.ProcessName -eq 'python') { Stop-Process -Id $$proc.Id -Force } }"`
+  Pop $R0
+  Pop $R1
+
+  ; Legacy Electron build: give it time to finish exiting (electron-updater
+  ; launches this installer right after quitting the app), but never
+  ; force-kill it — it may still be flushing config or the SQLite database.
+  StrCpy $R9 "CS2 Insight Agent.exe"
+  Call CS2_IsProcessRunning
+  ${If} $R0 = 1
+    DetailPrint "等待旧版 CS2 Insight Agent (Electron) 退出…"
+    StrCpy $R8 40
+    Call CS2_WaitProcessGone
+    ${If} $R0 = 1
+      StrCpy $R7 "检测到旧版 CS2 Insight Agent (Electron) 正在运行。$\r$\n$\r$\n为避免配置或数据库损坏，请先正常关闭旧版应用，再重新运行安装程序。"
+      Call CS2_AbortMigrationInstall
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+; In: $R0 = raw InstallLocation, $R8 = raw UninstallString.
+; Out: $CS2ElectronDir, $CS2ElectronUninsExe.
+Function CS2_ResolveElectronDir
+  Push $0
+  Push $1
+
+  ; Parsed uninstaller path: strip surrounding quotes and trailing arguments.
+  StrCpy $0 $R8
+  StrCpy $1 $0 1
+  ${If} $1 == '"'
+    StrCpy $0 $0 "" 1
+    ${StrLoc} $1 $0 '"' ">"
+    ${If} $1 != ""
+      StrCpy $0 $0 $1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $CS2ElectronUninsExe $0
+
+  ; Prefer the registered InstallLocation, else the uninstaller's directory.
+  StrCpy $1 $R0
+  StrCpy $0 $1 1
+  ${If} $0 == '"'
+    StrCpy $1 $1 "" 1
+  ${EndIf}
+  StrCpy $0 $1 1 -1
+  ${If} $0 == '"'
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${If} $1 == ""
+    ${GetParent} $CS2ElectronUninsExe $1
+  ${EndIf}
+  StrCpy $0 $1 1 -1
+  ${If} $0 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${StrCase} $CS2ElectronDir $1 "L"
+
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Out: $R0 = 1 when the legacy entry lives in the directory being installed to.
+Function CS2_ElectronDirMatchesInstDir
+  Push $0
+  Push $1
+  StrCpy $1 $INSTDIR
+  StrCpy $0 $1 1 -1
+  ${If} $0 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${StrCase} $1 $1 "L"
+  StrCpy $R0 0
+  ${If} $CS2ElectronDir != ""
+  ${AndIf} $CS2ElectronDir == $1
+    StrCpy $R0 1
+  ${EndIf}
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Function CS2_RunElectronUninstaller
+  ; Inputs: $R8 = uninstall command. Fully silent by design: electron-builder's
+  ; /S uninstall keeps the %APPDATA% user data in place, and the user asked for
+  ; a no-questions upgrade path.
+  DetailPrint "正在静默卸载旧版 CS2 Insight Agent (Electron)…"
   ClearErrors
   ExecWait '$R8 /S' $R0
   ${If} ${Errors}
@@ -66,6 +194,28 @@ Function CS2_RunElectronUninstaller
   ${EndIf}
 FunctionEnd
 
+; The silent NSIS uninstaller copies itself to %TEMP% and returns before the
+; real work finishes. After the registry entry disappears, also wait for the
+; uninstaller executable (and with it the directory deletion) to settle so a
+; same-directory install cannot race the file copy.
+Function CS2_WaitElectronUninsGone
+  Push $0
+  StrCpy $0 0
+  cs2_unins_gone_loop:
+    IfFileExists "$CS2ElectronUninsExe" 0 cs2_unins_gone_done
+    IntOp $0 $0 + 1
+    ${If} $0 < 30
+      Sleep 500
+      Goto cs2_unins_gone_loop
+    ${EndIf}
+  cs2_unins_gone_done:
+    Sleep 500
+    Pop $0
+FunctionEnd
+
+; electron-builder and Tauri use different NSIS identities even though the
+; product name is the same. Detect the old electron-builder uninstaller by
+; its executable name instead of relying on a single generated registry GUID.
 Function CS2_RemoveElectronHKCU
   StrCpy $R4 0
   cs2_hkcu_loop:
@@ -83,6 +233,13 @@ Function CS2_RemoveElectronHKCU
     ${StrLoc} $R2 $R1 "uninstall cs2 insight agent.exe" ">"
     StrCmp $R2 "" cs2_hkcu_loop
 
+    ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "InstallLocation"
+    Call CS2_ResolveElectronDir
+    ${If} $CS2ElectronScope == "samedir"
+      Call CS2_ElectronDirMatchesInstDir
+      StrCmp $R0 1 0 cs2_hkcu_loop
+    ${EndIf}
+
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
@@ -99,6 +256,7 @@ Function CS2_RemoveElectronHKCU
     StrCpy $R7 "旧版 Electron 卸载程序返回成功，但等待 15 秒后卸载注册项仍然存在。安装已中止，请勿继续并排安装。"
     Call CS2_AbortMigrationInstall
     cs2_hkcu_removed:
+    Call CS2_WaitElectronUninsGone
     StrCpy $R4 0
     Goto cs2_hkcu_loop
   cs2_hkcu_done:
@@ -121,6 +279,13 @@ Function CS2_RemoveElectronHKLM
     ${StrLoc} $R2 $R1 "uninstall cs2 insight agent.exe" ">"
     StrCmp $R2 "" cs2_hklm_loop
 
+    ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5" "InstallLocation"
+    Call CS2_ResolveElectronDir
+    ${If} $CS2ElectronScope == "samedir"
+      Call CS2_ElectronDirMatchesInstDir
+      StrCmp $R0 1 0 cs2_hklm_loop
+    ${EndIf}
+
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
@@ -137,14 +302,13 @@ Function CS2_RemoveElectronHKLM
     StrCpy $R7 "旧版 Electron 卸载程序返回成功，但等待 15 秒后系统级卸载注册项仍然存在。安装已中止，请勿继续并排安装。"
     Call CS2_AbortMigrationInstall
     cs2_hklm_removed:
+    Call CS2_WaitElectronUninsGone
     StrCpy $R4 0
     Goto cs2_hklm_loop
   cs2_hklm_done:
 FunctionEnd
 
 Function CS2_RemoveLegacyElectron
-  Call CS2_EnsureElectronStopped
-
   ${If} ${RunningX64}
     SetRegView 64
     Call CS2_RemoveElectronHKCU
@@ -163,14 +327,20 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
-  ; Keep the runnable Electron installation intact until both the Tauri files
-  ; and the user-data migration have completed successfully.
-  Call CS2_EnsureElectronStopped
+  Call CS2_PrepareRunningApps
+
+  ; Same-directory Electron installs must be retired before any file copy —
+  ; their uninstaller would delete $INSTDIR together with the new files.
+  ; Different-directory installs stay untouched until NSIS_HOOK_POSTINSTALL.
+  ; Do not hold $INSTDIR as the working directory while it may be deleted.
+  SetOutPath $PLUGINSDIR
+  StrCpy $CS2ElectronScope "samedir"
+  Call CS2_RemoveLegacyElectron
+  SetOutPath $INSTDIR
 
   ; GNU builds import WebView2Loader.dll dynamically. Keep it beside the main
   ; executable so Windows can resolve the dependency before Rust/Tauri starts.
   !if /FileExists "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
-    SetOutPath "$INSTDIR"
     File /a "/oname=WebView2Loader.dll" "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
   !endif
 !macroend
@@ -189,9 +359,10 @@ FunctionEnd
     Call CS2_AbortMigrationInstall
   ${EndIf}
 
-  ; Only retire the old application after the new installation and migration
-  ; are known-good. Any earlier installer failure therefore leaves a runnable
-  ; Electron fallback in place.
+  ; Only retire remaining (different-directory) Electron installs after the
+  ; new installation and migration are known-good. Any earlier installer
+  ; failure therefore leaves a runnable Electron fallback in place.
+  StrCpy $CS2ElectronScope "all"
   Call CS2_RemoveLegacyElectron
 !macroend
 

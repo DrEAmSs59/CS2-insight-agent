@@ -1,12 +1,27 @@
-import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import mime from "mime-types";
 import { fileURLToPath } from "url";
 
+/**
+ * 发布 Tauri NSIS 构建产物到 Cloudflare R2：
+ *   - `CS2 Insight Agent_<ver>_x64-setup.exe` — 完整安装包（同时是更新包）
+ *   - `latest.json` — Tauri updater 清单（签名来自同名 .sig 文件）
+ *   - `latest.yml`  — electron-updater 桥接清单：旧 Electron 客户端会把
+ *     Tauri 安装包当作更新下载并以 /S 静默执行，从而完成一次性迁移
+ *
+ * 需要先用 `npm run desktop:build:ver -- <ver>` 构建，并在构建时设置
+ * TAURI_SIGNING_PRIVATE_KEY(_PATH)，否则不会生成 .sig 更新签名。
+ */
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.join(__dirname, "../dist_electron");
+const NSIS_DIR = path.join(__dirname, "../src-tauri/target/release/bundle/nsis");
+
+const PUBLIC_BASE_URL = (
+  process.env.R2_PUBLIC_BASE_URL || "https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev"
+).replace(/\/+$/, "");
 
 const config = {
   region: "auto",
@@ -24,13 +39,17 @@ const s3Client = new S3Client({
   credentials: config.credentials,
 });
 
+const CONTENT_TYPES = {
+  ".exe": "application/octet-stream",
+  ".json": "application/json",
+  ".yml": "text/yaml",
+};
+
 async function checkFileExists(key, localSize) {
   try {
-    const command = new HeadObjectCommand({
-      Bucket: config.bucket,
-      Key: key,
-    });
-    const response = await s3Client.send(command);
+    const response = await s3Client.send(
+      new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
+    );
     // 如果大小一致，我们认为文件没有变化（简单但有效的热上传策略）
     return response.ContentLength === localSize;
   } catch (e) {
@@ -42,14 +61,11 @@ async function checkFileExists(key, localSize) {
   }
 }
 
-async function uploadFile(filePath, key) {
+async function uploadFile(filePath, key, { alwaysUpload = false } = {}) {
   const stats = fs.statSync(filePath);
   const localSize = stats.size;
 
-  // 始终上传清单文件 (.yml)，确保版本信息是最新的
-  const isManifest = key.endsWith(".yml");
-  
-  if (!isManifest) {
+  if (!alwaysUpload) {
     const exists = await checkFileExists(key, localSize);
     if (exists) {
       console.log(`Skipping ${key} (already exists and matches size)`);
@@ -57,67 +73,123 @@ async function uploadFile(filePath, key) {
     }
   }
 
-  const fileStream = fs.createReadStream(filePath);
-  const contentType = mime.lookup(filePath) || "application/octet-stream";
-
+  const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
   console.log(`Uploading ${key}... (${(localSize / 1024 / 1024).toFixed(2)} MB)`);
 
-  try {
-    const parallelUploads3 = new Upload({
-      client: s3Client,
-      params: {
-        Bucket: config.bucket,
-        Key: key,
-        Body: fileStream,
-        ContentType: contentType,
-      },
-      queueSize: 4,
-      partSize: 1024 * 1024 * 5, // 5MB
-      leavePartsOnError: false,
-    });
+  const upload = new Upload({
+    client: s3Client,
+    params: {
+      Bucket: config.bucket,
+      Key: key,
+      Body: fs.createReadStream(filePath),
+      ContentType: contentType,
+    },
+    queueSize: 4,
+    partSize: 1024 * 1024 * 5,
+    leavePartsOnError: false,
+  });
+  upload.on("httpUploadProgress", (progress) => {
+    const percentage = Math.round((progress.loaded / progress.total) * 100);
+    process.stdout.write(`\rProgress: ${percentage}%`);
+  });
+  await upload.done();
+  console.log(`\nSuccessfully uploaded ${key}`);
+}
 
-    parallelUploads3.on("httpUploadProgress", (progress) => {
-      const percentage = Math.round((progress.loaded / progress.total) * 100);
-      process.stdout.write(`\rProgress: ${percentage}%`);
-    });
-
-    await parallelUploads3.done();
-    console.log(`\nSuccessfully uploaded ${key}`);
-  } catch (e) {
-    console.error(`\nError uploading ${key}:`, e);
-    throw e;
-  }
+function sha512Base64(filePath) {
+  const hash = crypto.createHash("sha512");
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest("base64");
 }
 
 async function main() {
-  if (!fs.existsSync(DIST_DIR)) {
-    console.error("Dist directory not found. Please run 'npm run electron:build' first.");
+  if (!fs.existsSync(NSIS_DIR)) {
+    console.error(
+      `NSIS bundle directory not found: ${NSIS_DIR}\n` +
+        "Please run 'npm run desktop:build:ver -- <version>' first.",
+    );
     process.exit(1);
   }
-
   if (!config.endpoint || !config.credentials.accessKeyId || !config.credentials.secretAccessKey) {
     console.error("Missing R2 credentials. Please set R2_ENDPOINT, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY.");
     process.exit(1);
   }
 
-  const files = fs.readdirSync(DIST_DIR);
-  
-  // 我们需要上传所有发布所需的文件 (exe, AppImage, dmg, yml, blockmap 等)
-  const targets = files.filter(f => 
-    f.endsWith(".exe") || 
-    f.endsWith(".AppImage") ||
-    f.endsWith(".dmg") ||
-    f.endsWith(".yml") || 
-    f.endsWith(".blockmap")
-  );
+  const setupName = fs
+    .readdirSync(NSIS_DIR)
+    .filter((f) => f.endsWith("-setup.exe"))
+    .sort()
+    .pop();
+  if (!setupName) {
+    console.error(`No '*-setup.exe' found in ${NSIS_DIR}.`);
+    process.exit(1);
+  }
+  const setupPath = path.join(NSIS_DIR, setupName);
 
-  console.log(`Found ${targets.length} files to upload to R2.`);
+  const versionMatch = setupName.match(/_(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)_/);
+  if (!versionMatch) {
+    console.error(`Cannot parse version from installer name: ${setupName}`);
+    process.exit(1);
+  }
+  const version = versionMatch[1];
 
-  for (const file of targets) {
-    await uploadFile(path.join(DIST_DIR, file), file);
+  const sigPath = `${setupPath}.sig`;
+  if (!fs.existsSync(sigPath)) {
+    console.error(
+      `Updater signature not found: ${sigPath}\n` +
+        "Build with TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PATH set so Tauri emits the .sig file.",
+    );
+    process.exit(1);
   }
 
+  const releaseNotes = process.env.RELEASE_NOTES || "";
+  const pubDate = new Date().toISOString();
+  const setupUrl = `${PUBLIC_BASE_URL}/${encodeURIComponent(setupName)}`;
+
+  // Tauri updater manifest
+  const latestJson = {
+    version,
+    notes: releaseNotes,
+    pub_date: pubDate,
+    platforms: {
+      "windows-x86_64": {
+        signature: fs.readFileSync(sigPath, "utf8").trim(),
+        url: setupUrl,
+      },
+    },
+  };
+  const latestJsonPath = path.join(NSIS_DIR, "latest.json");
+  fs.writeFileSync(latestJsonPath, `${JSON.stringify(latestJson, null, 2)}\n`);
+
+  // electron-updater bridge manifest: legacy Electron clients download the
+  // Tauri installer as a regular update and run it silently (/S), which the
+  // NSIS upgrade hooks turn into an in-place migration.
+  const sha512 = sha512Base64(setupPath);
+  const size = fs.statSync(setupPath).size;
+  const latestYml = [
+    `version: ${version}`,
+    "files:",
+    `  - url: ${setupName}`,
+    `    sha512: ${sha512}`,
+    `    size: ${size}`,
+    `path: ${setupName}`,
+    `sha512: ${sha512}`,
+    `releaseDate: '${pubDate}'`,
+    "",
+  ].join("\n");
+  const latestYmlPath = path.join(NSIS_DIR, "latest.yml");
+  fs.writeFileSync(latestYmlPath, latestYml);
+
+  console.log(`Deploying version ${version} (${setupName})`);
+  await uploadFile(setupPath, setupName);
+  await uploadFile(latestJsonPath, "latest.json", { alwaysUpload: true });
+  await uploadFile(latestYmlPath, "latest.yml", { alwaysUpload: true });
+
   console.log("\nAll deployment tasks completed!");
+  console.log(`Updater endpoint: ${PUBLIC_BASE_URL}/latest.json`);
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
