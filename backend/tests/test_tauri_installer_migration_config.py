@@ -21,8 +21,18 @@ def test_tauri_identifier_and_installer_hook_are_stable():
 def test_installer_hook_covers_electron_upgrade_surfaces():
     hook = (TAURI_ROOT / "windows" / "upgrade-hooks.nsh").read_text(encoding="utf-8")
 
-    assert 'tasklist.exe" /FI "IMAGENAME eq CS2 Insight Agent.exe"' in hook
-    assert 'IMAGENAME eq cs2-insight-agent-desktop.exe' in hook
+    assert 'tasklist.exe" /FI "IMAGENAME eq $R9"' in hook
+    assert 'StrCpy $R9 "CS2 Insight Agent.exe"' in hook
+    assert 'StrCpy $R9 "cs2-insight-agent-desktop.exe"' in hook
+    # A running Tauri shell is waited for and force-killed with its backend
+    # child tree instead of aborting the install.
+    assert 'taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T' in hook
+    # An orphaned backend must not keep port 19871 busy after an upgrade.
+    assert "LocalPort 19871" in hook
+    # Same-directory Electron installs are retired before file copy,
+    # different-directory ones only after migration (postinstall).
+    assert 'StrCpy $CS2ElectronScope "samedir"' in hook
+    assert 'StrCpy $CS2ElectronScope "all"' in hook
     assert "EnumRegKey $R5 HKCU" in hook
     assert "EnumRegKey $R5 HKLM" in hook
     assert "SetRegView 64" in hook
@@ -54,5 +64,9 @@ def test_close_destroys_webview_before_waiting_for_backend():
     source = TAURI_RUNTIME.read_text(encoding="utf-8")
 
     destroy = source.index("window.destroy()")
-    stop = source.index("stop_backend(handle);", destroy)
+    stop = source.index("stop_backend(&handle);", destroy)
     assert destroy < stop
+    # The graceful backend stop must run off the event loop thread so the
+    # window disappears immediately instead of freezing on screen.
+    spawn = source.index("thread::spawn", destroy)
+    assert spawn < stop

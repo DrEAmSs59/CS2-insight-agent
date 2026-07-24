@@ -228,13 +228,44 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|error| format!("无法启动 Python 后端：{error}"))?;
+
+    // Register the child immediately so a window close during startup still
+    // reaps the backend process instead of leaking it.
+    {
+        let state = app.state::<BackendProcess>();
+        let mut backend_state = state
+            .0
+            .lock()
+            .map_err(|_| "后端进程状态锁已损坏".to_string())?;
+        *backend_state = Some(ManagedBackend {
+            child,
+            instance_id: instance_id.clone(),
+            data_root,
+        });
+    }
+
     let mut verified = false;
     for _ in 0..120 {
-        if child.try_wait().ok().flatten().is_some() {
-            break;
+        {
+            let state = app.state::<BackendProcess>();
+            let mut guard = state
+                .0
+                .lock()
+                .map_err(|_| "后端进程状态锁已损坏".to_string())?;
+            let Some(backend) = guard.as_mut() else {
+                // stop_backend already took ownership: the app is shutting down.
+                return Ok(());
+            };
+            if backend.child.try_wait().ok().flatten().is_some() {
+                *guard = None;
+                return Err(
+                    "Python 后端在启动阶段退出，请查看应用数据目录中的 backend-stdio.log。"
+                        .to_string(),
+                );
+            }
         }
         if backend_http("GET", "/api/app/runtime-state")
             .is_some_and(|response| response.contains(&instance_id))
@@ -245,23 +276,18 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         thread::sleep(Duration::from_millis(100));
     }
     if !verified {
-        let _ = child.kill();
-        let _ = child.wait();
+        let state = app.state::<BackendProcess>();
+        if let Ok(mut guard) = state.0.lock() {
+            if let Some(mut backend) = guard.take() {
+                let _ = backend.child.kill();
+                let _ = backend.child.wait();
+            }
+        }
         return Err(
             "Backend startup identity check failed; port 19871 may belong to another process."
                 .to_string(),
         );
     }
-    let state = app.state::<BackendProcess>();
-    let mut backend_state = state
-        .0
-        .lock()
-        .map_err(|_| "后端进程状态锁已损坏".to_string())?;
-    *backend_state = Some(ManagedBackend {
-        child,
-        instance_id,
-        data_root,
-    });
     Ok(())
 }
 
@@ -321,19 +347,28 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(BackendProcess::default())
         .invoke_handler(tauri::generate_handler![read_legacy_ui_state])
         .setup(|app| {
-            if let Err(error) = start_backend(app.handle()) {
-                app.dialog()
-                    .message(format!(
-                        "{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。"
-                    ))
-                    .title("CS2 Insight Agent — 后端启动失败")
-                    .kind(MessageDialogKind::Error)
-                    .blocking_show();
-                return Err(std::io::Error::other(error).into());
-            }
+            // Start the backend on a worker thread so the window (and its
+            // "connecting to backend" splash) appears immediately instead of
+            // after the Python process answers HTTP.
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                if let Err(error) = start_backend(&handle) {
+                    handle
+                        .dialog()
+                        .message(format!(
+                            "{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。"
+                        ))
+                        .title("CS2 Insight Agent — 后端启动失败")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    handle.exit(1);
+                }
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -347,16 +382,30 @@ pub fn run() {
         } if label == "main" => {
             // Destroy the webview first so EventSource/HTTP connections close
             // immediately. Otherwise uvicorn waits on the still-live renderer
-            // while this handler waits on uvicorn, making the X button appear
-            // frozen until the forced-shutdown timeout expires.
+            // while this handler waits on uvicorn.
             api.prevent_close();
             if let Some(window) = handle.get_webview_window(&label) {
                 let _ = window.destroy();
             }
-            stop_backend(handle);
-            handle.exit(0);
+            // window.destroy() is only queued on the event loop; blocking on
+            // the backend here would keep a frozen window on screen for the
+            // whole graceful-shutdown wait. Stop the backend on a worker
+            // thread so the window disappears instantly.
+            let handle = handle.clone();
+            thread::spawn(move || {
+                stop_backend(&handle);
+                handle.exit(0);
+            });
         }
-        RunEvent::Exit | RunEvent::ExitRequested { .. } => stop_backend(handle),
+        RunEvent::ExitRequested { code, api, .. } => {
+            // The last window closing must not tear down the process while the
+            // worker thread is still stopping the backend; explicit exit()
+            // calls (which carry a code) pass through.
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+        RunEvent::Exit => stop_backend(handle),
         _ => {}
     });
 }

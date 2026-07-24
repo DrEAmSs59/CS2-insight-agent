@@ -39,6 +39,8 @@ import {
   unexpectedCs2ExitRecoveryMessageKey,
 } from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
+import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
+import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
@@ -106,13 +108,6 @@ export default function App() {
   const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
   const shouldCheckUpdateRef = useRef(false);
 
-  // 修正 isPackaged 检测：同步判断
-  const [isPackaged, setIsPackaged] = useState(false);
-  useEffect(() => {
-    if (window.electron?.isPackaged) {
-      window.electron.isPackaged().then(setIsPackaged);
-    }
-  }, []);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "", obs_path: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
@@ -122,7 +117,8 @@ export default function App() {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateModalManual, setUpdateModalManual] = useState(false);
   const updateCheckOptsRef = useRef({ manual: false, awaitDismiss: false });
-  const updateStatusUnsubRef = useRef(null);
+  /** 当前活跃的 Tauri updater 控制器；旧控制器的迟到状态会被忽略 */
+  const updateControllerRef = useRef(null);
   /** 用户点「关闭」后忽略后续 cancelled 重开弹窗 */
   const updateModalDismissedRef = useRef(false);
   const obsConfigRef = useRef(obsConfig);
@@ -2664,14 +2660,11 @@ export default function App() {
   }, []);
 
   const handleUpdateModalClose = useCallback(() => {
-    // 关闭弹窗时若仍在下载/准备下载，真正取消，避免后台继续下
+    // 关闭弹窗时若更新流程尚未开始下载安装，真正取消（下载中无法中断）
     const st = String(updateInfo?.status || "");
     updateModalDismissedRef.current = true;
-    if (
-      window.electron?.cancelUpdate &&
-      (st === "checking" || st === "available" || st === "downloading")
-    ) {
-      window.electron.cancelUpdate();
+    if (st === "checking" || st === "available" || st === "downloading") {
+      updateControllerRef.current?.cancel();
     }
     setUpdateModalOpen(false);
     setUpdateModalManual(false);
@@ -2681,18 +2674,18 @@ export default function App() {
   }, [updateInfo?.status]);
 
   const handleUpdateCancel = useCallback(() => {
-    // 「停止更新」：取消下载并保留弹窗提示，不视为 dismiss
+    // 「停止更新」：取消更新流程并保留弹窗提示，不视为 dismiss
     updateModalDismissedRef.current = false;
-    window.electron?.cancelUpdate?.();
+    updateControllerRef.current?.cancel();
   }, []);
 
-  /** Cloudflare R2 + electron-updater（不走 GitHub /api/app/update-info） */
+  /** Cloudflare R2 + Tauri updater（不走 GitHub /api/app/update-info） */
   const fetchUpdateInfo = useCallback(
     async (opts = { manual: false, awaitDismiss: false }) => {
       const manual = Boolean(opts.manual);
       const awaitDismiss = Boolean(opts.awaitDismiss);
 
-      if (!(await shouldCheckAppUpdates()) || !window.electron?.checkForUpdates) {
+      if (!(await shouldCheckAppUpdates())) {
         if (manual) {
           setUpdateInfo({
             status: "error",
@@ -2711,19 +2704,16 @@ export default function App() {
 
       let currentVersion = "";
       try {
-        if (window.electron?.getVersion) {
-          currentVersion = String((await window.electron.getVersion()) || "");
-        }
+        currentVersion = String((await getDesktopAppVersion()) || "");
       } catch {
         currentVersion = "";
       }
 
-      if (updateStatusUnsubRef.current) {
-        updateStatusUnsubRef.current();
-        updateStatusUnsubRef.current = null;
-      }
+      // 旧控制器不再活跃：其后续状态回调会被忽略
+      updateControllerRef.current?.cancel();
 
-      const unsub = window.electron.onUpdateStatus?.((statusPayload) => {
+      const controller = createDesktopUpdateCheck((statusPayload) => {
+        if (updateControllerRef.current !== controller) return;
         const status = String(statusPayload?.status || "");
         const incomingLatest =
           statusPayload?.latest_version || statusPayload?.info?.version || null;
@@ -2811,9 +2801,7 @@ export default function App() {
           }
         }
       });
-      if (typeof unsub === "function") {
-        updateStatusUnsubRef.current = unsub;
-      }
+      updateControllerRef.current = controller;
 
       setUpdateInfo({
         status: "checking",
@@ -2827,9 +2815,9 @@ export default function App() {
         setUpdateModalOpen(true);
       }
 
-      // 先挂上 awaitDismiss，再发 IPC，避免 not-available 极快返回时丢 resume
+      // 先挂上 awaitDismiss 再启动检查，避免 not-available 极快返回时丢 resume
       const dismissWait = awaitDismiss ? waitForUpdateModalDismiss() : null;
-      window.electron.checkForUpdates();
+      controller.start();
       if (dismissWait) await dismissWait;
     },
     [t, waitForUpdateModalDismiss, markUpdateChecked],
@@ -2837,10 +2825,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (updateStatusUnsubRef.current) {
-        updateStatusUnsubRef.current();
-        updateStatusUnsubRef.current = null;
-      }
+      updateControllerRef.current?.cancel();
+      updateControllerRef.current = null;
     };
   }, []);
 
