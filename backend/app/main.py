@@ -3159,7 +3159,8 @@ async def batch_ingest_demos(body: BatchIngestBody):
         demo_id, row, dem_path = candidate
         try:
             async with inspect_sem:
-                await asyncio.to_thread(ensure_demo_compatible, dem_path)
+                # Compat repair is deferred to play/analyze/record — ingest only
+                # needs lightweight inspect metadata for library cards.
                 players, meta = await _inspect_demo_meta(Path(dem_path))
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
