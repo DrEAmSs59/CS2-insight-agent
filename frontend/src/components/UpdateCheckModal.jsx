@@ -1,7 +1,8 @@
 import { useT } from "../i18n/useT.js";
+import { normalizeUpdateMode } from "../utils/desktopUpdater";
 
-/** Cloudflare / electron-updater 检查更新弹窗 */
-export default function UpdateCheckModal({ open, info, onClose, onCancel, title }) {
+/** Cloudflare / Tauri updater 检查更新弹窗 */
+export default function UpdateCheckModal({ open, info, onClose, onCancel, onConfirm, title }) {
   const t = useT();
   if (!open || !info) return null;
 
@@ -9,11 +10,15 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, title 
   const err = info.error ? String(info.error) : "";
   const latest = info.latest_version ? String(info.latest_version) : "";
   const current = info.current_version ? String(info.current_version) : "";
-  const notes = String(info.release_notes || "");
+  const notes = String(info.release_notes || "").trim();
+  const updateMode = normalizeUpdateMode(info.update_mode);
+  const isForce = updateMode === "force";
   const percent = Number(info.progress?.percent);
   const hasPercent = Number.isFinite(percent);
   const upToDate = status === "not-available";
-  const canStop = status === "checking" || status === "available" || status === "downloading";
+  const isAvailable = status === "available";
+  const isDownloading = status === "downloading" || status === "downloaded";
+  const forceLocked = isForce && (isAvailable || isDownloading);
 
   let body = null;
   if (err || status === "error") {
@@ -22,8 +27,16 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, title 
     body = <p className="text-sm text-zinc-300">{t("settings.updateChecking")}</p>;
   } else if (upToDate) {
     body = <p className="text-sm text-zinc-300">{t("dialog.updateUpToDate")}</p>;
-  } else if (status === "available") {
-    body = <p className="text-sm text-zinc-300">{t("dialog.updateDownloadingStart")}</p>;
+  } else if (isAvailable) {
+    body = (
+      <div className="space-y-2">
+        {isForce ? (
+          <p className="text-sm font-semibold text-cs2-orange">{t("dialog.updateForceRequired")}</p>
+        ) : (
+          <p className="text-sm text-zinc-300">{t("dialog.updateAvailablePrompt")}</p>
+        )}
+      </div>
+    );
   } else if (status === "downloading") {
     body = (
       <div className="space-y-2">
@@ -45,8 +58,23 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, title 
     body = <p className="text-sm text-zinc-300">{t("dialog.updateCancelled")}</p>;
   }
 
+  const showNotes =
+    !err &&
+    status !== "error" &&
+    status !== "cancelled" &&
+    status !== "checking" &&
+    status !== "not-available" &&
+    notes;
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => {
+        if (forceLocked) e.stopPropagation();
+      }}
+    >
       <div className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-xl border border-white/10 bg-cs2-bg-card shadow-2xl">
         <div className="border-b border-white/10 px-4 py-3">
           <h2 className="text-sm font-bold text-white">{title || t("dialog.updateTitle")}</h2>
@@ -69,25 +97,55 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, title 
         </div>
         <div className="max-h-[45vh] overflow-y-auto px-4 py-3">
           {body}
-          {!err && status !== "error" && status !== "cancelled" && notes ? (
-            <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed text-zinc-300">
+          {showNotes ? (
+            <pre className="mt-3 whitespace-pre-wrap break-words rounded-md border border-white/5 bg-black/20 p-3 font-sans text-[12px] leading-relaxed text-zinc-300">
               {notes}
             </pre>
           ) : null}
+          {isAvailable && !notes ? (
+            <p className="mt-2 text-[12px] text-zinc-500">{t("dialog.updateNoNotes")}</p>
+          ) : null}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-4 py-2">
-          {canStop ? (
+          {isAvailable ? (
+            <>
+              {!isForce ? (
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-zinc-500 hover:text-white"
+                  onClick={() => onClose?.()}
+                >
+                  {t("dialog.updateLater")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="rounded-md bg-cs2-orange px-3 py-1.5 text-[11px] font-semibold text-black hover:opacity-90"
+                onClick={() => onConfirm?.()}
+              >
+                {t("dialog.updateNow")}
+              </button>
+            </>
+          ) : null}
+          {!isForce && status === "downloading" ? (
             <button
               type="button"
               className="text-[11px] font-semibold text-cs2-orange hover:opacity-90"
               onClick={() => onCancel?.()}
+              title={t("dialog.updateStopHint")}
             >
               {t("dialog.updateStop")}
             </button>
           ) : null}
-          <button type="button" className="text-[11px] font-semibold text-zinc-500 hover:text-white" onClick={onClose}>
-            {t("dialog.updateClose")}
-          </button>
+          {!forceLocked && !isAvailable ? (
+            <button
+              type="button"
+              className="text-[11px] font-semibold text-zinc-500 hover:text-white"
+              onClick={() => onClose?.()}
+            >
+              {t("dialog.updateClose")}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

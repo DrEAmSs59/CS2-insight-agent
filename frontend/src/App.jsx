@@ -62,28 +62,6 @@ const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage")
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
-/** 根据频率和上次检查时间判断是否需要检查更新 */
-function shouldCheckUpdateByFrequency(frequency, lastCheckAt) {
-  if (frequency === "never") return false;
-  if (!lastCheckAt) return true; // 没有记录过，需要检查
-
-  try {
-    const lastCheck = new Date(lastCheckAt);
-    const now = new Date();
-    const diffMs = now.getTime() - lastCheck.getTime();
-    const diffDays = diffMs / 86400000;
-
-    if (frequency === "weekly") {
-      return diffDays >= 7;
-    } else if (frequency === "monthly") {
-      return diffDays >= 30;
-    }
-    return true;
-  } catch {
-    return true; // 解析失败，默认检查
-  }
-}
-
 function ensureDefaultCs2FullscreenArg(value) {
   const text = String(value ?? "").trim();
   if (!text) return DEFAULT_CS2_EXTRA_LAUNCH_ARGS;
@@ -104,9 +82,6 @@ export default function App() {
   const startupInitStartedRef = useRef(false);
   const startupUpdateWaitRef = useRef(/** @type {(() => void) | null} */ (null));
   const [aiMode, setAiMode] = useState(false);
-  const [updateCheckFrequency, setUpdateCheckFrequency] = useState("weekly");
-  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
-  const shouldCheckUpdateRef = useRef(false);
 
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "", obs_path: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
@@ -991,18 +966,6 @@ export default function App() {
           }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
-          if (typeof data.update_check_frequency === "string") {
-            setUpdateCheckFrequency(data.update_check_frequency);
-          }
-          if (typeof data.last_update_check_at === "string") {
-            setLastUpdateCheckAt(data.last_update_check_at);
-          }
-          // 判断是否需要检查更新（根据频率和上次检查时间）
-          const needCheck = shouldCheckUpdateByFrequency(
-            data.update_check_frequency ?? "weekly",
-            data.last_update_check_at ?? ""
-          );
-          shouldCheckUpdateRef.current = needCheck;
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
@@ -2651,33 +2614,45 @@ export default function App() {
 
   const markUpdateChecked = useCallback(async () => {
     const checkedAt = new Date().toISOString();
-    setLastUpdateCheckAt(checkedAt);
     try {
       await API.put("config", { last_update_check_at: checkedAt });
     } catch {
-      // ignore persistence failures; UI still reflects local time
+      // ignore persistence failures
     }
   }, []);
 
   const handleUpdateModalClose = useCallback(() => {
-    // 关闭弹窗时若更新流程尚未开始下载安装，真正取消（下载中无法中断）
     const st = String(updateInfo?.status || "");
+    const isForce = String(updateInfo?.update_mode || "").toLowerCase() === "force";
+    // force：发现更新后或下载中不可关闭
+    if (isForce && (st === "available" || st === "downloading" || st === "downloaded")) {
+      return;
+    }
     updateModalDismissedRef.current = true;
-    if (st === "checking" || st === "available" || st === "downloading") {
-      updateControllerRef.current?.cancel();
+    if (st === "checking" || st === "available") {
+      if (typeof updateControllerRef.current?.defer === "function") {
+        updateControllerRef.current.defer();
+      } else {
+        updateControllerRef.current?.cancel();
+      }
     }
     setUpdateModalOpen(false);
     setUpdateModalManual(false);
     const resume = startupUpdateWaitRef.current;
     startupUpdateWaitRef.current = null;
     resume?.();
-  }, [updateInfo?.status]);
+  }, [updateInfo?.status, updateInfo?.update_mode]);
+
+  const handleUpdateConfirm = useCallback(() => {
+    updateControllerRef.current?.confirm?.();
+  }, []);
 
   const handleUpdateCancel = useCallback(() => {
-    // 「停止更新」：取消更新流程并保留弹窗提示，不视为 dismiss
+    // 「停止更新」：仅 normal；下载开始后无法真正打断
+    if (String(updateInfo?.update_mode || "").toLowerCase() === "force") return;
     updateModalDismissedRef.current = false;
     updateControllerRef.current?.cancel();
-  }, []);
+  }, [updateInfo?.update_mode]);
 
   /** Cloudflare R2 + Tauri updater（不走 GitHub /api/app/update-info） */
   const fetchUpdateInfo = useCallback(
@@ -2692,6 +2667,7 @@ export default function App() {
             error: t("settings.updateDevModeError"),
             current_version: "",
             latest_version: null,
+            update_mode: "normal",
           });
           setUpdateModalManual(true);
           setUpdateModalOpen(true);
@@ -2709,7 +2685,6 @@ export default function App() {
         currentVersion = "";
       }
 
-      // 旧控制器不再活跃：其后续状态回调会被忽略
       updateControllerRef.current?.cancel();
 
       const controller = createDesktopUpdateCheck((statusPayload) => {
@@ -2723,12 +2698,14 @@ export default function App() {
             : typeof statusPayload?.info?.releaseNotes === "string"
               ? statusPayload.info.releaseNotes
               : "";
-        // download-progress 等事件可能不带版本号，合并保留上次已知的 latest
+        const incomingMode =
+          statusPayload?.update_mode || statusPayload?.info?.update_mode || null;
         setUpdateInfo((prev) => ({
           status,
           current_version: currentVersion || prev?.current_version || "",
           latest_version: incomingLatest || prev?.latest_version || null,
           release_notes: incomingNotes || prev?.release_notes || "",
+          update_mode: incomingMode || prev?.update_mode || "normal",
           progress: statusPayload?.progress || null,
           error:
             statusPayload?.error === "dev-mode"
@@ -2756,7 +2733,6 @@ export default function App() {
         }
 
         if (status === "cancelled") {
-          // 点「关闭」已 dismiss：不再重开；点「停止更新」则保留提示
           if (updateModalDismissedRef.current) {
             setUpdateModalOpen(false);
             const resume = startupUpdateWaitRef.current;
@@ -2790,7 +2766,6 @@ export default function App() {
         }
 
         if (status === "error") {
-          // 检查失败不刷新 last_update_check_at，便于下次启动重试
           if (isManual) {
             setUpdateModalManual(true);
             setUpdateModalOpen(true);
@@ -2808,6 +2783,7 @@ export default function App() {
         current_version: currentVersion,
         latest_version: null,
         release_notes: "",
+        update_mode: "normal",
         error: "",
       });
       if (manual) {
@@ -2815,7 +2791,6 @@ export default function App() {
         setUpdateModalOpen(true);
       }
 
-      // 先挂上 awaitDismiss 再启动检查，避免 not-available 极快返回时丢 resume
       const dismissWait = awaitDismiss ? waitForUpdateModalDismiss() : null;
       controller.start();
       if (dismissWait) await dismissWait;
@@ -2837,7 +2812,7 @@ export default function App() {
     let cancelled = false;
     const runStartupInit = async () => {
       try {
-        if ((await shouldCheckAppUpdates()) && shouldCheckUpdateRef.current) {
+        if ((await shouldCheckAppUpdates())) {
           setStartupInitPhase("update");
           await fetchUpdateInfo({ manual: false, awaitDismiss: true });
           if (cancelled) return;
@@ -3217,6 +3192,7 @@ export default function App() {
           title={updateModalManual ? t("app.checkUpdate") : t("app.updateFound")}
           onClose={handleUpdateModalClose}
           onCancel={handleUpdateCancel}
+          onConfirm={handleUpdateConfirm}
         />
       </div>
     </AppShellProvider>

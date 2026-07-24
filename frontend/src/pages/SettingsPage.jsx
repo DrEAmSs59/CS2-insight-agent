@@ -332,12 +332,6 @@ const ENCODER_OPTIONS = [
   { value: "libx264", key: "settings.encoderX264" },
 ];
 
-const UPDATE_FREQUENCY_OPTIONS = [
-  { value: "weekly", key: "settings.updateFreqWeekly" },
-  { value: "monthly", key: "settings.updateFreqMonthly" },
-  { value: "never", key: "settings.updateFreqNever" },
-];
-
 /* ---------------------------------------------------------------------------
  * Tab definitions
  * ------------------------------------------------------------------------ */
@@ -575,7 +569,6 @@ export default function SettingsPage() {
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
-      payload.update_check_frequency = config.update_check_frequency ?? "weekly";
       payload.steam_api_key = config.steam_api_key ?? "";
       payload.steam_id64 = config.steam_id64 ?? "";
       payload.match_mode = config.match_mode ?? "premier";
@@ -808,25 +801,15 @@ export default function SettingsPage() {
               {activeTab === "general" && (
                 <>
               {/* System + Language */}
-              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.labelUpdateFrequency"))}>
-                <FieldRow label={t("settings.currentVersion")} search={search && !matches(t("settings.currentVersion") + " version")}>
-                  <div className="flex items-center gap-3">
+              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.checkUpdateBtn"))}>
+                <FieldRow label={t("settings.currentVersion")} hint={t("settings.hintAutoUpdateOnStartup")} search={search && !matches(t("settings.currentVersion") + " version " + t("settings.checkUpdateBtn"))}>
+                  <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs text-cs2-text-primary font-mono">{appVersion}</p>
                     {config.last_update_check_at && (
                       <span className="text-xs text-cs2-text-muted">
                         ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at)})
                       </span>
                     )}
-                  </div>
-                </FieldRow>
-                <FieldRow label={t("settings.labelUpdateFrequency")} hint={t("settings.hintUpdateFrequency")} search={search && !matches(t("settings.labelUpdateFrequency"))}>
-                  <div className="flex gap-2">
-                    <SelectInput
-                      value={config.update_check_frequency ?? "weekly"}
-                      onChange={(v) => set("update_check_frequency", v)}
-                      options={UPDATE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                      className="flex-1"
-                    />
                     <button
                       type="button"
                       onClick={() => void shell.fetchUpdateInfo({ manual: true })}

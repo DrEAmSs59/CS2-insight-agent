@@ -6,16 +6,25 @@ export function isTauriDesktop() {
   return Boolean(window.__TAURI_INTERNALS__);
 }
 
+/** @param {unknown} value */
+export function normalizeUpdateMode(value) {
+  return String(value || "").trim().toLowerCase() === "force" ? "force" : "normal";
+}
+
 /**
- * Tauri updater 检查/下载控制器。状态语义对齐旧 electron-updater 通道，
- * UpdateCheckModal 无需改动：
- * checking / available / downloading / downloaded / not-available / error / cancelled
+ * Tauri updater 检查/下载控制器。
+ * 状态：checking / available / downloading / downloaded / not-available / error / cancelled
  *
- * 注意：Tauri 的 downloadAndInstall 无法中断进行中的下载，cancel() 只在
- * 尚未开始下载安装前生效（checking / available 阶段）。
+ * 发现更新后会停在 available，等待 confirm() 再下载；defer()/cancel() 表示稍后再说。
+ * force 模式下 defer/cancel 在开始下载前会被忽略。
+ *
+ * 注意：Tauri 的 downloadAndInstall 无法中断进行中的下载。
  */
 export function createDesktopUpdateCheck(onStatus) {
   let cancelled = false;
+  let updateMode = "normal";
+  let confirmWait = null;
+  let startedDownload = false;
 
   const emit = (payload) => {
     try {
@@ -25,34 +34,63 @@ export function createDesktopUpdateCheck(onStatus) {
     }
   };
 
+  const waitForUserChoice = () =>
+    new Promise((resolve) => {
+      confirmWait = resolve;
+    });
+
+  const resolveChoice = (choice) => {
+    if (!confirmWait) return false;
+    if (updateMode === "force" && choice !== "install" && !startedDownload) {
+      return false;
+    }
+    const wait = confirmWait;
+    confirmWait = null;
+    wait(choice);
+    return true;
+  };
+
   const run = async () => {
-    emit({ status: "checking" });
+    emit({ status: "checking", update_mode: "normal" });
 
     let update = null;
     try {
       update = await check();
     } catch (error) {
-      emit({ status: "error", error: String(error?.message || error) });
+      emit({ status: "error", error: String(error?.message || error), update_mode: "normal" });
       return;
     }
     if (cancelled) {
-      emit({ status: "cancelled" });
+      emit({ status: "cancelled", update_mode: "normal" });
       return;
     }
     if (!update) {
-      emit({ status: "not-available" });
+      emit({ status: "not-available", update_mode: "normal" });
       return;
     }
 
+    updateMode = normalizeUpdateMode(update.rawJson?.update_mode);
     const latest = update.version || null;
     const notes = typeof update.body === "string" ? update.body : "";
-    const base = { latest_version: latest, release_notes: notes };
+    const base = {
+      latest_version: latest,
+      release_notes: notes,
+      update_mode: updateMode,
+    };
     emit({ status: "available", ...base });
-    if (cancelled) {
+
+    const choice = await waitForUserChoice();
+    if (cancelled || choice !== "install") {
+      try {
+        await update.close();
+      } catch {
+        // ignore
+      }
       emit({ status: "cancelled", ...base });
       return;
     }
 
+    startedDownload = true;
     let total = 0;
     let received = 0;
     try {
@@ -77,8 +115,6 @@ export function createDesktopUpdateCheck(onStatus) {
     }
 
     emit({ status: "downloaded", ...base });
-    // Windows 上 NSIS 安装器启动时应用会被自动退出、装完后由安装器重启，
-    // 通常执行不到这里；其他平台需要显式重启。
     try {
       await relaunch();
     } catch {
@@ -90,8 +126,18 @@ export function createDesktopUpdateCheck(onStatus) {
     start: () => {
       void run();
     },
+    /** 用户确认立即更新 */
+    confirm: () => {
+      resolveChoice("install");
+    },
+    /** 稍后再说（force 且尚未开始下载时无效） */
+    defer: () => {
+      cancelled = true;
+      resolveChoice("defer");
+    },
     cancel: () => {
       cancelled = true;
+      resolveChoice("defer");
     },
   };
 }

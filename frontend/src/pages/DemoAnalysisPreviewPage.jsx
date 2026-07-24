@@ -344,6 +344,8 @@ export default function DemoAnalysisPreviewPage() {
   const workspace = useWorkspaceData(s.analysisWorkspace, workspaceFallback);
   const teamAScore = Number(workspace.team_a_score ?? meta.team_a_score ?? 0);
   const teamBScore = Number(workspace.team_b_score ?? meta.team_b_score ?? 0);
+  const durationMins = Number(workspace.duration_mins ?? meta.duration_mins ?? 0);
+  const totalRounds = Number(workspace.summary?.total_rounds ?? workspace.rounds?.length ?? meta.total_rounds ?? 0);
   const parsingCurrent = Boolean(s.parsing || s.parsingByIndex?.[s.currentMatchIndex]);
   const selectedCount = s.selectedPlayersList?.length || 0;
   const parsedNames = s.parsedPlayerNames || [];
@@ -460,7 +462,7 @@ export default function DemoAnalysisPreviewPage() {
             <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
             <div className="grid items-center gap-4 px-5 py-5 md:grid-cols-[1fr_auto_1fr]">
               <div className="flex items-center gap-3 md:justify-end md:text-right"><div className="order-2 md:order-1"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sky-400">{teamAName}</p><p className="mt-1 text-[9px] text-cs2-text-muted">{teams.a.length} 名玩家</p></div><div className="order-1 flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/15 text-lg font-black text-sky-400 md:order-2">{teamAName.slice(0, 1).toUpperCase()}</div></div>
-              <div className="text-center"><div className="flex items-center justify-center gap-3"><span className="font-mono text-4xl font-black text-sky-300">{teamAScore}</span><span className="text-xl font-black text-cs2-text-muted">:</span><span className="font-mono text-4xl font-black text-amber-300">{teamBScore}</span></div><div className="mt-2 text-[9px] uppercase tracking-widest text-cs2-text-muted">{mapLabel(meta.map_name)} · {Number(meta.total_rounds || 0)} 回合</div></div>
+              <div className="text-center"><div className="flex items-center justify-center gap-3"><span className="font-mono text-4xl font-black text-sky-300">{teamAScore}</span><span className="text-xl font-black text-cs2-text-muted">:</span><span className="font-mono text-4xl font-black text-amber-300">{teamBScore}</span></div><div className="mt-2 text-[9px] uppercase tracking-widest text-cs2-text-muted">{mapLabel(meta.map_name)} · {totalRounds} 回合{durationMins > 0 ? ` · ${durationMins} 分钟` : ""}</div></div>
               <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/15 text-lg font-black text-amber-400">{teamBName.slice(0, 1).toUpperCase()}</div><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400">{teamBName}</p><p className="mt-1 text-[9px] text-cs2-text-muted">{teams.b.length} 名玩家</p></div></div>
             </div>
           </section>

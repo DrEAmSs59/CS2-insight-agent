@@ -15,7 +15,7 @@ Python 后端、Pillow、pandas、NumPy 与 demoparser2 等既有运行时依赖
 ## 在线更新（Tauri updater + Cloudflare R2）
 
 应用内更新走 `tauri-plugin-updater`，客户端启动时按配置频率请求
-`https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev/latest.json`（`tauri.conf.json > plugins.updater.endpoints`）。
+`https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev/latest.json`（`tauri.conf.json > plugins.updater.endpoints`）。
 
 1. **更新签名密钥（一次性）**：`node node_modules/@tauri-apps/cli/tauri.js signer generate -w %USERPROFILE%\.tauri\cs2-insight-agent.key`。
    公钥写入 `tauri.conf.json > plugins.updater.pubkey`；私钥务必备份，丢失后老客户端将无法再接受任何更新。
@@ -27,10 +27,12 @@ npm.cmd run desktop:build:ver -- 2.4.0
 
    CI 或自定义密钥路径时改用环境变量 `TAURI_SIGNING_PRIVATE_KEY`（密钥内容或文件路径均可）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。注意 PowerShell 无法设置「空字符串」环境变量（`$env:X = ""` 等于删除），空密码密钥请交给 `desktop:build:ver` 处理或在 CI YAML 中设置。
 
-3. **发布**：设置 R2 凭据（`R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`，可选 `R2_PUBLIC_BASE_URL`、`RELEASE_NOTES`）后执行 `npm run deploy:r2`。脚本会上传：
+3. **发布**：设置 R2 凭据（`R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`，可选 `R2_PUBLIC_BASE_URL`、`RELEASE_NOTES`、`UPDATE_MODE=force|normal`）后执行 `npm run deploy:r2`。脚本会上传：
    - `CS2 Insight Agent_<ver>_x64-setup.exe` — 完整安装包，同时是更新包；
-   - `latest.json` — Tauri updater 清单（内嵌 `.sig` 签名）；
+   - `latest.json` — Tauri updater 清单（内嵌 `.sig` 签名，含 `update_mode`）；
    - `latest.yml` — electron-updater 桥接清单：仍在旧 Electron 版上的用户会把 Tauri 安装包当作更新静默安装，完成一次性迁移。
+
+客户端每次启动都会检查更新。`update_mode=normal` 时可「立即更新 / 稍后再说」；`force` 时弹窗说明「本次更新涉及重大内容，必需更新才能使用」，只能立即更新。
 
 Windows 端更新流程：下载校验签名 → 应用自动退出 → NSIS 以 passive 模式安装（安装 hook 会等待后端进程退出）→ 自动重启。Authenticode 证书签名（`WINDOWS_PFX_*`）与更新签名互相独立，两者都建议配置。
 

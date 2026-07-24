@@ -107,7 +107,9 @@ export default function Sidebar({
           : status === "not-available"
             ? t("dialog.updateUpToDate")
             : status === "available"
-              ? t("app.updateFound")
+              ? payload?.update_mode === "force"
+                ? t("dialog.updateForceRequired")
+                : t("app.updateFound")
               : status === "downloading"
                 ? t("dialog.updateDownloading")
                 : status === "downloaded"
@@ -237,13 +239,35 @@ export default function Sidebar({
                     />
                   </div>
                 )}
+                {updateStatus.status === "available" && (
+                  <div className="mt-2 flex gap-2">
+                    {updateStatus.update_mode !== "force" ? (
+                      <button
+                        type="button"
+                        className="flex-1 rounded border border-white/10 py-1 text-[10px] text-zinc-400 hover:text-white"
+                        onClick={() => updateControllerRef.current?.defer?.()}
+                      >
+                        {t("dialog.updateLater")}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="flex-1 rounded bg-cs2-orange py-1 text-[10px] font-semibold text-black"
+                      onClick={() => updateControllerRef.current?.confirm?.()}
+                    >
+                      {t("dialog.updateNow")}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             <button
               type="button"
               onClick={handleCheckUpdates}
               disabled={
-                updateStatus?.status === "checking" || updateStatus?.status === "downloading"
+                updateStatus?.status === "checking" ||
+                updateStatus?.status === "downloading" ||
+                (updateStatus?.status === "available" && updateStatus?.update_mode === "force")
               }
               className="flex w-full items-center justify-center gap-2 py-2 rounded-md text-[11px] font-semibold bg-cs2-bg-input border border-cs2-border hover:border-cs2-orange/50 transition-colors disabled:opacity-50"
             >

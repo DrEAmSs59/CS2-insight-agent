@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const NSIS_DIR = path.join(__dirname, "../src-tauri/target/release/bundle/nsis");
 
 const PUBLIC_BASE_URL = (
-  process.env.R2_PUBLIC_BASE_URL || "https://pub-89edf85ff1b84f7bac561f78ec51f15b.r2.dev"
+  process.env.R2_PUBLIC_BASE_URL || "https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev"
 ).replace(/\/+$/, "");
 
 const config = {
@@ -143,6 +143,8 @@ async function main() {
   }
 
   const releaseNotes = process.env.RELEASE_NOTES || "";
+  const updateModeRaw = String(process.env.UPDATE_MODE || "normal").trim().toLowerCase();
+  const updateMode = updateModeRaw === "force" ? "force" : "normal";
   const pubDate = new Date().toISOString();
   const setupUrl = `${PUBLIC_BASE_URL}/${encodeURIComponent(setupName)}`;
 
@@ -151,6 +153,7 @@ async function main() {
     version,
     notes: releaseNotes,
     pub_date: pubDate,
+    update_mode: updateMode,
     platforms: {
       "windows-x86_64": {
         signature: fs.readFileSync(sigPath, "utf8").trim(),
@@ -180,13 +183,14 @@ async function main() {
   const latestYmlPath = path.join(NSIS_DIR, "latest.yml");
   fs.writeFileSync(latestYmlPath, latestYml);
 
-  console.log(`Deploying version ${version} (${setupName})`);
+  console.log(`Deploying version ${version} (${setupName}), update_mode=${updateMode}`);
   await uploadFile(setupPath, setupName);
   await uploadFile(latestJsonPath, "latest.json", { alwaysUpload: true });
   await uploadFile(latestYmlPath, "latest.yml", { alwaysUpload: true });
 
   console.log("\nAll deployment tasks completed!");
   console.log(`Updater endpoint: ${PUBLIC_BASE_URL}/latest.json`);
+  console.log(`Update mode: ${updateMode} (set UPDATE_MODE=force|normal when deploying)`);
 }
 
 main().catch((error) => {
