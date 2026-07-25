@@ -113,17 +113,31 @@ function normalizeWeaponHaystack(rawKey, rawName) {
  * @param {string | null | undefined} [rawName] weapon_name，辅助匹配 M4A1-S 等
  * @returns {string} 不含 `.svg` 的文件名
  */
-export function resolveHudWeaponStem(rawKey, rawName) {
+export function resolveHudWeaponStem(rawKey, rawName, options = {}) {
+  const fallback = Object.prototype.hasOwnProperty.call(options, "fallback")
+    ? options.fallback
+    : "ak47";
   const hay = normalizeWeaponHaystack(rawKey, rawName);
-  if (!hay) return "ak47";
+  if (!hay) return fallback;
 
   if (STEM_ALIASES[hay]) return STEM_ALIASES[hay];
 
+  // Compact form so "AK-47" / "ak_47" still match stem "ak47".
+  const hayCompact = hay.replace(/_/g, "");
   for (const stem of WEAPON_STEMS_LONGEST_FIRST) {
-    if (hay.includes(stem)) {
+    const stemCompact = stem.replace(/_/g, "");
+    if (hay.includes(stem) || hayCompact.includes(stemCompact)) {
       return STEM_ALIASES[stem] || stem;
+    }
+    // Skin names often omit the "knife_" prefix (e.g. "karambit").
+    if (stem.startsWith("knife_")) {
+      const short = stem.slice("knife_".length);
+      const shortCompact = short.replace(/_/g, "");
+      if (hay === short || hay.endsWith(`_${short}`) || hayCompact === shortCompact || hayCompact.endsWith(shortCompact)) {
+        return STEM_ALIASES[stem] || stem;
+      }
     }
   }
 
-  return "ak47";
+  return fallback;
 }

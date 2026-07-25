@@ -53,26 +53,32 @@ export default function SidePerformanceCard({
     <InsightCard
       title="阵营表现"
       icon={<ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
-      summary={summary}
       compact
-      className={`h-full min-h-[180px] xl:min-h-[190px] ${className}`}
+      className={className}
     >
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[220px] text-[10px]">
-          <thead>
-            <tr className="text-cs2-text-muted">
-              <th className="pb-1 text-left font-semibold">队伍</th>
-              <th className="pb-1 font-semibold">上半场 T/CT</th>
-              <th className="pb-1 font-semibold">下半场 T/CT</th>
-              {showOt ? <th className="pb-1 font-semibold">加时 T/CT</th> : null}
-              <th className="pb-1 font-semibold">总计</th>
-            </tr>
-          </thead>
-          <tbody>
-            <TeamRow name={teamAName} colorClass="bg-sky-400" bucket={model?.teamA} showOt={showOt} />
-            <TeamRow name={teamBName} colorClass="bg-amber-400" bucket={model?.teamB} showOt={showOt} />
-          </tbody>
-        </table>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col justify-center overflow-x-auto">
+          <table className="w-full min-w-[220px] text-[10px]">
+            <thead>
+              <tr className="text-cs2-text-muted">
+                <th className="pb-1 text-left font-semibold">队伍</th>
+                <th className="pb-1 font-semibold">上半场 T/CT</th>
+                <th className="pb-1 font-semibold">下半场 T/CT</th>
+                {showOt ? <th className="pb-1 font-semibold">加时 T/CT</th> : null}
+                <th className="pb-1 font-semibold">总计</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TeamRow name={teamAName} colorClass="bg-sky-400" bucket={model?.teamA} showOt={showOt} />
+              <TeamRow name={teamBName} colorClass="bg-amber-400" bucket={model?.teamB} showOt={showOt} />
+            </tbody>
+          </table>
+        </div>
+        {summary ? (
+          <p className="mt-2 shrink-0 truncate text-[10px] leading-snug text-cs2-text-secondary" title={summary}>
+            {summary}
+          </p>
+        ) : null}
       </div>
     </InsightCard>
   );

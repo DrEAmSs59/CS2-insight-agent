@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 
 const MAP_SIZE = 1024;
-const INFERNO_CELL_RADIUS_WORLD = 42;
+const INFERNO_CELL_RADIUS_WORLD = 36;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
+const SMOKE_CELL_RADIUS_WORLD = 28;
+const SMOKE_BLOOM_SECONDS = 1.35;
 
 function worldToPercent(point, transform) {
   if (!transform || !Number.isFinite(Number(point?.x)) || !Number.isFinite(Number(point?.y))) return null;
@@ -30,11 +32,14 @@ function pointMatchesMapLayer(point, transform, mapLayer) {
   return mapLayer === "lower" ? z <= threshold : z > threshold;
 }
 
-export function selectActiveSample(track, currentTick) {
+export function selectActiveSample(track, currentTick, hideAfterTick = null) {
   if (!track || !Array.isArray(track.samples) || !track.samples.length) return null;
   const tick = Number(currentTick);
   if (!Number.isFinite(tick)) return null;
   if (tick < Number(track.start_tick)) return null;
+  if (Number.isFinite(Number(hideAfterTick)) && Number(hideAfterTick) > 0 && tick > Number(hideAfterTick)) {
+    return null;
+  }
   if (Number.isFinite(Number(track.end_tick)) && tick > Number(track.end_tick)) return null;
   let chosen = null;
   for (const sample of track.samples) {
@@ -44,21 +49,29 @@ export function selectActiveSample(track, currentTick) {
   return chosen;
 }
 
-function paintSoftCell(ctx, cx, cy, radiusPx, stops) {
-  const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radiusPx);
-  for (const [stop, color] of stops) gradient.addColorStop(stop, color);
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
-  ctx.fill();
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function smokeBloomFactor(track, currentTick, tickRate) {
+  const start = Number(track?.start_tick);
+  const tick = Number(currentTick);
+  const rate = Math.max(1, Number(tickRate) || 64);
+  if (!Number.isFinite(start) || !Number.isFinite(tick)) return 1;
+  const ageSec = Math.max(0, (tick - start) / rate);
+  const t = clamp(ageSec / SMOKE_BLOOM_SECONDS, 0, 1);
+  return 0.2 + (1 - 0.2) * (1 - (1 - t) * (1 - t));
 }
 
 /**
  * Canvas overlay for sparse smoke / inferno area cells from /demo/replay effect_tracks.
+ * Smoke uses soft radial gradients (same language as fire) in gray; fire stays orange.
  */
 export default function ReplayAreaEffectsCanvas({
   tracks = [],
   currentTick = 0,
+  hideAfterTick = null,
+  tickRate = 64,
   transform = null,
   mapLayer = "upper",
   enabled = true,
@@ -74,18 +87,20 @@ export default function ReplayAreaEffectsCanvas({
     for (const track of tracks) {
       if (track?.type === "smoke" && capabilities && capabilities.smoke_voxels === false) continue;
       if (track?.type === "inferno" && capabilities && capabilities.inferno_cells === false) continue;
-      const sample = selectActiveSample(track, currentTick);
+      const sample = selectActiveSample(track, currentTick, hideAfterTick);
       if (!sample?.cells?.length) continue;
+      const bloom = track?.type === "smoke" ? smokeBloomFactor(track, currentTick, tickRate) : 1;
       layers.push({
         id: String(track.id || `${track.type}:${track.entity_id}`),
         type: track.type,
         cellSize: Number(sample.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE),
         cells: sample.cells,
         sampleTick: Number(sample.tick),
+        bloom,
       });
     }
     return layers;
-  }, [tracks, currentTick, enabled, capabilities]);
+  }, [tracks, currentTick, hideAfterTick, enabled, capabilities, tickRate]);
 
   const signature = useMemo(
     () => JSON.stringify({
@@ -96,6 +111,7 @@ export default function ReplayAreaEffectsCanvas({
         sampleTick: layer.sampleTick,
         cellSize: layer.cellSize,
         n: layer.cells.length,
+        bloom: Number(layer.bloom?.toFixed?.(3) || layer.bloom),
       })),
       scale: transform?.scale,
       pos_x: transform?.pos_x,
@@ -104,7 +120,7 @@ export default function ReplayAreaEffectsCanvas({
     [activeLayers, mapLayer, transform],
   );
 
-    useEffect(() => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return undefined;
@@ -130,11 +146,15 @@ export default function ReplayAreaEffectsCanvas({
 
       for (const layer of activeLayers) {
         const isSmoke = layer.type === "smoke";
-        const radiusWorld = isSmoke ? Math.max(22, layer.cellSize * 1.25) : INFERNO_CELL_RADIUS_WORLD;
+        const bloom = isSmoke ? clamp(Number(layer.bloom) || 1, 0.15, 1) : 1;
+        const radiusWorld = isSmoke ? SMOKE_CELL_RADIUS_WORLD : INFERNO_CELL_RADIUS_WORLD;
         const radiusPct = worldRadiusToPercent(radiusWorld, transform);
-        const radiusPx = (radiusPct / 100) * Math.min(width, height);
-        ctx.save();
-        ctx.globalCompositeOperation = isSmoke ? "source-over" : "lighter";
+        const radiusPx = Math.max(2.2, (radiusPct / 100) * Math.min(width, height));
+
+        let centerX = 0;
+        let centerY = 0;
+        let visible = 0;
+        const projected = [];
         for (const cell of layer.cells) {
           if (!Array.isArray(cell) || cell.length < 3) continue;
           const point = { x: cell[0], y: cell[1], z: cell[2] };
@@ -143,21 +163,47 @@ export default function ReplayAreaEffectsCanvas({
           if (!percent) continue;
           const cx = (percent.x / 100) * width;
           const cy = (percent.y / 100) * height;
-          const intensity = Number(cell[3]);
-          const alpha = Number.isFinite(intensity) ? clamp(intensity, 0.15, 1) : 0.85;
+          projected.push({ cx, cy, intensity: Number(cell[3]) });
+          centerX += cx;
+          centerY += cy;
+          visible += 1;
+        }
+        if (!visible) continue;
+        centerX /= visible;
+        centerY /= visible;
+        let maxDist = 1;
+        for (const item of projected) {
+          maxDist = Math.max(maxDist, Math.hypot(item.cx - centerX, item.cy - centerY));
+        }
+        const bloomRadius = maxDist * bloom + radiusPx * 0.4;
+
+        ctx.save();
+        for (const item of projected) {
+          const dist = Math.hypot(item.cx - centerX, item.cy - centerY);
+          if (isSmoke && dist > bloomRadius) continue;
+          const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
           if (isSmoke) {
-            paintSoftCell(ctx, cx, cy, radiusPx, [
-              [0, `rgba(148,163,184,${0.55 * alpha})`],
-              [0.45, `rgba(100,116,139,${0.28 * alpha})`],
-              [1, "rgba(71,85,105,0)"],
-            ]);
+            const alpha = clamp(0.55 + 0.35 * intensity, 0.55, 0.9) * (0.7 + 0.3 * bloom);
+            const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
+            grad.addColorStop(0, `rgba(203, 213, 225, ${0.75 * alpha})`);
+            grad.addColorStop(0.4, `rgba(148, 163, 184, ${0.55 * alpha})`);
+            grad.addColorStop(0.75, `rgba(100, 116, 139, ${0.28 * alpha})`);
+            grad.addColorStop(1, "rgba(71, 85, 105, 0)");
+            ctx.beginPath();
+            ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
+            ctx.fillStyle = grad;
+            ctx.fill();
           } else {
-            paintSoftCell(ctx, cx, cy, radiusPx, [
-              [0, `rgba(255,250,220,${0.95 * alpha})`],
-              [0.25, `rgba(251,191,36,${0.75 * alpha})`],
-              [0.65, `rgba(249,115,22,${0.45 * alpha})`],
-              [1, "rgba(220,38,38,0)"],
-            ]);
+            const alpha = clamp(0.8 + 0.2 * intensity, 0.8, 1);
+            const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
+            grad.addColorStop(0, `rgba(254, 243, 199, ${0.9 * alpha})`);
+            grad.addColorStop(0.35, `rgba(251, 146, 60, ${0.85 * alpha})`);
+            grad.addColorStop(0.75, `rgba(249, 115, 22, ${0.45 * alpha})`);
+            grad.addColorStop(1, "rgba(194, 65, 12, 0)");
+            ctx.beginPath();
+            ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
+            ctx.fillStyle = grad;
+            ctx.fill();
           }
         }
         ctx.restore();
@@ -183,8 +229,4 @@ export default function ReplayAreaEffectsCanvas({
       <canvas ref={canvasRef} className="h-full w-full" />
     </div>
   );
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
 }

@@ -330,19 +330,24 @@ describe("buildOverviewModel", () => {
       rounds: [
         roundWithEvents(1, "a", [
           { type: "kill", actor: "alpha1", target: "beta1", tick: 100 },
+          { type: "clutch", player: "alpha1", won: true, opponents: 2, team_key: "a" },
         ], priorWinners),
         roundWithEvents(2, "a", [
           { type: "kill", actor: "World", target: "beta1", tick: 100 },
           { type: "kill", actor: "alpha1", target: "beta1", tick: 200 },
+          { type: "clutch", player: "alpha1", won: false, opponents: 3, team_key: "a" },
         ], priorWinners),
         roundWithEvents(3, "a", [
           { type: "kill", actor: "alpha1", target: "alpha2", tick: 100 },
+          { type: "clutch", player: "alpha1", won: true, opponents: 1, team_key: "a" },
         ], priorWinners),
         roundWithEvents(4, "b", [
           { type: "kill", actor: "beta1", target: "alpha1", tick: 100 },
+          { type: "clutch", player: "beta1", won: true, opponents: 2, team_key: "b" },
         ], priorWinners),
         roundWithEvents(5, "a", [
           { type: "kill", actor: "beta1", target: "alpha1", tick: 100 },
+          { type: "clutch", player: "beta1", won: false, opponents: 4, team_key: "b" },
         ], priorWinners),
       ],
       players,
@@ -366,6 +371,53 @@ describe("buildOverviewModel", () => {
       });
       expect(model.opening.teamB.fiveVFour.total).toBe(2);
       expect(model.opening.teamB.fourVFive.wins).toBe(0);
+      // 1vN：仅统计 opponents>=2；A 队 1胜1负（排除 1v1），B 队 1胜1负
+      expect(model.opening.teamA.clutch1vN).toEqual({
+        wins: 1,
+        total: 2,
+        rate: null,
+        sampleTooSmall: true,
+      });
+      expect(model.opening.teamB.clutch1vN).toEqual({
+        wins: 1,
+        total: 2,
+        rate: null,
+        sampleTooSmall: true,
+      });
+    });
+
+    it("dedupes 1v3→1v2 for the same player in one round", () => {
+      const model = buildOverviewModel({
+        team_a_name: "Team Alpha",
+        team_b_name: "Team Beta",
+        team_a_score: 1,
+        team_b_score: 0,
+        rounds: [
+          {
+            round_number: 1,
+            winner_team_key: "a",
+            team_a_score_before: 0,
+            team_b_score_before: 0,
+            team_a_score_after: 1,
+            team_b_score_after: 0,
+            events: [{ type: "kill", actor: "alpha1", target: "beta1", tick: 100 }],
+            special_events: [
+              { type: "clutch", player: "alpha1", won: false, opponents: 3, team_key: "a" },
+              { type: "clutch", player: "alpha1", won: true, opponents: 2, team_key: "a" },
+            ],
+            ...sideForRound(1),
+          },
+        ],
+        players,
+      });
+      // 同一选手只计最高人数劣势一次，且以该条记录的胜负为准（取 opponents 最大的那条）
+      expect(model.opening.teamA.clutch1vN).toEqual({
+        wins: 0,
+        total: 1,
+        rate: null,
+        sampleTooSmall: true,
+      });
+      expect(model.opening.teamB.clutch1vN.total).toBe(0);
     });
   });
 
@@ -381,7 +433,8 @@ describe("buildOverviewModel", () => {
 
     it("does not throw and keeps trend/side while marking empty event cards", () => {
       const model = buildOverviewModel(data);
-      expect(model.trend.points.length).toBe(8);
+      expect(model.trend.points.length).toBe(9);
+      expect(model.trend.points[0]).toMatchObject({ lead: 0, scoreA: 0, scoreB: 0, isKickoff: true });
       expect(model.sidePerformance.teamA.total.rounds).toBeGreaterThan(0);
       expect(model.opening.hasData).toBe(false);
       expect(model.objective.hasData).toBe(false);
