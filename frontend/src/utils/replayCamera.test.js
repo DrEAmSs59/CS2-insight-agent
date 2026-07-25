@@ -4,6 +4,7 @@ import {
   clampUserZoom,
   computeFitScale,
   panBy,
+  rescaleCameraForFitChange,
   restoreCameraForViewport,
   zoomAtPointer,
 } from "./replayCamera";
@@ -57,5 +58,20 @@ describe("replayCamera", () => {
     expect(restored.userZoom).toBe(2);
     expect(restored.offsetX).toBeCloseTo(200, 5);
     expect(restored.offsetY).toBeCloseTo(-80, 5);
+  });
+
+  test("rescaleCameraForFitChange scales then clamps so scene stays overlapping", () => {
+    const camera = { fitScale: 1, userZoom: 3, offsetX: -8000, offsetY: -8000 };
+    const viewport = { width: 400, height: 400 };
+    const next = rescaleCameraForFitChange(camera, 2, viewport);
+    expect(next.fitScale).toBe(2);
+    // Raw scaled offsets would be -16000; clamp must pull them back into overlap.
+    expect(next.offsetX).toBeGreaterThan(-16000);
+    expect(next.offsetY).toBeGreaterThan(-16000);
+    const scale = next.fitScale * next.userZoom;
+    expect(next.offsetX).toBeLessThan(400);
+    expect(next.offsetY).toBeLessThan(400);
+    expect(next.offsetX + 1024 * scale).toBeGreaterThan(0);
+    expect(next.offsetY + 1024 * scale).toBeGreaterThan(0);
   });
 });

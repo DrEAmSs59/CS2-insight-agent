@@ -498,7 +498,7 @@ export default function ReplayAreaEffectsCanvas({
         ),
         cells: sample.cells,
         sampleTick: Number(sample.tick),
-        detonation: sample.detonation_pos || sample.detonation || null,
+        detonation: track.stable_origin || sample.detonation_pos || sample.detonation || null,
       });
     }
     return layers;

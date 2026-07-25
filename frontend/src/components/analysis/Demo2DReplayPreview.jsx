@@ -22,6 +22,9 @@ import {
   createReplayClock,
   findPreviousFrameIndex,
   interpolateReplayFrame,
+  replayPositionForTime,
+  resolvePlaybackStartSeconds,
+  secondsForFramePosition,
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 
@@ -209,31 +212,6 @@ function formatClock(seconds) {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-/** Map playhead seconds → fractional sample index (scrubber / ±5s seek). */
-function replayPositionForTime(frames, targetSeconds) {
-  if (!frames.length) return 0;
-  const target = Number(targetSeconds);
-  if (!Number.isFinite(target) || target <= Number(frames[0]?.time_sec || 0)) return 0;
-  for (let index = 1; index < frames.length; index += 1) {
-    const previousTime = Number(frames[index - 1]?.time_sec || 0);
-    const nextTime = Number(frames[index]?.time_sec || previousTime);
-    if (target > nextTime) continue;
-    const ratio = clamp((target - previousTime) / Math.max(0.0001, nextTime - previousTime), 0, 1);
-    return index - 1 + ratio;
-  }
-  return frames.length - 1;
-}
-
-function secondsForFramePosition(frames, position) {
-  if (!frames.length) return 0;
-  const i0 = clamp(Math.floor(Number(position) || 0), 0, frames.length - 1);
-  const i1 = Math.min(frames.length - 1, i0 + 1);
-  const t0 = Number(frames[i0]?.time_sec) || 0;
-  const t1 = Number(frames[i1]?.time_sec) || t0;
-  const frac = clamp((Number(position) || 0) - i0, 0, 1);
-  return i0 === i1 ? t0 : t0 + (t1 - t0) * frac;
-}
-
 function mapKey(value) {
   const raw = String(value || "unknown").trim().toLowerCase();
   if (!raw || raw === "unknown") return "unknown";
@@ -345,6 +323,7 @@ export default function Demo2DReplayPreview({
   const clockRef = useRef(null);
   const framesRef = useRef(frames);
   framesRef.current = frames;
+  const pauseSyncRef = useRef(null);
   const playheadStoreRef = useRef(null);
   if (!playheadStoreRef.current) {
     playheadStoreRef.current = createPlayheadStore({ position: 0, seconds: 0, tick: 0, sampleIndex: 0 });
@@ -478,17 +457,22 @@ export default function Demo2DReplayPreview({
   }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
 
   useEffect(() => {
-    const sampleIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
-    framePositionRef.current = frameIndex;
+    const synced = pauseSyncRef.current;
+    pauseSyncRef.current = null;
+    const position = Number.isFinite(Number(synced?.position)) ? Number(synced.position) : frameIndex;
+    const sampleIndex = clamp(Math.floor(position), 0, Math.max(0, frames.length - 1));
+    framePositionRef.current = position;
     setUiSampleIndex(sampleIndex);
     if (playing) return;
-    const seconds = secondsForFramePosition(frames, frameIndex);
+    const seconds = Number.isFinite(Number(synced?.seconds))
+      ? Number(synced.seconds)
+      : secondsForFramePosition(frames, position);
     const approx = frames.length
       ? interpolateReplayFrame(frames, Number.NaN, seconds)
       : { tick: selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0 };
     const tick = Number(approx.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
     playheadStoreRef.current?.set({
-      position: frameIndex,
+      position,
       seconds,
       tick,
       sampleIndex,
@@ -498,8 +482,12 @@ export default function Demo2DReplayPreview({
 
   useEffect(() => {
     if (!playing || frames.length < 2) return undefined;
-    const startIndex = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
-    const startSeconds = Number(frames[startIndex]?.time_sec || 0);
+    const snap = playheadStoreRef.current?.getSnapshot();
+    const startSeconds = resolvePlaybackStartSeconds(
+      frames,
+      framePositionRef.current,
+      snap?.seconds,
+    );
     const clock = createReplayClock({
       offsetSeconds: startSeconds,
       rate: speed,
@@ -508,7 +496,7 @@ export default function Demo2DReplayPreview({
     clockRef.current = clock;
     clock.play();
     let animationFrame = 0;
-    let lastUiSample = startIndex;
+    let lastUiSample = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
     const lastFrame = frames.length - 1;
     const lastSeconds = Number(frames[lastFrame]?.time_sec) || 0;
     const store = playheadStoreRef.current;
@@ -552,7 +540,25 @@ export default function Demo2DReplayPreview({
     animationFrame = window.requestAnimationFrame(animate);
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      clock.pause();
+      const at = window.performance.now();
+      clock.pause(at);
+      const playheadSeconds = clock.getPlayheadSeconds(at);
+      const activeFrames = framesRef.current;
+      if (!activeFrames.length) return;
+      const position = replayPositionForTime(activeFrames, playheadSeconds);
+      framePositionRef.current = position;
+      const sampleIndex = clamp(Math.floor(position), 0, activeFrames.length - 1);
+      const approx = interpolateReplayFrame(activeFrames, Number.NaN, playheadSeconds);
+      store.set({
+        position,
+        seconds: playheadSeconds,
+        tick: Number(approx.tick) || 0,
+        sampleIndex,
+      });
+      // Preserve fractional playhead across pause / speed change (avoid integer sample snap).
+      pauseSyncRef.current = { seconds: playheadSeconds, position };
+      setFrameIndex(position);
+      setUiSampleIndex(sampleIndex);
     };
   }, [playing, frames.length, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 

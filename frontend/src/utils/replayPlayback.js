@@ -180,6 +180,43 @@ export function interpolateReplayFrame(frames, playheadTick, playheadSeconds = n
   };
 }
 
+/** Map playhead seconds → fractional sample index (scrubber / ±5s seek / pause sync). */
+export function replayPositionForTime(frames, targetSeconds) {
+  if (!frames?.length) return 0;
+  const target = Number(targetSeconds);
+  if (!Number.isFinite(target) || target <= Number(frames[0]?.time_sec || 0)) return 0;
+  for (let index = 1; index < frames.length; index += 1) {
+    const previousTime = Number(frames[index - 1]?.time_sec || 0);
+    const nextTime = Number(frames[index]?.time_sec || previousTime);
+    if (target > nextTime) continue;
+    const ratio = clamp((target - previousTime) / Math.max(0.0001, nextTime - previousTime), 0, 1);
+    return index - 1 + ratio;
+  }
+  return frames.length - 1;
+}
+
+/** Continuous seconds for a fractional sample index (not floor-snapped). */
+export function secondsForFramePosition(frames, position) {
+  if (!frames?.length) return 0;
+  const i0 = clamp(Math.floor(Number(position) || 0), 0, frames.length - 1);
+  const i1 = Math.min(frames.length - 1, i0 + 1);
+  const t0 = Number(frames[i0]?.time_sec) || 0;
+  const t1 = Number(frames[i1]?.time_sec) || t0;
+  const frac = clamp((Number(position) || 0) - i0, 0, 1);
+  return i0 === i1 ? t0 : t0 + (t1 - t0) * frac;
+}
+
+/**
+ * Prefer live playhead.seconds; else continuous seconds for fractional framePosition.
+ * Avoids ~1/SAMPLE_HZ snap when resuming mid-sample.
+ */
+export function resolvePlaybackStartSeconds(frames, framePosition, playheadSeconds = null) {
+  if (playheadSeconds != null && Number.isFinite(Number(playheadSeconds))) {
+    return Number(playheadSeconds);
+  }
+  return secondsForFramePosition(frames, framePosition);
+}
+
 /** Map playhead seconds → tick using first/last frame span (uniform fallback). */
 export function playheadSecondsToTick(frames, playheadSeconds) {
   if (!frames?.length) return 0;

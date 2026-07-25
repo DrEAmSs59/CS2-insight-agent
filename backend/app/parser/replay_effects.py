@@ -291,6 +291,7 @@ def build_smoke_tracks_from_rows(
             if stable_origin is None:
                 continue
 
+            drift_warned = False
             for row in group:
                 origin = row.get("m_vSmokeDetonationPos")
                 if not isinstance(origin, (list, tuple)) or len(origin) < 3:
@@ -300,12 +301,12 @@ def build_smoke_tracks_from_rows(
                 except (TypeError, ValueError):
                     continue
                 drift = math.dist(stable_origin, later)
-                if drift > VOXEL_CELL_SIZE_WORLD:
+                if drift > VOXEL_CELL_SIZE_WORLD and not drift_warned:
+                    drift_warned = True
                     logger.warning(
-                        "smoke entity %s tick %s: detonation origin drift %.1f exceeds "
+                        "smoke entity %s: detonation origin drift %.1f exceeds "
                         "VOXEL_CELL_SIZE_WORLD=%.1f; locking samples to stable_origin=%s",
                         entity_id,
-                        row.get("tick"),
                         drift,
                         VOXEL_CELL_SIZE_WORLD,
                         stable_origin,

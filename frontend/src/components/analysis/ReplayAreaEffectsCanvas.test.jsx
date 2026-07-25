@@ -496,7 +496,7 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(strokeRect).not.toHaveBeenCalled();
   });
 
-  test("world_cells draws detonation crosshair when present", () => {
+  test("world_cells draws detonation crosshair from track.stable_origin", () => {
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
     const fillRect = vi.fn();
     const strokeRect = vi.fn();
@@ -524,9 +524,11 @@ describe("ReplayAreaEffectsCanvas", () => {
       start_tick: 100,
       end_tick: 200,
       cell_size: 20,
+      stable_origin: [300, 400, 60],
       samples: [{
         tick: 100,
         cells: [[100, 200, 50, 1]],
+        // Divergent sample field must NOT win over stable_origin.
         detonation_pos: [150, 250, 55],
       }],
     }];
@@ -545,6 +547,15 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(moveTo).toHaveBeenCalled();
     expect(lineTo).toHaveBeenCalled();
     expect(stroke).toHaveBeenCalled();
+    // clientWidth/Height fall back to 1 in jsdom; assert crosshair at stable_origin mapping.
+    const RADAR = 1024;
+    const mapX = (300 - 0) / 5;
+    const mapY = (4096 - 400) / 5;
+    const cx = ((mapX / RADAR) * 100 / 100) * 1;
+    const cy = ((mapY / RADAR) * 100 / 100) * 1;
+    const size = 6;
+    expect(moveTo).toHaveBeenCalledWith(cx - size, cy);
+    expect(lineTo).toHaveBeenCalledWith(cx + size, cy);
   });
 
   test("mask Image sets crossOrigin anonymous before src (Tauri CORS)", () => {

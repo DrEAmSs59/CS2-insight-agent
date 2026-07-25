@@ -6,6 +6,9 @@ import {
   interpolateReplayFrame,
   lerpAngle,
   lerpNumber,
+  replayPositionForTime,
+  resolvePlaybackStartSeconds,
+  secondsForFramePosition,
 } from "./replayPlayback";
 
 describe("lerpAngle", () => {
@@ -66,6 +69,32 @@ describe("interpolateReplayFrame", () => {
     const late = interpolateReplayFrame(frames, 106);
     expect(early.players[0].weapon).toBe("ak");
     expect(late.players[0].weapon).toBe("awp");
+  });
+});
+
+describe("secondsForFramePosition / replayPositionForTime", () => {
+  const frames = [
+    { tick: 100, time_sec: 0 },
+    { tick: 108, time_sec: 0.125 },
+    { tick: 116, time_sec: 0.25 },
+  ];
+
+  it("keeps fractional mid-sample seconds (not floor sample boundary)", () => {
+    const position = 0.5;
+    const seconds = secondsForFramePosition(frames, position);
+    expect(seconds).toBeCloseTo(0.0625, 5);
+    // Floor-snapped start would incorrectly use frames[0].time_sec === 0 (~125ms snap).
+    expect(Number(frames[Math.floor(position)].time_sec)).toBe(0);
+    expect(seconds).not.toBe(0);
+  });
+
+  it("round-trips fractional position through pause/resume seconds", () => {
+    const position = 1.25;
+    const seconds = secondsForFramePosition(frames, position);
+    const restored = replayPositionForTime(frames, seconds);
+    expect(restored).toBeCloseTo(position, 5);
+    expect(resolvePlaybackStartSeconds(frames, position, seconds)).toBeCloseTo(seconds, 5);
+    expect(resolvePlaybackStartSeconds(frames, position, null)).toBeCloseTo(seconds, 5);
   });
 });
 
