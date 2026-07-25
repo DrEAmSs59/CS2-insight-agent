@@ -30,6 +30,17 @@ def _run(payload: dict) -> object:
     dem_path = str(payload.get("dem_path") or "")
     if not dem_path:
         raise ValueError("dem_path is required")
+    if action == "materialize_replay":
+        workspace = payload.get("workspace")
+        if not isinstance(workspace, dict):
+            raise ValueError("workspace must be an object")
+        from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+
+        return materialize_match_replay_parquet_impl(
+            demo_path=dem_path,
+            workspace=workspace,
+            fps=float(payload.get("fps") or 32.0),
+        )
     if action == "analyze":
         target = str(payload.get("target_player") or "").strip()
         if not target:

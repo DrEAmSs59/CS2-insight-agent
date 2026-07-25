@@ -154,6 +154,8 @@ _ENQUEUE_STRIPE_COUNT = 64
 # /api/demo/replay single-flight: identical cache keys share one parse Future
 _replay_jobs: dict[str, asyncio.Future] = {}
 _replay_jobs_lock = asyncio.Lock()
+_replay_binary_jobs: dict[str, asyncio.Future] = {}
+_replay_binary_jobs_lock = asyncio.Lock()
 
 
 def infer_demo_source(filename: str, server_name: str | None = None) -> str:
@@ -288,6 +290,14 @@ async def lifespan(_: FastAPI):
     保留 ``DemoWatcher`` 实例只是为 ``POST /api/demos/scan`` 这一条手动扫描接口
     服务；页面上改为用户点"刷新"按钮时主动扫描。
     """
+    from .demoparser_runtime import require_demoparser_runtime
+
+    demoparser_runtime = require_demoparser_runtime()
+    logger.info(
+        "Patched demoparser runtime ready: %s",
+        demoparser_runtime["installed_version"],
+    )
+
     global demo_watcher
     await demo_db.init_db()
     await montage_db.init_tables()
@@ -365,6 +375,8 @@ def _write_recovery_marker(reason: str) -> None:
 
 @app.get("/api/app/runtime-state")
 async def app_runtime_state():
+    from .demoparser_runtime import inspect_demoparser_runtime
+
     return {
         "pid": os.getpid(),
         "instance_id": (os.getenv("CS2_INSIGHT_INSTANCE_ID") or "").strip(),
@@ -372,6 +384,7 @@ async def app_runtime_state():
         "data_dir": str(get_data_dir()),
         "recovery_required": _recovery_marker_path().is_file(),
         "runtime_session": runtime_session_state(),
+        "demoparser_runtime": inspect_demoparser_runtime(),
     }
 
 
@@ -3124,10 +3137,10 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
         )
 
     dem_path = resolve_uploaded_demo_path(req.path)
-    try:
-        from .parser.replay_match_cache import load_match_replay_round_binary
+    from .parser.replay_match_cache import load_match_replay_round_binary
 
-        packet = await asyncio.to_thread(
+    async def _load_packet() -> bytes | None:
+        return await asyncio.to_thread(
             load_match_replay_round_binary,
             str(dem_path),
             start_tick=int(req.start_tick),
@@ -3135,11 +3148,86 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
             fps=float(req.fps),
             tick_rate=float(req.tick_rate),
         )
-    except Exception as exc:  # noqa: BLE001 - frontend can fall back to JSON
+
+    try:
+        packet = await _load_packet()
+    except Exception as exc:  # noqa: BLE001 - report native/cache failures explicitly
         logger.warning("whole-match binary replay load failed: %s", exc)
         raise HTTPException(503, f"Binary replay unavailable: {type(exc).__name__}") from exc
+
     if packet is None:
-        raise HTTPException(404, "Binary replay cache is not available")
+        job_key = f"{dem_path}|{float(req.fps):.6f}|{float(req.tick_rate):.6f}"
+        async with _replay_binary_jobs_lock:
+            existing = _replay_binary_jobs.get(job_key)
+            if existing is not None:
+                shared = True
+                future = existing
+            else:
+                shared = False
+                future = asyncio.get_running_loop().create_future()
+                future.add_done_callback(
+                    lambda completed: (
+                        completed.exception() if not completed.cancelled() else None
+                    )
+                )
+                _replay_binary_jobs[job_key] = future
+
+        if shared:
+            try:
+                packet = await future
+            except Exception as exc:  # noqa: BLE001 - mirror the leader's repair failure
+                raise HTTPException(
+                    503,
+                    f"Binary replay cache repair failed: {type(exc).__name__}",
+                ) from exc
+        else:
+            try:
+                persisted = await demo_db.get_result(str(dem_path))
+                workspace = (
+                    persisted.get("analysis_workspace")
+                    if isinstance(persisted, dict)
+                    else None
+                )
+                if not isinstance(workspace, dict) or not workspace.get("rounds"):
+                    packet = None
+                else:
+                    from .demo_parse_isolation import (
+                        materialize_match_replay_parquet_isolated,
+                    )
+
+                    materialized = await asyncio.to_thread(
+                        materialize_match_replay_parquet_isolated,
+                        str(dem_path),
+                        workspace,
+                        fps=float(req.fps),
+                    )
+                    logger.info(
+                        "Cold replay Parquet cache repair: path=%s status=%s",
+                        dem_path,
+                        materialized.get("status"),
+                    )
+                    packet = await _load_packet()
+                if not future.done():
+                    future.set_result(packet)
+            except Exception as exc:  # noqa: BLE001 - native worker failure is explicit
+                if not future.done():
+                    future.set_exception(exc)
+                logger.warning("whole-match binary replay cold repair failed: %s", exc)
+                raise HTTPException(
+                    503,
+                    f"Binary replay cache repair failed: {type(exc).__name__}",
+                ) from exc
+            finally:
+                async with _replay_binary_jobs_lock:
+                    if _replay_binary_jobs.get(job_key) is future:
+                        _replay_binary_jobs.pop(job_key, None)
+
+    if packet is None:
+        raise HTTPException(
+            409,
+            "Binary replay cache is missing and no persisted analysis workspace can rebuild it; "
+            "analyze the demo again",
+        )
     return Response(
         content=packet,
         media_type="application/vnd.cs2-insight.replay-v1",

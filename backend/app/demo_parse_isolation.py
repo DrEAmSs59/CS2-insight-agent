@@ -138,6 +138,24 @@ def extract_replay_effects_isolated(**kwargs: Any) -> Any:
     return run_parse_worker("replay_effects", **kwargs)
 
 
+def materialize_match_replay_parquet_isolated(
+    demo_path: str,
+    workspace: dict[str, Any],
+    *,
+    fps: float = 32.0,
+) -> dict[str, Any]:
+    """Build the whole-match Rust Parquet cache without risking the API process."""
+    result = run_parse_worker(
+        "materialize_replay",
+        dem_path=demo_path,
+        workspace=workspace,
+        fps=float(fps),
+    )
+    if not isinstance(result, dict):
+        raise IsolatedParseError("回放 Parquet worker 返回了无效结果")
+    return result
+
+
 def analyze_multi_isolated(
     dem_path: str,
     target_players: list[str],

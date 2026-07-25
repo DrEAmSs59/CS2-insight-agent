@@ -26,8 +26,7 @@
   Then exit — use before npm run electron:build (electron-builder extraResources reads ..\python).
 
 .PARAMETER DemoparserWheel
-  Optional locally built lean demoparser wheel. It is installed before requirements.txt,
-  preventing the release runtime from pulling Polars and PyArrow.
+  Required patched demoparser wheel. It is installed before requirements.txt.
 
 #>
 param(
@@ -136,23 +135,22 @@ function Install-BackendRequirements {
     $previousNoUserSite = $env:PYTHONNOUSERSITE
     $env:PYTHONNOUSERSITE = "1"
     try {
+    if (-not $DemoparserWheel.Trim()) {
+        throw "DemoparserWheel is required; refusing to create a runtime with the stock parser."
+    }
     Write-Step "pip install -r requirements.txt (this can take several minutes)"
     & $PythonExe -m pip install -U pip
     if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)" }
-    if ($DemoparserWheel.Trim()) {
-        $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
-        Write-Step "Install lean demoparser wheel"
-        & $PythonExe -m pip install --no-deps $leanWheel
-        if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed (exit $LASTEXITCODE)" }
-    }
+    $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
+    Write-Step "Install patched demoparser wheel"
+    & $PythonExe -m pip install --no-deps $leanWheel
+    if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed (exit $LASTEXITCODE)" }
     & $PythonExe -m pip install -c $ConstraintsFile -r $RequirementsPath
     if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)" }
-    if ($DemoparserWheel.Trim()) {
-        & $PythonExe -m pip uninstall -y polars pyarrow polars-runtime-32
-        $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
-        & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; assert m.version('demoparser2') == sys.argv[1]; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
-        if ($LASTEXITCODE -ne 0) { throw "lean demoparser runtime verification failed (exit $LASTEXITCODE)" }
-    }
+    & $PythonExe -m pip uninstall -y polars pyarrow polars-runtime-32
+    $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
+    & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+    if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed (exit $LASTEXITCODE)" }
     Write-Step "Remove pip / setuptools / wheel (not needed at runtime)"
     & $PythonExe -m pip uninstall -y pip setuptools wheel
     if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed (exit $LASTEXITCODE)" }

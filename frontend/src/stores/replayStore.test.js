@@ -114,27 +114,20 @@ describe("replayStore", () => {
     }));
   });
 
-  test("falls back to the legacy JSON endpoint when binary cache is unavailable", async () => {
-    API.post
-      .mockRejectedValueOnce({ response: { status: 404 } })
-      .mockResolvedValueOnce({
-        data: {
-          frames: [{ tick: 2 }],
-          fps: 8,
-          effect_tracks: [],
-          cache: { frames: "disk_hit", parsed: false },
-        },
-      });
+  test("surfaces binary runtime failures without silently falling back to JSON", async () => {
+    API.post.mockRejectedValueOnce({
+      response: { status: 503, data: { detail: "Binary replay unavailable" } },
+    });
 
-    const replay = await useReplayStore.getState().ensureReplay("legacy", { path: "old.dem" });
+    await expect(
+      useReplayStore.getState().ensureReplay("binary-error", { path: "old.dem" }),
+    ).rejects.toMatchObject({ response: { status: 503 } });
 
-    expect(replay.frames[0].tick).toBe(2);
-    expect(API.post).toHaveBeenNthCalledWith(
-      1,
+    expect(API.post).toHaveBeenCalledTimes(1);
+    expect(API.post).toHaveBeenCalledWith(
       "/demo/replay/binary",
       { path: "old.dem" },
       { responseType: "arraybuffer" },
     );
-    expect(API.post).toHaveBeenNthCalledWith(2, "/demo/replay", { path: "old.dem" });
   });
 });

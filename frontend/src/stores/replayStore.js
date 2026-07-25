@@ -26,22 +26,15 @@ function estimateSizeBytes(payload) {
 }
 
 async function requestReplayFrames(requestBody) {
-  try {
-    const response = await API.post("/demo/replay/binary", requestBody, {
-      responseType: "arraybuffer",
-    });
-    if (response.data instanceof ArrayBuffer || ArrayBuffer.isView(response.data)) {
-      return decodeReplayBinary(response.data);
-    }
-    // Test/dev proxy compatibility: accept an already-decoded object.
-    if (response.data && typeof response.data === "object") return response.data;
-    throw new Error("回放二进制响应为空");
-  } catch (error) {
-    const status = Number(error?.response?.status);
-    if (status && ![404, 415, 501, 503].includes(status)) throw error;
-    const { data } = await API.post("/demo/replay", requestBody);
-    return data;
+  const response = await API.post("/demo/replay/binary", requestBody, {
+    responseType: "arraybuffer",
+  });
+  if (response.data instanceof ArrayBuffer || ArrayBuffer.isView(response.data)) {
+    return decodeReplayBinary(response.data);
   }
+  // Test/dev proxy compatibility: accept an already-decoded object.
+  if (response.data && typeof response.data === "object") return response.data;
+  throw new Error("回放二进制响应为空");
 }
 
 function buildReplayCacheKey({

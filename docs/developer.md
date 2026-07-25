@@ -99,15 +99,26 @@ CS2-insight-agent/
 
 #### 1. Backend
 
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-# 或
-python -m uvicorn app.main:app --reload --port 8000
+```powershell
+# 在仓库根目录执行。默认创建 .venv，下载固定版本的 Windows CPython 3.12
+# demoparser2 wheel，并用同一 release 中的 SHA256 文件校验后安装。
+.\packaging\demoparser-lean\setup-backend-dev.ps1
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app `
+  --app-dir backend --reload --port 8000
 ```
 
-发行版内置的 Python 运行时为 `3.12`。
+发行版内置的 Python 运行时为 `3.12`。2D 回放依赖项目固定的
+`demoparser2 0.41.4+cs2insight5` PyO3/Rust 扩展，不能用 PyPI 原版替代。
+如果预编译 wheel 尚未发布，已安装 Rust 工具链的开发者可以执行：
+
+```powershell
+.\packaging\demoparser-lean\setup-backend-dev.ps1 -BuildFromSource
+```
+
+后端启动时会校验 wheel 版本以及 `write_replay_parquet`、
+`read_replay_parquet_round`、`read_replay_parquet_round_binary` 三个 Rust
+接口。运行时不匹配会直接终止启动，不会静默退回 JSON 回放。
 
 #### 2. Frontend
 
