@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Bomb,
   ChevronLeft,
@@ -23,6 +23,7 @@ import {
   yawToCssRotation,
 } from "../../utils/replayRadarTransform";
 import {
+  createPlayheadStore,
   createReplayClock,
   interpolateReplayFrame as interpolateReplayFrameByTick,
 } from "../../utils/replayPlayback";
@@ -562,6 +563,10 @@ export default function Demo2DReplayPreview({
   const clockRef = useRef(null);
   const framesRef = useRef(frames);
   framesRef.current = frames;
+  const playheadStoreRef = useRef(null);
+  if (!playheadStoreRef.current) {
+    playheadStoreRef.current = createPlayheadStore({ position: 0, seconds: 0, tick: 0, sampleIndex: 0 });
+  }
 
   useEffect(() => {
     setRoundNumber(initialRound || rounds[0]?.round_number || 1);
@@ -697,8 +702,16 @@ export default function Demo2DReplayPreview({
 
   useEffect(() => {
     framePositionRef.current = frameIndex;
-    setUiSampleIndex(clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1)));
-  }, [frameIndex, frames.length]);
+    const sampleIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
+    setUiSampleIndex(sampleIndex);
+    const approx = interpolateReplayFrame(frames, frameIndex, selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0);
+    playheadStoreRef.current?.set({
+      position: frameIndex,
+      seconds: Number(approx.time_sec) || 0,
+      tick: Number(approx.tick) || 0,
+      sampleIndex,
+    });
+  }, [frameIndex, frames, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) return undefined;
@@ -715,6 +728,7 @@ export default function Demo2DReplayPreview({
     const lastFrame = frames.length - 1;
     const lastSeconds = Number(frames[lastFrame]?.time_sec);
     const hasTimeBase = Number.isFinite(lastSeconds) && Number.isFinite(startSeconds);
+    const store = playheadStoreRef.current;
 
     const animate = (now) => {
       const activeFrames = framesRef.current;
@@ -724,7 +738,6 @@ export default function Demo2DReplayPreview({
       if (hasTimeBase) {
         nextPosition = replayPositionForTime(activeFrames, playheadSeconds);
       } else {
-        // Fallback: convert absolute seconds back through nominal sample Hz.
         nextPosition = Math.min(
           lastFrame,
           (playheadSeconds - startSeconds) * replayFps,
@@ -732,15 +745,26 @@ export default function Demo2DReplayPreview({
       }
       nextPosition = Math.min(lastFrame, Math.max(0, nextPosition));
       framePositionRef.current = nextPosition;
-      setFrameIndex(nextPosition);
 
+      const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
+      const approx = interpolateReplayFrame(activeFrames, nextPosition, fallbackTick);
       const sampleIndex = clamp(Math.floor(nextPosition), 0, lastFrame);
+      store.set({
+        position: nextPosition,
+        seconds: Number(approx.time_sec) || playheadSeconds,
+        tick: Number(approx.tick) || 0,
+        sampleIndex,
+      });
+
+      // React UI (slider / roster) only at 8Hz sample boundaries — not every rAF.
       if (sampleIndex !== lastUiSample) {
         lastUiSample = sampleIndex;
         setUiSampleIndex(sampleIndex);
+        setFrameIndex(sampleIndex);
       }
 
       if (nextPosition >= lastFrame - 0.001) {
+        setFrameIndex(lastFrame);
         setPlaying(false);
         return;
       }
@@ -751,25 +775,30 @@ export default function Demo2DReplayPreview({
       window.cancelAnimationFrame(animationFrame);
       clock.pause();
     };
-  }, [playing, frames.length, replayFps, speed]);
+  }, [playing, frames.length, replayFps, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
-  const frameCursorIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
+  const playhead = useSyncExternalStore(
+    playheadStoreRef.current.subscribe,
+    playheadStoreRef.current.getSnapshot,
+  );
+  const frameCursorIndex = clamp(Math.floor(playing ? playhead.position : frameIndex), 0, Math.max(0, frames.length - 1));
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const frame = useMemo(() => {
     if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
-    // Tick/time brackets stay accurate when sample spacing is uneven; index path covers scrubbing.
+    const position = playing ? playhead.position : frameIndex;
     if (Number.isFinite(Number(frames[0]?.tick)) && Number.isFinite(Number(frames[0]?.time_sec))) {
-      const approx = interpolateReplayFrame(frames, frameIndex, fallbackTick);
+      const approx = interpolateReplayFrame(frames, position, fallbackTick);
       const tick = Number(approx.tick);
       const seconds = Number(approx.time_sec);
       if (Number.isFinite(tick)) {
         return interpolateReplayFrameByTick(frames, tick, seconds);
       }
     }
-    return interpolateReplayFrame(frames, frameIndex, fallbackTick);
-  }, [fallbackTick, frameIndex, frames]);
+    return interpolateReplayFrame(frames, position, fallbackTick);
+  }, [fallbackTick, frameIndex, frames, playhead.position, playing]);
   const uiFrame = frames[uiSampleIndex] || frames[frameCursorIndex] || frame;
   const currentTick = Number(frame.tick || fallbackTick || 0);
+  const sliderIndex = playing ? uiSampleIndex : frameIndex;
   const hasSmokeAreaTracks = Boolean(
     effectCapabilities?.smoke_voxels
     && effectTracks.some((track) => track?.type === "smoke" && Array.isArray(track.samples) && track.samples.length),
@@ -1080,7 +1109,7 @@ export default function Demo2DReplayPreview({
                 return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={event.type === "kill" ? "kill" : "utility"} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
               })}
             </div>
-            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={frameIndex} onChange={(event) => { setFrameIndex(Number(event.target.value)); setPlaying(false); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
+            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { setFrameIndex(Number(event.target.value)); setPlaying(false); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
           </div>
           <button type="button" onClick={() => { setFrameIndex(0); setPlaying(false); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
           <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(frame.tick) || 0)} · {replayFps} Hz</p></div>
