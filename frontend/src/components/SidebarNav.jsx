@@ -11,12 +11,17 @@ import {
   Moon,
 } from "lucide-react";
 import { useThemeStore } from "../stores/themeStore";
+import { useReplayStore } from "../stores/replayStore";
 import { useT } from "../i18n/useT.js";
 
 const linkBase =
   "flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-semibold transition-colors border border-transparent";
 const linkIdle = "text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary";
 const linkActive = "border-cs2-accent/45 bg-cs2-accent-soft text-cs2-accent";
+
+function suspendReplayPlayback() {
+  useReplayStore.getState().requestSuspendPlayback();
+}
 
 export default function SidebarNav({ queueLength = 0, disabled = false, onCheckUpdate }) {
   const theme = useThemeStore((s) => s.theme);
@@ -42,7 +47,11 @@ export default function SidebarNav({ queueLength = 0, disabled = false, onCheckU
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-1.5 py-2" aria-label={t("nav.mainNav")}>
+      <nav
+        className="flex flex-1 flex-col gap-1 overflow-y-auto px-1.5 py-2"
+        aria-label={t("nav.mainNav")}
+        onPointerDownCapture={suspendReplayPlayback}
+      >
         <NavLink to="/" end className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <BookOpen className="h-4 w-4 shrink-0 opacity-90" />
           {t("nav.guide")}

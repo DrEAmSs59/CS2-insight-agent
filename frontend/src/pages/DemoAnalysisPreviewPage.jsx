@@ -25,6 +25,7 @@ import DemoUpload from "../components/DemoUpload";
 import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView";
 import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import Demo2DReplayPreview from "../components/analysis/Demo2DReplayPreview";
+import { useReplayStore } from "../stores/replayStore";
 import {
   EconomyView,
   OverviewView,
@@ -451,7 +452,7 @@ export default function DemoAnalysisPreviewPage() {
           <div className="flex flex-wrap items-center justify-end gap-2">
             <DemoSelector matches={matches} currentIndex={s.currentMatchIndex} onChange={s.setCurrentMatchIndex} disabled={s.batchRecording} />
             <Button variant="secondary" size="sm" disabled={!currentUpload?.id && !currentUpload?.path} onClick={playCurrentDemo}><Play className="h-3 w-3 fill-current" />播放 Demo</Button>
-            <Button variant="secondary" size="sm" onClick={s.handleResetDemo} disabled={s.anyDemoParsing || s.batchRecording}><RefreshCw className="h-3.5 w-3.5" />重置 Demo</Button>
+            <Button variant="secondary" size="sm" onClick={s.handleResetDemo} disabled={s.anyDemoParsing || s.batchRecording}><RefreshCw className="h-3.5 w-3.5" />切换 Demo</Button>
           </div>
         </div>
       </header>
@@ -487,7 +488,22 @@ export default function DemoAnalysisPreviewPage() {
           </section>
 
           <nav className="flex h-10 gap-1 overflow-x-auto rounded-[10px] border border-cs2-border bg-cs2-bg-card p-1" aria-label="Demo 分析视图">
-            {TABS.map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setActiveTab(key)} className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/20" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
+            {TABS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onPointerDown={() => {
+                  if (activeTab === "replay" && key !== "replay") {
+                    useReplayStore.getState().requestSuspendPlayback();
+                  }
+                }}
+                onClick={() => setActiveTab(key)}
+                className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/20" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
           </nav>
 
           {activeTab === "highlights" && (
