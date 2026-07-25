@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,9 +57,15 @@ run(
 
 const tauri = join(frontendRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
 const buildConfig = { version };
+const hasUpdaterSigningKey = Boolean(buildEnv.TAURI_SIGNING_PRIVATE_KEY);
+if (!hasUpdaterSigningKey) {
+  buildConfig.bundle = { createUpdaterArtifacts: false };
+  console.warn("[desktop] updater private key not found — building an unsigned local installer");
+}
 const certificateThumbprint = buildEnv.CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT?.replaceAll(/\s/g, "");
 if (certificateThumbprint) {
   buildConfig.bundle = {
+    ...buildConfig.bundle,
     windows: {
       certificateThumbprint,
       digestAlgorithm: "sha256",
@@ -86,6 +92,10 @@ if (process.platform === "win32") {
     "nsis",
     `CS2 Insight Agent_${version}_x64-setup.exe`,
   );
+  const updaterSignature = `${artifact}.sig`;
+  if (!hasUpdaterSigningKey && existsSync(updaterSignature)) {
+    rmSync(updaterSignature);
+  }
   const gnuBuild = /gnu/i.test(
     [
       buildEnv.RUSTUP_TOOLCHAIN,

@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 
+import pandas as pd
+
 from app.parser.replay_effects import (
+    _parse_effect_rows,
     build_inferno_tracks_from_rows,
     build_smoke_tracks_from_rows,
     extract_dynamic_effect_tracks,
@@ -379,6 +382,64 @@ class TestSmokeTracks:
 
 
 class TestExtractDynamicEffectTracks:
+    def test_combined_parser_is_preferred_and_split_before_rows(self):
+        class Combined:
+            def __init__(self):
+                self.calls = 0
+
+            def parse_utility_effects(self, extra=None):
+                self.calls += 1
+                assert "m_VoxelFrameData" in extra
+                assert "m_firePositions" in extra
+                return pd.DataFrame(
+                    [
+                        {"grenade_type": "CInferno", "tick": 10},
+                        {
+                            "grenade_type": "CSmokeGrenadeProjectile",
+                            "m_bDidSmokeEffect": True,
+                            "tick": 20,
+                        },
+                        {"grenade_type": "CHEGrenadeProjectile", "tick": 30},
+                    ]
+                )
+
+            def parse_infernos(self, extra=None):
+                raise AssertionError("legacy inferno pass must not run")
+
+            def parse_grenades(self, extra=None):
+                raise AssertionError("legacy grenade pass must not run")
+
+        parser = Combined()
+        inferno_rows, smoke_rows, warnings = _parse_effect_rows(parser)
+        assert warnings == []
+        assert parser.calls == 1
+        assert [row["tick"] for row in inferno_rows] == [10]
+        assert [row["tick"] for row in smoke_rows] == [20]
+
+    def test_combined_parser_failure_falls_back_to_legacy_passes(self):
+        class Fallback:
+            def parse_utility_effects(self, extra=None):
+                raise RuntimeError("combined unavailable")
+
+            def parse_infernos(self, extra=None):
+                return pd.DataFrame([{"grenade_type": "CInferno", "tick": 10}])
+
+            def parse_grenades(self, extra=None):
+                return pd.DataFrame(
+                    [
+                        {
+                            "grenade_type": "CSmokeGrenadeProjectile",
+                            "m_bDidSmokeEffect": True,
+                            "tick": 20,
+                        }
+                    ]
+                )
+
+        inferno_rows, smoke_rows, warnings = _parse_effect_rows(Fallback())
+        assert [row["tick"] for row in inferno_rows] == [10]
+        assert [row["tick"] for row in smoke_rows] == [20]
+        assert any("legacy passes" in warning for warning in warnings)
+
     def test_exception_does_not_raise(self):
         class Boom:
             def parse_infernos(self, extra=None):

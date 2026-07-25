@@ -17,6 +17,43 @@ const SMOKE_CONTOUR_THRESHOLD = 0.15;
 const SMOKE_DILATE_CELLS = 1;
 const UTILITY_SOFT_BLUR_PX = 1.25;
 
+const EFFECT_PALETTES = {
+  T: {
+    smokeSoft: [180, 164, 126],
+    smokeCore: [226, 211, 174],
+    fire: [
+      [255, 247, 214],
+      [251, 191, 36],
+      [249, 115, 22],
+      [153, 27, 27],
+    ],
+  },
+  CT: {
+    smokeSoft: [112, 151, 174],
+    smokeCore: [186, 216, 232],
+    fire: [
+      [239, 246, 255],
+      [125, 211, 252],
+      [251, 146, 60],
+      [30, 64, 175],
+    ],
+  },
+  unknown: {
+    smokeSoft: [148, 163, 184],
+    smokeCore: [203, 213, 225],
+    fire: [
+      [254, 243, 199],
+      [251, 146, 60],
+      [249, 115, 22],
+      [194, 65, 12],
+    ],
+  },
+};
+
+export function effectPalette(side) {
+  return EFFECT_PALETTES[String(side || "").toUpperCase()] || EFFECT_PALETTES.unknown;
+}
+
 function worldToPercent(point, transform) {
   return worldToRadarPercent(point, transform);
 }
@@ -216,14 +253,15 @@ function worldRingToCanvasPath(ring, transform, width, height) {
   return points;
 }
 
-function fillSmokeRings(ctx, rings, transform, width, height, alpha, { soft = false } = {}) {
+function fillSmokeRings(ctx, rings, transform, width, height, alpha, palette, { soft = false } = {}) {
   if (!rings?.length || alpha <= 0) return;
   const fillAlpha = soft
     ? clamp(0.18 + 0.2 * alpha, 0.1, 0.4)
     : clamp(0.5 + 0.35 * alpha, 0.28, 0.9);
+  const [red, green, blue] = soft ? palette.smokeSoft : palette.smokeCore;
   ctx.fillStyle = soft
-    ? `rgba(148, 163, 184, ${fillAlpha})`
-    : `rgba(203, 213, 225, ${fillAlpha})`;
+    ? `rgba(${red}, ${green}, ${blue}, ${fillAlpha})`
+    : `rgba(${red}, ${green}, ${blue}, ${fillAlpha})`;
   for (const ring of rings) {
     const points = worldRingToCanvasPath(ring, transform, width, height);
     if (points.length < 3) continue;
@@ -260,11 +298,12 @@ function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, 
 
   const activeDensity = averageCellDensity(activeCells);
   const activeRings = buildSmokeContourRings(activeCells, cellSize);
+  const palette = effectPalette(track.side);
 
   const paintLayer = (rings, alpha) => {
     if (alpha <= 0) return;
-    fillSmokeRings(ctx, rings.soft, transform, width, height, alpha, { soft: true });
-    fillSmokeRings(ctx, rings.core, transform, width, height, alpha, { soft: false });
+    fillSmokeRings(ctx, rings.soft, transform, width, height, alpha, palette, { soft: true });
+    fillSmokeRings(ctx, rings.core, transform, width, height, alpha, palette, { soft: false });
   };
 
   if (next?.cells?.length) {
@@ -285,12 +324,14 @@ function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, 
   }
 }
 
-function drawRadarSquareCells(ctx, projected, cellSize, transform, width, height) {
+function drawRadarSquareCells(ctx, projected, cellSize, transform, width, height, palette) {
   const halfExtentPct = worldRadiusToPercent(cellSize / 2, transform);
   const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+  const [softRed, softGreen, softBlue] = palette.smokeSoft;
+  const [coreRed, coreGreen, coreBlue] = palette.smokeCore;
   for (const item of projected) {
-    ctx.fillStyle = "rgba(148, 163, 184, 0.45)";
-    ctx.strokeStyle = "rgba(203, 213, 225, 0.85)";
+    ctx.fillStyle = `rgba(${softRed}, ${softGreen}, ${softBlue}, 0.45)`;
+    ctx.strokeStyle = `rgba(${coreRed}, ${coreGreen}, ${coreBlue}, 0.85)`;
     ctx.lineWidth = 1;
     ctx.fillRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
     ctx.strokeRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
@@ -317,19 +358,21 @@ function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, he
 }
 
 /** Fire occupancy squares; flicker only modulates color/alpha, not geometry. */
-function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height, currentTick) {
+function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height, currentTick, palette) {
   const sizeWorld = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : INFERNO_CELL_SIZE_WORLD;
   const halfExtentPct = worldRadiusToPercent(sizeWorld / 2, transform);
   const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
   const tick = Number(currentTick) || 0;
+  const [, , fireOuter] = palette.fire;
+  const [coreRed, coreGreen, coreBlue] = palette.fire[0];
   for (const item of projected) {
     const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
     const flicker = 0.88 + 0.12 * Math.sin(tick * 0.41 + item.cx * 0.02 + item.cy * 0.017);
     const alpha = clamp((0.75 + 0.25 * intensity) * flicker, 0.55, 1);
-    ctx.fillStyle = `rgba(249, 115, 22, ${0.72 * alpha})`;
+    ctx.fillStyle = `rgba(${fireOuter.join(", ")}, ${0.72 * alpha})`;
     ctx.fillRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
     const core = halfExtentPx * 0.45;
-    ctx.fillStyle = `rgba(254, 243, 199, ${0.55 * alpha})`;
+    ctx.fillStyle = `rgba(${coreRed}, ${coreGreen}, ${coreBlue}, ${0.55 * alpha})`;
     ctx.fillRect(item.cx - core, item.cy - core, core * 2, core * 2);
   }
 }
@@ -351,7 +394,15 @@ function paintEffectLayers(ctx, {
       const projected = projectLayerCells(layer, transform, mapLayer, width, height);
       if (!projected.length) continue;
       ctx.save();
-      drawRadarSquareCells(ctx, projected, layer.cellSize, transform, width, height);
+      drawRadarSquareCells(
+        ctx,
+        projected,
+        layer.cellSize,
+        transform,
+        width,
+        height,
+        effectPalette(layer.side),
+      );
       if (smokeDebugLayer === "world_cells") {
         drawDetonationCrosshair(ctx, layer.detonation, transform, mapLayer, width, height);
       }
@@ -372,7 +423,16 @@ function paintEffectLayers(ctx, {
     if (!projected.length) continue;
     const fireCellSize = Number(layer.cellSize) > 0 ? Number(layer.cellSize) : INFERNO_CELL_SIZE_WORLD;
     ctx.save();
-    drawInfernoOccupancy(ctx, projected, fireCellSize, transform, width, height, currentTick);
+    drawInfernoOccupancy(
+      ctx,
+      projected,
+      fireCellSize,
+      transform,
+      width,
+      height,
+      currentTick,
+      effectPalette(layer.side),
+    );
     ctx.restore();
   }
 }
@@ -499,6 +559,7 @@ export default function ReplayAreaEffectsCanvas({
         cells: sample.cells,
         sampleTick: Number(sample.tick),
         detonation: track.stable_origin || sample.detonation_pos || sample.detonation || null,
+        side: String(track.side || "").toUpperCase(),
       });
     }
     return layers;
@@ -517,6 +578,7 @@ export default function ReplayAreaEffectsCanvas({
         sampleTick: layer.sampleTick,
         cellSize: layer.cellSize,
         n: layer.cells.length,
+        side: layer.side,
       })),
       scale: transform?.scale,
       pos_x: transform?.pos_x,

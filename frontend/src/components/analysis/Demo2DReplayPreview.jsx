@@ -437,6 +437,8 @@ export default function Demo2DReplayPreview({
       const cache = data?.cache || meta.cache;
       if (cache?.frames === "memory_hit" || meta.source === "memory") {
         setLoadHint("已从内存恢复回放");
+      } else if (cache?.frames === "parquet_hit") {
+        setLoadHint("已从整场轨迹缓存读取回放");
       } else if (cache?.frames === "disk_hit" || meta.source === "disk") {
         setLoadHint("已从本地缓存读取回放");
       } else {

@@ -346,6 +346,17 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; Tauri overwrites packaged files during an in-place upgrade but does not
+  ; remove directories that disappeared from the new resource bundle. Stale
+  ; demoparser metadata makes importlib.metadata report the old parser even
+  ; though the extension module itself was replaced.
+  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight1.dist-info"
+  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight2.dist-info"
+  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight3.dist-info"
+  RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow"
+  RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow.libs"
+  RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow-25.0.0.dist-info"
+
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.
   ClearErrors

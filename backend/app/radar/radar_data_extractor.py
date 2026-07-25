@@ -257,6 +257,8 @@ def extract_radar_timeline_impl(
     radar_timing: dict[str, Any] | None = None,
     include_all_players: bool = False,
     include_effect_tracks: bool = False,
+    sample_ticks_override: list[int] | None = None,
+    include_shots: bool = True,
 ) -> list[dict[str, Any]] | dict[str, Any]:
     """
     Runs inside parse_worker child process.
@@ -387,81 +389,57 @@ def extract_radar_timeline_impl(
         probe_lo, probe_hi = start_i, end_i
 
     parser = DemoParser(demo_path)
-
-    probe_ticks = sorted(
-        {int(probe_lo), int(probe_hi - 1), int(probe_lo + max(0, probe_hi - probe_lo) // 2)},
-    )
-    probe_ticks = [t for t in probe_ticks if int(probe_lo) <= t < int(probe_hi)]
-    if not probe_ticks:
-        probe_ticks = [int(probe_lo)]
-
     pov_sid = _norm_sid(pov_steamid64)
     pov_name_key = (pov_player_name or "").strip().lower()
-
-    raw0 = parser.parse_ticks(["steamid", "name", "team_num", "is_alive"], ticks=[probe_ticks[0]])
-    df0 = _to_pandas_df(raw0)
     pov_team: int | None = None
     pov_display_name = ""
-    if not df0.empty and "team_num" in df0.columns:
-        sid_col = "steamid" if "steamid" in df0.columns else None
-        name_col = "name" if "name" in df0.columns else None
-        if pov_sid and sid_col:
-            hit = df0[df0[sid_col].apply(lambda x: _norm_sid(x) == pov_sid)]
-            if not hit.empty:
-                try:
-                    pov_team = int(float(hit.iloc[0]["team_num"]))
-                except (TypeError, ValueError):
-                    pov_team = None
-                if name_col:
-                    pov_display_name = str(hit.iloc[0].get(name_col) or "").strip()
-        if pov_team is None and pov_name_key and name_col:
-            hit = df0[df0[name_col].astype(str).str.strip().str.lower() == pov_name_key]
-            if not hit.empty:
-                try:
-                    pov_team = int(float(hit.iloc[0]["team_num"]))
-                except (TypeError, ValueError):
-                    pov_team = None
-                pov_display_name = str(hit.iloc[0].get(name_col) or "").strip()
-
-    if pov_team is None and not include_all_players:
-        return []
 
     n_frames = max(1, int(round(max(0.01, duration_sec) * max(0.01, fps))))
     sample_ticks: list[int] = []
-    last_tick: int | None = None
-    try:
-        sync_lead_sec = float(os.environ.get("CS2_INSIGHT_RADAR_SYNC_LEAD_SEC") or 0.0)
-    except (TypeError, ValueError):
-        sync_lead_sec = 0.0
-    for i in range(n_frames):
-        video_time_sec = i / max(float(fps), 0.001) + sync_lead_sec
-        t: int
-        if timing_segments:
-            tick_opt = _tick_for_video_time_from_radar_timing(
-                video_time_sec,
-                timing_segments,
-                last_tick=last_tick,
-            )
-            if tick_opt is None:
-                t = int(start_i)
+    if sample_ticks_override is not None:
+        sample_ticks = [
+            int(tick)
+            for tick in sample_ticks_override
+            if int(probe_lo) <= int(tick) < int(probe_hi)
+        ]
+    else:
+        last_tick: int | None = None
+        try:
+            sync_lead_sec = float(os.environ.get("CS2_INSIGHT_RADAR_SYNC_LEAD_SEC") or 0.0)
+        except (TypeError, ValueError):
+            sync_lead_sec = 0.0
+        for i in range(n_frames):
+            video_time_sec = i / max(float(fps), 0.001) + sync_lead_sec
+            t: int
+            if timing_segments:
+                tick_opt = _tick_for_video_time_from_radar_timing(
+                    video_time_sec,
+                    timing_segments,
+                    last_tick=last_tick,
+                )
+                if tick_opt is None:
+                    t = int(start_i)
+                else:
+                    t = int(tick_opt)
+            elif segments:
+                t = _tick_for_video_time_from_segments(
+                    video_time_sec=video_time_sec,
+                    segments=segments,
+                    tick_rate=tick_rate,
+                    sync_offset_sec=sync_offset_sec,
+                )
             else:
-                t = int(tick_opt)
-        elif segments:
-            t = _tick_for_video_time_from_segments(
-                video_time_sec=video_time_sec,
-                segments=segments,
-                tick_rate=tick_rate,
-                sync_offset_sec=sync_offset_sec,
-            )
-        else:
-            span = max(1, int(end_i) - int(start_i))
-            if n_frames <= 1:
-                t = int(start_i)
-            else:
-                t = int(start_i) + int(round((i / (n_frames - 1)) * (span - 1)))
-            t = max(int(start_i), min(t, int(end_i) - 1))
-        last_tick = int(t)
-        sample_ticks.append(int(t))
+                span = max(1, int(end_i) - int(start_i))
+                if n_frames <= 1:
+                    t = int(start_i)
+                else:
+                    t = int(start_i) + int(round((i / (n_frames - 1)) * (span - 1)))
+                t = max(int(start_i), min(t, int(end_i) - 1))
+            last_tick = int(t)
+            sample_ticks.append(int(t))
+
+    if not sample_ticks:
+        return []
 
     fields = [
         "X",
@@ -486,24 +464,45 @@ def extract_radar_timeline_impl(
         "player_color",
     ]
 
-    snap_by_tick: dict[int, pd.DataFrame] = {}
-    chunk = 160
-    for i in range(0, len(sample_ticks), chunk):
-        part = sample_ticks[i : i + chunk]
-        uniq = sorted(set(part))
+    uniq = sorted(set(sample_ticks))
+    try:
+        raw = parser.parse_ticks(fields, ticks=uniq)
+    except Exception:
         try:
-            raw = parser.parse_ticks(fields, ticks=uniq)
+            raw = parser.parse_ticks(
+                ["X", "Y", "Z", "yaw", "name", "steamid", "team_num", "is_alive", "player_color"],
+                ticks=uniq,
+            )
         except Exception:
-            try:
-                raw = parser.parse_ticks(
-                    ["X", "Y", "Z", "yaw", "name", "steamid", "team_num", "is_alive", "player_color"],
-                    ticks=uniq,
-                )
-            except Exception:
-                continue
-        pdf = _to_pandas_df(raw)
-        if pdf.empty or "tick" not in pdf.columns:
-            continue
+            raw = None
+    pdf = _to_pandas_df(raw)
+
+    if not pdf.empty and "team_num" in pdf.columns:
+        sid_col = "steamid" if "steamid" in pdf.columns else None
+        name_col = "name" if "name" in pdf.columns else None
+        if pov_sid and sid_col:
+            hit = pdf[pdf[sid_col].apply(lambda x: _norm_sid(x) == pov_sid)]
+            if not hit.empty:
+                try:
+                    pov_team = int(float(hit.iloc[0]["team_num"]))
+                except (TypeError, ValueError):
+                    pov_team = None
+                if name_col:
+                    pov_display_name = str(hit.iloc[0].get(name_col) or "").strip()
+        if pov_team is None and pov_name_key and name_col:
+            hit = pdf[pdf[name_col].astype(str).str.strip().str.lower() == pov_name_key]
+            if not hit.empty:
+                try:
+                    pov_team = int(float(hit.iloc[0]["team_num"]))
+                except (TypeError, ValueError):
+                    pov_team = None
+                pov_display_name = str(hit.iloc[0].get(name_col) or "").strip()
+
+    if pov_team is None and not include_all_players:
+        return []
+
+    snap_by_tick: dict[int, pd.DataFrame] = {}
+    if not pdf.empty and "tick" in pdf.columns:
         for tick_val, grp in pdf.groupby("tick", sort=False):
             snap_by_tick[int(tick_val)] = grp
 
@@ -621,15 +620,17 @@ def extract_radar_timeline_impl(
     # Keep replay self-contained for workspaces cached before the shots field
     # existed. Attaching shots to the nearest requested replay frame avoids a second demo
     # parse in the API process and preserves native-parser crash isolation.
-    try:
-        raw_fire = parser.parse_event(
-            "weapon_fire",
-            player=["steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch"],
-            other=["weapon"],
-        )
-        fire_df = _to_pandas_df(raw_fire)
-    except Exception:
-        fire_df = pd.DataFrame()
+    fire_df = pd.DataFrame()
+    if include_shots:
+        try:
+            raw_fire = parser.parse_event(
+                "weapon_fire",
+                player=["steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch"],
+                other=["weapon"],
+            )
+            fire_df = _to_pandas_df(raw_fire)
+        except Exception:
+            fire_df = pd.DataFrame()
 
     non_bullet_weapons = {
         "", "c4", "knife", "knife_t", "taser", "hegrenade", "flashbang",

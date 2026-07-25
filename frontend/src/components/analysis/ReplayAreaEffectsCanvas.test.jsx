@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { render } from "@testing-library/react";
 import ReplayAreaEffectsCanvas, {
   applyUtilityClip,
+  effectPalette,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
 } from "./ReplayAreaEffectsCanvas";
@@ -181,7 +182,6 @@ describe("applyUtilityClip", () => {
     expect(ctx.getImageData(0, 0, 1, 1).data[3]).toBe(255);
   });
 });
-
 describe("selectActiveSample", () => {
   const track = {
     start_tick: 100,
@@ -210,6 +210,13 @@ describe("selectActiveSample", () => {
 });
 
 describe("ReplayAreaEffectsCanvas", () => {
+  test("uses subtly warm T and cool CT utility palettes", () => {
+    expect(effectPalette("T").smokeCore).toEqual([226, 211, 174]);
+    expect(effectPalette("CT").smokeCore).toEqual([186, 216, 232]);
+    expect(effectPalette("T").fire[1]).toEqual([251, 191, 36]);
+    expect(effectPalette("CT").fire[1]).toEqual([125, 211, 252]);
+  });
+
   beforeEach(() => {
     global.ResizeObserver = class {
       observe() {}

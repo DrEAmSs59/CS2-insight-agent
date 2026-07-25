@@ -2961,12 +2961,36 @@ async def get_demo_replay(req: DemoReplayRequest):
             "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
             "cache": {
                 "frames": frames_source,
-                "effects": "disk_hit" if cached.get("effect_tracks") else "miss",
+                "effects": (
+                    "parquet_hit"
+                    if frames_source == "parquet_hit" and cached.get("effect_tracks")
+                    else "disk_hit"
+                    if cached.get("effect_tracks")
+                    else "miss"
+                ),
                 "parsed": False,
                 "shared_job": shared_job,
+                "read_ms": cached.get("read_ms"),
             },
             "parse_stage": "ready",
         }
+
+    try:
+        from .parser.replay_match_cache import load_match_replay_round
+
+        match_cached = await asyncio.to_thread(
+            load_match_replay_round,
+            str(dem_path),
+            start_tick=int(req.start_tick),
+            end_tick=int(req.end_tick),
+            fps=float(req.fps),
+            tick_rate=float(req.tick_rate),
+        )
+    except Exception as exc:  # noqa: BLE001 - legacy per-round cache remains available
+        logger.warning("whole-match replay parquet load failed: %s", exc)
+        match_cached = None
+    if match_cached is not None:
+        return _payload_from_cache(match_cached, frames_source="parquet_hit")
 
     if cache_key:
         cached = await asyncio.to_thread(load_frames, cache_key)
