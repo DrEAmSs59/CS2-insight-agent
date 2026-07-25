@@ -4,6 +4,7 @@ import {
   clampUserZoom,
   computeFitScale,
   panBy,
+  restoreCameraForViewport,
   zoomAtPointer,
 } from "./replayCamera";
 
@@ -45,5 +46,16 @@ describe("replayCamera", () => {
     expect(next.offsetY).toBeLessThan(400);
     expect(next.offsetX + 1024 * 2).toBeGreaterThan(0);
     expect(next.offsetY + 1024 * 2).toBeGreaterThan(0);
+  });
+
+  test("restoreCameraForViewport scales offsets by fitScale ratio", () => {
+    const saved = { fitScale: 0.5, userZoom: 2, offsetX: 100, offsetY: -40 };
+    const fitted = { fitScale: 1, userZoom: 1, offsetX: 0, offsetY: 0 };
+    const viewport = { width: 800, height: 800 };
+    const restored = restoreCameraForViewport(saved, fitted, viewport);
+    expect(restored.fitScale).toBe(1);
+    expect(restored.userZoom).toBe(2);
+    expect(restored.offsetX).toBeCloseTo(200, 5);
+    expect(restored.offsetY).toBeCloseTo(-80, 5);
   });
 });

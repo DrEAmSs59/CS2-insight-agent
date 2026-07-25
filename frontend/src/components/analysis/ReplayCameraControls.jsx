@@ -6,12 +6,12 @@ export default function ReplayCameraControls({
   onZoomIn,
   onZoomOut,
   onFit,
-  className = "",
+  className = "top-3 left-3",
 }) {
   const percent = Math.round(Number(userZoom) * 100) || 100;
   return (
     <div
-      className={`pointer-events-auto absolute bottom-3 left-3 z-30 flex items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5 shadow-lg ${className}`}
+      className={`pointer-events-auto absolute z-30 flex items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5 shadow-lg ${className}`}
       role="group"
       aria-label="地图缩放"
     >

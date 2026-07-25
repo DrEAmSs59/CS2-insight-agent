@@ -19,6 +19,7 @@ import {
   contentRectFromTransform,
   createFittedCamera,
   panBy,
+  restoreCameraForViewport,
   zoomAtPointer,
 } from "../../utils/replayCamera";
 import { useReplayStore } from "../../stores/replayStore";
@@ -388,12 +389,7 @@ export default function ReplaySceneCanvas({
     if (mapChanged) {
       const saved = mapKey ? useReplayStore.getState().getCamera(mapKey) : null;
       if (saved && Number(saved.fitScale) > 0) {
-        applyCamera({
-          fitScale: fitted.fitScale,
-          userZoom: clampUserZoom(saved.userZoom),
-          offsetX: Number.isFinite(Number(saved.offsetX)) ? Number(saved.offsetX) : fitted.offsetX,
-          offsetY: Number.isFinite(Number(saved.offsetY)) ? Number(saved.offsetY) : fitted.offsetY,
-        });
+        applyCamera(restoreCameraForViewport(saved, fitted, viewportSize));
         return;
       }
       applyCamera(fitted);
@@ -893,6 +889,7 @@ export default function ReplaySceneCanvas({
           })}
         </div>
         <ReplayCameraControls
+          className={hasMapLayers ? "top-12 left-3" : "top-3 left-3"}
           userZoom={camera.userZoom}
           onZoomIn={() => stepUserZoom(USER_ZOOM_STEP)}
           onZoomOut={() => stepUserZoom(1 / USER_ZOOM_STEP)}
