@@ -24,15 +24,12 @@ CS2 Insight Agent — Windows 桌面端 CS2 电竞终端。自动解析 `.dem` �
 
 ## Commands
 
-```bash
-# 开发环境（macOS / Linux）
-uv venv .venv --python 3.12
-source .venv/bin/activate
-uv pip install -r backend/requirements.txt
+```powershell
+# Windows 开发环境（创建 .venv、安装并校验固定的 PyO3/Rust wheel）
+.\packaging\demoparser-lean\setup-backend-dev.ps1
 
 # Backend
-cd backend
-uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload --port 8000
 
 # Frontend
 cd frontend
@@ -43,6 +40,11 @@ npm run build        # Production build → frontend/dist/
 # Production launcher (Windows only — SelectorEventLoop 补丁)
 python -m app.run_server
 ```
+
+不要直接从 PyPI 安装 `demoparser2`：2D 回放要求
+`0.41.4+cs2insight5` 中的 Rust Parquet/二进制接口。需要本机构建时使用
+`setup-backend-dev.ps1 -BuildFromSource`；正式 Windows wheel 由
+`publish-demoparser-wheel.yml` 构建、发布，并附带 SHA256。
 
 前端 Vite 已配置 `/api/*` 代理到 `localhost:8000`。生产模式由 FastAPI 直接 serve `frontend/dist/` 静态文件。
 

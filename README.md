@@ -115,6 +115,12 @@
 
 安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**。轻量 Tauri 桌面壳会自动启动内嵌 Python 后端，并使用 Windows 系统 WebView2 显示界面。
 
+源码开发请先运行
+`.\packaging\demoparser-lean\setup-backend-dev.ps1`。项目的高速 2D 回放使用
+PyO3 编译的定制 `demoparser2` Rust 扩展；安装脚本会下载固定版本 wheel、
+校验同一发布附带的 SHA256 后安装。后端会在启动阶段验证所需 Rust 接口，
+不会使用 PyPI 原版解析器静默降级。
+
 当前不运行后台自动更新器；需要升级时，请直接从 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载新版安装包。
 
 > **建议安装路径不含中文字符。** 例如 `D:\CS2-Insight-Agent\` ✅，`D:\游戏工具\CS2-Insight-Agent\` ❌

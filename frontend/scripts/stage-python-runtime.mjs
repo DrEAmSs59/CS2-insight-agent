@@ -21,11 +21,6 @@ if (process.platform !== "win32") {
   process.exit(0);
 }
 
-if (existsSync(pythonExe) && process.env.CS2_INSIGHT_REFRESH_PYTHON !== "1") {
-  console.log("[desktop] using existing python/python.exe");
-  process.exit(0);
-}
-
 function resolveLeanWheel() {
   const configured = process.env.CS2_INSIGHT_DEMOPARSER_WHEEL?.trim();
   if (configured) {
@@ -47,6 +42,29 @@ if (!existsSync(portablePs1)) {
   process.exit(1);
 }
 
+if (existsSync(pythonExe) && process.env.CS2_INSIGHT_REFRESH_PYTHON !== "1") {
+  const backendDir = join(repoRoot, "backend");
+  const verification = spawnSync(
+    pythonExe,
+    [
+      "-c",
+      "import sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import main; raise SystemExit(main())",
+      backendDir,
+    ],
+    { cwd: repoRoot, env: process.env, stdio: "inherit", shell: false },
+  );
+  if (verification.status !== 0) {
+    console.error(
+      "[desktop] existing Python runtime is incompatible; run " +
+      "packaging/demoparser-lean/setup-backend-dev.ps1 or rebuild with " +
+      "CS2_INSIGHT_REFRESH_PYTHON=1 and CS2_INSIGHT_DEMOPARSER_WHEEL.",
+    );
+    process.exit(verification.status ?? 1);
+  }
+  console.log("[desktop] using verified python/python.exe");
+  process.exit(0);
+}
+
 const args = [
   "-NoProfile",
   "-ExecutionPolicy",
@@ -59,9 +77,15 @@ if (customPython) {
   args.push("-PortablePythonDir", customPython);
 }
 const leanWheel = resolveLeanWheel();
-if (leanWheel) {
-  args.push("-DemoparserWheel", leanWheel);
+if (!leanWheel) {
+  console.error(
+    "[desktop] patched demoparser wheel is required. Run " +
+    "packaging/demoparser-lean/setup-backend-dev.ps1 -BuildFromSource or set " +
+    "CS2_INSIGHT_DEMOPARSER_WHEEL.",
+  );
+  process.exit(1);
 }
+args.push("-DemoparserWheel", leanWheel);
 
 const result = spawnSync("powershell.exe", args, {
   cwd: repoRoot,

@@ -27,6 +27,9 @@ function Remove-TreeIfExists([string]$Path) {
 }
 
 try {
+  if (-not $DemoparserWheel.Trim()) {
+    throw "DemoparserWheel is required; refusing to stage a runtime with the stock parser."
+  }
   Write-Host "[CS2 Insight Agent] Downloading embedded Python (this may take a few minutes)..."
   $curl = Join-Path $env:SystemRoot "System32\curl.exe"
   if (Test-Path $curl) {
@@ -53,22 +56,18 @@ try {
   if (-not (Test-Path $py)) { throw "python.exe missing under $destPython" }
   & $py -m ensurepip --upgrade
   & $py -m pip install --no-cache-dir --upgrade pip==25.0
-  if ($DemoparserWheel.Trim()) {
-    $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
-    Write-Host "[CS2 Insight Agent] Installing lean demoparser wheel..."
-    & $py -m pip install --no-cache-dir --no-deps $leanWheel
-    if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed: $LASTEXITCODE" }
-  }
+  $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
+  Write-Host "[CS2 Insight Agent] Installing patched demoparser wheel..."
+  & $py -m pip install --no-cache-dir --no-deps $leanWheel
+  if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed: $LASTEXITCODE" }
   $req = Join-Path $repoRoot "backend\requirements.txt"
   $constraints = Join-Path $repoRoot "backend\constraints.txt"
   & $py -m pip install --no-cache-dir -c $constraints -r $req
   if ($LASTEXITCODE -ne 0) { throw "backend requirements install failed: $LASTEXITCODE" }
-  if ($DemoparserWheel.Trim()) {
-    & $py -m pip uninstall -y polars pyarrow polars-runtime-32
-    $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
-    & $py -c "import importlib.metadata as m, importlib.util as u, sys; assert m.version('demoparser2') == sys.argv[1]; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
-    if ($LASTEXITCODE -ne 0) { throw "lean demoparser runtime verification failed: $LASTEXITCODE" }
-  }
+  & $py -m pip uninstall -y polars pyarrow polars-runtime-32
+  $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
+  & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+  if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed: $LASTEXITCODE" }
   & $py -m pip uninstall -y pip setuptools wheel
   if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed: $LASTEXITCODE" }
   Write-Host "[CS2 Insight Agent] Trimming Python runtime to reduce installer size..."

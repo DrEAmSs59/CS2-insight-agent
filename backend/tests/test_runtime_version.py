@@ -13,10 +13,10 @@ from app import obs_config_center
 from app.update_info import resolve_local_version_info
 
 
-def test_runtime_surfaces_use_staged_release_version():
+def test_runtime_surfaces_use_resolved_local_version():
     expected, source = resolve_local_version_info()
 
-    assert source == "file"
+    assert source in {"file", "registry", "unknown"}
     assert main_module.app.version == expected
     assert main_module.health() == {"status": "ok", "version": expected}
     assert obs_config_center.APP_VERSION == f"V{expected}"

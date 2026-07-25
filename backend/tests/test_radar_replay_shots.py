@@ -118,7 +118,18 @@ def test_resolves_nuke_upper_and_lower_radar_layers():
 
 def test_resolves_locally_extracted_cache_radar_and_calibration():
     assert resolve_map_png_path("de_cache").name == "de_cache.png"
-    assert lookup_map_data("de_cache") == {
+    calibration = lookup_map_data("de_cache")
+    assert {
+        key: calibration[key]
+        for key in (
+            "pos_x",
+            "pos_y",
+            "scale",
+            "rotate",
+            "zoom",
+            "lower_level_max_units",
+        )
+    } == {
         "pos_x": -2000,
         "pos_y": 3250,
         "scale": 5.5,
@@ -126,3 +137,4 @@ def test_resolves_locally_extracted_cache_radar_and_calibration():
         "zoom": None,
         "lower_level_max_units": -1000000.0,
     }
+    assert calibration.get("transform_version", 1) >= 1
