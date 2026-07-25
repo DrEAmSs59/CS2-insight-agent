@@ -600,11 +600,9 @@ body {
 }
 
 .replay-observer-slot[data-alive="false"] {
-  width: 66.6667%;
   filter: grayscale(0.92) saturate(0.35);
   opacity: 0.58;
   transition:
-    width 720ms cubic-bezier(0.22, 0.8, 0.25, 1),
     filter 420ms ease-out,
     opacity 420ms ease-out;
 }

@@ -309,7 +309,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByText("$2,450")).toBeTruthy();
     const weaponDisplay = screen.getByLabelText(/ZywOo 当前武器/);
     expect(weaponDisplay.textContent).toBe("");
-    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-6");
+    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-5");
     expect(screen.getByLabelText(/ZywOo 头盔和防弹衣/)).toBeTruthy();
     expect(screen.queryByText("100 头甲")).toBeNull();
     expect(view.container.querySelector('img[src$="/ak47.svg"]')).toBeTruthy();
@@ -331,7 +331,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     const tRosterSlot = view.container.querySelector('[data-replay-roster-slot="b1t"]');
     expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
     expect(tRosterSlot?.className).toContain("border-amber-200");
-    expect(tRosterSlot?.className).toContain("ml-auto");
+    expect(tRosterSlot?.className).toContain("replay-observer-slot");
     expect(screen.getByLabelText("ZywOo 携带 C4").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" }));
