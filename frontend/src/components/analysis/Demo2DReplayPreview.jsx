@@ -22,13 +22,14 @@ import {
   createReplayClock,
   findPreviousFrameIndex,
   interpolateReplayFrame,
+  replaySampleStrideForRate,
   replayPositionForTime,
   resolvePlaybackStartSeconds,
   secondsForFramePosition,
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 
-const SAMPLE_HZ = 8;
+const SAMPLE_HZ = 32;
 const REPLAY_CACHE_VERSION = REPLAY_STORE_CACHE_VERSION;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
@@ -309,6 +310,7 @@ export default function Demo2DReplayPreview({
   const [uiSampleIndex, setUiSampleIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const playbackSampleStride = replaySampleStrideForRate(speed);
   const [loading, setLoading] = useState(false);
   const [loadHint, setLoadHint] = useState("");
   const [error, setError] = useState("");
@@ -437,6 +439,8 @@ export default function Demo2DReplayPreview({
       const cache = data?.cache || meta.cache;
       if (cache?.frames === "memory_hit" || meta.source === "memory") {
         setLoadHint("已从内存恢复回放");
+      } else if (cache?.frames === "parquet_binary_hit" || meta.source === "binary") {
+        setLoadHint("已从 Rust 二进制轨迹缓存读取回放");
       } else if (cache?.frames === "parquet_hit") {
         setLoadHint("已从整场轨迹缓存读取回放");
       } else if (cache?.frames === "disk_hit" || meta.source === "disk") {
@@ -468,14 +472,23 @@ export default function Demo2DReplayPreview({
     } else {
       setEffectTracks([]);
       setEffectCapabilities(null);
-      setLoadHint("正在解析当前回合回放（含烟火效果）…");
+      setLoadHint("正在读取当前回合二进制轨迹…");
     }
 
     useReplayStore.getState().ensureReplay(cacheKey, requestBody, {
       onStatus: ({ source, shared }) => {
         if (cancelled) return;
         if (shared) setLoadHint("正在等待同一解析任务…");
-        else if (source === "parsed") setLoadHint("正在解析当前回合回放（含烟火效果）…");
+        else if (source === "parsed") setLoadHint("正在读取当前回合二进制轨迹…");
+      },
+      onEffects: (effectsData) => {
+        if (cancelled) return;
+        setEffectTracks(Array.isArray(effectsData?.effect_tracks) ? effectsData.effect_tracks : []);
+        setEffectCapabilities(
+          effectsData?.effect_capabilities && typeof effectsData.effect_capabilities === "object"
+            ? effectsData.effect_capabilities
+            : null,
+        );
       },
     }).then((data) => {
       if (!cancelled) applyPayload(data);
@@ -551,7 +564,7 @@ export default function Demo2DReplayPreview({
     clock.play();
     let animationFrame = 0;
     let alive = true;
-    let lastUiSample = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
+    let lastRenderedSample = -1;
     const lastFrame = frames.length - 1;
     const lastSeconds = Number(frames[lastFrame]?.time_sec) || 0;
     const store = playheadStoreRef.current;
@@ -570,20 +583,21 @@ export default function Demo2DReplayPreview({
       const activeFrames = framesRef.current;
       if (!activeFrames.length) return;
       const playheadSeconds = clock.getPlayheadSeconds(now);
-      const approx = interpolateReplayFrame(activeFrames, Number.NaN, playheadSeconds);
-      const sampleIndex = approx._sampleIndex ?? findPreviousFrameIndex(activeFrames, Number.NaN, playheadSeconds);
-      framePositionRef.current = sampleIndex + (Number(approx._interpRatio) || 0);
+      const sourceIndex = findPreviousFrameIndex(activeFrames, Number.NaN, playheadSeconds);
+      const sampleIndex = Math.floor(sourceIndex / playbackSampleStride) * playbackSampleStride;
+      const sampleFrame = activeFrames[sampleIndex] || activeFrames[0];
 
-      store.set({
-        position: framePositionRef.current,
-        seconds: playheadSeconds,
-        tick: Number(approx.tick) || 0,
-        sampleIndex,
-      });
-
-      // React UI (slider / roster) only at 8Hz sample boundaries — not every rAF.
-      if (sampleIndex !== lastUiSample) {
-        lastUiSample = sampleIndex;
+      // 1x/2x/4x use 32/16/8Hz source frames respectively. No 60FPS interpolation:
+      // all three modes render about 32 actual updates per wall-clock second.
+      if (sampleIndex !== lastRenderedSample) {
+        lastRenderedSample = sampleIndex;
+        framePositionRef.current = sampleIndex;
+        store.set({
+          position: sampleIndex,
+          seconds: Number(sampleFrame?.time_sec) || playheadSeconds,
+          tick: Number(sampleFrame?.tick) || 0,
+          sampleIndex,
+        });
         setUiSampleIndex(sampleIndex);
         setFrameIndex(sampleIndex);
       }
@@ -592,7 +606,7 @@ export default function Demo2DReplayPreview({
         store.set({
           position: lastFrame,
           seconds: lastSeconds,
-          tick: Number(activeFrames[lastFrame]?.tick) || Number(approx.tick) || 0,
+          tick: Number(activeFrames[lastFrame]?.tick) || Number(sampleFrame?.tick) || 0,
           sampleIndex: lastFrame,
         });
         setFrameIndex(lastFrame);
@@ -608,16 +622,16 @@ export default function Demo2DReplayPreview({
       playbackAbortRef.current = null;
       const at = window.performance.now();
       clock.pause(at);
-      const playheadSeconds = clock.getPlayheadSeconds(at);
-      // Lightweight cleanup only — skip interpolateReplayFrame (can stall tab switches).
+      const snapshot = store.getSnapshot();
+      // Pause on the last frame that was actually rendered.
       pauseSyncRef.current = {
-        seconds: playheadSeconds,
+        seconds: Number(snapshot?.seconds) || 0,
         position: framePositionRef.current,
       };
       store.set({
         position: framePositionRef.current,
-        seconds: playheadSeconds,
-        tick: store.getSnapshot()?.tick || 0,
+        seconds: Number(snapshot?.seconds) || 0,
+        tick: snapshot?.tick || 0,
         sampleIndex: clamp(Math.floor(framePositionRef.current), 0, Math.max(0, framesRef.current.length - 1)),
       });
     };
@@ -714,7 +728,7 @@ export default function Demo2DReplayPreview({
             <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { seekToFrameIndex(Number(event.target.value)); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
           </div>
           <button type="button" onClick={() => { seekToFrameIndex(0, { pause: true }); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
-          <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(uiFrame.tick) || 0)} · {replayFps} Hz</p></div>
+          <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(uiFrame.tick) || 0)} · {Math.max(1, Math.round(replayFps / playbackSampleStride))} Hz</p></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-cs2-border pt-3">
           <div className="flex flex-wrap gap-2">
@@ -762,6 +776,7 @@ export default function Demo2DReplayPreview({
             frames={frames}
             playing={playing}
             frameIndex={frameIndex}
+            sampleStride={playbackSampleStride}
             mapName={mapName}
             hasMapLayers={hasMapLayers}
             mapLayer={mapLayer}

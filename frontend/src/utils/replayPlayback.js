@@ -1,5 +1,5 @@
 /**
- * Absolute replay clock + tick-bracket interpolation for 8Hz samples → ~60FPS visuals.
+ * Absolute replay clock + tick-bracket interpolation for sampled replay frames.
  */
 
 export function clamp(value, min, max) {
@@ -110,13 +110,26 @@ export function findPreviousFrameIndex(frames, playheadTick, playheadSeconds = n
   return ans;
 }
 
-export function frameBracket(frames, playheadTick, playheadSeconds = null) {
-  if (!frames?.length) return { index: 0, previous: null, next: null, ratio: 0 };
-  const index = findPreviousFrameIndex(frames, playheadTick, playheadSeconds);
+/** Keep the 32Hz source while using fewer interpolation anchors at high speed. */
+export function replaySampleStrideForRate(rate) {
+  const value = Math.max(0, Number(rate) || 1);
+  if (value >= 4) return 4;
+  if (value >= 2) return 2;
+  return 1;
+}
+
+export function frameBracket(frames, playheadTick, playheadSeconds = null, sampleStride = 1) {
+  if (!frames?.length) {
+    return { index: 0, nextIndex: 0, previous: null, next: null, ratio: 0 };
+  }
+  const stride = Math.max(1, Math.floor(Number(sampleStride) || 1));
+  const rawIndex = findPreviousFrameIndex(frames, playheadTick, playheadSeconds);
+  const index = Math.floor(rawIndex / stride) * stride;
+  const nextIndex = Math.min(frames.length - 1, index + stride);
   const previous = frames[index];
-  const next = frames[Math.min(frames.length - 1, index + 1)];
+  const next = frames[nextIndex];
   if (!previous || previous === next) {
-    return { index, previous, next: previous, ratio: 0 };
+    return { index, nextIndex, previous, next: previous, ratio: 0 };
   }
   const prevTick = Number(previous.tick);
   const nextTick = Number(next.tick);
@@ -132,7 +145,7 @@ export function frameBracket(frames, playheadTick, playheadSeconds = null) {
       ratio = 0;
     }
   }
-  return { index, previous, next, ratio: clamp(ratio, 0, 1) };
+  return { index, nextIndex, previous, next, ratio: clamp(ratio, 0, 1) };
 }
 
 export function playerKey(player) {
@@ -140,7 +153,7 @@ export function playerKey(player) {
 }
 
 /**
- * Linear position + shortest-path yaw between adjacent 8Hz samples.
+ * Linear position + shortest-path yaw between adjacent sampled replay frames.
  * HP / inventory / weapon stay stepped (no numeric blend).
  */
 export function interpolateReplayPlayers(previous, next, ratio) {
@@ -161,14 +174,20 @@ export function interpolateReplayPlayers(previous, next, ratio) {
   });
 }
 
-export function interpolateReplayFrame(frames, playheadTick, playheadSeconds = null) {
+export function interpolateReplayFrame(frames, playheadTick, playheadSeconds = null, sampleStride = 1) {
   if (!frames?.length) {
     return { players: [], tick: playheadTick, time_sec: playheadSeconds || 0 };
   }
-  const { previous, next, ratio, index } = frameBracket(frames, playheadTick, playheadSeconds);
+  const {
+    previous,
+    next,
+    ratio,
+    index,
+    nextIndex,
+  } = frameBracket(frames, playheadTick, playheadSeconds, sampleStride);
   if (!previous) return frames[0];
   if (previous === next || ratio <= 0) {
-    return { ...previous, _sampleIndex: index };
+    return { ...previous, _sampleIndex: index, _nextSampleIndex: nextIndex };
   }
   return {
     ...previous,
@@ -176,6 +195,7 @@ export function interpolateReplayFrame(frames, playheadTick, playheadSeconds = n
     tick: lerpNumber(previous.tick, next.tick, ratio),
     time_sec: lerpNumber(previous.time_sec, next.time_sec, ratio),
     _sampleIndex: index,
+    _nextSampleIndex: nextIndex,
     _interpRatio: ratio,
   };
 }

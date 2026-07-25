@@ -10,7 +10,7 @@ import {
   yawToCssRotation,
 } from "../../utils/replayRadarTransform";
 import {
-  interpolateReplayFrame,
+  findPreviousFrameIndex,
 } from "../../utils/replayPlayback";
 import {
   SCENE_SIZE,
@@ -264,6 +264,7 @@ export default function ReplaySceneCanvas({
   frames,
   playing,
   frameIndex,
+  sampleStride = 1,
   mapName,
   hasMapLayers,
   mapLayer,
@@ -280,7 +281,11 @@ export default function ReplaySceneCanvas({
 }) {
   const playhead = useSyncExternalStore(playheadStore.subscribe, playheadStore.getSnapshot);
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
-  const frameCursorIndex = clamp(Math.floor(playing ? playhead.position : frameIndex), 0, Math.max(0, frames.length - 1));
+  const frameCursorIndex = clamp(
+    Math.floor(playing ? playhead.sampleIndex : frameIndex),
+    0,
+    Math.max(0, frames.length - 1),
+  );
 
   const viewportRef = useRef(null);
   const cameraRef = useRef(null);
@@ -495,13 +500,8 @@ export default function ReplaySceneCanvas({
 
   const frame = useMemo(() => {
     if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
-    const seconds = Number(playhead.seconds);
-    if (Number.isFinite(seconds)) {
-      return interpolateReplayFrame(frames, Number.NaN, seconds);
-    }
-    const idx = clamp(Math.floor(frameIndex), 0, frames.length - 1);
-    return frames[idx] || { players: [], tick: fallbackTick, time_sec: 0 };
-  }, [fallbackTick, frameIndex, frames, playhead.seconds]);
+    return frames[frameCursorIndex] || { players: [], tick: fallbackTick, time_sec: 0 };
+  }, [fallbackTick, frameCursorIndex, frames]);
 
   const currentTick = Number(frame.tick || fallbackTick || 0);
   const roundEndTick = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
@@ -556,8 +556,10 @@ export default function ReplaySceneCanvas({
   const traces = useMemo(() => {
     if (!layers.traces || !frames.length) return [];
     const start = Math.max(0, frameCursorIndex - 72);
+    const stride = playing ? sampleStride : 1;
     const byName = new Map();
-    for (const sourceFrame of frames.slice(start, frameCursorIndex + 1)) {
+    for (let sourceIndex = start; sourceIndex <= frameCursorIndex; sourceIndex += stride) {
+      const sourceFrame = frames[sourceIndex];
       for (const player of sourceFrame.players || []) {
         if (!pointMatchesMapLayer(player, transform, mapLayer)) continue;
         const point = worldToPercent(player, transform);
@@ -568,13 +570,20 @@ export default function ReplaySceneCanvas({
       }
     }
     return [...byName.entries()].map(([name, points]) => ({ name, points, team_key: workspacePlayers.find((player) => player.name === name)?.team_key || "a" }));
-  }, [frames, frameCursorIndex, layers.traces, mapLayer, transform, workspacePlayers]);
+  }, [frames, frameCursorIndex, layers.traces, mapLayer, playing, sampleStride, transform, workspacePlayers]);
 
   const recentEvents = useMemo(() => {
     const events = roundEvents;
-    const nearestFrame = (tick) => frames.reduce((best, item) => (
-      Math.abs(Number(item.tick) - tick) < Math.abs(Number(best?.tick ?? Infinity) - tick) ? item : best
-    ), null);
+    const nearestFrame = (tick) => {
+      if (!frames.length) return null;
+      const previousIndex = findPreviousFrameIndex(frames, tick);
+      const nextIndex = Math.min(frames.length - 1, previousIndex + 1);
+      const previous = frames[previousIndex];
+      const next = frames[nextIndex];
+      return Math.abs(Number(next?.tick) - tick) < Math.abs(Number(previous?.tick) - tick)
+        ? next
+        : previous;
+    };
     const roundEndForEffects = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
     const kills = [];
     const grenades = [];

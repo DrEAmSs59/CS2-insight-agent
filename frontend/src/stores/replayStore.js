@@ -1,15 +1,46 @@
 import { create } from "zustand";
 import API from "../api/api";
+import { decodeReplayBinary } from "../utils/replayBinary";
 
-export const REPLAY_STORE_CACHE_VERSION = 11;
+export const REPLAY_STORE_CACHE_VERSION = 12;
 const MAX_READY_ENTRIES = 64;
 const MAX_BYTES = 150 * 1024 * 1024;
 
 function estimateSizeBytes(payload) {
+  const binaryBytes = Number(payload?.frames?.binaryByteLength);
+  if (Number.isFinite(binaryBytes) && binaryBytes > 0) {
+    try {
+      return binaryBytes + JSON.stringify({
+        effectTracks: payload?.effectTracks || [],
+        mapTransform: payload?.mapTransform || null,
+      }).length * 2;
+    } catch {
+      return binaryBytes;
+    }
+  }
   try {
     return JSON.stringify(payload).length * 2;
   } catch {
     return 0;
+  }
+}
+
+async function requestReplayFrames(requestBody) {
+  try {
+    const response = await API.post("/demo/replay/binary", requestBody, {
+      responseType: "arraybuffer",
+    });
+    if (response.data instanceof ArrayBuffer || ArrayBuffer.isView(response.data)) {
+      return decodeReplayBinary(response.data);
+    }
+    // Test/dev proxy compatibility: accept an already-decoded object.
+    if (response.data && typeof response.data === "object") return response.data;
+    throw new Error("回放二进制响应为空");
+  } catch (error) {
+    const status = Number(error?.response?.status);
+    if (status && ![404, 415, 501, 503].includes(status)) throw error;
+    const { data } = await API.post("/demo/replay", requestBody);
+    return data;
   }
 }
 
@@ -105,7 +136,7 @@ export const useReplayStore = create((set, get) => ({
    * Ensure a replay entry is loading or ready. Reuses in-flight Promise.
    * @returns {Promise<object>} resolved payload
    */
-  async ensureReplay(cacheKey, requestBody, { onStatus } = {}) {
+  async ensureReplay(cacheKey, requestBody, { onStatus, onEffects } = {}) {
     const existing = get().entries[cacheKey];
     if (existing?.status === "ready" && existing.frames) {
       get().touch(cacheKey);
@@ -125,8 +156,8 @@ export const useReplayStore = create((set, get) => ({
       return existing.promise;
     }
 
-    const promise = API.post("/demo/replay", requestBody)
-      .then(({ data }) => {
+    const promise = requestReplayFrames(requestBody)
+      .then((data) => {
         const frames = Array.isArray(data?.frames) ? data.frames : [];
         const mapTransform = data?.map_transform && typeof data.map_transform === "object"
           ? data.map_transform
@@ -139,7 +170,9 @@ export const useReplayStore = create((set, get) => ({
         const sizeBytes = estimateSizeBytes({ frames, effectTracks, mapTransform });
         const source = ["disk_hit", "parquet_hit", "memory_hit"].includes(data?.cache?.frames)
           ? (data.cache.frames === "memory_hit" ? "memory" : "disk")
-          : (data?.cache?.parsed ? "parsed" : "parsed");
+          : data?.cache?.frames === "parquet_binary_hit"
+            ? "binary"
+            : (data?.cache?.parsed ? "parsed" : "parsed");
         set({
           entries: {
             ...get().entries,
@@ -158,12 +191,76 @@ export const useReplayStore = create((set, get) => ({
               createdAt: Date.now(),
               lastAccessAt: Date.now(),
               sizeBytes,
+              effectsPromise: null,
             },
           },
           activeKey: cacheKey,
         });
         get().evictIfNeeded();
         onStatus?.({ source, cache: data?.cache || null });
+        if (data?.effects_pending) {
+          const effectsPromise = API.post("/demo/replay/effects", requestBody)
+            .then(({ data: effectsData }) => {
+              const effectTracks = Array.isArray(effectsData?.effect_tracks)
+                ? effectsData.effect_tracks
+                : [];
+              const effectCapabilities = effectsData?.effect_capabilities
+                && typeof effectsData.effect_capabilities === "object"
+                ? effectsData.effect_capabilities
+                : null;
+              const current = get().entries[cacheKey];
+              if (current?.status === "ready") {
+                set({
+                  entries: {
+                    ...get().entries,
+                    [cacheKey]: {
+                      ...current,
+                      effectTracks,
+                      effectCapabilities,
+                      effectsPromise: null,
+                      sizeBytes: estimateSizeBytes({
+                        frames: current.frames,
+                        effectTracks,
+                        mapTransform: current.mapTransform,
+                      }),
+                    },
+                  },
+                });
+                get().evictIfNeeded();
+              }
+              onEffects?.({
+                effect_tracks: effectTracks,
+                effect_capabilities: effectCapabilities,
+                effect_warnings: effectsData?.effect_warnings || [],
+              });
+              return effectsData;
+            })
+            .catch((error) => {
+              const current = get().entries[cacheKey];
+              if (current?.status === "ready") {
+                set({
+                  entries: {
+                    ...get().entries,
+                    [cacheKey]: { ...current, effectsPromise: null },
+                  },
+                });
+              }
+              onStatus?.({
+                source: "effects_error",
+                error: error?.response?.data?.detail || error?.message,
+              });
+              return null;
+            });
+          const current = get().entries[cacheKey];
+          if (current?.status === "ready") {
+            set({
+              entries: {
+                ...get().entries,
+                [cacheKey]: { ...current, effectsPromise },
+              },
+            });
+          }
+        }
         return data;
       })
       .catch((error) => {
@@ -185,6 +282,7 @@ export const useReplayStore = create((set, get) => ({
               createdAt: Date.now(),
               lastAccessAt: Date.now(),
               sizeBytes: 0,
+              effectsPromise: null,
             },
           },
         });
@@ -209,6 +307,7 @@ export const useReplayStore = create((set, get) => ({
           createdAt: Date.now(),
           lastAccessAt: Date.now(),
           sizeBytes: 0,
+          effectsPromise: null,
         },
       },
       activeKey: cacheKey,

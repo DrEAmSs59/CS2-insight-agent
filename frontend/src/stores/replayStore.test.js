@@ -72,4 +72,69 @@ describe("replayStore", () => {
     expect(API.post).toHaveBeenCalledTimes(1);
     expect(again.frames).toHaveLength(1);
   });
+
+  test("loads sparse effects after binary frames without blocking playback", async () => {
+    API.post
+      .mockResolvedValueOnce({
+        data: {
+          frames: [{ tick: 1 }],
+          fps: 32,
+          effect_tracks: [],
+          effects_pending: true,
+          cache: { frames: "parquet_binary_hit", effects: "pending", parsed: false },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          effect_tracks: [{ id: "smoke:1", type: "smoke" }],
+          effect_capabilities: { smoke_voxels: true },
+        },
+      });
+    const onEffects = vi.fn();
+
+    const replay = await useReplayStore.getState().ensureReplay(
+      "binary-effects",
+      { path: "a.dem" },
+      { onEffects },
+    );
+
+    expect(replay.frames).toHaveLength(1);
+    expect(API.post).toHaveBeenNthCalledWith(
+      1,
+      "/demo/replay/binary",
+      { path: "a.dem" },
+      { responseType: "arraybuffer" },
+    );
+    expect(API.post).toHaveBeenNthCalledWith(2, "/demo/replay/effects", { path: "a.dem" });
+    await vi.waitFor(() => {
+      expect(useReplayStore.getState().entries["binary-effects"].effectTracks).toHaveLength(1);
+    });
+    expect(onEffects).toHaveBeenCalledWith(expect.objectContaining({
+      effect_tracks: [{ id: "smoke:1", type: "smoke" }],
+    }));
+  });
+
+  test("falls back to the legacy JSON endpoint when binary cache is unavailable", async () => {
+    API.post
+      .mockRejectedValueOnce({ response: { status: 404 } })
+      .mockResolvedValueOnce({
+        data: {
+          frames: [{ tick: 2 }],
+          fps: 8,
+          effect_tracks: [],
+          cache: { frames: "disk_hit", parsed: false },
+        },
+      });
+
+    const replay = await useReplayStore.getState().ensureReplay("legacy", { path: "old.dem" });
+
+    expect(replay.frames[0].tick).toBe(2);
+    expect(API.post).toHaveBeenNthCalledWith(
+      1,
+      "/demo/replay/binary",
+      { path: "old.dem" },
+      { responseType: "arraybuffer" },
+    );
+    expect(API.post).toHaveBeenNthCalledWith(2, "/demo/replay", { path: "old.dem" });
+  });
 });

@@ -26,7 +26,7 @@ import faulthandler
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -2836,7 +2836,7 @@ class DemoReplayRequest(BaseModel):
     start_tick: int = Field(..., ge=0)
     end_tick: int = Field(..., gt=0)
     tick_rate: float = Field(64.0, gt=0, le=256)
-    fps: float = Field(32.0, ge=1, le=32)
+    fps: float = Field(32.0, ge=1, le=64)
     pov_player_name: Optional[str] = None
     pov_steamid64: Optional[str] = None
 
@@ -3105,6 +3105,49 @@ async def get_demo_replay(req: DemoReplayRequest):
         async with _replay_jobs_lock:
             if _replay_jobs.get(job_key) is future:
                 _replay_jobs.pop(job_key, None)
+
+
+@app.post("/api/demo/replay/binary")
+async def get_demo_replay_binary(req: DemoReplayRequest):
+    """Return one Parquet row group as Rust-produced columnar bytes."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
+    estimated_frame_count = int(duration_sec * req.fps) + 1
+    if estimated_frame_count > 40_000:
+        raise HTTPException(
+            422,
+            f"Binary replay request would generate about {estimated_frame_count} frames; maximum is 40000",
+        )
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    try:
+        from .parser.replay_match_cache import load_match_replay_round_binary
+
+        packet = await asyncio.to_thread(
+            load_match_replay_round_binary,
+            str(dem_path),
+            start_tick=int(req.start_tick),
+            end_tick=int(req.end_tick),
+            fps=float(req.fps),
+            tick_rate=float(req.tick_rate),
+        )
+    except Exception as exc:  # noqa: BLE001 - frontend can fall back to JSON
+        logger.warning("whole-match binary replay load failed: %s", exc)
+        raise HTTPException(503, f"Binary replay unavailable: {type(exc).__name__}") from exc
+    if packet is None:
+        raise HTTPException(404, "Binary replay cache is not available")
+    return Response(
+        content=packet,
+        media_type="application/vnd.cs2-insight.replay-v1",
+        headers={
+            "Cache-Control": "no-store",
+            "X-CS2-Replay-Protocol": "1",
+        },
+    )
 
 
 @app.post("/api/demo/replay/effects")
