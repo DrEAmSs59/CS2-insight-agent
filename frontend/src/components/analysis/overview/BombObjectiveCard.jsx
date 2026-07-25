@@ -1,4 +1,5 @@
 import { Bomb } from "lucide-react";
+import InsightCard from "./InsightCard";
 
 function formatPlantRate(rate) {
   if (rate == null) return "—";
@@ -7,10 +8,10 @@ function formatPlantRate(rate) {
 
 function SiteDonut({ siteA, siteB }) {
   const total = siteA + siteB;
-  if (total <= 0) return null;
+  if (total < 3) return null;
 
-  const size = 88;
-  const stroke = 12;
+  const size = 72;
+  const stroke = 10;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const aLen = (siteA / total) * c;
@@ -19,7 +20,7 @@ function SiteDonut({ siteA, siteB }) {
   const pctB = 100 - pctA;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex w-[88px] shrink-0 flex-col items-center gap-1">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
         <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
           <circle
@@ -30,7 +31,6 @@ function SiteDonut({ siteA, siteB }) {
             stroke="#38bdf8"
             strokeWidth={stroke}
             strokeDasharray={`${aLen} ${c - aLen}`}
-            strokeDashoffset={0}
           />
           <circle
             cx={size / 2}
@@ -43,28 +43,32 @@ function SiteDonut({ siteA, siteB }) {
             strokeDashoffset={-aLen}
           />
         </g>
-        <text
-          x="50%"
-          y="48%"
-          textAnchor="middle"
-          className="fill-cs2-text-muted"
-          fontSize="8"
-        >
-          下包分布
-        </text>
       </svg>
-      <div className="space-y-1.5 text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-sky-400" />
-          <span className="text-cs2-text-muted">A 点</span>
+      <div className="space-y-0.5 text-[10px]">
+        <div className="flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          <span className="text-cs2-text-muted">A</span>
           <span className="font-bold tabular-nums text-sky-400">{pctA}%</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-amber-400" />
-          <span className="text-cs2-text-muted">B 点</span>
+        <div className="flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="text-cs2-text-muted">B</span>
           <span className="font-bold tabular-nums text-amber-400">{pctB}%</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatRow({ label, a, b }) {
+  return (
+    <div className="flex min-h-[24px] items-center justify-between gap-2 text-[11px]">
+      <span className="text-cs2-text-muted">{label}</span>
+      <span className="tabular-nums">
+        <span className="font-bold text-sky-400">{a}</span>
+        <span className="mx-1 text-cs2-text-muted">/</span>
+        <span className="font-bold text-amber-400">{b}</span>
+      </span>
     </div>
   );
 }
@@ -74,80 +78,59 @@ function SiteDonut({ siteA, siteB }) {
  *   model?: object,
  *   teamAName?: string,
  *   teamBName?: string,
+ *   className?: string,
  * }} props
  */
 export default function BombObjectiveCard({
   model,
   teamAName = "Team A",
   teamBName = "Team B",
+  className = "",
 }) {
   const teamA = model?.teamA || {};
   const teamB = model?.teamB || {};
   const siteA = Number(model?.siteA) || 0;
   const siteB = Number(model?.siteB) || 0;
-  const summary = model?.summary || "";
   const plants = (teamA.plants || 0) + (teamB.plants || 0);
   const hasPlants = plants > 0 || siteA + siteB > 0;
   const hasData = model?.hasData !== false && hasPlants;
+  const showDonut = plants >= 3 || siteA + siteB >= 3;
+  const dominantHint =
+    model?.dominantSite && model?.summary?.startsWith?.("主要下包点")
+      ? model.summary
+      : null;
+
+  if (!hasData) return null;
 
   return (
-    <article className="flex min-h-[220px] flex-col rounded-xl border border-cs2-border bg-cs2-bg-card p-3.5">
-      <header className="mb-2 flex items-center gap-2">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent">
-          <Bomb className="h-3.5 w-3.5" />
-        </div>
-        <h3 className="text-[13px] font-bold text-cs2-text-primary">目标与包点</h3>
-      </header>
-      {summary ? (
-        <p className="mb-2 line-clamp-2 text-[11px] leading-snug text-cs2-text-secondary">{summary}</p>
-      ) : null}
-
-      {!hasData ? (
-        <p className="mt-6 text-center text-[11px] text-cs2-text-muted">本场没有可识别的下包事件。</p>
-      ) : (
-        <div className="mt-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 flex-1 space-y-1.5 text-[11px]">
-            <div className="flex justify-between gap-2">
-              <span className="text-cs2-text-muted">下包次数</span>
-              <span>
-                <span className="font-bold text-sky-400">{teamA.plants ?? 0}</span>
-                <span className="mx-1 text-cs2-text-muted">/</span>
-                <span className="font-bold text-amber-400">{teamB.plants ?? 0}</span>
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-cs2-text-muted">下包后胜率</span>
-              <span>
-                <span className="font-bold text-sky-400">{formatPlantRate(teamA.plantWinRate)}</span>
-                <span className="mx-1 text-cs2-text-muted">/</span>
-                <span className="font-bold text-amber-400">{formatPlantRate(teamB.plantWinRate)}</span>
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-cs2-text-muted">拆包</span>
-              <span>
-                <span className="font-bold text-sky-400">{teamA.defuses ?? 0}</span>
-                <span className="mx-1 text-cs2-text-muted">/</span>
-                <span className="font-bold text-amber-400">{teamB.defuses ?? 0}</span>
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-cs2-text-muted">爆炸取胜</span>
-              <span>
-                <span className="font-bold text-sky-400">{teamA.explodeWins ?? 0}</span>
-                <span className="mx-1 text-cs2-text-muted">/</span>
-                <span className="font-bold text-amber-400">{teamB.explodeWins ?? 0}</span>
-              </span>
-            </div>
-            <p className="pt-1 text-[9px] text-cs2-text-muted">
+    <InsightCard
+      title="目标与包点"
+      icon={<Bomb className="h-3.5 w-3.5 text-cs2-accent" />}
+      compact
+      className={`min-h-[135px] xl:min-h-[145px] ${className}`}
+    >
+      <div className={`flex gap-3 ${showDonut ? "items-start" : ""}`}>
+        <div className="min-w-0 flex-1">
+          <StatRow label="下包次数" a={teamA.plants ?? 0} b={teamB.plants ?? 0} />
+          <StatRow
+            label="下包后胜率"
+            a={formatPlantRate(teamA.plantWinRate)}
+            b={formatPlantRate(teamB.plantWinRate)}
+          />
+          <StatRow label="成功拆包" a={teamA.defuses ?? 0} b={teamB.defuses ?? 0} />
+          <StatRow label="爆炸取胜" a={teamA.explodeWins ?? 0} b={teamB.explodeWins ?? 0} />
+          {dominantHint ? (
+            <p className="mt-1 text-[9px] text-cs2-text-muted">{dominantHint}</p>
+          ) : (
+            <p className="mt-1 text-[9px] text-cs2-text-muted">
               <span className="text-sky-400">{teamAName}</span>
               {" · "}
               <span className="text-amber-400">{teamBName}</span>
             </p>
-          </div>
-          <SiteDonut siteA={siteA} siteB={siteB} />
+          )}
         </div>
-      )}
-    </article>
+        {showDonut ? <SiteDonut siteA={siteA} siteB={siteB} /> : null}
+      </div>
+    </InsightCard>
   );
 }

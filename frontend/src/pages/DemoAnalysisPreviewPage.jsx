@@ -38,7 +38,7 @@ import { useAppShell } from "../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 
-const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1500px] px-5 sm:px-6";
+const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1440px] px-5 sm:px-5";
 
 const TABS = [
   { key: "highlights", label: "高光与录制", icon: Film },
@@ -457,18 +457,37 @@ export default function DemoAnalysisPreviewPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <main className={`${PAGE_CONTAINER_CLASS} space-y-4 py-4`} data-testid="demo-analysis-content-container">
-          <section className="relative overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg">
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
-            <div className="grid items-center gap-4 px-5 py-5 md:grid-cols-[1fr_auto_1fr]">
-              <div className="flex items-center gap-3 md:justify-end md:text-right"><div className="order-2 md:order-1"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sky-400">{teamAName}</p><p className="mt-1 text-[9px] text-cs2-text-muted">{teams.a.length} 名玩家</p></div><div className="order-1 flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/15 text-lg font-black text-sky-400 md:order-2">{teamAName.slice(0, 1).toUpperCase()}</div></div>
-              <div className="text-center"><div className="flex items-center justify-center gap-3"><span className="font-mono text-4xl font-black text-sky-300">{teamAScore}</span><span className="text-xl font-black text-cs2-text-muted">:</span><span className="font-mono text-4xl font-black text-amber-300">{teamBScore}</span></div><div className="mt-2 text-[9px] uppercase tracking-widest text-cs2-text-muted">{mapLabel(meta.map_name)} · {totalRounds} 回合{durationMins > 0 ? ` · ${durationMins} 分钟` : ""}</div></div>
-              <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/15 text-lg font-black text-amber-400">{teamBName.slice(0, 1).toUpperCase()}</div><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400">{teamBName}</p><p className="mt-1 text-[9px] text-cs2-text-muted">{teams.b.length} 名玩家</p></div></div>
+        <main className={`${PAGE_CONTAINER_CLASS} space-y-3 py-3`} data-testid="demo-analysis-content-container">
+          <section className="relative overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-md">
+            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
+            <div className="grid h-[72px] items-center gap-2 px-4 md:grid-cols-[1fr_auto_1fr]">
+              <div className={`flex min-w-0 items-center gap-2.5 md:justify-end md:text-right ${teamAScore > teamBScore ? "rounded-md bg-sky-500/8 px-2 py-1" : ""}`}>
+                <div className="order-2 min-w-0 md:order-1">
+                  <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-sky-400">{teamAName}</p>
+                </div>
+                <div className="order-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sm font-black text-sky-400 md:order-2">{teamAName.slice(0, 1).toUpperCase()}</div>
+              </div>
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-2.5">
+                  <span className="font-mono text-3xl font-black text-sky-300">{teamAScore}</span>
+                  <span className="text-lg font-black text-cs2-text-muted">:</span>
+                  <span className="font-mono text-3xl font-black text-amber-300">{teamBScore}</span>
+                </div>
+                <div className="mt-0.5 text-[9px] uppercase tracking-wider text-cs2-text-muted">
+                  {mapLabel(meta.map_name)} · {totalRounds} 回合{durationMins > 0 ? ` · ${durationMins} 分钟` : ""}
+                </div>
+              </div>
+              <div className={`flex min-w-0 items-center gap-2.5 ${teamBScore > teamAScore ? "rounded-md bg-amber-500/8 px-2 py-1" : ""}`}>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-sm font-black text-amber-400">{teamBName.slice(0, 1).toUpperCase()}</div>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400">{teamBName}</p>
+                </div>
+              </div>
             </div>
           </section>
 
-          <nav className="flex gap-1 overflow-x-auto rounded-xl border border-cs2-border bg-cs2-bg-card p-1.5" aria-label="Demo 分析视图">
-            {TABS.map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setActiveTab(key)} className={`flex min-w-fit items-center gap-2 rounded-lg px-3.5 py-2 text-[11px] font-semibold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/20" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
+          <nav className="flex h-10 gap-1 overflow-x-auto rounded-[10px] border border-cs2-border bg-cs2-bg-card p-1" aria-label="Demo 分析视图">
+            {TABS.map(({ key, label, icon: Icon }) => <button key={key} type="button" onClick={() => setActiveTab(key)} className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/20" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
           </nav>
 
           {activeTab === "highlights" && (

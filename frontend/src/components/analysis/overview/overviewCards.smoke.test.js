@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 describe("overview presentational cards smoke imports", () => {
-  it("imports all eight Task 5 components", async () => {
+  it("imports overview card components", async () => {
     const modules = await Promise.all([
+      import("./InsightCard.jsx"),
       import("./MatchMainlineCard.jsx"),
       import("./MatchTrendCard.jsx"),
       import("./SidePerformanceCard.jsx"),
