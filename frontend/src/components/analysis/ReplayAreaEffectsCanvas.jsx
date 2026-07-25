@@ -297,7 +297,7 @@ export default function ReplayAreaEffectsCanvas({
       const useSquareDebug = smokeDebugLayer === "radar_cells" || smokeDebugLayer === "world_cells";
 
       for (const layer of activeLayers) {
-        if (useSquareDebug) {
+        if (useSquareDebug && layer.type === "smoke") {
           const projected = projectLayerCells(layer, transform, mapLayer, width, height);
           if (!projected.length) continue;
           ctx.save();

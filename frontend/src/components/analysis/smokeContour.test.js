@@ -1,5 +1,21 @@
 import { expect, test } from "vitest";
-import { buildDensityMask, marchingSquares, sampleCrossfadeAlpha } from "./smokeContour";
+import {
+  MARCHING_SQUARES_SEGMENTS,
+  buildDensityMask,
+  marchingSquares,
+  sampleCrossfadeAlpha,
+} from "./smokeContour";
+
+// BL=1, BR=2, TR=4, TL=8; edges 0=bottom, 1=right, 2=top, 3=left
+test("marching-squares LUT cases 9/11/12 (and verified neighbors)", () => {
+  expect(MARCHING_SQUARES_SEGMENTS[4]).toEqual([[1, 2]]);
+  expect(MARCHING_SQUARES_SEGMENTS[5]).toEqual([[3, 0], [1, 2]]);
+  expect(MARCHING_SQUARES_SEGMENTS[9]).toEqual([[0, 2]]);
+  expect(MARCHING_SQUARES_SEGMENTS[10]).toEqual([[0, 1], [2, 3]]);
+  expect(MARCHING_SQUARES_SEGMENTS[11]).toEqual([[1, 2]]);
+  expect(MARCHING_SQUARES_SEGMENTS[12]).toEqual([[1, 3]]);
+  expect(MARCHING_SQUARES_SEGMENTS[13]).toEqual([[0, 1]]);
+});
 
 test("buildDensityMask handles negative world coords", () => {
   const cells = [[-10, 90, 0, 1], [-10, 110, 0, 1]];
