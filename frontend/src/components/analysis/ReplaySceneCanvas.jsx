@@ -20,6 +20,7 @@ import {
   contentRectFromTransform,
   createFittedCamera,
   panBy,
+  rescaleCameraForFitChange,
   restoreCameraForViewport,
   zoomAtPointer,
 } from "../../utils/replayCamera";
@@ -348,14 +349,7 @@ export default function ReplaySceneCanvas({
       applyCamera(fitted);
       return;
     }
-    const prevFit = Number(current.fitScale) > 0 ? Number(current.fitScale) : fitted.fitScale;
-    const ratio = fitted.fitScale / prevFit;
-    applyCamera({
-      ...current,
-      fitScale: fitted.fitScale,
-      offsetX: current.offsetX * ratio,
-      offsetY: current.offsetY * ratio,
-    });
+    applyCamera(rescaleCameraForFitChange(current, fitted.fitScale, viewportSize));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally ignore round/layer
   }, [mapKey, contentRect.x, contentRect.y, contentRect.width, contentRect.height, viewportSize.width, viewportSize.height]);
 

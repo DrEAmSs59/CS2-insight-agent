@@ -138,6 +138,23 @@ export function contentRectFromTransform(transform) {
 }
 
 /**
+ * Same-map viewport/contentRect resize while zoomed: scale offsets by fitScale
+ * ratio, then clamp so the scene cannot leave the viewport with no overlap.
+ */
+export function rescaleCameraForFitChange(camera, nextFitScale, viewport, sceneSize = { width: SCENE_SIZE, height: SCENE_SIZE }) {
+  const fittedFit = Number(nextFitScale) > 0 ? Number(nextFitScale) : 1;
+  const prevFit = Number(camera?.fitScale) > 0 ? Number(camera.fitScale) : fittedFit;
+  const ratio = fittedFit / prevFit;
+  const scaled = {
+    ...camera,
+    fitScale: fittedFit,
+    offsetX: (Number(camera?.offsetX) || 0) * ratio,
+    offsetY: (Number(camera?.offsetY) || 0) * ratio,
+  };
+  return panBy(scaled, 0, 0, viewport, sceneSize);
+}
+
+/**
  * Restore a saved per-map camera into the current viewport fitScale.
  * Scales pan offsets by fitted.fitScale / saved.fitScale, then clamps.
  */
