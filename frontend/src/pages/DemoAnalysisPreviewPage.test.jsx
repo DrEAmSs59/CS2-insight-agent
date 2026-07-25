@@ -8,6 +8,7 @@ import { useReplayStore } from "../stores/replayStore";
 
 vi.mock("../api/api", () => ({
   getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
+  getDemoUtilityMaskUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/utility-mask/${mapName}${layer ? `?layer=${layer}` : ""}`),
   default: {
     post: vi.fn().mockResolvedValue({
       data: {
@@ -418,7 +419,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText("当前地图缺少坐标变换元数据")).toBeNull();
   });
 
-  test("switches Nuke upper and lower radar floors and enlarges its map plane", async () => {
+  test("switches Nuke upper and lower radar floors via camera scene", async () => {
     const shell = buildShell();
     shell.analysisWorkspace = {
       ...shell.analysisWorkspace,
@@ -443,7 +444,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     await waitFor(() => expect(screen.getByAltText("de_nuke 上层 雷达地图")).toBeTruthy());
     expect(screen.getByRole("group", { name: "地图楼层" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "上层" }).getAttribute("aria-pressed")).toBe("true");
-    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("translate(-50%, -50%)");
+    const scene = view.container.querySelector('.replay-scene.demo-radar-plane[data-map="de_nuke"]');
+    expect(scene).toBeTruthy();
+    expect(scene.getAttribute("style")).toContain("scale(");
+    expect(screen.getByRole("group", { name: "地图缩放" })).toBeTruthy();
     expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeTruthy();
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
 

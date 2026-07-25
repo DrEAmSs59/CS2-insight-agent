@@ -20,10 +20,10 @@ import {
   createPlayheadStore,
   createReplayClock,
 } from "../../utils/replayPlayback";
-import { useReplayStore } from "../../stores/replayStore";
+import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 
 const SAMPLE_HZ = 8;
-const REPLAY_CACHE_VERSION = 11;
+const REPLAY_CACHE_VERSION = REPLAY_STORE_CACHE_VERSION;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import API from "../api/api";
 
-export const REPLAY_STORE_CACHE_VERSION = 10;
+export const REPLAY_STORE_CACHE_VERSION = 11;
 const MAX_READY_ENTRIES = 3;
 const MAX_BYTES = 150 * 1024 * 1024;
 
@@ -39,6 +39,30 @@ export function createReplayCacheKey(args) {
 export const useReplayStore = create((set, get) => ({
   entries: {},
   activeKey: null,
+  /** Per-map camera snapshot: { fitScale, userZoom, offsetX, offsetY } */
+  camerasByMap: {},
+
+  getCamera(mapKey) {
+    const key = String(mapKey || "").trim().toLowerCase();
+    if (!key) return null;
+    return get().camerasByMap[key] || null;
+  },
+
+  setCamera(mapKey, camera) {
+    const key = String(mapKey || "").trim().toLowerCase();
+    if (!key || !camera || typeof camera !== "object") return;
+    set({
+      camerasByMap: {
+        ...get().camerasByMap,
+        [key]: {
+          fitScale: Number(camera.fitScale) || 1,
+          userZoom: Number(camera.userZoom) || 1,
+          offsetX: Number(camera.offsetX) || 0,
+          offsetY: Number(camera.offsetY) || 0,
+        },
+      },
+    });
+  },
 
   touch(key) {
     const entry = get().entries[key];
