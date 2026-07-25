@@ -55,17 +55,15 @@ export function selectActiveSample(track, currentTick, hideAfterTick = null) {
   return chosen;
 }
 
-function selectPreviousSample(track, currentSample) {
-  if (!track || !Array.isArray(track.samples) || !currentSample) return null;
-  const currentTick = Number(currentSample.tick);
-  if (!Number.isFinite(currentTick)) return null;
-  let previous = null;
+function selectNextSample(track, currentTick) {
+  if (!track || !Array.isArray(track.samples)) return null;
+  const tick = Number(currentTick);
+  if (!Number.isFinite(tick)) return null;
   for (const sample of track.samples) {
-    const tick = Number(sample.tick);
-    if (!Number.isFinite(tick) || tick >= currentTick) break;
-    previous = sample;
+    const sampleTick = Number(sample.tick);
+    if (Number.isFinite(sampleTick) && sampleTick > tick) return sample;
   }
-  return previous;
+  return null;
 }
 
 function clamp(value, min, max) {
@@ -151,32 +149,34 @@ function buildSmokeContourRings(cells, cellSize) {
 }
 
 function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, height, hideAfterTick) {
-  const current = selectActiveSample(track, currentTick, hideAfterTick);
-  if (!current?.cells?.length) return;
+  const active = selectActiveSample(track, currentTick, hideAfterTick);
+  if (!active?.cells?.length) return;
 
-  const cellSize = Number(current.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE);
-  const previous = selectPreviousSample(track, current);
-  const currentCells = filterCellsForMapLayer(current.cells, transform, mapLayer);
-  if (!currentCells.length) return;
+  const cellSize = Number(active.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE);
+  const next = selectNextSample(track, currentTick);
+  const activeCells = filterCellsForMapLayer(active.cells, transform, mapLayer);
+  if (!activeCells.length) return;
 
-  const currentDensity = averageCellDensity(currentCells);
-  const currentRings = buildSmokeContourRings(currentCells, cellSize);
+  const activeDensity = averageCellDensity(activeCells);
+  const activeRings = buildSmokeContourRings(activeCells, cellSize);
 
-  if (previous?.cells?.length) {
-    const prevCells = filterCellsForMapLayer(previous.cells, transform, mapLayer);
+  if (next?.cells?.length) {
+    const nextCells = filterCellsForMapLayer(next.cells, transform, mapLayer);
     const { prevA, nextA } = sampleCrossfadeAlpha(
-      Number(previous.tick),
-      Number(current.tick),
+      Number(active.tick),
+      Number(next.tick),
       Number(currentTick),
     );
-    if (prevCells.length && prevA > 0) {
-      const prevDensity = averageCellDensity(prevCells);
-      const prevRings = buildSmokeContourRings(prevCells, Number(previous.cell_size || cellSize));
-      fillSmokeRings(ctx, prevRings, transform, width, height, prevA * prevDensity);
+    if (prevA > 0) {
+      fillSmokeRings(ctx, activeRings, transform, width, height, prevA * activeDensity);
     }
-    fillSmokeRings(ctx, currentRings, transform, width, height, nextA * currentDensity);
+    if (nextCells.length && nextA > 0) {
+      const nextDensity = averageCellDensity(nextCells);
+      const nextRings = buildSmokeContourRings(nextCells, Number(next.cell_size || cellSize));
+      fillSmokeRings(ctx, nextRings, transform, width, height, nextA * nextDensity);
+    }
   } else {
-    fillSmokeRings(ctx, currentRings, transform, width, height, currentDensity);
+    fillSmokeRings(ctx, activeRings, transform, width, height, activeDensity);
   }
 }
 

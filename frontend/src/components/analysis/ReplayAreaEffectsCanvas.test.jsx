@@ -189,6 +189,54 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(fillRect).not.toHaveBeenCalled();
   });
 
+  test("crossfades active and next smoke samples mid-interval", () => {
+    const fill = vi.fn();
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      arc: vi.fn(),
+      fill,
+      fillRect: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    }));
+    const cellsA = [];
+    for (let x = 100; x <= 140; x += 20) {
+      for (let y = 200; y <= 240; y += 20) cellsA.push([x, y, 50, 1]);
+    }
+    const cellsB = [];
+    for (let x = 200; x <= 240; x += 20) {
+      for (let y = 300; y <= 340; y += 20) cellsB.push([x, y, 50, 1]);
+    }
+    const tracks = [{
+      id: "smoke:0:100:1",
+      type: "smoke",
+      start_tick: 100,
+      end_tick: 300,
+      cell_size: 20,
+      samples: [
+        { tick: 100, cells: cellsA },
+        { tick: 200, cells: cellsB },
+      ],
+    }];
+    render(
+      <ReplayAreaEffectsCanvas
+        tracks={tracks}
+        currentTick={150}
+        transform={{ pos_x: 0, pos_y: 4096, scale: 5 }}
+        capabilities={{ inferno_cells: true, smoke_voxels: true, smoke_mode: "voxels" }}
+        smokeDebugLayer="final_render"
+        enabled
+      />,
+    );
+    expect(fill.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("inferno still uses radial arcs", () => {
     const arc = vi.fn();
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
