@@ -458,21 +458,42 @@ export default function Demo2DReplayPreview({
 
   useEffect(() => {
     const synced = pauseSyncRef.current;
-    pauseSyncRef.current = null;
-    const position = Number.isFinite(Number(synced?.position)) ? Number(synced.position) : frameIndex;
-    const sampleIndex = clamp(Math.floor(position), 0, Math.max(0, frames.length - 1));
-    framePositionRef.current = position;
+    if (synced) {
+      pauseSyncRef.current = null;
+      const position = Number(synced.position);
+      const sampleIndex = clamp(Math.floor(position), 0, Math.max(0, frames.length - 1));
+      framePositionRef.current = position;
+      setUiSampleIndex(sampleIndex);
+      if (playing) return;
+      const seconds = Number.isFinite(Number(synced.seconds))
+        ? Number(synced.seconds)
+        : secondsForFramePosition(frames, position);
+      const approx = frames.length
+        ? interpolateReplayFrame(frames, Number.NaN, seconds)
+        : { tick: selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0 };
+      playheadStoreRef.current?.set({
+        position,
+        seconds,
+        tick: Number(approx.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0,
+        sampleIndex,
+      });
+      clockRef.current?.seek(seconds);
+      if (Math.abs(position - Number(frameIndex)) > 1e-6) {
+        setFrameIndex(position);
+      }
+      return;
+    }
+    const sampleIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
+    framePositionRef.current = frameIndex;
     setUiSampleIndex(sampleIndex);
     if (playing) return;
-    const seconds = Number.isFinite(Number(synced?.seconds))
-      ? Number(synced.seconds)
-      : secondsForFramePosition(frames, position);
+    const seconds = secondsForFramePosition(frames, frameIndex);
     const approx = frames.length
       ? interpolateReplayFrame(frames, Number.NaN, seconds)
       : { tick: selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0 };
     const tick = Number(approx.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
     playheadStoreRef.current?.set({
-      position,
+      position: frameIndex,
       seconds,
       tick,
       sampleIndex,
@@ -556,9 +577,8 @@ export default function Demo2DReplayPreview({
         sampleIndex,
       });
       // Preserve fractional playhead across pause / speed change (avoid integer sample snap).
+      // Do NOT setState here — cleanup also runs on unmount/route change and can freeze the UI.
       pauseSyncRef.current = { seconds: playheadSeconds, position };
-      setFrameIndex(position);
-      setUiSampleIndex(sampleIndex);
     };
   }, [playing, frames.length, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
@@ -578,11 +598,24 @@ export default function Demo2DReplayPreview({
     : Math.max(0, ROUND_CLOCK_SECONDS - activeRoundElapsed);
   const eventMarkers = roundEvents.filter((event) => event.type === "kill" || event.type === "grenade" || event.type === "plant");
 
-  const seekToFrameIndex = (index) => {
+  const seekToFrameIndex = (index, { pause = false } = {}) => {
     if (!frames.length) return;
     const i = clamp(Number(index), 0, frames.length - 1);
+    const seconds = secondsForFramePosition(frames, i);
+    const sampleIndex = clamp(Math.floor(i), 0, frames.length - 1);
+    const approx = interpolateReplayFrame(frames, Number.NaN, seconds);
+    framePositionRef.current = i;
+    pauseSyncRef.current = { seconds, position: i };
+    playheadStoreRef.current?.set({
+      position: i,
+      seconds,
+      tick: Number(approx.tick) || 0,
+      sampleIndex,
+    });
+    clockRef.current?.seek(seconds);
     setFrameIndex(i);
-    setPlaying(false);
+    setUiSampleIndex(sampleIndex);
+    if (pause) setPlaying(false);
   };
 
   const seekToEvent = (event) => {
@@ -599,8 +632,7 @@ export default function Demo2DReplayPreview({
       : secondsForFramePosition(frames, frameIndex);
     const lastSeconds = Number(frames.at(-1)?.time_sec || currentSeconds);
     const target = clamp(currentSeconds + deltaSeconds, 0, lastSeconds);
-    setFrameIndex(replayPositionForTime(frames, target));
-    setPlaying(false);
+    seekToFrameIndex(replayPositionForTime(frames, target));
   };
 
   const changeRound = (nextIndex) => {
@@ -640,7 +672,7 @@ export default function Demo2DReplayPreview({
             </div>
             <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { seekToFrameIndex(Number(event.target.value)); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
           </div>
-          <button type="button" onClick={() => { seekToFrameIndex(0); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => { seekToFrameIndex(0, { pause: true }); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
           <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(uiFrame.tick) || 0)} · {replayFps} Hz</p></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-cs2-border pt-3">
