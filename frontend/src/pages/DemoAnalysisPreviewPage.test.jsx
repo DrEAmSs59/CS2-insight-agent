@@ -10,6 +10,7 @@ vi.mock("../api/api", () => ({
   getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
   getDemoUtilityMaskUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/utility-mask/${mapName}${layer ? `?layer=${layer}` : ""}`),
   default: {
+    get: vi.fn().mockResolvedValue({ data: { avatars: {} } }),
     post: vi.fn().mockResolvedValue({
       data: {
         fps: 32,
@@ -308,7 +309,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByText("$2,450")).toBeTruthy();
     const weaponDisplay = screen.getByLabelText(/ZywOo 当前武器/);
     expect(weaponDisplay.textContent).toBe("");
-    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-[18px]");
+    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-6");
     expect(screen.getByLabelText(/ZywOo 头盔和防弹衣/)).toBeTruthy();
     expect(screen.queryByText("100 头甲")).toBeNull();
     expect(view.container.querySelector('img[src$="/ak47.svg"]')).toBeTruthy();
@@ -318,6 +319,18 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByLabelText("ZywOo 持有闪光弹 2 枚")).toBeTruthy();
     expect(screen.getByLabelText("ZywOo 携带拆弹器")).toBeTruthy();
     expect(screen.getByLabelText("ZywOo 携带 C4")).toBeTruthy();
+    expect(screen.getByLabelText("ZywOo 持有闪光弹 2 枚").querySelectorAll('img[src$="/flashbang.svg"]')).toHaveLength(2);
+    const ctRosterSlot = view.container.querySelector('[data-replay-roster-slot="ZywOo"]');
+    expect(ctRosterSlot?.getAttribute("data-side")).toBe("CT");
+    expect(ctRosterSlot?.className).toContain("border-sky-300");
+    expect(ctRosterSlot?.getAttribute("data-smoked")).toBe("false");
+    expect(ctRosterSlot?.getAttribute("data-burning")).toBe("false");
+    expect(ctRosterSlot?.getAttribute("data-blinded")).toBe("false");
+    expect(ctRosterSlot?.querySelector("span.rounded-full")?.textContent).toBe("0");
+    const tRosterSlot = view.container.querySelector('[data-replay-roster-slot="b1t"]');
+    expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
+    expect(tRosterSlot?.className).toContain("border-amber-200");
+    expect(tRosterSlot?.className).toContain("ml-auto");
     expect(screen.getAllByText("C4").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" }));
