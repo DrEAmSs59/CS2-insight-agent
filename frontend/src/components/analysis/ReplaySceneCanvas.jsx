@@ -10,7 +10,7 @@ import {
   yawToCssRotation,
 } from "../../utils/replayRadarTransform";
 import {
-  interpolateReplayFrame as interpolateReplayFrameByTick,
+  interpolateReplayFrame,
 } from "../../utils/replayPlayback";
 import {
   SCENE_SIZE,
@@ -58,60 +58,6 @@ function armorText(state) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
-}
-
-function interpolateNumber(start, end, ratio) {
-  const left = Number(start);
-  const right = Number(end);
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return start;
-  return left + (right - left) * ratio;
-}
-
-function interpolateYaw(start, end, ratio) {
-  const left = Number(start);
-  const right = Number(end);
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return start;
-  const delta = ((right - left + 540) % 360) - 180;
-  const value = left + delta * ratio;
-  return ((value % 360) + 360) % 360;
-}
-
-function replayPlayerKey(player) {
-  return String(player?.steamid64 || player?.steam_id64 || player?.name || "").trim().toLowerCase();
-}
-
-function interpolateReplayFrame(frames, position, fallbackTick) {
-  if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
-  const lowerIndex = clamp(Math.floor(position), 0, frames.length - 1);
-  const upperIndex = Math.min(frames.length - 1, lowerIndex + 1);
-  const lower = frames[lowerIndex] || {};
-  const upper = frames[upperIndex] || lower;
-  const ratio = clamp(position - lowerIndex, 0, 1);
-  if (upperIndex === lowerIndex || ratio <= 0) return lower;
-
-  const upperPlayers = new Map((upper.players || []).map((player) => [replayPlayerKey(player), player]));
-  const players = (lower.players || []).map((player) => {
-    const next = upperPlayers.get(replayPlayerKey(player));
-    if (!next) return player;
-    return {
-      ...player,
-      x: interpolateNumber(player.x, next.x, ratio),
-      y: interpolateNumber(player.y, next.y, ratio),
-      z: interpolateNumber(player.z, next.z, ratio),
-      yaw: interpolateYaw(player.yaw, next.yaw, ratio),
-      weapon: (() => {
-        const preferred = ratio >= 0.5 ? (next.weapon || player.weapon) : (player.weapon || next.weapon);
-        return preferred || player.weapon || next.weapon || "";
-      })(),
-      inventory: ratio >= 0.5 ? (next.inventory || player.inventory) : (player.inventory || next.inventory),
-    };
-  });
-  return {
-    ...lower,
-    players,
-    tick: interpolateNumber(lower.tick, upper.tick, ratio),
-    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, ratio),
-  };
 }
 
 function replaySideForTeamKey(teamKey, round) {
@@ -545,17 +491,13 @@ export default function ReplaySceneCanvas({
 
   const frame = useMemo(() => {
     if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
-    const position = playing ? playhead.position : frameIndex;
-    if (Number.isFinite(Number(frames[0]?.tick)) && Number.isFinite(Number(frames[0]?.time_sec))) {
-      const approx = interpolateReplayFrame(frames, position, fallbackTick);
-      const tick = Number(approx.tick);
-      const seconds = Number(approx.time_sec);
-      if (Number.isFinite(tick)) {
-        return interpolateReplayFrameByTick(frames, tick, seconds);
-      }
+    const seconds = Number(playhead.seconds);
+    if (Number.isFinite(seconds)) {
+      return interpolateReplayFrame(frames, Number.NaN, seconds);
     }
-    return interpolateReplayFrame(frames, position, fallbackTick);
-  }, [fallbackTick, frameIndex, frames, playhead.position, playing]);
+    const idx = clamp(Math.floor(frameIndex), 0, frames.length - 1);
+    return frames[idx] || { players: [], tick: fallbackTick, time_sec: 0 };
+  }, [fallbackTick, frameIndex, frames, playhead.seconds]);
 
   const currentTick = Number(frame.tick || fallbackTick || 0);
   const roundEndTick = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);

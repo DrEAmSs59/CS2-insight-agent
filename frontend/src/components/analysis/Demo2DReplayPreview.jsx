@@ -17,8 +17,11 @@ import ReplaySceneCanvas, { computeBombState } from "./ReplaySceneCanvas";
 import { isSmokeDebugEnabled } from "./smokeDebugGate";
 import { resolveReplayTransform } from "../../utils/replayRadarTransform";
 import {
+  clamp,
   createPlayheadStore,
   createReplayClock,
+  findPreviousFrameIndex,
+  interpolateReplayFrame,
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 
@@ -192,66 +195,6 @@ function eventFrameRatio(event, frames, selectedRound) {
   );
 }
 
-function interpolateNumber(start, end, ratio) {
-  const left = Number(start);
-  const right = Number(end);
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return start;
-  return left + (right - left) * ratio;
-}
-
-function interpolateYaw(start, end, ratio) {
-  const left = Number(start);
-  const right = Number(end);
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return start;
-  const delta = ((right - left + 540) % 360) - 180;
-  const value = left + delta * ratio;
-  return ((value % 360) + 360) % 360;
-}
-
-function replayPlayerKey(player) {
-  return String(player?.steamid64 || player?.steam_id64 || player?.name || "").trim().toLowerCase();
-}
-
-/** Fractional array-index scrubbing (timeline). Playback prefers tick/time via replayPlayback. */
-function interpolateReplayFrame(frames, position, fallbackTick) {
-  if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
-  const lowerIndex = clamp(Math.floor(position), 0, frames.length - 1);
-  const upperIndex = Math.min(frames.length - 1, lowerIndex + 1);
-  const lower = frames[lowerIndex] || {};
-  const upper = frames[upperIndex] || lower;
-  const ratio = clamp(position - lowerIndex, 0, 1);
-  if (upperIndex === lowerIndex || ratio <= 0) return lower;
-
-  // Linear interpolation only — smoothstep caused 125ms ease-in/out stutter at 8Hz.
-  const upperPlayers = new Map((upper.players || []).map((player) => [replayPlayerKey(player), player]));
-  const players = (lower.players || []).map((player) => {
-    const next = upperPlayers.get(replayPlayerKey(player));
-    if (!next) return player;
-    return {
-      ...player,
-      x: interpolateNumber(player.x, next.x, ratio),
-      y: interpolateNumber(player.y, next.y, ratio),
-      z: interpolateNumber(player.z, next.z, ratio),
-      yaw: interpolateYaw(player.yaw, next.yaw, ratio),
-      weapon: (() => {
-        const preferred = ratio >= 0.5 ? (next.weapon || player.weapon) : (player.weapon || next.weapon);
-        return preferred || player.weapon || next.weapon || "";
-      })(),
-      inventory: ratio >= 0.5 ? (next.inventory || player.inventory) : (player.inventory || next.inventory),
-    };
-  });
-  return {
-    ...lower,
-    players,
-    tick: interpolateNumber(lower.tick, upper.tick, ratio),
-    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, ratio),
-  };
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
 function isBlueReplaySide(side, fallback = false) {
   const normalized = String(side || "").trim().toUpperCase();
   return normalized ? normalized === "CT" : fallback;
@@ -266,18 +209,10 @@ function formatClock(seconds) {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-function replayPositionForTime(frames, targetSeconds) {
+/** Map playhead seconds → nearest prior sample index (scrubber display). */
+function sampleIndexForTime(frames, targetSeconds) {
   if (!frames.length) return 0;
-  const target = Number(targetSeconds);
-  if (!Number.isFinite(target) || target <= Number(frames[0]?.time_sec || 0)) return 0;
-  for (let index = 1; index < frames.length; index += 1) {
-    const previousTime = Number(frames[index - 1]?.time_sec || 0);
-    const nextTime = Number(frames[index]?.time_sec || previousTime);
-    if (target > nextTime) continue;
-    const ratio = clamp((target - previousTime) / Math.max(0.0001, nextTime - previousTime), 0, 1);
-    return index - 1 + ratio;
-  }
-  return frames.length - 1;
+  return findPreviousFrameIndex(frames, Number.NaN, targetSeconds);
 }
 
 function mapKey(value) {
@@ -524,21 +459,27 @@ export default function Demo2DReplayPreview({
   }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
 
   useEffect(() => {
-    framePositionRef.current = frameIndex;
     const sampleIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
+    framePositionRef.current = sampleIndex;
     setUiSampleIndex(sampleIndex);
-    const approx = interpolateReplayFrame(frames, frameIndex, selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0);
-    playheadStoreRef.current?.set({
-      position: frameIndex,
-      seconds: Number(approx.time_sec) || 0,
-      tick: Number(approx.tick) || 0,
-      sampleIndex,
-    });
-  }, [frameIndex, frames, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
+    const frame = frames[sampleIndex];
+    const seconds = Number(frame?.time_sec) || 0;
+    const tick = Number(frame?.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
+    if (!playing) {
+      playheadStoreRef.current?.set({
+        position: sampleIndex,
+        seconds,
+        tick,
+        sampleIndex,
+      });
+      clockRef.current?.seek(seconds);
+    }
+  }, [frameIndex, frames, playing, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) return undefined;
-    const startSeconds = Number(frames[clamp(Math.floor(framePositionRef.current), 0, frames.length - 1)]?.time_sec || 0);
+    const startIndex = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
+    const startSeconds = Number(frames[startIndex]?.time_sec || 0);
     const clock = createReplayClock({
       offsetSeconds: startSeconds,
       rate: speed,
@@ -547,34 +488,22 @@ export default function Demo2DReplayPreview({
     clockRef.current = clock;
     clock.play();
     let animationFrame = 0;
-    let lastUiSample = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
+    let lastUiSample = startIndex;
     const lastFrame = frames.length - 1;
-    const lastSeconds = Number(frames[lastFrame]?.time_sec);
-    const hasTimeBase = Number.isFinite(lastSeconds) && Number.isFinite(startSeconds);
+    const lastSeconds = Number(frames[lastFrame]?.time_sec) || 0;
     const store = playheadStoreRef.current;
 
     const animate = (now) => {
       const activeFrames = framesRef.current;
       if (!activeFrames.length) return;
       const playheadSeconds = clock.getPlayheadSeconds(now);
-      let nextPosition;
-      if (hasTimeBase) {
-        nextPosition = replayPositionForTime(activeFrames, playheadSeconds);
-      } else {
-        nextPosition = Math.min(
-          lastFrame,
-          (playheadSeconds - startSeconds) * replayFps,
-        );
-      }
-      nextPosition = Math.min(lastFrame, Math.max(0, nextPosition));
-      framePositionRef.current = nextPosition;
+      const approx = interpolateReplayFrame(activeFrames, Number.NaN, playheadSeconds);
+      const sampleIndex = approx._sampleIndex ?? findPreviousFrameIndex(activeFrames, Number.NaN, playheadSeconds);
+      framePositionRef.current = sampleIndex + (Number(approx._interpRatio) || 0);
 
-      const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
-      const approx = interpolateReplayFrame(activeFrames, nextPosition, fallbackTick);
-      const sampleIndex = clamp(Math.floor(nextPosition), 0, lastFrame);
       store.set({
-        position: nextPosition,
-        seconds: Number(approx.time_sec) || playheadSeconds,
+        position: framePositionRef.current,
+        seconds: playheadSeconds,
         tick: Number(approx.tick) || 0,
         sampleIndex,
       });
@@ -586,8 +515,15 @@ export default function Demo2DReplayPreview({
         setFrameIndex(sampleIndex);
       }
 
-      if (nextPosition >= lastFrame - 0.001) {
+      if (Number.isFinite(lastSeconds) && playheadSeconds >= lastSeconds - 0.0001) {
+        store.set({
+          position: lastFrame,
+          seconds: lastSeconds,
+          tick: Number(activeFrames[lastFrame]?.tick) || Number(approx.tick) || 0,
+          sampleIndex: lastFrame,
+        });
         setFrameIndex(lastFrame);
+        setUiSampleIndex(lastFrame);
         setPlaying(false);
         return;
       }
@@ -598,7 +534,7 @@ export default function Demo2DReplayPreview({
       window.cancelAnimationFrame(animationFrame);
       clock.pause();
     };
-  }, [playing, frames.length, replayFps, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
+  }, [playing, frames.length, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const uiFrame = frames[uiSampleIndex] || frames[0] || { players: [], tick: fallbackTick, time_sec: 0 };
@@ -616,20 +552,34 @@ export default function Demo2DReplayPreview({
     : Math.max(0, ROUND_CLOCK_SECONDS - activeRoundElapsed);
   const eventMarkers = roundEvents.filter((event) => event.type === "kill" || event.type === "grenade" || event.type === "plant");
 
+  const seekToFrameIndex = (index) => {
+    if (!frames.length) return;
+    const i = clamp(Math.round(Number(index)), 0, frames.length - 1);
+    const seconds = Number(frames[i]?.time_sec) || 0;
+    clockRef.current?.seek(seconds);
+    playheadStoreRef.current?.set({
+      position: i,
+      seconds,
+      tick: Number(frames[i]?.tick) || 0,
+      sampleIndex: i,
+    });
+    setFrameIndex(i);
+    setPlaying(false);
+  };
+
   const seekToEvent = (event) => {
     if (!frames.length) return;
     const eventTick = Number(event?.tick || 0);
     const firstFrameAfterEvent = frames.findIndex((item) => Number(item.tick || 0) >= eventTick);
-    setFrameIndex(firstFrameAfterEvent >= 0 ? firstFrameAfterEvent : frames.length - 1);
-    setPlaying(false);
+    seekToFrameIndex(firstFrameAfterEvent >= 0 ? firstFrameAfterEvent : frames.length - 1);
   };
 
-  const seekBySeconds = (seconds) => {
+  const seekBySeconds = (deltaSeconds) => {
     if (!frames.length) return;
     const currentSeconds = Number(uiFrame.time_sec || 0);
     const lastSeconds = Number(frames.at(-1)?.time_sec || currentSeconds);
-    setFrameIndex(replayPositionForTime(frames, clamp(currentSeconds + seconds, 0, lastSeconds)));
-    setPlaying(false);
+    const target = clamp(currentSeconds + deltaSeconds, 0, lastSeconds);
+    seekToFrameIndex(sampleIndexForTime(frames, target));
   };
 
   const changeRound = (nextIndex) => {
@@ -667,9 +617,9 @@ export default function Demo2DReplayPreview({
                 return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={eventKind} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
               })}
             </div>
-            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { setFrameIndex(Number(event.target.value)); setPlaying(false); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
+            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="1" value={sliderIndex} onChange={(event) => { seekToFrameIndex(Number(event.target.value)); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
           </div>
-          <button type="button" onClick={() => { setFrameIndex(0); setPlaying(false); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => { seekToFrameIndex(0); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
           <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(uiFrame.tick) || 0)} · {replayFps} Hz</p></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-cs2-border pt-3">
