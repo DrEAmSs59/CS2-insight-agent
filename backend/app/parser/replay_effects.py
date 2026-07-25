@@ -8,7 +8,11 @@ import os
 import time
 from typing import Any
 
-from .smoke_voxel_decode import VOXEL_CELL_SIZE_WORLD, decode_smoke_cells
+from .smoke_voxel_decode import (
+    VOXEL_CELL_SIZE_WORLD,
+    decode_smoke_cells,
+    decode_smoke_occupancy_sequence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,32 @@ def _quantize_cell(x: float, y: float, z: float, intensity: float) -> tuple[floa
 
 def _cells_signature(cells: list[list[float]] | list[tuple[float, float, float, float]]) -> tuple:
     return tuple(tuple(cell) for cell in cells)
+
+
+def _map_smoke_seq_to_tick(
+    seq: int,
+    anchors: dict[int, int],
+    begin_tick: int,
+) -> tuple[int, str]:
+    """Map journal seq → demo tick using row anchors; interpolate between known updates."""
+    if seq in anchors:
+        return int(anchors[seq]), "anchor"
+    lower = max((s for s in anchors if s < seq), default=None)
+    upper = min((s for s in anchors if s > seq), default=None)
+    if lower is not None and upper is not None:
+        t0 = float(anchors[lower])
+        t1 = float(anchors[upper])
+        ratio = (seq - lower) / (upper - lower)
+        return int(round(t0 + (t1 - t0) * ratio)), "interpolated"
+    if upper is not None:
+        t1 = float(anchors[upper])
+        if upper <= 0:
+            return int(begin_tick), "begin"
+        ratio = max(0.0, min(1.0, float(seq) / float(upper)))
+        return int(round(float(begin_tick) + (t1 - float(begin_tick)) * ratio)), "pre_anchor"
+    if lower is not None:
+        return int(anchors[lower]), "post_anchor"
+    return int(begin_tick), "begin"
 
 
 def _split_entity_lifecycles(rows: list[dict[str, Any]], tick_gap: int) -> list[list[dict[str, Any]]]:
@@ -232,57 +262,135 @@ def build_smoke_tracks_from_rows(
     tracks: list[dict[str, Any]] = []
     for entity_id, entity_rows in by_entity.items():
         for group in _split_entity_lifecycles(entity_rows, tick_gap):
-            samples: list[dict[str, Any]] = []
-            prev_update: Any = object()
-            prev_sig: tuple | None = None
-            cell_size = VOXEL_CELL_SIZE_WORLD
+            begin_raw = _json_number(group[0].get("m_nSmokeEffectTickBegin"))
+            begin_tick = int(begin_raw) if begin_raw is not None else int(group[0]["tick"])
+
+            anchors: dict[int, int] = {}
             for row in group:
                 update = row.get("m_nVoxelUpdate")
                 try:
                     update_i = int(update) if update is not None else None
                 except (TypeError, ValueError):
                     update_i = None
-                # Same voxel update ⇒ identical occupancy; skip expensive decode.
+                if update_i is not None:
+                    anchors[update_i] = int(row["tick"])
+
+            samples: list[dict[str, Any]] = []
+            seen_seqs: set[int] = set()
+            prev_update: Any = object()
+            prev_sig: tuple | None = None
+            cell_size = VOXEL_CELL_SIZE_WORLD
+
+            for row in group:
+                update = row.get("m_nVoxelUpdate")
+                try:
+                    update_i = int(update) if update is not None else None
+                except (TypeError, ValueError):
+                    update_i = None
+                # Same voxel update ⇒ identical journal occupancy; skip expensive decode.
                 if update_i is not None and update_i == prev_update:
                     continue
+
                 data = row.get("m_VoxelFrameData")
                 declared = row.get("m_nVoxelFrameDataSize")
                 origin = row.get("m_vSmokeDetonationPos")
-                decoded = decode_smoke_cells(
-                    data if isinstance(data, (bytes, bytearray)) else None,
-                    declared_size=declared,
-                    detonation_pos=origin if isinstance(origin, (list, tuple)) else None,
+                if not isinstance(data, (bytes, bytearray)) or not isinstance(origin, (list, tuple)):
+                    continue
+
+                actual_size = len(data)
+                try:
+                    declared_i = int(declared) if declared is not None else actual_size
+                except (TypeError, ValueError):
+                    declared_i = actual_size
+
+                sequence = decode_smoke_occupancy_sequence(
+                    data,
+                    declared_size=declared_i,
+                    detonation_pos=origin,
+                    max_seq=float(update_i) if update_i is not None else None,
                 )
-                if not decoded.get("ok"):
-                    continue
-                cells = decoded["cells"]
-                if not cells:
-                    continue
-                cell_size = float(decoded.get("cell_size") or VOXEL_CELL_SIZE_WORLD)
-                sig = _cells_signature(cells)
-                if update_i is not None and update_i == prev_update and sig != prev_sig:
-                    warnings.append(
-                        f"smoke entity {entity_id} tick {row['tick']}: cells changed without m_nVoxelUpdate"
+                if not sequence:
+                    # Fallback: single snapshot decode with target_seq when journal expand yields nothing.
+                    decoded = decode_smoke_cells(
+                        data,
+                        declared_size=declared_i,
+                        detonation_pos=origin,
+                        target_seq=float(update_i) if update_i is not None else None,
                     )
-                if sig == prev_sig:
-                    prev_update = update_i
-                    continue
+                    if not decoded.get("ok") or not decoded.get("cells"):
+                        prev_update = update_i
+                        continue
+                    sequence = [
+                        {
+                            "seq": int(decoded.get("seq") or update_i or 0),
+                            "cells": decoded["cells"],
+                            "cell_size": float(decoded.get("cell_size") or VOXEL_CELL_SIZE_WORLD),
+                            "voxel_count": int(decoded.get("voxel_count") or 0),
+                        }
+                    ]
+
+                for idx, item in enumerate(sequence):
+                    seq = int(item["seq"])
+                    if update_i is not None and seq > update_i:
+                        warnings.append(
+                            f"smoke entity {entity_id} tick {row['tick']}: decoded_seq {seq} > m_nVoxelUpdate {update_i}"
+                        )
+                        continue
+                    cells = item["cells"]
+                    if not cells:
+                        continue
+                    cell_size = float(item.get("cell_size") or VOXEL_CELL_SIZE_WORLD)
+                    sig = _cells_signature(cells)
+
+                    # Cumulative journals: each seq once. Real demos often keep a single
+                    # occupancy frame at seq=0 while m_nVoxelUpdate advances — re-emit only
+                    # the tip occupancy when its signature actually changes.
+                    is_new_seq = seq not in seen_seqs
+                    if not is_new_seq:
+                        is_tip = idx == len(sequence) - 1
+                        if not is_tip or sig == prev_sig:
+                            continue
+                        mapped_tick, anchor_mode = int(row["tick"]), "row"
+                    else:
+                        if sig == prev_sig:
+                            seen_seqs.add(seq)
+                            continue
+                        mapped_tick, anchor_mode = _map_smoke_seq_to_tick(seq, anchors, begin_tick)
+
+                    logger.debug(
+                        "smoke decode entity=%s row_tick=%s voxel_update=%s decoded_seq=%s "
+                        "cell_count=%s declared_size=%s actual_data_size=%s mapped_tick=%s anchor_mode=%s",
+                        entity_id,
+                        row["tick"],
+                        update_i,
+                        seq,
+                        len(cells),
+                        declared_i,
+                        actual_size,
+                        mapped_tick,
+                        anchor_mode,
+                    )
+                    seen_seqs.add(seq)
+                    prev_sig = sig
+                    sample: dict[str, Any] = {
+                        "tick": int(mapped_tick),
+                        "seq": seq,
+                        "cells": cells,
+                        "cell_size": cell_size,
+                        "anchor_mode": anchor_mode,
+                    }
+                    if update_i is not None:
+                        sample["voxel_update"] = update_i
+                    samples.append(sample)
+
                 prev_update = update_i
-                prev_sig = sig
-                sample: dict[str, Any] = {
-                    "tick": int(row["tick"]),
-                    "cells": cells,
-                    "cell_size": cell_size,
-                }
-                if update_i is not None:
-                    sample["voxel_update"] = update_i
-                samples.append(sample)
+
             if not samples:
                 continue
+            samples.sort(key=lambda s: (int(s["tick"]), int(s["seq"])))
             start = int(samples[0]["tick"])
-            begin = _json_number(group[0].get("m_nSmokeEffectTickBegin"))
-            if begin is not None:
-                start = min(start, int(begin))
+            if begin_raw is not None:
+                start = min(start, int(begin_raw))
             end = min(
                 int(end_tick),
                 max(int(samples[-1]["tick"]), start + int(SMOKE_EFFECT_DURATION_SEC * tick_rate)),

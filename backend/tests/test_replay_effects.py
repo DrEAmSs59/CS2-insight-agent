@@ -73,8 +73,11 @@ class TestInfernoCells:
 
 class TestSmokeTracks:
     def test_smoke_samples_on_update_change(self):
-        blob_a = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
-        blob_b = _make_journal([(0, _occ_payload([(16, 16, 16), (16, 16, 18)]))])
+        blob_a = _make_journal([(1, _occ_payload([(16, 16, 16)]))])
+        blob_b = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 16, 18)])),
+        ])
         origin = [100.0, 200.0, 50.0]
         rows = [
             {
@@ -109,6 +112,8 @@ class TestSmokeTracks:
         assert warnings == []
         assert len(tracks) == 1
         assert len(tracks[0]["samples"]) == 2
+        assert tracks[0]["samples"][0]["seq"] == 1
+        assert tracks[0]["samples"][1]["seq"] == 2
         assert tracks[0]["samples"][0]["voxel_update"] == 1
         assert tracks[0]["samples"][1]["voxel_update"] == 2
         payload = json.dumps(tracks)
@@ -196,6 +201,79 @@ class TestSmokeTracks:
         tracks, _warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=10000, tick_rate=64)
         assert len(tracks) == 1
         assert tracks[0]["end_tick"] == 100 + int(18 * 64)
+
+    def test_expands_journal_occupancy_growth_not_pop_open(self):
+        """One demoparser row with a multi-seq journal must emit growth samples."""
+        blob = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+            (3, _occ_payload([(16, 16, 16), (16, 18, 16), (16, 20, 16), (16, 22, 16)])),
+        ])
+        origin = [100.0, 200.0, 50.0]
+        rows = [
+            {
+                "tick": 10096,
+                "grenade_entity_id": 7,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 10000,
+                "m_nVoxelUpdate": 3,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=20000, tick_rate=64)
+        assert warnings == []
+        assert len(tracks) == 1
+        samples = tracks[0]["samples"]
+        assert len(samples) == 3
+        counts = [len(s["cells"]) for s in samples]
+        assert counts[0] < counts[-1], "first sample must not equal final full smoke"
+        assert [s["seq"] for s in samples] == [1, 2, 3]
+        ticks = [s["tick"] for s in samples]
+        assert ticks == sorted(ticks)
+        assert ticks[0] >= 10000
+        assert ticks[-1] == 10096
+        assert samples[-1]["voxel_update"] == 3
+
+    def test_seq_dedupe_across_rows_keeps_monotonic_ticks(self):
+        blob_early = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+        ])
+        blob_late = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+            (3, _occ_payload([(16, 16, 16), (16, 18, 16), (16, 20, 16)])),
+        ])
+        origin = [0.0, 0.0, 0.0]
+        rows = [
+            {
+                "tick": 200,
+                "grenade_entity_id": 1,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 100,
+                "m_nVoxelUpdate": 2,
+                "m_VoxelFrameData": blob_early,
+                "m_nVoxelFrameDataSize": len(blob_early),
+                "m_vSmokeDetonationPos": origin,
+            },
+            {
+                "tick": 300,
+                "grenade_entity_id": 1,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 100,
+                "m_nVoxelUpdate": 3,
+                "m_VoxelFrameData": blob_late,
+                "m_nVoxelFrameDataSize": len(blob_late),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, _ = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=1000, tick_rate=64)
+        samples = tracks[0]["samples"]
+        assert [s["seq"] for s in samples] == [1, 2, 3]
+        assert [s["tick"] for s in samples] == sorted(s["tick"] for s in samples)
+        assert len(samples[0]["cells"]) < len(samples[-1]["cells"])
 
 
 class TestExtractDynamicEffectTracks:
