@@ -329,13 +329,29 @@ export default function Demo2DReplayPreview({
     playheadStoreRef.current = createPlayheadStore({ position: 0, seconds: 0, tick: 0, sampleIndex: 0 });
   }
 
+  const resetPlayheadToStart = (nextFrames = []) => {
+    const first = Array.isArray(nextFrames) ? nextFrames[0] : null;
+    const seconds = Number(first?.time_sec) || 0;
+    const tick = Number(first?.tick) || 0;
+    framePositionRef.current = 0;
+    pauseSyncRef.current = { seconds, position: 0 };
+    playheadStoreRef.current?.set({
+      position: 0,
+      seconds,
+      tick,
+      sampleIndex: 0,
+    });
+    clockRef.current?.seek(seconds);
+    setFrameIndex(0);
+    setUiSampleIndex(0);
+  };
+
   useEffect(() => {
     setRoundNumber(initialRound || rounds[0]?.round_number || 1);
     setFrames([]);
     setEffectTracks([]);
     setEffectCapabilities(null);
-    setFrameIndex(0);
-    setUiSampleIndex(0);
+    resetPlayheadToStart([]);
     setPlaying(false);
     setResponseTransform(null);
     setReplayFps(SAMPLE_HZ);
@@ -385,6 +401,9 @@ export default function Demo2DReplayPreview({
     };
     let cancelled = false;
 
+    // Round change: snap scrubber/playhead to start immediately (also while loading).
+    resetPlayheadToStart([]);
+
     const applyPayload = (data, meta = {}) => {
       const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
       const nextTransform = data?.map_transform && typeof data.map_transform === "object"
@@ -400,7 +419,7 @@ export default function Demo2DReplayPreview({
       setEffectCapabilities(nextCapabilities);
       setResponseTransform(nextTransform);
       setReplayFps(nextFps);
-      setFrameIndex(0);
+      resetPlayheadToStart(nextFrames);
       setError(nextFrames.length ? "" : "该回合没有可用的坐标帧");
       setLoading(false);
       const cache = data?.cache || meta.cache;
