@@ -6,12 +6,15 @@ import logging
 import math
 import os
 import time
-from typing import Any
+from typing import Any, Sequence
 
 from .smoke_voxel_decode import (
+    SMOKE_FORMATION_SECONDS,
     VOXEL_CELL_SIZE_WORLD,
     decode_smoke_cells,
     decode_smoke_occupancy_sequence,
+    iter_smoke_occupancy_frames,
+    synthesize_formation_from_seeds,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,7 +95,8 @@ def _quantize_cell(x: float, y: float, z: float, intensity: float) -> tuple[floa
 
 
 def _cells_signature(cells: list[list[float]] | list[tuple[float, float, float, float]]) -> tuple:
-    return tuple(tuple(cell) for cell in cells)
+    # Sort so projection order does not defeat dedupe / formation merge.
+    return tuple(sorted(tuple(cell) for cell in cells))
 
 
 def _map_smoke_seq_to_tick(
@@ -263,7 +267,16 @@ def build_smoke_tracks_from_rows(
     for entity_id, entity_rows in by_entity.items():
         for group in _split_entity_lifecycles(entity_rows, tick_gap):
             begin_raw = _json_number(group[0].get("m_nSmokeEffectTickBegin"))
-            begin_tick = int(begin_raw) if begin_raw is not None else int(group[0]["tick"])
+            first_row_tick = int(group[0]["tick"])
+            last_row_tick = int(group[-1]["tick"])
+            if begin_raw is not None:
+                begin_tick = int(begin_raw)
+                # demoparser occasionally yields a stale begin far outside this
+                # lifecycle window; fall back to the first observed row tick.
+                if begin_tick > last_row_tick or begin_tick < first_row_tick - int(max(64, tick_rate) * 2):
+                    begin_tick = first_row_tick
+            else:
+                begin_tick = first_row_tick
 
             anchors: dict[int, int] = {}
             for row in group:
@@ -387,10 +400,73 @@ def build_smoke_tracks_from_rows(
 
             if not samples:
                 continue
+
+            # CS2 typically networks one full seed occupancy (~44 voxels). The client
+            # expands locally; approximate that with adjacency BFS formation samples
+            # so 2D replay does not pop open at the first snapshot.
+            first_voxels = None
+            first_origin: Sequence[float] | None = None
+            for row in group:
+                data = row.get("m_VoxelFrameData")
+                declared = row.get("m_nVoxelFrameDataSize")
+                origin = row.get("m_vSmokeDetonationPos")
+                if not isinstance(data, (bytes, bytearray)) or not isinstance(origin, (list, tuple)):
+                    continue
+                try:
+                    declared_i = int(declared) if declared is not None else len(data)
+                except (TypeError, ValueError):
+                    declared_i = len(data)
+                occ_frames = iter_smoke_occupancy_frames(data, declared_size=declared_i)
+                if occ_frames:
+                    first_voxels = occ_frames[0][1]
+                    first_origin = origin
+                    break
+
+            if first_voxels and first_origin is not None:
+                cell_counts = {len(sample["cells"]) for sample in samples}
+                # Skip when the journal already supplied a growing occupancy sequence.
+                if len(samples) >= 2 and len(cell_counts) >= 2:
+                    first_voxels = None
+            if first_voxels and first_origin is not None:
+                formation_end = begin_tick + int(SMOKE_FORMATION_SECONDS * float(tick_rate))
+                first_sample_tick = int(samples[0]["tick"])
+                if begin_tick < first_sample_tick <= formation_end:
+                    formation_end = first_sample_tick
+                if formation_end > begin_tick:
+                    formation = synthesize_formation_from_seeds(
+                        first_voxels,
+                        first_origin,
+                        begin_tick=begin_tick,
+                        end_tick=formation_end,
+                    )
+                    if formation:
+                        final_sig = _cells_signature(formation[-1]["cells"])
+                        kept: list[dict[str, Any]] = []
+                        for sample in samples:
+                            if (
+                                _cells_signature(sample["cells"]) == final_sig
+                                and int(sample["tick"]) <= formation_end
+                            ):
+                                continue
+                            kept.append(sample)
+                        samples = formation + kept
+
             samples.sort(key=lambda s: (int(s["tick"]), int(s["seq"])))
+            # Collapse identical consecutive signatures after merge.
+            deduped: list[dict[str, Any]] = []
+            last_sig: tuple | None = None
+            for sample in samples:
+                sig = _cells_signature(sample["cells"])
+                if sig == last_sig:
+                    continue
+                last_sig = sig
+                deduped.append(sample)
+            samples = deduped
+            if not samples:
+                continue
+
             start = int(samples[0]["tick"])
-            if begin_raw is not None:
-                start = min(start, int(begin_raw))
+            start = min(start, begin_tick)
             end = min(
                 int(end_tick),
                 max(int(samples[-1]["tick"]), start + int(SMOKE_EFFECT_DURATION_SEC * tick_rate)),

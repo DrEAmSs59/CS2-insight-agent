@@ -14,6 +14,7 @@ Format (reverse-engineered from the game client / community verification):
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
@@ -23,9 +24,15 @@ VOXEL_GRID_CENTER = VOXEL_GRID_DIM / 2.0
 VOXEL_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, 1.0)
 VOXEL_CELL_SIZE_WORLD = VOXEL_WORLD_SIZE
 
+# Networked occupancy is a ~44-voxel seed set; the game client expands locally.
+# We approximate that expansion by revealing seeds in adjacency order (not a circle).
+SMOKE_FORMATION_SECONDS = 1.2
+SMOKE_FORMATION_STEPS = 8
+
 _SECTION_OCCUPANCY = 1
 _ENTRY_SIZE = 8
 _HEARTBEAT_LEN = 3
+_NEIGHBOR_6 = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 
 
 @dataclass(frozen=True)
@@ -200,7 +207,7 @@ def project_voxels_to_cells(
         density = _density_from_state(voxel.state)
         key = (int(round(wx / VOXEL_CELL_SIZE_WORLD)), int(round(wy / VOXEL_CELL_SIZE_WORLD)))
         prev = buckets.get(key)
-        if prev is None or density > prev[3]:
+        if prev is None or density > prev[3] or (density == prev[3] and wz > prev[2]):
             buckets[key] = [
                 round(wx * 2) / 2.0,
                 round(wy * 2) / 2.0,
@@ -208,6 +215,86 @@ def project_voxels_to_cells(
                 round(density, 3),
             ]
     return list(buckets.values())
+
+
+def bfs_order_seed_voxels(voxels: Sequence[SmokeVoxel]) -> list[SmokeVoxel]:
+    """Order seed voxels by 6-connected BFS from the voxel nearest grid centre.
+
+    Revealing in this order grows along the real seed topology (door gaps, diagonals)
+    instead of a circular radius from the detonation point.
+    """
+    if not voxels:
+        return []
+    by_pos = {(int(v.x), int(v.y), int(v.z)): v for v in voxels}
+    start = min(
+        voxels,
+        key=lambda v: (v.x - VOXEL_GRID_CENTER) ** 2
+        + (v.y - VOXEL_GRID_CENTER) ** 2
+        + (v.z - VOXEL_GRID_CENTER) ** 2,
+    )
+    ordered: list[SmokeVoxel] = []
+    seen: set[tuple[int, int, int]] = set()
+
+    def _consume(root: SmokeVoxel) -> None:
+        key0 = (int(root.x), int(root.y), int(root.z))
+        if key0 in seen:
+            return
+        queue: deque[SmokeVoxel] = deque([root])
+        seen.add(key0)
+        while queue:
+            cur = queue.popleft()
+            ordered.append(cur)
+            cx, cy, cz = int(cur.x), int(cur.y), int(cur.z)
+            for dx, dy, dz in _NEIGHBOR_6:
+                key = (cx + dx, cy + dy, cz + dz)
+                nxt = by_pos.get(key)
+                if nxt is None or key in seen:
+                    continue
+                seen.add(key)
+                queue.append(nxt)
+
+    _consume(start)
+    for voxel in voxels:
+        _consume(voxel)
+    return ordered
+
+
+def synthesize_formation_from_seeds(
+    voxels: Sequence[SmokeVoxel],
+    origin: Sequence[float],
+    *,
+    begin_tick: int,
+    end_tick: int,
+    steps: int = SMOKE_FORMATION_STEPS,
+) -> list[dict[str, Any]]:
+    """Build intermediate occupancy samples that grow along seed adjacency.
+
+    Used when demos only network a single full seed snapshot (typical CS2 behaviour).
+    """
+    if not voxels or end_tick <= begin_tick or steps <= 0:
+        return []
+    ordered = bfs_order_seed_voxels(voxels)
+    if not ordered:
+        return []
+    out: list[dict[str, Any]] = []
+    total = len(ordered)
+    for step in range(1, steps + 1):
+        count = max(1, int(round(total * step / steps)))
+        count = min(total, count)
+        tick = int(round(begin_tick + (end_tick - begin_tick) * step / steps))
+        subset = ordered[:count]
+        cells = project_voxels_to_cells(subset, origin)
+        out.append(
+            {
+                "seq": step - steps - 1,
+                "tick": tick,
+                "cells": cells,
+                "cell_size": VOXEL_CELL_SIZE_WORLD,
+                "voxel_count": len(subset),
+                "anchor_mode": "formation_bfs",
+            }
+        )
+    return out
 
 
 def decode_smoke_cells(

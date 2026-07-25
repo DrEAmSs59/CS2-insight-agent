@@ -271,9 +271,44 @@ class TestSmokeTracks:
         ]
         tracks, _ = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=1000, tick_rate=64)
         samples = tracks[0]["samples"]
-        assert [s["seq"] for s in samples] == [1, 2, 3]
         assert [s["tick"] for s in samples] == sorted(s["tick"] for s in samples)
         assert len(samples[0]["cells"]) < len(samples[-1]["cells"])
+
+    def test_single_seed_snapshot_gets_formation_bfs_samples(self):
+        # Connected seed chain mimicking a narrow / diagonal footprint.
+        entries = [
+            (16, 16, 16),
+            (16, 17, 16),
+            (16, 18, 16),
+            (16, 19, 16),
+            (16, 20, 16),
+            (16, 21, 16),
+            (16, 22, 16),
+            (16, 23, 16),
+        ]
+        blob = _make_journal([(0, _occ_payload(entries))])
+        origin = [100.0, 200.0, 50.0]
+        rows = [
+            {
+                "tick": 10000,
+                "grenade_entity_id": 9,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 10000,
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=20000, tick_rate=64)
+        assert warnings == []
+        assert len(tracks) == 1
+        samples = tracks[0]["samples"]
+        assert len(samples) >= 4
+        assert samples[0].get("anchor_mode") == "formation_bfs"
+        counts = [len(s["cells"]) for s in samples]
+        assert counts[0] < counts[-1]
+        assert samples[0]["tick"] < samples[-1]["tick"]
 
 
 class TestExtractDynamicEffectTracks:

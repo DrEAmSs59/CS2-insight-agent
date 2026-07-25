@@ -133,3 +133,36 @@ class TestDecodeSmokeCells:
         out = decode_smoke_cells(b"\x00\x00\x00\x00", declared_size=4, detonation_pos=None)
         assert out["ok"] is False
         assert out["error"] == "missing_origin"
+
+
+class TestFormationFromSeeds:
+    def test_bfs_formation_grows_without_circular_clip(self):
+        from app.parser.smoke_voxel_decode import SmokeVoxel, synthesize_formation_from_seeds
+
+        # Diagonal seed chain — formation must follow adjacency, not a filled disc.
+        voxels = [
+            SmokeVoxel(x=16, y=16, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=17, y=17, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=18, y=18, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=19, y=19, z=16, state=b"\x05\x00\x00\x00\x00"),
+        ]
+        # Make them 6-connected via intermediates
+        voxels = [
+            SmokeVoxel(x=16, y=16, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=17, y=16, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=17, y=17, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=18, y=17, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=18, y=18, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=19, y=18, z=16, state=b"\x05\x00\x00\x00\x00"),
+            SmokeVoxel(x=19, y=19, z=16, state=b"\x05\x00\x00\x00\x00"),
+        ]
+        samples = synthesize_formation_from_seeds(
+            voxels, [0.0, 0.0, 0.0], begin_tick=1000, end_tick=1076, steps=4
+        )
+        assert len(samples) == 4
+        counts = [s["voxel_count"] for s in samples]
+        assert counts[0] < counts[-1]
+        assert counts[-1] == len(voxels)
+        assert samples[0]["anchor_mode"] == "formation_bfs"
+        assert samples[0]["tick"] < samples[-1]["tick"]
+

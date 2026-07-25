@@ -193,6 +193,27 @@ export function playheadSecondsToTick(frames, playheadSeconds) {
     const ratio = clamp((Number(playheadSeconds) - t0) / (t1 - t0), 0, 1);
     return tick0 + (tick1 - tick0) * ratio;
   }
-  // Index-based fallback when time_sec missing: treat samples as 1/fps seconds apart externally.
   return tick0;
+}
+
+/**
+ * External store so rAF can advance the playhead without setState on the React root.
+ * Scene layers subscribe via useSyncExternalStore; toolbar uses sample-boundary callbacks.
+ */
+export function createPlayheadStore(initial = { position: 0, seconds: 0, tick: 0, sampleIndex: 0 }) {
+  let state = { ...initial };
+  const listeners = new Set();
+  return {
+    getSnapshot() {
+      return state;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    set(partial) {
+      state = { ...state, ...partial };
+      listeners.forEach((listener) => listener());
+    },
+  };
 }
