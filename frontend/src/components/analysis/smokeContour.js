@@ -76,7 +76,7 @@ export function buildDensityMask(cells, cellSize) {
     minGy = Math.min(minGy, gy);
     maxGx = Math.max(maxGx, gx);
     maxGy = Math.max(maxGy, gy);
-    const key = gx * 1_000_003 + gy;
+    const key = `${gx},${gy}`;
     densities.set(key, Math.max(densities.get(key) || 0, density));
   }
 
@@ -85,8 +85,7 @@ export function buildDensityMask(cells, cellSize) {
   const data = new Float32Array(width * height);
 
   for (const [key, density] of densities) {
-    const gy = key % 1_000_003;
-    const gx = (key - gy) / 1_000_003;
+    const [gx, gy] = key.split(",").map(Number);
     data[maskIndex({ width }, gx - minGx, gy - minGy)] = density;
   }
 
@@ -144,8 +143,6 @@ const SMOOTH_KERNEL = [
   2, 4, 2,
   1, 2, 1,
 ];
-const SMOOTH_KERNEL_SUM = 16;
-
 export function smoothMask(mask, radiusCells = 0.35) {
   const { width, height } = mask;
   const out = new Float32Array(width * height);
