@@ -32,3 +32,15 @@ def test_state_histograms_count_bytes():
     assert hist[0]["freq"]["3"] == 2
     assert hist[1]["freq"]["0"] == 1
     assert hist[1]["freq"]["1"] == 1
+
+
+def test_demo_fingerprint_fields(tmp_path):
+    from app.parser.smoke_voxel_diagnostics import demo_fingerprint
+
+    p = tmp_path / "x.dem"
+    p.write_bytes(b"abc")
+    fp = demo_fingerprint(p)
+    assert fp["size"] == 3
+    assert "sha256" in fp and len(fp["sha256"]) == 64
+    assert "mtime_ns" in fp
+    assert fp["path"].endswith("x.dem")

@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
+from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .smoke_voxel_decode import SmokeVoxel, VOXEL_CELL_SIZE_WORLD, voxel_to_world
+
+
+def demo_fingerprint(path: Path | str) -> dict[str, Any]:
+    demo_path = Path(path)
+    data = demo_path.read_bytes()
+    stat = demo_path.stat()
+    return {
+        "path": str(demo_path),
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "mtime_ns": stat.st_mtime_ns,
+    }
 
 
 def raw_grid_entries(voxels: Iterable[SmokeVoxel]) -> list[dict[str, Any]]:
