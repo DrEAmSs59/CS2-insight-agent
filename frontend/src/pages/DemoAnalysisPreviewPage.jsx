@@ -512,7 +512,12 @@ export default function DemoAnalysisPreviewPage() {
           )}
 
           {activeTab === "overview" && (
-            <OverviewView data={workspace} onSelectPlayer={openPlayerStats} />
+            <OverviewView
+              data={workspace}
+              onSelectPlayer={openPlayerStats}
+              onOpenRound={openRound}
+              onOpenReplayRound={openReplayRound}
+            />
           )}
 
           {activeTab === "rounds" && (
