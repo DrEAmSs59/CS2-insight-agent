@@ -60,12 +60,17 @@ def _is_heartbeat(payload: bytes) -> bool:
     return len(payload) == _HEARTBEAT_LEN and payload == b"\x00\x00\x00"
 
 
-def decode_smoke_voxel_journal(data: bytes | bytearray, size: int | None = None) -> list[SmokeVoxelFrame]:
+def decode_smoke_voxel_journal(
+    data: bytes | bytearray,
+    size: int | None = None,
+    *,
+    start_offset: int = 0,
+) -> list[SmokeVoxelFrame]:
     """Split ``m_VoxelFrameData`` into ordered frame records."""
     raw = bytes(data)
     end = len(raw) if size is None else max(0, min(int(size), len(raw)))
     frames: list[SmokeVoxelFrame] = []
-    off = 0
+    off = max(0, min(int(start_offset), end))
     while off + 4 <= end:
         seq = raw[off] | (raw[off + 1] << 8)
         length = raw[off + 2] | (raw[off + 3] << 8)
@@ -125,6 +130,7 @@ def iter_smoke_occupancy_frames(
     *,
     declared_size: int | float | None = None,
     max_seq: float | None = None,
+    start_offset: int = 0,
 ) -> list[tuple[int, list[SmokeVoxel]]]:
     """Return every occupancy ``(seq, voxels)`` in journal order, optionally capped by ``max_seq``."""
     if data is None or not isinstance(data, (bytes, bytearray)) or len(data) == 0:
@@ -136,7 +142,7 @@ def iter_smoke_occupancy_frames(
     if size <= 0:
         return []
     try:
-        frames = decode_smoke_voxel_journal(bytes(data), size)
+        frames = decode_smoke_voxel_journal(bytes(data), size, start_offset=start_offset)
     except SmokeVoxelDecodeError:
         return []
     limit = float("inf") if max_seq is None else float(max_seq)
@@ -156,12 +162,18 @@ def decode_smoke_occupancy_sequence(
     declared_size: int | float | None,
     detonation_pos: Sequence[float] | None,
     max_seq: float | None = None,
+    start_offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Project every journal occupancy frame to 2D cells (one entry per seq)."""
     if detonation_pos is None or len(detonation_pos) < 3:
         return []
     sequence: list[dict[str, Any]] = []
-    for seq, voxels in iter_smoke_occupancy_frames(data, declared_size=declared_size, max_seq=max_seq):
+    for seq, voxels in iter_smoke_occupancy_frames(
+        data,
+        declared_size=declared_size,
+        max_seq=max_seq,
+        start_offset=start_offset,
+    ):
         cells = project_voxels_to_cells(voxels, detonation_pos)
         sequence.append(
             {

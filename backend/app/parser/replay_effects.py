@@ -83,6 +83,20 @@ def _entity_id(value: Any) -> int | str:
     return str(value)
 
 
+def _track_thrower(group: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in group:
+        name = str(row.get("name") or row.get("thrower_name") or "").strip()
+        steamid = _json_number(row.get("steamid") or row.get("thrower_steamid"))
+        if name or steamid is not None:
+            out: dict[str, Any] = {}
+            if name:
+                out["thrower_name"] = name
+            if steamid is not None:
+                out["thrower_steamid64"] = str(int(steamid))
+            return out
+    return {}
+
+
 def _safe_float(value: Any) -> float | None:
     number = _json_number(value)
     if number is None:
@@ -230,6 +244,7 @@ def build_inferno_tracks_from_rows(
                 "end_tick": end,
                 "source": "cinferno_cells",
                 "samples": samples,
+                **_track_thrower(group),
             })
     tracks.sort(key=lambda t: (t["start_tick"], str(t["entity_id"])))
     return tracks
@@ -327,6 +342,8 @@ def build_smoke_tracks_from_rows(
             prev_update: Any = object()
             prev_sig: tuple | None = None
             cell_size = VOXEL_CELL_SIZE_WORLD
+            previous_journal = b""
+            journal_offset = 0
 
             for row in group:
                 update = row.get("m_nVoxelUpdate")
@@ -348,17 +365,27 @@ def build_smoke_tracks_from_rows(
                     declared_i = int(declared) if declared is not None else actual_size
                 except (TypeError, ValueError):
                     declared_i = actual_size
+                declared_i = max(0, min(declared_i, actual_size))
+                journal = bytes(data[:declared_i])
+                if previous_journal and journal.startswith(previous_journal):
+                    start_offset = journal_offset
+                else:
+                    # Entity reuse, a buffer rewrite, or a non-prefix update.
+                    start_offset = 0
 
                 sequence = decode_smoke_occupancy_sequence(
-                    data,
+                    journal,
                     declared_size=declared_i,
                     detonation_pos=stable_origin,
                     max_seq=float(update_i) if update_i is not None else None,
+                    start_offset=start_offset,
                 )
-                if not sequence:
+                previous_journal = journal
+                journal_offset = len(journal)
+                if not sequence and start_offset == 0:
                     # Fallback: single snapshot decode with target_seq when journal expand yields nothing.
                     decoded = decode_smoke_cells(
-                        data,
+                        journal,
                         declared_size=declared_i,
                         detonation_pos=stable_origin,
                         target_seq=float(update_i) if update_i is not None else None,
@@ -374,6 +401,12 @@ def build_smoke_tracks_from_rows(
                             "voxel_count": int(decoded.get("voxel_count") or 0),
                         }
                     ]
+                elif not sequence:
+                    # The appended journal tail contains heartbeat/non-occupancy
+                    # records only. Re-decoding the cumulative prefix here makes
+                    # long smokes quadratic without changing their occupancy.
+                    prev_update = update_i
+                    continue
 
                 for idx, item in enumerate(sequence):
                     seq = int(item["seq"])
@@ -511,6 +544,7 @@ def build_smoke_tracks_from_rows(
                 "source": "smoke_voxels",
                 "cell_size": cell_size,
                 "samples": samples,
+                **_track_thrower(group),
             })
     tracks.sort(key=lambda t: (t["start_tick"], str(t["entity_id"])))
     return tracks, warnings
@@ -540,6 +574,18 @@ def _filter_smoke_frame(frame: Any) -> Any:
         return frame
 
 
+def _filter_inferno_frame(frame: Any) -> Any:
+    """Keep only CInferno rows from the combined utility parser."""
+    if frame is None or not hasattr(frame, "columns"):
+        return frame
+    try:
+        if "grenade_type" in frame.columns:
+            return frame[frame["grenade_type"] == "CInferno"]
+        return frame
+    except Exception:
+        return frame
+
+
 def _max_tick_in_rows(rows: list[dict[str, Any]], fallback: int) -> int:
     max_tick = int(fallback)
     for row in rows:
@@ -554,6 +600,18 @@ def _parse_effect_rows(parser: Any) -> tuple[list[dict[str, Any]], list[dict[str
     warnings: list[str] = []
     inferno_rows: list[dict[str, Any]] = []
     smoke_rows: list[dict[str, Any]] = []
+
+    if hasattr(parser, "parse_utility_effects"):
+        try:
+            effect_frame = parser.parse_utility_effects(extra=INFERNO_EXTRA + SMOKE_EXTRA)
+            inferno_rows = _dataframe_to_rows(_filter_inferno_frame(effect_frame))
+            smoke_rows = _dataframe_to_rows(_filter_smoke_frame(effect_frame))
+            return inferno_rows, smoke_rows, warnings
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(
+                f"combined utility extract failed; using legacy passes: {type(exc).__name__}: {exc}"
+            )
+            logger.warning("replay_effects combined utility parse failed: %s", exc)
 
     try:
         if hasattr(parser, "parse_infernos"):

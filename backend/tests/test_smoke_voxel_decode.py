@@ -131,6 +131,21 @@ class TestDecodeSmokeCells:
         assert [item["seq"] for item in seq] == [1, 2]
         assert len(seq[0]["cells"]) < len(seq[1]["cells"])
 
+    def test_occupancy_sequence_can_decode_only_appended_journal_tail(self):
+        prefix = _make_journal([(1, _occ_payload([(16, 16, 16)]))])
+        data = prefix + _make_journal([
+            (2, [0, 0, 0]),
+            (3, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+        ])
+        seq = decode_smoke_occupancy_sequence(
+            data,
+            declared_size=len(data),
+            detonation_pos=[0.0, 0.0, 0.0],
+            max_seq=3,
+            start_offset=len(prefix),
+        )
+        assert [item["seq"] for item in seq] == [3]
+
     def test_missing_origin(self):
         out = decode_smoke_cells(b"\x00\x00\x00\x00", declared_size=4, detonation_pos=None)
         assert out["ok"] is False

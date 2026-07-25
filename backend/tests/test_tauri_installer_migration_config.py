@@ -42,6 +42,10 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert "desktop_data_migration.py" in hook
     assert "--require-desktop-stopped" in hook
     assert "--require-electron-ui-export" in hook
+    assert "demoparser2-0.41.4+cs2insight1.dist-info" in hook
+    assert "demoparser2-0.41.4+cs2insight2.dist-info" in hook
+    assert "demoparser2-0.41.4+cs2insight3.dist-info" in hook
+    assert "pyarrow-25.0.0.dist-info" in hook
     assert '!define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\\..\\target\\release"' in hook
     assert 'File /a "/oname=WebView2Loader.dll"' in hook
     assert 'Delete "$INSTDIR\\WebView2Loader.dll"' in hook
@@ -58,6 +62,9 @@ def test_versioned_build_rejects_missing_webview2_loader_bundle():
     assert "GNU Tauri build is missing required runtime loader" in script
     assert "NSIS hook does not install WebView2Loader.dll" in script
     assert "validated Windows runtime bundle" in script
+    assert "createUpdaterArtifacts: false" in script
+    assert "updater private key not found" in script
+    assert "rmSync(updaterSignature)" in script
 
 
 def test_close_destroys_webview_before_waiting_for_backend():

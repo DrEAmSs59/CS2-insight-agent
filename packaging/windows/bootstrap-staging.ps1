@@ -107,8 +107,7 @@ try {
         "numpy\tests",
         "numpy\f2py\tests",
         "matplotlib\tests",
-        "matplotlib\mpl-data\sample_data",
-        "pyarrow\tests"
+        "matplotlib\mpl-data\sample_data"
       )) {
       Remove-TreeIfExists (Join-Path $sp $pkgRel)
     }

@@ -64,8 +64,23 @@ def _run(payload: dict) -> object:
         results = analyzer.analyze_multi_players(
             target_players, freeze_to_death_rounds=ftd_list
         )
+        analysis_workspace = analyzer.analysis_workspace
+        if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
+            analysis_workspace = dict(analysis_workspace)
+            try:
+                from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+
+                analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
+                    demo_path=dem_path,
+                    workspace=analysis_workspace,
+                )
+            except Exception as exc:  # noqa: BLE001 - analysis result remains usable
+                analysis_workspace["replay_cache"] = {
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
         return {
-            "__analysis_workspace__": analyzer.analysis_workspace,
+            "__analysis_workspace__": analysis_workspace,
             **{player: result.to_dict() for player, result in results.items()},
         }
     if action == "players":

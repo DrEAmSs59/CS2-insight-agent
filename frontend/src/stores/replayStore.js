@@ -2,7 +2,7 @@ import { create } from "zustand";
 import API from "../api/api";
 
 export const REPLAY_STORE_CACHE_VERSION = 11;
-const MAX_READY_ENTRIES = 3;
+const MAX_READY_ENTRIES = 64;
 const MAX_BYTES = 150 * 1024 * 1024;
 
 function estimateSizeBytes(payload) {
@@ -137,7 +137,7 @@ export const useReplayStore = create((set, get) => ({
           ? data.effect_capabilities
           : null;
         const sizeBytes = estimateSizeBytes({ frames, effectTracks, mapTransform });
-        const source = data?.cache?.frames === "disk_hit" || data?.cache?.frames === "memory_hit"
+        const source = ["disk_hit", "parquet_hit", "memory_hit"].includes(data?.cache?.frames)
           ? (data.cache.frames === "memory_hit" ? "memory" : "disk")
           : (data?.cache?.parsed ? "parsed" : "parsed");
         set({
