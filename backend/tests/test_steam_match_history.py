@@ -1,7 +1,7 @@
+import asyncio
 import sys, time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
-import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.steam_match_history import (
@@ -12,6 +12,8 @@ from app.steam_match_history import (
     calc_rating,
     build_demo_url,
     parse_match_row,
+    fetch_public_player_summaries,
+    fetch_player_summaries,
 )
 
 def test_is_demo_expired_fresh():
@@ -99,3 +101,60 @@ def test_parse_match_row_rounds_strip_delta():
     assert rounds[2] is True,  "Round 3: own scored (delta 1-0) → True"
     assert rounds[3] is None,  "Round 4+: not played → None"
     assert len(rounds) == 24,  "Always padded to 24"
+
+
+def test_fetch_player_summaries_batches_steam_ids():
+    response = MagicMock()
+    response.json.return_value = {
+        "response": {
+            "players": [
+                {
+                    "steamid": "76561198000000001",
+                    "avatarfull": "https://avatars.steamstatic.com/example_full.jpg",
+                },
+            ],
+        },
+    }
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    client.get.return_value = response
+
+    with patch("app.steam_match_history.httpx.AsyncClient", return_value=client):
+        players = asyncio.run(
+            fetch_player_summaries(
+                "test-key",
+                ["76561198000000001", "76561198000000002"],
+            ),
+        )
+
+    assert players[0]["steamid"] == "76561198000000001"
+    _, kwargs = client.get.await_args
+    assert kwargs["params"]["steamids"] == "76561198000000001,76561198000000002"
+    response.raise_for_status.assert_called_once_with()
+
+
+def test_fetch_public_player_summaries_uses_account_id_without_api_key():
+    steam_id64 = "76561198307734468"
+    response = MagicMock()
+    response.json.return_value = {
+        "persona_name": "rdnzao",
+        "avatar_url": "//avatars.akamai.steamstatic.com/rdnzao_full.jpg",
+    }
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    client.get.return_value = response
+
+    with patch("app.steam_match_history.httpx.AsyncClient", return_value=client):
+        players = asyncio.run(fetch_public_player_summaries([steam_id64]))
+
+    assert players == [{
+        "steamid": steam_id64,
+        "personaname": "rdnzao",
+        "avatarfull": "https://avatars.akamai.steamstatic.com/rdnzao_full.jpg",
+    }]
+    client.get.assert_awaited_once_with(
+        "https://steamcommunity.com/miniprofile/347468740/json",
+    )
+    response.raise_for_status.assert_called_once_with()

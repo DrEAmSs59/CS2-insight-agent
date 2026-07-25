@@ -10,8 +10,11 @@ import {
   Play,
   RotateCcw,
   Route,
+  Skull,
+  Star,
   Swords,
 } from "lucide-react";
+import API from "../../api/api";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplaySceneCanvas, { computeBombState } from "./ReplaySceneCanvas";
 import { isSmokeDebugEnabled } from "./smokeDebugGate";
@@ -30,6 +33,7 @@ import {
   secondsForFramePosition,
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
+import { replayUtilityExposureByName, roundEnemyKillCounts } from "../../utils/replayHudState";
 
 const SAMPLE_HZ = 32;
 const REPLAY_CACHE_VERSION = REPLAY_STORE_CACHE_VERSION;
@@ -55,16 +59,16 @@ function utilityInventory(inventory) {
   for (const raw of Array.isArray(inventory) ? inventory : []) {
     const item = safeLabel(raw).toLowerCase().replace(/^weapon_/, "");
     let entry = null;
-    if (/smoke/.test(item)) entry = { key: "smoke", label: "烟雾弹", stem: "smokegrenade", tone: "text-slate-100 bg-slate-400/20" };
-    else if (/flash/.test(item)) entry = { key: "flash", label: "闪光弹", stem: "flashbang", tone: "text-yellow-200 bg-yellow-400/15" };
-    else if (/high explosive|hegrenade|he grenade/.test(item)) entry = { key: "he", label: "HE 手雷", stem: "hegrenade", tone: "text-rose-200 bg-rose-400/15" };
-    else if (/molotov|incendiary|incgrenade/.test(item)) entry = { key: "fire", label: "燃烧弹", stem: /incendiary|incgrenade/.test(item) ? "incgrenade" : "molotov", tone: "text-orange-200 bg-orange-400/15" };
-    else if (/decoy/.test(item)) entry = { key: "decoy", label: "诱饵弹", stem: "decoy", tone: "text-violet-200 bg-violet-400/15" };
+    if (/smoke/.test(item)) entry = { key: "smoke", label: "烟雾弹", stem: "smokegrenade", order: 0 };
+    else if (/molotov|incendiary|incgrenade/.test(item)) entry = { key: "fire", label: "燃烧弹", stem: /incendiary|incgrenade/.test(item) ? "incgrenade" : "molotov", order: 1 };
+    else if (/high explosive|hegrenade|he grenade/.test(item)) entry = { key: "he", label: "HE 手雷", stem: "hegrenade", order: 2 };
+    else if (/flash/.test(item)) entry = { key: "flash", label: "闪光弹", stem: "flashbang", order: 3 };
+    else if (/decoy/.test(item)) entry = { key: "decoy", label: "诱饵弹", stem: "decoy", order: 4 };
     if (!entry) continue;
     const current = groups.get(entry.key);
     groups.set(entry.key, current ? { ...current, count: current.count + 1 } : { ...entry, count: 1 });
   }
-  return [...groups.values()];
+  return [...groups.values()].sort((left, right) => left.order - right.order);
 }
 
 function primaryWeaponFromInventory(inventory) {
@@ -201,11 +205,6 @@ function eventFrameRatio(event, frames, selectedRound) {
   );
 }
 
-function isBlueReplaySide(side, fallback = false) {
-  const normalized = String(side || "").trim().toUpperCase();
-  return normalized ? normalized === "CT" : fallback;
-}
-
 function replayPlayerNumber(teamKey, index) {
   return teamKey === "a" ? index : index + 5;
 }
@@ -221,73 +220,371 @@ function mapKey(value) {
   return /^(de|cs|ar)_/.test(raw) ? raw : `de_${raw}`;
 }
 
-const ReplayRoster = memo(function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrierName = "" }) {
-  const byName = new Map((framePlayers || []).map((player) => [safeLabel(player.name).toLowerCase(), player]));
-  const isBlue = isBlueReplaySide(side, !side && teamKey === "a");
-  const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
+const ReplayPlayerPortrait = memo(function ReplayPlayerPortrait({
+  avatarUrl,
+  displayName,
+  number,
+  alive,
+  isT,
+  mirrored,
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [avatarUrl]);
+  const showAvatar = Boolean(avatarUrl && !failed);
   return (
-    <aside className="rounded-xl border border-cs2-border bg-cs2-bg-card p-4">
-      <div className="mb-3 flex items-center justify-between border-b border-cs2-border pb-3">
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${isBlue ? "bg-sky-400" : "bg-amber-400"}`} />
-          <h3 className="text-[14px] font-black uppercase tracking-wide text-cs2-text-primary">{title}</h3>
-        </div>
-        <span className="font-mono text-[12px] text-cs2-text-muted">{players.filter((player) => byName.get(safeLabel(player.name).toLowerCase())?.is_alive !== false).length}/5</span>
+    <div className="relative flex h-full w-[50px] shrink-0 items-center justify-center overflow-hidden">
+      {showAvatar ? (
+        <img
+          src={avatarUrl}
+          alt={`${displayName} Steam 头像`}
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className={`h-[58px] w-[50px] object-cover transition-[filter,opacity] duration-300 ${alive ? "" : "grayscale opacity-45"}`}
+        />
+      ) : (
+        <span className={`flex h-11 w-11 items-center justify-center rounded-full border font-mono text-[18px] font-black shadow-inner ${
+          isT
+            ? "border-amber-100/50 bg-amber-300/15 text-amber-50"
+            : "border-sky-200/50 bg-sky-300/15 text-sky-100"
+        } ${alive ? "" : "grayscale opacity-45"}`}>
+          {number}
+        </span>
+      )}
+      {showAvatar && (
+        <span className={`absolute top-1 flex h-5 min-w-5 items-center justify-center rounded-sm border border-white/30 bg-black/70 px-1 font-mono text-[10px] font-black text-white ${mirrored ? "right-0.5" : "left-0.5"}`}>
+          {number}
+        </span>
+      )}
+      {!alive && <Skull className="absolute h-7 w-7 text-white/70 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />}
+    </div>
+  );
+});
+
+const ReplayRosterEffectCanvas = memo(function ReplayRosterEffectCanvas({ smoked, burning, mirrored }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!smoked && !burning) return undefined;
+    const canvas = canvasRef.current;
+    let context = null;
+    try {
+      context = canvas?.getContext?.("2d");
+    } catch {
+      context = null;
+    }
+    if (!canvas || !context) return undefined;
+
+    let animationFrame = 0;
+    let lastPaint = -Infinity;
+    const reducedMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const paint = (timestamp = 0) => {
+      if (!reducedMotion && timestamp - lastPaint < 40) {
+        animationFrame = window.requestAnimationFrame(paint);
+        return;
+      }
+      lastPaint = timestamp;
+      const width = Math.max(1, Math.round(canvas.clientWidth || 300));
+      const height = Math.max(1, Math.round(canvas.clientHeight || 78));
+      const dpr = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
+      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+      }
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.clearRect(0, 0, width, height);
+      const time = timestamp / 1000;
+      const direction = mirrored ? -1 : 1;
+
+      if (smoked) {
+        for (let index = 0; index < 9; index += 1) {
+          const phase = time * (0.18 + index * 0.008) + index * 1.7;
+          const baseX = width * (0.12 + index * 0.105);
+          const x = baseX + direction * Math.sin(phase * 1.9) * (7 + index % 3);
+          const y = height * (0.32 + (index % 4) * 0.14) + Math.cos(phase * 1.3) * 5;
+          const radius = 15 + (index % 3) * 7;
+          const gradient = context.createRadialGradient(x, y, 1, x, y, radius);
+          gradient.addColorStop(0, "rgba(218, 220, 214, 0.16)");
+          gradient.addColorStop(0.58, "rgba(147, 153, 151, 0.10)");
+          gradient.addColorStop(1, "rgba(93, 100, 102, 0)");
+          context.fillStyle = gradient;
+          context.beginPath();
+          context.arc(x, y, radius, 0, Math.PI * 2);
+          context.fill();
+        }
+      }
+
+      if (burning) {
+        const fireGradient = context.createLinearGradient(0, height, 0, height * 0.34);
+        fireGradient.addColorStop(0, "rgba(239, 68, 68, 0.45)");
+        fireGradient.addColorStop(0.5, "rgba(249, 115, 22, 0.35)");
+        fireGradient.addColorStop(1, "rgba(253, 224, 71, 0.02)");
+        context.fillStyle = fireGradient;
+        for (let index = 0; index < 11; index += 1) {
+          const x = (index + 0.5) * (width / 11);
+          const wave = 9 + (index % 4) * 3 + Math.sin(time * 5.2 + index * 1.37) * 4;
+          const halfWidth = width / 18;
+          context.beginPath();
+          context.moveTo(x - halfWidth, height);
+          context.quadraticCurveTo(x - halfWidth * 0.3, height - wave * 0.55, x, height - wave);
+          context.quadraticCurveTo(x + halfWidth * 0.35, height - wave * 0.45, x + halfWidth, height);
+          context.closePath();
+          context.fill();
+        }
+      }
+
+      if (!reducedMotion) animationFrame = window.requestAnimationFrame(paint);
+    };
+    paint(0);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [smoked, burning, mirrored]);
+
+  if (!smoked && !burning) return null;
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      className="replay-roster-ambient-canvas pointer-events-none absolute inset-0 z-[15] h-full w-full"
+    />
+  );
+});
+
+const ReplayRosterSlot = memo(function ReplayRosterSlot({
+  player,
+  state,
+  index,
+  teamKey,
+  isT,
+  mirrored,
+  exclusiveCarrier,
+  avatarUrl,
+  liveStats,
+  roundKillStars = 0,
+  utilityExposure,
+}) {
+  const displayName = safeLabel(player.name, `玩家 ${index + 1}`);
+  const alive = state.is_alive !== false;
+  const health = Number.isFinite(Number(state.health))
+    ? clamp(Math.round(Number(state.health)), 0, 100)
+    : (alive ? 100 : 0);
+  const previousHealthRef = useRef(health);
+  const damageTimerRef = useRef(0);
+  const [damagePulse, setDamagePulse] = useState(0);
+  useEffect(() => {
+    const previous = previousHealthRef.current;
+    previousHealthRef.current = health;
+    if (!alive || health >= previous) return undefined;
+    window.clearTimeout(damageTimerRef.current);
+    setDamagePulse((value) => value + 1);
+    damageTimerRef.current = window.setTimeout(() => setDamagePulse(0), 420);
+    return () => window.clearTimeout(damageTimerRef.current);
+  }, [alive, health]);
+
+  const number = replayPlayerNumber(teamKey, index);
+  const weapon = alive ? resolveReplayWeapon(state) || "—" : "—";
+  const weaponStem = alive && weapon !== "—"
+    ? resolveHudWeaponStem(weapon, weapon, { fallback: "" })
+    : "";
+  const hasC4 = Boolean(alive && exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
+  const hasArmor = alive && Number(state.armor || 0) > 0;
+  const armorValue = Math.max(0, Number(state.armor) || 0);
+  const utilities = alive ? utilityInventory(state.inventory) : [];
+  const blinded = Boolean(alive && Number(state.flash_duration || 0) > 0.01);
+  const smoked = Boolean(alive && utilityExposure?.smoked);
+  const burning = Boolean(alive && utilityExposure?.burning);
+  const stats = liveStats || { kills: 0, deaths: 0 };
+  const identity = (
+    <div className={`flex w-[82px] shrink-0 flex-col justify-center overflow-hidden px-2 ${mirrored ? "items-end text-right" : "items-start text-left"}`}>
+      <span title={displayName} className="w-full truncate text-[12px] font-black uppercase tracking-[0.025em] text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
+        {displayName}
+      </span>
+      <span className={`mt-0.5 flex items-center gap-1.5 text-[9px] font-bold text-white/80 ${mirrored ? "flex-row-reverse" : ""}`}>
+        <span className="inline-flex items-center gap-0.5"><Crosshair className="h-2.5 w-2.5" />{stats.kills}</span>
+        <span className="inline-flex items-center gap-0.5"><Skull className="h-2.5 w-2.5" />{stats.deaths}</span>
+      </span>
+      <span className="mt-0.5 font-mono text-[11px] font-black tabular-nums text-emerald-200 drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+        ${Math.max(0, Number(state.money) || 0).toLocaleString("en-US")}
+      </span>
+    </div>
+  );
+  const portrait = (
+    <ReplayPlayerPortrait
+      avatarUrl={avatarUrl}
+      displayName={displayName}
+      number={number}
+      alive={alive}
+      isT={isT}
+      mirrored={mirrored}
+    />
+  );
+  const combat = (
+    <div className="flex min-w-0 flex-1 flex-col justify-center px-2 py-1">
+      <div className={`flex min-h-8 items-center justify-between gap-1 ${mirrored ? "flex-row-reverse" : ""}`}>
+        <span
+          title={weapon}
+          aria-label={`${displayName} 当前武器 ${weapon}`}
+          className={`relative flex min-w-0 flex-1 items-center pt-1 ${mirrored ? "justify-end" : "justify-start"}`}
+        >
+          {alive && weaponStem && roundKillStars > 0 && (
+            <span
+              aria-label={`${displayName} 本回合 ${roundKillStars} 次有效击杀`}
+              className={`absolute -top-1 flex items-center ${mirrored ? "right-1" : "left-1"}`}
+            >
+              {Array.from({ length: Math.min(5, roundKillStars) }, (_, starIndex) => (
+                <Star
+                  key={starIndex}
+                  className="-mr-0.5 h-2.5 w-2.5 fill-white text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)]"
+                  strokeWidth={1.6}
+                />
+              ))}
+            </span>
+          )}
+          {weaponStem && <HudEquipmentIcon stem={weaponStem} className="h-6 w-[74px] max-w-full drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />}
+        </span>
+        <span className={`shrink-0 font-mono text-[25px] font-black leading-none tabular-nums tracking-[-0.08em] ${
+          alive ? "text-white" : "text-white/35"
+        }`}>
+          {alive ? health : "—"}
+        </span>
       </div>
-      <div className="space-y-2">
+      <div className={`mt-1 flex min-h-6 items-center gap-1 overflow-hidden ${mirrored ? "flex-row-reverse" : ""}`}>
+        {hasArmor && (
+          <span
+            title={state.has_helmet ? "vesthelm · 头盔 + 防弹衣" : "vest · 防弹衣"}
+            aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"} ${armorValue}`}
+            className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm border border-white/10 bg-black/20 px-0.5 font-mono text-[9px] font-black tabular-nums text-white/90"
+          >
+            <HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-[17px] w-5" />
+            {armorValue}
+          </span>
+        )}
+        {hasC4 && (
+          <span title="携带 C4" aria-label={`${displayName} 携带 C4`} className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm bg-amber-300 px-1 font-black leading-none text-black">
+            <HudEquipmentIcon stem="c4" className="h-4 w-4 brightness-0" />C4
+          </span>
+        )}
+        {state.has_defuser && alive && (
+          <span title="携带拆弹器" aria-label={`${displayName} 携带拆弹器`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-sky-200 text-sky-950">
+            <HudEquipmentIcon stem="defuser" className="h-4 w-4 brightness-0" />
+          </span>
+        )}
+        {utilities.map(({ key, label, stem, count }) => (
+          <span
+            key={key}
+            title={`${label}${count > 1 ? ` ×${count}` : ""}`}
+            aria-label={`${displayName} 持有${label}${count > 1 ? ` ${count} 枚` : ""}`}
+            className={`inline-flex h-5 shrink-0 items-center ${mirrored ? "flex-row-reverse" : ""}`}
+          >
+            {Array.from({ length: Math.min(4, count) }, (_, utilityIndex) => (
+              <HudEquipmentIcon key={`${key}-${utilityIndex}`} stem={stem} className="h-[18px] w-[17px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]" />
+            ))}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      data-replay-roster-slot={displayName}
+      data-alive={alive ? "true" : "false"}
+      data-side={isT ? "T" : "CT"}
+      data-smoked={smoked ? "true" : "false"}
+      data-burning={burning ? "true" : "false"}
+      data-blinded={blinded ? "true" : "false"}
+      className={`replay-observer-slot relative isolate h-[78px] overflow-hidden rounded-[3px] border shadow-[0_5px_12px_rgba(0,0,0,0.35)] ${
+        mirrored ? "ml-auto" : "mr-auto"
+      } ${
+        isT
+          ? "border-amber-200/45 bg-[#1b1707]"
+          : "border-sky-300/45 bg-[#07182a]"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0 ${
+          isT
+            ? "bg-gradient-to-r from-[#312805] via-[#806608] to-[#443707]"
+            : "bg-gradient-to-r from-[#071d39] via-[#0752a1] to-[#082544]"
+        } ${mirrored ? "right-0" : "left-0"}`}
+        style={{ width: `${alive ? health : 0}%` }}
+      />
+      {alive && health > 0 && health < 100 && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 z-[2] w-[2px] bg-white/65 shadow-[0_0_5px_rgba(255,255,255,0.35)]"
+          style={mirrored ? { right: `${health}%` } : { left: `${health}%` }}
+        />
+      )}
+      <ReplayRosterEffectCanvas smoked={smoked} burning={burning} mirrored={mirrored} />
+      {blinded && <span aria-hidden="true" className="replay-observer-blind-overlay pointer-events-none absolute inset-0 z-[25] bg-white/35" />}
+      {damagePulse > 0 && <span key={damagePulse} aria-hidden="true" className="replay-observer-damage-flash absolute inset-0 z-30 bg-rose-500/65" />}
+      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 z-[3] h-[4px] bg-black/55">
+        <i
+          className={`block h-full ${isT ? "bg-amber-100" : "bg-sky-200"} ${mirrored ? "ml-auto" : "mr-auto"}`}
+          style={{
+            width: `${alive ? health : 0}%`,
+            boxShadow: alive && health > 0 && health < 100
+              ? `${mirrored ? "-" : ""}2px 0 0 rgba(255,255,255,0.8)`
+              : "none",
+          }}
+        />
+      </span>
+      <div className={`relative z-10 flex h-full items-stretch ${mirrored ? "flex-row-reverse" : ""}`}>
+        {identity}
+        {portrait}
+        {combat}
+      </div>
+    </div>
+  );
+});
+
+const ReplayRoster = memo(function ReplayRoster({
+  title,
+  teamKey,
+  side,
+  players,
+  framePlayers,
+  bombCarrierName = "",
+  avatarBySteamId,
+  liveStatsByName,
+  roundKillStarsByName,
+  utilityExposureByName,
+}) {
+  const byName = new Map((framePlayers || []).map((player) => [safeLabel(player.name).toLowerCase(), player]));
+  const sideName = safeLabel(side, teamKey === "a" ? "T" : "CT").toUpperCase();
+  const isT = sideName === "T";
+  const mirrored = teamKey === "b";
+  const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
+  const aliveCount = players.filter((player) => byName.get(safeLabel(player.name).toLowerCase())?.is_alive !== false).length;
+  return (
+    <aside className={`rounded-xl border bg-[#07090c] p-2.5 shadow-xl ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
+      <div className={`mb-2 flex items-center justify-between border-b pb-2 ${mirrored ? "flex-row-reverse" : ""} ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
+        <div className={`flex items-center gap-2 ${mirrored ? "flex-row-reverse" : ""}`}>
+          <span className={`h-5 min-w-7 rounded-sm px-1 text-center font-mono text-[11px] font-black leading-5 ${isT ? "bg-amber-300 text-amber-950" : "bg-sky-400 text-sky-950"}`}>{sideName}</span>
+          <h3 className={`max-w-[190px] truncate text-[12px] font-black uppercase tracking-[0.08em] ${isT ? "text-amber-50" : "text-sky-100"}`}>{title}</h3>
+        </div>
+        <span className={`font-mono text-[12px] font-black ${isT ? "text-amber-200" : "text-sky-300"}`}>{aliveCount}/5</span>
+      </div>
+      <div className="space-y-1.5">
         {players.map((player, index) => {
           const displayName = safeLabel(player.name, `玩家 ${index + 1}`);
           const state = byName.get(displayName.toLowerCase()) || {};
-          const alive = state.is_alive !== false;
-          const health = Number.isFinite(Number(state.health)) ? Math.max(0, Number(state.health)) : (alive ? 100 : 0);
-          const weapon = alive ? resolveReplayWeapon(state) || "—" : "—";
-          // Single source of truth: only the resolved bomb carrier may show C4.
-          const hasC4 = Boolean(alive && exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
-          const utilities = alive ? utilityInventory(state.inventory) : [];
-          const hasArmor = Number(state.armor || 0) > 0;
-          const armorValue = Math.max(0, Number(state.armor) || 0);
-          const weaponStem = alive && weapon !== "—" ? resolveHudWeaponStem(weapon, weapon, { fallback: "" }) : "";
+          const steamId = safeLabel(player.steam_id64 || player.steamid64 || state.steamid64);
           return (
-            <div key={displayName} className={`rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-3 py-3 ${alive ? "" : "opacity-45"}`}>
-              <div className="flex items-center gap-2">
-                <span className={`flex h-[26px] w-[26px] items-center justify-center rounded-full font-mono text-[12px] font-black leading-none ${isBlue ? "bg-sky-500/20 text-sky-300" : "bg-amber-500/20 text-amber-300"}`}>
-                  {replayPlayerNumber(teamKey, index)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-cs2-text-primary">{displayName}</span>
-                <span
-                  className={`shrink-0 font-mono text-[13px] font-black tabular-nums ${
-                    !alive
-                      ? "text-cs2-text-muted"
-                      : health > 70
-                        ? "text-emerald-300"
-                        : health > 30
-                          ? "text-amber-300"
-                          : "text-rose-400"
-                  }`}
-                >
-                  {alive ? `${health} HP` : "阵亡"}
-                </span>
-              </div>
-              <div className="mt-1.5 flex min-h-5 items-center gap-1.5 pl-8 text-[10px] text-cs2-text-muted">
-                <span className="flex min-w-0 flex-1 items-center" title={weapon} aria-label={`${displayName} 当前武器 ${weapon}`}>{weaponStem && <HudEquipmentIcon stem={weaponStem} className="h-[18px] w-8 shrink-0" />}</span>
-                <span className="shrink-0 font-mono font-bold text-emerald-300">${Math.max(0, Number(state.money) || 0).toLocaleString("en-US")}</span>
-                {hasArmor && (
-                  <span
-                    title={state.has_helmet ? "头盔 + 防弹衣" : "防弹衣"}
-                    aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"} ${armorValue}`}
-                    className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded bg-sky-500/12 px-1 font-mono text-[10px] font-bold tabular-nums text-sky-200"
-                  >
-                    <HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-4 w-5" />
-                    {armorValue}
-                  </span>
-                )}
-              </div>
-              <div className="mt-1.5 flex min-h-5 flex-wrap items-center gap-1.5 pl-8 text-[10px] text-cs2-text-muted">
-                {utilities.map(({ key, label, stem, tone, count }) => <span key={key} title={`${label}${count > 1 ? ` ×${count}` : ""}`} aria-label={`${displayName} 持有${label}${count > 1 ? ` ${count} 枚` : ""}`} className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded px-1.5 ${tone}`}><HudEquipmentIcon stem={stem} className="h-4 w-4" />{count > 1 && <b className="font-mono text-[9px] leading-none">{count}</b>}</span>)}
-                {hasC4 && <span title="携带 C4" aria-label={`${displayName} 携带 C4`} className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-[3px] bg-amber-400 px-1.5 font-black leading-none text-black"><HudEquipmentIcon stem="c4" className="h-4 w-4 brightness-0" />C4</span>}
-                {state.has_defuser && <span title="携带拆弹器" aria-label={`${displayName} 携带拆弹器`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-sky-300 text-sky-950"><HudEquipmentIcon stem="defuser" className="h-4 w-4 brightness-0" /></span>}
-              </div>
-            </div>
+            <ReplayRosterSlot
+              key={displayName}
+              player={player}
+              state={state}
+              index={index}
+              teamKey={teamKey}
+              isT={isT}
+              mirrored={mirrored}
+              exclusiveCarrier={exclusiveCarrier}
+              avatarUrl={safeLabel(player.avatar || avatarBySteamId?.[steamId])}
+              liveStats={liveStatsByName?.[displayName.toLowerCase()]}
+              roundKillStars={roundKillStarsByName?.[displayName.toLowerCase()] || 0}
+              utilityExposure={utilityExposureByName?.[displayName.toLowerCase()]}
+            />
           );
         })}
       </div>
@@ -308,6 +605,7 @@ export default function Demo2DReplayPreview({
   const [frames, setFrames] = useState([]);
   const [effectTracks, setEffectTracks] = useState([]);
   const [effectCapabilities, setEffectCapabilities] = useState(null);
+  const [avatarBySteamId, setAvatarBySteamId] = useState({});
   const [frameIndex, setFrameIndex] = useState(0);
   const [uiSampleIndex, setUiSampleIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -393,6 +691,27 @@ export default function Demo2DReplayPreview({
   ), [workspace?.players, players]);
   const teamAPlayers = workspacePlayers.filter((player) => player.team_key === "a").slice(0, 5);
   const teamBPlayers = workspacePlayers.filter((player) => player.team_key === "b").slice(0, 5);
+  const steamAvatarRequestKey = useMemo(() => [...new Set(
+    workspacePlayers
+      .map((player) => safeLabel(player.steam_id64 || player.steamid64))
+      .filter((steamId) => /^\d{15,20}$/.test(steamId)),
+  )].slice(0, 10).join(","), [workspacePlayers]);
+
+  useEffect(() => {
+    if (!steamAvatarRequestKey) {
+      setAvatarBySteamId({});
+      return undefined;
+    }
+    let cancelled = false;
+    API.get("/steam/player-avatars", { params: { steam_ids: steamAvatarRequestKey } })
+      .then((response) => {
+        if (!cancelled) setAvatarBySteamId(response?.data?.avatars || {});
+      })
+      .catch(() => {
+        if (!cancelled) setAvatarBySteamId({});
+      });
+    return () => { cancelled = true; };
+  }, [steamAvatarRequestKey]);
 
   useEffect(() => {
     if (!selectedRound || !demoPath) return undefined;
@@ -674,6 +993,52 @@ export default function Demo2DReplayPreview({
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const uiFrame = frames[uiSampleIndex] || frames[0] || { players: [], tick: fallbackTick, time_sec: 0 };
   const uiTick = Number(uiFrame.tick || fallbackTick || 0);
+  const liveStatsByName = useMemo(() => {
+    const result = {};
+    const seenKills = new Set();
+    const selectedRoundNumber = Number(selectedRound?.round_number || 0);
+    for (const round of rounds) {
+      const roundNumberValue = Number(round?.round_number || 0);
+      if (roundNumberValue > selectedRoundNumber) continue;
+      for (const event of round?.events || []) {
+        if (event?.type !== "kill") continue;
+        if (roundNumberValue === selectedRoundNumber && Number(event.tick || 0) > uiTick) continue;
+        const actor = safeLabel(event.actor).toLowerCase();
+        const target = safeLabel(event.target).toLowerCase();
+        const identity = `${roundNumberValue}|${Number(event.tick || 0)}|${actor}|${target}`;
+        if (seenKills.has(identity)) continue;
+        seenKills.add(identity);
+        if (actor && actor !== "world") {
+          result[actor] ||= { kills: 0, deaths: 0 };
+          result[actor].kills += 1;
+        }
+        if (target) {
+          result[target] ||= { kills: 0, deaths: 0 };
+          result[target].deaths += 1;
+        }
+      }
+    }
+    return result;
+  }, [rounds, selectedRound?.round_number, uiTick]);
+  const roundKillStarsByName = useMemo(
+    () => roundEnemyKillCounts(roundEvents, uiTick, workspacePlayers),
+    [roundEvents, uiTick, workspacePlayers],
+  );
+  const utilityExposureByName = useMemo(
+    () => replayUtilityExposureByName(
+      uiFrame.players,
+      effectTracks,
+      uiTick,
+      selectedRound?.round_end_tick || selectedRound?.end_tick,
+    ),
+    [
+      uiFrame.players,
+      effectTracks,
+      uiTick,
+      selectedRound?.round_end_tick,
+      selectedRound?.end_tick,
+    ],
+  );
   const uiBombState = useMemo(
     () => computeBombState(roundEvents, uiTick, uiFrame.players, selectedRound?.bomb_initial_carrier, transform),
     [roundEvents, uiTick, uiFrame.players, selectedRound?.bomb_initial_carrier, transform],
@@ -776,8 +1141,8 @@ export default function Demo2DReplayPreview({
         </div>
       </section>
 
-      <div className="grid gap-3 xl:grid-cols-[260px_minmax(460px,1fr)_260px]">
-        <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} />
+      <div className="grid gap-3 xl:grid-cols-[300px_minmax(460px,1fr)_300px]">
+        <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} avatarBySteamId={avatarBySteamId} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
         <section className="relative min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
@@ -827,7 +1192,7 @@ export default function Demo2DReplayPreview({
           />
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}
         </section>
-        <ReplayRoster title={`${teamBName} · ${selectedRound.team_b_side || ""}`} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} />
+        <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} avatarBySteamId={avatarBySteamId} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
       </div>
     </div>
   );
