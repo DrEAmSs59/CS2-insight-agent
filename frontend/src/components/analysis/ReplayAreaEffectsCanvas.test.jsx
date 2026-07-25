@@ -138,8 +138,12 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(createRadialGradient).not.toHaveBeenCalled();
   });
 
-  test("final_render keeps production radial paint", () => {
+  test("smoke uses path fill not radial arcs", () => {
+    const arc = vi.fn();
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
+    const lineTo = vi.fn();
+    const moveTo = vi.fn();
+    const fill = vi.fn();
     const fillRect = vi.fn();
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
       setTransform: vi.fn(),
@@ -147,17 +151,25 @@ describe("ReplayAreaEffectsCanvas", () => {
       save: vi.fn(),
       restore: vi.fn(),
       beginPath: vi.fn(),
-      arc: vi.fn(),
-      fill: vi.fn(),
+      closePath: vi.fn(),
+      arc,
+      fill,
       fillRect,
+      moveTo,
+      lineTo,
       createRadialGradient,
     }));
+    const cells = [];
+    for (let x = 100; x <= 140; x += 20) {
+      for (let y = 200; y <= 240; y += 20) cells.push([x, y, 50, 1]);
+    }
     const tracks = [{
       id: "smoke:0:100:1",
       type: "smoke",
       start_tick: 100,
       end_tick: 200,
-      samples: [{ tick: 100, cells: [[100, 200, 50, 1]] }],
+      cell_size: 20,
+      samples: [{ tick: 100, cells }],
     }];
     render(
       <ReplayAreaEffectsCanvas
@@ -169,8 +181,47 @@ describe("ReplayAreaEffectsCanvas", () => {
         enabled
       />,
     );
-    expect(createRadialGradient).toHaveBeenCalled();
+    expect(arc).not.toHaveBeenCalled();
+    expect(createRadialGradient).not.toHaveBeenCalled();
+    expect(fill).toHaveBeenCalled();
+    expect(moveTo).toHaveBeenCalled();
+    expect(lineTo).toHaveBeenCalled();
     expect(fillRect).not.toHaveBeenCalled();
+  });
+
+  test("inferno still uses radial arcs", () => {
+    const arc = vi.fn();
+    const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
+    const fill = vi.fn();
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      arc,
+      fill,
+      createRadialGradient,
+    }));
+    const tracks = [{
+      id: "inferno:0:100:1",
+      type: "inferno",
+      start_tick: 100,
+      end_tick: 200,
+      samples: [{ tick: 100, cells: [[100, 200, 50, 1]] }],
+    }];
+    render(
+      <ReplayAreaEffectsCanvas
+        tracks={tracks}
+        currentTick={120}
+        transform={{ pos_x: 0, pos_y: 4096, scale: 5 }}
+        capabilities={{ inferno_cells: true, smoke_voxels: true, smoke_mode: "voxels" }}
+        enabled
+      />,
+    );
+    expect(arc).toHaveBeenCalled();
+    expect(createRadialGradient).toHaveBeenCalled();
+    expect(fill).toHaveBeenCalled();
   });
 
   test("world_cells draws detonation crosshair when present", () => {

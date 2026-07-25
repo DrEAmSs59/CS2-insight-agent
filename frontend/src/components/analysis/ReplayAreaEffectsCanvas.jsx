@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef } from "react";
+import {
+  buildDensityMask,
+  marchingSquares,
+  sampleCrossfadeAlpha,
+  smoothMask,
+  supersampleMask,
+} from "./smokeContour";
 
 const MAP_SIZE = 1024;
 const INFERNO_CELL_RADIUS_WORLD = 36;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
-const SMOKE_CELL_RADIUS_WORLD = 28;
-const SMOKE_BLOOM_SECONDS = 1.35;
+const SMOKE_CONTOUR_THRESHOLD = 0.15;
 
 function worldToPercent(point, transform) {
   if (!transform || !Number.isFinite(Number(point?.x)) || !Number.isFinite(Number(point?.y))) return null;
@@ -49,8 +55,32 @@ export function selectActiveSample(track, currentTick, hideAfterTick = null) {
   return chosen;
 }
 
+function selectPreviousSample(track, currentSample) {
+  if (!track || !Array.isArray(track.samples) || !currentSample) return null;
+  const currentTick = Number(currentSample.tick);
+  if (!Number.isFinite(currentTick)) return null;
+  let previous = null;
+  for (const sample of track.samples) {
+    const tick = Number(sample.tick);
+    if (!Number.isFinite(tick) || tick >= currentTick) break;
+    previous = sample;
+  }
+  return previous;
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function filterCellsForMapLayer(cells, transform, mapLayer) {
+  const filtered = [];
+  for (const cell of cells || []) {
+    if (!Array.isArray(cell) || cell.length < 3) continue;
+    const point = { x: cell[0], y: cell[1], z: cell[2] };
+    if (!pointMatchesMapLayer(point, transform, mapLayer)) continue;
+    filtered.push(cell);
+  }
+  return filtered;
 }
 
 function projectLayerCells(layer, transform, mapLayer, width, height) {
@@ -68,6 +98,86 @@ function projectLayerCells(layer, transform, mapLayer, width, height) {
     });
   }
   return projected;
+}
+
+function averageCellDensity(cells) {
+  if (!cells?.length) return 0.85;
+  let sum = 0;
+  let count = 0;
+  for (const cell of cells) {
+    const d = Number(cell?.[3]);
+    if (!Number.isFinite(d)) continue;
+    sum += d;
+    count += 1;
+  }
+  return count ? sum / count : 0.85;
+}
+
+function worldRingToCanvasPath(ring, transform, width, height) {
+  const points = [];
+  for (const pt of ring) {
+    const percent = worldToPercent({ x: pt[0], y: pt[1] }, transform);
+    if (!percent) continue;
+    points.push({
+      x: (percent.x / 100) * width,
+      y: (percent.y / 100) * height,
+    });
+  }
+  return points;
+}
+
+function fillSmokeRings(ctx, rings, transform, width, height, alpha) {
+  if (!rings?.length || alpha <= 0) return;
+  const fillAlpha = clamp(0.45 + 0.35 * alpha, 0.2, 0.85);
+  ctx.fillStyle = `rgba(148, 163, 184, ${fillAlpha})`;
+  for (const ring of rings) {
+    const points = worldRingToCanvasPath(ring, transform, width, height);
+    if (points.length < 3) continue;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i += 1) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function buildSmokeContourRings(cells, cellSize) {
+  if (!cells?.length) return [];
+  const mask = smoothMask(supersampleMask(buildDensityMask(cells, cellSize), 2), 0.35);
+  const { rings } = marchingSquares(mask, SMOKE_CONTOUR_THRESHOLD);
+  return rings;
+}
+
+function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, height, hideAfterTick) {
+  const current = selectActiveSample(track, currentTick, hideAfterTick);
+  if (!current?.cells?.length) return;
+
+  const cellSize = Number(current.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE);
+  const previous = selectPreviousSample(track, current);
+  const currentCells = filterCellsForMapLayer(current.cells, transform, mapLayer);
+  if (!currentCells.length) return;
+
+  const currentDensity = averageCellDensity(currentCells);
+  const currentRings = buildSmokeContourRings(currentCells, cellSize);
+
+  if (previous?.cells?.length) {
+    const prevCells = filterCellsForMapLayer(previous.cells, transform, mapLayer);
+    const { prevA, nextA } = sampleCrossfadeAlpha(
+      Number(previous.tick),
+      Number(current.tick),
+      Number(currentTick),
+    );
+    if (prevCells.length && prevA > 0) {
+      const prevDensity = averageCellDensity(prevCells);
+      const prevRings = buildSmokeContourRings(prevCells, Number(previous.cell_size || cellSize));
+      fillSmokeRings(ctx, prevRings, transform, width, height, prevA * prevDensity);
+    }
+    fillSmokeRings(ctx, currentRings, transform, width, height, nextA * currentDensity);
+  } else {
+    fillSmokeRings(ctx, currentRings, transform, width, height, currentDensity);
+  }
 }
 
 function drawRadarSquareCells(ctx, projected, cellSize, transform, width, height) {
@@ -101,19 +211,9 @@ function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, he
   ctx.stroke();
 }
 
-function smokeBloomFactor(track, currentTick, tickRate) {
-  const start = Number(track?.start_tick);
-  const tick = Number(currentTick);
-  const rate = Math.max(1, Number(tickRate) || 64);
-  if (!Number.isFinite(start) || !Number.isFinite(tick)) return 1;
-  const ageSec = Math.max(0, (tick - start) / rate);
-  const t = clamp(ageSec / SMOKE_BLOOM_SECONDS, 0, 1);
-  return 0.2 + (1 - 0.2) * (1 - (1 - t) * (1 - t));
-}
-
 /**
  * Canvas overlay for sparse smoke / inferno area cells from /demo/replay effect_tracks.
- * Smoke uses soft radial gradients (same language as fire) in gray; fire stays orange.
+ * Smoke uses density-mask marching-squares contours; fire stays orange radial blooms.
  */
 export default function ReplayAreaEffectsCanvas({
   tracks = [],
@@ -138,37 +238,36 @@ export default function ReplayAreaEffectsCanvas({
       if (track?.type === "inferno" && capabilities && capabilities.inferno_cells === false) continue;
       const sample = selectActiveSample(track, currentTick, hideAfterTick);
       if (!sample?.cells?.length) continue;
-      const bloom = track?.type === "smoke" ? smokeBloomFactor(track, currentTick, tickRate) : 1;
       layers.push({
         id: String(track.id || `${track.type}:${track.entity_id}`),
         type: track.type,
+        track,
         cellSize: Number(sample.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE),
         cells: sample.cells,
         sampleTick: Number(sample.tick),
-        bloom,
         detonation: sample.detonation_pos || sample.detonation || null,
       });
     }
     return layers;
-  }, [tracks, currentTick, hideAfterTick, enabled, capabilities, tickRate]);
+  }, [tracks, currentTick, hideAfterTick, enabled, capabilities]);
 
   const signature = useMemo(
     () => JSON.stringify({
       mapLayer,
       smokeDebugLayer,
+      currentTick,
       layers: activeLayers.map((layer) => ({
         id: layer.id,
         type: layer.type,
         sampleTick: layer.sampleTick,
         cellSize: layer.cellSize,
         n: layer.cells.length,
-        bloom: Number(layer.bloom?.toFixed?.(3) || layer.bloom),
       })),
       scale: transform?.scale,
       pos_x: transform?.pos_x,
       pos_y: transform?.pos_y,
     }),
-    [activeLayers, mapLayer, transform, smokeDebugLayer],
+    [activeLayers, mapLayer, transform, smokeDebugLayer, currentTick],
   );
 
   useEffect(() => {
@@ -198,10 +297,9 @@ export default function ReplayAreaEffectsCanvas({
       const useSquareDebug = smokeDebugLayer === "radar_cells" || smokeDebugLayer === "world_cells";
 
       for (const layer of activeLayers) {
-        const projected = projectLayerCells(layer, transform, mapLayer, width, height);
-        if (!projected.length) continue;
-
         if (useSquareDebug) {
+          const projected = projectLayerCells(layer, transform, mapLayer, width, height);
+          if (!projected.length) continue;
           ctx.save();
           drawRadarSquareCells(ctx, projected, layer.cellSize, transform, width, height);
           if (smokeDebugLayer === "world_cells") {
@@ -211,54 +309,32 @@ export default function ReplayAreaEffectsCanvas({
           continue;
         }
 
-        const isSmoke = layer.type === "smoke";
-        const bloom = isSmoke ? clamp(Number(layer.bloom) || 1, 0.15, 1) : 1;
-        const radiusWorld = isSmoke ? SMOKE_CELL_RADIUS_WORLD : INFERNO_CELL_RADIUS_WORLD;
-        const radiusPct = worldRadiusToPercent(radiusWorld, transform);
-        const radiusPx = Math.max(2.2, (radiusPct / 100) * Math.min(width, height));
+        if (layer.type === "smoke") {
+          ctx.save();
+          drawSmokeContours(ctx, layer.track, currentTick, transform, mapLayer, width, height, hideAfterTick);
+          ctx.restore();
+          continue;
+        }
 
-        let centerX = 0;
-        let centerY = 0;
-        for (const item of projected) {
-          centerX += item.cx;
-          centerY += item.cy;
-        }
-        centerX /= projected.length;
-        centerY /= projected.length;
-        let maxDist = 1;
-        for (const item of projected) {
-          maxDist = Math.max(maxDist, Math.hypot(item.cx - centerX, item.cy - centerY));
-        }
-        const bloomRadius = maxDist * bloom + radiusPx * 0.4;
+        const projected = projectLayerCells(layer, transform, mapLayer, width, height);
+        if (!projected.length) continue;
+
+        const radiusPct = worldRadiusToPercent(INFERNO_CELL_RADIUS_WORLD, transform);
+        const radiusPx = Math.max(2.2, (radiusPct / 100) * Math.min(width, height));
 
         ctx.save();
         for (const item of projected) {
-          const dist = Math.hypot(item.cx - centerX, item.cy - centerY);
-          if (isSmoke && dist > bloomRadius) continue;
           const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
-          if (isSmoke) {
-            const alpha = clamp(0.55 + 0.35 * intensity, 0.55, 0.9) * (0.7 + 0.3 * bloom);
-            const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
-            grad.addColorStop(0, `rgba(203, 213, 225, ${0.75 * alpha})`);
-            grad.addColorStop(0.4, `rgba(148, 163, 184, ${0.55 * alpha})`);
-            grad.addColorStop(0.75, `rgba(100, 116, 139, ${0.28 * alpha})`);
-            grad.addColorStop(1, "rgba(71, 85, 105, 0)");
-            ctx.beginPath();
-            ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
-            ctx.fillStyle = grad;
-            ctx.fill();
-          } else {
-            const alpha = clamp(0.8 + 0.2 * intensity, 0.8, 1);
-            const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
-            grad.addColorStop(0, `rgba(254, 243, 199, ${0.9 * alpha})`);
-            grad.addColorStop(0.35, `rgba(251, 146, 60, ${0.85 * alpha})`);
-            grad.addColorStop(0.75, `rgba(249, 115, 22, ${0.45 * alpha})`);
-            grad.addColorStop(1, "rgba(194, 65, 12, 0)");
-            ctx.beginPath();
-            ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
-            ctx.fillStyle = grad;
-            ctx.fill();
-          }
+          const alpha = clamp(0.8 + 0.2 * intensity, 0.8, 1);
+          const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
+          grad.addColorStop(0, `rgba(254, 243, 199, ${0.9 * alpha})`);
+          grad.addColorStop(0.35, `rgba(251, 146, 60, ${0.85 * alpha})`);
+          grad.addColorStop(0.75, `rgba(249, 115, 22, ${0.45 * alpha})`);
+          grad.addColorStop(1, "rgba(194, 65, 12, 0)");
+          ctx.beginPath();
+          ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
         }
         ctx.restore();
       }
@@ -274,7 +350,7 @@ export default function ReplayAreaEffectsCanvas({
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [signature, activeLayers, transform, mapLayer, smokeDebugLayer]);
+  }, [signature, activeLayers, transform, mapLayer, smokeDebugLayer, currentTick, hideAfterTick]);
 
   if (!enabled) return null;
 
