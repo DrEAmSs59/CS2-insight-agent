@@ -332,7 +332,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
     expect(tRosterSlot?.className).toContain("border-amber-200");
     expect(tRosterSlot?.className).toContain("ml-auto");
-    expect(screen.getAllByText("C4").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("ZywOo 携带 C4").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" }));
     await waitFor(() => expect(screen.getByTitle("ZywOo HE 手雷")).toBeTruthy());

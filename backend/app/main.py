@@ -680,8 +680,8 @@ def _upload_source_scope(persistent_path: Path, uploaded_path: Path) -> str:
         return "uploaded_copy"
 
 
-# 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
 def _normalized_expected_parse_players(cfg: AppConfig) -> list[str]:
+    """Normalize the watched-player list used by batch resolve / load-mode parse."""
     raw = getattr(cfg, "expected_parse_players", None) or []
     seen: set[str] = set()
     out: list[str] = []
@@ -723,14 +723,6 @@ def _match_expected_to_roster_row(expected: str, roster: list[dict]) -> Optional
             if el in nl or nl in el:
                 return r
     return None
-
-
-def _matched_demo_players_in_order(expected: list[str], dem_path: str) -> list[dict]:
-    """按配置名单顺序，在本场 roster 中依次匹配；同一场可命中多名（去重后保留名单顺序）。"""
-    from .demo_parse_isolation import get_player_list_isolated
-
-    roster = get_player_list_isolated(str(dem_path))
-    return _match_expected_players_in_roster(expected, roster)
 
 
 def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -> list[dict]:

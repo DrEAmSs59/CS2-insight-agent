@@ -71,22 +71,28 @@ function utilityInventory(inventory) {
   return [...groups.values()].sort((left, right) => left.order - right.order);
 }
 
+function isNonGunInventoryItem(item) {
+  return /knife|bayonet|karambit|shadow_daggers|gut|flip|ursus|stiletto|talon|navaja|nomad|paracord|skeleton|survival|bowie|falchion|huntsman|smoke|flash|hegrenade|he_grenade|molotov|incendiary|incgrenade|decoy|taser|zeus|c4|defuser|healthshot|kevlar|assaultsuit|helmet|vest|^armor$/.test(item);
+}
+
 function primaryWeaponFromInventory(inventory) {
+  const candidates = [];
   for (const raw of Array.isArray(inventory) ? inventory : []) {
-    const item = safeLabel(raw).toLowerCase().replace(/^weapon_/, "");
-    if (!item) continue;
-    if (/knife|bayonet|smoke|flash|hegrenade|molotov|incendiary|incgrenade|decoy|taser|c4|defuser|healthshot/.test(item)) {
-      continue;
-    }
-    return safeLabel(raw);
+    const label = safeLabel(raw);
+    const item = label.toLowerCase().replace(/^weapon_/, "").replace(/[\s-]+/g, "_");
+    if (!item || isNonGunInventoryItem(item)) continue;
+    candidates.push(label);
   }
-  return "";
+  for (const label of candidates) {
+    if (resolveHudWeaponStem(label, label, { fallback: "" })) return label;
+  }
+  return candidates[0] || "";
 }
 
 function meleeFromInventory(inventory) {
   for (const raw of Array.isArray(inventory) ? inventory : []) {
     const item = safeLabel(raw).toLowerCase().replace(/^weapon_/, "");
-    if (/knife|bayonet|karambit|shadow_daggers|gut|flip|bayonet/.test(item)) {
+    if (/knife|bayonet|karambit|shadow_daggers|gut|flip|ursus|stiletto|talon|navaja|nomad|paracord|skeleton|survival|bowie|falchion|huntsman/.test(item)) {
       return safeLabel(raw);
     }
   }
@@ -96,7 +102,9 @@ function meleeFromInventory(inventory) {
 function resolveReplayWeapon(state) {
   const direct = safeWeapon(state?.weapon, "").replace(/^weapon_/i, "");
   if (direct) return direct;
-  return primaryWeaponFromInventory(state?.inventory) || meleeFromInventory(state?.inventory);
+  return primaryWeaponFromInventory(state?.inventory)
+    || meleeFromInventory(state?.inventory)
+    || "knife";
 }
 
 function eventLabel(event) {
@@ -226,16 +234,16 @@ const ReplayPlayerPortrait = memo(function ReplayPlayerPortrait({
   isT,
 }) {
   return (
-    <div className="relative flex h-full w-[50px] shrink-0 items-center justify-center overflow-hidden">
-      <span className={`flex h-11 w-11 items-center justify-center rounded-full border font-mono text-[18px] font-black shadow-inner ${
+    <span className="relative inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center">
+      <span className={`flex h-[14px] w-[14px] items-center justify-center rounded-full border font-mono text-[9px] font-black leading-none tabular-nums shadow-inner ${
         isT
           ? "border-amber-100/50 bg-amber-300/15 text-amber-50"
           : "border-sky-200/50 bg-sky-300/15 text-sky-100"
       } ${alive ? "" : "grayscale opacity-45"}`}>
         {number}
       </span>
-      {!alive && <Skull className="absolute h-7 w-7 text-white/70 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />}
-    </div>
+      {!alive && <Skull className="absolute h-3 w-3 text-white/75 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />}
+    </span>
   );
 });
 
@@ -358,9 +366,9 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   }, [alive, health]);
 
   const number = replayPlayerNumber(teamKey, index);
-  const weapon = alive ? resolveReplayWeapon(state) || "—" : "—";
-  const weaponStem = alive && weapon !== "—"
-    ? resolveHudWeaponStem(weapon, weapon, { fallback: "" })
+  const weapon = alive ? resolveReplayWeapon(state) : "—";
+  const weaponStem = alive
+    ? resolveHudWeaponStem(weapon, weapon, { fallback: "knife" })
     : "";
   const hasC4 = Boolean(alive && exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
   const hasArmor = alive && Number(state.armor || 0) > 0;
@@ -371,9 +379,16 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   const burning = Boolean(alive && utilityExposure?.burning);
   const stats = liveStats || { kills: 0, deaths: 0 };
   const identity = (
-    <div className={`flex w-[82px] shrink-0 flex-col justify-center overflow-hidden px-2 ${mirrored ? "items-end text-right" : "items-start text-left"}`}>
-      <span title={displayName} className="w-full truncate text-[12px] font-black uppercase tracking-[0.025em] text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
-        {displayName}
+    <div className={`flex w-[118px] shrink-0 flex-col justify-center overflow-hidden px-2 ${mirrored ? "items-end text-right" : "items-start text-left"}`}>
+      <span className="inline-flex max-w-full items-center gap-1">
+        <span title={displayName} className={`min-w-0 truncate text-[12px] font-black tracking-[0.01em] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${alive ? "text-white" : "text-white/40"}`}>
+          {displayName}
+        </span>
+        <ReplayPlayerPortrait
+          number={number}
+          alive={alive}
+          isT={isT}
+        />
       </span>
       <span className={`mt-0.5 flex items-center gap-1.5 text-[9px] font-bold text-white/80 ${mirrored ? "flex-row-reverse" : ""}`}>
         <span className="inline-flex items-center gap-0.5"><Crosshair className="h-2.5 w-2.5" />{stats.kills}</span>
@@ -384,25 +399,44 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
       </span>
     </div>
   );
-  const portrait = (
-    <ReplayPlayerPortrait
-      number={number}
-      alive={alive}
-      isT={isT}
-    />
+  const utilitiesRow = utilities.map(({ key, label, stem, count }) => (
+    <span
+      key={key}
+      title={`${label}${count > 1 ? ` ×${count}` : ""}`}
+      aria-label={`${displayName} 持有${label}${count > 1 ? ` ${count} 枚` : ""}`}
+      className="inline-flex h-5 shrink-0 items-center"
+    >
+      {Array.from({ length: Math.min(4, count) }, (_, utilityIndex) => (
+        <HudEquipmentIcon key={`${key}-${utilityIndex}`} stem={stem} className="h-[18px] w-[17px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]" />
+      ))}
+    </span>
+  ));
+  const specialGear = (
+    <>
+      {hasC4 && (
+        <span title="携带 C4" aria-label={`${displayName} 携带 C4`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-amber-300 text-black">
+          <HudEquipmentIcon stem="c4" className="h-4 w-4 brightness-0" />
+        </span>
+      )}
+      {state.has_defuser && alive && (
+        <span title="携带拆弹器" aria-label={`${displayName} 携带拆弹器`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-sky-200 text-sky-950">
+          <HudEquipmentIcon stem="defuser" className="h-4 w-4 brightness-0" />
+        </span>
+      )}
+    </>
   );
   const combat = (
-    <div className="flex min-w-0 flex-1 flex-col justify-center px-2 py-1">
-      <div className={`flex min-h-8 items-center justify-between gap-1 ${mirrored ? "flex-row-reverse" : ""}`}>
+    <div className={`flex min-w-0 flex-1 items-stretch gap-1.5 px-2 py-1 ${mirrored ? "flex-row-reverse justify-end" : "justify-end"}`}>
+      <div className={`flex min-w-0 flex-1 flex-col justify-center gap-1 ${mirrored ? "items-start" : "items-end"}`}>
         <span
           title={weapon}
           aria-label={`${displayName} 当前武器 ${weapon}`}
-          className={`relative flex min-w-0 flex-1 items-center pt-1 ${mirrored ? "justify-end" : "justify-start"}`}
+          className="relative flex min-h-8 shrink-0 items-center pt-1"
         >
           {alive && weaponStem && roundKillStars > 0 && (
             <span
               aria-label={`${displayName} 本回合 ${roundKillStars} 次有效击杀`}
-              className={`absolute -top-1 flex items-center ${mirrored ? "right-1" : "left-1"}`}
+              className={`absolute -top-1 flex items-center ${mirrored ? "right-0" : "left-0"}`}
             >
               {Array.from({ length: Math.min(5, roundKillStars) }, (_, starIndex) => (
                 <Star
@@ -413,47 +447,31 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
               ))}
             </span>
           )}
-          {weaponStem && <HudEquipmentIcon stem={weaponStem} className="h-6 w-[74px] max-w-full drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />}
+          {weaponStem && <HudEquipmentIcon stem={weaponStem} className="h-6 w-[64px] max-w-full drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]" />}
         </span>
-        <span className={`shrink-0 font-mono text-[25px] font-black leading-none tabular-nums tracking-[-0.08em] ${
+        <div className={`flex max-w-full min-h-6 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${mirrored ? "justify-start" : "justify-end"}`}>
+          {utilitiesRow}
+        </div>
+      </div>
+      <div className={`flex shrink-0 flex-col justify-center gap-1 ${mirrored ? "items-start" : "items-end"}`}>
+        <span className={`flex min-h-8 items-center font-mono text-[25px] font-black leading-none tabular-nums tracking-[-0.08em] ${
           alive ? "text-white" : "text-white/35"
         }`}>
           {alive ? health : "—"}
         </span>
-      </div>
-      <div className={`mt-1 flex min-h-6 items-center gap-1 overflow-hidden ${mirrored ? "flex-row-reverse" : ""}`}>
-        {hasArmor && (
-          <span
-            title={state.has_helmet ? "vesthelm · 头盔 + 防弹衣" : "vest · 防弹衣"}
-            aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"} ${armorValue}`}
-            className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm border border-white/10 bg-black/20 px-0.5 font-mono text-[9px] font-black tabular-nums text-white/90"
-          >
-            <HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-[17px] w-5" />
-            {armorValue}
-          </span>
-        )}
-        {hasC4 && (
-          <span title="携带 C4" aria-label={`${displayName} 携带 C4`} className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm bg-amber-300 px-1 font-black leading-none text-black">
-            <HudEquipmentIcon stem="c4" className="h-4 w-4 brightness-0" />C4
-          </span>
-        )}
-        {state.has_defuser && alive && (
-          <span title="携带拆弹器" aria-label={`${displayName} 携带拆弹器`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-sky-200 text-sky-950">
-            <HudEquipmentIcon stem="defuser" className="h-4 w-4 brightness-0" />
-          </span>
-        )}
-        {utilities.map(({ key, label, stem, count }) => (
-          <span
-            key={key}
-            title={`${label}${count > 1 ? ` ×${count}` : ""}`}
-            aria-label={`${displayName} 持有${label}${count > 1 ? ` ${count} 枚` : ""}`}
-            className={`inline-flex h-5 shrink-0 items-center ${mirrored ? "flex-row-reverse" : ""}`}
-          >
-            {Array.from({ length: Math.min(4, count) }, (_, utilityIndex) => (
-              <HudEquipmentIcon key={`${key}-${utilityIndex}`} stem={stem} className="h-[18px] w-[17px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]" />
-            ))}
-          </span>
-        ))}
+        <span className={`flex min-h-6 items-center gap-0.5 ${mirrored ? "flex-row-reverse" : ""}`}>
+          {specialGear}
+          {hasArmor ? (
+            <span
+              title={state.has_helmet ? "vesthelm · 头盔 + 防弹衣" : "vest · 防弹衣"}
+              aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"} ${armorValue}`}
+              className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm border border-white/10 bg-black/20 px-0.5 font-mono text-[9px] font-black tabular-nums text-white/90"
+            >
+              <HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-[17px] w-5" />
+              {armorValue}
+            </span>
+          ) : null}
+        </span>
       </div>
     </div>
   );
@@ -506,7 +524,6 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
       </span>
       <div className={`relative z-10 flex h-full items-stretch ${mirrored ? "flex-row-reverse" : ""}`}>
         {identity}
-        {portrait}
         {combat}
       </div>
     </div>

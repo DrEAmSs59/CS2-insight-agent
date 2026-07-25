@@ -843,18 +843,22 @@ export default function ReplaySceneCanvas({
             const displayName = safeLabel(player.name, "?");
             const playerNumber = playerNumberByName.get(displayName.toLowerCase());
             const yaw = Number.isFinite(Number(player.yaw)) ? Number(player.yaw) : 0;
+            const alive = player.is_alive !== false;
             const markerTitle = `${displayName} · ${Number.isFinite(Number(player.health)) ? player.health : 0} HP · $${Math.max(0, Number(player.money) || 0).toLocaleString("en-US")} · ${armorText(player)} · ${safeWeapon(player.weapon, "—")}${player.has_c4 ? " · C4" : ""}${player.has_defuser ? " · 拆弹器" : ""}`;
-            const idMaxLen = 8;
-            const idLabel = displayName.length > idMaxLen ? `${displayName.slice(0, idMaxLen)}…` : displayName;
             const circleLabel = playerLabelMode === "id"
               ? (displayName.slice(0, 1).toUpperCase() || "?")
               : (Number.isInteger(playerNumber) ? playerNumber : "?");
             return (
-              <div key={player.steamid64 || displayName} className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: MOTION_DURATION }} title={markerTitle}>
+              <div
+                key={player.steamid64 || displayName}
+                className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear ${alive ? "z-[12]" : "z-[4]"}`}
+                style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: MOTION_DURATION }}
+                title={markerTitle}
+              >
                 <div
                   data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
                   data-player-label-mode={playerLabelMode}
-                  className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
+                  className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${alive ? "" : "opacity-35 grayscale"}`}
                   style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: Math.max(7, playerMarkerSizePx * 0.46) }}
                 >
                   <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
@@ -880,14 +884,15 @@ export default function ReplaySceneCanvas({
                 </div>
                 {playerLabelMode === "id" && (
                   <span
-                    className="demo-player-id-label mt-0.5 truncate text-center font-bold leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,.9)]"
+                    className={`demo-player-id-label mt-0.5 max-w-none text-center font-bold leading-tight drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] ${
+                      alive ? "text-white" : "text-white/40"
+                    }`}
                     style={{
                       // Same fitScale compensation as markers; ~10px on-screen at Fit.
                       fontSize: Math.max(9, 10 / Math.max(Number(camera.fitScale) || 1, 0.05)),
-                      maxWidth: Math.max(72, 88 / Math.max(Number(camera.fitScale) || 1, 0.05)),
                     }}
                   >
-                    {idLabel}
+                    {displayName}
                   </span>
                 )}
               </div>

@@ -324,8 +324,9 @@ def extract_radar_timeline_impl(
         return inventory
 
     _UTILITY_WEAPON_TOKENS = (
-        "knife", "bayonet", "smoke", "flash", "hegrenade", "molotov", "incendiary",
-        "incgrenade", "decoy", "taser", "c4", "defuser", "healthshot",
+        "knife", "bayonet", "karambit", "smoke", "flash", "hegrenade", "molotov", "incendiary",
+        "incgrenade", "decoy", "taser", "zeus", "c4", "defuser", "healthshot",
+        "kevlar", "assaultsuit", "helmet", "vest",
     )
 
     def _primary_from_inventory(inventory: list[str]) -> str:
@@ -333,13 +334,21 @@ def extract_radar_timeline_impl(
             lowered = item.lower().replace("-", "").replace(" ", "")
             if any(token in lowered for token in _UTILITY_WEAPON_TOKENS):
                 continue
+            if lowered in {"armor"}:
+                continue
             return item
         return ""
 
     def _melee_from_inventory(inventory: list[str]) -> str:
         for item in inventory:
             lowered = item.lower()
-            if "knife" in lowered or "bayonet" in lowered or "karambit" in lowered:
+            if any(
+                token in lowered
+                for token in (
+                    "knife", "bayonet", "karambit", "shadow daggers", "stiletto",
+                    "talon", "ursus", "navaja", "nomad", "paracord", "skeleton",
+                )
+            ):
                 return item
         return ""
 
@@ -347,7 +356,7 @@ def extract_radar_timeline_impl(
         weapon = _safe_weapon_text(record.get("active_weapon_name")) or _safe_weapon_text(record.get("active_weapon"))
         if weapon:
             return weapon
-        return _primary_from_inventory(inventory) or _melee_from_inventory(inventory)
+        return _primary_from_inventory(inventory) or _melee_from_inventory(inventory) or "knife"
 
     def _first_text(record: pd.Series, *keys: str) -> str:
         for key in keys:
