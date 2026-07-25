@@ -438,8 +438,1125 @@ index c7a3dda..ffb46fc 100644
 +    println!("cargo::rerun-if-changed=src/message_type.rs");
 +    Ok(())
  }
+diff --git a/src/parser/Cargo.lock b/src/parser/Cargo.lock
+index 25d2f42..eb2c68b 100644
+--- a/src/parser/Cargo.lock
++++ b/src/parser/Cargo.lock
+@@ -36,12 +36,6 @@ version = "0.1.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "99528ca30abb9495c7e106bf7c3177b257c62040fc0f2909fe470b0f43097296"
+ 
+-[[package]]
+-name = "bitflags"
+-version = "2.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+-
+ [[package]]
+ name = "bitter"
+ version = "0.7.0"
+@@ -107,7 +101,6 @@ version = "0.1.5"
+ dependencies = [
+  "phf",
+  "prost",
+- "prost-build",
+  "strum",
+  "winnow",
+ ]
+@@ -131,40 +124,12 @@ version = "1.10.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "11157ac094ffbdde99aa67b23417ebdd801842852b500e395a45a9c0aac03e4a"
+ 
+-[[package]]
+-name = "equivalent"
+-version = "1.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+-
+-[[package]]
+-name = "errno"
+-version = "0.3.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
+-dependencies = [
+- "libc",
+- "windows-sys 0.52.0",
+-]
+-
+-[[package]]
+-name = "fastrand"
+-version = "2.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
+-
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+ 
+-[[package]]
+-name = "fixedbitset"
+-version = "0.4.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+-
+ [[package]]
+ name = "getrandom"
+ version = "0.2.12"
+@@ -176,28 +141,12 @@ dependencies = [
+  "wasi",
+ ]
+ 
+-[[package]]
+-name = "hashbrown"
+-version = "0.15.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+-
+ [[package]]
+ name = "heck"
+ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
+-[[package]]
+-name = "indexmap"
+-version = "2.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
+-dependencies = [
+- "equivalent",
+- "hashbrown",
+-]
+-
+ [[package]]
+ name = "itertools"
+ version = "0.13.0"
+@@ -228,18 +177,6 @@ dependencies = [
+  "cc",
+ ]
+ 
+-[[package]]
+-name = "linux-raw-sys"
+-version = "0.4.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
+-
+-[[package]]
+-name = "log"
+-version = "0.4.20"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
+-
+ [[package]]
+ name = "memchr"
+ version = "2.7.1"
+@@ -264,12 +201,6 @@ dependencies = [
+  "libmimalloc-sys",
+ ]
+ 
+-[[package]]
+-name = "multimap"
+-version = "0.10.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
+-
+ [[package]]
+ name = "once_cell"
+ version = "1.19.0"
+@@ -302,16 +233,6 @@ dependencies = [
+  "snap",
+ ]
+ 
+-[[package]]
+-name = "petgraph"
+-version = "0.6.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+-dependencies = [
+- "fixedbitset",
+- "indexmap",
+-]
+-
+ [[package]]
+ name = "phf"
+ version = "0.11.2"
+@@ -360,16 +281,6 @@ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
+ 
+-[[package]]
+-name = "prettyplease"
+-version = "0.2.17"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8d3928fb5db768cb86f891ff014f0144589297e3c6a1aba6ed7cecfdace270c7"
+-dependencies = [
+- "proc-macro2",
+- "syn 2.0.48",
+-]
+-
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.78"
+@@ -389,27 +300,6 @@ dependencies = [
+  "prost-derive",
+ ]
+ 
+-[[package]]
+-name = "prost-build"
+-version = "0.13.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0c1318b19085f08681016926435853bbf7858f9c082d0999b80550ff5d9abe15"
+-dependencies = [
+- "bytes",
+- "heck",
+- "itertools",
+- "log",
+- "multimap",
+- "once_cell",
+- "petgraph",
+- "prettyplease",
+- "prost",
+- "prost-types",
+- "regex",
+- "syn 2.0.48",
+- "tempfile",
+-]
+-
+ [[package]]
+ name = "prost-derive"
+ version = "0.13.3"
+@@ -423,15 +313,6 @@ dependencies = [
+  "syn 2.0.48",
+ ]
+ 
+-[[package]]
+-name = "prost-types"
+-version = "0.13.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4759aa0d3a6232fb8dbdb97b61de2c20047c68aca932c7ed76da9d788508d670"
+-dependencies = [
+- "prost",
+-]
+-
+ [[package]]
+ name = "quote"
+ version = "1.0.35"
+@@ -529,19 +410,6 @@ dependencies = [
+  "semver",
+ ]
+ 
+-[[package]]
+-name = "rustix"
+-version = "0.38.34"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "70dc5ec042f7a43c4a73241207cecc9873a06d45debb38b329f8541d85c2730f"
+-dependencies = [
+- "bitflags",
+- "errno",
+- "libc",
+- "linux-raw-sys",
+- "windows-sys 0.52.0",
+-]
+-
+ [[package]]
+ name = "rustversion"
+ version = "1.0.19"
+@@ -636,19 +504,6 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
+-[[package]]
+-name = "tempfile"
+-version = "3.12.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "04cbcdd0c794ebb0d4cf35e88edd2f7d2c4c3e9a5a6dab322839b321c6a87a64"
+-dependencies = [
+- "cfg-if",
+- "fastrand",
+- "once_cell",
+- "rustix",
+- "windows-sys 0.59.0",
+-]
+-
+ [[package]]
+ name = "unicode-ident"
+ version = "1.0.12"
+@@ -667,88 +522,6 @@ version = "0.11.0+wasi-snapshot-preview1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+ 
+-[[package]]
+-name = "windows-sys"
+-version = "0.52.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-sys"
+-version = "0.59.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
+-dependencies = [
+- "windows-targets",
+-]
+-
+-[[package]]
+-name = "windows-targets"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
+-dependencies = [
+- "windows_aarch64_gnullvm",
+- "windows_aarch64_msvc",
+- "windows_i686_gnu",
+- "windows_i686_gnullvm",
+- "windows_i686_msvc",
+- "windows_x86_64_gnu",
+- "windows_x86_64_gnullvm",
+- "windows_x86_64_msvc",
+-]
+-
+-[[package]]
+-name = "windows_aarch64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+-
+-[[package]]
+-name = "windows_aarch64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+-
+-[[package]]
+-name = "windows_i686_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+-
+-[[package]]
+-name = "windows_i686_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+-
+-[[package]]
+-name = "windows_i686_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+-
+-[[package]]
+-name = "windows_x86_64_gnu"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+-
+-[[package]]
+-name = "windows_x86_64_gnullvm"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+-
+-[[package]]
+-name = "windows_x86_64_msvc"
+-version = "0.52.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+-
+ [[package]]
+ name = "winnow"
+ version = "0.7.2"
+diff --git a/src/parser/build.rs b/src/parser/build.rs
+index e6878e9..40aa25b 100644
+--- a/src/parser/build.rs
++++ b/src/parser/build.rs
+@@ -1,14 +1,11 @@
+-use std::{io::Result, process::Command};
++use std::io::Result;
+ 
+ fn main() -> Result<()> {
++    // CS2 Insight lean/effects builds ship pre-generated csgoproto modules.
++    // Avoid `cargo run` here: it forms a circular wait with this crate and
++    // hangs under `cargo check` (debug) when the empty profile arg is passed.
+     println!("cargo::rerun-if-changed=../csgoproto/src/protobuf.rs");
+-    println!("cargo::rerun-if-changed=../csgoproto/GameTracking-CS2/game/csgo/pak01_dir/resource/csgo_english.txt");
+-
+-    let profile = std::env::var("PROFILE").unwrap_or("debug".to_string());
+-    Command::new("cargo")
+-        .current_dir("../csgoproto")
+-        .args(["run", if profile == "release" { "--release" } else { "" }])
+-        .status()?;
+-
++    println!("cargo::rerun-if-changed=../csgoproto/src/maps.rs");
++    println!("cargo::rerun-if-changed=../csgoproto/src/message_type.rs");
+     Ok(())
+ }
+diff --git a/src/parser/src/bin/parse_bench.rs b/src/parser/src/bin/parse_bench.rs
+index b94d9f2..6f96ced 100644
+--- a/src/parser/src/bin/parse_bench.rs
++++ b/src/parser/src/bin/parse_bench.rs
+@@ -39,6 +39,7 @@ fn settings<'a>(huf: &'a Vec<(u8, u8)>) -> ParserInputs<'a> {
+         wanted_ticks: vec![],
+         parse_projectiles: false,
+         parse_grenades: false,
++            parse_infernos: false,
+         only_header: false,
+         list_props: false,
+         only_convars: false,
+diff --git a/src/parser/src/e2e_test.rs b/src/parser/src/e2e_test.rs
+index cc1a460..80bf802 100644
+--- a/src/parser/src/e2e_test.rs
++++ b/src/parser/src/e2e_test.rs
+@@ -309,6 +309,7 @@ pub fn _create_ge_tests() {
+         wanted_ticks: (0..5).into_iter().map(|x| x * 10000).collect_vec(),
+         parse_projectiles: false,
+         parse_grenades: false,
++            parse_infernos: false,
+         only_header: false,
+         list_props: false,
+         only_convars: false,
+@@ -685,6 +686,7 @@ pub fn _create_tests() {
+         wanted_ticks: (0..5).into_iter().map(|x| x * 10000).collect_vec(),
+         parse_projectiles: false,
+         parse_grenades: false,
++            parse_infernos: false,
+         only_header: false,
+         list_props: false,
+         only_convars: false,
+@@ -1058,6 +1060,7 @@ fn create_data() -> (DemoOutput, PropController, BTreeMap<String, Vec<GameEvent>
+         wanted_ticks: (0..5).into_iter().map(|x| x * 10000).collect_vec(),
+         parse_projectiles: false,
+         parse_grenades: false,
++            parse_infernos: false,
+         only_header: false,
+         list_props: false,
+         only_convars: false,
+@@ -1084,6 +1087,7 @@ fn create_data() -> (DemoOutput, PropController, BTreeMap<String, Vec<GameEvent>
+         wanted_ticks: (0..5).into_iter().map(|x| x * 10000).collect_vec(),
+         parse_projectiles: false,
+         parse_grenades: false,
++            parse_infernos: false,
+         only_header: false,
+         list_props: false,
+         only_convars: false,
+@@ -1196,6 +1200,7 @@ mod tests {
+             wanted_ticks: vec![10000, 10001],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: false,
+             list_props: false,
+             only_convars: false,
+diff --git a/src/parser/src/first_pass/parser_settings.rs b/src/parser/src/first_pass/parser_settings.rs
+index 7fb7037..e0fce24 100644
+--- a/src/parser/src/first_pass/parser_settings.rs
++++ b/src/parser/src/first_pass/parser_settings.rs
+@@ -34,6 +34,7 @@ pub struct ParserInputs<'a> {
+     pub parse_ents: bool,
+     pub parse_projectiles: bool,
+     pub parse_grenades: bool,
++    pub parse_infernos: bool,
+     pub only_header: bool,
+     pub only_convars: bool,
+     pub huffman_lookup_table: &'a Vec<(u8, u8)>,
+@@ -72,6 +73,7 @@ pub struct FirstPassParser<'a> {
+     pub parse_entities: bool,
+     pub parse_projectiles: bool,
+     pub parse_grenades: bool,
++    pub parse_infernos: bool,
+     pub name_to_id: AHashMap<String, u32>,
+     pub id: u32,
+     pub wanted_prop_ids: Vec<u32>,
+@@ -118,6 +120,7 @@ impl<'a> FirstPassParser<'a> {
+                 false,
+                 &vec!["None".to_string()],
+                 inputs.parse_projectiles,
++                inputs.parse_infernos,
+             ),
+             cls_by_id: None,
+             player_md: vec![],
+@@ -138,6 +141,7 @@ impl<'a> FirstPassParser<'a> {
+             serializers: AHashMap::default(),
+             parse_projectiles: inputs.parse_projectiles,
+             parse_grenades: inputs.parse_grenades,
++            parse_infernos: inputs.parse_infernos,
+             wanted_player_props: inputs.wanted_player_props.clone(),
+             wanted_events: inputs.wanted_events.clone(),
+             wanted_players: AHashSet::from_iter(inputs.wanted_players.iter().cloned()),
+diff --git a/src/parser/src/first_pass/prop_controller.rs b/src/parser/src/first_pass/prop_controller.rs
+index 03dccfa..2eba449 100644
+--- a/src/parser/src/first_pass/prop_controller.rs
++++ b/src/parser/src/first_pass/prop_controller.rs
+@@ -16,6 +16,15 @@ pub const NORMAL_PROP_BASEID: u32 = 1000;
+ pub const WEAPON_SKIN_NAME: u32 = 420420420;
+ pub const WEAPON_ORIGINGAL_OWNER_ID: u32 = 6942000;
+ pub const MY_WEAPONS_OFFSET: u32 = 500000;
++// Flattened CUtlVector slots for utility area props (CS2 Insight Agent).
++pub const VOXEL_FRAME_DATA_OFFSET: u32 = 700000;
++pub const VOXEL_FRAME_DATA_MAX: u32 = 4096;
++pub const FIRE_POSITIONS_OFFSET: u32 = 710000;
++pub const FIRE_POSITIONS_MAX: u32 = 128;
++pub const FIRE_BURNING_OFFSET: u32 = 720000;
++pub const FIRE_BURNING_MAX: u32 = 128;
++pub const FIRE_PARENT_POSITIONS_OFFSET: u32 = 730000;
++pub const FIRE_PARENT_POSITIONS_MAX: u32 = 128;
+ pub const GRENADE_AMMO_ID: u32 = 1111111;
+ pub const FLASHBANG_AMMO_ID: u32 = 2222222;
+ pub const INVENTORY_ID: u32 = 100000000;
+@@ -112,6 +121,7 @@ pub struct PropController {
+     pub wanted_prop_states: AHashMap<String, Variant>,
+     pub wanted_prop_state_infos: Vec<WantedPropStateInfo>,
+     pub parse_projectiles: bool,
++    pub parse_infernos: bool,
+ }
+ 
+ #[derive(Debug, Clone, PartialEq)]
+@@ -144,6 +154,7 @@ impl PropController {
+         needs_velocty: bool,
+         wanted_events: &[String],
+         parse_projectiles: bool,
++        parse_infernos: bool,
+     ) -> Self {
+         PropController {
+             id: NORMAL_PROP_BASEID,
+@@ -162,6 +173,7 @@ impl PropController {
+             wanted_prop_states,
+             wanted_prop_state_infos: vec![],
+             parse_projectiles: parse_projectiles,
++            parse_infernos: parse_infernos,
+         }
+     }
+ 
+@@ -287,8 +299,8 @@ impl PropController {
+                 is_player_prop: false,
+             });
+         }
+-        // Parse grenades specific
+-        if self.parse_projectiles {
++        // Parse grenades / infernos specific
++        if self.parse_projectiles || self.parse_infernos {
+             self.prop_infos.push(PropInfo {
+                 id: GRENADE_TYPE_ID,
+                 prop_type: PropType::Tick,
+@@ -465,6 +477,44 @@ impl PropController {
+         if full_name == "CCSPlayerPawn.CCSPlayer_WeaponServices.m_hMyWeapons" {
+             f.prop_id = MY_WEAPONS_OFFSET as u32;
+         }
++        // CS2 Insight: keep CUtlVector utility arrays under stable base IDs so
++        // elements can be flattened (path index) instead of overwriting one slot.
++        if full_name.ends_with(".m_VoxelFrameData") || full_name == "m_VoxelFrameData" {
++            f.prop_id = VOXEL_FRAME_DATA_OFFSET;
++            self.name_to_id.insert(prop_name.to_string(), VOXEL_FRAME_DATA_OFFSET);
++            for info in self.prop_infos.iter_mut() {
++                if info.prop_name == "m_VoxelFrameData" || info.prop_friendly_name == "m_VoxelFrameData" {
++                    info.id = VOXEL_FRAME_DATA_OFFSET;
++                }
++            }
++        }
++        if full_name.ends_with(".m_firePositions") || full_name == "m_firePositions" {
++            f.prop_id = FIRE_POSITIONS_OFFSET;
++            self.name_to_id.insert(prop_name.to_string(), FIRE_POSITIONS_OFFSET);
++            for info in self.prop_infos.iter_mut() {
++                if info.prop_name == "m_firePositions" || info.prop_friendly_name == "m_firePositions" {
++                    info.id = FIRE_POSITIONS_OFFSET;
++                }
++            }
++        }
++        if full_name.ends_with(".m_bFireIsBurning") || full_name == "m_bFireIsBurning" {
++            f.prop_id = FIRE_BURNING_OFFSET;
++            self.name_to_id.insert(prop_name.to_string(), FIRE_BURNING_OFFSET);
++            for info in self.prop_infos.iter_mut() {
++                if info.prop_name == "m_bFireIsBurning" || info.prop_friendly_name == "m_bFireIsBurning" {
++                    info.id = FIRE_BURNING_OFFSET;
++                }
++            }
++        }
++        if full_name.ends_with(".m_fireParentPositions") || full_name == "m_fireParentPositions" {
++            f.prop_id = FIRE_PARENT_POSITIONS_OFFSET;
++            self.name_to_id.insert(prop_name.to_string(), FIRE_PARENT_POSITIONS_OFFSET);
++            for info in self.prop_infos.iter_mut() {
++                if info.prop_name == "m_fireParentPositions" || info.prop_friendly_name == "m_fireParentPositions" {
++                    info.id = FIRE_PARENT_POSITIONS_OFFSET;
++                }
++            }
++        }
+         if full_name == "CCSPlayerPawn.CCSPlayer_ActionTrackingServices.WeaponPurchaseCount_t.m_nCount" {
+             f.prop_id = ITEM_PURCHASE_COUNT as u32;
+         }
+diff --git a/src/parser/src/first_pass/sendtables.rs b/src/parser/src/first_pass/sendtables.rs
+index 9aaf1a7..7ffbbf2 100644
+--- a/src/parser/src/first_pass/sendtables.rs
++++ b/src/parser/src/first_pass/sendtables.rs
+@@ -12,7 +12,15 @@ use crate::first_pass::prop_controller::ITEM_PURCHASE_COUNT;
+ use crate::first_pass::prop_controller::ITEM_PURCHASE_DEF_IDX;
+ use crate::first_pass::prop_controller::ITEM_PURCHASE_HANDLE;
+ use crate::first_pass::prop_controller::ITEM_PURCHASE_NEW_DEF_IDX;
++use crate::first_pass::prop_controller::FIRE_BURNING_MAX;
++use crate::first_pass::prop_controller::FIRE_BURNING_OFFSET;
++use crate::first_pass::prop_controller::FIRE_PARENT_POSITIONS_MAX;
++use crate::first_pass::prop_controller::FIRE_PARENT_POSITIONS_OFFSET;
++use crate::first_pass::prop_controller::FIRE_POSITIONS_MAX;
++use crate::first_pass::prop_controller::FIRE_POSITIONS_OFFSET;
+ use crate::first_pass::prop_controller::MY_WEAPONS_OFFSET;
++use crate::first_pass::prop_controller::VOXEL_FRAME_DATA_MAX;
++use crate::first_pass::prop_controller::VOXEL_FRAME_DATA_OFFSET;
+ use crate::first_pass::prop_controller::WEAPON_SKIN_ID;
+ use crate::maps::BASETYPE_DECODERS;
+ use crate::second_pass::decoder::Decoder;
+@@ -106,6 +114,7 @@ impl<'a> FirstPassParser<'a> {
+             needs_velocity(&self.wanted_player_props),
+             &self.wanted_events,
+             self.parse_projectiles,
++            self.parse_infernos,
+         );
+         // Quantalized floats have their own helper struct
+         let mut qf_mapper = QfMapper {
+@@ -493,6 +502,28 @@ pub fn get_propinfo(field: &Field, path: &FieldPath) -> Option<FieldInfo> {
+             fi.prop_id = MY_WEAPONS_OFFSET + path.path[2] as u32 + 1;
+         }
+     }
++    // CS2 Insight: flatten utility CUtlVector elements by deepest path index.
++    let vector_index = path.path[path.last] as u32;
++    if fi.prop_id == VOXEL_FRAME_DATA_OFFSET && path.last >= 1 {
++        if vector_index < VOXEL_FRAME_DATA_MAX {
++            fi.prop_id = VOXEL_FRAME_DATA_OFFSET + 1 + vector_index;
++        }
++    }
++    if fi.prop_id == FIRE_POSITIONS_OFFSET && path.last >= 1 {
++        if vector_index < FIRE_POSITIONS_MAX {
++            fi.prop_id = FIRE_POSITIONS_OFFSET + 1 + vector_index;
++        }
++    }
++    if fi.prop_id == FIRE_BURNING_OFFSET && path.last >= 1 {
++        if vector_index < FIRE_BURNING_MAX {
++            fi.prop_id = FIRE_BURNING_OFFSET + 1 + vector_index;
++        }
++    }
++    if fi.prop_id == FIRE_PARENT_POSITIONS_OFFSET && path.last >= 1 {
++        if vector_index < FIRE_PARENT_POSITIONS_MAX {
++            fi.prop_id = FIRE_PARENT_POSITIONS_OFFSET + 1 + vector_index;
++        }
++    }
+     if fi.prop_id == WEAPON_SKIN_ID {
+         fi.prop_id = WEAPON_SKIN_ID + path.path[1] as u32;
+     }
+diff --git a/src/parser/src/second_pass/collect_data.rs b/src/parser/src/second_pass/collect_data.rs
+index 12fa567..878167e 100644
+--- a/src/parser/src/second_pass/collect_data.rs
++++ b/src/parser/src/second_pass/collect_data.rs
+@@ -66,6 +66,10 @@ impl<'a> SecondPassParser<'a> {
+             self.collect_projectiles();
+             return;
+         }
++        if self.parse_infernos {
++            self.collect_infernos();
++            return;
++        }
+         // iterate every player and every wanted prop name
+         // if either one is missing then push None to output
+         for (entity_id, player) in &self.players {
+@@ -320,9 +324,183 @@ impl<'a> SecondPassParser<'a> {
+                 {
+                     continue;
+                 }
+-                let prop = match self.get_prop_from_ent(&prop_info.id, &projectile_entid) {
+-                    Ok(p) => Some(p),
+-                    _ => None,
++                let prop = if prop_info.prop_name == "m_VoxelFrameData" || prop_info.prop_friendly_name == "m_VoxelFrameData" {
++                    self.find_voxel_frame_data(projectile_entid).ok()
++                } else if prop_info.prop_name == "m_firePositions" || prop_info.prop_friendly_name == "m_firePositions" {
++                    self.find_fire_positions(projectile_entid).ok()
++                } else if prop_info.prop_name == "m_bFireIsBurning" || prop_info.prop_friendly_name == "m_bFireIsBurning" {
++                    self.find_fire_burning(projectile_entid).ok()
++                } else if prop_info.prop_name == "m_fireParentPositions" || prop_info.prop_friendly_name == "m_fireParentPositions" {
++                    self.find_fire_parent_positions(projectile_entid).ok()
++                } else {
++                    match self.get_prop_from_ent(&prop_info.id, &projectile_entid) {
++                        Ok(p) => Some(p),
++                        _ => None,
++                    }
++                };
++                match prop {
++                    Some(prop) => {
++                        self.output.entry(prop_info.id).or_insert_with(|| PropColumn::new()).push(Some(prop));
++                    }
++                    None => {
++                        self.output.entry(prop_info.id).or_insert_with(|| PropColumn::new()).push(None);
++                    }
++                }
++            }
++        }
++    }
++
++    pub fn find_voxel_frame_data(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
++        let len = match self.get_prop_from_ent(&VOXEL_FRAME_DATA_OFFSET, entity_id) {
++            Ok(Variant::U32(n)) => n.min(VOXEL_FRAME_DATA_MAX) as usize,
++            Ok(Variant::U8Vec(v)) => return Ok(Variant::U8Vec(v)),
++            _ => {
++                // Length update may be missing; scan filled slots up to known max.
++                let mut bytes = Vec::new();
++                for i in 0..VOXEL_FRAME_DATA_MAX {
++                    match self.get_prop_from_ent(&(VOXEL_FRAME_DATA_OFFSET + 1 + i), entity_id) {
++                        Ok(Variant::U32(b)) => bytes.push((b & 0xFF) as u8),
++                        Ok(Variant::I32(b)) => bytes.push((b & 0xFF) as u8),
++                        _ => {
++                            if bytes.is_empty() {
++                                continue;
++                            }
++                            break;
++                        }
++                    }
++                }
++                if bytes.is_empty() {
++                    return Err(PropCollectionError::GetPropFromEntPropNotFound);
++                }
++                return Ok(Variant::U8Vec(bytes));
++            }
++        };
++        let mut bytes = Vec::with_capacity(len);
++        for i in 0..len as u32 {
++            match self.get_prop_from_ent(&(VOXEL_FRAME_DATA_OFFSET + 1 + i), entity_id) {
++                Ok(Variant::U32(b)) => bytes.push((b & 0xFF) as u8),
++                Ok(Variant::I32(b)) => bytes.push((b & 0xFF) as u8),
++                _ => bytes.push(0),
++            }
++        }
++        Ok(Variant::U8Vec(bytes))
++    }
++
++    pub fn find_fire_positions(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
++        let len = match self.get_prop_from_ent(&FIRE_POSITIONS_OFFSET, entity_id) {
++            Ok(Variant::U32(n)) => n.min(FIRE_POSITIONS_MAX) as usize,
++            Ok(Variant::VecXYZList(v)) => return Ok(Variant::VecXYZList(v)),
++            _ => FIRE_POSITIONS_MAX as usize,
++        };
++        let mut positions = Vec::new();
++        for i in 0..len as u32 {
++            match self.get_prop_from_ent(&(FIRE_POSITIONS_OFFSET + 1 + i), entity_id) {
++                Ok(Variant::VecXYZ(v)) => positions.push(v),
++                _ => {
++                    if positions.is_empty() && i + 1 < len as u32 {
++                        continue;
++                    }
++                    if i as usize >= positions.len() && !positions.is_empty() {
++                        break;
++                    }
++                }
++            }
++        }
++        if positions.is_empty() {
++            return Err(PropCollectionError::GetPropFromEntPropNotFound);
++        }
++        Ok(Variant::VecXYZList(positions))
++    }
++
++    pub fn find_fire_parent_positions(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
++        let len = match self.get_prop_from_ent(&FIRE_PARENT_POSITIONS_OFFSET, entity_id) {
++            Ok(Variant::U32(n)) => n.min(FIRE_PARENT_POSITIONS_MAX) as usize,
++            Ok(Variant::VecXYZList(v)) => return Ok(Variant::VecXYZList(v)),
++            _ => FIRE_PARENT_POSITIONS_MAX as usize,
++        };
++        let mut positions = Vec::new();
++        for i in 0..len as u32 {
++            match self.get_prop_from_ent(&(FIRE_PARENT_POSITIONS_OFFSET + 1 + i), entity_id) {
++                Ok(Variant::VecXYZ(v)) => positions.push(v),
++                _ => {
++                    if !positions.is_empty() {
++                        break;
++                    }
++                }
++            }
++        }
++        if positions.is_empty() {
++            return Err(PropCollectionError::GetPropFromEntPropNotFound);
++        }
++        Ok(Variant::VecXYZList(positions))
++    }
++
++    pub fn find_fire_burning(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
++        let len = match self.get_prop_from_ent(&FIRE_BURNING_OFFSET, entity_id) {
++            Ok(Variant::U32(n)) => n.min(FIRE_BURNING_MAX) as usize,
++            Ok(Variant::BoolVec(v)) => return Ok(Variant::BoolVec(v)),
++            _ => FIRE_BURNING_MAX as usize,
++        };
++        let mut flags = Vec::new();
++        for i in 0..len as u32 {
++            match self.get_prop_from_ent(&(FIRE_BURNING_OFFSET + 1 + i), entity_id) {
++                Ok(Variant::Bool(b)) => flags.push(b),
++                Ok(Variant::U32(b)) => flags.push(b != 0),
++                _ => {
++                    if !flags.is_empty() {
++                        break;
++                    }
++                }
++            }
++        }
++        if flags.is_empty() {
++            return Err(PropCollectionError::GetPropFromEntPropNotFound);
++        }
++        Ok(Variant::BoolVec(flags))
++    }
++
++    pub fn collect_infernos(&mut self) {
++        let inferno_ids: Vec<i32> = self.infernos.iter().copied().collect();
++        for entity_id in inferno_ids {
++            let x = self.collect_cell_coordinate_grenade(CoordinateAxis::X, &entity_id).ok();
++            let y = self.collect_cell_coordinate_grenade(CoordinateAxis::Y, &entity_id).ok();
++            let z = self.collect_cell_coordinate_grenade(CoordinateAxis::Z, &entity_id).ok();
++            let pairs = vec![
++                (GRENADE_TYPE_ID, Some(Variant::String("CInferno".to_string()))),
++                (TICK_ID, Some(Variant::I32(self.tick))),
++                (ENTITY_ID_ID, Some(Variant::I32(entity_id))),
++                (GRENADE_X, x),
++                (GRENADE_Y, y),
++                (GRENADE_Z, z),
++                (STEAMID_ID, None),
++                (NAME_ID, None),
++            ];
++            for pair in pairs {
++                self.output.entry(pair.0).or_insert_with(|| PropColumn::new()).push(pair.1);
++            }
++            for prop_info in &self.prop_controller.prop_infos {
++                if prop_info.id == STEAMID_ID
++                    || prop_info.id == NAME_ID
++                    || prop_info.id == TICK_ID
++                    || prop_info.id == GRENADE_TYPE_ID
++                    || prop_info.id == ENTITY_ID_ID
++                    || prop_info.id == GRENADE_X
++                    || prop_info.id == GRENADE_Y
++                    || prop_info.id == GRENADE_Z
++                {
++                    continue;
++                }
++                let prop = if prop_info.prop_name == "m_firePositions" || prop_info.prop_friendly_name == "m_firePositions" {
++                    self.find_fire_positions(&entity_id).ok()
++                } else if prop_info.prop_name == "m_bFireIsBurning" || prop_info.prop_friendly_name == "m_bFireIsBurning" {
++                    self.find_fire_burning(&entity_id).ok()
++                } else if prop_info.prop_name == "m_fireParentPositions" || prop_info.prop_friendly_name == "m_fireParentPositions" {
++                    self.find_fire_parent_positions(&entity_id).ok()
++                } else {
++                    match self.get_prop_from_ent(&prop_info.id, &entity_id) {
++                        Ok(p) => Some(p),
++                        _ => None,
++                    }
+                 };
+                 match prop {
+                     Some(prop) => {
+diff --git a/src/parser/src/second_pass/entities.rs b/src/parser/src/second_pass/entities.rs
+index 9d205ac..1adcd0f 100644
+--- a/src/parser/src/second_pass/entities.rs
++++ b/src/parser/src/second_pass/entities.rs
+@@ -41,6 +41,7 @@ pub enum EntityType {
+     PlayerController,
+     Rules,
+     Projectile,
++    Inferno,
+     Team,
+     Normal,
+     C4,
+@@ -78,6 +79,7 @@ impl<'a> SecondPassParser<'a> {
+             match cmd {
+                 EntityCmd::Delete => {
+                     self.projectiles.remove(&entity_id);
++                    self.infernos.remove(&entity_id);
+                     if let Some(entry) = self.entities.get_mut(entity_id as usize) {
+                         *entry = None;
+                     }
+@@ -340,6 +342,9 @@ impl<'a> SecondPassParser<'a> {
+             EntityType::Projectile => {
+                 self.projectiles.insert(*entity_id);
+             }
++            EntityType::Inferno => {
++                self.infernos.insert(*entity_id);
++            }
+             EntityType::Rules => self.rules_entity_id = Some(*entity_id),
+             EntityType::C4 => self.c4_entity_id = Some(*entity_id),
+             _ => {}
+@@ -382,6 +387,7 @@ impl<'a> SecondPassParser<'a> {
+             "CCSGameRulesProxy" => return Ok(EntityType::Rules),
+             "CCSTeam" => return Ok(EntityType::Team),
+             "CC4" => return Ok(EntityType::C4),
++            "CInferno" => return Ok(EntityType::Inferno),
+             _ => {}
+         }
+         let is_projectile_prop =
+diff --git a/src/parser/src/second_pass/parser_settings.rs b/src/parser/src/second_pass/parser_settings.rs
+index a2613a6..ba56074 100644
+--- a/src/parser/src/second_pass/parser_settings.rs
++++ b/src/parser/src/second_pass/parser_settings.rs
+@@ -53,6 +53,7 @@ pub struct SecondPassParser<'a> {
+     pub uniq_prop_names: AHashSet<String>,
+     pub baselines: AHashMap<u32, Vec<u8>, RandomState>,
+     pub projectiles: BTreeSet<i32>,
++    pub infernos: BTreeSet<i32>,
+     pub fullpackets_parsed: u32,
+     pub wanted_players: AHashSet<u64>,
+     pub wanted_ticks: AHashSet<i32>,
+@@ -71,6 +72,7 @@ pub struct SecondPassParser<'a> {
+     pub parse_entities: bool,
+     pub parse_projectiles: bool,
+     pub parse_grenades: bool,
++    pub parse_infernos: bool,
+     pub is_debug_mode: bool,
+     pub df_per_player: AHashMap<u64, AHashMap<u32, PropColumn>>,
+     pub order_by_steamid: bool,
+@@ -151,7 +153,7 @@ impl<'a> SecondPassParser<'a> {
+                 .collect(),
+             game_events_counter: self.game_events_counter,
+             uniq_prop_names: self.uniq_prop_names,
+-            prop_info: PropController::new(vec![], vec![], AHashMap::default(), AHashMap::default(), false, &["none".to_string()], false),
++            prop_info: PropController::new(vec![], vec![], AHashMap::default(), AHashMap::default(), false, &["none".to_string()], false, false),
+             projectiles: self.projectile_records,
+             ptr: self.ptr,
+             df_per_player: self.df_per_player,
+@@ -213,12 +215,14 @@ impl<'a> SecondPassParser<'a> {
+             wanted_events: first_pass_output.settings.wanted_events.clone(),
+             parse_entities: first_pass_output.settings.parse_ents,
+             projectiles: BTreeSet::default(),
++            infernos: BTreeSet::default(),
+             baselines: first_pass_output.baselines.clone(),
+             string_tables: first_pass_output.string_tables.clone(),
+             teams: Teams::new(),
+             game_events_counter: AHashSet::default(),
+             parse_projectiles: first_pass_output.settings.parse_projectiles,
+             parse_grenades: first_pass_output.settings.parse_grenades,
++            parse_infernos: first_pass_output.settings.parse_infernos,
+             rules_entity_id: None,
+             convars: AHashMap::default(),
+             chat_messages: vec![],
+diff --git a/src/parser/src/second_pass/variants.rs b/src/parser/src/second_pass/variants.rs
+index fc83ce4..b9b4afb 100644
+--- a/src/parser/src/second_pass/variants.rs
++++ b/src/parser/src/second_pass/variants.rs
+@@ -21,6 +21,9 @@ pub enum Variant {
+     StringVec(Vec<String>),
+     U32Vec(Vec<u32>),
+     U64Vec(Vec<u64>),
++    U8Vec(Vec<u8>),
++    BoolVec(Vec<bool>),
++    VecXYZList(Vec<[f32; 3]>),
+     Stickers(Vec<Sticker>),
+     InputHistory(Vec<InputHistory>),
+ }
+@@ -54,6 +57,9 @@ pub enum VarVec {
+     StringVec(Vec<Vec<String>>),
+     U64Vec(Vec<Vec<u64>>),
+     U32Vec(Vec<Vec<u32>>),
++    U8Vec(Vec<Option<Vec<u8>>>),
++    BoolVec(Vec<Option<Vec<bool>>>),
++    VecXYZList(Vec<Option<Vec<[f32; 3]>>>),
+     XYVec(Vec<Option<[f32; 2]>>),
+     XYZVec(Vec<Option<[f32; 3]>>),
+     Stickers(Vec<Vec<Sticker>>),
+@@ -72,6 +78,9 @@ impl VarVec {
+             Variant::StringVec(_) => VarVec::StringVec(vec![]),
+             Variant::U64Vec(_) => VarVec::U64Vec(vec![]),
+             Variant::U32Vec(_) => VarVec::U32Vec(vec![]),
++            Variant::U8Vec(_) => VarVec::U8Vec(vec![]),
++            Variant::BoolVec(_) => VarVec::BoolVec(vec![]),
++            Variant::VecXYZList(_) => VarVec::VecXYZList(vec![]),
+             Variant::VecXY(_) => VarVec::XYVec(vec![]),
+             Variant::VecXYZ(_) => VarVec::XYZVec(vec![]),
+             Variant::Stickers(_) => VarVec::Stickers(vec![]),
+@@ -101,6 +110,9 @@ impl PropColumn {
+             Some(VarVec::StringVec(b)) => VarVec::StringVec(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
+             Some(VarVec::U64Vec(b)) => VarVec::U64Vec(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
+             Some(VarVec::U32Vec(b)) => VarVec::U32Vec(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
++            Some(VarVec::U8Vec(b)) => VarVec::U8Vec(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
++            Some(VarVec::BoolVec(b)) => VarVec::BoolVec(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
++            Some(VarVec::VecXYZList(b)) => VarVec::VecXYZList(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
+             Some(VarVec::XYVec(b)) => VarVec::XYVec(indicies.iter().map(|x| b[*x]).collect_vec()),
+             Some(VarVec::XYZVec(b)) => VarVec::XYZVec(indicies.iter().map(|x| b[*x]).collect_vec()),
+             Some(VarVec::Stickers(b)) => VarVec::Stickers(indicies.iter().map(|x| b[*x].to_owned()).collect_vec()),
+@@ -128,6 +140,9 @@ impl PropColumn {
+             Some(VarVec::StringVec(b)) => b.len(),
+             Some(VarVec::U64Vec(b)) => b.len(),
+             Some(VarVec::U32Vec(b)) => b.len(),
++            Some(VarVec::U8Vec(b)) => b.len(),
++            Some(VarVec::BoolVec(b)) => b.len(),
++            Some(VarVec::VecXYZList(b)) => b.len(),
+             Some(VarVec::XYVec(b)) => b.len(),
+             Some(VarVec::XYZVec(b)) => b.len(),
+             Some(VarVec::Stickers(b)) => b.len(),
+@@ -280,6 +295,39 @@ impl PropColumn {
+                 }
+                 _ => {}
+             },
++            Some(VarVec::U8Vec(v)) => match &other.data {
++                Some(VarVec::U8Vec(v_other)) => {
++                    v.extend_from_slice(&v_other);
++                }
++                None => {
++                    for _ in 0..other.num_nones {
++                        v.push(None);
++                    }
++                }
++                _ => {}
++            },
++            Some(VarVec::BoolVec(v)) => match &other.data {
++                Some(VarVec::BoolVec(v_other)) => {
++                    v.extend_from_slice(&v_other);
++                }
++                None => {
++                    for _ in 0..other.num_nones {
++                        v.push(None);
++                    }
++                }
++                _ => {}
++            },
++            Some(VarVec::VecXYZList(v)) => match &other.data {
++                Some(VarVec::VecXYZList(v_other)) => {
++                    v.extend_from_slice(&v_other);
++                }
++                None => {
++                    for _ in 0..other.num_nones {
++                        v.push(None);
++                    }
++                }
++                _ => {}
++            },
+             None => match &other.data {
+                 Some(VarVec::Bool(_inner)) => {
+                     self.resolve_vec_type(PropColumn::get_type(&other.data));
+@@ -333,6 +381,18 @@ impl PropColumn {
+                     self.resolve_vec_type(PropColumn::get_type(&other.data));
+                     self.extend_from(other);
+                 }
++                Some(VarVec::U8Vec(_inner)) => {
++                    self.resolve_vec_type(PropColumn::get_type(&other.data));
++                    self.extend_from(other);
++                }
++                Some(VarVec::BoolVec(_inner)) => {
++                    self.resolve_vec_type(PropColumn::get_type(&other.data));
++                    self.extend_from(other);
++                }
++                Some(VarVec::VecXYZList(_inner)) => {
++                    self.resolve_vec_type(PropColumn::get_type(&other.data));
++                    self.extend_from(other);
++                }
+                 None => {
+                     self.num_nones += other.num_nones;
+                 }
+@@ -355,6 +415,9 @@ impl PropColumn {
+             Some(VarVec::Stickers(_)) => Some(10),
+             Some(VarVec::U32Vec(_)) => Some(11),
+             Some(VarVec::InputHistory(_)) => Some(12),
++            Some(VarVec::U8Vec(_)) => Some(13),
++            Some(VarVec::BoolVec(_)) => Some(14),
++            Some(VarVec::VecXYZList(_)) => Some(15),
+ 
+             None => None,
+         }
+@@ -377,6 +440,9 @@ impl PropColumn {
+             Some(10) => self.data = Some(VarVec::Stickers(vec![])),
+             Some(11) => self.data = Some(VarVec::U32Vec(vec![])),
+             Some(12) => self.data = Some(VarVec::InputHistory(vec![])),
++            Some(13) => self.data = Some(VarVec::U8Vec(vec![])),
++            Some(14) => self.data = Some(VarVec::BoolVec(vec![])),
++            Some(15) => self.data = Some(VarVec::VecXYZList(vec![])),
+             _ => {}
+         }
+         for _ in 0..self.num_nones {
+@@ -459,6 +525,18 @@ impl VarVec {
+                 VarVec::InputHistory(f) => f.push(p),
+                 _ => {}
+             },
++            Some(Variant::U8Vec(p)) => match self {
++                VarVec::U8Vec(f) => f.push(Some(p)),
++                _ => {}
++            },
++            Some(Variant::BoolVec(p)) => match self {
++                VarVec::BoolVec(f) => f.push(Some(p)),
++                _ => {}
++            },
++            Some(Variant::VecXYZList(p)) => match self {
++                VarVec::VecXYZList(f) => f.push(Some(p)),
++                _ => {}
++            },
+             None => self.push_none(),
+         }
+     }
+@@ -475,6 +553,9 @@ impl VarVec {
+             VarVec::XYVec(f) => f.push(None),
+             VarVec::XYZVec(f) => f.push(None),
+             VarVec::U32Vec(f) => f.push(vec![]),
++            VarVec::U8Vec(f) => f.push(None),
++            VarVec::BoolVec(f) => f.push(None),
++            VarVec::VecXYZList(f) => f.push(None),
+             VarVec::Stickers(f) => f.push(vec![]),
+             VarVec::InputHistory(f) => f.push(vec![]),
+         }
+@@ -532,6 +613,27 @@ impl Serialize for Variant {
+                 }
+                 s.end()
+             }
++            Variant::U8Vec(v) => {
++                let mut s = serializer.serialize_seq(Some(v.len()))?;
++                for item in v {
++                    s.serialize_element(item)?;
++                }
++                s.end()
++            }
++            Variant::BoolVec(v) => {
++                let mut s = serializer.serialize_seq(Some(v.len()))?;
++                for item in v {
++                    s.serialize_element(item)?;
++                }
++                s.end()
++            }
++            Variant::VecXYZList(v) => {
++                let mut s = serializer.serialize_seq(Some(v.len()))?;
++                for item in v {
++                    s.serialize_element(item)?;
++                }
++                s.end()
++            }
+             Variant::Stickers(v) => {
+                 let mut s = serializer.serialize_seq(Some(v.len()))?;
+                 for item in v {
+@@ -713,6 +815,18 @@ pub fn soa_to_aos(soa: OutputSerdeHelperStruct) -> Vec<std::collections::HashMap
+                         Some(f) => hm.insert(prop_info.prop_friendly_name.clone(), Some(Variant::InputHistory(f.clone()))),
+                         _ => hm.insert(prop_info.prop_friendly_name.clone(), None),
+                     },
++                    Some(VarVec::U8Vec(val)) => match val.get(idx) {
++                        Some(Some(f)) => hm.insert(prop_info.prop_friendly_name.clone(), Some(Variant::U8Vec(f.clone()))),
++                        _ => hm.insert(prop_info.prop_friendly_name.clone(), None),
++                    },
++                    Some(VarVec::BoolVec(val)) => match val.get(idx) {
++                        Some(Some(f)) => hm.insert(prop_info.prop_friendly_name.clone(), Some(Variant::BoolVec(f.clone()))),
++                        _ => hm.insert(prop_info.prop_friendly_name.clone(), None),
++                    },
++                    Some(VarVec::VecXYZList(val)) => match val.get(idx) {
++                        Some(Some(f)) => hm.insert(prop_info.prop_friendly_name.clone(), Some(Variant::VecXYZList(f.clone()))),
++                        _ => hm.insert(prop_info.prop_friendly_name.clone(), None),
++                    },
+                 };
+             }
+         }
+@@ -785,6 +899,15 @@ impl Serialize for OutputSerdeHelperStruct {
+                             .collect_vec();
+                         map.serialize_entry(&prop_info.prop_friendly_name, &string_sid)?;
+                     }
++                    Some(VarVec::U8Vec(val)) => {
++                        map.serialize_entry(&prop_info.prop_friendly_name, val)?;
++                    }
++                    Some(VarVec::BoolVec(val)) => {
++                        map.serialize_entry(&prop_info.prop_friendly_name, val)?;
++                    }
++                    Some(VarVec::VecXYZList(val)) => {
++                        map.serialize_entry(&prop_info.prop_friendly_name, val)?;
++                    }
+                 }
+             }
+         }
 diff --git a/src/python/Cargo.lock b/src/python/Cargo.lock
-index 2e62735..5980c48 100644
+index 2e62735..ca393e5 100644
 --- a/src/python/Cargo.lock
 +++ b/src/python/Cargo.lock
 @@ -24,122 +24,30 @@ dependencies = [
@@ -702,7 +1819,7 @@ index 2e62735..5980c48 100644
  [[package]]
  name = "demoparser2"
 -version = "0.40.2"
-+version = "0.41.4+cs2insight1"
++version = "0.41.4+cs2insight2"
  dependencies = [
   "ahash",
   "csgoproto",
@@ -2358,14 +3475,14 @@ index 2e62735..5980c48 100644
 + "syn",
  ]
 diff --git a/src/python/Cargo.toml b/src/python/Cargo.toml
-index 99f044e..2e02806 100644
+index 99f044e..2152402 100644
 --- a/src/python/Cargo.toml
 +++ b/src/python/Cargo.toml
 @@ -1,6 +1,6 @@
  [package]
  name = "demoparser2"
 -version = "0.41.4"
-+version = "0.41.4+cs2insight1"
++version = "0.41.4+cs2insight2"
  edition = "2021"
  
  
@@ -2399,7 +3516,7 @@ index 7d2deac..507e224 100644
 \ No newline at end of file
 +overflow-checks = false
 diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
-index c950726..524ed0f 100644
+index c950726..957e176 100644
 --- a/src/python/src/lib.rs
 +++ b/src/python/src/lib.rs
 @@ -13,16 +13,7 @@ use parser::second_pass::game_events::GameEvent;
@@ -2442,7 +3559,39 @@ index c950726..524ed0f 100644
  #[derive(Clone)]
  struct PyVariant(Variant);
  
-@@ -267,29 +274,27 @@ impl DemoParser {
+@@ -138,6 +145,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -166,6 +174,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: false,
+             list_props: true,
+             only_convars: false,
+@@ -192,6 +201,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: false,
+             list_props: false,
+             only_convars: false,
+@@ -243,6 +253,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: true,
+             parse_grenades: grenades,
++            parse_infernos: false,
+             only_header: false,
+             list_props: false,
+             only_convars: false,
+@@ -267,29 +278,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -2478,7 +3627,34 @@ index c950726..524ed0f 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -311,22 +316,15 @@ impl DemoParser {
+@@ -307,26 +316,177 @@ impl DemoParser {
+                         df_column_names_py.push(prop_info.prop_friendly_name);
+                         all_pyobjects.push(data.into_py_any(py)?);
+                     }
++                    Some(VarVec::U8Vec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        let py_list = pyo3::types::PyList::empty(py);
++                        for opt in data {
++                            match opt {
++                                Some(bytes) => {
++                                    py_list.append(pyo3::types::PyBytes::new(py, &bytes))?;
++                                }
++                                None => {
++                                    py_list.append(py.None())?;
++                                }
++                            }
++                        }
++                        all_pyobjects.push(py_list.into_py_any(py)?);
++                    }
++                    Some(VarVec::BoolVec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::VecXYZList(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
+                     _ => {}
                  }
              }
          }
@@ -2490,7 +3666,140 @@ index c950726..524ed0f 100644
 -            let pandas_df = df.call_method0("to_pandas")?;
 -            for (pyobj, col_name) in all_pyobjects.iter().zip(&df_column_names_py) {
 -                pandas_df.call_method1("insert", (0, col_name, pyobj))?;
--            }
++        let mut columns: Vec<(String, Py<PyAny>)> = df_column_names_arrow
++            .iter()
++            .cloned()
++            .zip(all_series)
++            .collect();
++        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
++        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
++        column_order.extend(df_column_names_arrow);
++        pandas_dataframe(py, columns, column_order)
++    }
++
++    /// Collect CInferno fire-cell state across ticks.
++    ///
++    /// Returns columns similar to ``parse_grenades`` plus requested fire props
++    /// such as ``m_firePositions``, ``m_bFireIsBurning``, ``m_fireCount``.
++    #[pyo3(signature = (*, extra=None))]
++    pub fn parse_infernos(&self, py: Python<'_>, extra: Option<Vec<String>>) -> PyResult<Py<PyAny>> {
++        let wanted_other_props = extra.unwrap_or_else(|| {
++            vec![
++                "m_fireCount".to_string(),
++                "m_firePositions".to_string(),
++                "m_bFireIsBurning".to_string(),
++                "m_nFireEffectTickBegin".to_string(),
++                "m_nFireLifetime".to_string(),
++                "m_fireParentPositions".to_string(),
++            ]
++        });
++        let real_other_props = match rm_user_friendly_names(&wanted_other_props) {
++            Ok(real_props) => real_props,
++            Err(e) => return Err(PyValueError::new_err(format!("{e}"))),
++        };
++        let mut real_name_to_og_name = AHashMap::default();
++        for (real_name, user_friendly_name) in real_other_props.iter().zip(&wanted_other_props) {
++            real_name_to_og_name.insert(real_name.clone(), user_friendly_name.clone());
++        }
++        let settings = ParserInputs {
++            real_name_to_og_name,
++            wanted_players: vec![],
++            wanted_player_props: vec![],
++            wanted_other_props: real_other_props,
++            wanted_events: vec![],
++            wanted_prop_states: AHashMap::default(),
++            parse_ents: true,
++            wanted_ticks: vec![],
++            parse_projectiles: false,
++            parse_grenades: false,
++            parse_infernos: true,
++            only_header: false,
++            list_props: false,
++            only_convars: false,
++            huffman_lookup_table: &self.huf,
++            order_by_steamid: false,
++            fallback_bytes: None,
++        };
++        let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let output = match parser.parse_demo(&self.mmap) {
++            Ok(output) => output,
++            Err(e) => return Err(Exception::new_err(format!("{e}"))),
++        };
++        let mut all_series = vec![];
++        let mut all_pyobjects = vec![];
++        let prop_infos = output.prop_controller.prop_infos;
++        let mut df_column_names_arrow = vec![];
++        let mut df_column_names_py = vec![];
++
++        for prop_info in prop_infos {
++            if output.df.contains_key(&prop_info.id) {
++                match &output.df[&prop_info.id].data {
++                    Some(VarVec::F32(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name);
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::I32(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name);
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::U64(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name);
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::U32(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name);
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::Bool(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name);
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::String(data)) => {
++                        df_column_names_arrow.push(prop_info.prop_friendly_name.clone());
++                        all_series.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::StringVec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::U64Vec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::XYZVec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::U32Vec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::U8Vec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        let py_list = pyo3::types::PyList::empty(py);
++                        for opt in data {
++                            match opt {
++                                Some(bytes) => {
++                                    py_list.append(pyo3::types::PyBytes::new(py, &bytes))?;
++                                }
++                                None => {
++                                    py_list.append(py.None())?;
++                                }
++                            }
++                        }
++                        all_pyobjects.push(py_list.into_py_any(py)?);
++                    }
++                    Some(VarVec::BoolVec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::VecXYZList(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    _ => {}
++                }
+             }
 -            df_column_names_arrow.extend(df_column_names_py);
 -            df_column_names_arrow.sort();
 -            let kwargs = vec![("axis", 1)].into_py_dict(py).unwrap();
@@ -2498,6 +3807,7 @@ index c950726..524ed0f 100644
 -            pandas_df.call_method("reindex", args, Some(&kwargs))?;
 -            pandas_df.into_py_any(py)
 -        })
++        }
 +        let mut columns: Vec<(String, Py<PyAny>)> = df_column_names_arrow
 +            .iter()
 +            .cloned()
@@ -2510,7 +3820,15 @@ index c950726..524ed0f 100644
      }
  
      pub fn parse_player_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-@@ -359,24 +357,19 @@ impl DemoParser {
+@@ -341,6 +501,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -359,24 +520,19 @@ impl DemoParser {
          let names: Vec<Option<String>> = output.player_md.iter().map(|p| p.name.clone()).collect();
  
          // SoA form
@@ -2548,7 +3866,15 @@ index c950726..524ed0f 100644
      }
      pub fn parse_item_drops(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -416,52 +409,32 @@ impl DemoParser {
+@@ -390,6 +546,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -416,52 +573,32 @@ impl DemoParser {
              .iter()
              .map(|x| x.custom_name.clone())
              .collect();
@@ -2627,7 +3953,15 @@ index c950726..524ed0f 100644
      }
      pub fn parse_skins(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -497,45 +470,28 @@ impl DemoParser {
+@@ -475,6 +612,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -497,45 +635,28 @@ impl DemoParser {
          let custom_name: Vec<Option<String>> =
              output.skins.iter().map(|s| s.custom_name.clone()).collect();
  
@@ -2695,7 +4029,39 @@ index c950726..524ed0f 100644
      }
  
      #[pyo3(signature = (event_name, *, player=None, other=None))]
-@@ -773,29 +729,27 @@ impl DemoParser {
+@@ -580,6 +701,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -641,6 +763,7 @@ impl DemoParser {
+             wanted_ticks: vec![],
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -671,6 +794,7 @@ impl DemoParser {
+             parse_ents: false,
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: false,
+             list_props: false,
+             only_convars: false,
+@@ -750,6 +874,7 @@ impl DemoParser {
+             wanted_ticks,
+             parse_projectiles: false,
+             parse_grenades: false,
++            parse_infernos: false,
+             only_header: true,
+             list_props: false,
+             only_convars: false,
+@@ -773,29 +898,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -2731,7 +4097,37 @@ index c950726..524ed0f 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -863,146 +817,50 @@ impl DemoParser {
+@@ -813,6 +936,29 @@ impl DemoParser {
+                         df_column_names_py.push(prop_info.prop_friendly_name);
+                         all_pyobjects.push(data.into_py_any(py)?);
+                     }
++                    Some(VarVec::U8Vec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        let py_list = pyo3::types::PyList::empty(py);
++                        for opt in data {
++                            match opt {
++                                Some(bytes) => {
++                                    py_list.append(pyo3::types::PyBytes::new(py, &bytes))?;
++                                }
++                                None => {
++                                    py_list.append(py.None())?;
++                                }
++                            }
++                        }
++                        all_pyobjects.push(py_list.into_py_any(py)?);
++                    }
++                    Some(VarVec::BoolVec(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
++                    Some(VarVec::VecXYZList(data)) => {
++                        df_column_names_py.push(prop_info.prop_friendly_name);
++                        all_pyobjects.push(data.into_py_any(py)?);
++                    }
+ 
+                     Some(VarVec::Stickers(data)) => {
+                         let mut dicts = vec![];
+@@ -863,146 +1009,50 @@ impl DemoParser {
                  }
              }
          }
@@ -2899,7 +4295,7 @@ index c950726..524ed0f 100644
              vv.push((k, dfp));
          }
      }
-@@ -1010,66 +868,37 @@ pub fn series_from_multiple_events(
+@@ -1010,66 +1060,37 @@ pub fn series_from_multiple_events(
  }
  
  pub enum DataFrameColumn {
@@ -2980,7 +4376,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1077,9 +906,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1077,9 +1098,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -2992,7 +4388,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1087,9 +916,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1087,9 +1108,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -3004,7 +4400,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1097,9 +926,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1097,9 +1118,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -3016,7 +4412,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1107,7 +936,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1107,7 +1128,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -3025,7 +4421,7 @@ index c950726..524ed0f 100644
  }
  fn to_py_string_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1139,7 +968,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
+@@ -1139,7 +1160,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
      }
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
@@ -3034,7 +4430,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1147,10 +976,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1147,10 +1168,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -3047,7 +4443,7 @@ index c950726..524ed0f 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1158,7 +987,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1158,7 +1179,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -3056,7 +4452,7 @@ index c950726..524ed0f 100644
  }
  fn to_py_xyz_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1203,13 +1032,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
+@@ -1203,13 +1224,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
  
@@ -3072,7 +4468,7 @@ index c950726..524ed0f 100644
  }
  
  pub fn column_from_pairs(
-@@ -1220,13 +1049,13 @@ pub fn column_from_pairs(
+@@ -1220,13 +1241,13 @@ pub fn column_from_pairs(
      let field_type = find_type_of_vals(pairs)?;
  
      let s = match field_type {
