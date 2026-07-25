@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  RADAR_MAP_SIZE,
   radarPixelToWorld,
   resolveReplayTransform,
   worldLengthToRadarPercent,
@@ -34,7 +35,7 @@ describe("worldToRadarPercent", () => {
     expect(percent).toEqual({ x: 0, y: 0 });
   });
 
-  test("maps content_rect when provided", () => {
+  test("ignores content_* for overlay percent — full 1024 scene", () => {
     const t = {
       pos_x: 0,
       pos_y: 0,
@@ -44,10 +45,10 @@ describe("worldToRadarPercent", () => {
       content_width: 976,
       content_height: 982,
     };
+    // World → PNG pixel (content_x, content_y) = (24, 18)
     const percent = worldToRadarPercent({ x: 24, y: -18 }, t);
-    // mapX=24, mapY=18 → (24-24)/976, (18-18)/982
-    expect(percent.x).toBeCloseTo(0, 5);
-    expect(percent.y).toBeCloseTo(0, 5);
+    expect(percent.x).toBeCloseTo((24 / RADAR_MAP_SIZE) * 100, 5);
+    expect(percent.y).toBeCloseTo((18 / RADAR_MAP_SIZE) * 100, 5);
   });
 });
 
@@ -61,8 +62,28 @@ describe("round-trip and length", () => {
     expect(back.y).toBeCloseTo(world.y, 4);
   });
 
-  test("worldLengthToRadarPercent uses scale", () => {
+  test("round-trip ignores content_* insets", () => {
+    const t = {
+      pos_x: -100,
+      pos_y: 200,
+      scale: 2,
+      content_x: 40,
+      content_y: 30,
+      content_width: 900,
+      content_height: 880,
+    };
+    const world = { x: 50, y: 10 };
+    const pct = worldToRadarPercent(world, t);
+    const px = { x: (pct.x / 100) * 1024, y: (pct.y / 100) * 1024 };
+    const back = radarPixelToWorld(px, t, { width: 1024, height: 1024 });
+    expect(back.x).toBeCloseTo(world.x, 4);
+    expect(back.y).toBeCloseTo(world.y, 4);
+  });
+
+  test("worldLengthToRadarPercent uses full radar size not content_width", () => {
     expect(worldLengthToRadarPercent(5.22, anubis)).toBeCloseTo(100 / 1024, 6);
+    const withContent = { ...anubis, content_width: 800 };
+    expect(worldLengthToRadarPercent(5.22, withContent)).toBeCloseTo(100 / 1024, 6);
   });
 });
 

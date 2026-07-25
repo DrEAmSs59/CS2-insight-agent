@@ -32,16 +32,14 @@ export function worldToRadarPercent(point, transform) {
   // Match awpy game_to_pixel / current production formula. Metadata `rotate`
   // is recorded for overview assets but modern bundled PNGs already align with
   // this mapping; do not swap axes without per-map image verification.
-  const contentX = Number(transform.content_x) || 0;
-  const contentY = Number(transform.content_y) || 0;
-  const contentW = Number(transform.content_width) || RADAR_MAP_SIZE;
-  const contentH = Number(transform.content_height) || RADAR_MAP_SIZE;
+  // Overlay percents are relative to the full 1024 PNG scene. `content_*` is
+  // Fit-camera only (inset of playable radar within that PNG) — do not use it here.
   const mapX = (Number(point.x) - Number(transform.pos_x)) / scale;
   const mapY = (Number(transform.pos_y) - Number(point.y)) / scale;
   if (!Number.isFinite(mapX) || !Number.isFinite(mapY)) return null;
   return {
-    x: ((mapX - contentX) / contentW) * 100,
-    y: ((mapY - contentY) / contentH) * 100,
+    x: (mapX / RADAR_MAP_SIZE) * 100,
+    y: (mapY / RADAR_MAP_SIZE) * 100,
   };
 }
 
@@ -55,8 +53,7 @@ export function worldLengthToRadarPixel(length, transform, viewport = { width: R
 export function worldLengthToRadarPercent(length, transform) {
   const scale = Number(transform?.scale);
   if (!Number.isFinite(scale) || scale === 0) return 0;
-  const contentW = Number(transform?.content_width) || RADAR_MAP_SIZE;
-  return ((Number(length) || 0) / scale / contentW) * 100;
+  return ((Number(length) || 0) / scale / RADAR_MAP_SIZE) * 100;
 }
 
 export function radarPixelToWorld(point, transform, viewport = { width: RADAR_MAP_SIZE, height: RADAR_MAP_SIZE }) {
@@ -65,12 +62,8 @@ export function radarPixelToWorld(point, transform, viewport = { width: RADAR_MA
   if (!Number.isFinite(scale) || scale === 0) return null;
   const width = Number(viewport?.width) || RADAR_MAP_SIZE;
   const height = Number(viewport?.height) || RADAR_MAP_SIZE;
-  const contentX = Number(transform.content_x) || 0;
-  const contentY = Number(transform.content_y) || 0;
-  const contentW = Number(transform.content_width) || RADAR_MAP_SIZE;
-  const contentH = Number(transform.content_height) || RADAR_MAP_SIZE;
-  const mapX = (Number(point.x) / width) * contentW + contentX;
-  const mapY = (Number(point.y) / height) * contentH + contentY;
+  const mapX = (Number(point.x) / width) * RADAR_MAP_SIZE;
+  const mapY = (Number(point.y) / height) * RADAR_MAP_SIZE;
   return {
     x: Number(transform.pos_x) + mapX * scale,
     y: Number(transform.pos_y) - mapY * scale,

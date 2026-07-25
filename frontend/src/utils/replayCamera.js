@@ -136,3 +136,23 @@ export function contentRectFromTransform(transform) {
     height: Number(transform?.content_height) || SCENE_SIZE,
   };
 }
+
+/**
+ * Restore a saved per-map camera into the current viewport fitScale.
+ * Scales pan offsets by fitted.fitScale / saved.fitScale, then clamps.
+ */
+export function restoreCameraForViewport(saved, fitted, viewport) {
+  const savedFit = Number(saved?.fitScale);
+  const fittedFit = Number(fitted?.fitScale) > 0 ? Number(fitted.fitScale) : 1;
+  if (!(savedFit > 0)) {
+    return fitted || createFittedCamera(viewport, { x: 0, y: 0, width: SCENE_SIZE, height: SCENE_SIZE });
+  }
+  const ratio = fittedFit / savedFit;
+  const restored = {
+    fitScale: fittedFit,
+    userZoom: clampUserZoom(saved?.userZoom),
+    offsetX: Number.isFinite(Number(saved?.offsetX)) ? Number(saved.offsetX) * ratio : (Number(fitted?.offsetX) || 0),
+    offsetY: Number.isFinite(Number(saved?.offsetY)) ? Number(saved.offsetY) * ratio : (Number(fitted?.offsetY) || 0),
+  };
+  return panBy(restored, 0, 0, viewport, { width: SCENE_SIZE, height: SCENE_SIZE });
+}
