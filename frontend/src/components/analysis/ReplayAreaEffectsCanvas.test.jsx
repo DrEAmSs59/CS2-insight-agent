@@ -546,4 +546,52 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(lineTo).toHaveBeenCalled();
     expect(stroke).toHaveBeenCalled();
   });
+
+  test("mask Image sets crossOrigin anonymous before src (Tauri CORS)", () => {
+    // jsdom Image does not enforce CORS; assert production loader order so
+    // getImageData is not tainted on absolute http://127.0.0.1 mask URLs.
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      fill: vi.fn(),
+      fillRect: vi.fn(),
+    }));
+    const created = [];
+    class MockImage {
+      constructor() {
+        this.crossOrigin = null;
+        this._src = "";
+        created.push(this);
+      }
+      set src(value) {
+        this._src = value;
+      }
+      get src() {
+        return this._src;
+      }
+    }
+    const RealImage = global.Image;
+    global.Image = MockImage;
+    try {
+      render(
+        <ReplayAreaEffectsCanvas
+          tracks={[]}
+          currentTick={0}
+          mapName="de_mirage"
+          mapLayer="upper"
+          transform={{ pos_x: 0, pos_y: 0, scale: 5 }}
+          enabled
+        />,
+      );
+      expect(created.length).toBeGreaterThanOrEqual(1);
+      const img = created[0];
+      expect(img.crossOrigin).toBe("anonymous");
+      expect(img.src).toContain("/api/demo/utility-mask/de_mirage");
+    } finally {
+      global.Image = RealImage;
+    }
+  });
 });
