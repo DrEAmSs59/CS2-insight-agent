@@ -174,6 +174,46 @@ export function smoothMask(mask, radiusCells = 0.35) {
   };
 }
 
+/**
+ * Expand occupied cells by `cells` (default 1) using max-neighborhood dilation.
+ * Pads the mask so the silhouette can grow without clipping. Keeps wall bleed ≤ ~1 cell.
+ */
+export function dilateMask(mask, cells = 1) {
+  const radius = Math.max(0, Math.floor(Number(cells) || 0));
+  if (!mask?.width || !mask?.height || radius === 0) {
+    return mask ? { ...mask, data: mask.data.slice() } : mask;
+  }
+
+  const pad = radius;
+  const width = mask.width + pad * 2;
+  const height = mask.height + pad * 2;
+  const data = new Float32Array(width * height);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let max = 0;
+      for (let ky = -radius; ky <= radius; ky += 1) {
+        for (let kx = -radius; kx <= radius; kx += 1) {
+          if (kx * kx + ky * ky > radius * radius + 0.25) continue;
+          const sx = x - pad + kx;
+          const sy = y - pad + ky;
+          max = Math.max(max, sampleMask(mask, sx, sy));
+        }
+      }
+      data[y * width + x] = max;
+    }
+  }
+
+  return {
+    originX: mask.originX - pad * mask.cellSize,
+    originY: mask.originY - pad * mask.cellSize,
+    width,
+    height,
+    cellSize: mask.cellSize,
+    data,
+  };
+}
+
 function edgeVertex(mask, x, y, edge, threshold, bl, br, tr, tl) {
   const pBl = worldFromGrid(mask, x, y);
   const pBr = worldFromGrid(mask, x + 1, y);
