@@ -586,6 +586,7 @@ export default function ReplaySceneCanvas({
           hideAfterTick={roundEndTick > 0 ? roundEndTick : null}
           tickRate={tickRate}
           transform={transform}
+          mapName={mapName}
           mapLayer={hasMapLayers ? mapLayer : "upper"}
           enabled={Boolean(layers.utilityAreas)}
           capabilities={effectCapabilities}

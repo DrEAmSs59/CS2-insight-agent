@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getDemoUtilityMaskUrl } from "../../api/api";
 import {
   buildDensityMask,
   dilateMask,
@@ -9,10 +10,12 @@ import {
 } from "./smokeContour";
 import { worldLengthToRadarPercent, worldToRadarPercent } from "../../utils/replayRadarTransform";
 
-const INFERNO_CELL_RADIUS_WORLD = 36;
+/** World grid size for fire occupancy squares (mask write), not a painted bloom radius. */
+const INFERNO_CELL_SIZE_WORLD = 36;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
 const SMOKE_CONTOUR_THRESHOLD = 0.15;
 const SMOKE_DILATE_CELLS = 1;
+const UTILITY_SOFT_BLUR_PX = 1.25;
 
 function worldToPercent(point, transform) {
   return worldToRadarPercent(point, transform);
@@ -65,6 +68,21 @@ function selectNextSample(track, currentTick) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Clip drawn utility pixels to the white regions of a radar-derived mask.
+ * Missing mask → no-op (caller skips clip).
+ */
+export function applyUtilityClip(ctx, maskSource) {
+  if (!maskSource || !ctx) return;
+  const w = ctx.canvas?.width;
+  const h = ctx.canvas?.height;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(maskSource, 0, 0, w, h);
+  ctx.restore();
 }
 
 function filterCellsForMapLayer(cells, transform, mapLayer) {
@@ -221,9 +239,125 @@ function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, he
   ctx.stroke();
 }
 
+/** Fire occupancy squares; flicker only modulates color/alpha, not geometry. */
+function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height, currentTick) {
+  const sizeWorld = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : INFERNO_CELL_SIZE_WORLD;
+  const halfExtentPct = worldRadiusToPercent(sizeWorld / 2, transform);
+  const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+  const tick = Number(currentTick) || 0;
+  for (const item of projected) {
+    const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
+    const flicker = 0.88 + 0.12 * Math.sin(tick * 0.41 + item.cx * 0.02 + item.cy * 0.017);
+    const alpha = clamp((0.75 + 0.25 * intensity) * flicker, 0.55, 1);
+    ctx.fillStyle = `rgba(249, 115, 22, ${0.72 * alpha})`;
+    ctx.fillRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
+    const core = halfExtentPx * 0.45;
+    ctx.fillStyle = `rgba(254, 243, 199, ${0.55 * alpha})`;
+    ctx.fillRect(item.cx - core, item.cy - core, core * 2, core * 2);
+  }
+}
+
+function paintEffectLayers(ctx, {
+  activeLayers,
+  transform,
+  mapLayer,
+  width,
+  height,
+  smokeDebugLayer,
+  currentTick,
+  hideAfterTick,
+}) {
+  const useSquareDebug = smokeDebugLayer === "radar_cells" || smokeDebugLayer === "world_cells";
+
+  for (const layer of activeLayers) {
+    if (useSquareDebug && layer.type === "smoke") {
+      const projected = projectLayerCells(layer, transform, mapLayer, width, height);
+      if (!projected.length) continue;
+      ctx.save();
+      drawRadarSquareCells(ctx, projected, layer.cellSize, transform, width, height);
+      if (smokeDebugLayer === "world_cells") {
+        drawDetonationCrosshair(ctx, layer.detonation, transform, mapLayer, width, height);
+      }
+      ctx.restore();
+      continue;
+    }
+
+    if (layer.type === "smoke") {
+      ctx.save();
+      drawSmokeContours(ctx, layer.track, currentTick, transform, mapLayer, width, height, hideAfterTick);
+      ctx.restore();
+      continue;
+    }
+
+    if (layer.type !== "inferno") continue;
+
+    const projected = projectLayerCells(layer, transform, mapLayer, width, height);
+    if (!projected.length) continue;
+    const fireCellSize = Number(layer.cellSize) > 0 ? Number(layer.cellSize) : INFERNO_CELL_SIZE_WORLD;
+    ctx.save();
+    drawInfernoOccupancy(ctx, projected, fireCellSize, transform, width, height, currentTick);
+    ctx.restore();
+  }
+}
+
+/**
+ * Soften offscreen effects then clip to utility mask (clip after blur).
+ * Falls back to direct paint when offscreen canvas / mask is unavailable.
+ */
+function compositeWithUtilityClip(ctx, width, height, utilityMask, paintFn) {
+  if (!utilityMask) {
+    paintFn(ctx);
+    return;
+  }
+
+  let off;
+  try {
+    off = document.createElement("canvas");
+  } catch {
+    paintFn(ctx);
+    applyUtilityClip(ctx, utilityMask);
+    return;
+  }
+
+  off.width = Math.max(1, Math.floor(width));
+  off.height = Math.max(1, Math.floor(height));
+  const octx = off.getContext("2d");
+  if (!octx || typeof octx.drawImage !== "function") {
+    paintFn(ctx);
+    applyUtilityClip(ctx, utilityMask);
+    return;
+  }
+
+  paintFn(octx);
+
+  let soft = off;
+  try {
+    const blurred = document.createElement("canvas");
+    blurred.width = off.width;
+    blurred.height = off.height;
+    const bctx = blurred.getContext("2d");
+    if (bctx && typeof bctx.drawImage === "function") {
+      if ("filter" in bctx) {
+        bctx.filter = `blur(${UTILITY_SOFT_BLUR_PX}px)`;
+      }
+      bctx.drawImage(off, 0, 0);
+      if ("filter" in bctx) bctx.filter = "none";
+      // Soften then clip again (destination-in).
+      applyUtilityClip(bctx, utilityMask);
+      soft = blurred;
+    } else {
+      applyUtilityClip(octx, utilityMask);
+    }
+  } catch {
+    applyUtilityClip(octx, utilityMask);
+  }
+
+  ctx.drawImage(soft, 0, 0);
+}
+
 /**
  * Canvas overlay for sparse smoke / inferno area cells from /demo/replay effect_tracks.
- * Smoke uses density-mask marching-squares contours; fire stays orange radial blooms.
+ * Smoke uses density-mask marching-squares contours; fire uses occupancy squares + utility clip.
  */
 export default function ReplayAreaEffectsCanvas({
   tracks = [],
@@ -231,6 +365,7 @@ export default function ReplayAreaEffectsCanvas({
   hideAfterTick = null,
   tickRate = 64,
   transform = null,
+  mapName = "",
   mapLayer = "upper",
   enabled = true,
   capabilities = null,
@@ -239,6 +374,29 @@ export default function ReplayAreaEffectsCanvas({
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const lastSignatureRef = useRef("");
+  const [utilityMask, setUtilityMask] = useState(null);
+
+  useEffect(() => {
+    if (!mapName) {
+      setUtilityMask(null);
+      return undefined;
+    }
+    const layer = mapLayer || "upper";
+    const url = getDemoUtilityMaskUrl(mapName, layer === "upper" ? "" : layer);
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setUtilityMask(img);
+    };
+    img.onerror = () => {
+      // Missing mask → skip clip, do not crash.
+      if (!cancelled) setUtilityMask(null);
+    };
+    img.src = url;
+    return () => {
+      cancelled = true;
+    };
+  }, [mapName, mapLayer]);
 
   const activeLayers = useMemo(() => {
     if (!enabled || !Array.isArray(tracks) || !tracks.length) return [];
@@ -252,7 +410,11 @@ export default function ReplayAreaEffectsCanvas({
         id: String(track.id || `${track.type}:${track.entity_id}`),
         type: track.type,
         track,
-        cellSize: Number(sample.cell_size || track.cell_size || DEFAULT_SMOKE_CELL_SIZE),
+        cellSize: Number(
+          sample.cell_size
+          || track.cell_size
+          || (track.type === "inferno" ? INFERNO_CELL_SIZE_WORLD : DEFAULT_SMOKE_CELL_SIZE),
+        ),
         cells: sample.cells,
         sampleTick: Number(sample.tick),
         detonation: sample.detonation_pos || sample.detonation || null,
@@ -263,9 +425,11 @@ export default function ReplayAreaEffectsCanvas({
 
   const signature = useMemo(
     () => JSON.stringify({
+      mapName,
       mapLayer,
       smokeDebugLayer,
       currentTick,
+      hasUtilityMask: Boolean(utilityMask),
       layers: activeLayers.map((layer) => ({
         id: layer.id,
         type: layer.type,
@@ -277,7 +441,7 @@ export default function ReplayAreaEffectsCanvas({
       pos_x: transform?.pos_x,
       pos_y: transform?.pos_y,
     }),
-    [activeLayers, mapLayer, transform, smokeDebugLayer, currentTick],
+    [activeLayers, mapName, mapLayer, transform, smokeDebugLayer, currentTick, utilityMask],
   );
 
   useEffect(() => {
@@ -304,50 +468,20 @@ export default function ReplayAreaEffectsCanvas({
         return;
       }
 
-      const useSquareDebug = smokeDebugLayer === "radar_cells" || smokeDebugLayer === "world_cells";
+      const paintArgs = {
+        activeLayers,
+        transform,
+        mapLayer,
+        width,
+        height,
+        smokeDebugLayer,
+        currentTick,
+        hideAfterTick,
+      };
 
-      for (const layer of activeLayers) {
-        if (useSquareDebug && layer.type === "smoke") {
-          const projected = projectLayerCells(layer, transform, mapLayer, width, height);
-          if (!projected.length) continue;
-          ctx.save();
-          drawRadarSquareCells(ctx, projected, layer.cellSize, transform, width, height);
-          if (smokeDebugLayer === "world_cells") {
-            drawDetonationCrosshair(ctx, layer.detonation, transform, mapLayer, width, height);
-          }
-          ctx.restore();
-          continue;
-        }
-
-        if (layer.type === "smoke") {
-          ctx.save();
-          drawSmokeContours(ctx, layer.track, currentTick, transform, mapLayer, width, height, hideAfterTick);
-          ctx.restore();
-          continue;
-        }
-
-        const projected = projectLayerCells(layer, transform, mapLayer, width, height);
-        if (!projected.length) continue;
-
-        const radiusPct = worldRadiusToPercent(INFERNO_CELL_RADIUS_WORLD, transform);
-        const radiusPx = Math.max(2.2, (radiusPct / 100) * Math.min(width, height));
-
-        ctx.save();
-        for (const item of projected) {
-          const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
-          const alpha = clamp(0.8 + 0.2 * intensity, 0.8, 1);
-          const grad = ctx.createRadialGradient(item.cx, item.cy, 0, item.cx, item.cy, radiusPx);
-          grad.addColorStop(0, `rgba(254, 243, 199, ${0.9 * alpha})`);
-          grad.addColorStop(0.35, `rgba(251, 146, 60, ${0.85 * alpha})`);
-          grad.addColorStop(0.75, `rgba(249, 115, 22, ${0.45 * alpha})`);
-          grad.addColorStop(1, "rgba(194, 65, 12, 0)");
-          ctx.beginPath();
-          ctx.arc(item.cx, item.cy, radiusPx, 0, Math.PI * 2);
-          ctx.fillStyle = grad;
-          ctx.fill();
-        }
-        ctx.restore();
-      }
+      compositeWithUtilityClip(ctx, width, height, utilityMask, (target) => {
+        paintEffectLayers(target, paintArgs);
+      });
       lastSignatureRef.current = signature;
     };
 
@@ -360,7 +494,7 @@ export default function ReplayAreaEffectsCanvas({
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [signature, activeLayers, transform, mapLayer, smokeDebugLayer, currentTick, hideAfterTick]);
+  }, [signature, activeLayers, transform, mapLayer, smokeDebugLayer, currentTick, hideAfterTick, utilityMask]);
 
   if (!enabled) return null;
 
