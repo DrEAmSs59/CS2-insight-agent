@@ -164,19 +164,58 @@ export function useWorkspaceData(workspace, fallback) {
   }, [workspace, fallback]);
 }
 
-function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer }) {
+function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, winner = false }) {
   const isBlue = teamKey === "a";
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/20">
-      <header className={`flex items-center justify-between border-b px-4 py-3 ${isBlue ? "border-sky-500/20 bg-sky-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
-        <div className="flex items-center gap-2.5"><span className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-black ${isBlue ? "bg-sky-500/15 text-sky-300" : "bg-amber-500/15 text-amber-300"}`}>{name.slice(0, 1).toUpperCase()}</span><div><h3 className={`text-[12px] font-black tracking-wider ${isBlue ? "text-sky-300" : "text-amber-300"}`}>{name}</h3><p className="text-[8px] uppercase tracking-wider text-cs2-text-muted">完整比赛数据</p></div></div>
-        <span className={`font-mono text-2xl font-black ${isBlue ? "text-sky-200" : "text-amber-200"}`}>{score}</span>
+    <section className={`min-w-0 overflow-hidden rounded-lg border bg-cs2-bg-input/20 ${winner ? (isBlue ? "border-sky-500/40" : "border-amber-500/40") : "border-cs2-border"}`}>
+      <header className={`flex items-center justify-between border-b px-3 py-2 ${isBlue ? "border-sky-500/20 bg-sky-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-black ${isBlue ? "bg-sky-500/15 text-sky-300" : "bg-amber-500/15 text-amber-300"}`}>{name.slice(0, 1).toUpperCase()}</span>
+          <h3 className={`truncate text-[11px] font-black tracking-wider ${isBlue ? "text-sky-300" : "text-amber-300"}`}>{name}</h3>
+        </div>
+        <span className={`font-mono text-xl font-black ${isBlue ? "text-sky-200" : "text-amber-200"}`}>{score}</span>
       </header>
       <div className="overflow-hidden">
         <table className="w-full table-fixed border-collapse text-left">
-          <colgroup><col className="w-[29%]" />{Array.from({ length: 10 }).map((_, index) => <col key={index} className="w-[7.1%]" />)}</colgroup>
-          <thead className="border-b border-cs2-border bg-cs2-bg-input/55 text-[7px] uppercase tracking-wide text-cs2-text-muted"><tr><th className="px-2 py-2.5">玩家</th><th className="px-1 text-right">K</th><th className="px-1 text-right">D</th><th className="px-1 text-right">A</th><th className="px-1 text-right">ADR</th><th className="px-1 text-right">KAST</th><th className="px-1 text-right">HS</th><th className="px-1 text-right">首杀</th><th className="px-1 text-right">补枪</th><th className="px-1 text-right">AWP</th><th className="px-2 text-right">道伤</th></tr></thead>
-          <tbody>{players.map((player) => <tr key={player.name} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover"><td className="px-2 py-2.5"><button type="button" onClick={() => onSelectPlayer?.(player.name)} className="flex max-w-full items-center gap-1.5 text-left"><span className={`h-2 w-2 shrink-0 rounded-full ${teamDot(teamKey)}`} /><span className="truncate font-bold text-cs2-text-primary">{player.name}</span></button></td><td className="px-1 text-right font-mono text-[9px] font-bold text-cs2-text-primary">{player.kills}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.deaths}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.assists}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.adr || 0).toFixed(1)}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.kast || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.hs_percent || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.first_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.trade_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.awp_kills || 0}</td><td className="px-2 text-right font-mono text-[9px] text-cs2-text-secondary">{player.utility_damage || 0}</td></tr>)}</tbody>
+          <colgroup>
+            <col className="w-[28%]" />
+            {Array.from({ length: 9 }).map((_, index) => <col key={index} className="w-[8%]" />)}
+          </colgroup>
+          <thead className="border-b border-cs2-border bg-cs2-bg-input/55 text-[7px] uppercase tracking-wide text-cs2-text-muted">
+            <tr>
+              <th className="px-2 py-1.5">玩家</th>
+              <th className="px-1 text-right">K</th>
+              <th className="px-1 text-right">D</th>
+              <th className="px-1 text-right">A</th>
+              <th className="px-1 text-right">ADR</th>
+              <th className="px-1 text-right">KAST</th>
+              <th className="px-1 text-right">HS%</th>
+              <th className="px-1 text-right">首杀</th>
+              <th className="px-1 text-right">AWP</th>
+              <th className="px-2 text-right">道具</th>
+            </tr>
+          </thead>
+          <tbody>
+            {players.map((player) => (
+              <tr key={player.name} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover">
+                <td className="px-2 py-1.5">
+                  <button type="button" onClick={() => onSelectPlayer?.(player.name)} className="flex max-w-full items-center gap-1.5 text-left">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${teamDot(teamKey)}`} />
+                    <span className="truncate text-[11px] font-bold text-cs2-text-primary">{player.name}</span>
+                  </button>
+                </td>
+                <td className="px-1 text-right font-mono text-[9px] font-bold text-cs2-text-primary">{player.kills}</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.deaths}</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.assists}</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.adr || 0).toFixed(0)}</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.kast || 0).toFixed(0)}%</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.hs_percent || 0).toFixed(0)}%</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.first_kills || 0}</td>
+                <td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.awp_kills || 0}</td>
+                <td className="px-2 text-right font-mono text-[9px] text-cs2-text-secondary">{player.utility_damage || 0}</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </section>
@@ -198,77 +237,130 @@ function sortScoreboardPlayers(players) {
 
 export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound }) {
   const overview = useMemo(() => buildOverviewModel(data), [data]);
+  const [scoreboardOpen, setScoreboardOpen] = useState(true);
+  const [mobileScoreTeam, setMobileScoreTeam] = useState("a");
   const teamAName = data.team_a_name || "Team A";
   const teamBName = data.team_b_name || "Team B";
   const playersA = sortScoreboardPlayers(data.players.filter((player) => player.team_key === "a"));
   const playersB = sortScoreboardPlayers(data.players.filter((player) => player.team_key === "b"));
+  const scoreA = Number(data.team_a_score || 0);
+  const scoreB = Number(data.team_b_score || 0);
+  const winnerA = scoreA > scoreB;
+  const winnerB = scoreB > scoreA;
+  const hasOpening = overview.opening?.hasData !== false;
+  const hasObjective =
+    overview.objective?.hasData !== false &&
+    ((overview.objective?.teamA?.plants || 0) + (overview.objective?.teamB?.plants || 0) > 0 ||
+      (overview.objective?.siteA || 0) + (overview.objective?.siteB || 0) > 0);
+  const hasPlayerEvents = (overview.playerEvents || []).length > 0;
+  const secondaryCount = [hasOpening, hasObjective, hasPlayerEvents].filter(Boolean).length;
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-[1440px] space-y-3 pb-6">
       <MatchMainlineCard mainline={overview.mainline} />
-      <section>
-        <div className="mb-3 flex items-center gap-2">
-          <span className="h-4 w-1 rounded-full bg-cs2-accent" />
-          <h2 className="text-[13px] font-bold text-cs2-text-primary">本局洞察</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          <MatchTrendCard
-            model={overview.trend}
-            phaseMeta={overview.phaseMeta}
-            teamAName={teamAName}
-            teamBName={teamBName}
-          />
-          <SidePerformanceCard
-            model={overview.sidePerformance}
-            teamAName={teamAName}
-            teamBName={teamBName}
-          />
-          <EconomyInsightCard
-            model={overview.economy}
-            onOpenRound={onOpenRound}
-            teamAName={teamAName}
-            teamBName={teamBName}
-          />
-          <OpeningAdvantageCard
-            model={overview.opening}
-            teamAName={teamAName}
-            teamBName={teamBName}
-          />
-          <BombObjectiveCard
-            model={overview.objective}
-            teamAName={teamAName}
-            teamBName={teamBName}
-          />
+
+      <section className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 xl:grid-cols-12">
+        <MatchTrendCard
+          model={overview.trend}
+          phaseMeta={overview.phaseMeta}
+          teamAName={teamAName}
+          teamBName={teamBName}
+          className="lg:col-span-2 xl:col-span-5"
+        />
+        <SidePerformanceCard
+          model={overview.sidePerformance}
+          teamAName={teamAName}
+          teamBName={teamBName}
+          className="xl:col-span-4"
+        />
+        <EconomyInsightCard
+          model={overview.economy}
+          onOpenRound={onOpenRound}
+          teamAName={teamAName}
+          teamBName={teamBName}
+          className="xl:col-span-3"
+        />
+      </section>
+
+      {secondaryCount > 0 ? (
+        <section
+          className={`grid grid-cols-1 gap-2.5 md:grid-cols-2 ${
+            secondaryCount >= 3 ? "xl:grid-cols-3" : secondaryCount === 2 ? "xl:grid-cols-2" : "xl:grid-cols-1"
+          }`}
+        >
+          <OpeningAdvantageCard model={overview.opening} teamAName={teamAName} teamBName={teamBName} />
+          <BombObjectiveCard model={overview.objective} teamAName={teamAName} teamBName={teamBName} />
           <PlayerEventsCard
             events={overview.playerEvents}
             onSelectPlayer={onSelectPlayer}
             onOpenRound={onOpenRound}
           />
-        </div>
-      </section>
+        </section>
+      ) : null}
+
       <KeyRoundsTimeline
         rounds={overview.keyRounds}
         onOpenRound={onOpenRound}
         onOpenReplayRound={onOpenReplayRound}
       />
-      <Panel title="全场计分板" eyebrow="双方阵容 · Demo 解析与推导统计">
-        <div className="grid gap-3 p-3 xl:grid-cols-2">
-          <TeamScoreboard
-            teamKey="a"
-            name={teamAName}
-            score={data.team_a_score}
-            players={playersA}
-            onSelectPlayer={onSelectPlayer}
-          />
-          <TeamScoreboard
-            teamKey="b"
-            name={teamBName}
-            score={data.team_b_score}
-            players={playersB}
-            onSelectPlayer={onSelectPlayer}
-          />
-        </div>
-      </Panel>
+
+      <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
+        <header className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+          <h2 className="text-[12px] font-bold text-cs2-text-primary">全场数据</h2>
+          <button
+            type="button"
+            className="text-[10px] font-semibold text-cs2-accent hover:underline"
+            onClick={() => setScoreboardOpen((open) => !open)}
+          >
+            {scoreboardOpen ? "收起数据" : "展开数据"}
+          </button>
+        </header>
+        {scoreboardOpen ? (
+          <div className="border-t border-cs2-border p-2.5">
+            <div className="mb-2 flex gap-1 md:hidden">
+              {[
+                ["a", teamAName],
+                ["b", teamBName],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setMobileScoreTeam(key)}
+                  className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${
+                    mobileScoreTeam === key
+                      ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent"
+                      : "border-cs2-border text-cs2-text-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-2.5 md:grid-cols-2">
+              <div className={mobileScoreTeam === "a" ? "block" : "hidden md:block"}>
+                <TeamScoreboard
+                  teamKey="a"
+                  name={teamAName}
+                  score={scoreA}
+                  players={playersA}
+                  onSelectPlayer={onSelectPlayer}
+                  winner={winnerA}
+                />
+              </div>
+              <div className={mobileScoreTeam === "b" ? "block" : "hidden md:block"}>
+                <TeamScoreboard
+                  teamKey="b"
+                  name={teamBName}
+                  score={scoreB}
+                  players={playersB}
+                  onSelectPlayer={onSelectPlayer}
+                  winner={winnerB}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

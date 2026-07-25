@@ -1,8 +1,11 @@
-import { Coins, Crosshair, Target } from "lucide-react";
+import { Coins, Play } from "lucide-react";
+import InsightCard from "./InsightCard";
 
-function formatRate(bucket) {
-  if (!bucket || bucket.sampleTooSmall || bucket.conversionRate == null) return "—";
-  return `${Math.round(bucket.conversionRate * 100)}%`;
+function formatPistol(bucket) {
+  if (!bucket) return "—";
+  const wins = bucket.wins ?? 0;
+  if (!(bucket.conversionTotal > 0)) return `${wins}/—`;
+  return `${wins}/${bucket.conversionWins ?? 0}`;
 }
 
 function teamLabel(key, teamAName, teamBName) {
@@ -11,12 +14,22 @@ function teamLabel(key, teamAName, teamBName) {
   return "—";
 }
 
+function CompactRow({ label, children }) {
+  return (
+    <div className="flex min-h-[32px] items-center gap-2 border-t border-cs2-border/50 first:border-t-0">
+      <span className="w-[72px] shrink-0 text-[10px] text-cs2-text-muted">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 /**
  * @param {{
  *   model?: object,
  *   onOpenRound?: (roundNumber: number) => void,
  *   teamAName?: string,
  *   teamBName?: string,
+ *   className?: string,
  * }} props
  */
 export default function EconomyInsightCard({
@@ -24,6 +37,7 @@ export default function EconomyInsightCard({
   onOpenRound,
   teamAName = "Team A",
   teamBName = "Team B",
+  className = "",
 }) {
   const pistol = model?.pistol || {};
   const teamA = pistol.teamA || {};
@@ -32,64 +46,46 @@ export default function EconomyInsightCard({
   const forceCountA = upsetRounds.filter((u) => u.isForceUpset && u.winnerTeamKey === "a").length;
   const forceCountB = upsetRounds.filter((u) => u.isForceUpset && u.winnerTeamKey === "b").length;
   const keyRound = model?.keyRound || null;
-  const summary = model?.summary || "";
   const hasData = model?.hasData !== false;
   const canOpen = typeof onOpenRound === "function" && keyRound?.roundNumber != null;
 
   return (
-    <article className="flex min-h-[220px] flex-col rounded-xl border border-cs2-border bg-cs2-bg-card p-3.5">
-      <header className="mb-2 flex items-center gap-2">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent">
-          <Coins className="h-3.5 w-3.5" />
-        </div>
-        <h3 className="text-[13px] font-bold text-cs2-text-primary">经济表现</h3>
-      </header>
-      {summary ? (
-        <p className="mb-2 line-clamp-2 text-[11px] leading-snug text-cs2-text-secondary">{summary}</p>
-      ) : null}
-
+    <InsightCard
+      title="经济表现"
+      icon={<Coins className="h-3.5 w-3.5 text-cs2-accent" />}
+      compact
+      className={`h-full min-h-[180px] xl:min-h-[190px] ${className}`}
+    >
       {!hasData ? (
-        <p className="mt-4 text-center text-[11px] text-cs2-text-muted">当前 Demo 未提供完整经济快照。</p>
+        <p className="text-[11px] text-cs2-text-muted">
+          {model?.summary || "本场未产生明显经济翻盘回合"}
+        </p>
       ) : (
-        <div className="mt-auto space-y-2.5">
-          <div className="rounded-lg border border-cs2-border/70 bg-cs2-bg-input/30 px-2.5 py-2">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold text-cs2-text-muted">
-              <Target className="h-3 w-3 text-cs2-accent" />
-              手枪局转化
+        <div className="text-[11px]">
+          <CompactRow label="手枪局转化">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              <span>
+                <span className="text-sky-400">{teamAName}</span>{" "}
+                <span className="font-bold tabular-nums text-cs2-text-primary">{formatPistol(teamA)}</span>
+              </span>
+              <span>
+                <span className="text-amber-400">{teamBName}</span>{" "}
+                <span className="font-bold tabular-nums text-cs2-text-primary">{formatPistol(teamB)}</span>
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <span className="text-sky-400">{teamAName}</span>
-                <span className="ml-1.5 font-bold tabular-nums text-cs2-text-primary">
-                  {teamA.wins ?? 0} 胜 · {formatRate(teamA)}
-                </span>
-              </div>
-              <div>
-                <span className="text-amber-400">{teamBName}</span>
-                <span className="ml-1.5 font-bold tabular-nums text-cs2-text-primary">
-                  {teamB.wins ?? 0} 胜 · {formatRate(teamB)}
-                </span>
-              </div>
+          </CompactRow>
+          <CompactRow label="强起翻盘">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              <span>
+                <span className="text-sky-400">{teamAName}</span>{" "}
+                <span className="font-bold tabular-nums text-cs2-text-primary">{forceCountA}</span>
+              </span>
+              <span>
+                <span className="text-amber-400">{teamBName}</span>{" "}
+                <span className="font-bold tabular-nums text-cs2-text-primary">{forceCountB}</span>
+              </span>
             </div>
-          </div>
-
-          <div className="rounded-lg border border-cs2-border/70 bg-cs2-bg-input/30 px-2.5 py-2">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold text-cs2-text-muted">
-              <Crosshair className="h-3 w-3 text-cs2-accent" />
-              强起翻盘回合
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <span className="text-sky-400">{teamAName}</span>
-                <span className="ml-1.5 font-bold tabular-nums text-cs2-accent">{forceCountA}</span>
-              </div>
-              <div>
-                <span className="text-amber-400">{teamBName}</span>
-                <span className="ml-1.5 font-bold tabular-nums text-cs2-accent">{forceCountB}</span>
-              </div>
-            </div>
-          </div>
-
+          </CompactRow>
           {keyRound ? (
             <button
               type="button"
@@ -97,17 +93,18 @@ export default function EconomyInsightCard({
               onClick={() => {
                 if (canOpen) onOpenRound(keyRound.roundNumber);
               }}
-              className="w-full rounded-lg border border-cs2-accent/30 bg-cs2-accent-soft/40 px-2.5 py-2 text-left transition-colors hover:border-cs2-accent/50 disabled:cursor-default disabled:opacity-70"
+              className="flex min-h-[32px] w-full items-center gap-2 border-t border-cs2-border/50 text-left transition-colors hover:text-cs2-accent disabled:cursor-default"
             >
-              <p className="text-[10px] font-semibold text-cs2-accent">关键经济回合</p>
-              <p className="mt-0.5 text-[11px] text-cs2-text-secondary">
+              <span className="w-[72px] shrink-0 text-[10px] text-cs2-text-muted">关键经济回合</span>
+              <span className="min-w-0 flex-1 truncate text-cs2-text-secondary">
                 R{keyRound.roundNumber} · {teamLabel(keyRound.winnerTeamKey, teamAName, teamBName)}
                 {keyRound.isForceUpset ? " 强起翻盘" : " 经济翻盘"}
-              </p>
+              </span>
+              {canOpen ? <Play className="h-3 w-3 shrink-0 text-cs2-accent" fill="currentColor" /> : null}
             </button>
           ) : null}
         </div>
       )}
-    </article>
+    </InsightCard>
   );
 }

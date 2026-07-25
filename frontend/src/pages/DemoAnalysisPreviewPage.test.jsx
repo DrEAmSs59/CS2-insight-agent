@@ -252,9 +252,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByRole("heading", { name: "NAVI" })).toBeTruthy();
     expect(screen.getByText("23", { selector: "td" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "比赛主线" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "本局洞察" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "本局洞察" })).toBeNull();
     expect(screen.getByRole("heading", { name: "关键回合" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "全场计分板" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "全场数据" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "全场计分板" })).toBeNull();
     expect(screen.queryByText("详细战报")).toBeNull();
     expect(screen.queryByText("最佳")).toBeNull();
     expect(screen.getByText(/35 分钟/)).toBeTruthy();
