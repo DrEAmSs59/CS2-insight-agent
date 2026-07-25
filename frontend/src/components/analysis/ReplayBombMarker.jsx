@@ -1,12 +1,13 @@
 const HUD_ICON_BASE = "/hud-death-notice";
 
-function HudEquipmentIcon({ stem, className = "" }) {
+function HudEquipmentIcon({ stem, className = "", style }) {
   return (
     <img
       src={`${HUD_ICON_BASE}/${stem}.svg`}
       alt=""
       draggable={false}
       className={`block object-contain ${className}`}
+      style={style}
     />
   );
 }
@@ -24,14 +25,18 @@ function bombTitle(status, site) {
 /**
  * Ground C4 marker: dropped (static dark-gold) vs planted (orange-red + pulse rings).
  * Positioning (`left`/`top` %) is passed via `style` from the scene canvas.
+ * `fitScale` counters scene CSS shrink so the chip stays readable at Fit.
  */
-export default function ReplayBombMarker({ status, site = "", style, className = "" }) {
+export default function ReplayBombMarker({ status, site = "", style, className = "", fitScale = 1 }) {
   const muted = status === "defused" || status === "exploded";
   const planted = status === "planted";
   const dropped = status === "dropped";
+  const invFit = 1 / Math.max(Number(fitScale) || 1, 0.05);
+  // Target ~14px (dropped) / ~18px (planted) on-screen at Fit.
+  const chipPx = (dropped ? 14 : 18) * invFit;
+  const iconPx = (dropped ? 10 : 13) * invFit;
+  const ringPx = 18 * invFit;
 
-  const chipSize = dropped ? "h-3 w-3" : "h-4 w-4";
-  const iconSize = dropped ? "h-2.5 w-2.5" : "h-3 w-3";
   const chipTone = planted
     ? "border-orange-300 bg-orange-600"
     : dropped
@@ -62,17 +67,22 @@ export default function ReplayBombMarker({ status, site = "", style, className =
         {planted && (
           <>
             <span
-              className="planted-c4-ring pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 -ml-2 -mt-2 rounded-full border-2 border-orange-500"
+              className="planted-c4-ring pointer-events-none absolute left-1/2 top-1/2 rounded-full border-2 border-orange-500"
+              style={{ width: ringPx, height: ringPx, marginLeft: -ringPx / 2, marginTop: -ringPx / 2 }}
               aria-hidden="true"
             />
             <span
-              className="planted-c4-ring pointer-events-none absolute left-1/2 top-1/2 h-4 w-4 -ml-2 -mt-2 rounded-full border-2 border-orange-500"
+              className="planted-c4-ring pointer-events-none absolute left-1/2 top-1/2 rounded-full border-2 border-orange-500"
+              style={{ width: ringPx, height: ringPx, marginLeft: -ringPx / 2, marginTop: -ringPx / 2 }}
               aria-hidden="true"
             />
           </>
         )}
-        <div className={`relative z-[1] flex ${chipSize} items-center justify-center rounded-[2px] border ${chipTone}`}>
-          <HudEquipmentIcon stem="c4" className={`${iconSize} brightness-0`} />
+        <div
+          className={`relative z-[1] flex items-center justify-center rounded-[2px] border ${chipTone}`}
+          style={{ width: chipPx, height: chipPx }}
+        >
+          <HudEquipmentIcon stem="c4" className="brightness-0" style={{ width: iconPx, height: iconPx }} />
         </div>
       </div>
     </div>
