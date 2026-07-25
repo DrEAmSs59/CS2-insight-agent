@@ -53,6 +53,54 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function projectLayerCells(layer, transform, mapLayer, width, height) {
+  const projected = [];
+  for (const cell of layer.cells) {
+    if (!Array.isArray(cell) || cell.length < 3) continue;
+    const point = { x: cell[0], y: cell[1], z: cell[2] };
+    if (!pointMatchesMapLayer(point, transform, mapLayer)) continue;
+    const percent = worldToPercent(point, transform);
+    if (!percent) continue;
+    projected.push({
+      cx: (percent.x / 100) * width,
+      cy: (percent.y / 100) * height,
+      intensity: Number(cell[3]),
+    });
+  }
+  return projected;
+}
+
+function drawRadarSquareCells(ctx, projected, cellSize, transform, width, height) {
+  const halfExtentPct = worldRadiusToPercent(cellSize / 2, transform);
+  const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+  for (const item of projected) {
+    ctx.fillStyle = "rgba(148, 163, 184, 0.45)";
+    ctx.strokeStyle = "rgba(203, 213, 225, 0.85)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
+    ctx.strokeRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
+  }
+}
+
+function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, height) {
+  if (!Array.isArray(detonation) || detonation.length < 3) return;
+  const point = { x: detonation[0], y: detonation[1], z: detonation[2] };
+  if (!pointMatchesMapLayer(point, transform, mapLayer)) return;
+  const percent = worldToPercent(point, transform);
+  if (!percent) return;
+  const cx = (percent.x / 100) * width;
+  const cy = (percent.y / 100) * height;
+  const size = 6;
+  ctx.strokeStyle = "rgba(250, 204, 21, 0.95)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx - size, cy);
+  ctx.lineTo(cx + size, cy);
+  ctx.moveTo(cx, cy - size);
+  ctx.lineTo(cx, cy + size);
+  ctx.stroke();
+}
+
 function smokeBloomFactor(track, currentTick, tickRate) {
   const start = Number(track?.start_tick);
   const tick = Number(currentTick);
@@ -76,6 +124,7 @@ export default function ReplayAreaEffectsCanvas({
   mapLayer = "upper",
   enabled = true,
   capabilities = null,
+  smokeDebugLayer = "off",
 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -97,6 +146,7 @@ export default function ReplayAreaEffectsCanvas({
         cells: sample.cells,
         sampleTick: Number(sample.tick),
         bloom,
+        detonation: sample.detonation_pos || sample.detonation || null,
       });
     }
     return layers;
@@ -105,6 +155,7 @@ export default function ReplayAreaEffectsCanvas({
   const signature = useMemo(
     () => JSON.stringify({
       mapLayer,
+      smokeDebugLayer,
       layers: activeLayers.map((layer) => ({
         id: layer.id,
         type: layer.type,
@@ -117,7 +168,7 @@ export default function ReplayAreaEffectsCanvas({
       pos_x: transform?.pos_x,
       pos_y: transform?.pos_y,
     }),
-    [activeLayers, mapLayer, transform],
+    [activeLayers, mapLayer, transform, smokeDebugLayer],
   );
 
   useEffect(() => {
@@ -144,7 +195,22 @@ export default function ReplayAreaEffectsCanvas({
         return;
       }
 
+      const useSquareDebug = smokeDebugLayer === "radar_cells" || smokeDebugLayer === "world_cells";
+
       for (const layer of activeLayers) {
+        const projected = projectLayerCells(layer, transform, mapLayer, width, height);
+        if (!projected.length) continue;
+
+        if (useSquareDebug) {
+          ctx.save();
+          drawRadarSquareCells(ctx, projected, layer.cellSize, transform, width, height);
+          if (smokeDebugLayer === "world_cells") {
+            drawDetonationCrosshair(ctx, layer.detonation, transform, mapLayer, width, height);
+          }
+          ctx.restore();
+          continue;
+        }
+
         const isSmoke = layer.type === "smoke";
         const bloom = isSmoke ? clamp(Number(layer.bloom) || 1, 0.15, 1) : 1;
         const radiusWorld = isSmoke ? SMOKE_CELL_RADIUS_WORLD : INFERNO_CELL_RADIUS_WORLD;
@@ -153,24 +219,12 @@ export default function ReplayAreaEffectsCanvas({
 
         let centerX = 0;
         let centerY = 0;
-        let visible = 0;
-        const projected = [];
-        for (const cell of layer.cells) {
-          if (!Array.isArray(cell) || cell.length < 3) continue;
-          const point = { x: cell[0], y: cell[1], z: cell[2] };
-          if (!pointMatchesMapLayer(point, transform, mapLayer)) continue;
-          const percent = worldToPercent(point, transform);
-          if (!percent) continue;
-          const cx = (percent.x / 100) * width;
-          const cy = (percent.y / 100) * height;
-          projected.push({ cx, cy, intensity: Number(cell[3]) });
-          centerX += cx;
-          centerY += cy;
-          visible += 1;
+        for (const item of projected) {
+          centerX += item.cx;
+          centerY += item.cy;
         }
-        if (!visible) continue;
-        centerX /= visible;
-        centerY /= visible;
+        centerX /= projected.length;
+        centerY /= projected.length;
         let maxDist = 1;
         for (const item of projected) {
           maxDist = Math.max(maxDist, Math.hypot(item.cx - centerX, item.cy - centerY));
@@ -220,7 +274,7 @@ export default function ReplayAreaEffectsCanvas({
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [signature, activeLayers, transform, mapLayer]);
+  }, [signature, activeLayers, transform, mapLayer, smokeDebugLayer]);
 
   if (!enabled) return null;
 

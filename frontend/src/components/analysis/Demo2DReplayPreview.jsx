@@ -16,6 +16,7 @@ import API, { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
+import { isSmokeDebugEnabled } from "./smokeDebugGate";
 
 const MAP_SIZE = 1024;
 const SAMPLE_HZ = 8;
@@ -549,6 +550,8 @@ export default function Demo2DReplayPreview({
   const [responseTransform, setResponseTransform] = useState(null);
   const [replayFps, setReplayFps] = useState(SAMPLE_HZ);
   const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, utilityAreas: true, shots: true });
+  const smokeDebugOn = useMemo(() => isSmokeDebugEnabled(), []);
+  const [smokeDebugLayer, setSmokeDebugLayer] = useState("final_render");
   const cacheRef = useRef(new Map());
   const framePositionRef = useRef(0);
 
@@ -1038,6 +1041,22 @@ export default function Demo2DReplayPreview({
         <section className={`relative overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e] ${mapName === "de_nuke" ? "min-h-[780px]" : "min-h-[720px]"}`}>
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
+            {smokeDebugOn && (
+              <label className="flex items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-card/95 px-2 py-1 text-[8px] font-bold text-cs2-text-muted">
+                <span>烟格</span>
+                <select
+                  aria-label="烟雾调试图层"
+                  value={smokeDebugLayer}
+                  onChange={(event) => setSmokeDebugLayer(event.target.value)}
+                  className="rounded border border-cs2-border bg-cs2-bg-input px-1 py-0.5 text-[8px] font-semibold text-cs2-text-primary"
+                >
+                  <option value="off">off</option>
+                  <option value="world_cells">world_cells</option>
+                  <option value="radar_cells">radar_cells</option>
+                  <option value="final_render">final_render</option>
+                </select>
+              </label>
+            )}
           </div>
           <div className="pointer-events-none absolute right-3 top-3 z-20 flex w-[min(84%,390px)] flex-col items-end gap-1.5" aria-live="polite">{killFeed.map((kill) => {
             const weapon = safeWeapon(kill.weapon, "武器");
@@ -1065,6 +1084,7 @@ export default function Demo2DReplayPreview({
               mapLayer={hasMapLayers ? mapLayer : "upper"}
               enabled={Boolean(layers.utilityAreas)}
               capabilities={effectCapabilities}
+              smokeDebugLayer={smokeDebugOn ? smokeDebugLayer : "off"}
             />
             <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
               {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
