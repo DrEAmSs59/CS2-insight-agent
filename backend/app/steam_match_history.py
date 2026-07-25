@@ -1,7 +1,6 @@
 """Steam Web API proxy for CS2 official match history."""
 from __future__ import annotations
 
-import asyncio
 import bz2
 import logging
 import time
@@ -14,8 +13,6 @@ import httpx
 logger = logging.getLogger(__name__)
 
 STEAM_API_BASE = "https://api.steampowered.com"
-STEAM_COMMUNITY_BASE = "https://steamcommunity.com"
-STEAM_ID64_ACCOUNT_BASE = 76561197960265728
 _MAP_NAMES: dict[int, str] = {
     0: "de_dust2",
     1: "de_inferno",
@@ -183,62 +180,14 @@ async def fetch_match_history(api_key: str, steam_id64: str, count: int = 20) ->
     return result.get("matches") or []
 
 
-async def fetch_player_summaries(api_key: str, steam_ids64: list[str]) -> list[dict]:
-    steam_ids = [str(value).strip() for value in steam_ids64 if str(value).strip()][:100]
-    if not steam_ids:
-        return []
+async def fetch_player_summary(api_key: str, steam_id64: str) -> dict:
     url = f"{STEAM_API_BASE}/ISteamUser/GetPlayerSummaries/v002/"
-    params = {"key": api_key, "steamids": ",".join(steam_ids)}
+    params = {"key": api_key, "steamids": steam_id64}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, params=params)
         resp.raise_for_status()
-    return resp.json().get("response", {}).get("players") or []
-
-
-async def fetch_player_summary(api_key: str, steam_id64: str) -> dict:
-    players = await fetch_player_summaries(api_key, [steam_id64])
+    players = resp.json().get("response", {}).get("players") or []
     return players[0] if players else {}
-
-
-async def fetch_public_player_summaries(steam_ids64: list[str]) -> list[dict]:
-    """Resolve public mini-profile avatars without requiring a Steam Web API key."""
-    steam_ids = list(dict.fromkeys(
-        str(value).strip()
-        for value in steam_ids64
-        if str(value).strip().isdigit()
-    ))[:10]
-    if not steam_ids:
-        return []
-
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "CS2-Insight-Agent/2.4 Steam-avatar-resolver",
-    }
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers=headers) as client:
-        async def fetch_one(steam_id64: str) -> dict | None:
-            try:
-                account_id = int(steam_id64) - STEAM_ID64_ACCOUNT_BASE
-                if account_id < 0:
-                    return None
-                response = await client.get(f"{STEAM_COMMUNITY_BASE}/miniprofile/{account_id}/json")
-                response.raise_for_status()
-                payload = response.json()
-                avatar_url = str(payload.get("avatar_url") or payload.get("avatarfull") or "").strip()
-                if avatar_url.startswith("//"):
-                    avatar_url = f"https:{avatar_url}"
-                if not avatar_url.startswith(("https://", "http://")):
-                    return None
-                return {
-                    "steamid": steam_id64,
-                    "personaname": str(payload.get("persona_name") or payload.get("personaname") or ""),
-                    "avatarfull": avatar_url,
-                }
-            except (httpx.HTTPError, TypeError, ValueError):
-                logger.debug("Public Steam mini-profile unavailable for %s", steam_id64, exc_info=True)
-                return None
-
-        players = await asyncio.gather(*(fetch_one(steam_id) for steam_id in steam_ids))
-    return [player for player in players if player]
 
 
 async def download_demo(demo_url: str, dest_dir: Path, filename: str) -> Path:

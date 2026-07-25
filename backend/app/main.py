@@ -101,8 +101,6 @@ import httpx
 
 from .steam_match_history import (
     fetch_match_history,
-    fetch_public_player_summaries,
-    fetch_player_summaries,
     fetch_player_summary,
     parse_match_row,
     download_demo,
@@ -2538,46 +2536,6 @@ async def test_steam_connection(body: dict = Body(...)):
     if not player:
         raise HTTPException(404, "未找到该 SteamID 的玩家信息，请检查 SteamID64")
     return {"ok": True, "name": player.get("personaname", ""), "avatar": player.get("avatarfull", "")}
-
-
-@app.get("/api/steam/player-avatars")
-async def get_steam_player_avatars(
-    steam_ids: str = Query("", max_length=220),
-):
-    """Resolve public Steam avatar CDN URLs without exposing the configured API key."""
-    unique_ids: list[str] = []
-    for raw in steam_ids.split(","):
-        value = raw.strip()
-        if not value.isdigit() or not 15 <= len(value) <= 20 or value in unique_ids:
-            continue
-        unique_ids.append(value)
-        if len(unique_ids) >= 10:
-            break
-    if not unique_ids:
-        return {"avatars": {}}
-
-    cfg = load_config()
-    players: list[dict] = []
-    if cfg.steam_api_key:
-        try:
-            players = await fetch_player_summaries(cfg.steam_api_key, unique_ids)
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.info("Steam Web API avatar lookup unavailable, trying public profiles: %s", exc)
-
-    resolved_ids = {str(player.get("steamid") or "") for player in players}
-    missing_ids = [steam_id for steam_id in unique_ids if steam_id not in resolved_ids]
-    if missing_ids:
-        try:
-            players.extend(await fetch_public_player_summaries(missing_ids))
-        except httpx.HTTPError as exc:
-            logger.info("Public Steam avatar lookup unavailable: %s", exc)
-
-    avatars = {
-        str(player.get("steamid") or ""): str(player.get("avatarfull") or "")
-        for player in players
-        if player.get("steamid") and player.get("avatarfull")
-    }
-    return {"avatars": avatars}
 
 
 @app.post("/api/match-history/download")
