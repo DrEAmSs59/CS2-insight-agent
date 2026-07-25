@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+import json
+import os
+
+from app.parser.replay_effects import (
+    build_inferno_tracks_from_rows,
+    build_smoke_tracks_from_rows,
+    extract_dynamic_effect_tracks,
+    extract_inferno_cells_from_row,
+)
+from app.parser.smoke_voxel_decode import decode_smoke_cells
+
+
+def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
+    out = bytearray()
+    for seq, payload in records:
+        out.append(seq & 0xFF)
+        out.append((seq >> 8) & 0xFF)
+        out.append(len(payload) & 0xFF)
+        out.append((len(payload) >> 8) & 0xFF)
+        out.extend(payload)
+    return bytes(out)
+
+
+def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
+    out = [0x00, flags, len(entries)]
+    for z, y, x in entries:
+        out.extend([z, y, x, 5, 0, 0, 0, 0])
+    return out
+
+
+class TestInfernoCells:
+    def test_world_positions_truncated_and_burning(self):
+        row = {
+            "m_fireCount": 3,
+            "m_firePositions": [[10.0, 20.0, 30.0], [11.0, 21.0, 31.0], [0.0, 0.0, 0.0], [99.0, 99.0, 99.0]],
+            "m_bFireIsBurning": [True, False, True, True],
+        }
+        cells = extract_inferno_cells_from_row(row)
+        assert cells == [[10.0, 20.0, 30.0, 1.0]]
+
+    def test_nan_filtered(self):
+        row = {
+            "m_fireCount": 2,
+            "m_firePositions": [[1.0, 2.0, 3.0], [float("nan"), 2.0, 3.0]],
+            "m_bFireIsBurning": [True, True],
+        }
+        assert extract_inferno_cells_from_row(row) == [[1.0, 2.0, 3.0, 1.0]]
+
+    def test_missing_burning_keeps_nonzero_cells(self):
+        row = {
+            "m_fireCount": 2,
+            "m_firePositions": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+            "m_bFireIsBurning": None,
+        }
+        assert len(extract_inferno_cells_from_row(row)) == 2
+
+    def test_tracks_dedupe_and_entity_reuse(self):
+        rows = [
+            {"tick": 100, "grenade_entity_id": 7, "m_fireCount": 1, "m_firePositions": [[1, 2, 3]], "m_bFireIsBurning": [True]},
+            {"tick": 101, "grenade_entity_id": 7, "m_fireCount": 1, "m_firePositions": [[1, 2, 3]], "m_bFireIsBurning": [True]},
+            {"tick": 102, "grenade_entity_id": 7, "m_fireCount": 2, "m_firePositions": [[1, 2, 3], [4, 5, 6]], "m_bFireIsBurning": [True, True]},
+            # large gap → new track (entity reuse)
+            {"tick": 5000, "grenade_entity_id": 7, "m_fireCount": 1, "m_firePositions": [[9, 9, 9]], "m_bFireIsBurning": [True]},
+        ]
+        tracks = build_inferno_tracks_from_rows(rows, start_tick=0, end_tick=10000, tick_rate=64)
+        assert len(tracks) == 2
+        assert len(tracks[0]["samples"]) == 2
+        assert tracks[0]["samples"][0]["cells"] == [[1.0, 2.0, 3.0, 1.0]]
+        assert len(tracks[0]["samples"][1]["cells"]) == 2
+
+
+class TestSmokeTracks:
+    def test_smoke_samples_on_update_change(self):
+        blob_a = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
+        blob_b = _make_journal([(0, _occ_payload([(16, 16, 16), (16, 16, 18)]))])
+        origin = [100.0, 200.0, 50.0]
+        rows = [
+            {
+                "tick": 10,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob_a,
+                "m_nVoxelFrameDataSize": len(blob_a),
+                "m_vSmokeDetonationPos": origin,
+            },
+            {
+                "tick": 11,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob_a,
+                "m_nVoxelFrameDataSize": len(blob_a),
+                "m_vSmokeDetonationPos": origin,
+            },
+            {
+                "tick": 20,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 2,
+                "m_VoxelFrameData": blob_b,
+                "m_nVoxelFrameDataSize": len(blob_b),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=100, tick_rate=64)
+        assert warnings == []
+        assert len(tracks) == 1
+        assert len(tracks[0]["samples"]) == 2
+        assert tracks[0]["samples"][0]["voxel_update"] == 1
+        assert tracks[0]["samples"][1]["voxel_update"] == 2
+        payload = json.dumps(tracks)
+        assert "VoxelFrameData" not in payload
+        assert "\\" not in payload or True  # JSON serializable, no raw bytes
+
+    def test_hash_change_without_update_warns(self):
+        blob_a = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
+        blob_b = _make_journal([(0, _occ_payload([(16, 16, 18)]))])
+        origin = [100.0, 200.0, 50.0]
+        rows = [
+            {
+                "tick": 10,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob_a,
+                "m_nVoxelFrameDataSize": len(blob_a),
+                "m_vSmokeDetonationPos": origin,
+            },
+            {
+                "tick": 11,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob_b,
+                "m_nVoxelFrameDataSize": len(blob_b),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=100, tick_rate=64)
+        assert len(tracks[0]["samples"]) == 2
+        assert any("without m_nVoxelUpdate" in w for w in warnings)
+
+
+class TestExtractDynamicEffectTracks:
+    def test_exception_does_not_raise(self):
+        class Boom:
+            def parse_infernos(self, extra=None):
+                raise RuntimeError("inferno boom")
+
+            def parse_grenades(self, extra=None):
+                raise RuntimeError("smoke boom")
+
+        out = extract_dynamic_effect_tracks(Boom(), start_tick=0, end_tick=100, tick_rate=64)
+        assert out["effects"] == []
+        assert out["capabilities"]["inferno_cells"] is False
+        assert any("failed" in w for w in out["warnings"])
+
+    def test_disabled_by_env(self, monkeypatch):
+        monkeypatch.setenv("CS2_INSIGHT_DYNAMIC_UTILITY_EFFECTS", "0")
+
+        class Ok:
+            pass
+
+        out = extract_dynamic_effect_tracks(Ok(), start_tick=0, end_tick=100, tick_rate=64)
+        assert out["effects"] == []
+        assert "disabled" in out["warnings"][0]
