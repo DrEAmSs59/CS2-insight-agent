@@ -202,6 +202,7 @@ function renderPage(shell) {
 describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
   beforeEach(() => {
     useReplayStore.setState({ entries: {}, activeKey: null });
+    sessionStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -275,12 +276,12 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText(/DAK|analysis-kit|数据包/i)).toBeNull();
   });
 
-  test("keeps all six prototype workspaces backed by parsed match data", async () => {
+  test("keeps all seven analysis workspaces backed by parsed match data", async () => {
     const view = renderPage(buildShell());
 
     const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "高光与录制", "2D 回放", "概览", "玩家", "回合", "经济",
+      "高光与录制", "2D 回放", "热力图", "概览", "玩家", "回合", "经济",
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
@@ -426,6 +427,48 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getAllByText("R1").length).toBeGreaterThan(0);
     expect(screen.queryByText("平均装备差")).toBeNull();
     expect(screen.queryByText("双方最低装备总值")).toBeNull();
+  });
+
+  test("loads the whole-match heatmap as an independent analysis workspace", async () => {
+    const view = renderPage(buildShell());
+
+    fireEvent.click(screen.getByRole("button", { name: "热力图" }));
+
+    expect(screen.getByRole("heading", { name: "整场热力图" })).toBeTruthy();
+    expect(screen.queryByRole("slider", { name: "回放时间轴" })).toBeNull();
+    expect(screen.getByRole("group", { name: "热力图类型" })).toBeTruthy();
+    await waitFor(() => expect(view.container.querySelector('[data-heatmap-mode="movement"]')).toBeTruthy());
+    expect(screen.getByAltText("de_mirage 走位热力图")).toBeTruthy();
+    expect(API.post).toHaveBeenCalledWith(
+      "/demo/replay/binary",
+      expect.objectContaining({ path: "C:/demos/one.dem", fps: 32 }),
+      { responseType: "arraybuffer" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "交战热点" }));
+    expect(view.container.querySelector('[data-heatmap-mode="combat"]')).toBeTruthy();
+    expect(screen.getByAltText("de_mirage 交战热力图")).toBeTruthy();
+  });
+
+  test("restores the analysis workspace, replay round and playhead within the session", async () => {
+    const shell = buildShell();
+    const firstView = renderPage(shell);
+
+    fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
+    await waitFor(() => expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy());
+    fireEvent.change(screen.getByRole("combobox", { name: "选择回合" }), { target: { value: "2" } });
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "选择回合" }).value).toBe("2"));
+    await waitFor(() => expect(screen.getByRole("slider", { name: "回放时间轴" }).max).not.toBe("0"));
+    fireEvent.click(screen.getByRole("button", { name: "前进 5 秒" }));
+    const savedPosition = Number(screen.getByRole("slider", { name: "回放时间轴" }).value);
+    expect(savedPosition).toBeGreaterThan(0);
+
+    firstView.unmount();
+    renderPage(shell);
+
+    await waitFor(() => expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy());
+    expect(screen.getByRole("combobox", { name: "选择回合" }).value).toBe("2");
+    await waitFor(() => expect(Number(screen.getByRole("slider", { name: "回放时间轴" }).value)).toBeCloseTo(savedPosition));
   });
 
   test("repairs a cached workspace missing radar coordinates from the replay response", async () => {

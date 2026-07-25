@@ -25,7 +25,7 @@ function estimateSizeBytes(payload) {
   }
 }
 
-async function requestReplayFrames(requestBody) {
+export async function requestReplayFrames(requestBody) {
   const response = await API.post("/demo/replay/binary", requestBody, {
     responseType: "arraybuffer",
   });

@@ -590,8 +590,62 @@ body {
   transition: opacity 90ms ease-out;
 }
 
-.replay-roster-ambient-canvas {
+.replay-roster-ambient-static {
+  contain: strict;
+  isolation: isolate;
   mix-blend-mode: screen;
+}
+
+@keyframes replay-roster-smoke-sheet {
+  0% {
+    opacity: 0.48;
+    transform: translate3d(-1.2%, 0, 0) scale(1.015);
+  }
+  100% {
+    opacity: 0.62;
+    transform: translate3d(1.2%, -1px, 0) scale(1.035);
+  }
+}
+
+@keyframes replay-roster-fire-sheet {
+  0% {
+    opacity: 0.72;
+    transform: translate3d(0, 1px, 0) scaleY(0.96);
+  }
+  100% {
+    opacity: 0.9;
+    transform: translate3d(0, -1px, 0) scaleY(1.04);
+  }
+}
+
+.replay-roster-smoke-sheet,
+.replay-roster-fire-sheet {
+  display: block;
+  transform-origin: 50% 100%;
+  will-change: opacity, transform;
+}
+
+.replay-roster-smoke-sheet {
+  background:
+    radial-gradient(ellipse 18% 42% at 5% 48%, rgba(225, 229, 225, 0.34) 0 20%, rgba(136, 145, 144, 0.2) 48%, transparent 74%),
+    radial-gradient(ellipse 22% 46% at 24% 36%, rgba(213, 219, 216, 0.3) 0 18%, rgba(121, 132, 132, 0.18) 50%, transparent 76%),
+    radial-gradient(ellipse 24% 48% at 47% 55%, rgba(230, 231, 224, 0.29) 0 18%, rgba(125, 133, 132, 0.18) 52%, transparent 77%),
+    radial-gradient(ellipse 20% 44% at 70% 35%, rgba(207, 214, 212, 0.31) 0 18%, rgba(111, 122, 123, 0.17) 50%, transparent 75%),
+    radial-gradient(ellipse 24% 50% at 94% 52%, rgba(226, 228, 220, 0.32) 0 18%, rgba(116, 126, 127, 0.18) 52%, transparent 78%);
+  animation: replay-roster-smoke-sheet 2.4s steps(3, end) infinite alternate;
+}
+
+.replay-roster-fire-sheet {
+  background:
+    radial-gradient(ellipse 9% 68% at 5% 112%, rgba(254, 240, 138, 0.92) 0 13%, rgba(249, 115, 22, 0.75) 29%, rgba(220, 38, 38, 0.38) 48%, transparent 70%),
+    radial-gradient(ellipse 12% 86% at 18% 116%, rgba(255, 247, 174, 0.88) 0 11%, rgba(251, 146, 60, 0.76) 28%, rgba(239, 68, 68, 0.4) 50%, transparent 70%),
+    radial-gradient(ellipse 10% 72% at 34% 112%, rgba(254, 240, 138, 0.9) 0 12%, rgba(249, 115, 22, 0.74) 30%, rgba(220, 38, 38, 0.36) 49%, transparent 70%),
+    radial-gradient(ellipse 13% 92% at 51% 118%, rgba(255, 247, 174, 0.9) 0 10%, rgba(251, 146, 60, 0.78) 28%, rgba(239, 68, 68, 0.42) 50%, transparent 71%),
+    radial-gradient(ellipse 10% 74% at 68% 113%, rgba(254, 240, 138, 0.9) 0 12%, rgba(249, 115, 22, 0.74) 29%, rgba(220, 38, 38, 0.38) 49%, transparent 70%),
+    radial-gradient(ellipse 12% 86% at 83% 116%, rgba(255, 247, 174, 0.88) 0 11%, rgba(251, 146, 60, 0.76) 28%, rgba(239, 68, 68, 0.4) 50%, transparent 70%),
+    radial-gradient(ellipse 9% 68% at 97% 112%, rgba(254, 240, 138, 0.92) 0 13%, rgba(249, 115, 22, 0.75) 29%, rgba(220, 38, 38, 0.38) 48%, transparent 70%),
+    linear-gradient(to top, rgba(220, 38, 38, 0.5), rgba(249, 115, 22, 0.22) 25%, transparent 52%);
+  animation: replay-roster-fire-sheet 720ms steps(3, end) infinite alternate;
 }
 
 .replay-observer-slot {
@@ -614,6 +668,11 @@ body {
 
   .replay-observer-blind-overlay {
     transition: none;
+  }
+
+  .replay-roster-smoke-sheet,
+  .replay-roster-fire-sheet {
+    animation: none;
   }
 
   .replay-observer-slot[data-alive="false"] {

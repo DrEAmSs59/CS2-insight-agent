@@ -10,6 +10,7 @@ import {
   Crosshair,
   FileVideo2,
   Film,
+  Flame,
   Library,
   ListChecks,
   Loader2,
@@ -25,6 +26,7 @@ import DemoUpload from "../components/DemoUpload";
 import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView";
 import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import Demo2DReplayPreview from "../components/analysis/Demo2DReplayPreview";
+import DemoHeatmapView from "../components/analysis/DemoHeatmapView";
 import { useReplayStore } from "../stores/replayStore";
 import {
   EconomyView,
@@ -37,6 +39,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import { useAppShell } from "../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
+import useSessionState from "../hooks/useSessionState";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 
 const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1440px] px-5 sm:px-5";
@@ -44,6 +47,7 @@ const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1440px] px-5 sm:px-5";
 const TABS = [
   { key: "highlights", label: "高光与录制", icon: Film },
   { key: "replay", label: "2D 回放", icon: MapPin },
+  { key: "heatmap", label: "热力图", icon: Flame },
   { key: "overview", label: "概览", icon: Activity },
   { key: "players", label: "玩家", icon: Users },
   { key: "rounds", label: "回合", icon: ListChecks },
@@ -309,13 +313,22 @@ function UnsupportedPreview({ title, detail }) {
 export default function DemoAnalysisPreviewPage() {
   const s = useAppShell();
   const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
-  const [activeTab, setActiveTab] = useState("highlights");
-  const [activeHighlightView, setActiveHighlightView] = useState("clips");
-  const [selectedTag, setSelectedTag] = useState("全部");
-  const [selectedRound, setSelectedRound] = useState(null);
-  const [replayRound, setReplayRound] = useState(null);
-  const [statsPlayer, setStatsPlayer] = useState("");
   const matches = s.matchTabsData || [];
+  const currentUpload = s.uploadedDemos?.[s.currentMatchIndex] ?? null;
+  const sessionIdentity = encodeURIComponent(String(
+    currentUpload?.path
+    || currentUpload?.id
+    || matches[s.currentMatchIndex]?.demo_filename
+    || matches[s.currentMatchIndex]?.filename
+    || `demo-${s.currentMatchIndex}`,
+  ));
+  const sessionPrefix = `demo-analysis:${sessionIdentity}`;
+  const [activeTab, setActiveTab] = useSessionState(`${sessionPrefix}:tab`, "highlights");
+  const [activeHighlightView, setActiveHighlightView] = useSessionState(`${sessionPrefix}:highlight-view`, "clips");
+  const [selectedTag, setSelectedTag] = useSessionState(`${sessionPrefix}:tag`, "全部");
+  const [selectedRound, setSelectedRound] = useSessionState(`${sessionPrefix}:round`, null);
+  const [replayRound, setReplayRound] = useSessionState(`${sessionPrefix}:replay-round`, null);
+  const [statsPlayer, setStatsPlayer] = useSessionState(`${sessionPrefix}:stats-player`, "");
   const uploadedDemoCount = s.uploadedDemos?.length || 0;
   const parsedDemoCount = matches.filter((match) => match?.parsed).length;
   const allDemosParsed = uploadedDemoCount > 0
@@ -331,7 +344,6 @@ export default function DemoAnalysisPreviewPage() {
     || (analysisGateActive
       ? `正在解析所选 Demo（${parsedDemoCount}/${uploadedDemoCount}）…`
       : `尚有 ${Math.max(0, uploadedDemoCount - parsedDemoCount)} 个 Demo 未完成解析`);
-  const currentUpload = s.uploadedDemos?.[s.currentMatchIndex] ?? null;
   const meta = s.matchMeta || currentUpload?.match_meta || matches[s.currentMatchIndex]?.match_meta || {};
   const teams = useMemo(() => splitTeams(s.players), [s.players]);
   const teamAName = meta.team_a_name || firstTeamName(teams.a, "Team A");
@@ -370,15 +382,6 @@ export default function DemoAnalysisPreviewPage() {
     : regularClips.filter((clip) => (clip.context_tags || []).includes(selectedTag));
   const weaponSummary = summarizeWeaponKills(s.roundTimeline);
   const canAnalyze = Boolean(s.hasDemos && selectedCount && !parsingCurrent && !s.batchRecording);
-
-  useEffect(() => {
-    setActiveTab("highlights");
-    setActiveHighlightView("clips");
-    setSelectedTag("全部");
-    setSelectedRound(null);
-    setReplayRound(null);
-    setStatsPlayer("");
-  }, [s.currentMatchIndex]);
 
   const selectPlayer = (name) => {
     s.setActivePlayerTabs((previous) => ({ ...previous, [s.currentMatchIndex]: name }));
@@ -537,12 +540,23 @@ export default function DemoAnalysisPreviewPage() {
 
           {activeTab === "replay" && (
             <Demo2DReplayPreview
+              key={currentUpload?.path || currentUpload?.id || s.currentMatchIndex}
               workspace={workspace}
               demoPath={currentUpload?.path}
               players={s.players}
               teamAName={workspace.team_a_name || teamAName}
               teamBName={workspace.team_b_name || teamBName}
               initialRound={replayRound}
+              onRoundChange={setReplayRound}
+            />
+          )}
+
+          {activeTab === "heatmap" && (
+            <DemoHeatmapView
+              key={currentUpload?.path || currentUpload?.id || s.currentMatchIndex}
+              workspace={workspace}
+              demoPath={currentUpload?.path}
+              players={s.players}
             />
           )}
 
