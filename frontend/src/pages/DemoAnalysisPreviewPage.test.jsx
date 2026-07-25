@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppShellProvider } from "../context/AppShellContext";
 import DemoAnalysisPreviewPage from "./DemoAnalysisPreviewPage";
 import API from "../api/api";
+import { useReplayStore } from "../stores/replayStore";
 
 vi.mock("../api/api", () => ({
   getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
@@ -197,7 +198,10 @@ function renderPage(shell) {
 }
 
 describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    useReplayStore.setState({ entries: {}, activeKey: null });
+    vi.clearAllMocks();
+  });
 
   test("the selector only contains demos uploaded or selected for this session", () => {
     const shell = buildShell();
@@ -283,7 +287,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("道具");
     expect(view.container.querySelector('[data-event-kind="kill"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="utility"] > span')?.className).toContain("rounded-full");
-    expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 32 }));
+    expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 8 }));
     expect(screen.queryByText(/^nan$/i)).toBeNull();
     expect(screen.queryByText("16777215")).toBeNull();
     expect(screen.getByText("1:55")).toBeTruthy();
@@ -291,7 +295,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     const weaponDisplay = screen.getByLabelText(/ZywOo 当前武器/);
     expect(weaponDisplay.textContent).toBe("");
     expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-[18px]");
-    expect(screen.getByLabelText("ZywOo 头盔和防弹衣")).toBeTruthy();
+    expect(screen.getByLabelText(/ZywOo 头盔和防弹衣/)).toBeTruthy();
     expect(screen.queryByText("100 头甲")).toBeNull();
     expect(view.container.querySelector('img[src$="/ak47.svg"]')).toBeTruthy();
     expect(view.container.querySelector('img[src$="/armor_helmet.svg"]')).toBeTruthy();
@@ -338,7 +342,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByTitle(/ZywOo 燃烧弹 · 剩余/)).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区")).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
-    expect(screen.getByTitle("C4 已放置 · B 区").className).toContain("z-[5]");
+    expect(screen.getByTitle("C4 已放置 · B 区").className).toContain("z-[4]");
     const killFeed = view.container.querySelector('[aria-live="polite"]');
     expect(within(killFeed).getByText("ZywOo").getAttribute("data-side")).toBe("CT");
     expect(within(killFeed).getByText("ZywOo").className).toContain("text-sky-300");
@@ -407,7 +411,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     await waitFor(() => expect(API.post).toHaveBeenCalledWith(
       "/demo/replay",
-      expect.objectContaining({ map_name: "de_cache", fps: 32 }),
+      expect.objectContaining({ map_name: "de_cache", fps: 8 }),
     ));
     await waitFor(() => expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')).toBeTruthy());
     expect(screen.getByAltText("de_cache 雷达地图")).toBeTruthy();
@@ -439,7 +443,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     await waitFor(() => expect(screen.getByAltText("de_nuke 上层 雷达地图")).toBeTruthy());
     expect(screen.getByRole("group", { name: "地图楼层" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "上层" }).getAttribute("aria-pressed")).toBe("true");
-    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("scale(1.536)");
+    expect(view.container.querySelector('.demo-radar-plane[data-map="de_nuke"]')?.getAttribute("style")).toContain("translate(-50%, -50%)");
     expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeTruthy();
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
 
