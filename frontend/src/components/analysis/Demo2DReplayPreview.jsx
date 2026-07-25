@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bomb,
   ChevronLeft,
@@ -22,6 +22,10 @@ import {
   worldToRadarPercent,
   yawToCssRotation,
 } from "../../utils/replayRadarTransform";
+import {
+  createReplayClock,
+  interpolateReplayFrame as interpolateReplayFrameByTick,
+} from "../../utils/replayPlayback";
 import { useReplayStore } from "../../stores/replayStore";
 
 const SAMPLE_HZ = 8;
@@ -280,23 +284,20 @@ function interpolateNumber(start, end, ratio) {
   return left + (right - left) * ratio;
 }
 
-function smoothstep(ratio) {
-  const t = clamp(Number(ratio) || 0, 0, 1);
-  return t * t * (3 - 2 * t);
-}
-
 function interpolateYaw(start, end, ratio) {
   const left = Number(start);
   const right = Number(end);
   if (!Number.isFinite(left) || !Number.isFinite(right)) return start;
   const delta = ((right - left + 540) % 360) - 180;
-  return left + delta * ratio;
+  const value = left + delta * ratio;
+  return ((value % 360) + 360) % 360;
 }
 
 function replayPlayerKey(player) {
   return String(player?.steamid64 || player?.steam_id64 || player?.name || "").trim().toLowerCase();
 }
 
+/** Fractional array-index scrubbing (timeline). Playback prefers tick/time via replayPlayback. */
 function interpolateReplayFrame(frames, position, fallbackTick) {
   if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
   const lowerIndex = clamp(Math.floor(position), 0, frames.length - 1);
@@ -305,18 +306,18 @@ function interpolateReplayFrame(frames, position, fallbackTick) {
   const upper = frames[upperIndex] || lower;
   const ratio = clamp(position - lowerIndex, 0, 1);
   if (upperIndex === lowerIndex || ratio <= 0) return lower;
-  const eased = smoothstep(ratio);
 
+  // Linear interpolation only — smoothstep caused 125ms ease-in/out stutter at 8Hz.
   const upperPlayers = new Map((upper.players || []).map((player) => [replayPlayerKey(player), player]));
   const players = (lower.players || []).map((player) => {
     const next = upperPlayers.get(replayPlayerKey(player));
     if (!next) return player;
     return {
       ...player,
-      x: interpolateNumber(player.x, next.x, eased),
-      y: interpolateNumber(player.y, next.y, eased),
-      z: interpolateNumber(player.z, next.z, eased),
-      yaw: interpolateYaw(player.yaw, next.yaw, eased),
+      x: interpolateNumber(player.x, next.x, ratio),
+      y: interpolateNumber(player.y, next.y, ratio),
+      z: interpolateNumber(player.z, next.z, ratio),
+      yaw: interpolateYaw(player.yaw, next.yaw, ratio),
       weapon: (() => {
         const preferred = ratio >= 0.5 ? (next.weapon || player.weapon) : (player.weapon || next.weapon);
         return preferred || player.weapon || next.weapon || "";
@@ -327,8 +328,8 @@ function interpolateReplayFrame(frames, position, fallbackTick) {
   return {
     ...lower,
     players,
-    tick: interpolateNumber(lower.tick, upper.tick, eased),
-    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, eased),
+    tick: interpolateNumber(lower.tick, upper.tick, ratio),
+    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, ratio),
   };
 }
 
@@ -401,7 +402,7 @@ function pointMatchesMapLayer(point, transform, layer) {
   return layer === "lower" ? z <= threshold : z > threshold;
 }
 
-function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrierName = "" }) {
+const ReplayRoster = memo(function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrierName = "" }) {
   const byName = new Map((framePlayers || []).map((player) => [safeLabel(player.name).toLowerCase(), player]));
   const isBlue = isBlueReplaySide(side, !side && teamKey === "a");
   const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
@@ -473,7 +474,7 @@ function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrier
       </div>
     </aside>
   );
-}
+});
 
 function GrenadeEffectMarker({ grenade, motionDuration, useAreaFallback = true }) {
   const visual = grenadeVisual(grenade.kind);
@@ -544,6 +545,7 @@ export default function Demo2DReplayPreview({
   const [effectTracks, setEffectTracks] = useState([]);
   const [effectCapabilities, setEffectCapabilities] = useState(null);
   const [frameIndex, setFrameIndex] = useState(0);
+  const [uiSampleIndex, setUiSampleIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -557,6 +559,9 @@ export default function Demo2DReplayPreview({
   const smokeDebugOn = useMemo(() => isSmokeDebugEnabled(), []);
   const [smokeDebugLayer, setSmokeDebugLayer] = useState("final_render");
   const framePositionRef = useRef(0);
+  const clockRef = useRef(null);
+  const framesRef = useRef(frames);
+  framesRef.current = frames;
 
   useEffect(() => {
     setRoundNumber(initialRound || rounds[0]?.round_number || 1);
@@ -564,6 +569,7 @@ export default function Demo2DReplayPreview({
     setEffectTracks([]);
     setEffectCapabilities(null);
     setFrameIndex(0);
+    setUiSampleIndex(0);
     setPlaying(false);
     setResponseTransform(null);
     setReplayFps(SAMPLE_HZ);
@@ -691,39 +697,79 @@ export default function Demo2DReplayPreview({
 
   useEffect(() => {
     framePositionRef.current = frameIndex;
-  }, [frameIndex]);
+    setUiSampleIndex(clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1)));
+  }, [frameIndex, frames.length]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) return undefined;
+    const startSeconds = Number(frames[clamp(Math.floor(framePositionRef.current), 0, frames.length - 1)]?.time_sec || 0);
+    const clock = createReplayClock({
+      offsetSeconds: startSeconds,
+      rate: speed,
+      now: () => window.performance.now(),
+    });
+    clockRef.current = clock;
+    clock.play();
     let animationFrame = 0;
-    let previousTime = window.performance.now();
+    let lastUiSample = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
     const lastFrame = frames.length - 1;
+    const lastSeconds = Number(frames[lastFrame]?.time_sec);
+    const hasTimeBase = Number.isFinite(lastSeconds) && Number.isFinite(startSeconds);
+
     const animate = (now) => {
-      const elapsedSeconds = Math.min(0.1, Math.max(0, now - previousTime) / 1000);
-      previousTime = now;
-      const nextPosition = Math.min(
-        lastFrame,
-        framePositionRef.current + elapsedSeconds * replayFps * speed,
-      );
+      const activeFrames = framesRef.current;
+      if (!activeFrames.length) return;
+      const playheadSeconds = clock.getPlayheadSeconds(now);
+      let nextPosition;
+      if (hasTimeBase) {
+        nextPosition = replayPositionForTime(activeFrames, playheadSeconds);
+      } else {
+        // Fallback: convert absolute seconds back through nominal sample Hz.
+        nextPosition = Math.min(
+          lastFrame,
+          (playheadSeconds - startSeconds) * replayFps,
+        );
+      }
+      nextPosition = Math.min(lastFrame, Math.max(0, nextPosition));
       framePositionRef.current = nextPosition;
       setFrameIndex(nextPosition);
-      if (nextPosition >= lastFrame) {
+
+      const sampleIndex = clamp(Math.floor(nextPosition), 0, lastFrame);
+      if (sampleIndex !== lastUiSample) {
+        lastUiSample = sampleIndex;
+        setUiSampleIndex(sampleIndex);
+      }
+
+      if (nextPosition >= lastFrame - 0.001) {
         setPlaying(false);
         return;
       }
       animationFrame = window.requestAnimationFrame(animate);
     };
     animationFrame = window.requestAnimationFrame(animate);
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      clock.pause();
+    };
   }, [playing, frames.length, replayFps, speed]);
 
   const frameCursorIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
-  const frame = interpolateReplayFrame(
-    frames,
-    frameIndex,
-    selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0,
-  );
-  const currentTick = Number(frame.tick || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0);
+  const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
+  const frame = useMemo(() => {
+    if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
+    // Tick/time brackets stay accurate when sample spacing is uneven; index path covers scrubbing.
+    if (Number.isFinite(Number(frames[0]?.tick)) && Number.isFinite(Number(frames[0]?.time_sec))) {
+      const approx = interpolateReplayFrame(frames, frameIndex, fallbackTick);
+      const tick = Number(approx.tick);
+      const seconds = Number(approx.time_sec);
+      if (Number.isFinite(tick)) {
+        return interpolateReplayFrameByTick(frames, tick, seconds);
+      }
+    }
+    return interpolateReplayFrame(frames, frameIndex, fallbackTick);
+  }, [fallbackTick, frameIndex, frames]);
+  const uiFrame = frames[uiSampleIndex] || frames[frameCursorIndex] || frame;
+  const currentTick = Number(frame.tick || fallbackTick || 0);
   const hasSmokeAreaTracks = Boolean(
     effectCapabilities?.smoke_voxels
     && effectTracks.some((track) => track?.type === "smoke" && Array.isArray(track.samples) && track.samples.length),
@@ -1052,7 +1098,7 @@ export default function Demo2DReplayPreview({
       </section>
 
       <div className="grid gap-3 xl:grid-cols-[260px_minmax(460px,1fr)_260px]">
-        <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={frame.players} bombCarrierName={bombState.carrier} />
+        <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={bombState.carrier} />
         <section className="relative min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
@@ -1159,7 +1205,7 @@ export default function Demo2DReplayPreview({
           </div>
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}
         </section>
-        <ReplayRoster title={`${teamBName} · ${selectedRound.team_b_side || ""}`} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={frame.players} bombCarrierName={bombState.carrier} />
+        <ReplayRoster title={`${teamBName} · ${selectedRound.team_b_side || ""}`} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={bombState.carrier} />
       </div>
     </div>
   );
