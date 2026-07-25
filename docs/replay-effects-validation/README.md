@@ -16,12 +16,21 @@
 ```bash
 python backend/scripts/probe_replay_dynamic_effects.py \
   --demo "C:/soft/cs2_demo_lib/og-vs-spirit-m1-cache.dem" \
-  --out "docs/replay-effects-validation/probe-output/run-001"
+  --out "docs/replay-effects-validation/probe-output/run-002"
 ```
 
 - `--start-tick` / `--end-tick` 可选；缺省时按 `smokegrenade_detonate` / `inferno_startburn` 事件自动推导探测窗口。
 - 探针不会修改任何生产 API 或工作区缓存。
 - 二进制数据只记录 SHA-256、长度和前 256 字节十六进制。
+- 需要 `demoparser2>=0.41.4+cs2insight2`（含 `parse_infernos`）；烟雾走 `parse_grenades(extra=...)`，燃烧走 `parse_infernos(extra=...)`。
+
+烟雾字节可读后的格式研究（阶段 S-A）：
+
+```bash
+python backend/scripts/analyze_smoke_voxel_frames.py \
+  --demo "C:/soft/cs2_demo_lib/og-vs-spirit-m1-cache.dem" \
+  --out "docs/replay-effects-validation/probe-output/smoke-sa-001"
+```
 
 输出：
 

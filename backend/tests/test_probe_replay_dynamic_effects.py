@@ -270,3 +270,28 @@ class TestDecisions:
     def test_inferno_insufficient(self):
         out = probe.decide_inferno_status({"matches": {"inferno_or_fire": []}}, {"props": {}})
         assert out["status"] == "DEMO_DATA_INSUFFICIENT"
+
+
+class TestDescribeFramePropsAndInfernosApi:
+    def test_describe_frame_props_marks_bytes_array_like(self):
+        frame = pd.DataFrame({
+            "m_VoxelFrameData": [b"\x00\x01", b"\x02\x03"],
+            "m_fireCount": [1, 2],
+        })
+        log = probe.ProbeLog()
+        out = probe._describe_frame_props(
+            frame, ["m_VoxelFrameData", "m_fireCount", "missing_col"], log, "unit"
+        )
+        assert out["props"]["m_VoxelFrameData"]["array_like"] is True
+        assert out["props"]["m_VoxelFrameData"]["python_value_type"] == "bytes"
+        assert out["props"]["m_fireCount"]["array_like"] is False
+        assert out["props"]["missing_col"]["exported"] is False
+
+    def test_probe_parse_infernos_api_missing(self):
+        class _NoInfernos:
+            pass
+
+        log = probe.ProbeLog()
+        out, frame = probe.probe_parse_infernos(_NoInfernos(), ["m_firePositions"], log)
+        assert out["status"] == "api_missing"
+        assert frame is None

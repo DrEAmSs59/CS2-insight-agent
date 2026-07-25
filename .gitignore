@@ -103,3 +103,8 @@ frontend/preview/
 
 # Local UI design backups created before visual refactors
 backups/
+
+# Agent / local worktrees
+.worktrees/
+.superpowers/
+
