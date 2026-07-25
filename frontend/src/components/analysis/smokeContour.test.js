@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   MARCHING_SQUARES_SEGMENTS,
   buildDensityMask,
+  dilateMask,
   marchingSquares,
   sampleCrossfadeAlpha,
 } from "./smokeContour";
@@ -47,4 +48,14 @@ test("marchingSquares returns a ring for a filled block", () => {
 
 test("sampleCrossfadeAlpha midpoints", () => {
   expect(sampleCrossfadeAlpha(100, 200, 150)).toEqual({ prevA: 0.5, nextA: 0.5 });
+});
+
+test("dilateMask expands occupancy by one cell", () => {
+  const mask = buildDensityMask([[0, 0, 0, 1]], 20);
+  const dilated = dilateMask(mask, 1);
+  let nonzero = 0;
+  for (const v of dilated.data) if (v > 0) nonzero += 1;
+  expect(nonzero).toBeGreaterThan(1);
+  expect(dilated.width).toBe(mask.width + 2);
+  expect(dilated.height).toBe(mask.height + 2);
 });
