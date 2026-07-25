@@ -279,7 +279,6 @@ export default function ReplaySceneCanvas({
   smokeDebugLayer = "off",
 }) {
   const playhead = useSyncExternalStore(playheadStore.subscribe, playheadStore.getSnapshot);
-  const playerMarkerSizePx = 15.3;
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const frameCursorIndex = clamp(Math.floor(playing ? playhead.position : frameIndex), 0, Math.max(0, frames.length - 1));
 
@@ -298,6 +297,8 @@ export default function ReplaySceneCanvas({
   }));
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   cameraRef.current = camera;
+  // Scene is CSS-scaled by fitScale; keep on-screen size ≈ 15.3×1.1 at Fit, grow with userZoom.
+  const playerMarkerSizePx = (15.3 * 1.1) / Math.max(Number(camera.fitScale) || 1, 0.05);
 
   const applyCamera = (next) => {
     const resolved = typeof next === "function" ? next(cameraRef.current) : next;
@@ -436,9 +437,13 @@ export default function ReplaySceneCanvas({
   const onViewportPointerDown = (event) => {
     const current = cameraRef.current;
     if (!current) return;
+    // After zoom: left-drag pans (Space+LMB and middle-mouse still work).
+    const canPan = current.userZoom > 1;
     const isMiddle = event.button === 1;
-    const isSpaceLeft = event.button === 0 && spaceDownRef.current && current.userZoom > 1;
-    if (!isMiddle && !isSpaceLeft) return;
+    const isLeft = event.button === 0;
+    if (!canPan || (!isMiddle && !isLeft)) return;
+    // Ignore interactive chrome (zoom controls, floor toggle).
+    if (event.target?.closest?.("button, input, a, [data-no-pan]")) return;
     event.preventDefault();
     const node = viewportRef.current;
     if (!node) return;
@@ -448,6 +453,7 @@ export default function ReplaySceneCanvas({
       lastY: event.clientY,
     };
     node.setPointerCapture?.(event.pointerId);
+    node.style.cursor = "grabbing";
   };
 
   const onViewportPointerMove = (event) => {
@@ -474,6 +480,10 @@ export default function ReplaySceneCanvas({
     const session = panSessionRef.current;
     if (!session || (event && session.pointerId !== event.pointerId)) return;
     panSessionRef.current = null;
+    const node = viewportRef.current;
+    if (node) {
+      node.style.cursor = cameraRef.current?.userZoom > 1 ? "grab" : "default";
+    }
   };
 
   const finalScale = camera.fitScale * camera.userZoom;
@@ -815,7 +825,7 @@ export default function ReplaySceneCanvas({
                   data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
                   data-player-label-mode={playerLabelMode}
                   className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
-                  style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
+                  style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: Math.max(7, playerMarkerSizePx * 0.46) }}
                 >
                   <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
                     <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
