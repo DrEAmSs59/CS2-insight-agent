@@ -463,6 +463,9 @@ export default function ReplayAreaEffectsCanvas({
     const url = getDemoUtilityMaskUrl(mapName, layer === "upper" ? "" : layer);
     let cancelled = false;
     const img = new Image();
+    // Tauri webview origin ≠ http://127.0.0.1 API host; anonymous CORS
+    // keeps getImageData usable for luminance→alpha conversion.
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       if (!cancelled) setUtilityMask(img);
     };
