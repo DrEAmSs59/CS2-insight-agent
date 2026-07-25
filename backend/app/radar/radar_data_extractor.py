@@ -6,7 +6,7 @@ import os
 from bisect import bisect_left
 from typing import Any
 
-from app.demo_parse_isolation import extract_radar_timeline_isolated
+from app.demo_parse_isolation import extract_radar_timeline_isolated, extract_replay_effects_isolated
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,8 @@ def extract_radar_timeline(
     record_segments: list[dict[str, Any]] | None = None,
     radar_timing: dict[str, Any] | None = None,
     include_all_players: bool = False,
-) -> list[dict[str, Any]]:
+    include_effect_tracks: bool = False,
+) -> list[dict[str, Any]] | dict[str, Any]:
     """Wrap isolated worker (demoparser native crashes cannot kill FastAPI)."""
     try:
         result = extract_radar_timeline_isolated(
@@ -213,11 +214,29 @@ def extract_radar_timeline(
             record_segments=record_segments,
             radar_timing=radar_timing,
             include_all_players=bool(include_all_players),
+            include_effect_tracks=bool(include_effect_tracks),
         )
     except Exception as e:
         logger.warning("radar timeline isolated parse failed: %s", e)
         raise
+    if include_effect_tracks:
+        if isinstance(result, dict) and isinstance(result.get("frames"), list):
+            return result
+        frames = result if isinstance(result, list) else []
+        return {
+            "frames": frames,
+            "effect_tracks_version": 1,
+            "effect_capabilities": {
+                "inferno_cells": False,
+                "smoke_voxels": False,
+                "smoke_mode": "legacy_circle",
+            },
+            "effect_tracks": [],
+            "effect_warnings": ["effect sidecar missing from worker payload"],
+        }
     if not isinstance(result, list):
+        if isinstance(result, dict) and isinstance(result.get("frames"), list):
+            return result["frames"]
         return []
     return result
 
@@ -237,12 +256,14 @@ def extract_radar_timeline_impl(
     record_segments: list[dict[str, Any]] | None = None,
     radar_timing: dict[str, Any] | None = None,
     include_all_players: bool = False,
-) -> list[dict[str, Any]]:
+    include_effect_tracks: bool = False,
+) -> list[dict[str, Any]] | dict[str, Any]:
     """
     Runs inside parse_worker child process.
     从 demo 中提取雷达时间线（与成片 fps / 时长对齐，每帧一条）。
     时间轴：radar_timing > record_segments > record_start/end 线性铺满 tick 区间。
     """
+    map_name_for_effects = map_name
     del map_name
 
     import pandas as pd
@@ -616,4 +637,111 @@ def extract_radar_timeline_impl(
                 payload.update({"x": x, "y": y})
             timeline[frame_index].setdefault("shots", []).append(payload)
 
-    return timeline
+    if not include_effect_tracks:
+        return timeline
+
+    effect_payload: dict[str, Any] = {
+        "version": 1,
+        "capabilities": {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effects": [],
+        "warnings": [],
+        "parse_ms": 0.0,
+    }
+    try:
+        from app.parser.replay_effects import extract_dynamic_effect_tracks
+
+        effect_payload = extract_dynamic_effect_tracks(
+            parser,
+            start_tick=int(start_tick),
+            end_tick=int(end_tick),
+            tick_rate=float(demo_tick_rate),
+            map_name=str(map_name_for_effects or "") or None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("replay effect tracks failed: %s", exc)
+        effect_payload["warnings"] = [f"effect extract failed: {type(exc).__name__}: {exc}"]
+
+    return {
+        "frames": timeline,
+        "effect_tracks_version": int(effect_payload.get("version") or 1),
+        "effect_capabilities": effect_payload.get("capabilities") or {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": effect_payload.get("effects") or [],
+        "effect_warnings": effect_payload.get("warnings") or [],
+        "effect_parse_ms": effect_payload.get("parse_ms"),
+    }
+
+
+def extract_replay_effects(
+    *,
+    demo_path: str,
+    map_name: str,
+    start_tick: int,
+    end_tick: int,
+    demo_tick_rate: float = 64.0,
+) -> dict[str, Any]:
+    """Isolated-worker wrapper: smoke/inferno effect tracks for a tick window."""
+    try:
+        result = extract_replay_effects_isolated(
+            demo_path=demo_path,
+            map_name=map_name,
+            start_tick=int(start_tick),
+            end_tick=int(end_tick),
+            demo_tick_rate=float(demo_tick_rate),
+        )
+    except Exception as exc:
+        logger.warning("replay effects isolated parse failed: %s", exc)
+        raise
+    if isinstance(result, dict):
+        return result
+    return {
+        "effect_tracks_version": 1,
+        "effect_capabilities": {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": [],
+        "effect_warnings": ["invalid worker payload"],
+    }
+
+
+def extract_replay_effects_impl(
+    *,
+    demo_path: str,
+    map_name: str,
+    start_tick: int,
+    end_tick: int,
+    demo_tick_rate: float = 64.0,
+) -> dict[str, Any]:
+    """Runs inside parse_worker: only dynamic utility effect tracks."""
+    from demoparser2 import DemoParser
+
+    from app.parser.replay_effects import extract_dynamic_effect_tracks
+
+    parser = DemoParser(demo_path)
+    payload = extract_dynamic_effect_tracks(
+        parser,
+        start_tick=int(start_tick),
+        end_tick=int(end_tick),
+        tick_rate=float(demo_tick_rate),
+        map_name=str(map_name or "") or None,
+    )
+    return {
+        "effect_tracks_version": int(payload.get("version") or 1),
+        "effect_capabilities": payload.get("capabilities") or {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": payload.get("effects") or [],
+        "effect_warnings": payload.get("warnings") or [],
+        "effect_parse_ms": payload.get("parse_ms"),
+    }

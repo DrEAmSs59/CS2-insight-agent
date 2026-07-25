@@ -2875,11 +2875,16 @@ async def get_demo_replay(req: DemoReplayRequest):
         duration_sec=duration_sec,
         demo_tick_rate=req.tick_rate,
         include_all_players=True,
+        include_effect_tracks=False,
     )
     try:
         transform = lookup_map_data(map_key)
     except (KeyError, OSError):
         transform = None
+
+    if isinstance(frames, dict):
+        frames = list(frames.get("frames") or [])
+
     return {
         "frames": frames,
         "map_name": map_key or "unknown",
@@ -2888,6 +2893,72 @@ async def get_demo_replay(req: DemoReplayRequest):
         "fps": req.fps,
         "start_tick": req.start_tick,
         "end_tick": req.end_tick,
+        "effect_tracks_version": 1,
+        "effect_capabilities": {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": [],
+        "effects_pending": True,
+    }
+
+
+@app.post("/api/demo/replay/effects")
+async def get_demo_replay_effects(req: DemoReplayRequest):
+    """Async sidecar: sparse smoke/inferno tracks for an already-loaded replay window."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    from .radar.radar_data_extractor import extract_replay_effects
+
+    map_key = str(req.map_name or "unknown").strip().lower()
+    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+
+    try:
+        payload = await asyncio.to_thread(
+            extract_replay_effects,
+            demo_path=str(dem_path),
+            map_name=map_key,
+            start_tick=req.start_tick,
+            end_tick=req.end_tick,
+            demo_tick_rate=req.tick_rate,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail the round once frames are playable
+        return {
+            "map_name": map_key or "unknown",
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": 1,
+            "effect_capabilities": {
+                "inferno_cells": False,
+                "smoke_voxels": False,
+                "smoke_mode": "legacy_circle",
+            },
+            "effect_tracks": [],
+            "effect_warnings": [f"{type(exc).__name__}: {exc}"],
+            "effects_pending": False,
+        }
+
+    return {
+        "map_name": map_key or "unknown",
+        "start_tick": req.start_tick,
+        "end_tick": req.end_tick,
+        "effect_tracks_version": int(payload.get("effect_tracks_version") or 1),
+        "effect_capabilities": payload.get("effect_capabilities") or {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": payload.get("effect_tracks") or [],
+        "effect_warnings": payload.get("effect_warnings") or [],
+        "effect_parse_ms": payload.get("effect_parse_ms"),
+        "effects_pending": False,
     }
 
 

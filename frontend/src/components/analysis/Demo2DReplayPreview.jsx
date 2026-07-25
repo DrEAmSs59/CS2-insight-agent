@@ -15,10 +15,11 @@ import {
 import API, { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
+import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
 
 const MAP_SIZE = 1024;
 const SAMPLE_HZ = 32;
-const REPLAY_CACHE_VERSION = 2;
+const REPLAY_CACHE_VERSION = 4;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
 
@@ -406,7 +407,7 @@ function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrier
   );
 }
 
-function GrenadeEffectMarker({ grenade, motionDuration }) {
+function GrenadeEffectMarker({ grenade, motionDuration, useAreaFallback = true }) {
   const visual = grenadeVisual(grenade.kind);
   const title = `${safeLabel(grenade.actor, "未知玩家")} ${safeLabel(grenade.kind, "投掷物")}`;
   const teamColor = grenade.teamColor || "#fbbf24";
@@ -421,6 +422,16 @@ function GrenadeEffectMarker({ grenade, motionDuration }) {
   if (/烟|smoke/i.test(grenade.kind)) {
     const remaining = Math.max(0, grenade.duration - grenade.effectAge);
     const ring = clamp(remaining / Math.max(0.01, grenade.duration), 0, 1);
+    if (!useAreaFallback) {
+      return (
+        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2" style={style} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
+          <div className="relative flex h-5 w-5 items-center justify-center">
+            <svg viewBox="0 0 20 20" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="10" cy="10" r="8" fill="none" stroke={teamColor} strokeWidth="1.4" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
+            <HudEquipmentIcon stem="smokegrenade" className="h-3 w-3 drop-shadow" />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="demo-effect-shell pointer-events-none absolute z-10 h-[32px] w-[32px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ ...style, backgroundColor: `${teamColor}18`, boxShadow: `0 0 5px ${teamColor}2e` }} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
         <svg viewBox="0 0 32 32" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="16" cy="16" r="14" fill="none" stroke={teamColor} strokeWidth="1.6" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
@@ -435,6 +446,16 @@ function GrenadeEffectMarker({ grenade, motionDuration }) {
   if (/燃|火|molotov|inferno|incendiary/i.test(grenade.kind)) {
     const remaining = Math.max(0, grenade.duration - grenade.effectAge);
     const ring = clamp(remaining / Math.max(0.01, grenade.duration), 0, 1);
+    if (!useAreaFallback) {
+      return (
+        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2" style={style} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
+          <div className="relative flex h-5 w-5 items-center justify-center">
+            <svg viewBox="0 0 20 20" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="10" cy="10" r="8" fill="none" stroke={teamColor} strokeWidth="1.4" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
+            <HudEquipmentIcon stem={visual.stem} className="h-3 w-3 drop-shadow" />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="demo-effect-shell pointer-events-none absolute z-10 h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ ...style, backgroundColor: `${teamColor}1c`, boxShadow: `0 0 6px ${teamColor}38` }} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
         <svg viewBox="0 0 30 30" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="15" cy="15" r="13" fill="none" stroke={teamColor} strokeWidth="1.6" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
@@ -469,6 +490,8 @@ export default function Demo2DReplayPreview({
   const rounds = workspace?.rounds || [];
   const [roundNumber, setRoundNumber] = useState(initialRound || rounds[0]?.round_number || 1);
   const [frames, setFrames] = useState([]);
+  const [effectTracks, setEffectTracks] = useState([]);
+  const [effectCapabilities, setEffectCapabilities] = useState(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -478,13 +501,15 @@ export default function Demo2DReplayPreview({
   const [playerLabelMode, setPlayerLabelMode] = useState("number");
   const [responseTransform, setResponseTransform] = useState(null);
   const [replayFps, setReplayFps] = useState(SAMPLE_HZ);
-  const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, shots: true });
+  const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, utilityAreas: true, shots: true });
   const cacheRef = useRef(new Map());
   const framePositionRef = useRef(0);
 
   useEffect(() => {
     setRoundNumber(initialRound || rounds[0]?.round_number || 1);
     setFrames([]);
+    setEffectTracks([]);
+    setEffectCapabilities(null);
     setFrameIndex(0);
     setPlaying(false);
     setResponseTransform(null);
@@ -520,20 +545,7 @@ export default function Demo2DReplayPreview({
     if (!selectedRound || !demoPath) return undefined;
     const replayStartTick = Number(selectedRound.freeze_end_tick || selectedRound.start_tick);
     const key = `v${REPLAY_CACHE_VERSION}:${SAMPLE_HZ}:${demoPath}:${selectedRound.round_number}:${replayStartTick}:${selectedRound.end_tick}`;
-    const cached = cacheRef.current.get(key);
-    if (cached) {
-      setFrames(cached.frames);
-      setResponseTransform(cached.mapTransform || null);
-      setReplayFps(cached.fps || SAMPLE_HZ);
-      setFrameIndex(0);
-      setError("");
-      return undefined;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    setPlaying(false);
-    API.post("/demo/replay", {
+    const requestBody = {
       path: demoPath,
       map_name: mapName,
       start_tick: replayStartTick,
@@ -542,23 +554,85 @@ export default function Demo2DReplayPreview({
       fps: SAMPLE_HZ,
       pov_player_name: workspacePlayers[0]?.name || null,
       pov_steamid64: workspacePlayers[0]?.steam_id64 || null,
-    }).then(({ data }) => {
+    };
+    let cancelled = false;
+
+    const mergeEffectsIntoCache = (data) => {
+      const nextEffectTracks = Array.isArray(data?.effect_tracks) ? data.effect_tracks : [];
+      const nextCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
+        ? data.effect_capabilities
+        : null;
+      if (cancelled) return;
+      setEffectTracks(nextEffectTracks);
+      setEffectCapabilities(nextCapabilities);
+      const prev = cacheRef.current.get(key) || {};
+      cacheRef.current.set(key, {
+        ...prev,
+        effectTracks: nextEffectTracks,
+        effectCapabilities: nextCapabilities,
+        effectsReady: true,
+      });
+    };
+
+    const loadEffects = () => {
+      API.post("/demo/replay/effects", requestBody)
+        .then(({ data }) => mergeEffectsIntoCache(data))
+        .catch(() => {
+          if (cancelled) return;
+          const prev = cacheRef.current.get(key) || {};
+          cacheRef.current.set(key, { ...prev, effectsReady: true });
+        });
+    };
+
+    const cached = cacheRef.current.get(key);
+    if (cached?.frames) {
+      setFrames(cached.frames);
+      setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
+      setEffectCapabilities(cached.effectCapabilities || null);
+      setResponseTransform(cached.mapTransform || null);
+      setReplayFps(cached.fps || SAMPLE_HZ);
+      setFrameIndex(0);
+      setError(cached.frames.length ? "" : "该回合没有可用的坐标帧");
+      setLoading(false);
+      if (!cached.effectsReady) loadEffects();
+      return () => { cancelled = true; };
+    }
+
+    setLoading(true);
+    setError("");
+    setPlaying(false);
+    setEffectTracks([]);
+    setEffectCapabilities(null);
+    API.post("/demo/replay", requestBody).then(({ data }) => {
       if (cancelled) return;
       const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
       const nextTransform = data?.map_transform && typeof data.map_transform === "object"
         ? data.map_transform
         : null;
       const nextFps = Math.max(1, Number(data?.fps) || SAMPLE_HZ);
-      cacheRef.current.set(key, { frames: nextFrames, mapTransform: nextTransform, fps: nextFps });
+      cacheRef.current.set(key, {
+        frames: nextFrames,
+        mapTransform: nextTransform,
+        fps: nextFps,
+        effectTracks: [],
+        effectCapabilities: null,
+        effectsReady: false,
+      });
       setFrames(nextFrames);
       setResponseTransform(nextTransform);
       setReplayFps(nextFps);
       setFrameIndex(0);
-      if (!nextFrames.length) setError("该回合没有可用的坐标帧");
+      setLoading(false);
+      if (!nextFrames.length) {
+        setError("该回合没有可用的坐标帧");
+        return;
+      }
+      loadEffects();
     }).catch((reason) => {
-      if (!cancelled) setError(reason?.response?.data?.detail || reason?.message || "2D 回放加载失败");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        setError(reason?.response?.data?.detail || reason?.message || "2D 回放加载失败");
+        setLoading(false);
+      }
     });
     return () => { cancelled = true; };
   }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
@@ -598,6 +672,14 @@ export default function Demo2DReplayPreview({
     selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0,
   );
   const currentTick = Number(frame.tick || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0);
+  const hasSmokeAreaTracks = Boolean(
+    effectCapabilities?.smoke_voxels
+    && effectTracks.some((track) => track?.type === "smoke" && Array.isArray(track.samples) && track.samples.length),
+  );
+  const hasInfernoAreaTracks = Boolean(
+    effectCapabilities?.inferno_cells
+    && effectTracks.some((track) => track?.type === "inferno" && Array.isArray(track.samples) && track.samples.length),
+  );
   const bombState = useMemo(() => {
     let carrier = safeLabel(selectedRound?.bomb_initial_carrier);
     let status = carrier ? "carried" : "unknown";
@@ -893,7 +975,7 @@ export default function Demo2DReplayPreview({
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-cs2-border pt-3">
           <div className="flex flex-wrap gap-2">
-            {[{ key: "traces", icon: Route, label: "走位轨迹" }, { key: "kills", icon: Swords, label: "击杀连线" }, { key: "shots", icon: Crosshair, label: "射击弹道" }, { key: "grenades", icon: Bomb, label: "投掷物" }].map(({ key, icon: Icon, label }) => <button key={key} type="button" aria-pressed={layers[key]} onClick={() => toggleLayer(key)} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-semibold ${layers[key] ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border text-cs2-text-muted"}`}><Icon className="h-3 w-3" />{label}</button>)}
+            {[{ key: "traces", icon: Route, label: "走位轨迹" }, { key: "kills", icon: Swords, label: "击杀连线" }, { key: "shots", icon: Crosshair, label: "射击弹道" }, { key: "grenades", icon: Bomb, label: "投掷物" }, { key: "utilityAreas", icon: MapIcon, label: "烟火区域" }].map(({ key, icon: Icon, label }) => <button key={key} type="button" aria-pressed={layers[key]} onClick={() => toggleLayer(key)} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-semibold ${layers[key] ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border text-cs2-text-muted"}`}><Icon className="h-3 w-3" />{label}</button>)}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 text-[9px] font-semibold text-cs2-text-muted" aria-label="时间轴事件图例"><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-rose-400" />击杀</span><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-300" />道具</span></div>
@@ -922,13 +1004,36 @@ export default function Demo2DReplayPreview({
           {error && <div className="absolute inset-0 z-30 flex items-center justify-center p-8 text-center text-[11px] text-cs2-text-muted">{error}</div>}
           <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: `translate(-50%, -50%) scale(${radarZoom})` }}>
             <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
+            <ReplayAreaEffectsCanvas
+              tracks={effectTracks}
+              currentTick={currentTick}
+              transform={transform}
+              mapLayer={hasMapLayers ? mapLayer : "upper"}
+              enabled={Boolean(layers.utilityAreas)}
+              capabilities={effectCapabilities}
+            />
             <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
               {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
               {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
               {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="0.12" strokeLinecap="round" opacity="1" />; })}
               {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="0.205" strokeLinecap="round" strokeLinejoin="round" opacity="1" />)}
             </svg>
-            {recentEvents.grenades.map((grenade) => <GrenadeEffectMarker key={`grenade-${grenade.throwTick}-${grenade.actor}-${grenade.kind}`} grenade={grenade} motionDuration={motionDuration} />)}
+            {recentEvents.grenades.map((grenade) => {
+              const isSmoke = /烟|smoke/i.test(grenade.kind);
+              const isFire = /燃|火|molotov|inferno|incendiary/i.test(grenade.kind);
+              const useAreaFallback = !(
+                (isSmoke && hasSmokeAreaTracks && layers.utilityAreas)
+                || (isFire && hasInfernoAreaTracks && layers.utilityAreas)
+              );
+              return (
+                <GrenadeEffectMarker
+                  key={`grenade-${grenade.throwTick}-${grenade.actor}-${grenade.kind}`}
+                  grenade={grenade}
+                  motionDuration={motionDuration}
+                  useAreaFallback={useAreaFallback}
+                />
+              );
+            })}
             {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 ${bombState.status === "dropped" ? "z-20" : "z-[5]"} ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-5 w-5 items-center justify-center rounded-[3px] border border-amber-100 bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,.55)]"><HudEquipmentIcon stem="c4" className="h-3.5 w-3.5 brightness-0" /></div></div>}
             {markerPlayers.map((player) => {
               const isBlue = isBlueReplaySide(replaySideForTeamKey(player.team_key, selectedRound), player.team_key === "a");
