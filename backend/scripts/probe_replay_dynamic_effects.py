@@ -367,21 +367,13 @@ def probe_parse_grenades(parser: Any, log: ProbeLog) -> dict[str, Any]:
 _GRENADE_BASE_COLUMNS = {"grenade_type", "grenade_entity_id", "x", "y", "z", "tick", "steamid", "name"}
 
 
-def probe_grenade_extra_props(
-    parser: Any,
+def _describe_frame_props(
+    frame: pd.DataFrame,
     props: list[str],
     log: ProbeLog,
     label: str,
-) -> tuple[dict[str, Any], pd.DataFrame | None]:
-    """parse_grenades(extra=[...])：逐属性检查是否真的出现在返回列中及其值形态。"""
-    fn = getattr(parser, "parse_grenades", None)
-    if not callable(fn):
-        return {"status": "api_missing"}, None
-    ok, raw, error = capture(lambda: fn(extra=props))
-    if not ok:
-        log.write(f"  {label} parse_grenades(extra=...): ERROR {error['error_type']}: {error['error'][:200]}")
-        return {"status": "error", "error": error}, None
-    frame = _to_df(raw)
+) -> dict[str, Any]:
+    """逐属性检查是否出现在 DataFrame 列中及其值形态。"""
     out: dict[str, Any] = {
         "status": "ok",
         "rows": int(len(frame)),
@@ -391,7 +383,7 @@ def probe_grenade_extra_props(
     for prop in props:
         if prop not in frame.columns:
             out["props"][prop] = {"exported": False}
-            log.write(f"  {label} extra prop {prop}: NOT exported (column missing)")
+            log.write(f"  {label} prop {prop}: NOT exported (column missing)")
             continue
         column = frame[prop]
         non_null = column.dropna()
@@ -411,10 +403,61 @@ def probe_grenade_extra_props(
             entry["array_like"] = False
         out["props"][prop] = entry
         log.write(
-            f"  {label} extra prop {prop}: exported dtype={entry['dtype']} "
+            f"  {label} prop {prop}: exported dtype={entry['dtype']} "
             f"non_null={entry['non_null_rows']} type={entry.get('python_value_type')} "
             f"array_like={entry.get('array_like')}"
         )
+    return out
+
+
+def probe_grenade_extra_props(
+    parser: Any,
+    props: list[str],
+    log: ProbeLog,
+    label: str,
+) -> tuple[dict[str, Any], pd.DataFrame | None]:
+    """parse_grenades(extra=[...])：逐属性检查是否真的出现在返回列中及其值形态。"""
+    fn = getattr(parser, "parse_grenades", None)
+    if not callable(fn):
+        return {"status": "api_missing"}, None
+    ok, raw, error = capture(lambda: fn(extra=props))
+    if not ok:
+        log.write(f"  {label} parse_grenades(extra=...): ERROR {error['error_type']}: {error['error'][:200]}")
+        return {"status": "error", "error": error}, None
+    frame = _to_df(raw)
+    return _describe_frame_props(frame, props, log, f"{label} extra"), frame
+
+
+def probe_parse_infernos(
+    parser: Any,
+    props: list[str],
+    log: ProbeLog,
+) -> tuple[dict[str, Any], pd.DataFrame | None]:
+    """parse_infernos(extra=[...])：CInferno 专用入口（lean fork cs2insight2+）。"""
+    fn = getattr(parser, "parse_infernos", None)
+    if not callable(fn):
+        log.write("  parse_infernos: API missing")
+        return {"status": "api_missing"}, None
+    ok, raw, error = capture(lambda: fn(extra=props))
+    if not ok:
+        log.write(f"  parse_infernos(extra=...): ERROR {error['error_type']}: {error['error'][:200]}")
+        return {"status": "error", "error": error}, None
+    frame = _to_df(raw)
+    out = _describe_frame_props(frame, props, log, "inferno parse_infernos")
+    if not frame.empty and "grenade_type" in frame.columns:
+        out["grenade_type_counts"] = json_safe(frame["grenade_type"].value_counts().to_dict())
+    if not frame.empty and "m_fireCount" in frame.columns:
+        counts = pd.to_numeric(frame["m_fireCount"], errors="coerce").dropna()
+        if len(counts) > 0:
+            out["fire_count_stats"] = {
+                "min": float(counts.min()),
+                "max": float(counts.max()),
+                "mean": float(counts.mean()),
+            }
+            log.write(
+                f"  parse_infernos fire_count: min={counts.min()} max={counts.max()} "
+                f"mean={counts.mean():.2f} rows={len(frame)}"
+            )
     return out, frame
 
 
@@ -645,9 +688,14 @@ def run_probe(
         parser, SMOKE_EXTRA_PROPS, log, "smoke"
     )
 
-    log.write("=== inferno props via parse_grenades(extra=...) ===")
+    log.write("=== inferno props via parse_grenades(extra=...) (legacy path; CInferno 通常不在此) ===")
     summary["inferno_grenade_extra"], _ = probe_grenade_extra_props(
         parser, INFERNO_PROPS, log, "inferno"
+    )
+
+    log.write("=== inferno props via parse_infernos(extra=...) ===")
+    summary["inferno_parse_infernos"], _inferno_frame = probe_parse_infernos(
+        parser, INFERNO_PROPS, log
     )
 
     # 次要路径：parse_ticks 面向玩家实体，验证其对这些属性名的实际行为（预期静默丢弃）
@@ -724,7 +772,11 @@ def run_probe(
             summary["voxel_records_error"] = error
 
     summary["smoke_decision"] = decide_smoke_status(summary["updated_fields"], summary["smoke_grenade_extra"])
-    summary["inferno_decision"] = decide_inferno_status(summary["updated_fields"], summary["inferno_grenade_extra"])
+    # 优先用 parse_infernos；旧 fork 无该 API 时回退到 parse_grenades(extra=...)
+    inferno_props_for_decision = summary["inferno_parse_infernos"]
+    if inferno_props_for_decision.get("status") != "ok":
+        inferno_props_for_decision = summary["inferno_grenade_extra"]
+    summary["inferno_decision"] = decide_inferno_status(summary["updated_fields"], inferno_props_for_decision)
     log.write("=== decisions ===")
     log.write(f"  smoke:   {json.dumps(summary['smoke_decision'], ensure_ascii=False)}")
     log.write(f"  inferno: {json.dumps(summary['inferno_decision'], ensure_ascii=False)}")

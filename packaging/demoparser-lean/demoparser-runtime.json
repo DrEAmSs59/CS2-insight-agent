@@ -1,8 +1,8 @@
-{
+﻿{
   "upstream_url": "https://github.com/LaihoE/demoparser.git",
   "tag": "v0.41.4",
   "commit": "db3ba5f7a1b02b8cb27d0063d52649883a98469c",
-  "distribution_version": "0.41.4+cs2insight1",
+  "distribution_version": "0.41.4+cs2insight2",
   "maturin_version": "1.14.1",
-  "patch_sha256": "25aba8777c153d4a9a3801c297e0e6a26a89bb6638f5187236d36ed6d36b0677"
+  "patch_sha256": "b28755148e5f1e2ef71d8494f5983f8e0d4c2dbad85e1b6ce42e26e901929e19"
 }
