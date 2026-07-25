@@ -151,6 +151,10 @@ _enqueue_striped_locks: list[asyncio.Lock] = []
 _enqueue_striped_init_lock = asyncio.Lock()
 _ENQUEUE_STRIPE_COUNT = 64
 
+# /api/demo/replay single-flight: identical cache keys share one parse Future
+_replay_jobs: dict[str, asyncio.Future] = {}
+_replay_jobs_lock = asyncio.Lock()
+
 
 def infer_demo_source(filename: str, server_name: str | None = None) -> str:
     fn = filename.lower()
@@ -2885,6 +2889,13 @@ async def get_demo_replay(req: DemoReplayRequest):
             422,
             f"Replay request would generate about {estimated_frame_count} frames; maximum is 6000",
         )
+    from .parser.replay_frames_cache import (
+        REPLAY_FRAMES_CACHE_VERSION,
+        demo_fingerprint,
+        frames_cache_key,
+        load_frames,
+        save_frames,
+    )
     from .radar.radar_data_extractor import extract_radar_timeline
     from .radar.radar_map_assets import lookup_map_data
 
@@ -2892,57 +2903,164 @@ async def get_demo_replay(req: DemoReplayRequest):
     if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
         map_key = f"de_{map_key}"
 
-    frames = await asyncio.to_thread(
-        extract_radar_timeline,
-        demo_path=str(dem_path),
-        map_name=map_key,
-        pov_player_name=req.pov_player_name,
-        pov_steamid64=req.pov_steamid64,
-        start_tick=req.start_tick,
-        end_tick=req.end_tick,
-        fps=req.fps,
-        duration_sec=duration_sec,
-        demo_tick_rate=req.tick_rate,
-        include_all_players=True,
-        include_effect_tracks=True,
+    fp_meta = demo_fingerprint(str(dem_path))
+    cache_key = frames_cache_key(
+        str(dem_path),
+        round_number=None,
+        start_tick=int(req.start_tick),
+        end_tick=int(req.end_tick),
+        fps=float(req.fps),
+        transform_version=1,
     )
+
+    def _payload_from_cache(cached: dict[str, Any], *, frames_source: str, shared_job: bool = False) -> dict[str, Any]:
+        return {
+            "frames": list(cached.get("frames") or []),
+            "map_name": map_key or "unknown",
+            "map_transform": cached.get("map_transform"),
+            "tick_rate": req.tick_rate,
+            "fps": cached.get("fps") or req.fps,
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": int(cached.get("effect_tracks_version") or 1),
+            "effect_capabilities": cached.get("effect_capabilities") or {
+                "inferno_cells": False,
+                "smoke_voxels": False,
+                "smoke_mode": "legacy_circle",
+            },
+            "effect_tracks": list(cached.get("effect_tracks") or []),
+            "effect_warnings": list(cached.get("effect_warnings") or []),
+            "effect_parse_ms": cached.get("effect_parse_ms"),
+            "effects_pending": False,
+            "demo_fingerprint": cached.get("demo_fingerprint") or fp_meta,
+            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
+            "cache": {
+                "frames": frames_source,
+                "effects": "disk_hit" if cached.get("effect_tracks") else "miss",
+                "parsed": False,
+                "shared_job": shared_job,
+            },
+            "parse_stage": "ready",
+        }
+
+    if cache_key:
+        cached = await asyncio.to_thread(load_frames, cache_key)
+        if cached is not None:
+            return _payload_from_cache(cached, frames_source="disk_hit")
+
+    async def _build() -> dict[str, Any]:
+        frames = await asyncio.to_thread(
+            extract_radar_timeline,
+            demo_path=str(dem_path),
+            map_name=map_key,
+            pov_player_name=req.pov_player_name,
+            pov_steamid64=req.pov_steamid64,
+            start_tick=req.start_tick,
+            end_tick=req.end_tick,
+            fps=req.fps,
+            duration_sec=duration_sec,
+            demo_tick_rate=req.tick_rate,
+            include_all_players=True,
+            include_effect_tracks=True,
+        )
+        try:
+            transform = lookup_map_data(map_key)
+        except (KeyError, OSError):
+            transform = None
+
+        effect_tracks: list = []
+        effect_capabilities = {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        }
+        effect_warnings: list = []
+        effect_parse_ms = None
+        effect_tracks_version = 1
+        if isinstance(frames, dict):
+            effect_tracks = list(frames.get("effect_tracks") or [])
+            effect_capabilities = frames.get("effect_capabilities") or effect_capabilities
+            effect_warnings = list(frames.get("effect_warnings") or [])
+            effect_parse_ms = frames.get("effect_parse_ms")
+            effect_tracks_version = int(frames.get("effect_tracks_version") or 1)
+            frames = list(frames.get("frames") or [])
+
+        if cache_key:
+            await asyncio.to_thread(
+                save_frames,
+                cache_key,
+                frames=frames,
+                fps=float(req.fps),
+                start_tick=int(req.start_tick),
+                end_tick=int(req.end_tick),
+                map_transform=transform,
+                effect_tracks=effect_tracks,
+                effect_capabilities=effect_capabilities,
+                effect_warnings=effect_warnings,
+                effect_parse_ms=effect_parse_ms,
+                effect_tracks_version=effect_tracks_version,
+                demo_fingerprint_meta=fp_meta,
+            )
+
+        return {
+            "frames": frames,
+            "map_name": map_key or "unknown",
+            "map_transform": transform,
+            "tick_rate": req.tick_rate,
+            "fps": req.fps,
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": effect_tracks_version,
+            "effect_capabilities": effect_capabilities,
+            "effect_tracks": effect_tracks,
+            "effect_warnings": effect_warnings,
+            "effect_parse_ms": effect_parse_ms,
+            "effects_pending": False,
+            "demo_fingerprint": fp_meta,
+            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
+            "cache": {
+                "frames": "parsed",
+                "effects": "parsed" if effect_tracks else "miss",
+                "parsed": True,
+                "shared_job": False,
+            },
+            "parse_stage": "ready",
+        }
+
+    job_key = cache_key or f"nocache|{dem_path}|{req.start_tick}|{req.end_tick}|{req.fps}"
+    async with _replay_jobs_lock:
+        existing = _replay_jobs.get(job_key)
+        if existing is not None:
+            shared = True
+            future = existing
+        else:
+            shared = False
+            future = asyncio.get_running_loop().create_future()
+            _replay_jobs[job_key] = future
+
+    if shared:
+        result = await future
+        out = dict(result)
+        cache_meta = dict(out.get("cache") or {})
+        cache_meta["shared_job"] = True
+        if cache_meta.get("frames") == "parsed":
+            cache_meta["frames"] = "shared_job"
+        out["cache"] = cache_meta
+        return out
+
     try:
-        transform = lookup_map_data(map_key)
-    except (KeyError, OSError):
-        transform = None
-
-    effect_tracks: list = []
-    effect_capabilities = {
-        "inferno_cells": False,
-        "smoke_voxels": False,
-        "smoke_mode": "legacy_circle",
-    }
-    effect_warnings: list = []
-    effect_parse_ms = None
-    effect_tracks_version = 1
-    if isinstance(frames, dict):
-        effect_tracks = list(frames.get("effect_tracks") or [])
-        effect_capabilities = frames.get("effect_capabilities") or effect_capabilities
-        effect_warnings = list(frames.get("effect_warnings") or [])
-        effect_parse_ms = frames.get("effect_parse_ms")
-        effect_tracks_version = int(frames.get("effect_tracks_version") or 1)
-        frames = list(frames.get("frames") or [])
-
-    return {
-        "frames": frames,
-        "map_name": map_key or "unknown",
-        "map_transform": transform,
-        "tick_rate": req.tick_rate,
-        "fps": req.fps,
-        "start_tick": req.start_tick,
-        "end_tick": req.end_tick,
-        "effect_tracks_version": effect_tracks_version,
-        "effect_capabilities": effect_capabilities,
-        "effect_tracks": effect_tracks,
-        "effect_warnings": effect_warnings,
-        "effect_parse_ms": effect_parse_ms,
-        "effects_pending": False,
-    }
+        result = await _build()
+        if not future.done():
+            future.set_result(result)
+        return result
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        async with _replay_jobs_lock:
+            if _replay_jobs.get(job_key) is future:
+                _replay_jobs.pop(job_key, None)
 
 
 @app.post("/api/demo/replay/effects")
