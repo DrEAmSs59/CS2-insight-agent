@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from app.parser import replay_match_cache
@@ -48,6 +50,7 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
     cache_root = tmp_path / "replay-match"
     monkeypatch.setattr(replay_match_cache, "_cache_root", lambda: cache_root)
     write_calls: list[dict] = []
+    binary_calls: list[dict] = []
     row_groups: dict[int, list[int]] = {}
 
     class FakeDemoParser:
@@ -144,6 +147,21 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
                 )
             return pd.DataFrame(rows)
 
+        @staticmethod
+        def read_replay_parquet_round_binary(
+            parquet_path,
+            row_group,
+            sample_ticks,
+            metadata_json,
+        ):
+            binary_calls.append({
+                "parquet_path": parquet_path,
+                "row_group": row_group,
+                "sample_ticks": list(sample_ticks),
+                "metadata": json.loads(metadata_json),
+            })
+            return b"CS2RPL01-binary-test"
+
     monkeypatch.setattr(demoparser2, "DemoParser", FakeDemoParser)
     monkeypatch.setattr(
         replay_effects,
@@ -190,11 +208,11 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
         str(demo_path),
         start_tick=100,
         end_tick=164,
-        fps=8,
+        fps=replay_match_cache.REPLAY_MATCH_FPS,
         tick_rate=64,
     )
     assert round_one is not None
-    assert len(round_one["frames"]) == 8
+    assert len(round_one["frames"]) == 32
     assert round_one["frames"][0]["players"][0]["name"] == "Alpha"
     assert round_one["frames"][0]["players"][0]["inventory"] == ["AK-47", "Smoke Grenade"]
     assert round_one["frames"][0]["players"][0]["is_teammate"] is True
@@ -208,13 +226,28 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
         str(demo_path),
         start_tick=200,
         end_tick=264,
-        fps=8,
+        fps=replay_match_cache.REPLAY_MATCH_FPS,
         tick_rate=64,
     )
     assert round_two is not None
     assert round_two["frames"][0]["players"][0]["team"] == "CT"
     assert round_two["frames"][0]["players"][0]["is_teammate"] is True
     assert round_two["effect_tracks"][0]["side"] == "CT"
+
+    binary = replay_match_cache.load_match_replay_round_binary(
+        str(demo_path),
+        start_tick=100,
+        end_tick=164,
+        fps=replay_match_cache.REPLAY_MATCH_FPS,
+        tick_rate=64,
+    )
+    assert binary == b"CS2RPL01-binary-test"
+    assert binary_calls[0]["sample_ticks"] == write_calls[0]["ticks"][:32]
+    assert binary_calls[0]["metadata"]["shots"] == [
+        {"tick": 132, "actor": "Alpha", "weapon": "ak47"}
+    ]
+    assert binary_calls[0]["metadata"]["cache"]["frames"] == "parquet_binary_hit"
+    assert binary_calls[0]["metadata"]["effects_pending"] is True
 
     again = replay_match_cache.materialize_match_replay_parquet_impl(
         demo_path=str(demo_path),

@@ -7,13 +7,14 @@ import json
 import logging
 import math
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 REPLAY_MATCH_CACHE_VERSION = 2
-REPLAY_MATCH_FPS = 8.0
+REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (
     "X",
@@ -623,15 +624,31 @@ def materialize_match_replay_parquet_impl(
     }
 
 
-def _load_meta(cache_key: str) -> dict[str, Any] | None:
-    parquet_path, meta_path = _cache_paths(cache_key)
-    if not parquet_path.is_file() or not meta_path.is_file():
-        return None
+@lru_cache(maxsize=32)
+def _load_meta_file(
+    meta_path_text: str,
+    mtime_ns: int,
+    size: int,
+) -> dict[str, Any] | None:
+    del mtime_ns, size  # cache-key-only file identity
+    meta_path = Path(meta_path_text)
     try:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("whole-match replay metadata load failed: %s", exc)
         return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _load_meta(cache_key: str) -> dict[str, Any] | None:
+    parquet_path, meta_path = _cache_paths(cache_key)
+    if not parquet_path.is_file() or not meta_path.is_file():
+        return None
+    try:
+        stat = meta_path.stat()
+    except OSError:
+        return None
+    payload = _load_meta_file(str(meta_path), int(stat.st_mtime_ns), int(stat.st_size))
     if (
         not isinstance(payload, dict)
         or payload.get("version") != REPLAY_MATCH_CACHE_VERSION
@@ -713,3 +730,66 @@ def load_match_replay_round(
         "cache_key": cache_key,
         "read_ms": round((time.perf_counter() - started) * 1000, 2),
     }
+
+
+def load_match_replay_round_binary(
+    demo_path: str,
+    *,
+    start_tick: int,
+    end_tick: int,
+    fps: float,
+    tick_rate: float,
+) -> bytes | None:
+    """Read one row group into Rust's compact TypedArray-ready protocol."""
+    from demoparser2 import DemoParser
+
+    cache_key = replay_match_cache_key(demo_path, fps=fps, tick_rate=tick_rate)
+    if not cache_key:
+        return None
+    meta = _load_meta(cache_key)
+    if meta is None:
+        return None
+    spec = next(
+        (
+            item
+            for item in meta.get("rounds") or []
+            if _int(item.get("start_tick")) == int(start_tick)
+            and _int(item.get("end_tick")) == int(end_tick)
+        ),
+        None,
+    )
+    if not isinstance(spec, dict):
+        return None
+    binary_reader = getattr(DemoParser, "read_replay_parquet_round_binary", None)
+    if binary_reader is None:
+        return None
+    parquet_path, _ = _cache_paths(cache_key)
+    metadata = {
+        "round_number": _int(spec.get("round_number")),
+        "start_tick": int(start_tick),
+        "end_tick": int(end_tick),
+        "tick_rate": float(meta.get("tick_rate") or tick_rate),
+        "fps": float(meta.get("fps") or fps),
+        "map_transform": meta.get("map_transform"),
+        "pov_player_name": meta.get("pov_player_name"),
+        "pov_steamid64": meta.get("pov_steamid64"),
+        "shots": [dict(item) for item in spec.get("shots") or [] if isinstance(item, dict)],
+        "effect_tracks_version": int(meta.get("effect_tracks_version") or 1),
+        "effect_capabilities": meta.get("effect_capabilities") or {},
+        "effect_warnings": list(meta.get("effect_warnings") or []),
+        "effects_pending": True,
+        "demo_fingerprint": meta.get("demo_fingerprint"),
+        "cache_key": cache_key,
+        "cache": {
+            "frames": "parquet_binary_hit",
+            "effects": "pending",
+            "parsed": False,
+        },
+    }
+    packet = binary_reader(
+        str(parquet_path),
+        _int(spec.get("row_group")),
+        [_int(tick) for tick in spec.get("sample_ticks") or []],
+        json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+    )
+    return bytes(packet)

@@ -6,6 +6,7 @@ import {
   interpolateReplayFrame,
   lerpAngle,
   lerpNumber,
+  replaySampleStrideForRate,
   replayPositionForTime,
   resolvePlaybackStartSeconds,
   secondsForFramePosition,
@@ -44,6 +45,28 @@ describe("findPreviousFrameIndex / frameBracket", () => {
     const { ratio, index } = frameBracket(frames, 110);
     expect(index).toBe(1);
     expect(ratio).toBeCloseTo(0.25, 5);
+  });
+
+  it("uses wider source-frame brackets for high-speed playback", () => {
+    const denseFrames = Array.from({ length: 5 }, (_, index) => ({
+      tick: 100 + index * 2,
+      time_sec: index / 32,
+      players: [{ name: "a", steamid64: "1", x: index * 10, y: 0, z: 0, yaw: 0 }],
+    }));
+    const bracket = frameBracket(denseFrames, Number.NaN, 3 / 32, 4);
+    expect(bracket.index).toBe(0);
+    expect(bracket.nextIndex).toBe(4);
+    expect(bracket.ratio).toBeCloseTo(0.75, 5);
+    expect(interpolateReplayFrame(denseFrames, Number.NaN, 3 / 32, 4).players[0].x).toBeCloseTo(30, 5);
+  });
+});
+
+describe("replaySampleStrideForRate", () => {
+  it("maps 1x/2x/4x playback to 32/16/8Hz source anchors", () => {
+    expect(replaySampleStrideForRate(0.5)).toBe(1);
+    expect(replaySampleStrideForRate(1)).toBe(1);
+    expect(replaySampleStrideForRate(2)).toBe(2);
+    expect(replaySampleStrideForRate(4)).toBe(4);
   });
 });
 

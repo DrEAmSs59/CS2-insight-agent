@@ -208,7 +208,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     const shell = buildShell();
     renderPage(shell);
 
-    fireEvent.click(screen.getByRole("button", { name: "切换 Demo" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "切换 Demo" })
+        .find((button) => button.getAttribute("aria-haspopup") === "listbox"),
+    );
     const listbox = screen.getByRole("listbox", { name: "本次载入的 Demo" });
     const options = within(listbox).getAllByRole("option");
     expect(options).toHaveLength(2);
@@ -245,7 +248,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     renderPage(shell);
 
     expect(screen.queryByText("PREVIEW")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "重置 Demo" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "切换 Demo" })
+        .find((button) => !button.hasAttribute("aria-haspopup")),
+    );
     expect(shell.handleResetDemo).toHaveBeenCalledTimes(1);
   });
 
@@ -291,7 +297,11 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('[data-event-kind="utility"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("bg-orange-600");
-    expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 8 }));
+    expect(API.post).toHaveBeenCalledWith(
+      "/demo/replay/binary",
+      expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 32 }),
+      { responseType: "arraybuffer" },
+    );
     expect(screen.queryByText(/^nan$/i)).toBeNull();
     expect(screen.queryByText("16777215")).toBeNull();
     expect(screen.getByText("1:55")).toBeTruthy();
@@ -416,8 +426,9 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
 
     await waitFor(() => expect(API.post).toHaveBeenCalledWith(
-      "/demo/replay",
-      expect.objectContaining({ map_name: "de_cache", fps: 8 }),
+      "/demo/replay/binary",
+      expect.objectContaining({ map_name: "de_cache", fps: 32 }),
+      { responseType: "arraybuffer" },
     ));
     await waitFor(() => expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')).toBeTruthy());
     expect(screen.getByAltText("de_cache 雷达地图")).toBeTruthy();

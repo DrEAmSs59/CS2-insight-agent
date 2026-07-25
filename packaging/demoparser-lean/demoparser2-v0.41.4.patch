@@ -1741,7 +1741,7 @@ index fc83ce4..b9b4afb 100644
              }
          }
 diff --git a/src/python/Cargo.lock b/src/python/Cargo.lock
-index 2e62735..22db480 100644
+index 2e62735..75cc881 100644
 --- a/src/python/Cargo.lock
 +++ b/src/python/Cargo.lock
 @@ -9,6 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2001,7 +2001,7 @@ index 2e62735..22db480 100644
  [[package]]
  name = "demoparser2"
 -version = "0.40.2"
-+version = "0.41.4+cs2insight4"
++version = "0.41.4+cs2insight5"
  dependencies = [
   "ahash",
   "csgoproto",
@@ -3716,14 +3716,14 @@ index 2e62735..22db480 100644
  name = "zstd"
  version = "0.13.3"
 diff --git a/src/python/Cargo.toml b/src/python/Cargo.toml
-index 99f044e..3194805 100644
+index 99f044e..a5429a1 100644
 --- a/src/python/Cargo.toml
 +++ b/src/python/Cargo.toml
 @@ -1,6 +1,6 @@
  [package]
  name = "demoparser2"
 -version = "0.41.4"
-+version = "0.41.4+cs2insight4"
++version = "0.41.4+cs2insight5"
  edition = "2021"
  
  
@@ -3743,7 +3743,7 @@ index 99f044e..3194805 100644
  [dependencies.parser]
  path = "../parser"
 diff --git a/src/python/demoparser2.pyi b/src/python/demoparser2.pyi
-index bbdb48e..d087278 100644
+index bbdb48e..37cc3da 100644
 --- a/src/python/demoparser2.pyi
 +++ b/src/python/demoparser2.pyi
 @@ -36,6 +36,12 @@ class DemoParser:
@@ -3759,7 +3759,7 @@ index bbdb48e..d087278 100644
      def parse_player_info(self) -> pd.DataFrame: ...
      def parse_item_drops(self) -> pd.DataFrame: ...
      def parse_skins(self) -> pd.DataFrame: ...
-@@ -54,6 +60,18 @@ class DemoParser:
+@@ -54,6 +60,25 @@ class DemoParser:
          other: Optional[Sequence[str]] = None,
      ) -> List[Tuple[str, pd.DataFrame]]: ...
      def parse_voice(self) -> List[VoiceData]: ...
@@ -3775,6 +3775,13 @@ index bbdb48e..d087278 100644
 +        parquet_path: str,
 +        row_group: int,
 +    ) -> pd.DataFrame: ...
++    @staticmethod
++    def read_replay_parquet_round_binary(
++        parquet_path: str,
++        row_group: int,
++        sample_ticks: Sequence[int],
++        metadata_json: str,
++    ) -> bytes: ...
      def parse_ticks(
          self,
          wanted_props: Sequence[str],
@@ -3799,7 +3806,7 @@ index 7d2deac..507e224 100644
 \ No newline at end of file
 +overflow-checks = false
 diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
-index c950726..1b0447c 100644
+index c950726..30fa2a4 100644
 --- a/src/python/src/lib.rs
 +++ b/src/python/src/lib.rs
 @@ -1,28 +1,28 @@
@@ -3840,7 +3847,7 @@ index c950726..1b0447c 100644
  use pyo3::impl_::frompyobject::extract_struct_field;
  use pyo3::prelude::*;
  use pyo3::types::IntoPyDict;
-@@ -32,12 +32,321 @@ use pyo3::types::PyList;
+@@ -32,12 +32,661 @@ use pyo3::types::PyList;
  use pyo3::IntoPyObjectExt;
  use pyo3::{intern, Python};
  use pyo3::{PyAny, PyResult};
@@ -4160,10 +4167,350 @@ index c950726..1b0447c 100644
 +    pandas_dataframe(py, columns, names)
 +}
 +
++const REPLAY_BINARY_MAGIC: &[u8; 8] = b"CS2RPL01";
++const REPLAY_BINARY_VERSION: u16 = 1;
++
++#[derive(Default)]
++struct ReplayBinaryRow {
++    steamid: u64,
++    name_id: u32,
++    team_num: i8,
++    flags: u8,
++    health: u16,
++    armor: u16,
++    balance: i32,
++    equipment_value: i32,
++    x: f32,
++    y: f32,
++    z: f32,
++    yaw: f32,
++    flash_duration: f32,
++    inventory_id: u32,
++    active_weapon_id: u32,
++    active_weapon_name_id: u32,
++    player_color_id: u32,
++}
++
++fn replay_field_i64(field: &ParquetField) -> Option<i64> {
++    match field {
++        ParquetField::Byte(value) => Some(i64::from(*value)),
++        ParquetField::Short(value) => Some(i64::from(*value)),
++        ParquetField::Int(value) => Some(i64::from(*value)),
++        ParquetField::Long(value) => Some(*value),
++        ParquetField::UByte(value) => Some(i64::from(*value)),
++        ParquetField::UShort(value) => Some(i64::from(*value)),
++        ParquetField::UInt(value) => Some(i64::from(*value)),
++        ParquetField::ULong(value) => i64::try_from(*value).ok(),
++        _ => None,
++    }
++}
++
++fn replay_field_u64(field: &ParquetField) -> Option<u64> {
++    match field {
++        ParquetField::Byte(value) => u64::try_from(*value).ok(),
++        ParquetField::Short(value) => u64::try_from(*value).ok(),
++        ParquetField::Int(value) => u64::try_from(*value).ok(),
++        ParquetField::Long(value) => u64::try_from(*value).ok(),
++        ParquetField::UByte(value) => Some(u64::from(*value)),
++        ParquetField::UShort(value) => Some(u64::from(*value)),
++        ParquetField::UInt(value) => Some(u64::from(*value)),
++        ParquetField::ULong(value) => Some(*value),
++        _ => None,
++    }
++}
++
++fn replay_field_f32(field: &ParquetField) -> Option<f32> {
++    match field {
++        ParquetField::Float16(value) => Some(f32::from(*value)),
++        ParquetField::Float(value) => Some(*value),
++        ParquetField::Double(value) => Some(*value as f32),
++        other => replay_field_i64(other).map(|value| value as f32),
++    }
++}
++
++fn replay_field_bool(field: &ParquetField) -> Option<bool> {
++    match field {
++        ParquetField::Bool(value) => Some(*value),
++        other => replay_field_i64(other).map(|value| value != 0),
++    }
++}
++
++fn replay_intern_string(
++    value: &str,
++    ids: &mut AHashMap<String, u32>,
++    values: &mut Vec<String>,
++) -> u32 {
++    if value.is_empty() {
++        return 0;
++    }
++    if let Some(id) = ids.get(value) {
++        return *id;
++    }
++    let id = values.len() as u32;
++    let owned = value.to_string();
++    ids.insert(owned.clone(), id);
++    values.push(owned);
++    id
++}
++
++fn replay_intern_field(
++    field: &ParquetField,
++    ids: &mut AHashMap<String, u32>,
++    values: &mut Vec<String>,
++    stringify_number: bool,
++) -> u32 {
++    match field {
++        ParquetField::Str(value) => replay_intern_string(value, ids, values),
++        ParquetField::Bytes(value) => std::str::from_utf8(value.data())
++            .ok()
++            .map(|text| replay_intern_string(text, ids, values))
++            .unwrap_or(0),
++        other if stringify_number => replay_field_i64(other)
++            .map(|number| replay_intern_string(&number.to_string(), ids, values))
++            .unwrap_or(0),
++        _ => 0,
++    }
++}
++
++fn replay_packet_align(packet: &mut Vec<u8>, alignment: usize) {
++    let padding = (alignment - (packet.len() % alignment)) % alignment;
++    packet.resize(packet.len() + padding, 0);
++}
++
++fn replay_packet_u16(packet: &mut Vec<u8>, value: u16) {
++    packet.extend_from_slice(&value.to_le_bytes());
++}
++
++fn replay_packet_u32(packet: &mut Vec<u8>, value: u32) {
++    packet.extend_from_slice(&value.to_le_bytes());
++}
++
++fn replay_packet_i32(packet: &mut Vec<u8>, value: i32) {
++    packet.extend_from_slice(&value.to_le_bytes());
++}
++
++fn replay_packet_u64(packet: &mut Vec<u8>, value: u64) {
++    packet.extend_from_slice(&value.to_le_bytes());
++}
++
++fn replay_packet_f32(packet: &mut Vec<u8>, value: f32) {
++    packet.extend_from_slice(&value.to_le_bytes());
++}
++
++fn replay_parquet_binary_packet(
++    parquet_path: &str,
++    row_group: usize,
++    sample_ticks: Vec<i32>,
++    metadata_json: &str,
++) -> Result<Vec<u8>, String> {
++    if sample_ticks.is_empty() {
++        return Err("sample_ticks must not be empty".to_string());
++    }
++    let file =
++        File::open(parquet_path).map_err(|error| format!("open replay parquet failed: {error}"))?;
++    let reader = SerializedFileReader::new(file)
++        .map_err(|error| format!("read replay parquet metadata failed: {error}"))?;
++    if row_group >= reader.num_row_groups() {
++        return Err(format!("row_group {row_group} is out of range"));
++    }
++    let row_group_reader = reader
++        .get_row_group(row_group)
++        .map_err(|error| format!("open replay row group failed: {error}"))?;
++    let rows = row_group_reader
++        .get_row_iter(None)
++        .map_err(|error| format!("open replay row iterator failed: {error}"))?;
++    let tick_to_frame: AHashMap<i32, usize> = sample_ticks
++        .iter()
++        .copied()
++        .enumerate()
++        .map(|(index, tick)| (tick, index))
++        .collect();
++    let mut rows_by_frame: Vec<Vec<ReplayBinaryRow>> =
++        (0..sample_ticks.len()).map(|_| Vec::new()).collect();
++    let mut string_ids = AHashMap::default();
++    let mut strings = vec![String::new()];
++    string_ids.insert(String::new(), 0);
++
++    for row_result in rows {
++        let row = row_result.map_err(|error| format!("read replay row failed: {error}"))?;
++        let mut tick = None;
++        let mut packed = ReplayBinaryRow::default();
++        for (name, field) in row.into_columns() {
++            match name.as_str() {
++                "tick" => {
++                    tick = replay_field_i64(&field).and_then(|value| i32::try_from(value).ok())
++                }
++                "steamid" => packed.steamid = replay_field_u64(&field).unwrap_or(0),
++                "name" => {
++                    packed.name_id =
++                        replay_intern_field(&field, &mut string_ids, &mut strings, false)
++                }
++                "team_num" => {
++                    packed.team_num = replay_field_i64(&field)
++                        .and_then(|value| i8::try_from(value).ok())
++                        .unwrap_or(-1)
++                }
++                "X" => packed.x = replay_field_f32(&field).unwrap_or(0.0),
++                "Y" => packed.y = replay_field_f32(&field).unwrap_or(0.0),
++                "Z" => packed.z = replay_field_f32(&field).unwrap_or(0.0),
++                "yaw" => packed.yaw = replay_field_f32(&field).unwrap_or(0.0),
++                "is_alive" if replay_field_bool(&field).unwrap_or(false) => packed.flags |= 1,
++                "has_helmet" if replay_field_bool(&field).unwrap_or(false) => packed.flags |= 2,
++                "has_defuser" if replay_field_bool(&field).unwrap_or(false) => packed.flags |= 4,
++                "has_c4" if replay_field_bool(&field).unwrap_or(false) => packed.flags |= 8,
++                "health" => {
++                    packed.health = replay_field_i64(&field)
++                        .and_then(|value| u16::try_from(value.max(0)).ok())
++                        .unwrap_or(0)
++                }
++                "armor" => {
++                    packed.armor = replay_field_i64(&field)
++                        .and_then(|value| u16::try_from(value.max(0)).ok())
++                        .unwrap_or(0)
++                }
++                "balance" => {
++                    packed.balance = replay_field_i64(&field)
++                        .and_then(|value| i32::try_from(value.max(0)).ok())
++                        .unwrap_or(0)
++                }
++                "current_equip_value" => {
++                    packed.equipment_value = replay_field_i64(&field)
++                        .and_then(|value| i32::try_from(value.max(0)).ok())
++                        .unwrap_or(0)
++                }
++                "inventory" => {
++                    packed.inventory_id =
++                        replay_intern_field(&field, &mut string_ids, &mut strings, false)
++                }
++                "active_weapon" => {
++                    packed.active_weapon_id =
++                        replay_intern_field(&field, &mut string_ids, &mut strings, false)
++                }
++                "active_weapon_name" => {
++                    packed.active_weapon_name_id =
++                        replay_intern_field(&field, &mut string_ids, &mut strings, false)
++                }
++                "flash_duration" => {
++                    packed.flash_duration = replay_field_f32(&field).unwrap_or(0.0).max(0.0)
++                }
++                "player_color" => {
++                    packed.player_color_id =
++                        replay_intern_field(&field, &mut string_ids, &mut strings, true)
++                }
++                _ => {}
++            }
++        }
++        if packed.team_num != 2 && packed.team_num != 3 {
++            continue;
++        }
++        if let Some(frame_index) = tick.and_then(|value| tick_to_frame.get(&value).copied()) {
++            rows_by_frame[frame_index].push(packed);
++        }
++    }
++
++    let mut frame_offsets = Vec::with_capacity(sample_ticks.len() + 1);
++    let row_count = rows_by_frame.iter().map(Vec::len).sum::<usize>();
++    let mut flat_rows = Vec::with_capacity(row_count);
++    for frame_rows in rows_by_frame {
++        frame_offsets.push(flat_rows.len() as u32);
++        flat_rows.extend(frame_rows);
++    }
++    frame_offsets.push(flat_rows.len() as u32);
++
++    let mut metadata: serde_json::Value = serde_json::from_str(metadata_json)
++        .map_err(|error| format!("invalid metadata JSON: {error}"))?;
++    let metadata_object = metadata
++        .as_object_mut()
++        .ok_or_else(|| "metadata JSON must be an object".to_string())?;
++    metadata_object.insert(
++        "protocol".to_string(),
++        serde_json::Value::String("cs2-replay-binary-v1".to_string()),
++    );
++    metadata_object.insert(
++        "frame_count".to_string(),
++        serde_json::Value::from(sample_ticks.len() as u64),
++    );
++    metadata_object.insert(
++        "row_count".to_string(),
++        serde_json::Value::from(flat_rows.len() as u64),
++    );
++    metadata_object.insert(
++        "strings".to_string(),
++        serde_json::Value::Array(strings.into_iter().map(serde_json::Value::String).collect()),
++    );
++    let header = serde_json::to_vec(&metadata)
++        .map_err(|error| format!("serialize replay binary metadata failed: {error}"))?;
++    let mut packet =
++        Vec::with_capacity(header.len() + sample_ticks.len() * 8 + flat_rows.len() * 62 + 64);
++    packet.extend_from_slice(REPLAY_BINARY_MAGIC);
++    replay_packet_u16(&mut packet, REPLAY_BINARY_VERSION);
++    replay_packet_u16(&mut packet, 0);
++    replay_packet_u32(&mut packet, header.len() as u32);
++    packet.extend_from_slice(&header);
++    replay_packet_align(&mut packet, 4);
++    for tick in &sample_ticks {
++        replay_packet_i32(&mut packet, *tick);
++    }
++    for offset in &frame_offsets {
++        replay_packet_u32(&mut packet, *offset);
++    }
++    replay_packet_align(&mut packet, 8);
++    for row in &flat_rows {
++        replay_packet_u64(&mut packet, row.steamid);
++    }
++    for row in &flat_rows {
++        replay_packet_u32(&mut packet, row.name_id);
++    }
++    for row in &flat_rows {
++        packet.push(row.team_num as u8);
++    }
++    for row in &flat_rows {
++        packet.push(row.flags);
++    }
++    replay_packet_align(&mut packet, 2);
++    for row in &flat_rows {
++        replay_packet_u16(&mut packet, row.health);
++    }
++    for row in &flat_rows {
++        replay_packet_u16(&mut packet, row.armor);
++    }
++    replay_packet_align(&mut packet, 4);
++    for row in &flat_rows {
++        replay_packet_i32(&mut packet, row.balance);
++    }
++    for row in &flat_rows {
++        replay_packet_i32(&mut packet, row.equipment_value);
++    }
++    let f32_getters: [fn(&ReplayBinaryRow) -> f32; 5] = [
++        |row: &ReplayBinaryRow| row.x,
++        |row: &ReplayBinaryRow| row.y,
++        |row: &ReplayBinaryRow| row.z,
++        |row: &ReplayBinaryRow| row.yaw,
++        |row: &ReplayBinaryRow| row.flash_duration,
++    ];
++    for getter in f32_getters {
++        for row in &flat_rows {
++            replay_packet_f32(&mut packet, getter(row));
++        }
++    }
++    let u32_getters: [fn(&ReplayBinaryRow) -> u32; 4] = [
++        |row: &ReplayBinaryRow| row.inventory_id,
++        |row: &ReplayBinaryRow| row.active_weapon_id,
++        |row: &ReplayBinaryRow| row.active_weapon_name_id,
++        |row: &ReplayBinaryRow| row.player_color_id,
++    ];
++    for getter in u32_getters {
++        for row in &flat_rows {
++            replay_packet_u32(&mut packet, getter(row));
++        }
++    }
++    Ok(packet)
++}
++
  #[derive(Clone)]
  struct PyVariant(Variant);
  
-@@ -138,6 +447,7 @@ impl DemoParser {
+@@ -138,6 +787,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4171,7 +4518,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -166,6 +476,7 @@ impl DemoParser {
+@@ -166,6 +816,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4179,7 +4526,7 @@ index c950726..1b0447c 100644
              only_header: false,
              list_props: true,
              only_convars: false,
-@@ -192,6 +503,7 @@ impl DemoParser {
+@@ -192,6 +843,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4187,7 +4534,7 @@ index c950726..1b0447c 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -243,6 +555,7 @@ impl DemoParser {
+@@ -243,6 +895,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: true,
              parse_grenades: grenades,
@@ -4195,7 +4542,7 @@ index c950726..1b0447c 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -267,29 +580,27 @@ impl DemoParser {
+@@ -267,29 +920,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -4231,7 +4578,7 @@ index c950726..1b0447c 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -307,26 +618,243 @@ impl DemoParser {
+@@ -307,26 +958,243 @@ impl DemoParser {
                          df_column_names_py.push(prop_info.prop_friendly_name);
                          all_pyobjects.push(data.into_py_any(py)?);
                      }
@@ -4490,7 +4837,7 @@ index c950726..1b0447c 100644
      }
  
      pub fn parse_player_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-@@ -341,6 +869,7 @@ impl DemoParser {
+@@ -341,6 +1209,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4498,7 +4845,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -359,24 +888,19 @@ impl DemoParser {
+@@ -359,24 +1228,19 @@ impl DemoParser {
          let names: Vec<Option<String>> = output.player_md.iter().map(|p| p.name.clone()).collect();
  
          // SoA form
@@ -4536,7 +4883,7 @@ index c950726..1b0447c 100644
      }
      pub fn parse_item_drops(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -390,6 +914,7 @@ impl DemoParser {
+@@ -390,6 +1254,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4544,7 +4891,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -416,52 +941,32 @@ impl DemoParser {
+@@ -416,52 +1281,32 @@ impl DemoParser {
              .iter()
              .map(|x| x.custom_name.clone())
              .collect();
@@ -4623,7 +4970,7 @@ index c950726..1b0447c 100644
      }
      pub fn parse_skins(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -475,6 +980,7 @@ impl DemoParser {
+@@ -475,6 +1320,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4631,7 +4978,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -497,45 +1003,28 @@ impl DemoParser {
+@@ -497,45 +1343,28 @@ impl DemoParser {
          let custom_name: Vec<Option<String>> =
              output.skins.iter().map(|s| s.custom_name.clone()).collect();
  
@@ -4699,7 +5046,7 @@ index c950726..1b0447c 100644
      }
  
      #[pyo3(signature = (event_name, *, player=None, other=None))]
-@@ -580,6 +1069,7 @@ impl DemoParser {
+@@ -580,6 +1409,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4707,7 +5054,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -641,6 +1131,7 @@ impl DemoParser {
+@@ -641,6 +1471,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4715,7 +5062,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -671,6 +1162,7 @@ impl DemoParser {
+@@ -671,6 +1502,7 @@ impl DemoParser {
              parse_ents: false,
              parse_projectiles: false,
              parse_grenades: false,
@@ -4723,7 +5070,7 @@ index c950726..1b0447c 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -698,6 +1190,237 @@ impl DemoParser {
+@@ -698,6 +1530,258 @@ impl DemoParser {
          hm.into_py_any(py)
      }
  
@@ -4958,10 +5305,31 @@ index c950726..1b0447c 100644
 +        )
 +    }
 +
++    /// Read one replay row group into the compact columnar binary protocol.
++    ///
++    /// The returned bytes are ready for direct HTTP transfer into JavaScript
++    /// TypedArrays. No pandas frame or Python row dictionaries are created.
++    #[staticmethod]
++    #[pyo3(signature = (parquet_path, row_group, sample_ticks, metadata_json))]
++    pub fn read_replay_parquet_round_binary(
++        py: Python<'_>,
++        parquet_path: String,
++        row_group: usize,
++        sample_ticks: Vec<i32>,
++        metadata_json: String,
++    ) -> PyResult<Py<PyAny>> {
++        let packet = py
++            .detach(move || {
++                replay_parquet_binary_packet(&parquet_path, row_group, sample_ticks, &metadata_json)
++            })
++            .map_err(Exception::new_err)?;
++        Ok(PyBytes::new(py, &packet).into_py_any(py)?)
++    }
++
      #[pyo3(signature = (wanted_props, *, players=None, ticks=None, prop_states=None))]
      pub fn parse_ticks(
          &self,
-@@ -750,6 +1473,7 @@ impl DemoParser {
+@@ -750,6 +1834,7 @@ impl DemoParser {
              wanted_ticks,
              parse_projectiles: false,
              parse_grenades: false,
@@ -4969,7 +5337,7 @@ index c950726..1b0447c 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -773,29 +1497,27 @@ impl DemoParser {
+@@ -773,29 +1858,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -5005,7 +5373,7 @@ index c950726..1b0447c 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -813,6 +1535,29 @@ impl DemoParser {
+@@ -813,6 +1896,29 @@ impl DemoParser {
                          df_column_names_py.push(prop_info.prop_friendly_name);
                          all_pyobjects.push(data.into_py_any(py)?);
                      }
@@ -5035,7 +5403,7 @@ index c950726..1b0447c 100644
  
                      Some(VarVec::Stickers(data)) => {
                          let mut dicts = vec![];
-@@ -863,146 +1608,50 @@ impl DemoParser {
+@@ -863,146 +1969,50 @@ impl DemoParser {
                  }
              }
          }
@@ -5203,7 +5571,7 @@ index c950726..1b0447c 100644
              vv.push((k, dfp));
          }
      }
-@@ -1010,66 +1659,37 @@ pub fn series_from_multiple_events(
+@@ -1010,66 +2020,37 @@ pub fn series_from_multiple_events(
  }
  
  pub enum DataFrameColumn {
@@ -5252,8 +5620,7 @@ index c950726..1b0447c 100644
  
      if rows == 0 {
 -        return Err(DemoParserError::NoEvents);
-+        return Err(PyValueError::new_err(DemoParserError::NoEvents.to_string()));
-     }
+-    }
 -    let dfp = Python::attach(|py| {
 -        let polars = py.import("polars").unwrap();
 -        let all_series_py = series_columns.into_py_any(py).unwrap();
@@ -5274,6 +5641,8 @@ index c950726..1b0447c 100644
 -            .unwrap();
 -        df.into_py_any(py).unwrap()
 -    });
++        return Err(PyValueError::new_err(DemoParserError::NoEvents.to_string()));
++    }
 +    let mut column_order: Vec<String> = columns.iter().map(|(name, _)| name.clone()).collect();
 +    column_order.sort();
 +    let dfp = pandas_dataframe(py, columns, column_order)?;
@@ -5284,7 +5653,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1077,9 +1697,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1077,9 +2058,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5296,7 +5665,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1087,9 +1707,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1087,9 +2068,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5308,7 +5677,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1097,9 +1717,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1097,9 +2078,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5320,7 +5689,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1107,7 +1727,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1107,7 +2088,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5329,7 +5698,7 @@ index c950726..1b0447c 100644
  }
  fn to_py_string_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1139,7 +1759,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
+@@ -1139,7 +2120,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
      }
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
@@ -5338,7 +5707,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1147,10 +1767,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1147,10 +2128,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5351,7 +5720,7 @@ index c950726..1b0447c 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1158,7 +1778,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1158,7 +2139,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5360,7 +5729,7 @@ index c950726..1b0447c 100644
  }
  fn to_py_xyz_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1203,13 +1823,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
+@@ -1203,13 +2184,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
  
@@ -5376,7 +5745,7 @@ index c950726..1b0447c 100644
  }
  
  pub fn column_from_pairs(
-@@ -1220,13 +1840,13 @@ pub fn column_from_pairs(
+@@ -1220,13 +2201,13 @@ pub fn column_from_pairs(
      let field_type = find_type_of_vals(pairs)?;
  
      let s = match field_type {
