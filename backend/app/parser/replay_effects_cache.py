@@ -15,7 +15,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-CACHE_VERSION = 4
+# Bump when smoke/inferno track geometry decoding changes (axes, packing, etc.).
+CACHE_VERSION = 5
 
 
 def _cache_root() -> Path:

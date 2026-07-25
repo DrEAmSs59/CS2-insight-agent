@@ -24,9 +24,10 @@ def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
 
 
 def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
+    # entries are (z, y, x) matching CS2 occupancy packing
     out = [0x00, flags, len(entries)]
-    for z, x, y in entries:
-        out.extend([z, x, y, 5, 0, 0, 0, 0])
+    for z, y, x in entries:
+        out.extend([z, y, x, 5, 0, 0, 0, 0])
     return out
 
 
@@ -55,11 +56,11 @@ class TestDecodeSmokeVoxelJournal:
 
 class TestOccupancyAndWorld:
     def test_occupancy_entries(self):
-        # payload bytes are [z, x, y]; SmokeVoxel stores named axes
+        # payload bytes are [z, y, x]; SmokeVoxel stores named axes
         voxels = decode_voxel_frame_occupancy(bytes(_occ_payload([(14, 16, 18), (16, 16, 18)])))
         assert voxels is not None
         assert len(voxels) == 2
-        assert (voxels[0].z, voxels[0].x, voxels[0].y) == (14, 16, 18)
+        assert (voxels[0].z, voxels[0].y, voxels[0].x) == (14, 16, 18)
 
     def test_get_occupancy_at(self):
         frames = decode_smoke_voxel_journal(
@@ -74,15 +75,16 @@ class TestOccupancyAndWorld:
 
     def test_voxel_to_world(self):
         assert voxel_to_world(16, 16, 16, [100, 200, 50]) == (100.0, 200.0, 50.0)
-        assert voxel_to_world(17, 16, 16, [100, 200, 50]) == (120.0, 200.0, 50.0)
+        # sign_x = -1 → grid x=17 is west of origin
+        assert voxel_to_world(17, 16, 16, [100, 200, 50]) == (80.0, 200.0, 50.0)
         assert voxel_to_world(16, 17, 16, [100, 200, 50]) == (100.0, 220.0, 50.0)
         assert voxel_to_world(16, 16, 17, [100, 200, 50]) == (100.0, 200.0, 70.0)
 
 
 class TestDecodeSmokeCells:
     def test_ok_path_projects_cells(self):
-        # entries are (z, x, y); different x → distinct projected XY cells
-        data = _make_journal([(0, _occ_payload([(16, 16, 16), (16, 17, 16)]))])
+        # entries are (z, y, x); different x → distinct projected XY cells
+        data = _make_journal([(0, _occ_payload([(16, 16, 16), (16, 16, 17)]))])
         out = decode_smoke_cells(data, declared_size=len(data), detonation_pos=[100.0, 200.0, 50.0])
         assert out["ok"] is True
         assert out["voxel_count"] == 2

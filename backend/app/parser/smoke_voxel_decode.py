@@ -5,11 +5,10 @@ Format (reverse-engineered from the game client / community verification):
 - Buffer capacity is often 3072; valid length is ``m_nVoxelFrameDataSize``.
 - Bytes are a journal of records: ``u16le seq``, ``u16le payload_len``, payload.
 - Occupancy payload: ``u8 active``, ``u8 section_flags``; if bit0 set then
-  ``u8 count`` + ``count`` × 8-byte entries ``[z, x, y, state0..state4]``.
+  ``u8 count`` + ``count`` × 8-byte entries ``[z, y, x, state0..state4]``.
 - Occupancy frames fully replace the active set.
-- World: ``world = sign * (grid - 16) * 20 + detonationPos`` with signs ``[+1, +1, +1]``.
-  (Byte order was previously treated as ``[z, y, x]``, which rotated smoke 90° on radar —
-  e.g. Nuke main-door left-side gap. ``[z, x, y]`` matches live demos.)
+- World: ``world = sign * (grid - 16) * 20 + detonationPos`` with signs ``[-1, +1, +1]``
+  (world X is mirrored relative to the voxel grid — matches ``client.dll`` / cs2parser).
 """
 
 from __future__ import annotations
@@ -21,8 +20,11 @@ from typing import Any, Iterable, Sequence
 VOXEL_GRID_DIM = 32
 VOXEL_WORLD_SIZE = 20.0
 VOXEL_GRID_CENTER = VOXEL_GRID_DIM / 2.0
-VOXEL_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, 1.0)
+# client.dll: world X is mirrored vs grid X; Y/Z align.
+VOXEL_AXIS_SIGN: tuple[float, float, float] = (-1.0, 1.0, 1.0)
 VOXEL_CELL_SIZE_WORLD = VOXEL_WORLD_SIZE
+# Byte packing for occupancy entries: (z, y, x).
+VOXEL_BYTE_PACKING = "zyx"
 
 # Networked occupancy is a ~44-voxel seed set; the game client expands locally.
 # We approximate that expansion by revealing seeds in adjacency order (not a circle).
@@ -95,8 +97,8 @@ def decode_voxel_frame_occupancy(payload: bytes | bytearray) -> list[SmokeVoxel]
     for _ in range(count):
         if off + _ENTRY_SIZE > len(blob):
             break
-        # CS2 packs seed entries as [z, x, y, state…] (not [z, y, x]).
-        z, x, y = blob[off], blob[off + 1], blob[off + 2]
+        # CS2 packs seed entries as [z, y, x, state…] (client.dll / cs2parser).
+        z, y, x = blob[off], blob[off + 1], blob[off + 2]
         state = blob[off + 3 : off + _ENTRY_SIZE]
         voxels.append(SmokeVoxel(x=x, y=y, z=z, state=state))
         off += _ENTRY_SIZE

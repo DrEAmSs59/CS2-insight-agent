@@ -24,9 +24,10 @@ def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
 
 
 def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
+    # entries are (z, y, x) matching CS2 occupancy packing
     out = [0x00, flags, len(entries)]
-    for z, x, y in entries:
-        out.extend([z, x, y, 5, 0, 0, 0, 0])
+    for z, y, x in entries:
+        out.extend([z, y, x, 5, 0, 0, 0, 0])
     return out
 
 
