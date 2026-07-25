@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 const MAP_SIZE = 1024;
-const INFERNO_CELL_RADIUS_WORLD = 28;
+const INFERNO_CELL_RADIUS_WORLD = 42;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
 
 function worldToPercent(point, transform) {
@@ -130,7 +130,7 @@ export default function ReplayAreaEffectsCanvas({
 
       for (const layer of activeLayers) {
         const isSmoke = layer.type === "smoke";
-        const radiusWorld = isSmoke ? Math.max(10, layer.cellSize * 0.7) : INFERNO_CELL_RADIUS_WORLD;
+        const radiusWorld = isSmoke ? Math.max(22, layer.cellSize * 1.25) : INFERNO_CELL_RADIUS_WORLD;
         const radiusPct = worldRadiusToPercent(radiusWorld, transform);
         const radiusPx = (radiusPct / 100) * Math.min(width, height);
         ctx.save();

@@ -19,7 +19,7 @@ import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
 
 const MAP_SIZE = 1024;
 const SAMPLE_HZ = 32;
-const REPLAY_CACHE_VERSION = 4;
+const REPLAY_CACHE_VERSION = 5;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
 
@@ -544,12 +544,13 @@ export default function Demo2DReplayPreview({
   useEffect(() => {
     if (!selectedRound || !demoPath) return undefined;
     const replayStartTick = Number(selectedRound.freeze_end_tick || selectedRound.start_tick);
-    const key = `v${REPLAY_CACHE_VERSION}:${SAMPLE_HZ}:${demoPath}:${selectedRound.round_number}:${replayStartTick}:${selectedRound.end_tick}`;
+    const replayEndTick = Number(selectedRound.end_tick);
+    const key = `v${REPLAY_CACHE_VERSION}:${SAMPLE_HZ}:${demoPath}:${selectedRound.round_number}:${replayStartTick}:${replayEndTick}`;
     const requestBody = {
       path: demoPath,
       map_name: mapName,
       start_tick: replayStartTick,
-      end_tick: Number(selectedRound.end_tick),
+      end_tick: replayEndTick,
       tick_rate: Number(workspace?.tick_rate || 64),
       fps: SAMPLE_HZ,
       pov_player_name: workspacePlayers[0]?.name || null,
@@ -557,7 +558,22 @@ export default function Demo2DReplayPreview({
     };
     let cancelled = false;
 
-    const mergeEffectsIntoCache = (data) => {
+    const workspaceTracks = Array.isArray(workspace?.effect_tracks) ? workspace.effect_tracks : [];
+    const workspaceCaps = workspace?.effect_capabilities && typeof workspace.effect_capabilities === "object"
+      ? workspace.effect_capabilities
+      : null;
+    const seededTracks = workspaceTracks.filter((track) => {
+      const start = Number(track?.start_tick);
+      const end = Number(track?.end_tick);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return true;
+      return end >= replayStartTick && start <= replayEndTick;
+    });
+    const hasWorkspaceEffects = Boolean(
+      seededTracks.length
+      && (workspaceCaps?.smoke_voxels || workspaceCaps?.inferno_cells),
+    );
+
+    const mergeEffectsIntoCache = (data, { fromWorkspace = false } = {}) => {
       const nextEffectTracks = Array.isArray(data?.effect_tracks) ? data.effect_tracks : [];
       const nextCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
         ? data.effect_capabilities
@@ -571,38 +587,52 @@ export default function Demo2DReplayPreview({
         effectTracks: nextEffectTracks,
         effectCapabilities: nextCapabilities,
         effectsReady: true,
+        effectsFromWorkspace: fromWorkspace,
       });
     };
 
-    const loadEffects = () => {
+    const loadEffectsFromApi = () => {
       API.post("/demo/replay/effects", requestBody)
         .then(({ data }) => mergeEffectsIntoCache(data))
         .catch(() => {
           if (cancelled) return;
           const prev = cacheRef.current.get(key) || {};
-          cacheRef.current.set(key, { ...prev, effectsReady: true });
+          cacheRef.current.set(key, { ...prev, effectsReady: Boolean(prev.effectsReady) });
         });
     };
+
+    // Prefer precomputed workspace tracks so smoke/fire areas appear with the round,
+    // without waiting on a second demoparser pass.
+    if (hasWorkspaceEffects) {
+      mergeEffectsIntoCache({
+        effect_tracks: seededTracks,
+        effect_capabilities: workspaceCaps,
+      }, { fromWorkspace: true });
+    }
 
     const cached = cacheRef.current.get(key);
     if (cached?.frames) {
       setFrames(cached.frames);
-      setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
-      setEffectCapabilities(cached.effectCapabilities || null);
+      if (!hasWorkspaceEffects) {
+        setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
+        setEffectCapabilities(cached.effectCapabilities || null);
+      }
       setResponseTransform(cached.mapTransform || null);
       setReplayFps(cached.fps || SAMPLE_HZ);
       setFrameIndex(0);
       setError(cached.frames.length ? "" : "该回合没有可用的坐标帧");
       setLoading(false);
-      if (!cached.effectsReady) loadEffects();
+      if (!hasWorkspaceEffects && !cached.effectsReady) loadEffectsFromApi();
       return () => { cancelled = true; };
     }
 
     setLoading(true);
     setError("");
     setPlaying(false);
-    setEffectTracks([]);
-    setEffectCapabilities(null);
+    if (!hasWorkspaceEffects) {
+      setEffectTracks([]);
+      setEffectCapabilities(null);
+    }
     API.post("/demo/replay", requestBody).then(({ data }) => {
       if (cancelled) return;
       const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
@@ -610,13 +640,15 @@ export default function Demo2DReplayPreview({
         ? data.map_transform
         : null;
       const nextFps = Math.max(1, Number(data?.fps) || SAMPLE_HZ);
+      const prev = cacheRef.current.get(key) || {};
       cacheRef.current.set(key, {
+        ...prev,
         frames: nextFrames,
         mapTransform: nextTransform,
         fps: nextFps,
-        effectTracks: [],
-        effectCapabilities: null,
-        effectsReady: false,
+        effectTracks: prev.effectTracks || (hasWorkspaceEffects ? seededTracks : []),
+        effectCapabilities: prev.effectCapabilities || (hasWorkspaceEffects ? workspaceCaps : null),
+        effectsReady: Boolean(prev.effectsReady || hasWorkspaceEffects),
       });
       setFrames(nextFrames);
       setResponseTransform(nextTransform);
@@ -627,7 +659,7 @@ export default function Demo2DReplayPreview({
         setError("该回合没有可用的坐标帧");
         return;
       }
-      loadEffects();
+      if (!hasWorkspaceEffects) loadEffectsFromApi();
     }).catch((reason) => {
       if (!cancelled) {
         setError(reason?.response?.data?.detail || reason?.message || "2D 回放加载失败");
@@ -635,7 +667,7 @@ export default function Demo2DReplayPreview({
       }
     });
     return () => { cancelled = true; };
-  }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
+  }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspace?.effect_tracks, workspace?.effect_capabilities, workspacePlayers]);
 
   useEffect(() => {
     framePositionRef.current = frameIndex;
