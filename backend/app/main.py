@@ -2872,6 +2872,24 @@ async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
     return FileResponse(str(map_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.get("/api/demo/utility-mask/{map_name}")
+async def get_demo_utility_mask(map_name: str, layer: Optional[str] = None):
+    """Serve radar-derived utility clip masks for 2D smoke/fire rendering."""
+    map_key = str(map_name or "").strip().lower()
+    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
+        raise HTTPException(400, "Invalid map name")
+    if not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+    normalized_layer = str(layer or "upper").strip().lower()
+    if normalized_layer not in {"upper", "lower"}:
+        raise HTTPException(400, "Invalid radar layer")
+    from .radar.radar_derived_assets import resolve_utility_mask_path
+    mask_path = resolve_utility_mask_path(map_key, layer=normalized_layer)
+    if mask_path is None:
+        raise HTTPException(404, f"No utility mask for {map_key}")
+    return FileResponse(str(mask_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.post("/api/demo/replay")
 async def get_demo_replay(req: DemoReplayRequest):
     """Return one active-round 2D replay from the original Insight Agent parser."""

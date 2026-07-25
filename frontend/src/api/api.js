@@ -47,6 +47,13 @@ export function getDemoRadarMapUrl(mapName, layer = "") {
   return `${API_BASE_URL}/api/demo/radar-map/${name}${query}`;
 }
 
+/** Radar-derived utility clip mask (white = drawable). 404 → skip clip client-side. */
+export function getDemoUtilityMaskUrl(mapName, layer = "") {
+  const name = encodeURIComponent(String(mapName || ""));
+  const query = layer ? `?layer=${encodeURIComponent(String(layer))}` : "";
+  return `${API_BASE_URL}/api/demo/utility-mask/${name}${query}`;
+}
+
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsDesktop: ${IS_DESKTOP_APP}, BaseURL: ${API_BASE_URL}`);
 
 const API = axios.create({
