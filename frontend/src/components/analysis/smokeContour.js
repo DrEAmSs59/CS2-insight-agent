@@ -28,8 +28,8 @@ function lerpPoint(p0, p1, v0, v1, threshold) {
   ];
 }
 
-// edge index: 0 bottom, 1 right, 2 top, 3 left
-const MARCHING_SQUARES_SEGMENTS = [
+// edge index: 0 bottom, 1 right, 2 top, 3 left; corners BL=1 BR=2 TR=4 TL=8
+export const MARCHING_SQUARES_SEGMENTS = [
   [],
   [[3, 0]],
   [[0, 1]],
@@ -39,10 +39,10 @@ const MARCHING_SQUARES_SEGMENTS = [
   [[0, 2]],
   [[3, 2]],
   [[2, 3]],
-  [[0, 3]],
+  [[0, 2]],
   [[0, 1], [2, 3]],
-  [[1, 3]],
   [[1, 2]],
+  [[1, 3]],
   [[0, 1]],
   [[0, 3]],
   [],
