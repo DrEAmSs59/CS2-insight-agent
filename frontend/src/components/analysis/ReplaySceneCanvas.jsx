@@ -1,8 +1,9 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
+import ReplayCameraControls from "./ReplayCameraControls";
 import {
   worldToRadarPercent,
   yawToCssRotation,
@@ -10,6 +11,17 @@ import {
 import {
   interpolateReplayFrame as interpolateReplayFrameByTick,
 } from "../../utils/replayPlayback";
+import {
+  SCENE_SIZE,
+  USER_ZOOM_STEP,
+  cameraCssTransform,
+  clampUserZoom,
+  contentRectFromTransform,
+  createFittedCamera,
+  panBy,
+  zoomAtPointer,
+} from "../../utils/replayCamera";
+import { useReplayStore } from "../../stores/replayStore";
 
 const HUD_ICON_BASE = "/hud-death-notice";
 const MOTION_DURATION = "0ms";
@@ -322,6 +334,218 @@ export default function ReplaySceneCanvas({
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const frameCursorIndex = clamp(Math.floor(playing ? playhead.position : frameIndex), 0, Math.max(0, frames.length - 1));
 
+  const viewportRef = useRef(null);
+  const cameraRef = useRef(null);
+  const spaceDownRef = useRef(false);
+  const panSessionRef = useRef(null);
+  const prevMapKeyRef = useRef("");
+  const mapKey = String(mapName || "").trim().toLowerCase();
+  const contentRect = useMemo(() => contentRectFromTransform(transform), [transform]);
+  const [camera, setCamera] = useState(() => ({
+    fitScale: 1,
+    userZoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+  }));
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  cameraRef.current = camera;
+
+  const applyCamera = (next) => {
+    const resolved = typeof next === "function" ? next(cameraRef.current) : next;
+    if (!resolved) return;
+    cameraRef.current = resolved;
+    setCamera(resolved);
+    if (mapKey) useReplayStore.getState().setCamera(mapKey, resolved);
+  };
+
+  const fitCameraToViewport = (size = viewportSize) => {
+    if (!(size.width > 0) || !(size.height > 0)) return;
+    applyCamera(createFittedCamera(size, contentRect));
+  };
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const width = entry?.contentRect?.width || node.clientWidth;
+      const height = entry?.contentRect?.height || node.clientHeight;
+      if (!(width > 0) || !(height > 0)) return;
+      setViewportSize({ width, height });
+    });
+    observer.observe(node);
+    setViewportSize({ width: node.clientWidth, height: node.clientHeight });
+    return () => observer.disconnect();
+  }, []);
+
+  // Fit on map change (restore store if present). Same map: refresh fitScale; recenter when userZoom==1.
+  useEffect(() => {
+    if (!(viewportSize.width > 0) || !(viewportSize.height > 0)) return;
+    const mapChanged = prevMapKeyRef.current !== mapKey;
+    prevMapKeyRef.current = mapKey;
+    const fitted = createFittedCamera(viewportSize, contentRect);
+
+    if (mapChanged) {
+      const saved = mapKey ? useReplayStore.getState().getCamera(mapKey) : null;
+      if (saved && Number(saved.fitScale) > 0) {
+        applyCamera({
+          fitScale: fitted.fitScale,
+          userZoom: clampUserZoom(saved.userZoom),
+          offsetX: Number.isFinite(Number(saved.offsetX)) ? Number(saved.offsetX) : fitted.offsetX,
+          offsetY: Number.isFinite(Number(saved.offsetY)) ? Number(saved.offsetY) : fitted.offsetY,
+        });
+        return;
+      }
+      applyCamera(fitted);
+      return;
+    }
+
+    const current = cameraRef.current;
+    if (!current || clampUserZoom(current.userZoom) === 1) {
+      applyCamera(fitted);
+      return;
+    }
+    const prevFit = Number(current.fitScale) > 0 ? Number(current.fitScale) : fitted.fitScale;
+    const ratio = fitted.fitScale / prevFit;
+    applyCamera({
+      ...current,
+      fitScale: fitted.fitScale,
+      offsetX: current.offsetX * ratio,
+      offsetY: current.offsetY * ratio,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally ignore round/layer
+  }, [mapKey, contentRect.x, contentRect.y, contentRect.width, contentRect.height, viewportSize.width, viewportSize.height]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.code === "Space") spaceDownRef.current = true;
+    };
+    const onKeyUp = (event) => {
+      if (event.code === "Space") spaceDownRef.current = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return undefined;
+    const onWheel = (event) => {
+      event.preventDefault();
+      const current = cameraRef.current;
+      if (!current) return;
+      const rect = node.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const direction = event.deltaY < 0 ? 1 : -1;
+      const nextUserZoom = clampUserZoom(
+        current.userZoom * (direction > 0 ? USER_ZOOM_STEP : 1 / USER_ZOOM_STEP),
+      );
+      if (nextUserZoom === current.userZoom) return;
+      const beforeScale = current.fitScale * current.userZoom;
+      const afterScale = current.fitScale * nextUserZoom;
+      const zoomed = zoomAtPointer({
+        offsetX: current.offsetX,
+        offsetY: current.offsetY,
+        scale: beforeScale,
+        pointerX,
+        pointerY,
+        nextScale: afterScale,
+      });
+      applyCamera(panBy(
+        { ...current, userZoom: nextUserZoom, offsetX: zoomed.offsetX, offsetY: zoomed.offsetY },
+        0,
+        0,
+        { width: rect.width, height: rect.height },
+        { width: SCENE_SIZE, height: SCENE_SIZE },
+      ));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [mapKey, contentRect.width, contentRect.height]);
+
+  const stepUserZoom = (factor) => {
+    const node = viewportRef.current;
+    const current = cameraRef.current;
+    if (!node || !current) return;
+    const rect = node.getBoundingClientRect();
+    const pointerX = rect.width / 2;
+    const pointerY = rect.height / 2;
+    const nextUserZoom = clampUserZoom(current.userZoom * factor);
+    if (nextUserZoom === current.userZoom) return;
+    const beforeScale = current.fitScale * current.userZoom;
+    const afterScale = current.fitScale * nextUserZoom;
+    const zoomed = zoomAtPointer({
+      offsetX: current.offsetX,
+      offsetY: current.offsetY,
+      scale: beforeScale,
+      pointerX,
+      pointerY,
+      nextScale: afterScale,
+    });
+    applyCamera(panBy(
+      { ...current, userZoom: nextUserZoom, offsetX: zoomed.offsetX, offsetY: zoomed.offsetY },
+      0,
+      0,
+      { width: rect.width, height: rect.height },
+      { width: SCENE_SIZE, height: SCENE_SIZE },
+    ));
+  };
+
+  const onViewportPointerDown = (event) => {
+    const current = cameraRef.current;
+    if (!current) return;
+    const isMiddle = event.button === 1;
+    const isSpaceLeft = event.button === 0 && spaceDownRef.current && current.userZoom > 1;
+    if (!isMiddle && !isSpaceLeft) return;
+    event.preventDefault();
+    const node = viewportRef.current;
+    if (!node) return;
+    panSessionRef.current = {
+      pointerId: event.pointerId,
+      lastX: event.clientX,
+      lastY: event.clientY,
+    };
+    node.setPointerCapture?.(event.pointerId);
+  };
+
+  const onViewportPointerMove = (event) => {
+    const session = panSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    const node = viewportRef.current;
+    const current = cameraRef.current;
+    if (!node || !current) return;
+    const dx = event.clientX - session.lastX;
+    const dy = event.clientY - session.lastY;
+    session.lastX = event.clientX;
+    session.lastY = event.clientY;
+    const rect = node.getBoundingClientRect();
+    applyCamera(panBy(
+      current,
+      dx,
+      dy,
+      { width: rect.width, height: rect.height },
+      { width: SCENE_SIZE, height: SCENE_SIZE },
+    ));
+  };
+
+  const endPanSession = (event) => {
+    const session = panSessionRef.current;
+    if (!session || (event && session.pointerId !== event.pointerId)) return;
+    panSessionRef.current = null;
+  };
+
+  const finalScale = camera.fitScale * camera.userZoom;
+  const sceneTransform = cameraCssTransform({
+    offsetX: camera.offsetX,
+    offsetY: camera.offsetY,
+    scale: finalScale,
+  });
+
   const frame = useMemo(() => {
     if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
     const position = playing ? playhead.position : frameIndex;
@@ -578,75 +802,102 @@ export default function ReplaySceneCanvas({
         const targetBlue = isBlueReplaySide(targetSide, teamKeyForPlayerName(kill.target) === "a");
         return <div key={`feed-${kill.tick}-${kill.actor}-${kill.target}`} className="flex max-w-full items-center gap-2 rounded-md border border-white/10 bg-black/80 px-2.5 py-1 text-[9px] shadow-lg"><span data-side={actorSide || undefined} className={`truncate font-bold ${actorBlue ? "text-sky-300" : "text-amber-300"}`}>{safeLabel(kill.actor, "未知玩家")}</span><KillfeedIconStrip event={{ ...kill, is_headshot: Boolean(kill.headshot) }} weaponName={weapon} weaponKey={weapon} /><span data-side={targetSide || undefined} className={`truncate font-bold ${targetBlue ? "text-sky-300" : "text-amber-300"}`}>{safeLabel(kill.target, "未知玩家")}</span></div>;
       })}</div>
-      <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: "translate(-50%, -50%)" }}>
-        <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
-        <ReplayAreaEffectsCanvas
-          tracks={effectTracks}
-          currentTick={currentTick}
-          hideAfterTick={roundEndTick > 0 ? roundEndTick : null}
-          tickRate={tickRate}
-          transform={transform}
-          mapName={mapName}
-          mapLayer={hasMapLayers ? mapLayer : "upper"}
-          enabled={Boolean(layers.utilityAreas)}
-          capabilities={effectCapabilities}
-          smokeDebugLayer={smokeDebugLayer}
-        />
-        <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-          {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
-          {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
-          {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="0.12" strokeLinecap="round" opacity="1" />; })}
-          {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="0.205" strokeLinecap="round" strokeLinejoin="round" opacity="1" />)}
-        </svg>
-        {recentEvents.grenades.map((grenade) => {
-          const isSmoke = /烟|smoke/i.test(grenade.kind);
-          const isFire = /燃烧|molotov|inferno|incendiary/i.test(grenade.kind);
-          const useAreaFallback = !(
-            (isSmoke && hasSmokeAreaTracks && layers.utilityAreas)
-            || (isFire && hasInfernoAreaTracks && layers.utilityAreas)
-          );
-          return (
-            <GrenadeEffectMarker
-              key={`grenade-${grenade.throwTick}-${grenade.actor}-${grenade.kind}`}
-              grenade={grenade}
-              motionDuration={MOTION_DURATION}
-              useAreaFallback={useAreaFallback}
-            />
-          );
-        })}
-        {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-4 w-4 items-center justify-center rounded-[2px] border border-amber-200 bg-amber-400"><HudEquipmentIcon stem="c4" className="h-3 w-3 brightness-0" /></div></div>}
-        {markerPlayers.map((player) => {
-          const isBlue = isBlueReplaySide(replaySideForTeamKey(player.team_key, selectedRound), player.team_key === "a");
-          const displayName = safeLabel(player.name, "?");
-          const playerNumber = playerNumberByName.get(displayName.toLowerCase());
-          const yaw = Number.isFinite(Number(player.yaw)) ? Number(player.yaw) : 0;
-          const markerTitle = `${displayName} · ${Number.isFinite(Number(player.health)) ? player.health : 0} HP · $${Math.max(0, Number(player.money) || 0).toLocaleString("en-US")} · ${armorText(player)} · ${safeWeapon(player.weapon, "—")}${player.has_c4 ? " · C4" : ""}${player.has_defuser ? " · 拆弹器" : ""}`;
-          const idMaxLen = 8;
-          const idLabel = displayName.length > idMaxLen ? `${displayName.slice(0, idMaxLen)}…` : displayName;
-          const circleLabel = playerLabelMode === "id"
-            ? (displayName.slice(0, 1).toUpperCase() || "?")
-            : (Number.isInteger(playerNumber) ? playerNumber : "?");
-          return (
-            <div key={player.steamid64 || displayName} className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: MOTION_DURATION }} title={markerTitle}>
-              <div
-                data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
-                data-player-label-mode={playerLabelMode}
-                className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
-                style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
-              >
-                <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
-                  <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
-                </span>
-                <span>{circleLabel}</span>
-                {player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}
-                {player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}
+      <div
+        ref={viewportRef}
+        className="replay-viewport absolute inset-0 overflow-hidden"
+        onPointerDown={onViewportPointerDown}
+        onPointerMove={onViewportPointerMove}
+        onPointerUp={endPanSession}
+        onPointerCancel={endPanSession}
+        onDoubleClick={() => fitCameraToViewport()}
+        style={{ cursor: camera.userZoom > 1 ? "grab" : "default" }}
+      >
+        <div
+          className="replay-scene demo-radar-plane absolute left-0 top-0"
+          data-map={mapName}
+          data-layer={hasMapLayers ? mapLayer : undefined}
+          style={{
+            width: SCENE_SIZE,
+            height: SCENE_SIZE,
+            transform: sceneTransform,
+            transformOrigin: "0 0",
+          }}
+        >
+          <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" draggable={false} />
+          <ReplayAreaEffectsCanvas
+            tracks={effectTracks}
+            currentTick={currentTick}
+            hideAfterTick={roundEndTick > 0 ? roundEndTick : null}
+            tickRate={tickRate}
+            transform={transform}
+            mapName={mapName}
+            mapLayer={hasMapLayers ? mapLayer : "upper"}
+            enabled={Boolean(layers.utilityAreas)}
+            capabilities={effectCapabilities}
+            smokeDebugLayer={smokeDebugLayer}
+          />
+          <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+            {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
+            {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
+            {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="0.12" strokeLinecap="round" opacity="1" />; })}
+            {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="0.205" strokeLinecap="round" strokeLinejoin="round" opacity="1" />)}
+          </svg>
+          {recentEvents.grenades.map((grenade) => {
+            const isSmoke = /烟|smoke/i.test(grenade.kind);
+            const isFire = /燃烧|molotov|inferno|incendiary/i.test(grenade.kind);
+            const useAreaFallback = !(
+              (isSmoke && hasSmokeAreaTracks && layers.utilityAreas)
+              || (isFire && hasInfernoAreaTracks && layers.utilityAreas)
+            );
+            return (
+              <GrenadeEffectMarker
+                key={`grenade-${grenade.throwTick}-${grenade.actor}-${grenade.kind}`}
+                grenade={grenade}
+                motionDuration={MOTION_DURATION}
+                useAreaFallback={useAreaFallback}
+              />
+            );
+          })}
+          {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-4 w-4 items-center justify-center rounded-[2px] border border-amber-200 bg-amber-400"><HudEquipmentIcon stem="c4" className="h-3 w-3 brightness-0" /></div></div>}
+          {markerPlayers.map((player) => {
+            const isBlue = isBlueReplaySide(replaySideForTeamKey(player.team_key, selectedRound), player.team_key === "a");
+            const displayName = safeLabel(player.name, "?");
+            const playerNumber = playerNumberByName.get(displayName.toLowerCase());
+            const yaw = Number.isFinite(Number(player.yaw)) ? Number(player.yaw) : 0;
+            const markerTitle = `${displayName} · ${Number.isFinite(Number(player.health)) ? player.health : 0} HP · $${Math.max(0, Number(player.money) || 0).toLocaleString("en-US")} · ${armorText(player)} · ${safeWeapon(player.weapon, "—")}${player.has_c4 ? " · C4" : ""}${player.has_defuser ? " · 拆弹器" : ""}`;
+            const idMaxLen = 8;
+            const idLabel = displayName.length > idMaxLen ? `${displayName.slice(0, idMaxLen)}…` : displayName;
+            const circleLabel = playerLabelMode === "id"
+              ? (displayName.slice(0, 1).toUpperCase() || "?")
+              : (Number.isInteger(playerNumber) ? playerNumber : "?");
+            return (
+              <div key={player.steamid64 || displayName} className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear" style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: MOTION_DURATION }} title={markerTitle}>
+                <div
+                  data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
+                  data-player-label-mode={playerLabelMode}
+                  className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
+                  style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
+                >
+                  <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
+                    <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
+                  </span>
+                  <span>{circleLabel}</span>
+                  {player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}
+                  {player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}
+                </div>
+                {playerLabelMode === "id" && (
+                  <span className="demo-player-id-label mt-0.5 max-w-[52px] truncate text-center text-[6px] font-bold leading-none text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,.85)]">{idLabel}</span>
+                )}
               </div>
-              {playerLabelMode === "id" && (
-                <span className="demo-player-id-label mt-0.5 max-w-[52px] truncate text-center text-[6px] font-bold leading-none text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,.85)]">{idLabel}</span>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+        <ReplayCameraControls
+          userZoom={camera.userZoom}
+          onZoomIn={() => stepUserZoom(USER_ZOOM_STEP)}
+          onZoomOut={() => stepUserZoom(1 / USER_ZOOM_STEP)}
+          onFit={() => fitCameraToViewport()}
+        />
       </div>
     </>
   );
