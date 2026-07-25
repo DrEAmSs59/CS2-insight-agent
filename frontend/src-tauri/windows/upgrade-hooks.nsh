@@ -117,6 +117,30 @@ Function CS2_PrepareRunningApps
   ${EndIf}
 FunctionEnd
 
+; Tauri's in-place installer overwrites files but does not remove package
+; directories that disappeared from a newer bundled Python runtime. Remove
+; the parser package and every historical dist-info directory before file
+; copy so importlib.metadata can never resolve a stale local version.
+Function CS2_RemoveBundledDemoparser
+  Push $0
+  Push $1
+
+  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2"
+  FindFirst $0 $1 "$INSTDIR\python\Lib\site-packages\demoparser2-*.dist-info"
+  cs2_remove_demoparser_metadata_loop:
+    StrCmp $1 "" cs2_remove_demoparser_metadata_done
+    RMDir /r "$INSTDIR\python\Lib\site-packages\$1"
+    ClearErrors
+    FindNext $0 $1
+    IfErrors cs2_remove_demoparser_metadata_done
+    Goto cs2_remove_demoparser_metadata_loop
+  cs2_remove_demoparser_metadata_done:
+    FindClose $0
+
+  Pop $1
+  Pop $0
+FunctionEnd
+
 ; In: $R0 = raw InstallLocation, $R8 = raw UninstallString.
 ; Out: $CS2ElectronDir, $CS2ElectronUninsExe.
 Function CS2_ResolveElectronDir
@@ -338,6 +362,10 @@ FunctionEnd
   Call CS2_RemoveLegacyElectron
   SetOutPath $INSTDIR
 
+  ; Delete every previous patched-parser generation before NSIS copies the
+  ; newly staged runtime. This also makes same-version repair installs clean.
+  Call CS2_RemoveBundledDemoparser
+
   ; GNU builds import WebView2Loader.dll dynamically. Keep it beside the main
   ; executable so Windows can resolve the dependency before Rust/Tauri starts.
   !if /FileExists "${CS2_TAURI_RELEASE_DIR}\WebView2Loader.dll"
@@ -346,16 +374,23 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; Tauri overwrites packaged files during an in-place upgrade but does not
-  ; remove directories that disappeared from the new resource bundle. Stale
-  ; demoparser metadata makes importlib.metadata report the old parser even
-  ; though the extension module itself was replaced.
-  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight1.dist-info"
-  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight2.dist-info"
-  RMDir /r "$INSTDIR\python\Lib\site-packages\demoparser2-0.41.4+cs2insight3.dist-info"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow.libs"
   RMDir /r "$INSTDIR\python\Lib\site-packages\pyarrow-25.0.0.dist-info"
+
+  ; Validate the exact installed runtime before the finish page can launch
+  ; Tauri. This catches stale metadata, a missing extension, or an incomplete
+  ; file copy at install time instead of surfacing as a backend startup dialog.
+  ClearErrors
+  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
+  ${If} ${Errors}
+    StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+  ${If} $R0 != 0
+    StrCpy $R7 "内置 Rust Demo 解析器版本校验失败（退出码 $R0）。安装已停止，请重新下载完整安装包。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
 
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.

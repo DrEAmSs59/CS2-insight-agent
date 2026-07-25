@@ -15,6 +15,7 @@ import {
   Swords,
 } from "lucide-react";
 import API from "../../api/api";
+import useSessionState from "../../hooks/useSessionState";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplaySceneCanvas, { computeBombState } from "./ReplaySceneCanvas";
 import { isSmokeDebugEnabled } from "./smokeDebugGate";
@@ -39,6 +40,34 @@ const SAMPLE_HZ = 32;
 const REPLAY_CACHE_VERSION = REPLAY_STORE_CACHE_VERSION;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
+const DEFAULT_REPLAY_LAYERS = {
+  traces: true,
+  kills: true,
+  grenades: true,
+  utilityAreas: true,
+  shots: true,
+};
+
+function replayPositionStorageKey(sessionIdentity) {
+  return `cs2-session-demo-replay:${sessionIdentity}:position`;
+}
+
+function readReplayPosition(sessionIdentity) {
+  try {
+    const raw = sessionStorage.getItem(replayPositionStorageKey(sessionIdentity));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeReplayPosition(sessionIdentity, value) {
+  try {
+    sessionStorage.setItem(replayPositionStorageKey(sessionIdentity), JSON.stringify(value));
+  } catch {
+    // Session recovery is best-effort and must never block replay navigation.
+  }
+}
 
 function HudEquipmentIcon({ stem, className = "", title = "" }) {
   return <img src={`${HUD_ICON_BASE}/${stem}.svg`} alt="" title={title} draggable={false} className={`block object-contain ${className}`} />;
@@ -247,91 +276,22 @@ const ReplayPlayerPortrait = memo(function ReplayPlayerPortrait({
   );
 });
 
-const ReplayRosterEffectCanvas = memo(function ReplayRosterEffectCanvas({ smoked, burning, mirrored }) {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    if (!smoked && !burning) return undefined;
-    const canvas = canvasRef.current;
-    let context = null;
-    try {
-      context = canvas?.getContext?.("2d");
-    } catch {
-      context = null;
-    }
-    if (!canvas || !context) return undefined;
-
-    let animationFrame = 0;
-    let lastPaint = -Infinity;
-    const reducedMotion = typeof window.matchMedia === "function"
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const paint = (timestamp = 0) => {
-      if (!reducedMotion && timestamp - lastPaint < 40) {
-        animationFrame = window.requestAnimationFrame(paint);
-        return;
-      }
-      lastPaint = timestamp;
-      const width = Math.max(1, Math.round(canvas.clientWidth || 300));
-      const height = Math.max(1, Math.round(canvas.clientHeight || 78));
-      const dpr = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
-      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
-        canvas.width = Math.round(width * dpr);
-        canvas.height = Math.round(height * dpr);
-      }
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
-      context.clearRect(0, 0, width, height);
-      const time = timestamp / 1000;
-      const direction = mirrored ? -1 : 1;
-
-      if (smoked) {
-        for (let index = 0; index < 9; index += 1) {
-          const phase = time * (0.18 + index * 0.008) + index * 1.7;
-          const baseX = width * (0.12 + index * 0.105);
-          const x = baseX + direction * Math.sin(phase * 1.9) * (7 + index % 3);
-          const y = height * (0.32 + (index % 4) * 0.14) + Math.cos(phase * 1.3) * 5;
-          const radius = 15 + (index % 3) * 7;
-          const gradient = context.createRadialGradient(x, y, 1, x, y, radius);
-          gradient.addColorStop(0, "rgba(218, 220, 214, 0.16)");
-          gradient.addColorStop(0.58, "rgba(147, 153, 151, 0.10)");
-          gradient.addColorStop(1, "rgba(93, 100, 102, 0)");
-          context.fillStyle = gradient;
-          context.beginPath();
-          context.arc(x, y, radius, 0, Math.PI * 2);
-          context.fill();
-        }
-      }
-
-      if (burning) {
-        const fireGradient = context.createLinearGradient(0, height, 0, height * 0.34);
-        fireGradient.addColorStop(0, "rgba(239, 68, 68, 0.45)");
-        fireGradient.addColorStop(0.5, "rgba(249, 115, 22, 0.35)");
-        fireGradient.addColorStop(1, "rgba(253, 224, 71, 0.02)");
-        context.fillStyle = fireGradient;
-        for (let index = 0; index < 11; index += 1) {
-          const x = (index + 0.5) * (width / 11);
-          const wave = 9 + (index % 4) * 3 + Math.sin(time * 5.2 + index * 1.37) * 4;
-          const halfWidth = width / 18;
-          context.beginPath();
-          context.moveTo(x - halfWidth, height);
-          context.quadraticCurveTo(x - halfWidth * 0.3, height - wave * 0.55, x, height - wave);
-          context.quadraticCurveTo(x + halfWidth * 0.35, height - wave * 0.45, x + halfWidth, height);
-          context.closePath();
-          context.fill();
-        }
-      }
-
-      if (!reducedMotion) animationFrame = window.requestAnimationFrame(paint);
-    };
-    paint(0);
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [smoked, burning, mirrored]);
-
+export const ReplayRosterAmbientEffect = memo(function ReplayRosterAmbientEffect({
+  smoked,
+  burning,
+  mirrored,
+}) {
   if (!smoked && !burning) return null;
   return (
-    <canvas
-      ref={canvasRef}
+    <span
       aria-hidden="true"
-      className="replay-roster-ambient-canvas pointer-events-none absolute inset-0 z-[15] h-full w-full"
-    />
+      data-effect-renderer="static-css"
+      className="replay-roster-ambient-static pointer-events-none absolute inset-0 z-[15] overflow-hidden"
+      style={mirrored ? { transform: "scaleX(-1)" } : undefined}
+    >
+      {smoked && <i className="replay-roster-smoke-sheet absolute inset-[-8%]" />}
+      {burning && <i className="replay-roster-fire-sheet absolute inset-[-8%]" />}
+    </span>
   );
 });
 
@@ -437,7 +397,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
           style={mirrored ? { right: `${health}%` } : { left: `${health}%` }}
         />
       )}
-      <ReplayRosterEffectCanvas smoked={smoked} burning={burning} mirrored={mirrored} />
+      <ReplayRosterAmbientEffect smoked={smoked} burning={burning} mirrored={mirrored} />
       {blinded && <span aria-hidden="true" className="replay-observer-blind-overlay pointer-events-none absolute inset-0 z-[25] bg-white/35" />}
       {damagePulse > 0 && <span key={damagePulse} aria-hidden="true" className="replay-observer-damage-flash absolute inset-0 z-30 bg-rose-500/65" />}
       <span aria-hidden="true" className="absolute inset-x-0 bottom-0 z-[3] h-[4px] bg-black/55">
@@ -602,29 +562,41 @@ export default function Demo2DReplayPreview({
   teamAName = "Team A",
   teamBName = "Team B",
   initialRound,
+  onRoundChange,
 }) {
   const rounds = workspace?.rounds || [];
-  const [roundNumber, setRoundNumber] = useState(initialRound || rounds[0]?.round_number || 1);
+  const sessionIdentity = encodeURIComponent(String(demoPath || workspace?.demo_fingerprint || workspace?.map_name || "unknown"));
+  const sessionPrefix = `demo-replay:${sessionIdentity}`;
+  const [roundNumber, setRoundNumber] = useSessionState(
+    `${sessionPrefix}:round`,
+    initialRound || rounds[0]?.round_number || 1,
+  );
   const [frames, setFrames] = useState([]);
   const [effectTracks, setEffectTracks] = useState([]);
   const [effectCapabilities, setEffectCapabilities] = useState(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [uiSampleIndex, setUiSampleIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useSessionState(`${sessionPrefix}:speed`, 1);
   const playbackSampleStride = replaySampleStrideForRate(speed);
   const interpolatePlayback = playbackSampleStride === 1;
   const [loading, setLoading] = useState(false);
   const [loadHint, setLoadHint] = useState("");
   const [error, setError] = useState("");
-  const [mapLayer, setMapLayer] = useState("upper");
-  const [playerLabelMode, setPlayerLabelMode] = useState("number");
+  const [mapLayer, setMapLayer] = useSessionState(`${sessionPrefix}:map-layer`, "upper");
+  const [playerLabelMode, setPlayerLabelMode] = useSessionState(`${sessionPrefix}:label-mode`, "number");
   const [responseTransform, setResponseTransform] = useState(null);
   const [replayFps, setReplayFps] = useState(SAMPLE_HZ);
-  const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, utilityAreas: true, shots: true });
+  const [layers, setLayers] = useSessionState(`${sessionPrefix}:layers`, DEFAULT_REPLAY_LAYERS);
   const smokeDebugOn = useMemo(() => isSmokeDebugEnabled(), []);
-  const [smokeDebugLayer, setSmokeDebugLayer] = useState("final_render");
+  const [smokeDebugLayer, setSmokeDebugLayer] = useSessionState(`${sessionPrefix}:smoke-debug-layer`, "final_render");
   const framePositionRef = useRef(0);
+  const roundNumberRef = useRef(roundNumber);
+  roundNumberRef.current = roundNumber;
+  const pendingResumeRef = useRef(undefined);
+  if (pendingResumeRef.current === undefined) {
+    pendingResumeRef.current = readReplayPosition(sessionIdentity);
+  }
   const clockRef = useRef(null);
   const framesRef = useRef(frames);
   framesRef.current = frames;
@@ -635,22 +607,38 @@ export default function Demo2DReplayPreview({
     playheadStoreRef.current = createPlayheadStore({ position: 0, seconds: 0, tick: 0, sampleIndex: 0 });
   }
 
-  const resetPlayheadToStart = (nextFrames = []) => {
-    const first = Array.isArray(nextFrames) ? nextFrames[0] : null;
-    const seconds = Number(first?.time_sec) || 0;
-    const tick = Number(first?.tick) || 0;
-    framePositionRef.current = 0;
-    pauseSyncRef.current = { seconds, position: 0 };
+  const resetPlayheadToStart = (nextFrames = [], requestedPosition = 0) => {
+    const lastIndex = Math.max(0, (Array.isArray(nextFrames) ? nextFrames.length : 0) - 1);
+    const position = clamp(Number(requestedPosition) || 0, 0, lastIndex);
+    const sampleIndex = clamp(Math.floor(position), 0, lastIndex);
+    const frame = nextFrames[sampleIndex] || nextFrames[0] || null;
+    const seconds = nextFrames.length
+      ? secondsForFramePosition(nextFrames, position)
+      : Number(frame?.time_sec) || 0;
+    const tick = Number(frame?.tick) || 0;
+    framePositionRef.current = position;
+    pauseSyncRef.current = { seconds, position };
     playheadStoreRef.current?.set({
-      position: 0,
+      position,
       seconds,
       tick,
-      sampleIndex: 0,
+      sampleIndex,
     });
     clockRef.current?.seek(seconds);
-    setFrameIndex(0);
-    setUiSampleIndex(0);
+    setFrameIndex(position);
+    setUiSampleIndex(sampleIndex);
   };
+
+  useEffect(() => () => {
+    const pending = pendingResumeRef.current;
+    const savedPosition = Number(pending?.roundNumber) === Number(roundNumberRef.current)
+      ? Number(pending?.position) || 0
+      : framePositionRef.current;
+    writeReplayPosition(sessionIdentity, {
+      roundNumber: Number(roundNumberRef.current) || 1,
+      position: Math.max(0, Number(savedPosition) || 0),
+    });
+  }, [sessionIdentity]);
 
   useEffect(() => {
     let prevEpoch = useReplayStore.getState().playbackSuspendEpoch;
@@ -664,7 +652,14 @@ export default function Demo2DReplayPreview({
   }, []);
 
   useEffect(() => {
-    setRoundNumber(initialRound || rounds[0]?.round_number || 1);
+    const preferredRound = Number(initialRound || roundNumber || rounds[0]?.round_number || 1);
+    const validRound = rounds.some((round) => Number(round?.round_number) === preferredRound)
+      ? preferredRound
+      : Number(rounds[0]?.round_number || 1);
+    setRoundNumber(validRound);
+    onRoundChange?.(validRound);
+    const saved = pendingResumeRef.current;
+    if (Number(saved?.roundNumber) !== validRound) pendingResumeRef.current = null;
     setFrames([]);
     setEffectTracks([]);
     setEffectCapabilities(null);
@@ -685,7 +680,9 @@ export default function Demo2DReplayPreview({
     workspaceTransform: workspace?.map_transform,
   });
   const hasMapLayers = Number.isFinite(Number(transform?.lower_level_max_units)) && ["de_nuke", "de_vertigo"].includes(mapName);
-  useEffect(() => setMapLayer("upper"), [mapName]);
+  useEffect(() => {
+    if (!hasMapLayers) setMapLayer("upper");
+  }, [hasMapLayers, mapName, setMapLayer]);
   const workspacePlayers = useMemo(() => (
     workspace?.players?.length
       ? workspace.players
@@ -736,7 +733,12 @@ export default function Demo2DReplayPreview({
       setEffectCapabilities(nextCapabilities);
       setResponseTransform(nextTransform);
       setReplayFps(nextFps);
-      resetPlayheadToStart(nextFrames);
+      const pending = pendingResumeRef.current;
+      const restorePosition = Number(pending?.roundNumber) === Number(selectedRound?.round_number)
+        ? Number(pending?.position) || 0
+        : 0;
+      pendingResumeRef.current = null;
+      resetPlayheadToStart(nextFrames, restorePosition);
       setError(nextFrames.length ? "" : "该回合没有可用的坐标帧");
       setLoading(false);
       const cache = data?.cache || meta.cache;
@@ -1072,7 +1074,11 @@ export default function Demo2DReplayPreview({
 
   const changeRound = (nextIndex) => {
     const next = rounds[clamp(nextIndex, 0, Math.max(0, rounds.length - 1))];
-    if (next) setRoundNumber(next.round_number);
+    if (next) {
+      pendingResumeRef.current = null;
+      setRoundNumber(next.round_number);
+      onRoundChange?.(next.round_number);
+    }
   };
   const toggleLayer = (key) => setLayers((current) => ({ ...current, [key]: !current[key] }));
 
@@ -1085,7 +1091,7 @@ export default function Demo2DReplayPreview({
       <section className="rounded-xl border border-cs2-border bg-cs2-bg-card p-3">
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => changeRound(roundIndex - 1)} disabled={loading || roundIndex <= 0} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
-          <select value={selectedRound.round_number} disabled={loading} onChange={(event) => setRoundNumber(Number(event.target.value))} className="h-8 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-primary outline-none disabled:opacity-40">
+          <select aria-label="选择回合" value={selectedRound.round_number} disabled={loading} onChange={(event) => { const nextRound = Number(event.target.value); pendingResumeRef.current = null; setRoundNumber(nextRound); onRoundChange?.(nextRound); }} className="h-8 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-primary outline-none disabled:opacity-40">
             {rounds.map((round) => <option key={round.round_number} value={round.round_number}>回合 R{round.round_number} · {round.team_a_score_after} : {round.team_b_score_after}</option>)}
           </select>
           <button type="button" onClick={() => changeRound(roundIndex + 1)} disabled={loading || roundIndex >= rounds.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>

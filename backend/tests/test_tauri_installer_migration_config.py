@@ -42,9 +42,14 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert "desktop_data_migration.py" in hook
     assert "--require-desktop-stopped" in hook
     assert "--require-electron-ui-export" in hook
-    assert "demoparser2-0.41.4+cs2insight1.dist-info" in hook
-    assert "demoparser2-0.41.4+cs2insight2.dist-info" in hook
-    assert "demoparser2-0.41.4+cs2insight3.dist-info" in hook
+    # In-place upgrades must remove every historical patched-parser metadata
+    # generation before copying the new runtime, not a hard-coded version list.
+    assert 'FindFirst $0 $1 "$INSTDIR\\python\\Lib\\site-packages\\demoparser2-*.dist-info"' in hook
+    assert 'RMDir /r "$INSTDIR\\python\\Lib\\site-packages\\demoparser2"' in hook
+    assert "Call CS2_RemoveBundledDemoparser" in hook
+    assert "demoparser2-0.41.4+cs2insight1.dist-info" not in hook
+    # The installed parser contract is checked before the app can be launched.
+    assert 'backend\\app\\demoparser_runtime.py' in hook
     assert "pyarrow-25.0.0.dist-info" in hook
     assert '!define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\\..\\target\\release"' in hook
     assert 'File /a "/oname=WebView2Loader.dll"' in hook
