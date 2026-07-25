@@ -209,10 +209,29 @@ function formatClock(seconds) {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-/** Map playhead seconds → nearest prior sample index (scrubber display). */
-function sampleIndexForTime(frames, targetSeconds) {
+/** Map playhead seconds → fractional sample index (scrubber / ±5s seek). */
+function replayPositionForTime(frames, targetSeconds) {
   if (!frames.length) return 0;
-  return findPreviousFrameIndex(frames, Number.NaN, targetSeconds);
+  const target = Number(targetSeconds);
+  if (!Number.isFinite(target) || target <= Number(frames[0]?.time_sec || 0)) return 0;
+  for (let index = 1; index < frames.length; index += 1) {
+    const previousTime = Number(frames[index - 1]?.time_sec || 0);
+    const nextTime = Number(frames[index]?.time_sec || previousTime);
+    if (target > nextTime) continue;
+    const ratio = clamp((target - previousTime) / Math.max(0.0001, nextTime - previousTime), 0, 1);
+    return index - 1 + ratio;
+  }
+  return frames.length - 1;
+}
+
+function secondsForFramePosition(frames, position) {
+  if (!frames.length) return 0;
+  const i0 = clamp(Math.floor(Number(position) || 0), 0, frames.length - 1);
+  const i1 = Math.min(frames.length - 1, i0 + 1);
+  const t0 = Number(frames[i0]?.time_sec) || 0;
+  const t1 = Number(frames[i1]?.time_sec) || t0;
+  const frac = clamp((Number(position) || 0) - i0, 0, 1);
+  return i0 === i1 ? t0 : t0 + (t1 - t0) * frac;
 }
 
 function mapKey(value) {
@@ -460,20 +479,21 @@ export default function Demo2DReplayPreview({
 
   useEffect(() => {
     const sampleIndex = clamp(Math.floor(frameIndex), 0, Math.max(0, frames.length - 1));
-    framePositionRef.current = sampleIndex;
+    framePositionRef.current = frameIndex;
     setUiSampleIndex(sampleIndex);
-    const frame = frames[sampleIndex];
-    const seconds = Number(frame?.time_sec) || 0;
-    const tick = Number(frame?.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
-    if (!playing) {
-      playheadStoreRef.current?.set({
-        position: sampleIndex,
-        seconds,
-        tick,
-        sampleIndex,
-      });
-      clockRef.current?.seek(seconds);
-    }
+    if (playing) return;
+    const seconds = secondsForFramePosition(frames, frameIndex);
+    const approx = frames.length
+      ? interpolateReplayFrame(frames, Number.NaN, seconds)
+      : { tick: selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0 };
+    const tick = Number(approx.tick) || selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
+    playheadStoreRef.current?.set({
+      position: frameIndex,
+      seconds,
+      tick,
+      sampleIndex,
+    });
+    clockRef.current?.seek(seconds);
   }, [frameIndex, frames, playing, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 
   useEffect(() => {
@@ -554,15 +574,7 @@ export default function Demo2DReplayPreview({
 
   const seekToFrameIndex = (index) => {
     if (!frames.length) return;
-    const i = clamp(Math.round(Number(index)), 0, frames.length - 1);
-    const seconds = Number(frames[i]?.time_sec) || 0;
-    clockRef.current?.seek(seconds);
-    playheadStoreRef.current?.set({
-      position: i,
-      seconds,
-      tick: Number(frames[i]?.tick) || 0,
-      sampleIndex: i,
-    });
+    const i = clamp(Number(index), 0, frames.length - 1);
     setFrameIndex(i);
     setPlaying(false);
   };
@@ -576,10 +588,13 @@ export default function Demo2DReplayPreview({
 
   const seekBySeconds = (deltaSeconds) => {
     if (!frames.length) return;
-    const currentSeconds = Number(uiFrame.time_sec || 0);
+    const currentSeconds = playing
+      ? Number(playheadStoreRef.current?.getSnapshot()?.seconds) || secondsForFramePosition(frames, frameIndex)
+      : secondsForFramePosition(frames, frameIndex);
     const lastSeconds = Number(frames.at(-1)?.time_sec || currentSeconds);
     const target = clamp(currentSeconds + deltaSeconds, 0, lastSeconds);
-    seekToFrameIndex(sampleIndexForTime(frames, target));
+    setFrameIndex(replayPositionForTime(frames, target));
+    setPlaying(false);
   };
 
   const changeRound = (nextIndex) => {
@@ -617,7 +632,7 @@ export default function Demo2DReplayPreview({
                 return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={eventKind} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
               })}
             </div>
-            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="1" value={sliderIndex} onChange={(event) => { seekToFrameIndex(Number(event.target.value)); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
+            <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { seekToFrameIndex(Number(event.target.value)); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
           </div>
           <button type="button" onClick={() => { seekToFrameIndex(0); }} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted"><RotateCcw className="h-3.5 w-3.5" /></button>
           <div className="min-w-[82px] text-right"><p className="text-[8px] uppercase text-cs2-text-muted">回合时间</p><p className="font-mono text-xl font-black text-cs2-text-primary">{formatClock(roundClockRemaining)}</p><p className="font-mono text-[8px] text-cs2-text-muted">Tick {Math.round(Number(uiFrame.tick) || 0)} · {replayFps} Hz</p></div>
