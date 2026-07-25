@@ -6,7 +6,7 @@ import logging
 import math
 import os
 import time
-from typing import Any, Sequence
+from typing import Any
 
 from .smoke_voxel_decode import (
     SMOKE_FORMATION_SECONDS,
@@ -241,6 +241,7 @@ def build_smoke_tracks_from_rows(
     start_tick: int,
     end_tick: int,
     tick_rate: float,
+    round_number: int = 0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     tick_gap = max(64, int(tick_rate * 5))
     warnings: list[str] = []
@@ -278,6 +279,38 @@ def build_smoke_tracks_from_rows(
             else:
                 begin_tick = first_row_tick
 
+            stable_origin = None
+            for row in group:
+                origin = row.get("m_vSmokeDetonationPos")
+                if isinstance(origin, (list, tuple)) and len(origin) >= 3:
+                    try:
+                        stable_origin = [float(origin[0]), float(origin[1]), float(origin[2])]
+                        break
+                    except (TypeError, ValueError):
+                        continue
+            if stable_origin is None:
+                continue
+
+            for row in group:
+                origin = row.get("m_vSmokeDetonationPos")
+                if not isinstance(origin, (list, tuple)) or len(origin) < 3:
+                    continue
+                try:
+                    later = [float(origin[0]), float(origin[1]), float(origin[2])]
+                except (TypeError, ValueError):
+                    continue
+                drift = math.dist(stable_origin, later)
+                if drift > VOXEL_CELL_SIZE_WORLD:
+                    logger.warning(
+                        "smoke entity %s tick %s: detonation origin drift %.1f exceeds "
+                        "VOXEL_CELL_SIZE_WORLD=%.1f; locking samples to stable_origin=%s",
+                        entity_id,
+                        row.get("tick"),
+                        drift,
+                        VOXEL_CELL_SIZE_WORLD,
+                        stable_origin,
+                    )
+
             anchors: dict[int, int] = {}
             for row in group:
                 update = row.get("m_nVoxelUpdate")
@@ -306,8 +339,7 @@ def build_smoke_tracks_from_rows(
 
                 data = row.get("m_VoxelFrameData")
                 declared = row.get("m_nVoxelFrameDataSize")
-                origin = row.get("m_vSmokeDetonationPos")
-                if not isinstance(data, (bytes, bytearray)) or not isinstance(origin, (list, tuple)):
+                if not isinstance(data, (bytes, bytearray)):
                     continue
 
                 actual_size = len(data)
@@ -319,7 +351,7 @@ def build_smoke_tracks_from_rows(
                 sequence = decode_smoke_occupancy_sequence(
                     data,
                     declared_size=declared_i,
-                    detonation_pos=origin,
+                    detonation_pos=stable_origin,
                     max_seq=float(update_i) if update_i is not None else None,
                 )
                 if not sequence:
@@ -327,7 +359,7 @@ def build_smoke_tracks_from_rows(
                     decoded = decode_smoke_cells(
                         data,
                         declared_size=declared_i,
-                        detonation_pos=origin,
+                        detonation_pos=stable_origin,
                         target_seq=float(update_i) if update_i is not None else None,
                     )
                     if not decoded.get("ok") or not decoded.get("cells"):
@@ -405,12 +437,10 @@ def build_smoke_tracks_from_rows(
             # expands locally; approximate that with adjacency BFS formation samples
             # so 2D replay does not pop open at the first snapshot.
             first_voxels = None
-            first_origin: Sequence[float] | None = None
             for row in group:
                 data = row.get("m_VoxelFrameData")
                 declared = row.get("m_nVoxelFrameDataSize")
-                origin = row.get("m_vSmokeDetonationPos")
-                if not isinstance(data, (bytes, bytearray)) or not isinstance(origin, (list, tuple)):
+                if not isinstance(data, (bytes, bytearray)):
                     continue
                 try:
                     declared_i = int(declared) if declared is not None else len(data)
@@ -419,15 +449,14 @@ def build_smoke_tracks_from_rows(
                 occ_frames = iter_smoke_occupancy_frames(data, declared_size=declared_i)
                 if occ_frames:
                     first_voxels = occ_frames[0][1]
-                    first_origin = origin
                     break
 
-            if first_voxels and first_origin is not None:
+            if first_voxels is not None:
                 cell_counts = {len(sample["cells"]) for sample in samples}
                 # Skip when the journal already supplied a growing occupancy sequence.
                 if len(samples) >= 2 and len(cell_counts) >= 2:
                     first_voxels = None
-            if first_voxels and first_origin is not None:
+            if first_voxels is not None:
                 formation_end = begin_tick + int(SMOKE_FORMATION_SECONDS * float(tick_rate))
                 first_sample_tick = int(samples[0]["tick"])
                 if begin_tick < first_sample_tick <= formation_end:
@@ -435,7 +464,7 @@ def build_smoke_tracks_from_rows(
                 if formation_end > begin_tick:
                     formation = synthesize_formation_from_seeds(
                         first_voxels,
-                        first_origin,
+                        stable_origin,
                         begin_tick=begin_tick,
                         end_tick=formation_end,
                     )
@@ -465,18 +494,19 @@ def build_smoke_tracks_from_rows(
             if not samples:
                 continue
 
-            start = int(samples[0]["tick"])
-            start = min(start, begin_tick)
+            effect_start = int(samples[0]["tick"])
+            start = min(effect_start, begin_tick)
             end = min(
                 int(end_tick),
                 max(int(samples[-1]["tick"]), start + int(SMOKE_EFFECT_DURATION_SEC * tick_rate)),
             )
             tracks.append({
-                "id": f"smoke:0:{start}:{_entity_id(entity_id)}",
+                "id": f"smoke:{int(round_number)}:{_entity_id(entity_id)}:{effect_start}",
                 "type": "smoke",
                 "entity_id": _entity_id(entity_id),
                 "start_tick": start,
                 "end_tick": end,
+                "stable_origin": stable_origin,
                 "source": "smoke_voxels",
                 "cell_size": cell_size,
                 "samples": samples,

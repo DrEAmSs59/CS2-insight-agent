@@ -311,6 +311,72 @@ class TestSmokeTracks:
         assert counts[0] < counts[-1]
         assert samples[0]["tick"] < samples[-1]["tick"]
 
+    def test_stable_origin_ignores_later_detonation_drift(self):
+        blob = _make_journal([(1, _occ_payload([(16, 16, 16)]))])
+        origin_a = [100.0, 200.0, 50.0]
+        origin_b = [1000.0, 2000.0, 50.0]  # > 1 cell drift
+        rows = [
+            {
+                "tick": 10,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin_a,
+            },
+            {
+                "tick": 20,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 2,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin_b,
+            },
+        ]
+        tracks, _warnings = build_smoke_tracks_from_rows(
+            rows, start_tick=0, end_tick=1000, tick_rate=64, round_number=12
+        )
+        assert len(tracks) == 1
+        assert tracks[0]["stable_origin"] == origin_a
+        assert tracks[0]["id"].startswith("smoke:12:3:")
+        # All sample cell XY near origin_a, not origin_b
+        for sample in tracks[0]["samples"]:
+            for cell in sample["cells"]:
+                assert abs(cell[0] - origin_a[0]) < 40
+                assert abs(cell[1] - origin_a[1]) < 40
+
+    def test_entity_reuse_gets_distinct_lifecycle_ids(self):
+        blob = _make_journal([(1, _occ_payload([(16, 16, 16)]))])
+        rows = [
+            {
+                "tick": 10,
+                "grenade_entity_id": 9,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": [1.0, 2.0, 3.0],
+            },
+            {
+                "tick": 5000,
+                "grenade_entity_id": 9,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": [50.0, 60.0, 70.0],
+            },
+        ]
+        tracks, _warnings = build_smoke_tracks_from_rows(
+            rows, start_tick=0, end_tick=10000, tick_rate=64, round_number=0
+        )
+        assert len(tracks) == 2
+        assert tracks[0]["id"] != tracks[1]["id"]
+        assert tracks[0]["stable_origin"] == [1.0, 2.0, 3.0]
+        assert tracks[1]["stable_origin"] == [50.0, 60.0, 70.0]
+
 
 class TestExtractDynamicEffectTracks:
     def test_exception_does_not_raise(self):
