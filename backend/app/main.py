@@ -2904,13 +2904,20 @@ async def get_demo_replay(req: DemoReplayRequest):
         map_key = f"de_{map_key}"
 
     fp_meta = demo_fingerprint(str(dem_path))
+    transform: dict[str, Any] | None = None
+    if map_key not in {"unknown", ""}:
+        try:
+            transform = lookup_map_data(map_key)
+        except (KeyError, OSError):
+            transform = None
+    tv = int((transform or {}).get("transform_version") or 3)
     cache_key = frames_cache_key(
         str(dem_path),
         round_number=None,
         start_tick=int(req.start_tick),
         end_tick=int(req.end_tick),
         fps=float(req.fps),
-        transform_version=1,
+        transform_version=tv,
     )
 
     def _payload_from_cache(cached: dict[str, Any], *, frames_source: str, shared_job: bool = False) -> dict[str, Any]:
@@ -2963,11 +2970,6 @@ async def get_demo_replay(req: DemoReplayRequest):
             include_all_players=True,
             include_effect_tracks=True,
         )
-        try:
-            transform = lookup_map_data(map_key)
-        except (KeyError, OSError):
-            transform = None
-
         effect_tracks: list = []
         effect_capabilities = {
             "inferno_cells": False,
