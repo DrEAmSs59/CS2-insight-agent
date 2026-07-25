@@ -614,7 +614,7 @@ export default function Demo2DReplayPreview({
   const roundClockRemaining = uiTick >= roundEndTick
     ? 0
     : Math.max(0, ROUND_CLOCK_SECONDS - activeRoundElapsed);
-  const eventMarkers = roundEvents.filter((event) => event.type === "kill" || event.type === "grenade");
+  const eventMarkers = roundEvents.filter((event) => event.type === "kill" || event.type === "grenade" || event.type === "plant");
 
   const seekToEvent = (event) => {
     if (!frames.length) return;
@@ -658,8 +658,13 @@ export default function Demo2DReplayPreview({
             <div className="absolute left-2 right-2 top-0 z-10 h-3">
               {eventMarkers.map((event) => {
                 const ratio = eventFrameRatio(event, frames, selectedRound);
-                const markerTone = event.type === "kill" ? "bg-rose-400" : "bg-amber-300";
-                return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={event.type === "kill" ? "kill" : "utility"} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
+                const markerTone = event.type === "kill"
+                  ? "bg-rose-400"
+                  : event.type === "plant"
+                    ? "bg-orange-600"
+                    : "bg-amber-300";
+                const eventKind = event.type === "kill" ? "kill" : event.type === "plant" ? "plant" : "utility";
+                return <button key={`${event.type}-${event.tick}-${event.actor || ""}`} type="button" data-event-kind={eventKind} aria-label={`定位事件：${eventLabel(event)}`} onClick={() => seekToEvent(event)} className="group absolute top-0 h-3 w-3 -translate-x-1/2" style={{ left: `${ratio * 100}%` }}><span className={`mx-auto block h-2.5 w-2.5 rounded-full border border-black/40 shadow-sm ${markerTone}`} /><span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-max max-w-[260px] -translate-x-1/2 rounded-md border border-cs2-border bg-cs2-bg-page px-2 py-1.5 text-left text-[9px] font-medium text-cs2-text-primary shadow-xl group-hover:block group-focus-visible:block"><b className="mr-1 font-mono text-cs2-accent">{event.time_text || "--:--"}</b>{eventLabel(event)}</span></button>;
               })}
             </div>
             <input aria-label="回放时间轴" type="range" min="0" max={Math.max(0, frames.length - 1)} step="0.01" value={sliderIndex} onChange={(event) => { setFrameIndex(Number(event.target.value)); setPlaying(false); }} className="h-1.5 w-full cursor-pointer accent-cs2-accent" />
@@ -672,7 +677,7 @@ export default function Demo2DReplayPreview({
             {[{ key: "traces", icon: Route, label: "走位轨迹" }, { key: "kills", icon: Swords, label: "击杀连线" }, { key: "shots", icon: Crosshair, label: "射击弹道" }, { key: "grenades", icon: Bomb, label: "投掷物" }, { key: "utilityAreas", icon: MapIcon, label: "烟火区域" }].map(({ key, icon: Icon, label }) => <button key={key} type="button" aria-pressed={layers[key]} onClick={() => toggleLayer(key)} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-semibold ${layers[key] ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border text-cs2-text-muted"}`}><Icon className="h-3 w-3" />{label}</button>)}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-[9px] font-semibold text-cs2-text-muted" aria-label="时间轴事件图例"><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-rose-400" />击杀</span><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-300" />道具</span></div>
+            <div className="flex items-center gap-2 text-[9px] font-semibold text-cs2-text-muted" aria-label="时间轴事件图例"><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-rose-400" />击杀</span><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-300" />道具</span><span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-600" />下包</span></div>
             <div role="group" aria-label="人物标识" className="flex rounded-md border border-cs2-border bg-cs2-bg-input p-0.5">{[["number", "序号"], ["id", "ID"]].map(([value, label]) => <button key={value} type="button" aria-pressed={playerLabelMode === value} onClick={() => setPlayerLabelMode(value)} className={`rounded px-2 py-1 text-[8px] font-bold ${playerLabelMode === value ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{label}</button>)}</div>
             <div className="flex rounded-md border border-cs2-border bg-cs2-bg-input p-0.5">{[0.5, 1, 2, 4].map((value) => <button key={value} type="button" onClick={() => setSpeed(value)} className={`rounded px-2 py-1 font-mono text-[8px] ${speed === value ? "bg-cs2-text-primary text-cs2-bg-page" : "text-cs2-text-muted"}`}>{value}x</button>)}</div>
           </div>

@@ -286,8 +286,11 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(Number(screen.getByRole("slider", { name: "回放时间轴" }).value)).toBeCloseTo(0);
     expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("击杀");
     expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("道具");
+    expect(screen.getByLabelText("时间轴事件图例").textContent).toContain("下包");
     expect(view.container.querySelector('[data-event-kind="kill"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="utility"] > span')?.className).toContain("rounded-full");
+    expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("rounded-full");
+    expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("bg-orange-600");
     expect(API.post).toHaveBeenCalledWith("/demo/replay", expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 8 }));
     expect(screen.queryByText(/^nan$/i)).toBeNull();
     expect(screen.queryByText("16777215")).toBeNull();
@@ -344,6 +347,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByTitle("C4 已放置 · B 区")).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
     expect(screen.getByTitle("C4 已放置 · B 区").className).toContain("z-[4]");
+    expect(screen.getByTitle("C4 已放置 · B 区").querySelectorAll(".planted-c4-ring")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "定位事件：ZywOo 在 B 区下包" })).toBeTruthy();
     const killFeed = view.container.querySelector('[aria-live="polite"]');
     expect(within(killFeed).getByText("ZywOo").getAttribute("data-side")).toBe("CT");
     expect(within(killFeed).getByText("ZywOo").className).toContain("text-sky-300");

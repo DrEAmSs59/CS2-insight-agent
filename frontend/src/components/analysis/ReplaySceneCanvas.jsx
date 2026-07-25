@@ -3,6 +3,7 @@ import { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
+import ReplayBombMarker from "./ReplayBombMarker";
 import ReplayCameraControls from "./ReplayCameraControls";
 import {
   worldToRadarPercent,
@@ -854,7 +855,13 @@ export default function ReplaySceneCanvas({
               />
             );
           })}
-          {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-4 w-4 items-center justify-center rounded-[2px] border border-amber-200 bg-amber-400"><HudEquipmentIcon stem="c4" className="h-3 w-3 brightness-0" /></div></div>}
+          {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && (
+            <ReplayBombMarker
+              status={bombState.status}
+              site={bombState.site}
+              style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }}
+            />
+          )}
           {markerPlayers.map((player) => {
             const isBlue = isBlueReplaySide(replaySideForTeamKey(player.team_key, selectedRound), player.team_key === "a");
             const displayName = safeLabel(player.name, "?");
