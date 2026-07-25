@@ -13,6 +13,8 @@ import DemoPagination from "../components/demoLibrary/DemoPagination";
 import MatchCard, { MatchListRow } from "../components/MatchCard";
 import DemoInfoModal from "../components/DemoInfoModal";
 import IngestModal from "../components/IngestModal";
+import Modal from "../components/ui/Modal";
+import Button from "../components/ui/Button";
 import {
   applyClientSideDemoFilters,
   filterByPathAndTags,
@@ -53,6 +55,7 @@ export default function DemoLibraryPage() {
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
   const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
+  const [batchDeleteCount, setBatchDeleteCount] = useState(0);
   const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
 
   const queuedClientClipUids = useMemo(
@@ -199,13 +202,19 @@ export default function DemoLibraryPage() {
   const handleBatchDelete = useCallback(() => {
     const ids = Array.from(s.selectedLibraryDemoIds);
     if (!ids.length) return;
-    if (
-      !window.confirm(t("library.batchDeleteConfirm", { count: ids.length }))
-    ) {
-      return;
-    }
+    setBatchDeleteCount(ids.length);
+  }, [s]);
+
+  const closeBatchDeleteConfirm = useCallback(() => {
+    setBatchDeleteCount(0);
+  }, []);
+
+  const confirmBatchDelete = useCallback(() => {
+    const ids = Array.from(s.selectedLibraryDemoIds);
+    setBatchDeleteCount(0);
+    if (!ids.length) return;
     void s.handleLibraryBatchDelete(ids);
-  }, [s, t]);
+  }, [s]);
 
   const onPageChange = useCallback(
     (page) => {
@@ -354,6 +363,30 @@ export default function DemoLibraryPage() {
         onBatchDelete={handleBatchDelete}
         onClearSelection={s.clearLibrarySelection}
       />
+
+      <Modal
+        open={batchDeleteCount > 0}
+        onClose={closeBatchDeleteConfirm}
+        title={t("library.batchDelete")}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        zIndex={110}
+        className="!h-auto"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={closeBatchDeleteConfirm}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmBatchDelete}>
+              {t("common.confirm")}
+            </Button>
+          </div>
+        )}
+      >
+        <p className="px-5 py-4 text-[12px] leading-relaxed text-cs2-text-secondary">
+          {t("library.batchDeleteConfirm", { count: batchDeleteCount })}
+        </p>
+      </Modal>
 
       {s.libraryDeletePrompt ? (
         <div
