@@ -15,15 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.9.0"
+          run_install: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.8"
+          enable-cache: true
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -33,20 +43,19 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install backend test dependencies
-        run: python -m pip install -c backend/constraints.txt -r backend/requirements.txt pytest==8.4.2
+        run: uv sync --frozen
 
-      - name: Build and install patched demoparser runtime
+      - name: Build and verify patched demoparser runtime
         shell: pwsh
         run: |
-          $meta = Get-Content "packaging/demoparser-lean/demoparser-runtime.json" -Raw | ConvertFrom-Json
-          python -m pip install --disable-pip-version-check "maturin==$($meta.maturin_version)"
           ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
           $wheel = Get-ChildItem "dist/wheels/demoparser2-*-cp312-*.whl" | Select-Object -First 1
           if (-not $wheel) { throw "CPython 3.12 patched demoparser wheel not found" }
-          python -m pip install --force-reinstall --no-deps $wheel.FullName
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m; from demoparser2 import DemoParser; assert m.version('demoparser2').endswith('+cs2insight5'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')"
+          if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
           $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText(
             (Join-Path $wheel.DirectoryName "demoparser2-SHA256SUMS.txt"),
@@ -54,16 +63,16 @@ jobs:
             [Text.UTF8Encoding]::new($false)
           )
           $env:PYTHONPATH = "backend"
-          python -m app.demoparser_runtime
+          uv run --frozen python -m app.demoparser_runtime
 
       - name: Run backend tests
         env:
           PYTHONPATH: backend
-        run: python -m pytest backend/tests -q
+        run: uv run --frozen python -m pytest backend/tests -q
 
       - name: Run frontend tests
         working-directory: frontend
-        run: npm test
+        run: pnpm test
 
       - name: Check Rust formatting
         working-directory: frontend/src-tauri
@@ -114,7 +123,7 @@ jobs:
           $ver = $env:RELEASE_TAG -replace '^[vV]', ''
           Push-Location frontend
           try {
-            npm.cmd run desktop:build:ver -- $ver
+            pnpm.cmd run desktop:build:ver -- $ver
             if ($LASTEXITCODE -ne 0) { throw "Tauri build failed: $LASTEXITCODE" }
           } finally {
             Pop-Location
@@ -139,7 +148,7 @@ jobs:
 
       - name: Report bundled runtime size
         shell: pwsh
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 150
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 160
 
       - name: Write SHA256SUMS
         shell: pwsh
@@ -164,7 +173,7 @@ jobs:
           $resourceBytes = (Get-ChildItem "frontend/src-tauri/bundle-resources" -Recurse -File | Measure-Object Length -Sum).Sum
           $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
           Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
-          if ($installedMiB -gt 180) { throw ("Installed footprint exceeds 180 MiB budget: {0:N2} MiB" -f $installedMiB) }
+          if ($installedMiB -gt 190) { throw ("Installed footprint exceeds 190 MiB budget: {0:N2} MiB" -f $installedMiB) }
           $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }

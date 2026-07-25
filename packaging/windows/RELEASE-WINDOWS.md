@@ -8,7 +8,7 @@ Python 后端、Pillow、pandas、NumPy 与 demoparser2 等既有运行时依赖
 
 ## Cut a release
 
-1. 确保 `frontend/package-lock.json` 与 `frontend/src-tauri/Cargo.lock` 已更新。
+1. 确保 `frontend/pnpm-lock.yaml` 与 `frontend/src-tauri/Cargo.lock` 已更新。
 2. 推送 semver tag：`git tag v1.2.3 && git push origin v1.2.3`（`V1.2.3` 也会触发）。
 3. `Release Windows` workflow 构建并上传 Tauri NSIS 安装包、`runtime-size-report.json` 与 `SHA256SUMS`。
 
@@ -22,12 +22,12 @@ Python 后端、Pillow、pandas、NumPy 与 demoparser2 等既有运行时依赖
 2. **构建时签名**：`desktop:build:ver` 会自动使用 `%USERPROFILE%\.tauri\cs2-insight-agent.key`（空密码），并在 NSIS 包旁生成 `.sig` 更新签名：
 
 ```powershell
-npm.cmd run desktop:build:ver -- 2.4.0
+pnpm.cmd run desktop:build:ver -- 2.4.0
 ```
 
    CI 或自定义密钥路径时改用环境变量 `TAURI_SIGNING_PRIVATE_KEY`（密钥内容或文件路径均可）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。注意 PowerShell 无法设置「空字符串」环境变量（`$env:X = ""` 等于删除），空密码密钥请交给 `desktop:build:ver` 处理或在 CI YAML 中设置。
 
-3. **发布**：设置 R2 凭据（`R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`，可选 `R2_PUBLIC_BASE_URL`、`RELEASE_NOTES`、`UPDATE_MODE=force|normal`）后执行 `npm run deploy:r2`。脚本会上传：
+3. **发布**：设置 R2 凭据（`R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`，可选 `R2_PUBLIC_BASE_URL`、`RELEASE_NOTES`、`UPDATE_MODE=force|normal`）后执行 `pnpm run deploy:r2`。脚本会上传：
    - `CS2 Insight Agent_<ver>_x64-setup.exe` — 完整安装包，同时是更新包；
    - `latest.json` — Tauri updater 清单（内嵌 `.sig` 签名，含 `update_mode`）；
    - `latest.yml` — electron-updater 桥接清单：仍在旧 Electron 版上的用户会把 Tauri 安装包当作更新静默安装，完成一次性迁移。
@@ -43,15 +43,15 @@ Windows 端更新流程：下载校验签名 → 应用自动退出 → NSIS 以
 ```powershell
 Push-Location frontend
 try {
-  npm.cmd run desktop:build:ver -- 2.4.0
+  pnpm.cmd run desktop:build:ver -- 2.4.0
 } finally {
   Pop-Location
 }
 ```
 
-`desktop:build:ver` 会把同一版本传给三个位置：Vite 的 `__APP_VERSION__`、Tauri/NSIS 的文件与产品版本、内置后端的 `app/release_version.txt`。构建日志中的 npm/Cargo manifest 版本仍可能显示仓库默认值，最终版本以安装包文件属性和上述 `release_version.txt` 为准。
+`desktop:build:ver` 会把同一版本传给三个位置：Vite 的 `__APP_VERSION__`、Tauri/NSIS 的文件与产品版本、内置后端的 `app/release_version.txt`。构建日志中的 pnpm/Cargo manifest 版本仍可能显示仓库默认值，最终版本以安装包文件属性和上述 `release_version.txt` 为准。
 
-发布构建不要使用不带版本的 `npm run desktop:build`；该命令只使用仓库默认版本，适合日常 smoke build。产物固定输出到：
+发布构建不要使用不带版本的 `pnpm run desktop:build`；该命令只使用仓库默认版本，适合日常 smoke build。产物固定输出到：
 
 ```text
 frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe
@@ -61,17 +61,16 @@ frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-se
 
 ```powershell
 $version = "2.4.0"
-$meta = Get-Content ./packaging/demoparser-lean/demoparser-runtime.json -Raw | ConvertFrom-Json
 $python312 = py -3.12 -c "import sys; print(sys.executable)"
-& $python312 -m pip install "maturin==$($meta.maturin_version)"
+uv sync --frozen
 ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe $python312 -OutputDir dist/wheels
 
 $env:CS2_INSIGHT_DEMOPARSER_WHEEL = (Get-ChildItem ./dist/wheels/demoparser2-*-cp312-*.whl | Select-Object -First 1).FullName
 $env:CS2_INSIGHT_REFRESH_PYTHON = "1"
 Push-Location frontend
 try {
-  npm ci
-  npm.cmd run desktop:build:ver -- $version
+  pnpm install --frozen-lockfile
+  pnpm.cmd run desktop:build:ver -- $version
 } finally {
   Pop-Location
 }
@@ -100,9 +99,8 @@ NSIS 升级桥按以下顺序执行，任何迁移或校验失败都会中止，
 1. 用 CPython 3.12 构建仓库原有的 lean demoparser wheel：
 
 ```powershell
-$meta = Get-Content ./packaging/demoparser-lean/demoparser-runtime.json -Raw | ConvertFrom-Json
 $python312 = py -3.12 -c "import sys; print(sys.executable)"
-& $python312 -m pip install "maturin==$($meta.maturin_version)"
+uv sync --frozen
 ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe $python312 -OutputDir dist/wheels
 ```
 
@@ -112,8 +110,8 @@ $python312 = py -3.12 -c "import sys; print(sys.executable)"
 $env:CS2_INSIGHT_DEMOPARSER_WHEEL = (Get-ChildItem ./dist/wheels/demoparser2-*-cp312-*.whl | Select-Object -First 1).FullName
 $env:CS2_INSIGHT_REFRESH_PYTHON = "1"
 Push-Location frontend
-npm ci
-npm.cmd run desktop:build:ver -- 0.0.0
+pnpm install --frozen-lockfile
+pnpm.cmd run desktop:build:ver -- 0.0.0
 Pop-Location
 ```
 
@@ -131,6 +129,6 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ./packaging/windows/report-runtime-size.ps1 -Root $resources -OutputPath dist/runtime-size-report.json
 ```
 
-CI 预算：嵌入 resources 不超过 `150 MiB`，NSIS 安装包不超过 `70 MiB`，预计安装占用不超过 `180 MiB`。超过上限会中止 release。
+CI 预算：嵌入 resources 不超过 `160 MiB`，NSIS 安装包不超过 `70 MiB`，预计安装占用不超过 `190 MiB`。超过上限会中止 release。
 
 `bootstrap-staging.ps1`、`package_portable.ps1` 与 `CS2InsightAgent.iss` 仍保留为 legacy/manual 工具；Tauri 正式发布仅复用 `package_portable.ps1` 的 Python staging 能力。

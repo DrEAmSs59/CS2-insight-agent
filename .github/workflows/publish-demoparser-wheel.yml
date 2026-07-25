@@ -7,6 +7,8 @@ on:
       - develop
     paths:
       - ".github/workflows/publish-demoparser-wheel.yml"
+      - "pyproject.toml"
+      - "uv.lock"
       - "packaging/demoparser-lean/build-wheel.ps1"
       - "packaging/demoparser-lean/demoparser-runtime.json"
       - "packaging/demoparser-lean/demoparser2-v0.41.4.patch"
@@ -24,14 +26,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build patched wheel
         shell: pwsh
-        run: |
-          $meta = Get-Content "packaging/demoparser-lean/demoparser-runtime.json" -Raw | ConvertFrom-Json
-          python -m pip install --disable-pip-version-check "maturin==$($meta.maturin_version)"
-          ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
+        run: ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
 
       - name: Verify wheel and write checksum
         id: runtime
@@ -41,8 +45,8 @@ jobs:
           $wheel = Get-ChildItem "dist/wheels/demoparser2-$($meta.distribution_version)-cp312-cp312-win_amd64.whl" |
             Select-Object -First 1
           if (-not $wheel) { throw "Expected patched demoparser wheel was not produced" }
-          python -m pip install --force-reinstall --no-deps $wheel.FullName
-          python -c "import importlib.metadata as m; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')"
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')"
+          if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
           $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText(
             (Join-Path $wheel.DirectoryName ([string]$meta.checksum_asset)),

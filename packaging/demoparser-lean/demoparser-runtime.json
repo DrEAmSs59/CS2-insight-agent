@@ -6,6 +6,5 @@
   "release_repo": "DrEAmSs59/CS2-insight-agent",
   "release_tag": "demoparser-runtime-v0.41.4-cs2insight5-r1",
   "checksum_asset": "demoparser2-SHA256SUMS.txt",
-  "maturin_version": "1.14.1",
   "patch_sha256": "79735dbb474623603d76d2e4f2c95b032d017c4bcf3bb97137c61f78058eef6d"
 }

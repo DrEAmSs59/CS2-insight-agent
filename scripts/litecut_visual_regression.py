@@ -243,12 +243,12 @@ class VisualRegressionRunner:
 
     def start_vite(self) -> None:
         PUBLIC_TMP.mkdir(parents=True, exist_ok=True)
-        npm = shutil.which("npm.cmd") or shutil.which("npm")
-        if not npm:
-            raise FileNotFoundError("npm is required for browser preview rendering")
+        pnpm = shutil.which("pnpm.cmd") or shutil.which("pnpm")
+        if not pnpm:
+            raise FileNotFoundError("pnpm is required for browser preview rendering")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.vite = subprocess.Popen(
-            [npm, "run", "dev", "--", "--host", "127.0.0.1", "--port", str(VITE_PORT), "--strictPort"],
+            [pnpm, "exec", "vite", "--host", "127.0.0.1", "--port", str(VITE_PORT), "--strictPort"],
             cwd=FRONTEND,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

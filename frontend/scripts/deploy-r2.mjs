@@ -12,7 +12,7 @@ import { fileURLToPath } from "url";
  *   - `latest.yml`  — electron-updater 桥接清单：旧 Electron 客户端会把
  *     Tauri 安装包当作更新下载并以 /S 静默执行，从而完成一次性迁移
  *
- * 需要先用 `npm run desktop:build:ver -- <ver>` 构建，并在构建时设置
+ * 需要先用 `pnpm run desktop:build:ver -- <ver>` 构建，并在构建时设置
  * TAURI_SIGNING_PRIVATE_KEY(_PATH)，否则不会生成 .sig 更新签名。
  */
 
@@ -106,7 +106,7 @@ async function main() {
   if (!fs.existsSync(NSIS_DIR)) {
     console.error(
       `NSIS bundle directory not found: ${NSIS_DIR}\n` +
-        "Please run 'npm run desktop:build:ver -- <version>' first.",
+        "Please run 'pnpm run desktop:build:ver -- <version>' first.",
     );
     process.exit(1);
   }

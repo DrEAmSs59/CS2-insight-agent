@@ -4,7 +4,7 @@
   "version": "2.3.0",
   "identifier": "com.cs2insightagent.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "node node_modules/vite/bin/vite.js build",
     "frontendDist": "../dist"

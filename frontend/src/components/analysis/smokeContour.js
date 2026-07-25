@@ -60,18 +60,51 @@ export function buildDensityMask(cells, cellSize) {
     };
   }
 
+  const size = Number(cellSize);
+  if (!Number.isFinite(size) || size <= 0) {
+    return {
+      originX: 0,
+      originY: 0,
+      width: 0,
+      height: 0,
+      cellSize: size,
+      data: new Float32Array(0),
+    };
+  }
+
+  const validCells = cells.filter((cell) => (
+    Number.isFinite(Number(cell?.[0]))
+    && Number.isFinite(Number(cell?.[1]))
+  ));
+  if (!validCells.length) {
+    return {
+      originX: 0,
+      originY: 0,
+      width: 0,
+      height: 0,
+      cellSize: size,
+      data: new Float32Array(0),
+    };
+  }
+
+  // Incoming world coordinates are voxel *centres* and every smoke owns its
+  // own grid phase (detonation origin + N * cellSize). Quantising them against
+  // the global world origin and then adding 0.5 cell shifts every contour.
+  // Anchor indices to this smoke's first centre and retain that phase.
+  const phaseX = Number(validCells[0][0]);
+  const phaseY = Number(validCells[0][1]);
   let minGx = Infinity;
   let minGy = Infinity;
   let maxGx = -Infinity;
   let maxGy = -Infinity;
   const densities = new Map();
 
-  for (const cell of cells) {
+  for (const cell of validCells) {
     const x = Number(cell[0]);
     const y = Number(cell[1]);
     const density = Number(cell[3]) || 0;
-    const gx = Math.floor(x / cellSize);
-    const gy = Math.floor(y / cellSize);
+    const gx = Math.round((x - phaseX) / size);
+    const gy = Math.round((y - phaseY) / size);
     minGx = Math.min(minGx, gx);
     minGy = Math.min(minGy, gy);
     maxGx = Math.max(maxGx, gx);
@@ -90,11 +123,12 @@ export function buildDensityMask(cells, cellSize) {
   }
 
   return {
-    originX: minGx * cellSize,
-    originY: minGy * cellSize,
+    // worldFromGrid adds half a cell to reach a sample centre.
+    originX: phaseX + minGx * size - size / 2,
+    originY: phaseY + minGy * size - size / 2,
     width,
     height,
-    cellSize,
+    cellSize: size,
     data,
   };
 }
