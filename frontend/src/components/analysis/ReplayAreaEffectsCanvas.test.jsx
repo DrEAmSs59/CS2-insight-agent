@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { render } from "@testing-library/react";
-import ReplayAreaEffectsCanvas, { applyUtilityClip, selectActiveSample } from "./ReplayAreaEffectsCanvas";
+import ReplayAreaEffectsCanvas, {
+  applyUtilityClip,
+  luminanceMaskToAlphaCanvas,
+  selectActiveSample,
+} from "./ReplayAreaEffectsCanvas";
 
-/** Minimal ImageData-backed 2d context for destination-in clip tests (jsdom has no canvas). */
+/** Minimal ImageData-backed 2d context matching real destination-in (source alpha only). */
 function createImageDataCanvas(width, height) {
   const pixels = new Uint8ClampedArray(width * height * 4);
   const canvas = { width, height };
@@ -59,12 +63,10 @@ function createImageDataCanvas(width, height) {
           const si = (sy * sw + sx) * 4;
           const di = ((dy + py) * width + (dx + px)) * 4;
           if (di < 0 || di + 3 >= pixels.length) continue;
+          // Real canvas destination-in uses source alpha only (not luminance).
           const ma = (src[si + 3] ?? 255) / 255;
-          // White mask → high alpha; black → 0. Use luminance * alpha as coverage.
-          const lum = ((src[si] + src[si + 1] + src[si + 2]) / 3) / 255;
-          const cover = lum * ma;
           if (this.globalCompositeOperation === "destination-in") {
-            pixels[di + 3] = Math.round(pixels[di + 3] * cover);
+            pixels[di + 3] = Math.round(pixels[di + 3] * ma);
             if (pixels[di + 3] === 0) {
               pixels[di] = 0;
               pixels[di + 1] = 0;
@@ -99,6 +101,29 @@ function createImageDataCanvas(width, height) {
   return canvas;
 }
 
+/** Opaque L-mode decode: black/white RGB with alpha always 255 (browser L PNG behavior). */
+function createOpaqueLuminanceMask(width, height, whiteRect) {
+  const canvas = createImageDataCanvas(width, height);
+  const pixels = canvas.__pixels;
+  for (let i = 0; i < pixels.length; i += 4) {
+    pixels[i] = 0;
+    pixels[i + 1] = 0;
+    pixels[i + 2] = 0;
+    pixels[i + 3] = 255;
+  }
+  const { x0, y0, x1, y1 } = whiteRect;
+  for (let py = y0; py < y1; py += 1) {
+    for (let px = x0; px < x1; px += 1) {
+      const i = (py * width + px) * 4;
+      pixels[i] = 255;
+      pixels[i + 1] = 255;
+      pixels[i + 2] = 255;
+      pixels[i + 3] = 255;
+    }
+  }
+  return canvas;
+}
+
 function parseCssColor(style) {
   if (style === "#000" || style === "#000000") return [0, 0, 0, 255];
   if (style === "#fff" || style === "#ffffff") return [255, 255, 255, 255];
@@ -108,18 +133,38 @@ function parseCssColor(style) {
   return [parts[0] || 0, parts[1] || 0, parts[2] || 0, parts.length > 3 ? Math.round(parts[3] * 255) : 255];
 }
 
+describe("luminanceMaskToAlphaCanvas", () => {
+  test("maps opaque L RGB to alpha (white→255, black→0)", () => {
+    const mask = createOpaqueLuminanceMask(4, 4, { x0: 0, y0: 0, x1: 2, y1: 2 });
+    const alpha = luminanceMaskToAlphaCanvas(mask, 4, 4);
+    expect(alpha).toBeTruthy();
+    expect(alpha.__pixels[3]).toBe(255); // white → full alpha
+    expect(alpha.__pixels[0]).toBe(255); // RGB white
+    const blackIdx = (3 * 4 + 3) * 4;
+    expect(alpha.__pixels[blackIdx + 3]).toBe(0); // black → zero alpha
+  });
+});
+
 describe("applyUtilityClip", () => {
-  test("applyUtilityClip zeros outside white mask", () => {
+  test("clips opaque L-mode mask via luminance→alpha (would no-op without conversion)", () => {
     const canvas = createImageDataCanvas(4, 4);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "rgba(255,0,0,1)";
     ctx.fillRect(0, 0, 4, 4);
-    const mask = createImageDataCanvas(4, 4);
-    const mctx = mask.getContext("2d");
-    mctx.fillStyle = "#000";
-    mctx.fillRect(0, 0, 4, 4);
-    mctx.fillStyle = "#fff";
-    mctx.fillRect(0, 0, 2, 2);
+    // Opaque L decode: black outside / white inside, alpha always 255.
+    const mask = createOpaqueLuminanceMask(4, 4, { x0: 0, y0: 0, x1: 2, y1: 2 });
+
+    // Sanity: raw destination-in on opaque L is a no-op (all source alpha = 255).
+    const raw = createImageDataCanvas(4, 4);
+    const rctx = raw.getContext("2d");
+    rctx.fillStyle = "rgba(255,0,0,1)";
+    rctx.fillRect(0, 0, 4, 4);
+    rctx.save();
+    rctx.globalCompositeOperation = "destination-in";
+    rctx.drawImage(mask, 0, 0, 4, 4);
+    rctx.restore();
+    expect(rctx.getImageData(3, 3, 1, 1).data[3]).toBe(255);
+
     applyUtilityClip(ctx, mask);
     const outside = ctx.getImageData(3, 3, 1, 1).data[3];
     const inside = ctx.getImageData(0, 0, 1, 1).data[3];
