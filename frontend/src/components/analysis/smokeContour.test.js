@@ -1,5 +1,13 @@
-import { describe, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import { buildDensityMask, marchingSquares, sampleCrossfadeAlpha } from "./smokeContour";
+
+test("buildDensityMask handles negative world coords", () => {
+  const cells = [[-10, 90, 0, 1], [-10, 110, 0, 1]];
+  const mask = buildDensityMask(cells, 20);
+  let nonzero = 0;
+  for (const v of mask.data) if (v > 0) nonzero += 1;
+  expect(nonzero).toBeGreaterThanOrEqual(2);
+});
 
 test("buildDensityMask keeps diagonal occupancy", () => {
   const cells = [[0, 0, 0, 1], [20, 20, 0, 1], [40, 40, 0, 1]];
