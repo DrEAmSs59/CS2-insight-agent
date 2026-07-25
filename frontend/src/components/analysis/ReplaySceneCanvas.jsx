@@ -805,7 +805,6 @@ export default function ReplaySceneCanvas({
             <ReplayBombMarker
               status={bombState.status}
               site={bombState.site}
-              fitScale={camera.fitScale}
               style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }}
             />
           )}
