@@ -3,9 +3,11 @@ from __future__ import annotations
 from app.parser.smoke_voxel_decode import (
     VOXEL_CELL_SIZE_WORLD,
     decode_smoke_cells,
+    decode_smoke_occupancy_sequence,
     decode_smoke_voxel_journal,
     decode_voxel_frame_occupancy,
     get_smoke_occupancy_at,
+    iter_smoke_occupancy_frames,
     voxel_to_world,
 )
 
@@ -86,6 +88,46 @@ class TestDecodeSmokeCells:
         assert out["voxel_count"] == 2
         assert out["cell_size"] == VOXEL_CELL_SIZE_WORLD
         assert len(out["cells"]) == 2
+
+    def test_target_seq_limits_to_earlier_occupancy(self):
+        data = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+            (3, _occ_payload([(16, 16, 16), (16, 18, 16), (16, 20, 16), (16, 22, 16)])),
+        ])
+        early = decode_smoke_cells(
+            data, declared_size=len(data), detonation_pos=[100.0, 200.0, 50.0], target_seq=1
+        )
+        late = decode_smoke_cells(
+            data, declared_size=len(data), detonation_pos=[100.0, 200.0, 50.0], target_seq=3
+        )
+        assert early["ok"] and late["ok"]
+        assert early["seq"] == 1
+        assert late["seq"] == 3
+        assert early["voxel_count"] < late["voxel_count"]
+        assert len(early["cells"]) < len(late["cells"])
+
+    def test_iter_occupancy_frames_yields_growth(self):
+        data = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (1, [0, 0, 0]),  # heartbeat skipped
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16)])),
+            (3, _occ_payload([(16, 16, 16), (16, 18, 16), (16, 20, 16)])),
+        ])
+        frames = iter_smoke_occupancy_frames(data, declared_size=len(data))
+        assert [seq for seq, _ in frames] == [1, 2, 3]
+        assert [len(v) for _, v in frames] == [1, 2, 3]
+
+    def test_occupancy_sequence_projects_each_seq(self):
+        data = _make_journal([
+            (1, _occ_payload([(16, 16, 16)])),
+            (2, _occ_payload([(16, 16, 16), (16, 18, 16), (16, 20, 16)])),
+        ])
+        seq = decode_smoke_occupancy_sequence(
+            data, declared_size=len(data), detonation_pos=[0.0, 0.0, 0.0], max_seq=2
+        )
+        assert [item["seq"] for item in seq] == [1, 2]
+        assert len(seq[0]["cells"]) < len(seq[1]["cells"])
 
     def test_missing_origin(self):
         out = decode_smoke_cells(b"\x00\x00\x00\x00", declared_size=4, detonation_pos=None)

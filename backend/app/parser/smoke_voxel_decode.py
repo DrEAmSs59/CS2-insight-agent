@@ -111,6 +111,60 @@ def get_smoke_occupancy_at(
     return latest
 
 
+def iter_smoke_occupancy_frames(
+    data: bytes | bytearray | None,
+    *,
+    declared_size: int | float | None = None,
+    max_seq: float | None = None,
+) -> list[tuple[int, list[SmokeVoxel]]]:
+    """Return every occupancy ``(seq, voxels)`` in journal order, optionally capped by ``max_seq``."""
+    if data is None or not isinstance(data, (bytes, bytearray)) or len(data) == 0:
+        return []
+    try:
+        size = int(declared_size) if declared_size is not None else len(data)
+    except (TypeError, ValueError):
+        size = len(data)
+    if size <= 0:
+        return []
+    try:
+        frames = decode_smoke_voxel_journal(bytes(data), size)
+    except SmokeVoxelDecodeError:
+        return []
+    limit = float("inf") if max_seq is None else float(max_seq)
+    out: list[tuple[int, list[SmokeVoxel]]] = []
+    for frame in frames:
+        if frame.seq > limit:
+            break
+        voxels = decode_voxel_frame_occupancy(frame.payload)
+        if voxels is not None:
+            out.append((frame.seq, voxels))
+    return out
+
+
+def decode_smoke_occupancy_sequence(
+    data: bytes | bytearray | None,
+    *,
+    declared_size: int | float | None,
+    detonation_pos: Sequence[float] | None,
+    max_seq: float | None = None,
+) -> list[dict[str, Any]]:
+    """Project every journal occupancy frame to 2D cells (one entry per seq)."""
+    if detonation_pos is None or len(detonation_pos) < 3:
+        return []
+    sequence: list[dict[str, Any]] = []
+    for seq, voxels in iter_smoke_occupancy_frames(data, declared_size=declared_size, max_seq=max_seq):
+        cells = project_voxels_to_cells(voxels, detonation_pos)
+        sequence.append(
+            {
+                "seq": seq,
+                "cells": cells,
+                "cell_size": VOXEL_CELL_SIZE_WORLD,
+                "voxel_count": len(voxels),
+            }
+        )
+    return sequence
+
+
 def voxel_to_world(
     x: float,
     y: float,
