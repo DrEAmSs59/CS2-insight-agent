@@ -325,6 +325,7 @@ export default function Demo2DReplayPreview({
   framesRef.current = frames;
   const pauseSyncRef = useRef(null);
   const playheadStoreRef = useRef(null);
+  const playbackAbortRef = useRef(null);
   if (!playheadStoreRef.current) {
     playheadStoreRef.current = createPlayheadStore({ position: 0, seconds: 0, tick: 0, sampleIndex: 0 });
   }
@@ -345,6 +346,17 @@ export default function Demo2DReplayPreview({
     setFrameIndex(0);
     setUiSampleIndex(0);
   };
+
+  useEffect(() => {
+    let prevEpoch = useReplayStore.getState().playbackSuspendEpoch;
+    return useReplayStore.subscribe((state) => {
+      if (state.playbackSuspendEpoch === prevEpoch) return;
+      prevEpoch = state.playbackSuspendEpoch;
+      // Stop rAF immediately so navigation is not blocked by 60fps scene work.
+      playbackAbortRef.current?.();
+      setPlaying(false);
+    });
+  }, []);
 
   useEffect(() => {
     setRoundNumber(initialRound || rounds[0]?.round_number || 1);
@@ -536,12 +548,23 @@ export default function Demo2DReplayPreview({
     clockRef.current = clock;
     clock.play();
     let animationFrame = 0;
+    let alive = true;
     let lastUiSample = clamp(Math.floor(framePositionRef.current), 0, frames.length - 1);
     const lastFrame = frames.length - 1;
     const lastSeconds = Number(frames[lastFrame]?.time_sec) || 0;
     const store = playheadStoreRef.current;
 
+    const stopLoop = () => {
+      alive = false;
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame);
+        animationFrame = 0;
+      }
+    };
+    playbackAbortRef.current = stopLoop;
+
     const animate = (now) => {
+      if (!alive) return;
       const activeFrames = framesRef.current;
       if (!activeFrames.length) return;
       const playheadSeconds = clock.getPlayheadSeconds(now);
@@ -579,25 +602,22 @@ export default function Demo2DReplayPreview({
     };
     animationFrame = window.requestAnimationFrame(animate);
     return () => {
-      window.cancelAnimationFrame(animationFrame);
+      stopLoop();
+      playbackAbortRef.current = null;
       const at = window.performance.now();
       clock.pause(at);
       const playheadSeconds = clock.getPlayheadSeconds(at);
-      const activeFrames = framesRef.current;
-      if (!activeFrames.length) return;
-      const position = replayPositionForTime(activeFrames, playheadSeconds);
-      framePositionRef.current = position;
-      const sampleIndex = clamp(Math.floor(position), 0, activeFrames.length - 1);
-      const approx = interpolateReplayFrame(activeFrames, Number.NaN, playheadSeconds);
-      store.set({
-        position,
+      // Lightweight cleanup only — skip interpolateReplayFrame (can stall tab switches).
+      pauseSyncRef.current = {
         seconds: playheadSeconds,
-        tick: Number(approx.tick) || 0,
-        sampleIndex,
+        position: framePositionRef.current,
+      };
+      store.set({
+        position: framePositionRef.current,
+        seconds: playheadSeconds,
+        tick: store.getSnapshot()?.tick || 0,
+        sampleIndex: clamp(Math.floor(framePositionRef.current), 0, Math.max(0, framesRef.current.length - 1)),
       });
-      // Preserve fractional playhead across pause / speed change (avoid integer sample snap).
-      // Do NOT setState here — cleanup also runs on unmount/route change and can freeze the UI.
-      pauseSyncRef.current = { seconds: playheadSeconds, position };
     };
   }, [playing, frames.length, speed, selectedRound?.freeze_end_tick, selectedRound?.start_tick]);
 

@@ -41,6 +41,12 @@ export const useReplayStore = create((set, get) => ({
   activeKey: null,
   /** Per-map camera snapshot: { fitScale, userZoom, offsetX, offsetY } */
   camerasByMap: {},
+  /** Bumped to force 2D replay rAF to stop before heavy UI navigation. */
+  playbackSuspendEpoch: 0,
+
+  requestSuspendPlayback() {
+    set({ playbackSuspendEpoch: get().playbackSuspendEpoch + 1 });
+  },
 
   getCamera(mapKey) {
     const key = String(mapKey || "").trim().toLowerCase();
