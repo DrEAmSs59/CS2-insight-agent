@@ -1,19 +1,19 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build frontend, copy backend + web, bundle Python + pip deps (default), zip.
+  Build frontend, copy backend + web, bundle Python + uv-locked deps (default), zip.
 
 .PARAMETER PortablePythonDir
-  If set: copy this folder to .\python\ (must contain python.exe), then pip install -r requirements.
+  If set: copy this folder to .\python\ (must contain python.exe), then install the uv-locked runtime.
 
 .PARAMETER OutDir
   Output folder, default dist\CS2-Insight-Agent-portable
 
-.PARAMETER SkipNpm
-  Skip npm install / build (use existing frontend\dist)
+.PARAMETER SkipPnpm
+  Skip pnpm install / build (use existing frontend\dist)
 
-.PARAMETER CleanNpm
-  Kill node.exe, delete frontend\node_modules, then npm install/build (fixes EPERM on Windows)
+.PARAMETER CleanPnpm
+  Kill node.exe, delete frontend\node_modules, then pnpm install/build (fixes EPERM on Windows)
 
 .PARAMETER SkipBundlePython
   Do not embed Python; output has no python\ (end users must install Python + deps themselves).
@@ -22,18 +22,18 @@
   Python embeddable version to download (default 3.12.7). Must match an existing zip on python.org.
 
 .PARAMETER ElectronStagePythonOnly
-  Only populate repo-root .\python\ using the same rules as the portable pack (embeddable or -PortablePythonDir + pip install).
-  Then exit — use before npm run electron:build (electron-builder extraResources reads ..\python).
+  Only populate repo-root .\python\ using the same rules as the portable pack.
+  Then exit — use before pnpm run electron:build (electron-builder extraResources reads ..\python).
 
 .PARAMETER DemoparserWheel
-  Required patched demoparser wheel. It is installed before requirements.txt.
+  Required patched demoparser wheel. It replaces the published wheel from the lock for packaging.
 
 #>
 param(
     [string]$PortablePythonDir = "",
     [string]$OutDir = "",
-    [switch]$SkipNpm,
-    [switch]$CleanNpm,
+    [Alias("SkipNpm")][switch]$SkipPnpm,
+    [Alias("CleanNpm")][switch]$CleanPnpm,
     [switch]$SkipBundlePython,
     [string]$EmbeddedPythonVersion = "3.12.7",
     [switch]$ElectronStagePythonOnly,
@@ -59,8 +59,10 @@ $ZipPath = "$OutDir.zip"
 $Frontend = Join-Path $Root "frontend"
 $Backend = Join-Path $Root "backend"
 $CacheDir = Join-Path $Root ".packaging-cache"
-$ReqFile = Join-Path $Backend "requirements.txt"
-$ConstraintsFile = Join-Path $Backend "constraints.txt"
+$ProjectFile = Join-Path $Root "pyproject.toml"
+$LockFile = Join-Path $Root "uv.lock"
+$Uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $Uv) { throw "uv 0.11.x is required to build a portable runtime." }
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
@@ -110,27 +112,11 @@ function Get-EmbeddedPython {
     $sitePkgs = Join-Path $DestDir "Lib\site-packages"
     Ensure-Directory $sitePkgs
 
-    $getPip = Join-Path $CacheDir "get-pip.py"
-    if (-not (Test-Path $getPip)) {
-        Write-Step "Download get-pip.py"
-        Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing -TimeoutSec 120
-    }
-
-    $pyExe = Join-Path $DestDir "python.exe"
-    Write-Step "Install pip into embedded Python"
-    Push-Location $DestDir
-    try {
-        & $pyExe $getPip
-        if ($LASTEXITCODE -ne 0) { throw "get-pip.py failed (exit $LASTEXITCODE)" }
-    } finally {
-        Pop-Location
-    }
 }
 
 function Install-BackendRequirements {
     param(
-        [Parameter(Mandatory)][string]$PythonExe,
-        [Parameter(Mandatory)][string]$RequirementsPath
+        [Parameter(Mandatory)][string]$PythonExe
     )
     $previousNoUserSite = $env:PYTHONNOUSERSITE
     $env:PYTHONNOUSERSITE = "1"
@@ -138,22 +124,23 @@ function Install-BackendRequirements {
     if (-not $DemoparserWheel.Trim()) {
         throw "DemoparserWheel is required; refusing to create a runtime with the stock parser."
     }
-    Write-Step "pip install -r requirements.txt (this can take several minutes)"
-    & $PythonExe -m pip install -U pip
-    if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed (exit $LASTEXITCODE)" }
+    $runtimeRequirements = Join-Path ([IO.Path]::GetTempPath()) (
+        "cs2-insight-runtime-" + [Guid]::NewGuid().ToString("n") + ".txt"
+    )
+    Write-Step "Install uv-locked Python runtime (this can take several minutes)"
+    & $Uv.Source export --project $Root --frozen --no-dev --no-emit-project `
+        --no-emit-package demoparser2 --output-file $runtimeRequirements
+    if ($LASTEXITCODE -ne 0) { throw "uv export failed (exit $LASTEXITCODE)" }
+    & $Uv.Source pip install --python $PythonExe --requirements $runtimeRequirements --compile-bytecode
+    if ($LASTEXITCODE -ne 0) { throw "uv runtime install failed (exit $LASTEXITCODE)" }
     $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
     Write-Step "Install patched demoparser wheel"
-    & $PythonExe -m pip install --no-deps $leanWheel
+    & $Uv.Source pip install --python $PythonExe --no-deps $leanWheel --compile-bytecode
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed (exit $LASTEXITCODE)" }
-    & $PythonExe -m pip install -c $ConstraintsFile -r $RequirementsPath
-    if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements.txt failed (exit $LASTEXITCODE)" }
-    & $PythonExe -m pip uninstall -y polars pyarrow polars-runtime-32
+    Remove-Item -LiteralPath $runtimeRequirements -Force -ErrorAction SilentlyContinue
     $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
     & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed (exit $LASTEXITCODE)" }
-    Write-Step "Remove pip / setuptools / wheel (not needed at runtime)"
-    & $PythonExe -m pip uninstall -y pip setuptools wheel
-    if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed (exit $LASTEXITCODE)" }
     $pythonRoot = Split-Path -Parent $PythonExe
     $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
     foreach ($rel in @(
@@ -208,8 +195,7 @@ function Install-BackendRequirements {
 
 function Bundle-PythonInto {
     param(
-        [Parameter(Mandatory)][string]$PythonDestDir,
-        [Parameter(Mandatory)][string]$RequirementsPath
+        [Parameter(Mandatory)][string]$PythonDestDir
     )
     if ($PortablePythonDir.Trim()) {
         $PySrc = (Resolve-Path $PortablePythonDir).Path
@@ -223,11 +209,11 @@ function Bundle-PythonInto {
         robocopy $PySrc $PythonDestDir /E /NFL /NDL /NJH /NJS /nc /ns /np `
             /XD __pycache__ .git | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy python failed (exit $LASTEXITCODE)" }
-        Install-BackendRequirements -PythonExe (Join-Path $PythonDestDir "python.exe") -RequirementsPath $RequirementsPath
+        Install-BackendRequirements -PythonExe (Join-Path $PythonDestDir "python.exe")
     }
     elseif (-not $SkipBundlePython) {
         Get-EmbeddedPython -DestDir $PythonDestDir -Version $EmbeddedPythonVersion -CacheDir $CacheDir
-        Install-BackendRequirements -PythonExe (Join-Path $PythonDestDir "python.exe") -RequirementsPath $RequirementsPath
+        Install-BackendRequirements -PythonExe (Join-Path $PythonDestDir "python.exe")
     }
     else {
         throw "Bundle-PythonInto: set PortablePythonDir or clear -SkipBundlePython"
@@ -235,7 +221,8 @@ function Bundle-PythonInto {
 }
 
 if (-not (Test-Path $Backend)) { throw "backend folder not found: $Backend" }
-if (-not (Test-Path $ReqFile)) { throw "requirements.txt not found: $ReqFile" }
+if (-not (Test-Path $ProjectFile)) { throw "pyproject.toml not found: $ProjectFile" }
+if (-not (Test-Path $LockFile)) { throw "uv.lock not found: $LockFile" }
 
 if ($ElectronStagePythonOnly) {
     if ($SkipBundlePython -and -not ($PortablePythonDir.Trim())) {
@@ -243,18 +230,21 @@ if ($ElectronStagePythonOnly) {
     }
     $electronPy = Join-Path $Root "python"
     Write-Step "Electron: stage repo-root python\ (same bundle logic as portable package)"
-    Bundle-PythonInto -PythonDestDir $electronPy -RequirementsPath $ReqFile
+    Bundle-PythonInto -PythonDestDir $electronPy
     Write-Host ""
     Write-Host "Done: $electronPy" -ForegroundColor Green
     Write-Host "Next:  cd frontend" -ForegroundColor Yellow
-    Write-Host "       npm run electron:build" -ForegroundColor Yellow
+    Write-Host "       pnpm run electron:build" -ForegroundColor Yellow
     exit 0
 }
 
 # --- frontend build ---
-if (-not $SkipNpm) {
-    if ($CleanNpm) {
-        Write-Step "CleanNpm: stop node.exe, remove frontend\node_modules"
+if (-not $SkipPnpm) {
+    $Pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
+    if (-not $Pnpm) { $Pnpm = Get-Command pnpm -ErrorAction SilentlyContinue }
+    if (-not $Pnpm) { throw "pnpm 11.9.0 is required to build the frontend." }
+    if ($CleanPnpm) {
+        Write-Step "CleanPnpm: stop node.exe, remove frontend\node_modules"
         Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
         $nm = Join-Path $Frontend "node_modules"
@@ -262,20 +252,16 @@ if (-not $SkipNpm) {
             Remove-Item -Recurse -Force $nm
         }
     }
-    Write-Step "npm install / npm run build (frontend)"
+    Write-Step "pnpm install --frozen-lockfile / pnpm run build (frontend)"
     Push-Location $Frontend
     try {
-        if (Test-Path (Join-Path $Frontend "package-lock.json")) {
-            npm ci
-        } else {
-            npm install
-        }
+        & $Pnpm.Source install --frozen-lockfile
         if ($LASTEXITCODE -ne 0) {
-            throw "npm install/ci failed (exit $LASTEXITCODE). Try closing editors/antivirus, or run with -CleanNpm."
+            throw "pnpm install failed (exit $LASTEXITCODE). Try closing editors/antivirus, or run with -CleanPnpm."
         }
-        npm run build
+        & $Pnpm.Source run build
         if ($LASTEXITCODE -ne 0) {
-            throw "npm run build failed (exit $LASTEXITCODE)."
+            throw "pnpm run build failed (exit $LASTEXITCODE)."
         }
     } finally {
         Pop-Location
@@ -284,7 +270,7 @@ if (-not $SkipNpm) {
 
 $DistWeb = Join-Path $Frontend "dist"
 if (-not (Test-Path (Join-Path $DistWeb "index.html"))) {
-    throw "Missing frontend\dist\index.html — run npm run build in frontend first."
+    throw "Missing frontend\dist\index.html — run pnpm run build in frontend first."
 }
 
 # --- output dir ---
@@ -302,7 +288,8 @@ robocopy $Backend $DestBackend /E /NFL /NDL /NJH /NJS /nc /ns /np `
     | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy backend failed (exit $LASTEXITCODE)" }
 
-$ReqInPackage = Join-Path $DestBackend "requirements.txt"
+Copy-Item -LiteralPath $ProjectFile -Destination (Join-Path $OutDir "pyproject.toml") -Force
+Copy-Item -LiteralPath $LockFile -Destination (Join-Path $OutDir "uv.lock") -Force
 
 # --- web static files ---
 Write-Step "Copy frontend dist into web/"
@@ -352,11 +339,11 @@ $DestPy = Join-Path $OutDir "python"
 $BundledPython = $false
 
 if ($PortablePythonDir.Trim()) {
-    Bundle-PythonInto -PythonDestDir $DestPy -RequirementsPath $ReqInPackage
+    Bundle-PythonInto -PythonDestDir $DestPy
     $BundledPython = $true
 }
 elseif (-not $SkipBundlePython) {
-    Bundle-PythonInto -PythonDestDir $DestPy -RequirementsPath $ReqInPackage
+    Bundle-PythonInto -PythonDestDir $DestPy
     $BundledPython = $true
 }
 
@@ -411,19 +398,35 @@ if not exist "%ROOT%python\python.exe" (
   pause
   exit /b 1
 )
-echo 正在重新安装/修复 Python 依赖（与发行包一致）...
-"%ROOT%python\python.exe" -m pip install -U pip
-"%ROOT%python\python.exe" -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
+where uv >nul 2>&1
+if errorlevel 1 (
+  echo [错误] 修复依赖需要 uv。请安装 uv 后重试，或重新安装完整发行包。
+  pause
+  exit /b 1
+)
+set "REQ=%TEMP%\cs2-insight-runtime-%RANDOM%.txt"
+echo 正在按 uv.lock 重新安装/修复 Python 依赖...
+uv export --project "%ROOT%" --frozen --no-dev --no-emit-project --output-file "%REQ%"
+if errorlevel 1 goto :failed
+uv pip install --python "%ROOT%python\python.exe" --requirements "%REQ%" --compile-bytecode
+if errorlevel 1 goto :failed
+del /q "%REQ%" >nul 2>&1
 echo.
 echo 完成。可再运行「启动.bat」。
 pause
+exit /b 0
+:failed
+del /q "%REQ%" >nul 2>&1
+echo [错误] 依赖修复失败。
+pause
+exit /b 1
 '@
 
     $Readme = @"
 CS2 Insight Agent — 便携包使用说明
 ================================
 
-本包已内置 Python 运行环境与 pip 依赖，无需再运行「安装依赖」。
+本包已内置由 uv.lock 精确锁定的 Python 运行环境，无需再运行「安装依赖」。
 
 1. 首次使用（可选）
    - 默认会从 data\cs2-insight.config.example.json 自动生成 data\cs2-insight.config.json；也可手动复制编辑。
@@ -433,7 +436,7 @@ CS2 Insight Agent — 便携包使用说明
    - 浏览器访问 http://127.0.0.1:（见启动.bat 中 CS2_INSIGHT_PORT）/
 
 3. 若杀毒软件误删 python\ 下文件导致无法启动
-   - 可双击「修复依赖.bat」尝试重新拉取依赖；仍失败请关闭杀毒对本文件夹的拦截或重新解压。
+   - 推荐重新安装完整发行包；也可在本机安装 uv 后双击「修复依赖.bat」按锁文件重建。
 
 4. 说明
    - 配置与数据库位于程序约定路径（见应用内说明）。
@@ -475,7 +478,7 @@ if %errorlevel% equ 0 (
   goto :run
 )
 
-echo [错误] 未找到 Python。请安装 Python 3.10+ 并加入 PATH，或使用默认打包方式生成带 python\ 的完整包。
+echo [错误] 未找到 64 位 Python 3.12。请安装后加入 PATH，或使用默认打包方式生成带 python\ 的完整包。
 pause
 exit /b 1
 
@@ -505,38 +508,53 @@ pause
 setlocal
 set "ROOT=%~dp0"
 
+where uv >nul 2>&1
+if errorlevel 1 (
+  echo [错误] 安装依赖需要 uv 0.11.x。
+  pause
+  exit /b 1
+)
 if exist "%ROOT%python\python.exe" (
-  "%ROOT%python\python.exe" -m pip install -U pip
-  "%ROOT%python\python.exe" -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
-  goto :done
+  set "USEPY=%ROOT%python\python.exe"
+  goto :install
 )
 where python >nul 2>&1
 if %errorlevel% equ 0 (
-  python -m pip install -U pip
-  python -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
-  goto :done
+  for /f "delims=" %%P in ('python -c "import sys; print(sys.executable)"') do set "USEPY=%%P"
+  goto :install
 )
 where py >nul 2>&1
 if %errorlevel% equ 0 (
-  py -3 -m pip install -U pip
-  py -3 -m pip install -c "%ROOT%backend\constraints.txt" -r "%ROOT%backend\requirements.txt"
-  goto :done
+  for /f "delims=" %%P in ('py -3.12 -c "import sys; print(sys.executable)"') do set "USEPY=%%P"
+  goto :install
 )
 echo [错误] 未找到 python / py。
 pause
 exit /b 1
 
-:done
+:install
+set "REQ=%TEMP%\cs2-insight-runtime-%RANDOM%.txt"
+uv export --project "%ROOT%" --frozen --no-dev --no-emit-project --output-file "%REQ%"
+if errorlevel 1 goto :failed
+uv pip install --python "%USEPY%" --requirements "%REQ%" --compile-bytecode
+if errorlevel 1 goto :failed
+del /q "%REQ%" >nul 2>&1
 echo.
 echo 依赖安装完成。请运行「启动.bat」。
 pause
+exit /b 0
+:failed
+del /q "%REQ%" >nul 2>&1
+echo [错误] 依赖安装失败。
+pause
+exit /b 1
 '@
 
     $Readme = @"
 CS2 Insight Agent — 便携包（精简：未内置 Python）
 ================================
 
-1. 请先双击「安装依赖.bat」安装 Python 依赖（需本机已安装 Python 3.10+ 并在 PATH 中）。
+1. 请先双击「安装依赖.bat」安装 Python 依赖（需本机已安装 uv 与 64 位 Python 3.12）。
 2. 可选：将 data\cs2-insight.config.example.json 复制为 data\cs2-insight.config.json 并填写（多数情况首次启动会自动生成）。
 3. 双击「启动.bat」。
 
@@ -564,7 +582,7 @@ Write-Host "  Folder: $OutDir"
 Write-Host "  Zip   : $ZipPath"
 Write-Host ""
 if ($BundledPython) {
-    Write-Host "Release zip includes embedded Python + pip deps. End users: unzip and run 启动.bat only." -ForegroundColor Yellow
+    Write-Host "Release zip includes embedded Python + uv-locked deps. End users: unzip and run 启动.bat only." -ForegroundColor Yellow
 } else {
     Write-Host "This zip does NOT include Python. End users must run 安装依赖.bat first." -ForegroundColor Yellow
 }

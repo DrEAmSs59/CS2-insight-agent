@@ -21,6 +21,10 @@ New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $tarball = Join-Path $tmp "cpython-windows.tar.gz"
 $previousNoUserSite = $env:PYTHONNOUSERSITE
 $env:PYTHONNOUSERSITE = "1"
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv) {
+  throw "uv 0.11.x is required to assemble the bundled Python runtime."
+}
 
 function Remove-TreeIfExists([string]$Path) {
   if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
@@ -54,22 +58,20 @@ try {
   Move-Item -Path $inner.FullName -Destination $destPython
   $py = Join-Path $destPython "python.exe"
   if (-not (Test-Path $py)) { throw "python.exe missing under $destPython" }
-  & $py -m ensurepip --upgrade
-  & $py -m pip install --no-cache-dir --upgrade pip==25.0
+  $runtimeRequirements = Join-Path $tmp "runtime-requirements.txt"
+  & $uv.Source export --project $repoRoot --frozen --no-dev --no-emit-project `
+    --no-emit-package demoparser2 --output-file $runtimeRequirements
+  if ($LASTEXITCODE -ne 0) { throw "Exporting the locked backend runtime failed: $LASTEXITCODE" }
+  Write-Host "[CS2 Insight Agent] Installing locked Python runtime with uv..."
+  & $uv.Source pip install --python $py --requirements $runtimeRequirements --compile-bytecode
+  if ($LASTEXITCODE -ne 0) { throw "locked backend runtime install failed: $LASTEXITCODE" }
   $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
   Write-Host "[CS2 Insight Agent] Installing patched demoparser wheel..."
-  & $py -m pip install --no-cache-dir --no-deps $leanWheel
+  & $uv.Source pip install --python $py --no-deps $leanWheel --compile-bytecode
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed: $LASTEXITCODE" }
-  $req = Join-Path $repoRoot "backend\requirements.txt"
-  $constraints = Join-Path $repoRoot "backend\constraints.txt"
-  & $py -m pip install --no-cache-dir -c $constraints -r $req
-  if ($LASTEXITCODE -ne 0) { throw "backend requirements install failed: $LASTEXITCODE" }
-  & $py -m pip uninstall -y polars pyarrow polars-runtime-32
   $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
   & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed: $LASTEXITCODE" }
-  & $py -m pip uninstall -y pip setuptools wheel
-  if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed: $LASTEXITCODE" }
   Write-Host "[CS2 Insight Agent] Trimming Python runtime to reduce installer size..."
   foreach ($rel in @(
       "Lib\test",

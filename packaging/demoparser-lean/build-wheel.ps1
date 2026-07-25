@@ -6,7 +6,10 @@ param(
     [string]$PythonExe = "python",
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputDir = "dist\wheels"
+    [string]$OutputDir = "dist\wheels",
+
+    [Parameter(Mandatory = $false)]
+    [string]$UvExe = "uv"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,14 +31,10 @@ if ($patchHash -ne ([string]$metadata.patch_sha256).ToLowerInvariant()) {
     throw "Lean demoparser patch SHA256 mismatch: expected $($metadata.patch_sha256), got $patchHash"
 }
 
-& $PythonExe -c "import maturin" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    throw "maturin $($metadata.maturin_version) is required for $PythonExe"
-}
-$maturinVersion = (& $PythonExe -m maturin --version) -replace '^maturin\s+', ''
-if ($LASTEXITCODE -ne 0 -or $maturinVersion.Trim() -ne [string]$metadata.maturin_version) {
-    throw "Expected maturin $($metadata.maturin_version), got '$maturinVersion'"
-}
+& $UvExe --version
+if ($LASTEXITCODE -ne 0) { throw "uv is required to build the patched demoparser wheel." }
+& $UvExe sync --project $repoRoot --frozen --group parser-build
+if ($LASTEXITCODE -ne 0) { throw "Installing the locked parser-build environment with uv failed." }
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("cs2insight-demoparser-" + [Guid]::NewGuid().ToString("n"))
@@ -57,7 +56,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Applying lean demoparser patch failed" }
 
     $manifest = Join-Path $sourceRoot "src\python\Cargo.toml"
-    & $PythonExe -m maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
+    & $UvExe run --project $repoRoot --frozen --group parser-build python -m maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
     if ($LASTEXITCODE -ne 0) { throw "maturin build failed with exit code $LASTEXITCODE" }
 
     $wheel = Get-ChildItem -LiteralPath $outputPath -File -Filter "demoparser2-$($metadata.distribution_version)-*.whl" |

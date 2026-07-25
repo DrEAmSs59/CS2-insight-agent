@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import ReplayAreaEffectsCanvas, {
   applyUtilityClip,
   effectPalette,
+  infernoFlameGeometry,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
 } from "./ReplayAreaEffectsCanvas";
@@ -225,6 +226,16 @@ describe("ReplayAreaEffectsCanvas", () => {
     };
   });
 
+  test("inferno flame geometry animates without changing its occupancy bound", () => {
+    const item = { cx: 120, cy: 80, intensity: 1 };
+    const first = infernoFlameGeometry(item, 100, 10);
+    const later = infernoFlameGeometry(item, 104, 10);
+    expect(first.outerRadius).toBeGreaterThan(0);
+    expect(first.outerRadius).toBeLessThanOrEqual(10);
+    expect(first.tongueHeight).toBeLessThanOrEqual(10);
+    expect(later.jitterX).not.toBe(first.jitterX);
+  });
+
   test("renders canvas when tracks exist", () => {
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
       setTransform: vi.fn(),
@@ -425,17 +436,21 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(fill.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("inferno uses occupancy squares not radial bloom", () => {
+  test("inferno uses organic flame layers without radial gradients or square tiles", () => {
     const arc = vi.fn();
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
     const fill = vi.fn();
     const fillRect = vi.fn();
+    const bezierCurveTo = vi.fn();
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
       setTransform: vi.fn(),
       clearRect: vi.fn(),
       save: vi.fn(),
       restore: vi.fn(),
       beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      bezierCurveTo,
       arc,
       fill,
       fillRect,
@@ -457,12 +472,14 @@ describe("ReplayAreaEffectsCanvas", () => {
         enabled
       />,
     );
-    expect(fillRect).toHaveBeenCalled();
-    expect(arc).not.toHaveBeenCalled();
+    expect(fill).toHaveBeenCalled();
+    expect(arc).toHaveBeenCalled();
+    expect(bezierCurveTo).toHaveBeenCalled();
+    expect(fillRect).not.toHaveBeenCalled();
     expect(createRadialGradient).not.toHaveBeenCalled();
   });
 
-  test("radar_cells keeps inferno on occupancy squares not gray debug stroke", () => {
+  test("radar_cells keeps inferno on organic flames rather than smoke debug squares", () => {
     const arc = vi.fn();
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
     const fillRect = vi.fn();
@@ -497,8 +514,9 @@ describe("ReplayAreaEffectsCanvas", () => {
         enabled
       />,
     );
-    expect(fillRect).toHaveBeenCalled();
-    expect(arc).not.toHaveBeenCalled();
+    expect(fill).toHaveBeenCalled();
+    expect(arc).toHaveBeenCalled();
+    expect(fillRect).not.toHaveBeenCalled();
     expect(createRadialGradient).not.toHaveBeenCalled();
     expect(strokeRect).not.toHaveBeenCalled();
   });

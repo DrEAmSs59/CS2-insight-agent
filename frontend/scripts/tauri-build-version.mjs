@@ -4,9 +4,9 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const version = process.argv[2]?.trim();
+const version = process.argv.slice(2).find((arg) => arg !== "--")?.trim();
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  console.error("Usage: npm run desktop:build:ver -- <x.y.z>");
+  console.error("Usage: pnpm run desktop:build:ver -- <x.y.z>");
   process.exit(1);
 }
 

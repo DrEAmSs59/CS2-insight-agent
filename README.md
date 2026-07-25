@@ -115,11 +115,15 @@
 
 安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**。轻量 Tauri 桌面壳会自动启动内嵌 Python 后端，并使用 Windows 系统 WebView2 显示界面。
 
-源码开发请先运行
-`.\packaging\demoparser-lean\setup-backend-dev.ps1`。项目的高速 2D 回放使用
-PyO3 编译的定制 `demoparser2` Rust 扩展；安装脚本会下载固定版本 wheel、
-校验同一发布附带的 SHA256 后安装。后端会在启动阶段验证所需 Rust 接口，
-不会使用 PyPI 原版解析器静默降级。
+源码开发需先安装 `uv 0.11.x`，然后运行
+`.\packaging\demoparser-lean\setup-backend-dev.ps1`。脚本会依据仓库根目录的
+`uv.lock` 创建 Python 3.12 环境并安装经过哈希锁定的依赖。项目的高速 2D
+回放使用 PyO3 编译的定制 `demoparser2` Rust 扩展；后端会在启动阶段验证
+所需 Rust 接口，不会使用 PyPI 原版解析器静默降级。
+
+依赖边界保持独立：Python 后端使用 `uv`/`uv.lock`，前端与 Tauri JS
+工具链使用 `pnpm`/`pnpm-lock.yaml`，Rust 桌面壳使用 `cargo`/`Cargo.lock`；
+OBS 与 FFmpeg 仍由各自的运行时集成管理。
 
 当前不运行后台自动更新器；需要升级时，请直接从 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载新版安装包。
 

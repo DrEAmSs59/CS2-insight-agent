@@ -1,6 +1,6 @@
 # Cloudflare R2 Deployment Guide
 
-`npm run deploy:r2` 将 **Tauri NSIS** 构建产物与更新清单上传到 Cloudflare R2，供应用内 `tauri-plugin-updater` 在线更新使用。
+`pnpm run deploy:r2` 将 **Tauri NSIS** 构建产物与更新清单上传到 Cloudflare R2，供应用内 `tauri-plugin-updater` 在线更新使用。
 
 ## Prerequisites
 
@@ -22,13 +22,13 @@ export UPDATE_MODE="normal"
 1. **构建并签名**（`desktop:build:ver` 自动使用 `%USERPROFILE%\.tauri\cs2-insight-agent.key` 生成 `.sig`，详见 `packaging/windows/RELEASE-WINDOWS.md`）：
 
    ```powershell
-   npm.cmd run desktop:build:ver -- <version>
+   pnpm.cmd run desktop:build:ver -- <version>
    ```
 
 2. **上传**：
 
    ```bash
-   npm run deploy:r2
+   pnpm run deploy:r2
    ```
 
 ## What gets uploaded?

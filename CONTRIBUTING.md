@@ -69,7 +69,7 @@ git checkout -b fix/critical-bug main
 开发环境搭建见 [docs/developer.md](./docs/developer.md)。架构与命令速查见 [CLAUDE.md](./CLAUDE.md)。
 
 - 后端：Python **3.12**，FastAPI
-- 前端：Node.js + Vite；`npm run dev` 代理 `/api` 到 `localhost:8000`
+- 前端：Node.js + pnpm + Vite；`pnpm run dev` 代理 `/api` 到 `localhost:8000`
 - 录制 / OBS / CS2 控制台注入：**仅 Windows** 可完整验证；macOS / Linux 可开发解析、Demo 库、前端等
 
 ## 报告问题

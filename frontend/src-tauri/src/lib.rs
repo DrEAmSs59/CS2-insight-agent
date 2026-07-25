@@ -62,9 +62,9 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
         if !state_file.is_file() {
             return Ok(None);
         }
-        return fs::read_to_string(&state_file)
+        fs::read_to_string(&state_file)
             .map(Some)
-            .map_err(|error| format!("无法读取旧版界面状态 {}：{error}", state_file.display()));
+            .map_err(|error| format!("无法读取旧版界面状态 {}：{error}", state_file.display()))
     }
 
     #[cfg(not(windows))]
@@ -112,7 +112,7 @@ fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<Pa
         let data_root = app_data.join("CS2 Insight Agent").join("data");
         fs::create_dir_all(data_root.join("logs"))
             .map_err(|error| format!("无法创建应用数据目录 {}：{error}", data_root.display()))?;
-        return Ok(data_root);
+        Ok(data_root)
     }
 
     #[cfg(not(windows))]

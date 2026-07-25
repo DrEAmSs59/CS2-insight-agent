@@ -357,23 +357,128 @@ function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, he
   ctx.stroke();
 }
 
-/** Fire occupancy squares; flicker only modulates color/alpha, not geometry. */
+export function infernoFlameGeometry(item, currentTick, halfExtentPx) {
+  const tick = Number(currentTick) || 0;
+  const seed = Number(item?.cx || 0) * 0.071 + Number(item?.cy || 0) * 0.053;
+  const slow = tick * 0.09 + seed;
+  const quick = tick * 0.17 + seed * 1.73;
+  const pulse = 0.92 + 0.08 * Math.sin(slow);
+  const sway = Math.sin(quick);
+  return {
+    jitterX: halfExtentPx * 0.1 * sway,
+    jitterY: halfExtentPx * 0.06 * Math.cos(quick * 0.83),
+    outerRadius: halfExtentPx * (0.82 + 0.1 * Math.sin(slow * 0.71)),
+    middleRadius: halfExtentPx * 0.58 * pulse,
+    coreRadius: halfExtentPx * (0.3 + 0.05 * Math.cos(quick)),
+    tongueHeight: halfExtentPx * (0.78 + 0.16 * Math.sin(slow + 0.8)),
+    tongueWidth: halfExtentPx * (0.42 + 0.05 * Math.cos(quick)),
+    tongueLean: halfExtentPx * 0.22 * sway,
+    sparkX: halfExtentPx * 0.5 * Math.sin(quick * 1.31),
+    sparkY: -halfExtentPx * (0.55 + 0.2 * Math.cos(slow)),
+    sparkRadius: Math.max(0.65, halfExtentPx * 0.1),
+    pulse,
+  };
+}
+
+function fillCircle(ctx, x, y, radius, color) {
+  if (!(radius > 0)) return;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function fillFlameTongue(ctx, x, y, geometry, color) {
+  if (typeof ctx.moveTo !== "function") {
+    fillCircle(ctx, x, y, geometry.middleRadius, color);
+    return;
+  }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x + geometry.tongueLean, y - geometry.tongueHeight);
+  if (typeof ctx.bezierCurveTo === "function") {
+    ctx.bezierCurveTo(
+      x + geometry.tongueWidth + geometry.tongueLean * 0.35,
+      y - geometry.tongueHeight * 0.25,
+      x + geometry.tongueWidth,
+      y + geometry.tongueHeight * 0.35,
+      x,
+      y + geometry.tongueHeight * 0.42,
+    );
+    ctx.bezierCurveTo(
+      x - geometry.tongueWidth,
+      y + geometry.tongueHeight * 0.35,
+      x - geometry.tongueWidth + geometry.tongueLean * 0.35,
+      y - geometry.tongueHeight * 0.25,
+      x + geometry.tongueLean,
+      y - geometry.tongueHeight,
+    );
+  } else {
+    // Minimal canvas mocks / older engines still get an animated core.
+    ctx.arc(x, y, geometry.middleRadius, 0, Math.PI * 2);
+  }
+  ctx.closePath?.();
+  ctx.fill();
+}
+
+/** Organic flames constrained to the real inferno occupancy cells. */
 function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height, currentTick, palette) {
   const sizeWorld = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : INFERNO_CELL_SIZE_WORLD;
   const halfExtentPct = worldRadiusToPercent(sizeWorld / 2, transform);
   const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
-  const tick = Number(currentTick) || 0;
-  const [, , fireOuter] = palette.fire;
-  const [coreRed, coreGreen, coreBlue] = palette.fire[0];
+  const geometry = projected.map((item) => ({
+    item,
+    shape: infernoFlameGeometry(item, currentTick, halfExtentPx),
+    intensity: Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95,
+  }));
+
+  const [hot, bright, middle, outer] = palette.fire;
+
+  // Draw by depth across all cells so neighbouring fire points merge into one
+  // continuous bed instead of exposing a checkerboard of independent tiles.
+  for (const { item, shape, intensity } of geometry) {
+    fillCircle(
+      ctx,
+      item.cx + shape.jitterX,
+      item.cy + shape.jitterY,
+      shape.outerRadius,
+      `rgba(${outer.join(", ")}, ${0.34 + 0.2 * intensity})`,
+    );
+  }
+
+  for (const { item, shape, intensity } of geometry) {
+    fillCircle(
+      ctx,
+      item.cx - shape.jitterX * 0.35,
+      item.cy,
+      shape.middleRadius,
+      `rgba(${middle.join(", ")}, ${(0.48 + 0.25 * intensity) * shape.pulse})`,
+    );
+    fillCircle(
+      ctx,
+      item.cx + shape.jitterX * 0.2,
+      item.cy + shape.jitterY * 0.2,
+      shape.coreRadius,
+      `rgba(${bright.join(", ")}, ${0.68 + 0.2 * intensity})`,
+    );
+  }
+
   for (const item of projected) {
-    const intensity = Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95;
-    const flicker = 0.88 + 0.12 * Math.sin(tick * 0.41 + item.cx * 0.02 + item.cy * 0.017);
-    const alpha = clamp((0.75 + 0.25 * intensity) * flicker, 0.55, 1);
-    ctx.fillStyle = `rgba(${fireOuter.join(", ")}, ${0.72 * alpha})`;
-    ctx.fillRect(item.cx - halfExtentPx, item.cy - halfExtentPx, halfExtentPx * 2, halfExtentPx * 2);
-    const core = halfExtentPx * 0.45;
-    ctx.fillStyle = `rgba(${coreRed}, ${coreGreen}, ${coreBlue}, ${0.55 * alpha})`;
-    ctx.fillRect(item.cx - core, item.cy - core, core * 2, core * 2);
+    const shape = infernoFlameGeometry(item, currentTick, halfExtentPx);
+    fillFlameTongue(
+      ctx,
+      item.cx,
+      item.cy,
+      shape,
+      `rgba(${bright.join(", ")}, ${0.52 + 0.22 * shape.pulse})`,
+    );
+    fillCircle(
+      ctx,
+      item.cx + shape.sparkX,
+      item.cy + shape.sparkY,
+      shape.sparkRadius,
+      `rgba(${hot.join(", ")}, ${0.5 + 0.28 * shape.pulse})`,
+    );
   }
 }
 
@@ -495,7 +600,8 @@ function compositeWithUtilityClip(ctx, width, height, utilityMask, paintFn) {
 
 /**
  * Canvas overlay for sparse smoke / inferno area cells from /demo/replay effect_tracks.
- * Smoke uses density-mask marching-squares contours; fire uses occupancy squares + utility clip.
+ * Smoke uses density-mask marching-squares contours; fire uses animated organic
+ * flames constrained to occupancy cells + utility clip.
  */
 export default function ReplayAreaEffectsCanvas({
   tracks = [],

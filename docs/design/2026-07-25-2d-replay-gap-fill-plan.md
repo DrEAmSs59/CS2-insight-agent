@@ -354,7 +354,7 @@ test("applyUtilityClip zeros outside white mask", () => {
 
 ```bash
 cd frontend
-npm test -- src/components/analysis/ReplayAreaEffectsCanvas.test.jsx
+pnpm test -- src/components/analysis/ReplayAreaEffectsCanvas.test.jsx
 ```
 
 - [ ] **Step 3: Implement**
@@ -381,7 +381,7 @@ Pass `mapName` into `ReplayAreaEffectsCanvas` from `ReplaySceneCanvas`.
 
 ```bash
 cd frontend
-npm test -- src/components/analysis/ReplayAreaEffectsCanvas.test.jsx src/components/analysis/smokeContour.test.js
+pnpm test -- src/components/analysis/ReplayAreaEffectsCanvas.test.jsx src/components/analysis/smokeContour.test.js
 ```
 
 - [ ] **Step 5: Commit**
@@ -443,7 +443,7 @@ test("computeFitScale uses content rect", () => {
 
 ```bash
 cd frontend
-npm test -- src/utils/replayCamera.test.js
+pnpm test -- src/utils/replayCamera.test.js
 ```
 
 - [ ] **Step 3: Implement math + UI**
@@ -484,7 +484,7 @@ World→percent mapping stays relative to the 1024 scene (content_rect already i
 
 ```bash
 cd frontend
-npm test -- src/utils/replayCamera.test.js src/utils/replayRadarTransform.test.js
+pnpm test -- src/utils/replayCamera.test.js src/utils/replayRadarTransform.test.js
 ```
 
 - [ ] **Step 5: Commit**
@@ -532,7 +532,7 @@ test("planted renders two pulse rings", () => {
 
 ```bash
 cd frontend
-npm test -- src/components/analysis/ReplayBombMarker.test.jsx
+pnpm test -- src/components/analysis/ReplayBombMarker.test.jsx
 ```
 
 - [ ] **Step 3: Implement marker + timeline**
@@ -569,7 +569,7 @@ Replace inline C4 chip in `ReplaySceneCanvas` with `<ReplayBombMarker status={bo
 
 ```bash
 cd frontend
-npm test -- src/components/analysis/ReplayBombMarker.test.jsx src/pages/DemoAnalysisPreviewPage.test.jsx
+pnpm test -- src/components/analysis/ReplayBombMarker.test.jsx src/pages/DemoAnalysisPreviewPage.test.jsx
 ```
 
 - [ ] **Step 5: Commit**
@@ -615,7 +615,7 @@ test("preview and scene do not redefine interpolateReplayFrame", () => {
 
 ```bash
 cd frontend
-npm test -- src/utils/replayPlayback.dedupe.test.js
+pnpm test -- src/utils/replayPlayback.dedupe.test.js
 ```
 
 - [ ] **Step 3: Delete duplicates; import shared helpers**
@@ -629,7 +629,7 @@ npm test -- src/utils/replayPlayback.dedupe.test.js
 
 ```bash
 cd frontend
-npm test -- src/utils/replayPlayback.test.js src/utils/replayPlayback.dedupe.test.js
+pnpm test -- src/utils/replayPlayback.test.js src/utils/replayPlayback.dedupe.test.js
 ```
 
 - [ ] **Step 5: Commit**
@@ -652,7 +652,7 @@ cd backend
 python -m pytest tests/test_replay_effects.py tests/test_replay_frames_cache.py tests/test_smoke_voxel_decode.py tests/test_generate_radar_derived_assets.py -v
 
 cd ../frontend
-npm test
+pnpm test
 ```
 
 Expected: all PASS.
@@ -663,7 +663,7 @@ Expected: all PASS.
 # terminal 1
 cd backend && uvicorn app.main:app --reload --port 8000
 # terminal 2
-cd frontend && npm run dev
+cd frontend && pnpm run dev
 ```
 
 Verify against design §11 / original plan §14 for available demos:

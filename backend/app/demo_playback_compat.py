@@ -235,8 +235,8 @@ def _snappy_decompress(payload: bytes) -> bytes:
         if backend_name == "cramjam":
             decoded = bytes(backend.snappy.decompress_raw(payload))  # type: ignore[attr-defined]
         else:
-            # Standard demoparser2 installs include PyArrow.  Lean release
-            # builds install cramjam explicitly through requirements.txt.
+            # Standard demoparser2 installs include PyArrow. Lean release
+            # builds install cramjam explicitly through the uv-locked runtime.
             decoded = bytes(  # type: ignore[attr-defined]
                 backend.Codec("snappy").decompress(payload, expected_size)
             )

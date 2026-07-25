@@ -37,6 +37,19 @@ test("buildDensityMask keeps diagonal occupancy", () => {
   expect(nonzero).toBe(3);
 });
 
+test("buildDensityMask preserves each smoke's arbitrary world-grid phase", () => {
+  const cells = [
+    [41.25, 1495.75, 1686, 1],
+    [61.25, 1515.75, 1686, 0.8],
+  ];
+  const mask = buildDensityMask(cells, 20);
+  // worldFromGrid(mask, 0, 0) must reconstruct the first voxel centre exactly.
+  expect(mask.originX + mask.cellSize / 2).toBeCloseTo(41.25, 6);
+  expect(mask.originY + mask.cellSize / 2).toBeCloseTo(1495.75, 6);
+  expect(mask.width).toBe(2);
+  expect(mask.height).toBe(2);
+});
+
 test("marchingSquares returns a ring for a filled block", () => {
   const cells = [];
   for (let x = 0; x <= 40; x += 20) for (let y = 0; y <= 40; y += 20) cells.push([x, y, 0, 1]);

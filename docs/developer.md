@@ -1,3 +1,5 @@
+> English quick start: [Development Setup](dev-setup.md)
+
 ## 分支与贡献
 
 日常开发基于 **`develop`**，稳定发布在 **`main`**。工作分支从 `develop` 拉出，PR 目标为 `develop`。
@@ -100,8 +102,8 @@ CS2-insight-agent/
 #### 1. Backend
 
 ```powershell
-# 在仓库根目录执行。默认创建 .venv，下载固定版本的 Windows CPython 3.12
-# demoparser2 wheel，并用同一 release 中的 SHA256 文件校验后安装。
+# 先安装 uv 0.11.x，再在仓库根目录执行。
+# 默认依据 uv.lock 创建 .venv，并安装哈希锁定的 Windows CPython 3.12 wheel。
 .\packaging\demoparser-lean\setup-backend-dev.ps1
 
 .\.venv\Scripts\python.exe -m uvicorn app.main:app `
@@ -110,7 +112,7 @@ CS2-insight-agent/
 
 发行版内置的 Python 运行时为 `3.12`。2D 回放依赖项目固定的
 `demoparser2 0.41.4+cs2insight5` PyO3/Rust 扩展，不能用 PyPI 原版替代。
-如果预编译 wheel 尚未发布，已安装 Rust 工具链的开发者可以执行：
+如果需要重建 wheel，已安装 Rust 工具链的开发者可以执行：
 
 ```powershell
 .\packaging\demoparser-lean\setup-backend-dev.ps1 -BuildFromSource
@@ -124,13 +126,13 @@ CS2-insight-agent/
 
 ```bash
 cd frontend
-npm install
+pnpm install --frozen-lockfile
 
 # 仅启动浏览器前端开发服务器
-npm run dev
+pnpm run dev
 
 # 启动 Tauri 桌面开发模式（自动启动 Python 后端）
-npm run desktop:dev
+pnpm run desktop:dev
 ```
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
@@ -139,10 +141,10 @@ npm run desktop:dev
 
 ```bash
 # 仅打包前端静态资源
-npm run build
+pnpm run build
 
 # 打包 Tauri NSIS 安装包
-npm run desktop:build
+pnpm run desktop:build
 ```
 
 安装包输出至 `frontend/src-tauri/target/release/bundle/nsis/`。正式发布版不启用应用内自动更新，用户从 Releases 页面下载新版。

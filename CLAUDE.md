@@ -25,7 +25,7 @@ CS2 Insight Agent — Windows 桌面端 CS2 电竞终端。自动解析 `.dem` �
 ## Commands
 
 ```powershell
-# Windows 开发环境（创建 .venv、安装并校验固定的 PyO3/Rust wheel）
+# Windows 开发环境（需要 uv 0.11.x；按 uv.lock 创建 .venv 并校验 PyO3/Rust wheel）
 .\packaging\demoparser-lean\setup-backend-dev.ps1
 
 # Backend
@@ -33,9 +33,9 @@ CS2 Insight Agent — Windows 桌面端 CS2 电竞终端。自动解析 `.dem` �
 
 # Frontend
 cd frontend
-npm install
-npm run dev          # Vite dev server → http://localhost:5173
-npm run build        # Production build → frontend/dist/
+pnpm install --frozen-lockfile
+pnpm run dev          # Vite dev server → http://localhost:5173
+pnpm run build        # Production build → frontend/dist/
 
 # Production launcher (Windows only — SelectorEventLoop 补丁)
 python -m app.run_server
@@ -43,7 +43,8 @@ python -m app.run_server
 
 不要直接从 PyPI 安装 `demoparser2`：2D 回放要求
 `0.41.4+cs2insight5` 中的 Rust Parquet/二进制接口。需要本机构建时使用
-`setup-backend-dev.ps1 -BuildFromSource`；正式 Windows wheel 由
+`setup-backend-dev.ps1 -BuildFromSource`；Maturin 版本由 `pyproject.toml`
+的 `parser-build` 组锁定。正式 Windows wheel 由
 `publish-demoparser-wheel.yml` 构建、发布，并附带 SHA256。
 
 前端 Vite 已配置 `/api/*` 代理到 `localhost:8000`。生产模式由 FastAPI 直接 serve `frontend/dist/` 静态文件。
