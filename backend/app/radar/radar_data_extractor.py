@@ -321,6 +321,32 @@ def extract_radar_timeline_impl(
                 inventory.append(text)
         return inventory
 
+    _UTILITY_WEAPON_TOKENS = (
+        "knife", "bayonet", "smoke", "flash", "hegrenade", "molotov", "incendiary",
+        "incgrenade", "decoy", "taser", "c4", "defuser", "healthshot",
+    )
+
+    def _primary_from_inventory(inventory: list[str]) -> str:
+        for item in inventory:
+            lowered = item.lower().replace("-", "").replace(" ", "")
+            if any(token in lowered for token in _UTILITY_WEAPON_TOKENS):
+                continue
+            return item
+        return ""
+
+    def _melee_from_inventory(inventory: list[str]) -> str:
+        for item in inventory:
+            lowered = item.lower()
+            if "knife" in lowered or "bayonet" in lowered or "karambit" in lowered:
+                return item
+        return ""
+
+    def _resolve_weapon(record: pd.Series, inventory: list[str]) -> str:
+        weapon = _safe_weapon_text(record.get("active_weapon_name")) or _safe_weapon_text(record.get("active_weapon"))
+        if weapon:
+            return weapon
+        return _primary_from_inventory(inventory) or _melee_from_inventory(inventory)
+
     def _first_text(record: pd.Series, *keys: str) -> str:
         for key in keys:
             value = _safe_text(record.get(key))
@@ -568,7 +594,7 @@ def extract_radar_timeline_impl(
                         "money": max(0, int(_safe_number(r.get("balance"), 0))),
                         "equipment_value": max(0, int(_safe_number(r.get("current_equip_value"), 0))),
                         "inventory": inventory,
-                        "weapon": _safe_weapon_text(r.get("active_weapon_name")) or _safe_weapon_text(r.get("active_weapon")),
+                        "weapon": _resolve_weapon(r, inventory),
                         "has_defuser": _safe_bool(r.get("has_defuser")) if "has_defuser" in work.columns else False,
                         "has_c4": has_c4,
                         "flash_duration": max(0.0, _safe_number(r.get("flash_duration"), 0.0)),
@@ -580,6 +606,7 @@ def extract_radar_timeline_impl(
             if players_out:
                 last_players = players_out
         else:
+            # Carry last known player state across brief parse misses.
             players_out = [dict(p) for p in last_players]
 
         time_sec = i / max(fps, 0.001)
@@ -609,6 +636,7 @@ def extract_radar_timeline_impl(
         "smokegrenade", "molotov", "incgrenade", "incendiary", "decoy",
     }
     if timeline and not fire_df.empty and "tick" in fire_df.columns:
+        fire_df = fire_df[(fire_df["tick"] >= start_i) & (fire_df["tick"] <= end_i)]
         for _, shot_row in fire_df.iterrows():
             shot_tick = int(_safe_number(shot_row.get("tick"), 0))
             if shot_tick < start_i or shot_tick > end_i:
@@ -660,6 +688,7 @@ def extract_radar_timeline_impl(
             end_tick=int(end_tick),
             tick_rate=float(demo_tick_rate),
             map_name=str(map_name_for_effects or "") or None,
+            demo_path=str(demo_path),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("replay effect tracks failed: %s", exc)
@@ -733,6 +762,7 @@ def extract_replay_effects_impl(
         end_tick=int(end_tick),
         tick_rate=float(demo_tick_rate),
         map_name=str(map_name or "") or None,
+        demo_path=str(demo_path),
     )
     return {
         "effect_tracks_version": int(payload.get("version") or 1),

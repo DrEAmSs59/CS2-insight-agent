@@ -10,8 +10,8 @@ function SiteDonut({ siteA, siteB }) {
   const total = siteA + siteB;
   if (total < 3) return null;
 
-  const size = 72;
-  const stroke = 10;
+  const size = 64;
+  const stroke = 9;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const aLen = (siteA / total) * c;
@@ -20,7 +20,7 @@ function SiteDonut({ siteA, siteB }) {
   const pctB = 100 - pctA;
 
   return (
-    <div className="flex w-[88px] shrink-0 flex-col items-center gap-1">
+    <div className="flex w-[88px] shrink-0 flex-col items-center justify-center gap-1">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
         <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
           <circle
@@ -62,7 +62,7 @@ function SiteDonut({ siteA, siteB }) {
 
 function StatRow({ label, a, b }) {
   return (
-    <div className="flex min-h-[24px] items-center justify-between gap-2 text-[11px]">
+    <div className="flex min-h-[22px] items-center justify-between gap-2 text-[11px]">
       <span className="text-cs2-text-muted">{label}</span>
       <span className="tabular-nums">
         <span className="font-bold text-sky-400">{a}</span>
@@ -107,9 +107,9 @@ export default function BombObjectiveCard({
       title="目标与包点"
       icon={<Bomb className="h-3.5 w-3.5 text-cs2-accent" />}
       compact
-      className={`min-h-[135px] xl:min-h-[145px] ${className}`}
+      className={className}
     >
-      <div className={`flex gap-3 ${showDonut ? "items-start" : ""}`}>
+      <div className={`flex flex-1 gap-3 ${showDonut ? "items-center" : "flex-col justify-center"}`}>
         <div className="min-w-0 flex-1">
           <StatRow label="下包次数" a={teamA.plants ?? 0} b={teamB.plants ?? 0} />
           <StatRow

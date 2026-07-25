@@ -143,6 +143,15 @@ function computeRoundStats(rounds, phaseMeta, match) {
     phaseMeta.overtimeRounds.map((round) => round.round_number),
   );
 
+  // Kickoff at 0:0 so the chart starts on the baseline before R1.
+  points.push({
+    roundNumber: 0,
+    scoreA: 0,
+    scoreB: 0,
+    lead: 0,
+    isKickoff: true,
+  });
+
   for (const round of rounds) {
     const scoreA = num(round.team_a_score_after);
     const scoreB = num(round.team_b_score_after);
@@ -452,21 +461,25 @@ function buildSidePerformance(rounds, phaseMeta, data) {
 
   let summary = "双方在 T/CT 两侧的得分差异不明显。";
   if (teamACtGap >= 4 && teamACtGap > teamBCtGap) {
-    summary = `${nameA} 的 CT 防守表现主导了本场比赛。`;
+    summary = `${nameA} 在 CT 方拿下 ${teamA.total.ct} 回合，CT 表现更胜一筹`;
     dominantSide = "CT";
   } else if (teamBCtGap >= 4 && teamBCtGap > teamACtGap) {
-    summary = `${nameB} 的 CT 防守表现主导了本场比赛。`;
+    summary = `${nameB} 在 CT 方拿下 ${teamB.total.ct} 回合，CT 表现更胜一筹`;
     dominantSide = "CT";
   } else if (teamATGap >= 4 && teamATGap > teamBTGap) {
-    summary = `${nameA} 的 T 进攻表现主导了本场比赛。`;
+    summary = `${nameA} 在 T 方拿下 ${teamA.total.t} 回合，T 表现更胜一筹`;
     dominantSide = "T";
   } else if (teamBTGap >= 4 && teamBTGap > teamATGap) {
-    summary = `${nameB} 的 T 进攻表现主导了本场比赛。`;
+    summary = `${nameB} 在 T 方拿下 ${teamB.total.t} 回合，T 表现更胜一筹`;
     dominantSide = "T";
   } else if (dominantSide === "CT") {
-    summary = "CT 方整体得分更高，防守端是主要得分来源。";
+    const leader = teamA.total.ct >= teamB.total.ct ? nameA : nameB;
+    const wins = Math.max(teamA.total.ct, teamB.total.ct);
+    summary = `${leader} 在 CT 方拿下 ${wins} 回合，CT 表现更胜一筹`;
   } else if (dominantSide === "T") {
-    summary = "T 方整体得分更高，进攻端是主要得分来源。";
+    const leader = teamA.total.t >= teamB.total.t ? nameA : nameB;
+    const wins = Math.max(teamA.total.t, teamB.total.t);
+    summary = `${leader} 在 T 方拿下 ${wins} 回合，T 表现更胜一筹`;
   }
 
   return {
@@ -505,6 +518,7 @@ function emptyTeamOpening() {
     firstKills: 0,
     fiveVFour: rateBucket(0, 0),
     fourVFive: rateBucket(0, 0),
+    clutch1vN: rateBucket(0, 0),
   };
 }
 
@@ -517,6 +531,39 @@ function getFirstKillTeam(round, playerTeamMap) {
   return null;
 }
 
+/**
+ * 每回合每位选手最多计 1 次 1vN 残局：取最高对手人数（1v3→1v2 不重复）。
+ * @returns {Array<{ teamKey: "a"|"b", opponents: number, won: boolean }>}
+ */
+function collectRoundClutch1vNAttempts(round, playerTeamMap) {
+  const sources = [...(round.special_events || []), ...(round.events || [])];
+  /** @type {Map<string, { teamKey: string, opponents: number, won: boolean }>} */
+  const byPlayer = new Map();
+
+  for (const event of sources) {
+    if (event?.type !== "clutch") continue;
+    const opponents = num(event.opponents);
+    if (opponents < 1) continue;
+    const playerKey = event.player ? String(event.player).trim().toLowerCase() : "";
+    if (!playerKey) continue;
+
+    let teamKey = event.team_key;
+    if (teamKey !== "a" && teamKey !== "b") {
+      teamKey = playerTeamMap.get(playerKey) || null;
+    }
+    if (teamKey !== "a" && teamKey !== "b") continue;
+
+    const prev = byPlayer.get(playerKey);
+    if (!prev || opponents > prev.opponents) {
+      byPlayer.set(playerKey, { teamKey, opponents, won: event.won === true });
+    } else if (opponents === prev.opponents && event.won === true) {
+      byPlayer.set(playerKey, { ...prev, won: true });
+    }
+  }
+
+  return [...byPlayer.values()].filter((attempt) => attempt.opponents >= 2);
+}
+
 function buildOpening(rounds, data) {
   const playerTeamMap = buildPlayerTeamMap(data.players);
   const teamA = emptyTeamOpening();
@@ -525,29 +572,38 @@ function buildOpening(rounds, data) {
 
   for (const round of rounds) {
     const fkTeam = getFirstKillTeam(round, playerTeamMap);
-    if (!fkTeam) continue;
-    hasData = true;
+    if (fkTeam) {
+      hasData = true;
 
-    const winner = round.winner_team_key;
-    if (fkTeam === "a") {
-      teamA.firstKills += 1;
-      teamA.fiveVFour.total += 1;
-      if (winner === "a") teamA.fiveVFour.wins += 1;
-      teamB.fourVFive.total += 1;
-      if (winner === "b") teamB.fourVFive.wins += 1;
-    } else if (fkTeam === "b") {
-      teamB.firstKills += 1;
-      teamB.fiveVFour.total += 1;
-      if (winner === "b") teamB.fiveVFour.wins += 1;
-      teamA.fourVFive.total += 1;
-      if (winner === "a") teamA.fourVFive.wins += 1;
+      const winner = round.winner_team_key;
+      if (fkTeam === "a") {
+        teamA.firstKills += 1;
+        teamA.fiveVFour.total += 1;
+        if (winner === "a") teamA.fiveVFour.wins += 1;
+        teamB.fourVFive.total += 1;
+        if (winner === "b") teamB.fourVFive.wins += 1;
+      } else if (fkTeam === "b") {
+        teamB.firstKills += 1;
+        teamB.fiveVFour.total += 1;
+        if (winner === "b") teamB.fiveVFour.wins += 1;
+        teamA.fourVFive.total += 1;
+        if (winner === "a") teamA.fourVFive.wins += 1;
+      }
+    }
+
+    for (const attempt of collectRoundClutch1vNAttempts(round, playerTeamMap)) {
+      const bucket = attempt.teamKey === "a" ? teamA.clutch1vN : teamB.clutch1vN;
+      bucket.total += 1;
+      if (attempt.won) bucket.wins += 1;
     }
   }
 
   teamA.fiveVFour = rateBucket(teamA.fiveVFour.wins, teamA.fiveVFour.total);
   teamA.fourVFive = rateBucket(teamA.fourVFive.wins, teamA.fourVFive.total);
+  teamA.clutch1vN = rateBucket(teamA.clutch1vN.wins, teamA.clutch1vN.total);
   teamB.fiveVFour = rateBucket(teamB.fiveVFour.wins, teamB.fiveVFour.total);
   teamB.fourVFive = rateBucket(teamB.fourVFive.wins, teamB.fourVFive.total);
+  teamB.clutch1vN = rateBucket(teamB.clutch1vN.wins, teamB.clutch1vN.total);
 
   let summary = "";
   if (!hasData) {
@@ -598,8 +654,20 @@ function detectRoundEconomyUpset(round) {
 
 function buildEconomy(rounds, data, _phaseMeta, stats) {
   const pistol = {
-    teamA: { wins: 0, conversionWins: 0, conversionTotal: 0, conversionRate: null },
-    teamB: { wins: 0, conversionWins: 0, conversionTotal: 0, conversionRate: null },
+    teamA: {
+      wins: 0,
+      conversionWins: 0,
+      conversionTotal: 0,
+      conversionRate: null,
+      postWinStreaks: [],
+    },
+    teamB: {
+      wins: 0,
+      conversionWins: 0,
+      conversionTotal: 0,
+      conversionRate: null,
+      postWinStreaks: [],
+    },
   };
   const upsetRounds = [];
   let hasEconomyData = false;
@@ -615,6 +683,12 @@ function buildEconomy(rounds, data, _phaseMeta, stats) {
       if (winner === "a" || winner === "b") {
         const key = winner === "a" ? "teamA" : "teamB";
         pistol[key].wins += 1;
+        let streak = 0;
+        for (let j = i + 1; j < rounds.length; j += 1) {
+          if (rounds[j].winner_team_key === winner) streak += 1;
+          else break;
+        }
+        pistol[key].postWinStreaks.push(streak);
         if (i < rounds.length - 1) {
           const nextRound = rounds[i + 1];
           pistol[key].conversionTotal += 1;
@@ -661,6 +735,16 @@ function buildEconomy(rounds, data, _phaseMeta, stats) {
       return score;
     };
     keyRound = [...upsetRounds].sort((a, b) => scoreUpset(b) - scoreUpset(a))[0];
+    if (keyRound) {
+      const kr = rounds.find((r) => r.round_number === keyRound.roundNumber);
+      if (kr) {
+        keyRound = {
+          ...keyRound,
+          scoreA: num(kr.team_a_score_after),
+          scoreB: num(kr.team_b_score_after),
+        };
+      }
+    }
   }
 
   let summary = "";
@@ -800,6 +884,8 @@ function buildPlayerEvents(rounds, data) {
             playerTeamMap.get(String(event.player).trim().toLowerCase()) ||
             null,
           roundNumber: round.round_number,
+          scoreA: num(round.team_a_score_after),
+          scoreB: num(round.team_b_score_after),
           label:
             opponents >= 5
               ? `1v${opponents} 残局`
@@ -824,6 +910,8 @@ function buildPlayerEvents(rounds, data) {
             playerTeamMap.get(String(event.player).trim().toLowerCase()) ||
             null,
           roundNumber: round.round_number,
+          scoreA: num(round.team_a_score_after),
+          scoreB: num(round.team_b_score_after),
           label: kills >= 5 ? "ACE" : "四杀",
         });
       }
@@ -846,6 +934,8 @@ function buildPlayerEvents(rounds, data) {
           playerName: actor,
           teamKey: playerTeamMap.get(actor.toLowerCase()) || null,
           roundNumber: round.round_number,
+          scoreA: num(round.team_a_score_after),
+          scoreB: num(round.team_b_score_after),
           label: kills >= 5 ? "ACE" : "四杀",
         });
       }
@@ -1183,6 +1273,8 @@ function buildKeyRoundCandidates(
       candidates.push({
         roundNumber,
         score,
+        scoreA,
+        scoreB,
         primaryType: types[0],
         types,
         title,
@@ -1199,6 +1291,8 @@ function buildKeyRoundCandidates(
   candidates.push({
     roundNumber: lastRound.round_number,
     score: 100,
+    scoreA: num(lastRound.team_a_score_after, match.scoreA),
+    scoreB: num(lastRound.team_b_score_after, match.scoreB),
     primaryType: "final",
     types: ["final"],
     title: isFinalMatch ? "终结比赛" : "当前最后回合",
@@ -1309,6 +1403,7 @@ function emptyEconomy() {
         conversionTotal: 0,
         conversionRate: null,
         sampleTooSmall: true,
+        postWinStreaks: [],
       },
       teamB: {
         wins: 0,
@@ -1316,6 +1411,7 @@ function emptyEconomy() {
         conversionTotal: 0,
         conversionRate: null,
         sampleTooSmall: true,
+        postWinStreaks: [],
       },
     },
     conversions: {
@@ -1325,6 +1421,7 @@ function emptyEconomy() {
         conversionTotal: 0,
         conversionRate: null,
         sampleTooSmall: true,
+        postWinStreaks: [],
       },
       teamB: {
         wins: 0,
@@ -1332,6 +1429,7 @@ function emptyEconomy() {
         conversionTotal: 0,
         conversionRate: null,
         sampleTooSmall: true,
+        postWinStreaks: [],
       },
     },
     upsetRounds: [],

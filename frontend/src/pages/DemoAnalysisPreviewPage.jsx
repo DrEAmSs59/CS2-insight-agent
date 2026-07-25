@@ -536,6 +536,7 @@ export default function DemoAnalysisPreviewPage() {
               onSelectPlayer={openPlayerStats}
               onOpenRound={openRound}
               onOpenReplayRound={openReplayRound}
+              onOpenHighlights={() => setActiveTab("highlights")}
             />
           )}
 

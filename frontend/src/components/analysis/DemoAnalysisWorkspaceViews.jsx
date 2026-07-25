@@ -235,7 +235,7 @@ function sortScoreboardPlayers(players) {
   });
 }
 
-export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound }) {
+export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound, onOpenHighlights }) {
   const overview = useMemo(() => buildOverviewModel(data), [data]);
   const [scoreboardOpen, setScoreboardOpen] = useState(true);
   const [mobileScoreTeam, setMobileScoreTeam] = useState("a");
@@ -259,7 +259,7 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
     <div className="mx-auto w-full max-w-[1440px] space-y-3 pb-6">
       <MatchMainlineCard mainline={overview.mainline} />
 
-      <section className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 xl:grid-cols-12">
+      <section className="grid auto-rows-fr grid-cols-1 gap-2.5 lg:grid-cols-2 xl:grid-cols-12 xl:auto-rows-[210px]">
         <MatchTrendCard
           model={overview.trend}
           phaseMeta={overview.phaseMeta}
@@ -275,7 +275,6 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
         />
         <EconomyInsightCard
           model={overview.economy}
-          onOpenRound={onOpenRound}
           teamAName={teamAName}
           teamBName={teamBName}
           className="xl:col-span-3"
@@ -284,7 +283,7 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
 
       {secondaryCount > 0 ? (
         <section
-          className={`grid grid-cols-1 gap-2.5 md:grid-cols-2 ${
+          className={`grid auto-rows-fr grid-cols-1 gap-2.5 md:grid-cols-2 xl:auto-rows-[176px] ${
             secondaryCount >= 3 ? "xl:grid-cols-3" : secondaryCount === 2 ? "xl:grid-cols-2" : "xl:grid-cols-1"
           }`}
         >
@@ -294,6 +293,7 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
             events={overview.playerEvents}
             onSelectPlayer={onSelectPlayer}
             onOpenRound={onOpenRound}
+            onOpenHighlights={onOpenHighlights}
           />
         </section>
       ) : null}
@@ -517,6 +517,6 @@ function EconomyChart({ rounds, teamAName, teamBName }) {
 
 export function EconomyView({ data, onOpenRound }) {
   return (
-    <Panel title="经济走势" eyebrow="双方每回合装备价值 · 背景表示低经济一方购买类型"><div className="p-4"><EconomyChart rounds={data.rounds} teamAName={data.team_a_name} teamBName={data.team_b_name} /><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">{data.rounds.map((round) => <button key={round.round_number} type="button" onClick={() => onOpenRound(round.round_number)} className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-2.5 text-left hover:border-cs2-accent/40"><div className="flex items-center justify-between"><span className="font-mono text-[9px] font-bold text-cs2-text-primary">R{round.round_number}</span><span className={`text-[8px] font-bold ${round.winner_team_key === "a" ? "text-sky-400" : "text-emerald-400"}`}>{round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 胜</span></div><p className="mt-1 text-[8px] text-sky-400">{data.team_a_name}: {economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p><p className="mt-0.5 text-[8px] text-emerald-400">{data.team_b_name}: {economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></button>)}</div></div></Panel>
+    <Panel title="经济走势" eyebrow="双方每回合装备价值 · 背景表示低经济一方购买类型"><div className="p-4"><EconomyChart rounds={data.rounds} teamAName={data.team_a_name} teamBName={data.team_b_name} /><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">{data.rounds.map((round) => <button key={round.round_number} type="button" onClick={() => onOpenRound(round.round_number)} className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-2.5 text-left hover:border-cs2-accent/40"><div className="flex items-center justify-between gap-2"><span className="font-mono text-[9px] font-bold text-cs2-text-primary">R{round.round_number} {Number(round.team_a_score_after || 0)}:{Number(round.team_b_score_after || 0)}</span><span className={`shrink-0 text-[8px] font-bold ${round.winner_team_key === "a" ? "text-sky-400" : "text-emerald-400"}`}>{round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 胜</span></div><p className="mt-1 text-[8px] text-sky-400">{data.team_a_name}: {economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p><p className="mt-0.5 text-[8px] text-emerald-400">{data.team_b_name}: {economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></button>)}</div></div></Panel>
   );
 }

@@ -13,7 +13,7 @@ function formatSample(bucket) {
 
 function MetricRow({ label, valueA, valueB, sampleA, sampleB }) {
   return (
-    <div className="grid grid-cols-[1fr_minmax(4.5rem,auto)_minmax(4.5rem,auto)] items-center gap-2 border-t border-cs2-border/50 py-1.5 first:border-t-0">
+    <div className="grid grid-cols-[1fr_minmax(4.5rem,auto)_minmax(4.5rem,auto)] items-center gap-2 border-t border-cs2-border/50 py-1 first:border-t-0">
       <span className="text-[11px] text-cs2-text-muted">{label}</span>
       <span className="text-right text-[12px] font-bold tabular-nums text-sky-400">
         {valueA}
@@ -52,28 +52,37 @@ export default function OpeningAdvantageCard({
       title="首杀与人数优势"
       icon={<Swords className="h-3.5 w-3.5 text-amber-400" />}
       compact
-      className={`min-h-[135px] xl:min-h-[145px] ${className}`}
+      className={className}
     >
-      <div className="mb-0.5 grid grid-cols-[1fr_minmax(4.5rem,auto)_minmax(4.5rem,auto)] gap-2 text-[9px] font-semibold text-cs2-text-muted">
-        <span />
-        <span className="truncate text-right text-sky-400/80">{teamAName}</span>
-        <span className="truncate text-right text-amber-400/80">{teamBName}</span>
+      <div className="flex flex-1 flex-col justify-center">
+        <div className="mb-0.5 grid grid-cols-[1fr_minmax(4.5rem,auto)_minmax(4.5rem,auto)] gap-2 text-[9px] font-semibold text-cs2-text-muted">
+          <span />
+          <span className="truncate text-right text-sky-400/80">{teamAName}</span>
+          <span className="truncate text-right text-amber-400/80">{teamBName}</span>
+        </div>
+        <MetricRow label="首杀次数" valueA={teamA.firstKills ?? 0} valueB={teamB.firstKills ?? 0} />
+        <MetricRow
+          label="5v4 转化率"
+          valueA={formatRate(teamA.fiveVFour)}
+          valueB={formatRate(teamB.fiveVFour)}
+          sampleA={formatSample(teamA.fiveVFour)}
+          sampleB={formatSample(teamB.fiveVFour)}
+        />
+        <MetricRow
+          label="4v5 翻盘率"
+          valueA={formatRate(teamA.fourVFive)}
+          valueB={formatRate(teamB.fourVFive)}
+          sampleA={formatSample(teamA.fourVFive)}
+          sampleB={formatSample(teamB.fourVFive)}
+        />
+        <MetricRow
+          label="1vN 残局胜率"
+          valueA={formatRate(teamA.clutch1vN)}
+          valueB={formatRate(teamB.clutch1vN)}
+          sampleA={formatSample(teamA.clutch1vN)}
+          sampleB={formatSample(teamB.clutch1vN)}
+        />
       </div>
-      <MetricRow label="首杀次数" valueA={teamA.firstKills ?? 0} valueB={teamB.firstKills ?? 0} />
-      <MetricRow
-        label="5v4 转化率"
-        valueA={formatRate(teamA.fiveVFour)}
-        valueB={formatRate(teamB.fiveVFour)}
-        sampleA={formatSample(teamA.fiveVFour)}
-        sampleB={formatSample(teamB.fiveVFour)}
-      />
-      <MetricRow
-        label="4v5 翻盘率"
-        valueA={formatRate(teamA.fourVFive)}
-        valueB={formatRate(teamB.fourVFive)}
-        sampleA={formatSample(teamA.fourVFive)}
-        sampleB={formatSample(teamB.fourVFive)}
-      />
     </InsightCard>
   );
 }

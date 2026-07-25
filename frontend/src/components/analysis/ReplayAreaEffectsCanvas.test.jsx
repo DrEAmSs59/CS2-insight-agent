@@ -22,6 +22,11 @@ describe("selectActiveSample", () => {
     expect(selectActiveSample(track, 150)?.tick).toBe(150);
     expect(selectActiveSample(track, 180)?.tick).toBe(150);
   });
+
+  test("hides after round end even if track end is later", () => {
+    expect(selectActiveSample(track, 180, 160)).toBeNull();
+    expect(selectActiveSample(track, 150, 160)?.tick).toBe(150);
+  });
 });
 
 describe("ReplayAreaEffectsCanvas", () => {

@@ -25,8 +25,8 @@ def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
 
 def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
     out = [0x00, flags, len(entries)]
-    for z, y, x in entries:
-        out.extend([z, y, x, 5, 0, 0, 0, 0])
+    for z, x, y in entries:
+        out.extend([z, x, y, 5, 0, 0, 0, 0])
     return out
 
 
@@ -115,7 +115,7 @@ class TestSmokeTracks:
         assert "VoxelFrameData" not in payload
         assert "\\" not in payload or True  # JSON serializable, no raw bytes
 
-    def test_hash_change_without_update_warns(self):
+    def test_hash_change_without_update_skips_redundant_decode(self):
         blob_a = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
         blob_b = _make_journal([(0, _occ_payload([(16, 16, 18)]))])
         origin = [100.0, 200.0, 50.0]
@@ -140,8 +140,62 @@ class TestSmokeTracks:
             },
         ]
         tracks, warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=100, tick_rate=64)
-        assert len(tracks[0]["samples"]) == 2
-        assert any("without m_nVoxelUpdate" in w for w in warnings)
+        assert len(tracks) == 1
+        assert len(tracks[0]["samples"]) == 1
+        assert warnings == []
+
+    def test_rejects_non_smoke_grenade_types(self):
+        blob = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
+        rows = [
+            {
+                "tick": 10,
+                "grenade_entity_id": 9,
+                "grenade_type": "CMolotovProjectile",
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": [0, 0, 0],
+            },
+            {
+                "tick": 11,
+                "grenade_entity_id": 10,
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": [0, 0, 0],
+            },
+        ]
+        tracks, _warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=100, tick_rate=64)
+        assert tracks == []
+
+    def test_smoke_end_tick_uses_lifetime_not_last_row(self):
+        blob = _make_journal([(0, _occ_payload([(16, 16, 16)]))])
+        origin = [1.0, 2.0, 3.0]
+        rows = [
+            {
+                "tick": 100,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 100,
+                "m_nVoxelUpdate": 1,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin,
+            },
+            {
+                "tick": 180,
+                "grenade_entity_id": 3,
+                "grenade_type": "CSmokeGrenadeProjectile",
+                "m_nSmokeEffectTickBegin": 100,
+                "m_nVoxelUpdate": 2,
+                "m_VoxelFrameData": blob,
+                "m_nVoxelFrameDataSize": len(blob),
+                "m_vSmokeDetonationPos": origin,
+            },
+        ]
+        tracks, _warnings = build_smoke_tracks_from_rows(rows, start_tick=0, end_tick=10000, tick_rate=64)
+        assert len(tracks) == 1
+        assert tracks[0]["end_tick"] == 100 + int(18 * 64)
 
 
 class TestExtractDynamicEffectTracks:

@@ -44,6 +44,15 @@ function resolveTone(round) {
   return "blue";
 }
 
+function roundHeading(round) {
+  const n = round.roundNumber;
+  if (n == null) return "回合";
+  if (round.scoreA != null && round.scoreB != null) {
+    return `R${n} ${round.scoreA}:${round.scoreB}`;
+  }
+  return `R${n}`;
+}
+
 /**
  * @param {{
  *   rounds?: Array<object>,
@@ -66,7 +75,7 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
       </div>
 
       <div className="overflow-x-auto pb-0.5">
-        <div className="flex min-w-max gap-2.5">
+        <div className="flex w-full min-w-0 gap-2.5">
           {list.map((round) => {
             const tone = resolveTone(round);
             const styles = TONE_STYLES[tone] || TONE_STYLES.blue;
@@ -75,7 +84,7 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
             const replayEnabled = canReplay && roundNumber != null;
 
             return (
-              <div key={roundNumber} className="flex w-[200px] shrink-0 flex-col">
+              <div key={roundNumber} className="flex min-w-[188px] flex-1 basis-0 flex-col">
                 <div
                   role={openEnabled ? "button" : undefined}
                   tabIndex={openEnabled ? 0 : undefined}
@@ -89,13 +98,13 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                       onOpenRound(roundNumber);
                     }
                   }}
-                  className={`flex h-[80px] flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-2.5 py-2 text-left transition-colors ${
+                  className={`flex h-[88px] flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-2.5 py-2 text-left transition-colors ${
                     openEnabled ? "cursor-pointer hover:border-cs2-accent/40" : ""
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-[11px] font-bold text-cs2-text-primary">
-                      R{roundNumber}
+                    <span className="whitespace-nowrap font-mono text-[11px] font-bold text-cs2-text-primary">
+                      {roundHeading(round)}
                     </span>
                     <span
                       className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${styles.badge}`}
@@ -118,9 +127,10 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                     ) : null}
                   </div>
                   <p className="mt-1 truncate text-[11px] font-semibold text-cs2-text-primary">
+                    {round.playerName ? `${round.playerName} · ` : ""}
                     {round.title || "关键回合"}
                   </p>
-                  <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-cs2-text-muted">
+                  <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-cs2-text-muted">
                     {round.description || ""}
                   </p>
                 </div>

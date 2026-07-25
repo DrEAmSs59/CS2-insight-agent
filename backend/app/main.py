@@ -568,13 +568,42 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
 
 
 def _save_uploaded_demo(file: UploadFile, destination: Path) -> str:
-    """Save one upload and return the MD5 calculated during that same read."""
+    """Save one upload and return the MD5 calculated during that same read.
 
+    Writes via a unique ``.partial`` then ``os.replace`` so Windows does not
+    hit ``OSError: [Errno 22] Invalid argument`` when truncating a large
+    existing ``.dem`` that is briefly locked (Defender / prior parse handle).
+    """
+
+    if not destination.name or destination.name in {".", ".."}:
+        raise ValueError(f"invalid upload destination name: {destination!r}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.md5()
-    with destination.open("wb") as writer:
-        while chunk := file.file.read(1024 * 1024):
-            writer.write(chunk)
-            digest.update(chunk)
+    tmp = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.partial")
+    try:
+        with tmp.open("wb") as writer:
+            while chunk := file.file.read(1024 * 1024):
+                writer.write(chunk)
+                digest.update(chunk)
+        try:
+            os.replace(tmp, destination)
+        except OSError:
+            # Same-volume replace can still fail if the final name is locked.
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Could not remove locked upload destination before replace: %s",
+                    destination,
+                )
+            os.replace(tmp, destination)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     return digest.hexdigest()
 
 
@@ -2875,14 +2904,28 @@ async def get_demo_replay(req: DemoReplayRequest):
         duration_sec=duration_sec,
         demo_tick_rate=req.tick_rate,
         include_all_players=True,
-        include_effect_tracks=False,
+        include_effect_tracks=True,
     )
     try:
         transform = lookup_map_data(map_key)
     except (KeyError, OSError):
         transform = None
 
+    effect_tracks: list = []
+    effect_capabilities = {
+        "inferno_cells": False,
+        "smoke_voxels": False,
+        "smoke_mode": "legacy_circle",
+    }
+    effect_warnings: list = []
+    effect_parse_ms = None
+    effect_tracks_version = 1
     if isinstance(frames, dict):
+        effect_tracks = list(frames.get("effect_tracks") or [])
+        effect_capabilities = frames.get("effect_capabilities") or effect_capabilities
+        effect_warnings = list(frames.get("effect_warnings") or [])
+        effect_parse_ms = frames.get("effect_parse_ms")
+        effect_tracks_version = int(frames.get("effect_tracks_version") or 1)
         frames = list(frames.get("frames") or [])
 
     return {
@@ -2893,14 +2936,12 @@ async def get_demo_replay(req: DemoReplayRequest):
         "fps": req.fps,
         "start_tick": req.start_tick,
         "end_tick": req.end_tick,
-        "effect_tracks_version": 1,
-        "effect_capabilities": {
-            "inferno_cells": False,
-            "smoke_voxels": False,
-            "smoke_mode": "legacy_circle",
-        },
-        "effect_tracks": [],
-        "effects_pending": True,
+        "effect_tracks_version": effect_tracks_version,
+        "effect_capabilities": effect_capabilities,
+        "effect_tracks": effect_tracks,
+        "effect_warnings": effect_warnings,
+        "effect_parse_ms": effect_parse_ms,
+        "effects_pending": False,
     }
 
 

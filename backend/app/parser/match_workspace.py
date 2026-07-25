@@ -1036,36 +1036,12 @@ def build_match_workspace(
     except (KeyError, OSError):
         map_transform = None
 
-    effect_tracks: list[dict[str, Any]] = []
-    effect_capabilities: dict[str, Any] = {
-        "inferno_cells": False,
-        "smoke_voxels": False,
-        "smoke_mode": "legacy_circle",
-    }
-    effect_warnings: list[str] = []
-    if parser is not None:
-        try:
-            from .replay_effects import extract_dynamic_effect_tracks
-
-            demo_end = int(getattr(shared_facts, "demo_end_tick", shared_facts.demo_max_tick) or 0)
-            start_i = max(0, int(match_start_tick))
-            end_i = max(start_i + 1, demo_end)
-            effect_payload = extract_dynamic_effect_tracks(
-                parser,
-                start_tick=start_i,
-                end_tick=end_i,
-                tick_rate=float(tick_rate),
-                map_name=map_name,
-            )
-            effect_tracks = list(effect_payload.get("effects") or [])
-            effect_capabilities = effect_payload.get("capabilities") or effect_capabilities
-            effect_warnings = list(effect_payload.get("warnings") or [])
-        except Exception as exc:  # noqa: BLE001 — effects must not break workspace
-            effect_warnings = [f"workspace effect extract failed: {type(exc).__name__}: {exc}"]
-
+    # Smoke/inferno area tracks are intentionally NOT extracted here.
+    # Full-demo parse_infernos + parse_grenades(voxel) can add minutes to
+    # parse-multi. 2D replay loads them per-round via /api/demo/replay/effects.
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.07.2",
+        "algorithm_version": "match-workspace-2026.07.3",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
@@ -1079,7 +1055,6 @@ def build_match_workspace(
             "clutch_wins",
             "special_events",
             "phase_meta",
-            "effect_tracks",
         ],
         "map_name": map_name,
         "tick_rate": float(tick_rate),
@@ -1107,9 +1082,14 @@ def build_match_workspace(
         "players": stats,
         "rounds": rounds_out,
         "effect_tracks_version": 1,
-        "effect_capabilities": effect_capabilities,
-        "effect_tracks": effect_tracks,
-        "effect_warnings": effect_warnings,
+        "effect_capabilities": {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+            "source": "replay_effects_api",
+        },
+        "effect_tracks": [],
+        "effect_warnings": [],
         "summary": {
             "total_rounds": len(rounds_out),
         },

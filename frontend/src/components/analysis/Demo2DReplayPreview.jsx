@@ -18,8 +18,8 @@ import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
 
 const MAP_SIZE = 1024;
-const SAMPLE_HZ = 32;
-const REPLAY_CACHE_VERSION = 5;
+const SAMPLE_HZ = 8;
+const REPLAY_CACHE_VERSION = 9;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
 
@@ -60,6 +60,34 @@ function utilityInventory(inventory) {
     groups.set(entry.key, current ? { ...current, count: current.count + 1 } : { ...entry, count: 1 });
   }
   return [...groups.values()];
+}
+
+function primaryWeaponFromInventory(inventory) {
+  for (const raw of Array.isArray(inventory) ? inventory : []) {
+    const item = safeLabel(raw).toLowerCase().replace(/^weapon_/, "");
+    if (!item) continue;
+    if (/knife|bayonet|smoke|flash|hegrenade|molotov|incendiary|incgrenade|decoy|taser|c4|defuser|healthshot/.test(item)) {
+      continue;
+    }
+    return safeLabel(raw);
+  }
+  return "";
+}
+
+function meleeFromInventory(inventory) {
+  for (const raw of Array.isArray(inventory) ? inventory : []) {
+    const item = safeLabel(raw).toLowerCase().replace(/^weapon_/, "");
+    if (/knife|bayonet|karambit|shadow_daggers|gut|flip|bayonet/.test(item)) {
+      return safeLabel(raw);
+    }
+  }
+  return "";
+}
+
+function resolveReplayWeapon(state) {
+  const direct = safeWeapon(state?.weapon, "").replace(/^weapon_/i, "");
+  if (direct) return direct;
+  return primaryWeaponFromInventory(state?.inventory) || meleeFromInventory(state?.inventory);
 }
 
 function armorText(state) {
@@ -163,7 +191,7 @@ function replayEventsForRound(round, tickRate = 64) {
 function grenadeDurationSeconds(kind) {
   const value = safeLabel(kind);
   if (/烟|smoke/i.test(value)) return 18;
-  if (/燃|火|molotov|inferno|incendiary/i.test(value)) return 7;
+  if (/燃烧|molotov|inferno|incendiary/i.test(value)) return 7;
   if (/闪|flash/i.test(value)) return 0.85;
   return 0.4;
 }
@@ -246,6 +274,11 @@ function interpolateNumber(start, end, ratio) {
   return left + (right - left) * ratio;
 }
 
+function smoothstep(ratio) {
+  const t = clamp(Number(ratio) || 0, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function interpolateYaw(start, end, ratio) {
   const left = Number(start);
   const right = Number(end);
@@ -266,6 +299,7 @@ function interpolateReplayFrame(frames, position, fallbackTick) {
   const upper = frames[upperIndex] || lower;
   const ratio = clamp(position - lowerIndex, 0, 1);
   if (upperIndex === lowerIndex || ratio <= 0) return lower;
+  const eased = smoothstep(ratio);
 
   const upperPlayers = new Map((upper.players || []).map((player) => [replayPlayerKey(player), player]));
   const players = (lower.players || []).map((player) => {
@@ -273,17 +307,22 @@ function interpolateReplayFrame(frames, position, fallbackTick) {
     if (!next) return player;
     return {
       ...player,
-      x: interpolateNumber(player.x, next.x, ratio),
-      y: interpolateNumber(player.y, next.y, ratio),
-      z: interpolateNumber(player.z, next.z, ratio),
-      yaw: interpolateYaw(player.yaw, next.yaw, ratio),
+      x: interpolateNumber(player.x, next.x, eased),
+      y: interpolateNumber(player.y, next.y, eased),
+      z: interpolateNumber(player.z, next.z, eased),
+      yaw: interpolateYaw(player.yaw, next.yaw, eased),
+      weapon: (() => {
+        const preferred = ratio >= 0.5 ? (next.weapon || player.weapon) : (player.weapon || next.weapon);
+        return preferred || player.weapon || next.weapon || "";
+      })(),
+      inventory: ratio >= 0.5 ? (next.inventory || player.inventory) : (player.inventory || next.inventory),
     };
   });
   return {
     ...lower,
     players,
-    tick: interpolateNumber(lower.tick, upper.tick, ratio),
-    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, ratio),
+    tick: interpolateNumber(lower.tick, upper.tick, eased),
+    time_sec: interpolateNumber(lower.time_sec, upper.time_sec, eased),
   };
 }
 
@@ -360,6 +399,7 @@ function pointMatchesMapLayer(point, transform, layer) {
 function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrierName = "" }) {
   const byName = new Map((framePlayers || []).map((player) => [safeLabel(player.name).toLowerCase(), player]));
   const isBlue = isBlueReplaySide(side, !side && teamKey === "a");
+  const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
   return (
     <aside className="rounded-xl border border-cs2-border bg-cs2-bg-card p-4">
       <div className="mb-3 flex items-center justify-between border-b border-cs2-border pb-3">
@@ -375,11 +415,13 @@ function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrier
           const state = byName.get(displayName.toLowerCase()) || {};
           const alive = state.is_alive !== false;
           const health = Number.isFinite(Number(state.health)) ? Math.max(0, Number(state.health)) : (alive ? 100 : 0);
-          const weapon = alive ? safeWeapon(state.weapon, "—") : "—";
-          const hasC4 = alive && (state.has_c4 || displayName.toLowerCase() === bombCarrierName.toLowerCase());
+          const weapon = alive ? resolveReplayWeapon(state) || "—" : "—";
+          // Single source of truth: only the resolved bomb carrier may show C4.
+          const hasC4 = Boolean(alive && exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
           const utilities = alive ? utilityInventory(state.inventory) : [];
           const hasArmor = Number(state.armor || 0) > 0;
-          const weaponStem = alive && weapon !== "—" ? resolveHudWeaponStem(state.weapon, weapon) : "";
+          const armorValue = Math.max(0, Number(state.armor) || 0);
+          const weaponStem = alive && weapon !== "—" ? resolveHudWeaponStem(weapon, weapon, { fallback: "" }) : "";
           return (
             <div key={displayName} className={`rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-3 py-3 ${alive ? "" : "opacity-45"}`}>
               <div className="flex items-center gap-2">
@@ -387,12 +429,33 @@ function ReplayRoster({ title, teamKey, side, players, framePlayers, bombCarrier
                   {replayPlayerNumber(teamKey, index)}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-cs2-text-primary">{displayName}</span>
-                <span className="font-mono text-[10px] text-cs2-text-muted">{alive ? `${health} HP` : "阵亡"}</span>
+                <span
+                  className={`shrink-0 font-mono text-[13px] font-black tabular-nums ${
+                    !alive
+                      ? "text-cs2-text-muted"
+                      : health > 70
+                        ? "text-emerald-300"
+                        : health > 30
+                          ? "text-amber-300"
+                          : "text-rose-400"
+                  }`}
+                >
+                  {alive ? `${health} HP` : "阵亡"}
+                </span>
               </div>
               <div className="mt-1.5 flex min-h-5 items-center gap-1.5 pl-8 text-[10px] text-cs2-text-muted">
                 <span className="flex min-w-0 flex-1 items-center" title={weapon} aria-label={`${displayName} 当前武器 ${weapon}`}>{weaponStem && <HudEquipmentIcon stem={weaponStem} className="h-[18px] w-8 shrink-0" />}</span>
                 <span className="shrink-0 font-mono font-bold text-emerald-300">${Math.max(0, Number(state.money) || 0).toLocaleString("en-US")}</span>
-                {hasArmor && <span title={state.has_helmet ? "头盔 + 防弹衣" : "防弹衣"} aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"}`} className="inline-flex h-5 w-6 shrink-0 items-center justify-center rounded bg-sky-500/12 text-sky-200"><HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-4 w-5" /></span>}
+                {hasArmor && (
+                  <span
+                    title={state.has_helmet ? "头盔 + 防弹衣" : "防弹衣"}
+                    aria-label={`${displayName} ${state.has_helmet ? "头盔和防弹衣" : "防弹衣"} ${armorValue}`}
+                    className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded bg-sky-500/12 px-1 font-mono text-[10px] font-bold tabular-nums text-sky-200"
+                  >
+                    <HudEquipmentIcon stem={state.has_helmet ? "armor_helmet" : "armor"} className="h-4 w-5" />
+                    {armorValue}
+                  </span>
+                )}
               </div>
               <div className="mt-1.5 flex min-h-5 flex-wrap items-center gap-1.5 pl-8 text-[10px] text-cs2-text-muted">
                 {utilities.map(({ key, label, stem, tone, count }) => <span key={key} title={`${label}${count > 1 ? ` ×${count}` : ""}`} aria-label={`${displayName} 持有${label}${count > 1 ? ` ${count} 枚` : ""}`} className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded px-1.5 ${tone}`}><HudEquipmentIcon stem={stem} className="h-4 w-4" />{count > 1 && <b className="font-mono text-[9px] leading-none">{count}</b>}</span>)}
@@ -420,18 +483,10 @@ function GrenadeEffectMarker({ grenade, motionDuration, useAreaFallback = true }
     );
   }
   if (/烟|smoke/i.test(grenade.kind)) {
+    // Real voxel areas replace circles; countdown is drawn on the area itself.
+    if (!useAreaFallback) return null;
     const remaining = Math.max(0, grenade.duration - grenade.effectAge);
     const ring = clamp(remaining / Math.max(0.01, grenade.duration), 0, 1);
-    if (!useAreaFallback) {
-      return (
-        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2" style={style} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
-          <div className="relative flex h-5 w-5 items-center justify-center">
-            <svg viewBox="0 0 20 20" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="10" cy="10" r="8" fill="none" stroke={teamColor} strokeWidth="1.4" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
-            <HudEquipmentIcon stem="smokegrenade" className="h-3 w-3 drop-shadow" />
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="demo-effect-shell pointer-events-none absolute z-10 h-[32px] w-[32px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ ...style, backgroundColor: `${teamColor}18`, boxShadow: `0 0 5px ${teamColor}2e` }} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
         <svg viewBox="0 0 32 32" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="16" cy="16" r="14" fill="none" stroke={teamColor} strokeWidth="1.6" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
@@ -443,19 +498,10 @@ function GrenadeEffectMarker({ grenade, motionDuration, useAreaFallback = true }
       </div>
     );
   }
-  if (/燃|火|molotov|inferno|incendiary/i.test(grenade.kind)) {
+  if (/燃烧|molotov|inferno|incendiary/i.test(grenade.kind)) {
+    if (!useAreaFallback) return null;
     const remaining = Math.max(0, grenade.duration - grenade.effectAge);
     const ring = clamp(remaining / Math.max(0.01, grenade.duration), 0, 1);
-    if (!useAreaFallback) {
-      return (
-        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2" style={style} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
-          <div className="relative flex h-5 w-5 items-center justify-center">
-            <svg viewBox="0 0 20 20" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="10" cy="10" r="8" fill="none" stroke={teamColor} strokeWidth="1.4" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
-            <HudEquipmentIcon stem={visual.stem} className="h-3 w-3 drop-shadow" />
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="demo-effect-shell pointer-events-none absolute z-10 h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ ...style, backgroundColor: `${teamColor}1c`, boxShadow: `0 0 6px ${teamColor}38` }} title={`${title} · 剩余 ${remaining.toFixed(1)} 秒`} data-side={grenade.side || undefined}>
         <svg viewBox="0 0 30 30" className="absolute inset-0 h-full w-full -rotate-90"><circle className="demo-duration-ring" cx="15" cy="15" r="13" fill="none" stroke={teamColor} strokeWidth="1.6" strokeLinecap="round" pathLength="1" strokeDasharray={`${ring} 1`} /></svg>
@@ -496,6 +542,7 @@ export default function Demo2DReplayPreview({
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadHint, setLoadHint] = useState("");
   const [error, setError] = useState("");
   const [mapLayer, setMapLayer] = useState("upper");
   const [playerLabelMode, setPlayerLabelMode] = useState("number");
@@ -526,8 +573,8 @@ export default function Demo2DReplayPreview({
   // use it as a live repair without forcing a full demo analysis again.
   const transform = workspace?.map_transform || responseTransform;
   const hasMapLayers = mapLayerThreshold(transform) != null && ["de_nuke", "de_vertigo"].includes(mapName);
-  const radarZoom = (mapName === "de_nuke" ? 1.28 : 1) * 1.2;
-  const playerMarkerSizePx = 17;
+  const radarZoom = mapName === "de_nuke" ? 1.28 : 1;
+  const playerMarkerSizePx = 15.3;
   useEffect(() => setMapLayer("upper"), [mapName]);
   const workspacePlayers = useMemo(() => (
     workspace?.players?.length
@@ -558,116 +605,71 @@ export default function Demo2DReplayPreview({
     };
     let cancelled = false;
 
-    const workspaceTracks = Array.isArray(workspace?.effect_tracks) ? workspace.effect_tracks : [];
-    const workspaceCaps = workspace?.effect_capabilities && typeof workspace.effect_capabilities === "object"
-      ? workspace.effect_capabilities
-      : null;
-    const seededTracks = workspaceTracks.filter((track) => {
-      const start = Number(track?.start_tick);
-      const end = Number(track?.end_tick);
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return true;
-      return end >= replayStartTick && start <= replayEndTick;
-    });
-    const hasWorkspaceEffects = Boolean(
-      seededTracks.length
-      && (workspaceCaps?.smoke_voxels || workspaceCaps?.inferno_cells),
-    );
-
-    const mergeEffectsIntoCache = (data, { fromWorkspace = false } = {}) => {
+    const applyPayload = (data) => {
+      const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
+      const nextTransform = data?.map_transform && typeof data.map_transform === "object"
+        ? data.map_transform
+        : null;
+      const nextFps = Math.max(1, Number(data?.fps) || SAMPLE_HZ);
       const nextEffectTracks = Array.isArray(data?.effect_tracks) ? data.effect_tracks : [];
       const nextCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
         ? data.effect_capabilities
         : null;
-      if (cancelled) return;
-      setEffectTracks(nextEffectTracks);
-      setEffectCapabilities(nextCapabilities);
-      const prev = cacheRef.current.get(key) || {};
       cacheRef.current.set(key, {
-        ...prev,
+        frames: nextFrames,
+        mapTransform: nextTransform,
+        fps: nextFps,
         effectTracks: nextEffectTracks,
         effectCapabilities: nextCapabilities,
         effectsReady: true,
-        effectsFromWorkspace: fromWorkspace,
       });
+      setFrames(nextFrames);
+      setEffectTracks(nextEffectTracks);
+      setEffectCapabilities(nextCapabilities);
+      setResponseTransform(nextTransform);
+      setReplayFps(nextFps);
+      setFrameIndex(0);
+      setError(nextFrames.length ? "" : "该回合没有可用的坐标帧");
+      setLoading(false);
+      setLoadHint("");
     };
-
-    const loadEffectsFromApi = () => {
-      API.post("/demo/replay/effects", requestBody)
-        .then(({ data }) => mergeEffectsIntoCache(data))
-        .catch(() => {
-          if (cancelled) return;
-          const prev = cacheRef.current.get(key) || {};
-          cacheRef.current.set(key, { ...prev, effectsReady: Boolean(prev.effectsReady) });
-        });
-    };
-
-    // Prefer precomputed workspace tracks so smoke/fire areas appear with the round,
-    // without waiting on a second demoparser pass.
-    if (hasWorkspaceEffects) {
-      mergeEffectsIntoCache({
-        effect_tracks: seededTracks,
-        effect_capabilities: workspaceCaps,
-      }, { fromWorkspace: true });
-    }
 
     const cached = cacheRef.current.get(key);
     if (cached?.frames) {
       setFrames(cached.frames);
-      if (!hasWorkspaceEffects) {
-        setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
-        setEffectCapabilities(cached.effectCapabilities || null);
-      }
+      setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
+      setEffectCapabilities(cached.effectCapabilities || null);
       setResponseTransform(cached.mapTransform || null);
       setReplayFps(cached.fps || SAMPLE_HZ);
       setFrameIndex(0);
       setError(cached.frames.length ? "" : "该回合没有可用的坐标帧");
       setLoading(false);
-      if (!hasWorkspaceEffects && !cached.effectsReady) loadEffectsFromApi();
+      setLoadHint("");
       return () => { cancelled = true; };
     }
 
     setLoading(true);
     setError("");
     setPlaying(false);
-    if (!hasWorkspaceEffects) {
-      setEffectTracks([]);
-      setEffectCapabilities(null);
-    }
+    setEffectTracks([]);
+    setEffectCapabilities(null);
+    const hasWarmCache = [...cacheRef.current.keys()].some((entry) => entry.includes(demoPath));
+    setLoadHint(
+      hasWarmCache
+        ? "正在加载本回合回放数据…"
+        : "首次进入需解析整场烟火区域（通常约 30–60 秒），完成后同一 demo 切回合会快很多",
+    );
     API.post("/demo/replay", requestBody).then(({ data }) => {
-      if (cancelled) return;
-      const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
-      const nextTransform = data?.map_transform && typeof data.map_transform === "object"
-        ? data.map_transform
-        : null;
-      const nextFps = Math.max(1, Number(data?.fps) || SAMPLE_HZ);
-      const prev = cacheRef.current.get(key) || {};
-      cacheRef.current.set(key, {
-        ...prev,
-        frames: nextFrames,
-        mapTransform: nextTransform,
-        fps: nextFps,
-        effectTracks: prev.effectTracks || (hasWorkspaceEffects ? seededTracks : []),
-        effectCapabilities: prev.effectCapabilities || (hasWorkspaceEffects ? workspaceCaps : null),
-        effectsReady: Boolean(prev.effectsReady || hasWorkspaceEffects),
-      });
-      setFrames(nextFrames);
-      setResponseTransform(nextTransform);
-      setReplayFps(nextFps);
-      setFrameIndex(0);
-      setLoading(false);
-      if (!nextFrames.length) {
-        setError("该回合没有可用的坐标帧");
-        return;
-      }
-      if (!hasWorkspaceEffects) loadEffectsFromApi();
+      if (!cancelled) applyPayload(data);
     }).catch((reason) => {
       if (!cancelled) {
         setError(reason?.response?.data?.detail || reason?.message || "2D 回放加载失败");
         setLoading(false);
+        setLoadHint("");
       }
     });
     return () => { cancelled = true; };
-  }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspace?.effect_tracks, workspace?.effect_capabilities, workspacePlayers]);
+  }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
 
   useEffect(() => {
     framePositionRef.current = frameIndex;
@@ -745,15 +747,25 @@ export default function Demo2DReplayPreview({
         status = "exploded";
       }
     }
+    // Prefer event-derived exclusive carrier; fall back to a single frame has_c4.
+    if (status === "carried" && !carrier) {
+      const frameCarriers = (frame.players || []).filter((player) => player?.has_c4 && player?.is_alive !== false);
+      if (frameCarriers.length === 1) carrier = safeLabel(frameCarriers[0].name);
+    }
+    if (status !== "carried") carrier = "";
     return { carrier, status, position, site, z };
-  }, [currentTick, roundEvents, selectedRound?.bomb_initial_carrier, transform]);
+  }, [currentTick, frame.players, roundEvents, selectedRound?.bomb_initial_carrier, transform]);
   const markerPlayers = (frame.players || []).map((player) => {
     const meta = workspacePlayers.find((item) => item.name?.toLowerCase() === String(player.name || "").toLowerCase());
     const frameSide = safeLabel(player.team).toUpperCase();
     const fallbackTeamKey = frameSide && frameSide === String(selectedRound?.team_a_side || "").toUpperCase() ? "a" : "b";
+    const displayName = safeLabel(player.name);
+    const carriesBomb = bombState.status === "carried"
+      && bombState.carrier
+      && displayName.toLowerCase() === bombState.carrier.toLowerCase();
     return {
       ...player,
-      has_c4: Boolean(player.has_c4) || (bombState.status === "carried" && safeLabel(player.name).toLowerCase() === bombState.carrier.toLowerCase()),
+      has_c4: carriesBomb,
       team_key: meta?.team_key || fallbackTeamKey,
       position: worldToPercent(player, transform),
     };
@@ -786,6 +798,7 @@ export default function Demo2DReplayPreview({
     const nearestFrame = (tick) => frames.reduce((best, item) => (
       Math.abs(Number(item.tick) - tick) < Math.abs(Number(best?.tick ?? Infinity) - tick) ? item : best
     ), null);
+    const roundEndForEffects = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
     const kills = [];
     const grenades = [];
     for (const event of events) {
@@ -827,7 +840,10 @@ export default function Demo2DReplayPreview({
           ? parsedThrowTick
           : Math.max(0, eventTick - fallbackFlightTicks);
         const effectDuration = grenadeDurationSeconds(event.kind) * tickRate;
-        if (currentTick < throwTick || currentTick > eventTick + effectDuration) continue;
+        const effectEndTick = Number.isFinite(roundEndForEffects) && roundEndForEffects > 0
+          ? Math.min(eventTick + effectDuration, roundEndForEffects)
+          : eventTick + effectDuration;
+        if (currentTick < throwTick || currentTick > effectEndTick) continue;
         let trajectory = trajectoryValid ? rawTrajectory : [];
         let trajectoryInferred = false;
         if (trajectory.length < 2 && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
@@ -984,11 +1000,11 @@ export default function Demo2DReplayPreview({
       `}</style>
       <section className="rounded-xl border border-cs2-border bg-cs2-bg-card p-3">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => changeRound(roundIndex - 1)} disabled={roundIndex <= 0} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
-          <select value={selectedRound.round_number} onChange={(event) => setRoundNumber(Number(event.target.value))} className="h-8 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-primary outline-none">
+          <button type="button" onClick={() => changeRound(roundIndex - 1)} disabled={loading || roundIndex <= 0} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+          <select value={selectedRound.round_number} disabled={loading} onChange={(event) => setRoundNumber(Number(event.target.value))} className="h-8 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-primary outline-none disabled:opacity-40">
             {rounds.map((round) => <option key={round.round_number} value={round.round_number}>回合 R{round.round_number} · {round.team_a_score_after} : {round.team_b_score_after}</option>)}
           </select>
-          <button type="button" onClick={() => changeRound(roundIndex + 1)} disabled={roundIndex >= rounds.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+          <button type="button" onClick={() => changeRound(roundIndex + 1)} disabled={loading || roundIndex >= rounds.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
           <button type="button" onClick={() => setPlaying((value) => !value)} disabled={!frames.length} className="flex h-9 w-9 items-center justify-center rounded-full bg-cs2-accent text-cs2-text-on-accent disabled:opacity-40">{playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}</button>
           <button type="button" aria-label="后退 5 秒" onClick={() => seekBySeconds(-5)} disabled={!frames.length} className="h-8 rounded-md border border-cs2-border px-2 font-mono text-[9px] font-bold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-35">-5s</button>
           <button type="button" aria-label="前进 5 秒" onClick={() => seekBySeconds(5)} disabled={!frames.length} className="h-8 rounded-md border border-cs2-border px-2 font-mono text-[9px] font-bold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary disabled:opacity-35">+5s</button>
@@ -1021,7 +1037,6 @@ export default function Demo2DReplayPreview({
         <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={frame.players} bombCarrierName={bombState.carrier} />
         <section className={`relative overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e] ${mapName === "de_nuke" ? "min-h-[780px]" : "min-h-[720px]"}`}>
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-md border border-cs2-border bg-cs2-bg-card/90 px-2.5 py-1.5 text-[9px] text-cs2-text-secondary"><MapIcon className="h-3.5 w-3.5 text-cs2-accent" />{mapName.replace(/^de_/, "")} · R{selectedRound.round_number} · {selectedRound.team_a_score_after} : {selectedRound.team_b_score_after}</div>
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
           </div>
           <div className="pointer-events-none absolute right-3 top-3 z-20 flex w-[min(84%,390px)] flex-col items-end gap-1.5" aria-live="polite">{killFeed.map((kill) => {
@@ -1032,13 +1047,20 @@ export default function Demo2DReplayPreview({
             const targetBlue = isBlueReplaySide(targetSide, teamKeyForPlayerName(kill.target) === "a");
             return <div key={`feed-${kill.tick}-${kill.actor}-${kill.target}`} className="flex max-w-full items-center gap-2 rounded-md border border-white/10 bg-black/80 px-2.5 py-1 text-[9px] shadow-lg"><span data-side={actorSide || undefined} className={`truncate font-bold ${actorBlue ? "text-sky-300" : "text-amber-300"}`}>{safeLabel(kill.actor, "未知玩家")}</span><KillfeedIconStrip event={{ ...kill, is_headshot: Boolean(kill.headshot) }} weaponName={weapon} weaponKey={weapon} /><span data-side={targetSide || undefined} className={`truncate font-bold ${targetBlue ? "text-sky-300" : "text-amber-300"}`}>{safeLabel(kill.target, "未知玩家")}</span></div>;
           })}</div>
-          {loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-cs2-bg-page/70"><Loader2 className="h-6 w-6 animate-spin text-cs2-accent" /></div>}
+          {loading && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-cs2-bg-page/75 px-6 text-center">
+              <Loader2 className="h-6 w-6 animate-spin text-cs2-accent" />
+              <p className="max-w-sm text-[11px] leading-relaxed text-cs2-text-secondary">{loadHint || "正在加载回放…"}</p>
+            </div>
+          )}
           {error && <div className="absolute inset-0 z-30 flex items-center justify-center p-8 text-center text-[11px] text-cs2-text-muted">{error}</div>}
           <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: `translate(-50%, -50%) scale(${radarZoom})` }}>
             <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
             <ReplayAreaEffectsCanvas
               tracks={effectTracks}
               currentTick={currentTick}
+              hideAfterTick={roundEndTick > 0 ? roundEndTick : null}
+              tickRate={tickRate}
               transform={transform}
               mapLayer={hasMapLayers ? mapLayer : "upper"}
               enabled={Boolean(layers.utilityAreas)}
@@ -1052,7 +1074,7 @@ export default function Demo2DReplayPreview({
             </svg>
             {recentEvents.grenades.map((grenade) => {
               const isSmoke = /烟|smoke/i.test(grenade.kind);
-              const isFire = /燃|火|molotov|inferno|incendiary/i.test(grenade.kind);
+              const isFire = /燃烧|molotov|inferno|incendiary/i.test(grenade.kind);
               const useAreaFallback = !(
                 (isSmoke && hasSmokeAreaTracks && layers.utilityAreas)
                 || (isFire && hasInfernoAreaTracks && layers.utilityAreas)
@@ -1066,7 +1088,7 @@ export default function Demo2DReplayPreview({
                 />
               );
             })}
-            {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 ${bombState.status === "dropped" ? "z-20" : "z-[5]"} ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-5 w-5 items-center justify-center rounded-[3px] border border-amber-100 bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,.55)]"><HudEquipmentIcon stem="c4" className="h-3.5 w-3.5 brightness-0" /></div></div>}
+            {bombState.position && pointMatchesMapLayer(bombState, transform, mapLayer) && ["dropped", "planted", "defused", "exploded"].includes(bombState.status) && <div className={`demo-c4-marker pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 ${["defused", "exploded"].includes(bombState.status) ? "opacity-45" : ""}`} style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }} title={`C4 ${bombState.status === "planted" ? `已放置${bombState.site ? ` · ${bombState.site} 区` : ""}` : bombState.status === "dropped" ? "已掉落" : bombState.status === "defused" ? "已拆除" : "已引爆"}`}><div className="flex h-4 w-4 items-center justify-center rounded-[2px] border border-amber-200 bg-amber-400"><HudEquipmentIcon stem="c4" className="h-3 w-3 brightness-0" /></div></div>}
             {markerPlayers.map((player) => {
               const isBlue = isBlueReplaySide(replaySideForTeamKey(player.team_key, selectedRound), player.team_key === "a");
               const displayName = safeLabel(player.name, "?");
@@ -1083,11 +1105,11 @@ export default function Demo2DReplayPreview({
                   <div
                     data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
                     data-player-label-mode={playerLabelMode}
-                    className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white shadow-sm ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
+                    className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
                     style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
                   >
-                    <span className="demo-player-direction-arrow pointer-events-none absolute -inset-[3px]" style={{ transform: `rotate(${90 - yaw}deg)` }}>
-                      <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[2px] border-b-[4px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
+                    <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${90 - yaw}deg)` }}>
+                      <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
                     </span>
                     <span>{circleLabel}</span>
                     {player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}
