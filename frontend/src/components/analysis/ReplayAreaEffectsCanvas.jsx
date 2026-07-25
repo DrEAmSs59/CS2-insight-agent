@@ -71,17 +71,94 @@ function clamp(value, min, max) {
 }
 
 /**
+ * Convert an L-mode / opaque grayscale mask into an alpha mask for destination-in.
+ * Browsers decode L PNGs as RGBA(L,L,L,255); destination-in uses source alpha only,
+ * so we map luminance → A and set RGB to opaque white.
+ * Accepts an Image / canvas / ImageData-like source with width/height and drawable pixels.
+ */
+function luminancePixelsToAlphaBuffer(srcPixels, sw, sh, w, h) {
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let py = 0; py < h; py += 1) {
+    for (let px = 0; px < w; px += 1) {
+      const sx = Math.min(sw - 1, Math.floor((px / w) * sw));
+      const sy = Math.min(sh - 1, Math.floor((py / h) * sh));
+      const si = (sy * sw + sx) * 4;
+      const di = (py * w + px) * 4;
+      const lum = Math.round((srcPixels[si] + srcPixels[si + 1] + srcPixels[si + 2]) / 3);
+      out[di] = 255;
+      out[di + 1] = 255;
+      out[di + 2] = 255;
+      out[di + 3] = lum;
+    }
+  }
+  return out;
+}
+
+export function luminanceMaskToAlphaCanvas(img, targetW, targetH) {
+  if (!img) return null;
+  const sw = Number(img.width) || 0;
+  const sh = Number(img.height) || 0;
+  if (sw <= 0 || sh <= 0) return null;
+
+  const w = Number.isFinite(targetW) && targetW > 0 ? Math.floor(targetW) : sw;
+  const h = Number.isFinite(targetH) && targetH > 0 ? Math.floor(targetH) : sh;
+  if (w <= 0 || h <= 0) return null;
+
+  // Pure-JS path for ImageData-like / test fixtures (and when DOM canvas is unavailable).
+  const srcPixels = img.__pixels || (img.data instanceof Uint8ClampedArray ? img.data : null);
+  if (srcPixels) {
+    return { width: w, height: h, __pixels: luminancePixelsToAlphaBuffer(srcPixels, sw, sh, w, h) };
+  }
+
+  let canvas;
+  try {
+    canvas = typeof document !== "undefined" && document.createElement
+      ? document.createElement("canvas")
+      : null;
+  } catch {
+    canvas = null;
+  }
+  if (!canvas || typeof canvas.getContext !== "function") return null;
+
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, w, h);
+  let imageData;
+  try {
+    imageData = ctx.getImageData(0, 0, w, h);
+  } catch {
+    // Cross-origin / tainted canvas — fall back to raw draw (clip may be a no-op for L masks).
+    return canvas;
+  }
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = Math.round((data[i] + data[i + 1] + data[i + 2]) / 3);
+    data[i] = 255;
+    data[i + 1] = 255;
+    data[i + 2] = 255;
+    data[i + 3] = lum;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+/**
  * Clip drawn utility pixels to the white regions of a radar-derived mask.
  * Missing mask → no-op (caller skips clip).
+ * L-mode masks are converted to alpha before destination-in.
  */
 export function applyUtilityClip(ctx, maskSource) {
   if (!maskSource || !ctx) return;
   const w = ctx.canvas?.width;
   const h = ctx.canvas?.height;
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+  const alphaMask = luminanceMaskToAlphaCanvas(maskSource, w, h);
+  if (!alphaMask) return;
   ctx.save();
   ctx.globalCompositeOperation = "destination-in";
-  ctx.drawImage(maskSource, 0, 0, w, h);
+  ctx.drawImage(alphaMask, 0, 0, w, h);
   ctx.restore();
 }
 
@@ -301,7 +378,8 @@ function paintEffectLayers(ctx, {
 }
 
 /**
- * Soften offscreen effects then clip to utility mask (clip after blur).
+ * When mask is present: clip → soft blur → clip again.
+ * First clip prevents blur bleed-in from outside the mask; second clip re-hardens edges.
  * Falls back to direct paint when offscreen canvas / mask is unavailable.
  */
 function compositeWithUtilityClip(ctx, width, height, utilityMask, paintFn) {
@@ -329,6 +407,8 @@ function compositeWithUtilityClip(ctx, width, height, utilityMask, paintFn) {
   }
 
   paintFn(octx);
+  // Clip before blur so soft edges cannot bleed in from outside the mask.
+  applyUtilityClip(octx, utilityMask);
 
   let soft = off;
   try {
@@ -345,11 +425,9 @@ function compositeWithUtilityClip(ctx, width, height, utilityMask, paintFn) {
       // Soften then clip again (destination-in).
       applyUtilityClip(bctx, utilityMask);
       soft = blurred;
-    } else {
-      applyUtilityClip(octx, utilityMask);
     }
   } catch {
-    applyUtilityClip(octx, utilityMask);
+    // Keep pre-blur clipped offscreen.
   }
 
   ctx.drawImage(soft, 0, 0);
