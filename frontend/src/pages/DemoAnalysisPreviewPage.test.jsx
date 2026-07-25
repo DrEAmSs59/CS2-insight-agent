@@ -285,7 +285,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
     expect(screen.getByAltText("de_mirage 雷达地图").getAttribute("src")).toBe("http://127.0.0.1:19871/api/demo/radar-map/de_mirage");
-    await waitFor(() => expect(screen.getByText("32 Hz", { exact: false })).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("64 Hz", { exact: false })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "前进 5 秒" }));
     expect(Number(screen.getByRole("slider", { name: "回放时间轴" }).value)).toBeCloseTo(0.8);
     fireEvent.click(screen.getByRole("button", { name: "后退 5 秒" }));

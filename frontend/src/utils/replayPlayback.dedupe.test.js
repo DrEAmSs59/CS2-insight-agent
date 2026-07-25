@@ -12,3 +12,18 @@ test("preview and scene do not redefine interpolateReplayFrame", () => {
     expect(text).not.toMatch(/smoothstep/);
   }
 });
+
+test("64Hz interpolation stays isolated from stepped event and effect layers", () => {
+  const preview = fs.readFileSync(
+    path.resolve("src/components/analysis/Demo2DReplayPreview.jsx"),
+    "utf8",
+  );
+  const scene = fs.readFileSync(
+    path.resolve("src/components/analysis/ReplaySceneCanvas.jsx"),
+    "utf8",
+  );
+  expect(preview).toContain("const interpolatedFrameDurationMs = 1000 / 64");
+  expect(scene).toContain("interpolateReplayFrameAtPosition(frames, playhead.position)");
+  expect(scene).toContain("const currentTick = Number(eventFrame.tick");
+  expect(scene).not.toMatch(/const currentTick = Number\(visualFrame\.tick/);
+});
