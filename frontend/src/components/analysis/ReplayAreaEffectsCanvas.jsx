@@ -1,28 +1,25 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
   buildDensityMask,
+  dilateMask,
   marchingSquares,
   sampleCrossfadeAlpha,
   smoothMask,
   supersampleMask,
 } from "./smokeContour";
+import { worldLengthToRadarPercent, worldToRadarPercent } from "../../utils/replayRadarTransform";
 
-const MAP_SIZE = 1024;
 const INFERNO_CELL_RADIUS_WORLD = 36;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
 const SMOKE_CONTOUR_THRESHOLD = 0.15;
+const SMOKE_DILATE_CELLS = 1;
 
 function worldToPercent(point, transform) {
-  if (!transform || !Number.isFinite(Number(point?.x)) || !Number.isFinite(Number(point?.y))) return null;
-  const scale = Number(transform.scale) || 1;
-  const px = (Number(point.x) - Number(transform.pos_x)) / scale;
-  const py = (Number(transform.pos_y) - Number(point.y)) / scale;
-  return { x: (px / MAP_SIZE) * 100, y: (py / MAP_SIZE) * 100 };
+  return worldToRadarPercent(point, transform);
 }
 
 function worldRadiusToPercent(radiusWorld, transform) {
-  const scale = Number(transform?.scale) || 1;
-  return ((Number(radiusWorld) || 0) / scale / MAP_SIZE) * 100;
+  return worldLengthToRadarPercent(radiusWorld, transform);
 }
 
 function mapLayerThreshold(transform) {
@@ -124,10 +121,14 @@ function worldRingToCanvasPath(ring, transform, width, height) {
   return points;
 }
 
-function fillSmokeRings(ctx, rings, transform, width, height, alpha) {
+function fillSmokeRings(ctx, rings, transform, width, height, alpha, { soft = false } = {}) {
   if (!rings?.length || alpha <= 0) return;
-  const fillAlpha = clamp(0.45 + 0.35 * alpha, 0.2, 0.85);
-  ctx.fillStyle = `rgba(148, 163, 184, ${fillAlpha})`;
+  const fillAlpha = soft
+    ? clamp(0.18 + 0.2 * alpha, 0.1, 0.4)
+    : clamp(0.5 + 0.35 * alpha, 0.28, 0.9);
+  ctx.fillStyle = soft
+    ? `rgba(148, 163, 184, ${fillAlpha})`
+    : `rgba(203, 213, 225, ${fillAlpha})`;
   for (const ring of rings) {
     const points = worldRingToCanvasPath(ring, transform, width, height);
     if (points.length < 3) continue;
@@ -142,10 +143,15 @@ function fillSmokeRings(ctx, rings, transform, width, height, alpha) {
 }
 
 function buildSmokeContourRings(cells, cellSize) {
-  if (!cells?.length) return [];
-  const mask = smoothMask(supersampleMask(buildDensityMask(cells, cellSize), 2), 0.35);
-  const { rings } = marchingSquares(mask, SMOKE_CONTOUR_THRESHOLD);
-  return rings;
+  if (!cells?.length) return { core: [], soft: [] };
+  const base = buildDensityMask(cells, cellSize);
+  const dilated = dilateMask(base, SMOKE_DILATE_CELLS);
+  const softMask = smoothMask(supersampleMask(dilateMask(dilated, 1), 2), 0.35);
+  const coreMask = smoothMask(supersampleMask(dilated, 2), 0.35);
+  return {
+    soft: marchingSquares(softMask, SMOKE_CONTOUR_THRESHOLD * 0.7).rings,
+    core: marchingSquares(coreMask, SMOKE_CONTOUR_THRESHOLD).rings,
+  };
 }
 
 function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, height, hideAfterTick) {
@@ -160,6 +166,12 @@ function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, 
   const activeDensity = averageCellDensity(activeCells);
   const activeRings = buildSmokeContourRings(activeCells, cellSize);
 
+  const paintLayer = (rings, alpha) => {
+    if (alpha <= 0) return;
+    fillSmokeRings(ctx, rings.soft, transform, width, height, alpha, { soft: true });
+    fillSmokeRings(ctx, rings.core, transform, width, height, alpha, { soft: false });
+  };
+
   if (next?.cells?.length) {
     const nextCells = filterCellsForMapLayer(next.cells, transform, mapLayer);
     const { prevA, nextA } = sampleCrossfadeAlpha(
@@ -167,16 +179,14 @@ function drawSmokeContours(ctx, track, currentTick, transform, mapLayer, width, 
       Number(next.tick),
       Number(currentTick),
     );
-    if (prevA > 0) {
-      fillSmokeRings(ctx, activeRings, transform, width, height, prevA * activeDensity);
-    }
+    if (prevA > 0) paintLayer(activeRings, prevA * activeDensity);
     if (nextCells.length && nextA > 0) {
       const nextDensity = averageCellDensity(nextCells);
       const nextRings = buildSmokeContourRings(nextCells, Number(next.cell_size || cellSize));
-      fillSmokeRings(ctx, nextRings, transform, width, height, nextA * nextDensity);
+      paintLayer(nextRings, nextA * nextDensity);
     }
   } else {
-    fillSmokeRings(ctx, activeRings, transform, width, height, activeDensity);
+    paintLayer(activeRings, activeDensity);
   }
 }
 

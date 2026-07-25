@@ -12,15 +12,20 @@ import {
   Route,
   Swords,
 } from "lucide-react";
-import API, { getDemoRadarMapUrl } from "../../api/api";
+import { getDemoRadarMapUrl } from "../../api/api";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplayAreaEffectsCanvas from "./ReplayAreaEffectsCanvas";
 import { isSmokeDebugEnabled } from "./smokeDebugGate";
+import {
+  resolveReplayTransform,
+  worldToRadarPercent,
+  yawToCssRotation,
+} from "../../utils/replayRadarTransform";
+import { useReplayStore } from "../../stores/replayStore";
 
-const MAP_SIZE = 1024;
 const SAMPLE_HZ = 8;
-const REPLAY_CACHE_VERSION = 9;
+const REPLAY_CACHE_VERSION = 10;
 const ROUND_CLOCK_SECONDS = 115;
 const HUD_ICON_BASE = "/hud-death-notice";
 
@@ -375,13 +380,12 @@ function mapKey(value) {
 }
 
 function worldToPercent(player, transform) {
-  if (!player || !transform) return null;
-  const scale = Number(transform.scale);
-  if (!Number.isFinite(scale) || scale === 0) return null;
-  const px = (Number(player.x) - Number(transform.pos_x)) / scale;
-  const py = (Number(transform.pos_y) - Number(player.y)) / scale;
-  if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
-  return { x: clamp(px / MAP_SIZE * 100, -5, 105), y: clamp(py / MAP_SIZE * 100, -5, 105) };
+  const percent = worldToRadarPercent(player, transform);
+  if (!percent) return null;
+  return {
+    x: clamp(percent.x, -5, 105),
+    y: clamp(percent.y, -5, 105),
+  };
 }
 
 function mapLayerThreshold(transform) {
@@ -552,7 +556,6 @@ export default function Demo2DReplayPreview({
   const [layers, setLayers] = useState({ traces: true, kills: true, grenades: true, utilityAreas: true, shots: true });
   const smokeDebugOn = useMemo(() => isSmokeDebugEnabled(), []);
   const [smokeDebugLayer, setSmokeDebugLayer] = useState("final_render");
-  const cacheRef = useRef(new Map());
   const framePositionRef = useRef(0);
 
   useEffect(() => {
@@ -571,12 +574,12 @@ export default function Demo2DReplayPreview({
   const roundEvents = useMemo(() => replayEventsForRound(selectedRound, tickRate), [selectedRound, tickRate]);
   const roundIndex = Math.max(0, rounds.findIndex((round) => round === selectedRound));
   const mapName = mapKey(workspace?.map_name);
-  // Persisted workspaces created before a radar map was bundled may not carry
-  // map_transform. The replay endpoint resolves current bundled metadata, so
-  // use it as a live repair without forcing a full demo analysis again.
-  const transform = workspace?.map_transform || responseTransform;
+  // Prefer live /api/demo/replay map_transform over stale workspace metadata.
+  const transform = resolveReplayTransform({
+    responseTransform,
+    workspaceTransform: workspace?.map_transform,
+  });
   const hasMapLayers = mapLayerThreshold(transform) != null && ["de_nuke", "de_vertigo"].includes(mapName);
-  const radarZoom = mapName === "de_nuke" ? 1.28 : 1;
   const playerMarkerSizePx = 15.3;
   useEffect(() => setMapLayer("upper"), [mapName]);
   const workspacePlayers = useMemo(() => (
@@ -595,7 +598,14 @@ export default function Demo2DReplayPreview({
     if (!selectedRound || !demoPath) return undefined;
     const replayStartTick = Number(selectedRound.freeze_end_tick || selectedRound.start_tick);
     const replayEndTick = Number(selectedRound.end_tick);
-    const key = `v${REPLAY_CACHE_VERSION}:${SAMPLE_HZ}:${demoPath}:${selectedRound.round_number}:${replayStartTick}:${replayEndTick}`;
+    const cacheKey = [
+      demoPath,
+      `v${REPLAY_CACHE_VERSION}`,
+      `r${selectedRound.round_number}`,
+      `t${replayStartTick}-${replayEndTick}`,
+      `f${SAMPLE_HZ}`,
+      "tv1",
+    ].join("|");
     const requestBody = {
       path: demoPath,
       map_name: mapName,
@@ -608,7 +618,7 @@ export default function Demo2DReplayPreview({
     };
     let cancelled = false;
 
-    const applyPayload = (data) => {
+    const applyPayload = (data, meta = {}) => {
       const nextFrames = Array.isArray(data?.frames) ? data.frames : [];
       const nextTransform = data?.map_transform && typeof data.map_transform === "object"
         ? data.map_transform
@@ -618,14 +628,6 @@ export default function Demo2DReplayPreview({
       const nextCapabilities = data?.effect_capabilities && typeof data.effect_capabilities === "object"
         ? data.effect_capabilities
         : null;
-      cacheRef.current.set(key, {
-        frames: nextFrames,
-        mapTransform: nextTransform,
-        fps: nextFps,
-        effectTracks: nextEffectTracks,
-        effectCapabilities: nextCapabilities,
-        effectsReady: true,
-      });
       setFrames(nextFrames);
       setEffectTracks(nextEffectTracks);
       setEffectCapabilities(nextCapabilities);
@@ -634,35 +636,48 @@ export default function Demo2DReplayPreview({
       setFrameIndex(0);
       setError(nextFrames.length ? "" : "该回合没有可用的坐标帧");
       setLoading(false);
-      setLoadHint("");
+      const cache = data?.cache || meta.cache;
+      if (cache?.frames === "memory_hit" || meta.source === "memory") {
+        setLoadHint("已从内存恢复回放");
+      } else if (cache?.frames === "disk_hit" || meta.source === "disk") {
+        setLoadHint("已从本地缓存读取回放");
+      } else {
+        setLoadHint("");
+      }
     };
 
-    const cached = cacheRef.current.get(key);
-    if (cached?.frames) {
-      setFrames(cached.frames);
-      setEffectTracks(Array.isArray(cached.effectTracks) ? cached.effectTracks : []);
-      setEffectCapabilities(cached.effectCapabilities || null);
-      setResponseTransform(cached.mapTransform || null);
-      setReplayFps(cached.fps || SAMPLE_HZ);
-      setFrameIndex(0);
-      setError(cached.frames.length ? "" : "该回合没有可用的坐标帧");
-      setLoading(false);
-      setLoadHint("");
+    const existing = useReplayStore.getState().getEntry(cacheKey);
+    if (existing?.status === "ready" && existing.frames) {
+      applyPayload({
+        frames: existing.frames,
+        map_transform: existing.mapTransform,
+        fps: existing.fps,
+        effect_tracks: existing.effectTracks,
+        effect_capabilities: existing.effectCapabilities,
+        cache: existing.cache,
+      }, { source: existing.source || "memory" });
+      useReplayStore.getState().touch(cacheKey);
       return () => { cancelled = true; };
     }
 
     setLoading(true);
     setError("");
     setPlaying(false);
-    setEffectTracks([]);
-    setEffectCapabilities(null);
-    const hasWarmCache = [...cacheRef.current.keys()].some((entry) => entry.includes(demoPath));
-    setLoadHint(
-      hasWarmCache
-        ? "正在加载本回合回放数据…"
-        : "首次进入需解析整场烟火区域（通常约 30–60 秒），完成后同一 demo 切回合会快很多",
-    );
-    API.post("/demo/replay", requestBody).then(({ data }) => {
+    if (existing?.status === "loading") {
+      setLoadHint("正在等待同一解析任务…");
+    } else {
+      setEffectTracks([]);
+      setEffectCapabilities(null);
+      setLoadHint("正在解析当前回合回放（含烟火效果）…");
+    }
+
+    useReplayStore.getState().ensureReplay(cacheKey, requestBody, {
+      onStatus: ({ source, shared }) => {
+        if (cancelled) return;
+        if (shared) setLoadHint("正在等待同一解析任务…");
+        else if (source === "parsed") setLoadHint("正在解析当前回合回放（含烟火效果）…");
+      },
+    }).then((data) => {
       if (!cancelled) applyPayload(data);
     }).catch((reason) => {
       if (!cancelled) {
@@ -1038,7 +1053,7 @@ export default function Demo2DReplayPreview({
 
       <div className="grid gap-3 xl:grid-cols-[260px_minmax(460px,1fr)_260px]">
         <ReplayRoster title={`${teamAName} · ${selectedRound.team_a_side || ""}`} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={frame.players} bombCarrierName={bombState.carrier} />
-        <section className={`relative overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e] ${mapName === "de_nuke" ? "min-h-[780px]" : "min-h-[720px]"}`}>
+        <section className="relative min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
             {smokeDebugOn && (
@@ -1073,7 +1088,7 @@ export default function Demo2DReplayPreview({
             </div>
           )}
           {error && <div className="absolute inset-0 z-30 flex items-center justify-center p-8 text-center text-[11px] text-cs2-text-muted">{error}</div>}
-          <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: `translate(-50%, -50%) scale(${radarZoom})` }}>
+          <div className="demo-radar-plane absolute left-1/2 top-1/2 aspect-square w-[min(88%,620px)]" data-map={mapName} data-layer={hasMapLayers ? mapLayer : undefined} style={{ transform: "translate(-50%, -50%)" }}>
             <img src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")} alt={`${mapName}${hasMapLayers ? ` ${mapLayer === "upper" ? "上层" : "下层"}` : ""} 雷达地图`} className="h-full w-full object-contain opacity-80" />
             <ReplayAreaEffectsCanvas
               tracks={effectTracks}
@@ -1128,7 +1143,7 @@ export default function Demo2DReplayPreview({
                     className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${player.is_alive === false ? "opacity-35 grayscale" : ""}`}
                     style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: 7 }}
                   >
-                    <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${90 - yaw}deg)` }}>
+                    <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
                       <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
                     </span>
                     <span>{circleLabel}</span>
