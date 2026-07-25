@@ -14,6 +14,15 @@ import {
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
+import { buildOverviewModel } from "./overview/buildOverviewModel";
+import MatchMainlineCard from "./overview/MatchMainlineCard";
+import MatchTrendCard from "./overview/MatchTrendCard";
+import SidePerformanceCard from "./overview/SidePerformanceCard";
+import EconomyInsightCard from "./overview/EconomyInsightCard";
+import OpeningAdvantageCard from "./overview/OpeningAdvantageCard";
+import BombObjectiveCard from "./overview/BombObjectiveCard";
+import PlayerEventsCard from "./overview/PlayerEventsCard";
+import KeyRoundsTimeline from "./overview/KeyRoundsTimeline";
 
 export function Panel({ title, eyebrow, action, children, className = "" }) {
   return (
@@ -87,7 +96,6 @@ function fallbackWorkspace({ players = [], meta = {}, teamAName, teamBName }) {
       trade_kills: Number(player.trade_kills || 0),
       awp_kills: Number(player.awp_kills || 0),
       utility_damage: Number(player.utility_damage || 0),
-      rating: Number(player.rating || player.kd || kills / Math.max(1, deaths)),
     };
   });
   return {
@@ -97,7 +105,7 @@ function fallbackWorkspace({ players = [], meta = {}, teamAName, teamBName }) {
     team_b_name: teamBName,
     team_a_score: Number(meta.team_a_score || 0),
     team_b_score: Number(meta.team_b_score || 0),
-    summary: { mvp_player: stats[0]?.name, total_rounds: Number(meta.total_rounds || 0) },
+    summary: { total_rounds: Number(meta.total_rounds || 0) },
   };
 }
 
@@ -156,7 +164,7 @@ export function useWorkspaceData(workspace, fallback) {
   }, [workspace, fallback]);
 }
 
-function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, mvpName }) {
+function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer }) {
   const isBlue = teamKey === "a";
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/20">
@@ -168,7 +176,7 @@ function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, mvpName
         <table className="w-full table-fixed border-collapse text-left">
           <colgroup><col className="w-[29%]" />{Array.from({ length: 10 }).map((_, index) => <col key={index} className="w-[7.1%]" />)}</colgroup>
           <thead className="border-b border-cs2-border bg-cs2-bg-input/55 text-[7px] uppercase tracking-wide text-cs2-text-muted"><tr><th className="px-2 py-2.5">玩家</th><th className="px-1 text-right">K</th><th className="px-1 text-right">D</th><th className="px-1 text-right">A</th><th className="px-1 text-right">ADR</th><th className="px-1 text-right">KAST</th><th className="px-1 text-right">HS</th><th className="px-1 text-right">首杀</th><th className="px-1 text-right">补枪</th><th className="px-1 text-right">AWP</th><th className="px-2 text-right">道伤</th></tr></thead>
-          <tbody>{players.map((player) => <tr key={player.name} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover"><td className="px-2 py-2.5"><button type="button" onClick={() => onSelectPlayer?.(player.name)} className="flex max-w-full items-center gap-1.5 text-left"><span className={`h-2 w-2 shrink-0 rounded-full ${teamDot(teamKey)}`} /><span className="truncate font-bold text-cs2-text-primary">{player.name}</span>{player.name === mvpName && <Badge variant="orange" className="shrink-0 px-1 py-0 text-[7px]">最佳</Badge>}</button></td><td className="px-1 text-right font-mono text-[9px] font-bold text-cs2-text-primary">{player.kills}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.deaths}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.assists}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.adr || 0).toFixed(1)}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.kast || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.hs_percent || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.first_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.trade_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.awp_kills || 0}</td><td className="px-2 text-right font-mono text-[9px] text-cs2-text-secondary">{player.utility_damage || 0}</td></tr>)}</tbody>
+          <tbody>{players.map((player) => <tr key={player.name} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover"><td className="px-2 py-2.5"><button type="button" onClick={() => onSelectPlayer?.(player.name)} className="flex max-w-full items-center gap-1.5 text-left"><span className={`h-2 w-2 shrink-0 rounded-full ${teamDot(teamKey)}`} /><span className="truncate font-bold text-cs2-text-primary">{player.name}</span></button></td><td className="px-1 text-right font-mono text-[9px] font-bold text-cs2-text-primary">{player.kills}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.deaths}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.assists}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.adr || 0).toFixed(1)}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.kast || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{Number(player.hs_percent || 0).toFixed(0)}%</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.first_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.trade_kills || 0}</td><td className="px-1 text-right font-mono text-[9px] text-cs2-text-secondary">{player.awp_kills || 0}</td><td className="px-2 text-right font-mono text-[9px] text-cs2-text-secondary">{player.utility_damage || 0}</td></tr>)}</tbody>
         </table>
       </div>
     </section>
@@ -180,50 +188,87 @@ function roundWinnerSide(round) {
   return round.winner_team_key === "a" ? round.team_a_side || "" : round.team_b_side || "";
 }
 
-function longestWinStreak(rounds) {
-  let best = { teamKey: "", start: 0, end: 0, length: 0 };
-  let current = { teamKey: "", start: 0, end: 0, length: 0 };
-  rounds.forEach((round) => {
-    const teamKey = round.winner_team_key;
-    const number = Number(round.round_number || 0);
-    if (teamKey && teamKey === current.teamKey) current = { ...current, end: number, length: current.length + 1 };
-    else current = { teamKey, start: number, end: number, length: teamKey ? 1 : 0 };
-    if (current.length > best.length) best = current;
+function sortScoreboardPlayers(players) {
+  return [...players].sort((a, b) => {
+    const killsDiff = Number(b.kills || 0) - Number(a.kills || 0);
+    if (killsDiff !== 0) return killsDiff;
+    return Number(b.adr || 0) - Number(a.adr || 0);
   });
-  return best;
 }
 
-export function OverviewView({ data, onSelectPlayer }) {
-  const playersA = data.players.filter((player) => player.team_key === "a");
-  const playersB = data.players.filter((player) => player.team_key === "b");
-  const firstHalf = data.rounds.filter((round) => Number(round.round_number) <= 12);
-  const mvp = [...data.players].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0))[0];
-  const entryLeader = [...data.players].sort((a, b) => Number(b.first_kills || 0) - Number(a.first_kills || 0))[0];
-  const winnerKey = data.team_a_score >= data.team_b_score ? "a" : "b";
-  const winnerName = winnerKey === "a" ? data.team_a_name : data.team_b_name;
-  const loserName = winnerKey === "a" ? data.team_b_name : data.team_a_name;
-  const secondHalf = data.rounds.filter((round) => Number(round.round_number) > 12 && Number(round.round_number) <= 24);
-  const halfScore = (rounds, key) => rounds.filter((round) => round.winner_team_key === key).length;
-  const pistolRounds = data.rounds.filter((round) => round.team_a_economy === "pistol" || round.team_b_economy === "pistol");
-  const pistolWins = pistolRounds.filter((round) => round.winner_team_key === winnerKey).length;
-  const streak = longestWinStreak(data.rounds);
-  const streakName = streak.teamKey === "a" ? data.team_a_name : data.team_b_name;
-  const reportLines = [
-    `${winnerName} 以 ${Math.max(data.team_a_score, data.team_b_score)}:${Math.min(data.team_a_score, data.team_b_score)} 战胜 ${loserName}；上半场 ${halfScore(firstHalf, "a")}:${halfScore(firstHalf, "b")}，换边后 ${halfScore(secondHalf, "a")}:${halfScore(secondHalf, "b")}。`,
-    `${mvp?.name || "—"} 交出 ${mvp?.kills || 0}/${mvp?.deaths || 0}/${mvp?.assists || 0}、ADR ${Number(mvp?.adr || 0).toFixed(1)}，是全场综合表现最突出的选手。`,
-    `${entryLeader?.name || "—"} 取得 ${entryLeader?.first_kills || 0} 次首杀，是开局对抗贡献最高的选手。`,
-    `${pistolRounds.length} 个手枪局中，${winnerName} 拿下 ${pistolWins} 个；手枪局后的经济衔接${pistolWins === pistolRounds.length && pistolRounds.length ? "非常稳定" : "仍有继续提升空间"}。`,
-    streak.length > 1 ? `${streakName} 在 R${streak.start}–R${streak.end} 打出 ${streak.length} 连胜，这是本场最长连续得分阶段。` : "全场没有超过 1 回合的连续得分，双方回合交换非常频繁。",
-  ];
+export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound }) {
+  const overview = useMemo(() => buildOverviewModel(data), [data]);
+  const teamAName = data.team_a_name || "Team A";
+  const teamBName = data.team_b_name || "Team B";
+  const playersA = sortScoreboardPlayers(data.players.filter((player) => player.team_key === "a"));
+  const playersB = sortScoreboardPlayers(data.players.filter((player) => player.team_key === "b"));
+
   return (
     <div className="space-y-4">
-      <Panel title="比赛主线" eyebrow="自动提炼">
-        <div className="px-4 py-3">
-          <p className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-accent">详细战报</p>
-          <ol className="space-y-1.5">{reportLines.map((line, index) => <li key={line} className="flex gap-2 text-[10px] leading-relaxed text-cs2-text-secondary"><span className="mt-0.5 font-mono text-[9px] font-bold text-cs2-accent">{String(index + 1).padStart(2, "0")}</span><span>{line}</span></li>)}</ol>
+      <MatchMainlineCard mainline={overview.mainline} />
+      <section>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="h-4 w-1 rounded-full bg-cs2-accent" />
+          <h2 className="text-[13px] font-bold text-cs2-text-primary">本局洞察</h2>
+        </div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <MatchTrendCard
+            model={overview.trend}
+            phaseMeta={overview.phaseMeta}
+            teamAName={teamAName}
+            teamBName={teamBName}
+          />
+          <SidePerformanceCard
+            model={overview.sidePerformance}
+            teamAName={teamAName}
+            teamBName={teamBName}
+          />
+          <EconomyInsightCard
+            model={overview.economy}
+            onOpenRound={onOpenRound}
+            teamAName={teamAName}
+            teamBName={teamBName}
+          />
+          <OpeningAdvantageCard
+            model={overview.opening}
+            teamAName={teamAName}
+            teamBName={teamBName}
+          />
+          <BombObjectiveCard
+            model={overview.objective}
+            teamAName={teamAName}
+            teamBName={teamBName}
+          />
+          <PlayerEventsCard
+            events={overview.playerEvents}
+            onSelectPlayer={onSelectPlayer}
+            onOpenRound={onOpenRound}
+          />
+        </div>
+      </section>
+      <KeyRoundsTimeline
+        rounds={overview.keyRounds}
+        onOpenRound={onOpenRound}
+        onOpenReplayRound={onOpenReplayRound}
+      />
+      <Panel title="全场计分板" eyebrow="双方阵容 · Demo 解析与推导统计">
+        <div className="grid gap-3 p-3 xl:grid-cols-2">
+          <TeamScoreboard
+            teamKey="a"
+            name={teamAName}
+            score={data.team_a_score}
+            players={playersA}
+            onSelectPlayer={onSelectPlayer}
+          />
+          <TeamScoreboard
+            teamKey="b"
+            name={teamBName}
+            score={data.team_b_score}
+            players={playersB}
+            onSelectPlayer={onSelectPlayer}
+          />
         </div>
       </Panel>
-      <Panel title="全场计分板" eyebrow="双方阵容 · Demo 解析与推导统计"><div className="grid gap-3 p-3 xl:grid-cols-2"><TeamScoreboard teamKey="a" name={data.team_a_name} score={data.team_a_score} players={playersA} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /><TeamScoreboard teamKey="b" name={data.team_b_name} score={data.team_b_score} players={playersB} onSelectPlayer={onSelectPlayer} mvpName={mvp?.name} /></div></Panel>
     </div>
   );
 }
