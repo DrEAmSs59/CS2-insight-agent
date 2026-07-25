@@ -835,7 +835,16 @@ export default function ReplaySceneCanvas({
                   {player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}
                 </div>
                 {playerLabelMode === "id" && (
-                  <span className="demo-player-id-label mt-0.5 max-w-[52px] truncate text-center text-[6px] font-bold leading-none text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,.85)]">{idLabel}</span>
+                  <span
+                    className="demo-player-id-label mt-0.5 truncate text-center font-bold leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,.9)]"
+                    style={{
+                      // Same fitScale compensation as markers; ~10px on-screen at Fit.
+                      fontSize: Math.max(9, 10 / Math.max(Number(camera.fitScale) || 1, 0.05)),
+                      maxWidth: Math.max(72, 88 / Math.max(Number(camera.fitScale) || 1, 0.05)),
+                    }}
+                  >
+                    {idLabel}
+                  </span>
                 )}
               </div>
             );
