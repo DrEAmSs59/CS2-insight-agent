@@ -627,14 +627,23 @@ def _accumulate_capped_damage(
     return total, utility
 
 
-def _note_clutch_solos(alive_by_team: dict[str, set[str]], clutch_attempted: set[str]) -> None:
+def _note_clutch_solos(
+    alive_by_team: dict[str, set[str]],
+    clutch_attempted: set[str],
+    clutch_opponents: dict[str, int] | None = None,
+) -> None:
     for team_key, members in alive_by_team.items():
         if len(members) != 1:
             continue
         solo = next(iter(members))
         enemy_key = "b" if team_key == "a" else "a"
-        if len(alive_by_team.get(enemy_key, ())) >= 1:
+        enemy_count = len(alive_by_team.get(enemy_key, ()))
+        if enemy_count >= 1:
             clutch_attempted.add(solo)
+            if clutch_opponents is not None:
+                prev = clutch_opponents.get(solo)
+                if prev is None or enemy_count > prev:
+                    clutch_opponents[solo] = enemy_count
 
 
 def _player_stats(
@@ -648,7 +657,7 @@ def _player_stats(
     economy_rows_by_player: dict[str, list[dict[str, Any]]],
     windows: list[dict[str, Any]] | None = None,
     round_winner_team: dict[int, Optional[str]] | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[int, list[dict[str, Any]]]]:
     names: list[str] = []
     roster_by_name: dict[str, dict[str, Any]] = {}
     for row in roster:
@@ -662,6 +671,8 @@ def _player_stats(
             names.append(clean)
             roster_by_name[clean.lower()] = {}
 
+    display_name_by_key = {name.lower(): name for name in names}
+
     rounds_with_kill: dict[str, set[int]] = defaultdict(set)
     rounds_with_death: dict[str, set[int]] = defaultdict(set)
     rounds_with_assist: dict[str, set[int]] = defaultdict(set)
@@ -669,6 +680,7 @@ def _player_stats(
     counters: dict[str, Counter] = defaultdict(Counter)
     multi_kills: dict[str, Counter] = defaultdict(Counter)
     winners = round_winner_team or {}
+    special_events_by_round: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
     for round_number in round_numbers:
         kills = [event for event in events_by_round.get(round_number, []) if event.get("type") == "kill"]
@@ -680,7 +692,8 @@ def _player_stats(
             if team_key in alive_by_team:
                 alive_by_team[team_key].add(player_key)
         clutch_attempted: set[str] = set()
-        _note_clutch_solos(alive_by_team, clutch_attempted)
+        clutch_opponents: dict[str, int] = {}
+        _note_clutch_solos(alive_by_team, clutch_attempted, clutch_opponents)
 
         for index, kill in enumerate(kills):
             killer = _clean_name(kill.get("actor"))
@@ -693,7 +706,7 @@ def _player_stats(
                 victim_team = player_team.get(victim_key)
                 if victim_team in alive_by_team:
                     alive_by_team[victim_team].discard(victim_key)
-                _note_clutch_solos(alive_by_team, clutch_attempted)
+                _note_clutch_solos(alive_by_team, clutch_attempted, clutch_opponents)
             if killer and victim and killer != victim and killer.lower() != "world":
                 key = killer.lower()
                 counters[key]["kills"] += 1
@@ -718,6 +731,15 @@ def _player_stats(
             counters[solo_key]["clutch_attempts"] += 1
             if winner_key and player_team.get(solo_key) == winner_key:
                 counters[solo_key]["clutch_wins"] += 1
+            opponents = clutch_opponents.get(solo_key)
+            if opponents is not None:
+                special_events_by_round[round_number].append({
+                    "type": "clutch",
+                    "player": display_name_by_key.get(solo_key, solo_key),
+                    "team_key": player_team.get(solo_key),
+                    "opponents": int(opponents),
+                    "won": bool(winner_key and player_team.get(solo_key) == winner_key),
+                })
 
         if valid_kill_indexes:
             first = kills[valid_kill_indexes[0]]
@@ -729,6 +751,13 @@ def _player_stats(
                 counters[victim.lower()]["first_deaths"] += 1
         for key, count in kills_this_round.items():
             multi_kills[key][min(5, count)] += 1
+            if count >= 4:
+                special_events_by_round[round_number].append({
+                    "type": "multikill",
+                    "player": display_name_by_key.get(key, key),
+                    "team_key": player_team.get(key),
+                    "kills": int(count),
+                })
 
     damage_by_attacker, utility_by_attacker = _accumulate_capped_damage(
         hurt_df, player_team, windows or [],
@@ -757,10 +786,6 @@ def _player_stats(
             sum(int(row.get("equipment_value") or 0) for row in economy_rows) / len(economy_rows)
             if economy_rows else 0.0
         )
-        rr = (
-            kills + 0.7 * assists - 0.7 * deaths + damage / 100.0
-            + 0.35 * counter["first_kills"] + 0.2 * counter["trade_kills"]
-        ) / total_rounds
         roster_row = roster_by_name.get(key, {})
         stats_out.append({
             "name": name,
@@ -794,10 +819,9 @@ def _player_stats(
             "utility_damage": int(counter["utility_damage"]),
             "utility_damage_per_round": round(counter["utility_damage"] / total_rounds, 1),
             "average_equipment_value": round(avg_equipment),
-            "rating": round(rr, 2),
         })
     stats_out.sort(key=lambda row: (-int(row["kills"]), -float(row["adr"]), str(row["name"]).lower()))
-    return stats_out
+    return stats_out, dict(special_events_by_round)
 
 
 def build_match_workspace(
@@ -910,7 +934,7 @@ def build_match_workspace(
             winner_key = "a" if winner_side == side_a else "b" if winner_side == side_b else None
         round_winner_team[round_number] = winner_key
 
-    stats = _player_stats(
+    stats, special_events_by_round = _player_stats(
         roster=roster,
         player_results=player_results,
         events_by_round=raw_events_by_round,
@@ -1001,6 +1025,7 @@ def build_match_workspace(
             "tags": tags,
             "duration_seconds": max(0, round((window["end_tick"] - window["freeze_end_tick"]) / max(1.0, tick_rate))),
             "events": events,
+            "special_events": special_events_by_round.get(round_number, []),
             "shots": [dict(shot) for shot in shots_by_round.get(round_number, [])],
             "bomb_initial_carrier": _initial_bomb_carrier(events),
         })
@@ -1011,7 +1036,6 @@ def build_match_workspace(
     except (KeyError, OSError):
         map_transform = None
 
-    mvp = stats[0] if stats else None
     return {
         "version": 1,
         "algorithm_version": "match-workspace-2026.07.1",
@@ -1020,14 +1044,14 @@ def build_match_workspace(
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
         ),
         "derived_fields": [
-            "rating",
             "kast",
             "trade_kills",
             "trade_deaths",
             "economy_type",
-            "mvp_player",
             "clutch_attempts",
             "clutch_wins",
+            "special_events",
+            "phase_meta",
         ],
         "map_name": map_name,
         "tick_rate": float(tick_rate),
@@ -1044,12 +1068,17 @@ def build_match_workspace(
         "team_a_group": team_a_group,
         "team_b_group": team_b_group,
         "map_transform": map_transform,
+        "phase_meta": {
+            "halftime_round": halftime_round,
+            "regulation_end_round": (
+                (halftime_round - 1) * 2
+                if halftime_round and halftime_round > 1
+                else None
+            ),
+        },
         "players": stats,
         "rounds": rounds_out,
         "summary": {
-            "mvp_player": mvp.get("name") if mvp else None,
-            "mvp_kills": mvp.get("kills") if mvp else 0,
-            "mvp_adr": mvp.get("adr") if mvp else 0,
             "total_rounds": len(rounds_out),
         },
     }

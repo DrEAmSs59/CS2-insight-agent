@@ -7,6 +7,7 @@ import pandas as pd
 from app.parser.match_workspace import (
     _enrich_grenade_events,
     _extract_grenade_trajectories,
+    _player_stats,
     build_match_workspace,
 )
 
@@ -169,7 +170,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
         "economy_ticks_df": economy,
         "economy_map_shared": {1: {2: 4000, 3: 4000}, 2: {2: 15000, 3: 8000}},
         "name_to_final_team_shared": {"alpha": 2, "bravo": 3},
-        "group_side_by_round_shared": {1: {2: 2, 3: 3}},
+        "group_side_by_round_shared": {1: {2: 2, 3: 3}, 13: {2: 3, 3: 2}},
     }
     facts = _SharedFacts(
         round_end_tick_map={1: 250, 2: 500},
@@ -234,3 +235,78 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
     assert "A 队" not in result["rounds"][0]["headline"]
     assert "clutch_attempts" in by_name["Alpha"]
     assert "clutch_wins" in by_name["Alpha"]
+    assert "rating" not in by_name["Alpha"]
+    assert "rating" not in by_name["Bravo"]
+    assert "mvp_player" not in result["summary"]
+    assert "mvp_kills" not in result["summary"]
+    assert "mvp_adr" not in result["summary"]
+    assert "rating" not in result["derived_fields"]
+    assert "mvp_player" not in result["derived_fields"]
+    assert result["phase_meta"] == {
+        "halftime_round": 13,
+        "regulation_end_round": 24,
+    }
+    for round_data in result["rounds"]:
+        assert isinstance(round_data["special_events"], list)
+
+
+def test_player_stats_records_clutch_max_opponents_and_multikill():
+    """Clutch uses max opponents when solo; 4+ kills emit multikill."""
+    roster = [
+        {"name": "Alice", "steamid64": "1", "team_num": 2},
+        {"name": "Bob", "steamid64": "2", "team_num": 2},
+        {"name": "Carl", "steamid64": "3", "team_num": 2},
+        {"name": "Dan", "steamid64": "4", "team_num": 2},
+        {"name": "Eve", "steamid64": "5", "team_num": 3},
+        {"name": "Frank", "steamid64": "6", "team_num": 3},
+        {"name": "Gina", "steamid64": "7", "team_num": 3},
+        {"name": "Hank", "steamid64": "8", "team_num": 3},
+    ]
+    player_team = {
+        "alice": "a", "bob": "a", "carl": "a", "dan": "a",
+        "eve": "b", "frank": "b", "gina": "b", "hank": "b",
+    }
+    # Round 1: teammates die → Alice 1v4; she then gets 4 kills and wins.
+    events_by_round = {
+        1: [
+            {"type": "kill", "actor": "Eve", "target": "Bob", "assister": "", "headshot": False, "weapon": "ak47"},
+            {"type": "kill", "actor": "Eve", "target": "Carl", "assister": "", "headshot": False, "weapon": "ak47"},
+            {"type": "kill", "actor": "Eve", "target": "Dan", "assister": "", "headshot": False, "weapon": "ak47"},
+            {"type": "kill", "actor": "Alice", "target": "Eve", "assister": "", "headshot": True, "weapon": "ak47"},
+            {"type": "kill", "actor": "Alice", "target": "Frank", "assister": "", "headshot": False, "weapon": "ak47"},
+            {"type": "kill", "actor": "Alice", "target": "Gina", "assister": "", "headshot": False, "weapon": "ak47"},
+            {"type": "kill", "actor": "Alice", "target": "Hank", "assister": "", "headshot": False, "weapon": "ak47"},
+        ],
+    }
+    stats, special_events_by_round = _player_stats(
+        roster=roster,
+        player_results={},
+        events_by_round=events_by_round,
+        hurt_df=pd.DataFrame(),
+        player_team=player_team,
+        round_numbers=[1],
+        economy_rows_by_player={},
+        windows=[{"round_number": 1, "freeze_end_tick": 100, "end_tick": 500}],
+        round_winner_team={1: "a"},
+    )
+
+    events = special_events_by_round[1]
+    clutch = next(e for e in events if e["type"] == "clutch" and e["player"] == "Alice")
+    assert clutch == {
+        "type": "clutch",
+        "player": "Alice",
+        "team_key": "a",
+        "opponents": 4,
+        "won": True,
+    }
+    multikill = next(e for e in events if e["type"] == "multikill" and e["player"] == "Alice")
+    assert multikill == {
+        "type": "multikill",
+        "player": "Alice",
+        "team_key": "a",
+        "kills": 4,
+    }
+    by_name = {row["name"]: row for row in stats}
+    assert "rating" not in by_name["Alice"]
+    assert by_name["Alice"]["clutch_wins"] == 1
+    assert by_name["Alice"]["four_kill_rounds"] == 1
