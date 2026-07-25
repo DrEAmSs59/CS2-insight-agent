@@ -221,40 +221,19 @@ function mapKey(value) {
 }
 
 const ReplayPlayerPortrait = memo(function ReplayPlayerPortrait({
-  avatarUrl,
-  displayName,
   number,
   alive,
   isT,
-  mirrored,
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [avatarUrl]);
-  const showAvatar = Boolean(avatarUrl && !failed);
   return (
     <div className="relative flex h-full w-[50px] shrink-0 items-center justify-center overflow-hidden">
-      {showAvatar ? (
-        <img
-          src={avatarUrl}
-          alt={`${displayName} Steam 头像`}
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-          className={`h-[58px] w-[50px] object-cover transition-[filter,opacity] duration-300 ${alive ? "" : "grayscale opacity-45"}`}
-        />
-      ) : (
-        <span className={`flex h-11 w-11 items-center justify-center rounded-full border font-mono text-[18px] font-black shadow-inner ${
-          isT
-            ? "border-amber-100/50 bg-amber-300/15 text-amber-50"
-            : "border-sky-200/50 bg-sky-300/15 text-sky-100"
-        } ${alive ? "" : "grayscale opacity-45"}`}>
-          {number}
-        </span>
-      )}
-      {showAvatar && (
-        <span className={`absolute top-1 flex h-5 min-w-5 items-center justify-center rounded-sm border border-white/30 bg-black/70 px-1 font-mono text-[10px] font-black text-white ${mirrored ? "right-0.5" : "left-0.5"}`}>
-          {number}
-        </span>
-      )}
+      <span className={`flex h-11 w-11 items-center justify-center rounded-full border font-mono text-[18px] font-black shadow-inner ${
+        isT
+          ? "border-amber-100/50 bg-amber-300/15 text-amber-50"
+          : "border-sky-200/50 bg-sky-300/15 text-sky-100"
+      } ${alive ? "" : "grayscale opacity-45"}`}>
+        {number}
+      </span>
       {!alive && <Skull className="absolute h-7 w-7 text-white/70 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />}
     </div>
   );
@@ -356,7 +335,6 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   isT,
   mirrored,
   exclusiveCarrier,
-  avatarUrl,
   liveStats,
   roundKillStars = 0,
   utilityExposure,
@@ -408,12 +386,9 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   );
   const portrait = (
     <ReplayPlayerPortrait
-      avatarUrl={avatarUrl}
-      displayName={displayName}
       number={number}
       alive={alive}
       isT={isT}
-      mirrored={mirrored}
     />
   );
   const combat = (
@@ -545,7 +520,6 @@ const ReplayRoster = memo(function ReplayRoster({
   players,
   framePlayers,
   bombCarrierName = "",
-  avatarBySteamId,
   liveStatsByName,
   roundKillStarsByName,
   utilityExposureByName,
@@ -569,7 +543,6 @@ const ReplayRoster = memo(function ReplayRoster({
         {players.map((player, index) => {
           const displayName = safeLabel(player.name, `玩家 ${index + 1}`);
           const state = byName.get(displayName.toLowerCase()) || {};
-          const steamId = safeLabel(player.steam_id64 || player.steamid64 || state.steamid64);
           return (
             <ReplayRosterSlot
               key={displayName}
@@ -580,7 +553,6 @@ const ReplayRoster = memo(function ReplayRoster({
               isT={isT}
               mirrored={mirrored}
               exclusiveCarrier={exclusiveCarrier}
-              avatarUrl={safeLabel(player.avatar || avatarBySteamId?.[steamId])}
               liveStats={liveStatsByName?.[displayName.toLowerCase()]}
               roundKillStars={roundKillStarsByName?.[displayName.toLowerCase()] || 0}
               utilityExposure={utilityExposureByName?.[displayName.toLowerCase()]}
@@ -605,7 +577,6 @@ export default function Demo2DReplayPreview({
   const [frames, setFrames] = useState([]);
   const [effectTracks, setEffectTracks] = useState([]);
   const [effectCapabilities, setEffectCapabilities] = useState(null);
-  const [avatarBySteamId, setAvatarBySteamId] = useState({});
   const [frameIndex, setFrameIndex] = useState(0);
   const [uiSampleIndex, setUiSampleIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -691,27 +662,6 @@ export default function Demo2DReplayPreview({
   ), [workspace?.players, players]);
   const teamAPlayers = workspacePlayers.filter((player) => player.team_key === "a").slice(0, 5);
   const teamBPlayers = workspacePlayers.filter((player) => player.team_key === "b").slice(0, 5);
-  const steamAvatarRequestKey = useMemo(() => [...new Set(
-    workspacePlayers
-      .map((player) => safeLabel(player.steam_id64 || player.steamid64))
-      .filter((steamId) => /^\d{15,20}$/.test(steamId)),
-  )].slice(0, 10).join(","), [workspacePlayers]);
-
-  useEffect(() => {
-    if (!steamAvatarRequestKey) {
-      setAvatarBySteamId({});
-      return undefined;
-    }
-    let cancelled = false;
-    API.get("/steam/player-avatars", { params: { steam_ids: steamAvatarRequestKey } })
-      .then((response) => {
-        if (!cancelled) setAvatarBySteamId(response?.data?.avatars || {});
-      })
-      .catch(() => {
-        if (!cancelled) setAvatarBySteamId({});
-      });
-    return () => { cancelled = true; };
-  }, [steamAvatarRequestKey]);
 
   useEffect(() => {
     if (!selectedRound || !demoPath) return undefined;
@@ -1142,7 +1092,7 @@ export default function Demo2DReplayPreview({
       </section>
 
       <div className="grid gap-3 xl:grid-cols-[300px_minmax(460px,1fr)_300px]">
-        <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} avatarBySteamId={avatarBySteamId} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+        <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
         <section className="relative min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
@@ -1192,7 +1142,7 @@ export default function Demo2DReplayPreview({
           />
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}
         </section>
-        <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} avatarBySteamId={avatarBySteamId} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+        <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
       </div>
     </div>
   );

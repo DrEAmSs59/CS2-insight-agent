@@ -326,6 +326,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(ctRosterSlot?.getAttribute("data-smoked")).toBe("false");
     expect(ctRosterSlot?.getAttribute("data-burning")).toBe("false");
     expect(ctRosterSlot?.getAttribute("data-blinded")).toBe("false");
+    expect(ctRosterSlot?.querySelector('img[alt*="Steam"]')).toBeNull();
     expect(ctRosterSlot?.querySelector("span.rounded-full")?.textContent).toBe("0");
     const tRosterSlot = view.container.querySelector('[data-replay-roster-slot="b1t"]');
     expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
