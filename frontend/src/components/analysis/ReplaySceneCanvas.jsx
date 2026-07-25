@@ -29,8 +29,8 @@ import { useReplayStore } from "../../stores/replayStore";
 const HUD_ICON_BASE = "/hud-death-notice";
 const MOTION_DURATION = "0ms";
 
-function HudEquipmentIcon({ stem, className = "", title = "" }) {
-  return <img src={`${HUD_ICON_BASE}/${stem}.svg`} alt="" title={title} draggable={false} className={`block object-contain ${className}`} />;
+function HudEquipmentIcon({ stem, className = "", title = "", style }) {
+  return <img src={`${HUD_ICON_BASE}/${stem}.svg`} alt="" title={title} draggable={false} className={`block object-contain ${className}`} style={style} />;
 }
 
 function safeLabel(value, fallback = "") {
@@ -805,6 +805,7 @@ export default function ReplaySceneCanvas({
             <ReplayBombMarker
               status={bombState.status}
               site={bombState.site}
+              fitScale={camera.fitScale}
               style={{ left: `${bombState.position.x}%`, top: `${bombState.position.y}%` }}
             />
           )}
@@ -831,8 +832,22 @@ export default function ReplaySceneCanvas({
                     <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
                   </span>
                   <span>{circleLabel}</span>
-                  {player.has_c4 && <span className="demo-player-c4-badge absolute -right-1 -top-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-amber-400"><HudEquipmentIcon stem="c4" className="h-1.5 w-1.5 brightness-0" /></span>}
-                  {player.has_defuser && <span className="demo-player-kit-badge absolute -bottom-1 -right-1 flex h-2 w-2 items-center justify-center rounded-[2px] bg-sky-300"><HudEquipmentIcon stem="defuser" className="h-1.5 w-1.5 brightness-0" /></span>}
+                  {player.has_c4 && (
+                    <span
+                      className="demo-player-c4-badge absolute -right-1 -top-1 flex items-center justify-center rounded-[2px] bg-amber-400"
+                      style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
+                    >
+                      <HudEquipmentIcon stem="c4" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                    </span>
+                  )}
+                  {player.has_defuser && (
+                    <span
+                      className="demo-player-kit-badge absolute -bottom-1 -right-1 flex items-center justify-center rounded-[2px] bg-sky-300"
+                      style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
+                    >
+                      <HudEquipmentIcon stem="defuser" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                    </span>
+                  )}
                 </div>
                 {playerLabelMode === "id" && (
                   <span
