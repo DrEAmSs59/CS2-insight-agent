@@ -133,6 +133,11 @@ def extract_radar_timeline_isolated(**kwargs: Any) -> Any:
     return run_parse_worker("radar_timeline", **kwargs)
 
 
+def extract_replay_effects_isolated(**kwargs: Any) -> Any:
+    """烟雾/燃烧效果轨（子进程隔离）。"""
+    return run_parse_worker("replay_effects", **kwargs)
+
+
 def analyze_multi_isolated(
     dem_path: str,
     target_players: list[str],
