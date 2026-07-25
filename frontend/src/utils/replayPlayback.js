@@ -118,6 +118,12 @@ export function replaySampleStrideForRate(rate) {
   return 1;
 }
 
+export function replayVisualHzForRate(sourceHz, rate) {
+  const hz = Math.max(1, Number(sourceHz) || 32);
+  const stride = replaySampleStrideForRate(rate);
+  return stride === 1 ? Math.min(64, hz * 2) : Math.max(1, Math.round(hz / stride));
+}
+
 export function frameBracket(frames, playheadTick, playheadSeconds = null, sampleStride = 1) {
   if (!frames?.length) {
     return { index: 0, nextIndex: 0, previous: null, next: null, ratio: 0 };
@@ -157,11 +163,24 @@ export function playerKey(player) {
  * HP / inventory / weapon stay stepped (no numeric blend).
  */
 export function interpolateReplayPlayers(previous, next, ratio) {
-  const upperPlayers = new Map((next?.players || []).map((player) => [playerKey(player), player]));
-  return (previous?.players || []).map((player) => {
-    const other = upperPlayers.get(playerKey(player));
+  const lowerPlayers = previous?.players || [];
+  const upperPlayers = next?.players || [];
+  const t = clamp(Number(ratio) || 0, 0, 1);
+  let sameOrder = lowerPlayers.length === upperPlayers.length;
+  if (sameOrder) {
+    for (let index = 0; index < lowerPlayers.length; index += 1) {
+      if (playerKey(lowerPlayers[index]) !== playerKey(upperPlayers[index])) {
+        sameOrder = false;
+        break;
+      }
+    }
+  }
+  const upperByKey = sameOrder
+    ? null
+    : new Map(upperPlayers.map((player) => [playerKey(player), player]));
+  return lowerPlayers.map((player, index) => {
+    const other = sameOrder ? upperPlayers[index] : upperByKey.get(playerKey(player));
     if (!other) return player;
-    const t = clamp(Number(ratio) || 0, 0, 1);
     return {
       ...player,
       x: lerpNumber(player.x, other.x, t),
@@ -172,6 +191,32 @@ export function interpolateReplayPlayers(previous, next, ratio) {
       inventory: t >= 0.5 ? (other.inventory || player.inventory) : (player.inventory || other.inventory),
     };
   });
+}
+
+/**
+ * Hot-path interpolation when the clock already resolved a fractional source index.
+ * Avoids a second binary search and only allocates the ten visual player records.
+ */
+export function interpolateReplayFrameAtPosition(frames, position) {
+  if (!frames?.length) return { players: [], tick: 0, time_sec: 0 };
+  const resolved = clamp(Number(position) || 0, 0, frames.length - 1);
+  const index = Math.floor(resolved);
+  const nextIndex = Math.min(frames.length - 1, index + 1);
+  const previous = frames[index];
+  const next = frames[nextIndex];
+  const ratio = resolved - index;
+  if (!previous || previous === next || ratio <= 0) {
+    return previous || frames[0];
+  }
+  return {
+    ...previous,
+    players: interpolateReplayPlayers(previous, next, ratio),
+    tick: lerpNumber(previous.tick, next.tick, ratio),
+    time_sec: lerpNumber(previous.time_sec, next.time_sec, ratio),
+    _sampleIndex: index,
+    _nextSampleIndex: nextIndex,
+    _interpRatio: ratio,
+  };
 }
 
 export function interpolateReplayFrame(frames, playheadTick, playheadSeconds = null, sampleStride = 1) {

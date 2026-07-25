@@ -11,6 +11,7 @@ import {
 } from "../../utils/replayRadarTransform";
 import {
   findPreviousFrameIndex,
+  interpolateReplayFrameAtPosition,
 } from "../../utils/replayPlayback";
 import {
   SCENE_SIZE,
@@ -498,12 +499,19 @@ export default function ReplaySceneCanvas({
     scale: finalScale,
   });
 
-  const frame = useMemo(() => {
+  const eventFrame = useMemo(() => {
     if (!frames.length) return { players: [], tick: fallbackTick, time_sec: 0 };
     return frames[frameCursorIndex] || { players: [], tick: fallbackTick, time_sec: 0 };
   }, [fallbackTick, frameCursorIndex, frames]);
 
-  const currentTick = Number(frame.tick || fallbackTick || 0);
+  const visualFrame = useMemo(() => {
+    if (sampleStride !== 1) return eventFrame;
+    return interpolateReplayFrameAtPosition(frames, playhead.position);
+  }, [eventFrame, frames, playhead.position, sampleStride]);
+
+  // Event/effect layers intentionally remain stepped at the 32Hz source boundary.
+  // Only player positions and yaw consume the display-rate interpolation.
+  const currentTick = Number(eventFrame.tick || fallbackTick || 0);
   const roundEndTick = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
 
   const hasSmokeAreaTracks = Boolean(
@@ -516,8 +524,13 @@ export default function ReplaySceneCanvas({
   );
 
   const bombState = useMemo(
-    () => computeBombState(roundEvents, currentTick, frame.players, selectedRound?.bomb_initial_carrier, transform),
-    [currentTick, frame.players, roundEvents, selectedRound?.bomb_initial_carrier, transform],
+    () => computeBombState(roundEvents, currentTick, eventFrame.players, selectedRound?.bomb_initial_carrier, transform),
+    [currentTick, eventFrame.players, roundEvents, selectedRound?.bomb_initial_carrier, transform],
+  );
+
+  const workspacePlayerByName = useMemo(
+    () => new Map(workspacePlayers.map((player) => [safeLabel(player.name).toLowerCase(), player])),
+    [workspacePlayers],
   );
 
   const playerNumberByName = useMemo(() => {
@@ -529,8 +542,8 @@ export default function ReplaySceneCanvas({
     ]);
   }, [workspacePlayers]);
 
-  const markerPlayers = (frame.players || []).map((player) => {
-    const meta = workspacePlayers.find((item) => item.name?.toLowerCase() === String(player.name || "").toLowerCase());
+  const markerPlayers = (visualFrame.players || []).map((player) => {
+    const meta = workspacePlayerByName.get(safeLabel(player.name).toLowerCase());
     const frameSide = safeLabel(player.team).toUpperCase();
     const fallbackTeamKey = frameSide && frameSide === String(selectedRound?.team_a_side || "").toUpperCase() ? "a" : "b";
     const displayName = safeLabel(player.name);
@@ -545,12 +558,20 @@ export default function ReplaySceneCanvas({
     };
   }).filter((player) => player.position && pointMatchesMapLayer(player, transform, mapLayer));
 
-  const teamKeyForPlayerName = (name) => {
-    const normalized = safeLabel(name).toLowerCase();
-    return workspacePlayers.find((player) => safeLabel(player.name).toLowerCase() === normalized)?.team_key
-      || markerPlayers.find((player) => safeLabel(player.name).toLowerCase() === normalized)?.team_key
-      || "";
-  };
+  const teamKeyByName = useMemo(() => {
+    const result = new Map(
+      workspacePlayers.map((player) => [safeLabel(player.name).toLowerCase(), player.team_key]),
+    );
+    const teamASide = safeLabel(selectedRound?.team_a_side).toUpperCase();
+    for (const player of eventFrame.players || []) {
+      const name = safeLabel(player.name).toLowerCase();
+      const side = safeLabel(player.team).toUpperCase();
+      if (!name || result.has(name) || !side) continue;
+      result.set(name, side === teamASide ? "a" : "b");
+    }
+    return result;
+  }, [eventFrame.players, selectedRound?.team_a_side, workspacePlayers]);
+  const teamKeyForPlayerName = (name) => teamKeyByName.get(safeLabel(name).toLowerCase()) || "";
   const sideForPlayerName = (name) => replaySideForTeamKey(teamKeyForPlayerName(name), selectedRound);
 
   const traces = useMemo(() => {
@@ -695,7 +716,7 @@ export default function ReplaySceneCanvas({
       }
     }
     return { kills, grenades };
-  }, [currentTick, frames, layers.grenades, layers.kills, mapLayer, markerPlayers, roundEvents, selectedRound, tickRate, transform, workspacePlayers]);
+  }, [currentTick, frames, layers.grenades, layers.kills, mapLayer, roundEvents, selectedRound, teamKeyByName, tickRate, transform]);
 
   const recentShots = useMemo(() => {
     if (!layers.shots) return [];

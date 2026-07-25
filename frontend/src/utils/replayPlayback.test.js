@@ -4,9 +4,11 @@ import {
   findPreviousFrameIndex,
   frameBracket,
   interpolateReplayFrame,
+  interpolateReplayFrameAtPosition,
   lerpAngle,
   lerpNumber,
   replaySampleStrideForRate,
+  replayVisualHzForRate,
   replayPositionForTime,
   resolvePlaybackStartSeconds,
   secondsForFramePosition,
@@ -68,6 +70,12 @@ describe("replaySampleStrideForRate", () => {
     expect(replaySampleStrideForRate(2)).toBe(2);
     expect(replaySampleStrideForRate(4)).toBe(4);
   });
+
+  it("reports 64Hz visual interpolation only for the full 32Hz source lane", () => {
+    expect(replayVisualHzForRate(32, 1)).toBe(64);
+    expect(replayVisualHzForRate(32, 2)).toBe(16);
+    expect(replayVisualHzForRate(32, 4)).toBe(8);
+  });
 });
 
 describe("interpolateReplayFrame", () => {
@@ -92,6 +100,13 @@ describe("interpolateReplayFrame", () => {
     const late = interpolateReplayFrame(frames, 106);
     expect(early.players[0].weapon).toBe("ak");
     expect(late.players[0].weapon).toBe("awp");
+  });
+
+  it("interpolates directly from an already-resolved fractional source position", () => {
+    const mid = interpolateReplayFrameAtPosition(frames, 0.5);
+    expect(mid.players[0].x).toBeCloseTo(40, 5);
+    expect(mid.players[0].yaw).toBeCloseTo(0, 5);
+    expect(mid._sampleIndex).toBe(0);
   });
 });
 
