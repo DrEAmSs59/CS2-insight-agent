@@ -5,7 +5,7 @@ import zipfile
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from app.lite_cut import api
+from app.lite_cut import api, portable_api
 from app.lite_cut.api import _resolve_lite_cut_encoder
 
 
@@ -52,9 +52,9 @@ async def test_portable_import_rolls_back_project_and_directory_on_invalid_asset
     async def no_asset_records(_project_id):
         return None
 
-    monkeypatch.setattr(api, "_get_lite_cut_db", lambda: db)
-    monkeypatch.setattr(api, "get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(api, "_delete_project_asset_files", no_asset_records)
+    monkeypatch.setattr(portable_api, "get_lite_cut_db", lambda: db)
+    monkeypatch.setattr(portable_api, "get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(portable_api, "_delete_project_asset_files", no_asset_records)
     monkeypatch.setattr(
         "app.lite_cut.assets.stable_project_asset_directory",
         lambda *_args, **_kwargs: destination,
@@ -62,7 +62,7 @@ async def test_portable_import_rolls_back_project_and_directory_on_invalid_asset
 
     upload = UploadFile(filename="broken.zip", file=io.BytesIO(payload.getvalue()))
     with pytest.raises(HTTPException) as exc_info:
-        await api.import_lite_cut_portable_package(upload)
+        await portable_api.import_lite_cut_portable_package(upload)
 
     assert exc_info.value.status_code == 400
     assert db.deleted == [42]
