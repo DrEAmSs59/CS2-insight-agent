@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CS2 Insight Agent",
+  "version": "2.3.0",
+  "identifier": "com.cs2insightagent.app",
+  "build": {
+    "beforeDevCommand": "pnpm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "node node_modules/vite/bin/vite.js build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CS2 Insight Agent",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "center": true,
+        "decorations": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyMEQxOUIwQUJBQkM3NDgKUldSSXg2dXJzQmtOb25Pamc0c3lEcVJ4WEtkN2JLVWcwcUNxR3dpRDJVMDV5T0pBc3ZRQ2E3dnIK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": ["../../packaging/windows/app-icon.ico"],
+    "resources": {
+      "bundle-resources/": ""
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "../../packaging/windows/app-icon.ico",
+        "installerHooks": "windows/upgrade-hooks.nsh",
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

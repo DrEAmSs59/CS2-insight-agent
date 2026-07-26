@@ -13,15 +13,27 @@ const PREFIX = "cs2-session-";
 export default function useSessionState(key, initialValue, { storageTransform } = {}) {
   const storageKey = PREFIX + key;
 
-  const [state, setState] = useState(() => {
+  const readValue = useCallback(() => {
     try {
       const raw = sessionStorage.getItem(storageKey);
       if (raw !== null) return JSON.parse(raw);
     } catch { /* ignore */ }
     return typeof initialValue === "function" ? initialValue() : initialValue;
-  });
+  }, [initialValue, storageKey]);
+
+  const [entry, setEntry] = useState(() => ({
+    storageKey,
+    value: readValue(),
+  }));
+  const state = entry.storageKey === storageKey ? entry.value : readValue();
 
   useEffect(() => {
+    if (entry.storageKey === storageKey) return;
+    setEntry({ storageKey, value: readValue() });
+  }, [entry.storageKey, readValue, storageKey]);
+
+  useEffect(() => {
+    if (entry.storageKey !== storageKey) return;
     try {
       if (state === null || state === undefined) {
         sessionStorage.removeItem(storageKey);
@@ -30,11 +42,24 @@ export default function useSessionState(key, initialValue, { storageTransform } 
         sessionStorage.setItem(storageKey, JSON.stringify(value));
       }
     } catch { /* quota exceeded, ignore */ }
-  }, [storageKey, state, storageTransform]);
+  }, [entry.storageKey, storageKey, state, storageTransform]);
+
+  const setState = useCallback((next) => {
+    setEntry((current) => {
+      const currentValue = current.storageKey === storageKey ? current.value : readValue();
+      return {
+        storageKey,
+        value: typeof next === "function" ? next(currentValue) : next,
+      };
+    });
+  }, [readValue, storageKey]);
 
   const reset = useCallback(() => {
     try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
-    setState(typeof initialValue === "function" ? initialValue() : initialValue);
+    setEntry({
+      storageKey,
+      value: typeof initialValue === "function" ? initialValue() : initialValue,
+    });
   }, [storageKey, initialValue]);
 
   return [state, setState, reset];

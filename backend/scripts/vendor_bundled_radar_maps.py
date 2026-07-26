@@ -3,13 +3,12 @@
 
 使用前（仅需维护地图资源的机器执行一次）::
 
-    pip install awpy
-    python -m awpy get maps
+    uv run --with awpy python -m awpy get maps
 
 然后::
 
     cd backend
-    python scripts/vendor_bundled_radar_maps.py
+    uv run python scripts/vendor_bundled_radar_maps.py
 
 会把 ``map-data.json`` 与 ``*.png`` 复制到 ``assets/bundled_radar_maps/``，
 提交后可移除本机 ``awpy``，运行时不再依赖该包。

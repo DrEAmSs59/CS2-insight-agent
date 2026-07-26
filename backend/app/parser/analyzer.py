@@ -8,9 +8,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
+from ..demo_playback_compat import read_demo_end_tick
 from .models import MatchMeta, Clip, ParseResult, meme_series_badges_for_kd
 from .weapons import (
     SNIPER_WEAPONS, _normalize_item, _translate_weapon, _highlight_weapon_used_label,
@@ -30,7 +31,7 @@ from .parse_utils import (
     _DEMOPARSER_RE_RAISE, _bool, _int, _max_demo_tick,
     _duration_mins_from_tick_span, _get_match_start_tick,
     _count_team_wins_from_round_end_df, _infer_total_rounds_from_round_end,
-    _pick_assister_column, win_panel_ceiling_from_match_tick,
+    _pick_assister_column,
 )
 from .round_economy import (
     build_round_economy, build_round_economy_shared, extract_player_team_maps,
@@ -67,6 +68,40 @@ from .spatial_analysis import count_shots_before
 logger = logging.getLogger(__name__)
 
 
+# These events can share one native demoparser scan. Keep player_death and
+# player_blind separate: death needs role-prefixed fields, while blind
+# duration is lost by some demoparser versions when mixed with other events.
+_SHARED_BATCH_EVENT_NAMES = (
+    "bomb_planted",
+    "bomb_defused",
+    "bomb_exploded",
+    "bomb_begindefuse",
+    "bomb_dropped",
+    "bomb_pickup",
+    "item_equip",
+    "item_pickup",
+    "weapon_fire",
+    "player_hurt",
+    "hegrenade_detonate",
+    "inferno_startburn",
+    "molotov_detonate",
+    "smokegrenade_detonate",
+    "flashbang_detonate",
+    "round_end",
+    "round_freeze_end",
+    "round_start",
+    "round_announce_match_start",
+)
+
+_SHARED_BATCH_PLAYER_FIELDS = (
+    "steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch", "last_place_name",
+)
+
+_SHARED_BATCH_OTHER_FIELDS = tuple(dict.fromkeys(
+    [*_EXTRA_EVENT_FIELDS, "site", "total_rounds_played", "winner", "reason"]
+))
+
+
 @dataclass(slots=True)
 class SharedDemoFacts:
     """Player-independent analysis facts materialized once per Demo.
@@ -78,6 +113,7 @@ class SharedDemoFacts:
 
     match_summary: tuple[int, int, str, int, str, str]
     demo_max_tick: int
+    demo_end_tick: int
     name_to_uid: dict[str, int]
     observed_user_ids: tuple[int, ...]
     spec_slots: dict[str, int]
@@ -375,6 +411,7 @@ class DemoAnalyzer:
     def __init__(self, dem_path: str | Path):
         self.dem_path = Path(dem_path)
         self.parser = DemoParser(str(self.dem_path))
+        self.analysis_workspace: dict[str, Any] = {}
 
     def _detect_map(self) -> str:
         try:
@@ -411,7 +448,64 @@ class DemoAnalyzer:
         except Exception:
             return pd.DataFrame()
 
-    def _parse_shared_events(self, match_start_tick: int) -> dict:
+    def _parse_shared_event_batch(self) -> dict[str, pd.DataFrame]:
+        batch = safe_parse_events_batch(
+            self.parser,
+            list(_SHARED_BATCH_EVENT_NAMES),
+            other=list(_SHARED_BATCH_OTHER_FIELDS),
+            player=list(_SHARED_BATCH_PLAYER_FIELDS),
+        )
+        if any(not frame.empty for frame in batch.values()):
+            return batch
+
+        # A parser/version-specific incompatibility in one merged request must
+        # not erase every optional event family. Fall back to the former,
+        # smaller batches only when the unified request returned no data at all.
+        logger.warning("Unified shared event batch was empty; retrying legacy groups")
+        fallback: dict[str, pd.DataFrame] = {}
+        fallback.update(safe_parse_events_batch(
+            self.parser,
+            [
+                "bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse",
+                "bomb_dropped", "bomb_pickup",
+            ],
+            other=["site", "total_rounds_played"],
+            player=["steamid", "X", "Y", "Z", "last_place_name"],
+        ))
+        fallback.update(safe_parse_events_batch(
+            self.parser,
+            ["item_equip", "item_pickup"],
+            player=["steamid", "name", "team_num"],
+            other=["total_rounds_played"],
+        ))
+        fallback.update(safe_parse_events_batch(
+            self.parser,
+            ["weapon_fire", "player_hurt"],
+            player=["steamid", "name", "team_num", "X", "Y", "Z", "yaw", "pitch"],
+            other=["weapon", "total_rounds_played"],
+        ))
+        fallback.update(safe_parse_events_batch(
+            self.parser,
+            [
+                "hegrenade_detonate", "inferno_startburn", "molotov_detonate",
+                "smokegrenade_detonate", "flashbang_detonate",
+            ],
+        ))
+        fallback.update(safe_parse_events_batch(
+            self.parser,
+            ["round_end", "round_freeze_end", "round_start", "round_announce_match_start"],
+            other=list(_EXTRA_EVENT_FIELDS) + ["winner", "reason"],
+        ))
+        for name in _SHARED_BATCH_EVENT_NAMES:
+            fallback.setdefault(name, pd.DataFrame())
+        return fallback
+
+    def _parse_shared_events(
+        self,
+        match_start_tick: int,
+        *,
+        event_batch: Optional[dict[str, pd.DataFrame]] = None,
+    ) -> dict:
         """
         Parse all player-independent events once. Returns a dict with keys:
           events, fire_df, hurt_df, equip_df, pickup_df,
@@ -433,27 +527,22 @@ class DemoAnalyzer:
             "defuser", "defuser_name",
         )
 
-        # Bomb events batch
-        _bomb_batch = safe_parse_events_batch(
-            self.parser,
-            ["bomb_planted", "bomb_defused", "bomb_exploded", "bomb_begindefuse"],
-            other=["site", "total_rounds_played"],
-            player=["steamid", "X", "Y", "Z", "last_place_name"],
+        # All compatible event types share one native demo scan. demoparser2
+        # accepts the union of requested fields and leaves non-applicable
+        # columns absent/empty for each event frame.
+        _event_batch = (
+            event_batch
+            if event_batch is not None
+            else self._parse_shared_event_batch()
         )
-        planted_df    = _filter_ms(_bomb_batch["bomb_planted"])
-        defused_df    = _filter_ms(_bomb_batch["bomb_defused"])
-        bomb_exploded = _filter_ms(_bomb_batch["bomb_exploded"])
-        begindefuse   = _filter_ms(_bomb_batch["bomb_begindefuse"])
-
-        # Equipment batch
-        _equip_batch = safe_parse_events_batch(
-            self.parser,
-            ["item_equip", "item_pickup"],
-            player=["steamid", "name", "team_num"],
-            other=["total_rounds_played"],
-        )
-        equip_df  = _filter_ms(_equip_batch["item_equip"])
-        pickup_df = _filter_ms(_equip_batch["item_pickup"])
+        planted_df    = _filter_ms(_event_batch["bomb_planted"])
+        defused_df    = _filter_ms(_event_batch["bomb_defused"])
+        bomb_exploded = _filter_ms(_event_batch["bomb_exploded"])
+        begindefuse   = _filter_ms(_event_batch["bomb_begindefuse"])
+        bomb_dropped  = _filter_ms(_event_batch["bomb_dropped"])
+        bomb_pickup   = _filter_ms(_event_batch["bomb_pickup"])
+        equip_df      = _filter_ms(_event_batch["item_equip"])
+        pickup_df     = _filter_ms(_event_batch["item_pickup"])
 
         # player_death (largest event) — player=["X","Y","Z"] 附带攻击者/受害者击杀瞬间坐标
         _death_other = list(dict.fromkeys(list(_EXTRA_EVENT_FIELDS) + list(_PLAYER_DEATH_GAME_KEYS)))
@@ -462,33 +551,24 @@ class DemoAnalyzer:
         )))
 
         # weapon_fire + player_hurt — 合并为单次 demo 扫描
-        _fire_hurt_batch = safe_parse_events_batch(
-            self.parser,
-            ["weapon_fire", "player_hurt"],
-        )
-        fire_df = _filter_ms(_fire_hurt_batch["weapon_fire"])
-        hurt_df = _filter_ms(_fire_hurt_batch["player_hurt"])
+        fire_df = _filter_ms(_event_batch["weapon_fire"])
+        hurt_df = _filter_ms(_event_batch["player_hurt"])
 
         # Grenade batch
-        nade_batch = safe_parse_events_batch(
-            self.parser,
-            [
+        nade_batch = {
+            name: _event_batch[name]
+            for name in (
                 "hegrenade_detonate", "inferno_startburn", "molotov_detonate",
                 "smokegrenade_detonate", "flashbang_detonate",
-            ],
-        )
+            )
+        }
         nade_batch = {k: _filter_ms(v) for k, v in nade_batch.items()}
 
         # round 边界事件合批（4 个事件一次 demo 扫描）
-        _round_batch = safe_parse_events_batch(
-            self.parser,
-            ["round_end", "round_freeze_end", "round_start", "round_announce_match_start"],
-            other=list(_EXTRA_EVENT_FIELDS) + ["winner", "reason"],
-        )
-        re_df           = _round_batch["round_end"]
-        freeze_end_df   = _round_batch["round_freeze_end"]
-        round_start_df  = _round_batch["round_start"]
-        match_start_df  = _round_batch["round_announce_match_start"]
+        re_df           = _event_batch["round_end"]
+        freeze_end_df   = _event_batch["round_freeze_end"]
+        round_start_df  = _event_batch["round_start"]
+        match_start_df  = _event_batch["round_announce_match_start"]
 
         # A failed batch parse is represented as empty frames. Empty critical
         # round data is not authoritative: retry the legacy single-event paths
@@ -557,7 +637,10 @@ class DemoAnalyzer:
         )
 
         # Name strip on all relevant DataFrames
-        for _df in (events, equip_df, fire_df, hurt_df, planted_df, defused_df, bomb_exploded, begindefuse):
+        for _df in (
+            events, equip_df, fire_df, hurt_df, planted_df, defused_df,
+            bomb_exploded, begindefuse, bomb_dropped, bomb_pickup,
+        ):
             if _df is None or _df.empty:
                 continue
             for _col in _NAME_COLS:
@@ -567,17 +650,6 @@ class DemoAnalyzer:
         # pickup_df user_name strip (needed separately)
         if not pickup_df.empty and "user_name" in pickup_df.columns:
             pickup_df["user_name"] = pickup_df["user_name"].astype(str).str.strip()
-
-        # cs_win_panel_match — 比赛结算界面出现的 tick（全场一次；仅终局回合有意义）
-        win_panel_match_tick = 0
-        _wp_df = self._safe_parse_event("cs_win_panel_match")
-        if _wp_df is not None and not _wp_df.empty and "tick" in _wp_df.columns:
-            _wp_ticks = pd.to_numeric(_wp_df["tick"], errors="coerce").dropna().astype(int)
-            if match_start_tick > 0:
-                _wp_ticks = _wp_ticks[_wp_ticks > match_start_tick]
-            if len(_wp_ticks) > 0:
-                win_panel_match_tick = int(_wp_ticks.max())
-        logger.info("[win_panel] cs_win_panel_match tick=%s", win_panel_match_tick)
 
         return {
             "events":                        events,
@@ -589,9 +661,10 @@ class DemoAnalyzer:
             "defused_df":                    defused_df,
             "bomb_exploded_df":              bomb_exploded,
             "begindefuse_df":               begindefuse,
+            "bomb_dropped_df":               bomb_dropped,
+            "bomb_pickup_df":                bomb_pickup,
             "nade_batch":                    nade_batch,
             "re_df_cached":                  re_df,
-            "win_panel_match_tick":          win_panel_match_tick,
             "blind_df":                      blind_df,
             "economy_map_shared":            economy_map_shared,
             "round_freeze_end_ticks_shared": round_freeze_end_ticks_shared,
@@ -625,11 +698,24 @@ class DemoAnalyzer:
             round_end_df=re_df,
             header=header,
         )
-        demo_max_tick = _max_demo_tick(
+        event_max_tick = _max_demo_tick(
             self.parser,
             re_df,
             match_start_tick,
             death_df=events,
+        )
+        try:
+            file_end_tick = read_demo_end_tick(self.dem_path)
+        except (OSError, ValueError):
+            logger.exception("Could not read PBDEMS2 end tick: %s", self.dem_path)
+            file_end_tick = 0
+        demo_end_tick = int(file_end_tick) if int(file_end_tick) > 0 else int(event_max_tick)
+        demo_max_tick = max(int(event_max_tick), demo_end_tick)
+        logger.info(
+            "[demo_end] event_max_tick=%d file_end_tick=%d analysis_max=%d",
+            event_max_tick,
+            file_end_tick,
+            demo_max_tick,
         )
         name_to_uid = build_player_name_to_user_id(
             self.parser,
@@ -778,6 +864,7 @@ class DemoAnalyzer:
         return SharedDemoFacts(
             match_summary=match_summary,
             demo_max_tick=demo_max_tick,
+            demo_end_tick=demo_end_tick,
             name_to_uid=name_to_uid,
             observed_user_ids=observed_user_ids,
             spec_slots=spec_slots,
@@ -823,10 +910,21 @@ class DemoAnalyzer:
         except Exception:
             header = {}
         map_name = str(header.get("map_name") or "unknown")
-        match_start_tick = _get_match_start_tick(self.parser)
+
+        # round_announce_match_start already belongs to the shared native
+        # batch. Reusing it avoids a dedicated full-demo scan before the rest
+        # of the shared events are processed.
+        event_batch = self._parse_shared_event_batch()
+        match_start_tick = _get_match_start_tick(
+            self.parser,
+            precomputed_df=event_batch.get("round_announce_match_start"),
+        )
 
         # Phase 1: Parse all shared events ONCE
-        _shared = self._parse_shared_events(match_start_tick)
+        _shared = self._parse_shared_events(
+            match_start_tick,
+            event_batch=event_batch,
+        )
         shared_facts = self._build_shared_demo_facts(
             match_start_tick=match_start_tick,
             header=header,
@@ -1184,11 +1282,44 @@ class DemoAnalyzer:
                 bomb_exploded_df=_shared["bomb_exploded_df"],
                 nade_batch=_shared["nade_batch"],
                 re_df_cached=_shared["re_df_cached"],
-                win_panel_match_tick=_shared["win_panel_match_tick"],
                 blind_df=_shared["blind_df"],
                 shared_facts=shared_facts,
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
+
+        try:
+            from .match_workspace import build_match_workspace
+
+            raw_tick_rate = header.get("tick_rate") or header.get("tickrate") or TICK_RATE
+            try:
+                tick_rate = float(raw_tick_rate)
+            except (TypeError, ValueError):
+                tick_rate = float(TICK_RATE)
+            self.analysis_workspace = build_match_workspace(
+                map_name=map_name,
+                tick_rate=tick_rate,
+                match_start_tick=match_start_tick,
+                shared_events=_shared,
+                shared_facts=shared_facts,
+                player_results=results,
+                parser=self.parser,
+            )
+        except BaseException as exc:
+            if isinstance(exc, _DEMOPARSER_RE_RAISE):
+                raise
+            logger.exception("build_match_workspace failed for %s", self.dem_path)
+            self.analysis_workspace = {
+                "version": 1,
+                "algorithm_version": "match-workspace-2026.07.1",
+                "data_source": "demo_parser_with_derived_metrics",
+                "team_assignment_source": "unavailable",
+                "derived_fields": [],
+                "map_name": map_name,
+                "tick_rate": float(TICK_RATE),
+                "players": [],
+                "rounds": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
         return results
 
@@ -1227,7 +1358,6 @@ class DemoAnalyzer:
         bomb_exploded_df: "pd.DataFrame",
         nade_batch: dict,
         re_df_cached: "pd.DataFrame",
-        win_panel_match_tick: int = 0,
         blind_df: "Optional[pd.DataFrame]" = None,
         shared_facts: SharedDemoFacts,
         freeze_to_death_rounds: "Optional[list[int]]" = None,
@@ -1668,8 +1798,6 @@ class DemoAnalyzer:
         _last_kill_buf_ticks = int(float(
             os.environ.get("CS2_INSIGHT_LAST_ROUND_KILL_BUFFER_SEC", "0.70") or "0.70"
         ) * TICK_RATE)
-        _win_panel_ceiling = win_panel_ceiling_from_match_tick(win_panel_match_tick, TICK_RATE)
-
         # round_end 事件 tick 映射（已从缓存 DataFrame 派生）
         _round_end_evt_tick_map: dict[int, int] = dict(round_end_tick_map)
         if not _round_end_evt_tick_map and round_freeze_end_ticks:
@@ -1756,11 +1884,7 @@ class DemoAnalyzer:
                                     if _kti > 0 and (_last_match_evt is None or _kti > _last_match_evt):
                                         _last_match_evt = _kti
                     if _last_match_evt is not None and _last_match_evt > 0:
-                        _heuristic = int(_last_match_evt) + _last_kill_buf_ticks
-                        if _win_panel_ceiling is not None and _win_panel_ceiling > int(_last_match_evt):
-                            _c.clip_max_tick = _win_panel_ceiling
-                        else:
-                            _c.clip_max_tick = _heuristic
+                        _c.clip_max_tick = max(int(_last_match_evt) + 1, _demo_max_tick)
                         if _c.end_tick > _c.clip_max_tick:
                             _c.end_tick = _c.clip_max_tick
             elif _terminal_play_round is not None and _c.round == _terminal_play_round:
@@ -1772,11 +1896,7 @@ class DemoAnalyzer:
                     _re_t = _round_end_evt_tick_map.get(_c.round, 0)
                     _last_evt_tick = _re_t + _re_offset_last_ticks if _re_t else None
                 if _last_evt_tick:
-                    _heuristic = int(_last_evt_tick) + int(_last_kill_buf_ticks)
-                    if _win_panel_ceiling is not None and _win_panel_ceiling > int(_last_evt_tick):
-                        _c.clip_max_tick = _win_panel_ceiling
-                    else:
-                        _c.clip_max_tick = _heuristic
+                    _c.clip_max_tick = max(int(_last_evt_tick) + 1, _demo_max_tick)
                     if _c.end_tick > _c.clip_max_tick:
                         _c.end_tick = _c.clip_max_tick
             elif _c.round in _round_end_evt_tick_map:
@@ -1883,7 +2003,6 @@ class DemoAnalyzer:
                 match_start_tick=match_start_tick,
                 tick_rate=float(TICK_RATE),
                 spec_slots=spec_slots,
-                win_panel_match_tick=win_panel_match_tick,
             )
             timeline = bundle.get("timeline")
             round_timeline = bundle.get("round_timeline")
@@ -1910,7 +2029,7 @@ class DemoAnalyzer:
                 match_date=match_date, duration_mins=duration_mins,
                 meme_series_badges=meme_series_badges_for_kd(target_total_kills, target_total_deaths),
                 server_name=_server_name, all_players=all_players_roster,
-                win_panel_match_tick=win_panel_match_tick,
+                demo_end_tick=shared_facts.demo_end_tick,
             ),
             clips=clips, timeline=timeline, round_timeline=round_timeline,
         )
@@ -2022,13 +2141,18 @@ def get_demo_match_summary(
 ) -> dict[str, object]:
     """上传后即刻可用的比赛摘要（无需选定玩家）。"""
     path = Path(dem_path)
+    try:
+        demo_end_tick = read_demo_end_tick(path)
+    except (OSError, ValueError):
+        logger.exception("Could not read PBDEMS2 end tick: %s", path)
+        demo_end_tick = 0
     fallback: dict[str, object] = {
         "map_name": "unknown", "server_name": "", "target_player": "",
         "target_player_user_id": None, "target_steam_id": None,
         "total_rounds": 0, "target_kills": 0, "target_deaths": 0,
         "team_a_score": 0, "team_b_score": 0, "team_a_name": "Team A",
         "team_b_name": "Team B", "match_date": "", "duration_mins": 0,
-        "win_panel_match_tick": 0,
+        "demo_end_tick": demo_end_tick,
     }
     try:
         parser = parser or DemoParser(str(path))
@@ -2062,7 +2186,7 @@ def get_demo_match_summary(
             "team_a_score": int(ta), "team_b_score": int(tb),
             "team_a_name": tan, "team_b_name": tbn,
             "match_date": md, "duration_mins": int(dm),
-            "win_panel_match_tick": 0,
+            "demo_end_tick": demo_end_tick,
         }
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):

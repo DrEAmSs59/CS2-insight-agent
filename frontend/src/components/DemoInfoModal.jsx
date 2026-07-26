@@ -11,6 +11,7 @@ import {
 import {
   ensureClientClipUidsOnClips,
 } from "../utils/clipClientUid";
+import { getPlayerClipScope } from "../utils/playerClipScope";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
@@ -24,8 +25,7 @@ import RoundTimelineView from "./analysis/timeline/RoundTimelineView";
 import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
-import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
-import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
+import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 
 /**
  * @param {{
@@ -34,7 +34,6 @@ import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
  *   demoId: number | null;
  *   onAddToQueue: (clipData: any[]) => void;
  *   onEnqueueNotice?: (message: string, meta?: { autoDismissMs?: number; queueLink?: boolean }) => void;
- *   expectedPlayers: string[];
  *   aiMode: boolean;
  *   queuedClientClipUids?: Set<string>;
  *   queueLength?: number;
@@ -47,14 +46,13 @@ export default function DemoInfoModal({
   demoId,
   onAddToQueue,
   onEnqueueNotice,
-  expectedPlayers = [],
   aiMode = false,
   queuedClientClipUids = new Set(),
   queueLength = 0,
   onDequeue,
 }) {
   const t = useT();
-  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
+  const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
   const [tab, setTab] = useState("parse"); // "parse" | "clips" | "weapon_kills" | "timeline"
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -68,6 +66,16 @@ export default function DemoInfoModal({
   
   // 针对合集（如 211）的轮数选择草稿
   const [freezeToDeathDraft, setFreezeToDeathDraft] = useState({ picked: [] });
+  const parsedPlayerNames = useMemo(() => Object.keys(parsedPlayers), [parsedPlayers]);
+  const activePlayerScope = useMemo(
+    () => getPlayerClipScope(parsedPlayers, activePlayerTab, queuedClientClipUids),
+    [parsedPlayers, activePlayerTab, queuedClientClipUids],
+  );
+  const activePlayerData = activePlayerScope.playerData;
+  const clips = activePlayerScope.clips;
+  const roundTimeline = activePlayerData?.round_timeline || [];
+  const weaponKillSummary = summarizeWeaponKills(roundTimeline);
+  const matchMeta = demoData?.match_meta || {};
 
   useEffect(() => {
     if (!open || !demoId) return;
@@ -143,13 +151,10 @@ export default function DemoInfoModal({
           }
         }
 
-        // 自动勾选关注名单中的玩家
+        // 多玩家分析共享同一次 demo 事件扫描；默认整场，关注名单不再作为隐式筛选器。
         const roster = data.players || [];
         const names = roster.map((p) => (typeof p === "string" ? p : p.name)).filter(Boolean);
-        const autoSelected = expectedPlayers
-          .map((ep) => names.find((n) => n.toLowerCase() === ep.toLowerCase() || n.toLowerCase().includes(ep.toLowerCase())))
-          .filter(Boolean);
-        setSelectedPlayers(autoSelected);
+        setSelectedPlayers(names);
       } catch (e) {
         setProgressText(t("dialog.demoInfoLoadFail", { msg: e.response?.data?.detail || e.message }));
       } finally {
@@ -157,7 +162,7 @@ export default function DemoInfoModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, demoId, expectedPlayers]);
+  }, [open, demoId]);
 
   const handleParse = useCallback(async () => {
     if (!demoId || !selectedPlayers.length) return;
@@ -227,19 +232,14 @@ export default function DemoInfoModal({
     }
   }, [demoId, selectedPlayers, freezeToDeathDraft]);
 
-  const handlePlayDemo = useCallback(async () => {
+  const handlePlayDemo = useCallback(() => {
     if (!demoId) return;
     const label =
       (demoData?.display_name && String(demoData.display_name).trim()) ||
       demoData?.filename ||
       `#${demoId}`;
-    try {
-      await playDemoInCs2({ id: demoId });
-      showPlayToast(true, label);
-    } catch (e) {
-      showPlayToast(false, playDemoErrorLabel(e));
-    }
-  }, [demoId, demoData, showPlayToast]);
+    void requestPlayDemo({ id: demoId, label });
+  }, [demoId, demoData, requestPlayDemo]);
 
   const handleToggleClip = useCallback((uid) => {
     if (!uid || queuedClientClipUids.has(uid)) return;
@@ -251,46 +251,48 @@ export default function DemoInfoModal({
     });
   }, [queuedClientClipUids]);
 
+  useEffect(() => {
+    setSelectedClipUids(new Set());
+  }, [activePlayerTab]);
+
   const handleAddSelected = useCallback(() => {
     if (selectedClipUids.size === 0) return;
 
     const ftdPicksSorted = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
 
+    const playerData = activePlayerScope.playerData;
+    const mm = playerData.match_meta ?? null;
+    const steamId = mm?.target_steam_id != null && mm.target_steam_id !== ""
+      ? String(mm.target_steam_id) : null;
     const allClips = [];
-    for (const pname of Object.keys(parsedPlayers)) {
-      const pd = parsedPlayers[pname];
-      const mm = pd.match_meta ?? null;
-      const steamId = mm?.target_steam_id != null && mm.target_steam_id !== ""
-        ? String(mm.target_steam_id) : null;
-      for (const c of pd.clips || []) {
-        if (!c.client_clip_uid || !selectedClipUids.has(c.client_clip_uid)) continue;
-        const base = {
-          demoPath: demoData?.path || "",
-          demoFilename: demoData?.filename || "",
-          targetPlayer: mm?.target_player || pname,
-          targetPlayerUserId: mm?.target_player_user_id ?? null,
-          targetSteamId: steamId,
-          clipId: c.clip_id,
-          clientClipUid: c.client_clip_uid,
-          clipData: { ...c },
-          // 将 match_meta 随入队项一起携带，确保录制时 all_players 可用（尤其是从库页加入时）
-          matchMeta: mm,
-        };
-        if (isFreezeToDeathCompilation(c)) {
-          const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
-          if (!sliced.ok) {
-            setProgressText(t(sliced.errorKey));
-            return;
-          }
-          allClips.push({
-            ...base,
-            clientClipUid: sliced.clip.client_clip_uid,
-            clipData: sliced.clip,
-            freezeToDeathQueueRounds: [...ftdPicksSorted],
-          });
-        } else {
-          allClips.push(base);
+    for (const c of activePlayerScope.selectableClips) {
+      if (!selectedClipUids.has(c.client_clip_uid)) continue;
+      const base = {
+        demoPath: demoData?.path || "",
+        demoFilename: demoData?.filename || "",
+        targetPlayer: mm?.target_player || activePlayerTab,
+        targetPlayerUserId: mm?.target_player_user_id ?? null,
+        targetSteamId: steamId,
+        clipId: c.clip_id,
+        clientClipUid: c.client_clip_uid,
+        clipData: { ...c },
+        // 将 match_meta 随入队项一起携带，确保录制时 all_players 可用（尤其是从库页加入时）
+        matchMeta: mm,
+      };
+      if (isFreezeToDeathCompilation(c)) {
+        const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
+        if (!sliced.ok) {
+          setProgressText(t(sliced.errorKey));
+          return;
         }
+        allClips.push({
+          ...base,
+          clientClipUid: sliced.clip.client_clip_uid,
+          clipData: sliced.clip,
+          freezeToDeathQueueRounds: [...ftdPicksSorted],
+        });
+      } else {
+        allClips.push(base);
       }
     }
 
@@ -302,70 +304,52 @@ export default function DemoInfoModal({
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [parsedPlayers, selectedClipUids, demoData, onAddToQueue, onEnqueueNotice, freezeToDeathDraft, t]);
+  }, [activePlayerScope, activePlayerTab, selectedClipUids, demoData, onAddToQueue, onEnqueueNotice, freezeToDeathDraft, t]);
 
-  const canAddAllHighlights = useMemo(
-    () =>
-      Object.values(parsedPlayers).some((pd) =>
-        (pd.clips || []).some(
-          (c) =>
-            c.category === "highlight" &&
-            c.client_clip_uid &&
-            !queuedClientClipUids.has(c.client_clip_uid)
-        )
-      ),
-    [parsedPlayers, queuedClientClipUids]
-  );
+  const canAddCurrentPlayerHighlights = activePlayerScope.queueableHighlights.length > 0;
 
-  const handleAddAllHighlights = useCallback(() => {
+  const handleAddCurrentPlayerHighlights = useCallback(() => {
     const toAdd = [];
-    for (const pname of Object.keys(parsedPlayers)) {
-      const pd = parsedPlayers[pname];
-      const mm = pd.match_meta ?? null;
-      const steamId =
-        mm?.target_steam_id != null && mm.target_steam_id !== ""
-          ? String(mm.target_steam_id)
-          : null;
-      for (const c of pd.clips || []) {
-        if (c.category !== "highlight") continue;
-        if (!c.client_clip_uid || queuedClientClipUids.has(c.client_clip_uid)) continue;
-        toAdd.push({
-          demoPath: demoData?.path || "",
-          demoFilename: demoData?.filename || "",
-          targetPlayer: mm?.target_player || pname,
-          targetPlayerUserId: mm?.target_player_user_id ?? null,
-          targetSteamId: steamId,
-          clipId: c.clip_id,
-          clientClipUid: c.client_clip_uid,
-          clipData: { ...c },
-          matchMeta: mm,
-        });
-      }
+    const playerData = activePlayerScope.playerData;
+    const mm = playerData.match_meta ?? null;
+    const steamId =
+      mm?.target_steam_id != null && mm.target_steam_id !== ""
+        ? String(mm.target_steam_id)
+        : null;
+    for (const c of activePlayerScope.queueableHighlights) {
+      toAdd.push({
+        demoPath: demoData?.path || "",
+        demoFilename: demoData?.filename || "",
+        targetPlayer: mm?.target_player || activePlayerTab,
+        targetPlayerUserId: mm?.target_player_user_id ?? null,
+        targetSteamId: steamId,
+        clipId: c.clip_id,
+        clientClipUid: c.client_clip_uid,
+        clipData: { ...c },
+        matchMeta: mm,
+      });
     }
     if (!toAdd.length) {
-      onEnqueueNotice?.(t("app.enqueueAllHighlightsEmpty"));
+      onEnqueueNotice?.(t("app.enqueuePlayerHighlightsEmpty", { player: activePlayerTab }));
       return;
     }
     onAddToQueue(toAdd);
-    onEnqueueNotice?.(t("app.enqueueAllHighlightsDone", { n: toAdd.length }), {
+    onEnqueueNotice?.(t("app.enqueuePlayerHighlightsDone", {
+      player: activePlayerTab,
+      n: toAdd.length,
+    }), {
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [parsedPlayers, demoData, queuedClientClipUids, onAddToQueue, onEnqueueNotice, t]);
+  }, [activePlayerScope, activePlayerTab, demoData, onAddToQueue, onEnqueueNotice, t]);
 
   const handleSelectAll = useCallback(() => {
     setSelectedClipUids((prev) => {
       const next = new Set(prev);
-      Object.values(parsedPlayers).forEach(pd => {
-        (pd.clips || []).forEach(c => {
-          if (c.client_clip_uid && !queuedClientClipUids.has(c.client_clip_uid) && c.category !== "meme_death") {
-            next.add(c.client_clip_uid);
-          }
-        });
-      });
+      activePlayerScope.selectableClips.forEach((clip) => next.add(clip.client_clip_uid));
       return next;
     });
-  }, [parsedPlayers, queuedClientClipUids]);
+  }, [activePlayerScope]);
 
   const handleDeselectAll = useCallback(() => {
     setSelectedClipUids(new Set());
@@ -449,23 +433,10 @@ export default function DemoInfoModal({
     enqueueTimelineClip(clipData, "app.enqueueWeaponKillsDone");
   }, [enqueueTimelineClip]);
 
-  const activePlayerData = parsedPlayers[activePlayerTab] || null;
-  const clips = activePlayerData?.clips || [];
-  const roundTimeline = activePlayerData?.round_timeline || [];
-  const weaponKillSummary = summarizeWeaponKills(roundTimeline);
-  const matchMeta = demoData?.match_meta || {};
-  const parsedPlayerNames = useMemo(() => Object.keys(parsedPlayers), [parsedPlayers]);
-  
-  const selectableTotal = useMemo(() => {
-    let total = 0;
-    Object.values(parsedPlayers).forEach(pd => {
-      total += (pd.clips || []).filter(c => c.client_clip_uid && !queuedClientClipUids.has(c.client_clip_uid) && c.category !== "meme_death").length;
-    });
-    return total;
-  }, [parsedPlayers, queuedClientClipUids]);
+  const selectableTotal = activePlayerScope.selectableClips.length;
 
   if (!open || !demoId) {
-    return <PlayDemoToast />;
+    return <DemoPlaybackUi />;
   }
 
   return (
@@ -530,7 +501,7 @@ export default function DemoInfoModal({
                      disabled={!parsedPlayerNames.length}
                      className={`text-sm font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg transition-all disabled:opacity-30 ${tab === "clips" ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-secondary"}`}
                    >
-                     {parsedPlayerNames.length > 0 ? t("dialog.demoInfoTabClipsCount", { n: selectableTotal }) : t("dialog.demoInfoTabClips")}
+                     {parsedPlayerNames.length > 0 ? t("dialog.demoInfoTabClipsCount", { n: parsedPlayerNames.length }) : t("dialog.demoInfoTabClips")}
                    </button>
                    <button
                      onClick={() => setTab("timeline")}
@@ -568,7 +539,7 @@ export default function DemoInfoModal({
                     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card p-2">
                       <span className="flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-cs2-text-muted">
                         <User className="h-3.5 w-3.5" />
-                        {t("dialog.demoInfoCurrentPlayer")}
+                        {t("dialog.demoInfoFullMatchResults", { n: parsedPlayerNames.length })}
                       </span>
                       {parsedPlayerNames.map((name) => (
                         <button
@@ -577,7 +548,10 @@ export default function DemoInfoModal({
                           onClick={() => setActivePlayerTab(name)}
                           className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors ${name === activePlayerTab ? "bg-cs2-accent text-cs2-text-on-accent" : "bg-cs2-bg-hover text-cs2-text-secondary hover:text-cs2-text-primary"}`}
                         >
-                          {name}
+                          <span>{name}</span>
+                          <span className="ml-1.5 rounded bg-cs2-bg-input/50 px-1 font-mono text-[9px] tabular-nums opacity-80">
+                            {(parsedPlayers[name]?.clips || []).filter((clip) => clip.category !== "meme_death").length}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -654,10 +628,11 @@ export default function DemoInfoModal({
                   onSelectAll={handleSelectAll}
                   onDeselectAll={handleDeselectAll}
                   onAddSelectedToQueue={handleAddSelected}
-                  onAddAllHighlightsAllMatches={handleAddAllHighlights}
+                  onAddCurrentPlayerHighlights={handleAddCurrentPlayerHighlights}
+                  currentPlayer={activePlayerTab}
                   queueLength={queueLength}
                   batchRecording={false}
-                  canAddAllHighlights={canAddAllHighlights}
+                  canAddCurrentPlayerHighlights={canAddCurrentPlayerHighlights}
                />
              )}
              
@@ -679,7 +654,7 @@ export default function DemoInfoModal({
         </div>
       </div>
     </div>
-    <PlayDemoToast />
+    <DemoPlaybackUi />
     </>
   );
 }

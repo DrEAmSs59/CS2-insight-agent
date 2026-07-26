@@ -10,13 +10,13 @@ from typing import Any, Optional
 
 if __package__:
     from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
-    from .radar.radar_data_extractor import extract_radar_timeline_impl
+    from .radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
     from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
-    from app.radar.radar_data_extractor import extract_radar_timeline_impl
+    from app.radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 
 
 def _run(payload: dict) -> object:
@@ -24,9 +24,23 @@ def _run(payload: dict) -> object:
     if action == "radar_timeline":
         args = {k: v for k, v in payload.items() if k != "action"}
         return extract_radar_timeline_impl(**args)
+    if action == "replay_effects":
+        args = {k: v for k, v in payload.items() if k != "action"}
+        return extract_replay_effects_impl(**args)
     dem_path = str(payload.get("dem_path") or "")
     if not dem_path:
         raise ValueError("dem_path is required")
+    if action == "materialize_replay":
+        workspace = payload.get("workspace")
+        if not isinstance(workspace, dict):
+            raise ValueError("workspace must be an object")
+        from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+
+        return materialize_match_replay_parquet_impl(
+            demo_path=dem_path,
+            workspace=workspace,
+            fps=float(payload.get("fps") or 32.0),
+        )
     if action == "analyze":
         target = str(payload.get("target_player") or "").strip()
         if not target:
@@ -57,10 +71,29 @@ def _run(payload: dict) -> object:
             if not isinstance(ftd_raw, list):
                 raise ValueError("freeze_to_death_rounds must be a list of integers or null")
             ftd_list = [int(x) for x in ftd_raw]
-        results = DemoAnalyzer(dem_path).analyze_multi_players(
+        analyzer = DemoAnalyzer(dem_path)
+        results = analyzer.analyze_multi_players(
             target_players, freeze_to_death_rounds=ftd_list
         )
-        return {player: result.to_dict() for player, result in results.items()}
+        analysis_workspace = analyzer.analysis_workspace
+        if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
+            analysis_workspace = dict(analysis_workspace)
+            try:
+                from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+
+                analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
+                    demo_path=dem_path,
+                    workspace=analysis_workspace,
+                )
+            except Exception as exc:  # noqa: BLE001 - analysis result remains usable
+                analysis_workspace["replay_cache"] = {
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+        return {
+            "__analysis_workspace__": analysis_workspace,
+            **{player: result.to_dict() for player, result in results.items()},
+        }
     if action == "players":
         return get_player_list(dem_path)
     if action == "summary":

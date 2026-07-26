@@ -40,6 +40,7 @@ from .cs2_config_backup import (
     is_cs2_running,
     is_restore_required,
     restore_latest_user_config_backup,
+    write_recording_state,
     write_persistent_backup_from_snap,
 )
 from .env_utils import OBSConfig, SpecPlayerVerifyConfig, _steam_install_from_registry as _get_steam_install_root
@@ -402,6 +403,10 @@ def _resolve_gsi_sink_url() -> str:
 
 class RecordingAborted(Exception):
     """用户请求中止录制（中途退出批量/单次任务）。"""
+
+
+class CS2UnexpectedExitError(RuntimeError):
+    """Insight 管理的录制会话中，CS2 在清理阶段前自行退出。"""
 
 
 class _SpecVerifyAbort(Exception):
@@ -1968,6 +1973,13 @@ class OBSDirector:
         self._spec_parse_fallback_offset_by_demo: dict[str, int] = {}
         self._demo_steam_by_name_cache: dict[str, dict[str, str]] = {}
         self._abort_event = abort_event
+        self._cs2_exit_monitor_task: Optional[asyncio.Task] = None
+        self._cs2_exit_monitor_stop: Optional[asyncio.Event] = None
+        self._cs2_shutdown_expected = False
+        self._cs2_exited_unexpectedly = False
+        self._last_player_config_restore_result: Optional[dict[str, Any]] = None
+        self._player_config_restore_results: list[dict[str, Any]] = []
+        self._player_config_snapshot_attempted = False
         # 实验性 POV：在首次片段预热注入末尾追加强制 cvar
         self._pov_enabled = False
         # 启动 CS2 前对用户配置文件做的字节级快照：{Path: bytes | None}。
@@ -1984,6 +1996,8 @@ class OBSDirector:
         return self._abort_event is not None and self._abort_event.is_set()
 
     def _check_abort(self) -> None:
+        if self._cs2_exited_unexpectedly:
+            raise CS2UnexpectedExitError("CS2 exited unexpectedly during recording")
         if self._abort_requested():
             raise RecordingAborted()
 
@@ -1996,8 +2010,85 @@ class OBSDirector:
         deadline = time.monotonic() + float(seconds)
         while time.monotonic() < deadline:
             if self._abort_event.is_set():
-                raise RecordingAborted()
+                self._check_abort()
             await asyncio.sleep(min(step, deadline - time.monotonic()))
+
+    def _is_managed_cs2_alive(self) -> bool:
+        """Check both the launch handle and the real cs2.exe process/window."""
+        process_alive = False
+        process = self._cs2_process
+        if process is not None:
+            try:
+                process_alive = process.poll() is None
+            except Exception:  # noqa: BLE001 - a fake/launcher handle is non-authoritative
+                pass
+        if sys.platform == "win32":
+            # On Windows the Popen handle can belong to a short-lived Steam
+            # launcher, so cs2.exe/window discovery is the authoritative source.
+            return is_cs2_running()
+        return process_alive or is_cs2_running()
+
+    async def _monitor_cs2_exit(self, poll_interval: float = 0.5) -> None:
+        """Signal the recording abort path when a running managed CS2 disappears."""
+        seen_alive = False
+        stop_event = self._cs2_exit_monitor_stop
+        if stop_event is None:
+            return
+
+        try:
+            while not self._cs2_shutdown_expected and not stop_event.is_set():
+                # A user-requested Insight abort owns the shutdown from this point on;
+                # do not misclassify the following process termination as an external exit.
+                if self._abort_requested() and not self._cs2_exited_unexpectedly:
+                    return
+
+                alive = await asyncio.to_thread(self._is_managed_cs2_alive)
+                if alive:
+                    seen_alive = True
+                elif seen_alive and not self._cs2_shutdown_expected:
+                    self._cs2_exited_unexpectedly = True
+                    logger.error(
+                        "[RecordingV3] managed CS2 exited before Insight cleanup; "
+                        "stopping OBS and restoring player/POV files"
+                    )
+                    if self._abort_event is not None:
+                        self._abort_event.set()
+                    return
+
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=max(0.05, poll_interval))
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - monitoring must not crash recording
+            logger.warning("[RecordingV3] CS2 exit monitor failed: %s", exc)
+
+    async def _start_cs2_exit_monitor(self) -> None:
+        await self._stop_cs2_exit_monitor(expected=True)
+        self._cs2_shutdown_expected = False
+        self._cs2_exited_unexpectedly = False
+        self._cs2_exit_monitor_stop = asyncio.Event()
+        self._cs2_exit_monitor_task = asyncio.create_task(
+            self._monitor_cs2_exit(),
+            name="cs2-recording-exit-monitor",
+        )
+
+    async def _stop_cs2_exit_monitor(self, *, expected: bool) -> None:
+        if expected:
+            self._cs2_shutdown_expected = True
+        stop_event = self._cs2_exit_monitor_stop
+        if stop_event is not None:
+            stop_event.set()
+        task = self._cs2_exit_monitor_task
+        self._cs2_exit_monitor_task = None
+        self._cs2_exit_monitor_stop = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     def _safe_stop_obs_recording(self) -> None:
         if not self._ws:
@@ -2187,6 +2278,8 @@ class OBSDirector:
         csgo_dir = game_root / "csgo"
         dest_name = f"_insight_{uuid.uuid4().hex}.dem"
         dest = csgo_dir / dest_name
+        # The persistent compatibility preflight has already removed legacy
+        # type 138 and the terminal win-panel event from the source.
         shutil.copy2(demo_abs, dest)
         self._copied_demo = dest
 
@@ -2888,6 +2981,8 @@ class OBSDirector:
         """对用户 CS2 配置文件做字节级快照，存到 ``self._user_config_snapshot``。
         启动 CS2 之前调用；跳过我们自己写的 ``_insight_<uuid>.cfg``。"""
         snap: dict[Path, Optional[bytes]] = {}
+        self._player_config_snapshot_attempted = True
+        self._last_player_config_restore_result = None
 
         def add_path(p: Path, record_missing: bool) -> None:
             if p in snap:
@@ -2932,7 +3027,7 @@ class OBSDirector:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Persistent disk backup failed (in-memory still active): %s", e)
 
-    def _restore_user_configs(self) -> None:
+    def _restore_user_configs(self) -> dict[str, Any]:
         """强杀 CS2 后：若 ``recording_state`` 为 ``recording`` 则按 manifest 原子恢复；
         否则回退为内存快照对比（例如持久化备份未写入 state 的边缘情况）。"""
         snap = self._user_config_snapshot
@@ -2941,14 +3036,22 @@ class OBSDirector:
                 res = restore_latest_user_config_backup(skip_cs2_running_check=True)
                 if res.get("ok"):
                     self._user_config_snapshot = {}
-                    return
+                    return {**res, "source": "manifest"}
                 logger.warning("Manifest restore failed post-kill: %s", res)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Manifest restore raised: %s", e)
         if not snap:
             self._user_config_snapshot = {}
-            return
+            return {
+                "ok": True,
+                "verified": False,
+                "checked": 0,
+                "restored": 0,
+                "failed": [],
+                "source": "none",
+            }
         restored = 0
+        failed: list[dict[str, str]] = []
         for p, original in snap.items():
             try:
                 current_exists = p.is_file()
@@ -2960,6 +3063,7 @@ class OBSDirector:
                             restored += 1
                         except OSError as e:
                             logger.warning("Remove user config %s failed: %s", p, e)
+                            failed.append({"original": str(p), "error": str(e)})
                     continue
                 current = p.read_bytes() if current_exists else None
                 if current != original:
@@ -2968,9 +3072,91 @@ class OBSDirector:
                     restored += 1
             except OSError as e:
                 logger.warning("Restore user config %s failed: %s", p, e)
+                failed.append({"original": str(p), "error": str(e)})
+        checked = 0
+        failed_paths = {item.get("original") for item in failed}
+        for p, original in snap.items():
+            if str(p) in failed_paths:
+                continue
+            try:
+                if original is None:
+                    if p.exists():
+                        failed.append({
+                            "original": str(p),
+                            "error": "file that did not originally exist is still present",
+                        })
+                        continue
+                elif not p.is_file() or p.read_bytes() != original:
+                    failed.append({
+                        "original": str(p),
+                        "error": "restored content does not match the in-memory snapshot",
+                    })
+                    continue
+                checked += 1
+            except OSError as e:
+                failed.append({
+                    "original": str(p),
+                    "error": f"post-restore verification failed: {e}",
+                })
+
+        if not failed and is_restore_required():
+            try:
+                write_recording_state("recorded")
+            except OSError as e:
+                failed.append({
+                    "original": "",
+                    "error": f"could not finalize recovery state: {e}",
+                })
+
         if restored:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
+        return {
+            "ok": not failed,
+            "verified": not failed and checked == len(snap),
+            "checked": checked,
+            "restored": restored,
+            "failed": failed,
+            "source": "memory",
+        }
+
+    def _player_config_recovery_payload(self) -> dict[str, Any]:
+        reports = list(self._player_config_restore_results)
+        attempted = bool(reports or self._player_config_snapshot_attempted)
+        if not attempted:
+            state = "not_needed"
+        elif reports and all(
+            report.get("ok") is True and report.get("verified") is True
+            for report in reports
+        ) and not self._player_config_snapshot_attempted:
+            state = "restored"
+        elif any(report.get("ok") is False or report.get("failed") for report in reports):
+            state = "failed"
+        else:
+            state = "unverified"
+
+        failed = [
+            failure
+            for report in reports
+            for failure in list(report.get("failed") or [])
+        ]
+        checked = sum(int(report.get("checked") or 0) for report in reports)
+        restored_files = sum(int(report.get("restored") or 0) for report in reports)
+        sources = sorted({
+            str(report.get("source") or "")
+            for report in reports
+            if str(report.get("source") or "")
+        })
+        return {
+            "player_config_restore_state": state,
+            "player_config_restore_attempted": attempted,
+            "player_config_restore_verified": state in {"restored", "not_needed"},
+            "player_config_restored": state in {"restored", "not_needed"},
+            "player_config_checked_files": checked,
+            "player_config_restored_files": restored_files,
+            "player_config_restore_sources": sources,
+            "player_config_restore_failures": failed,
+        }
 
     def _voice_ban_paths(self) -> list[Path]:
         """返回所有 Steam 账号的 ``userdata/<id>/730/voice_ban.dt`` 路径。"""
@@ -3077,6 +3263,9 @@ class OBSDirector:
         等窗口彻底消失后调用 ``_restore_user_configs``，把录制期可能被 CS2
         auto-save 到用户 config 文件里的脏 archive cvar 全部回滚回录制前的样子。
         """
+        # Set this before the first taskkill call so the parallel process monitor
+        # never classifies an Insight-owned teardown as a player-forced exit.
+        self._cs2_shutdown_expected = True
         pid = self._cs2_process.pid if self._cs2_process else 0
         if sys.platform == "win32":
             if pid:
@@ -3132,9 +3321,26 @@ class OBSDirector:
         # CS2 进程已结束，文件锁已释放。此时回滚用户配置，确保我们的 archive cvar
         # 修改不会泄漏到用户下一次启动（包括 5E / 竞技服的正式对局）。
         try:
-            self._restore_user_configs()
+            restore_result = self._restore_user_configs()
+            self._last_player_config_restore_result = restore_result
+            if self._player_config_snapshot_attempted:
+                self._player_config_restore_results.append(dict(restore_result))
+                self._player_config_snapshot_attempted = False
         except Exception as e:  # noqa: BLE001
             logger.warning("Restore user configs after kill failed: %s", e)
+            self._last_player_config_restore_result = {
+                "ok": False,
+                "verified": False,
+                "checked": 0,
+                "restored": 0,
+                "failed": [{"original": "", "error": str(e)}],
+                "source": "exception",
+            }
+            if self._player_config_snapshot_attempted:
+                self._player_config_restore_results.append(
+                    dict(self._last_player_config_restore_result)
+                )
+                self._player_config_snapshot_attempted = False
 
     async def _await_cs2_window(self, timeout: float = 45.0) -> bool:
         """录制前等待 CS2 主窗口出现（便于后续 SendInput 注入 demo_gototick）。"""
@@ -3451,6 +3657,7 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
+        pov_restore_ok: Optional[bool] = None
 
         try:
             # ── Phase 0: 预构建 plan + 提取 overlay 轨道（CS2 启动前完成，避免进游戏后卡顿）────
@@ -3624,11 +3831,7 @@ class OBSDirector:
                     logger.error("[RecordingV3][POV] install failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
 
-            batch_aborted = False
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
-                if batch_aborted:
-                    break
-
                 demo_abs = demo_abs_map[demo_key]
                 demo_name = demo_abs.name
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
@@ -3652,12 +3855,15 @@ class OBSDirector:
                     await self._run_cleanup_step("CS2 artifact cleanup", self._cleanup_cs2_artifacts, timeout=8.0)
                     continue
 
+                await self._start_cs2_exit_monitor()
+
                 # ── Wait for GSI ready ────────────────────────────────────────
                 try:
                     self._set_state(DirectorState.LOADING_DEMO, str(demo_abs))
                     await self._await_gsi_startup_gate()
                     await self._sleep_abortable(8.0)
                     await self._await_cs2_window(40.0)
+                    self._check_abort()
                     if job_idx > 0:
                         settle = self._env_float("CS2_INSIGHT_BATCH_NEW_DEMO_SETTLE_SEC", "9.0")
                         if settle > 0:
@@ -3719,6 +3925,8 @@ class OBSDirector:
                     except Exception as _wce:
                         logger.warning("[RecordingV3] demo key bindings inject failed: %s", _wce)
 
+                self._check_abort()
+
                 if _voice_mode in ("mute", "team", "enemy") and not _warmup_inject_ok:
                     error = "voice isolation warmup injection failed; recording aborted fail-closed"
                     logger.error("[RecordingV3] %s", error)
@@ -3770,14 +3978,7 @@ class OBSDirector:
                     post_spec_console_lines=post_spec_lines,
                 )
                 for dto in demo_requests:
-                    if self._abort_requested():
-                        logger.info("[RecordingV3] Abort requested, skipping remaining requests")
-                        batch_aborted = True
-                        all_results.append({
-                            "request_id": dto.request_id, "success": False,
-                            "error": "aborted", "segment_results": [], "warnings": [],
-                        })
-                        continue
+                    self._check_abort()
 
                     # 优先使用预构建的 plan（已含 kb_track 数据），避免重复 build_plan
                     plan = _plan_cache.get(dto.request_id)
@@ -3812,6 +4013,9 @@ class OBSDirector:
                     _pre_execute_wall = time.time()
                     try:
                         result = await executor.execute(plan)
+                        self._check_abort()
+                    except (CS2UnexpectedExitError, RecordingAborted):
+                        raise
                     except Exception as e:
                         logger.error("[RecordingV3] executor error: %s", e)
                         all_results.append({
@@ -3837,83 +4041,12 @@ class OBSDirector:
                         resolved_path = Path(result.output_path)
                         rename_status = "from_executor"
                     else:
-                        # Fallback: scan the OBS record directory for the newest video
-                        # written since recording started.
-                        # Use obs_record_directory from executor (fetched via GetRecordDirectory
-                        # on the live V3 OBSClient).
-                        _obs_dir: Optional[Path] = None
-                        if result.obs_record_directory:
-                            _obs_dir = Path(result.obs_record_directory)
-                        if _obs_dir and _obs_dir.is_dir():
-                            logger.info(
-                                "[RecordingV3] scanning OBS dir for output (started_at=%.1f, stopped_at=%s): %s",
-                                _started_at,
-                                f"{_stopped_at:.1f}" if _stopped_at else "N/A",
-                                _obs_dir,
-                            )
-                            # Give OBS up to 6s to close/finalize the output file.
-                            _cutoff = _started_at - 3.0
-                            for _scan_attempt in range(6):
-                                _candidates: list[tuple[float, Path]] = []
-                                try:
-                                    for _p in _obs_dir.iterdir():
-                                        if not _p.is_file() or _p.suffix.lower() not in _RECORDING_VIDEO_EXTENSIONS:
-                                            continue
-                                        try:
-                                            _st = _p.stat()
-                                        except OSError:
-                                            continue
-                                        if _st.st_mtime >= _cutoff:
-                                            _candidates.append((_st.st_mtime, _p))
-                                except OSError as _scan_e:
-                                    logger.warning("[RecordingV3] dir scan error: %s", _scan_e)
-                                    break
-
-                                if _candidates:
-                                    _candidates.sort(key=lambda x: x[0], reverse=True)
-                                    _candidate = _candidates[0][1]
-                                    # Wait for file size to stabilize (OBS finalizing).
-                                    try:
-                                        _sz1 = _candidate.stat().st_size
-                                        await asyncio.sleep(1.5)
-                                        _sz2 = _candidate.stat().st_size
-                                    except OSError:
-                                        _sz1, _sz2 = -1, -2  # force retry
-                                    if _sz1 == _sz2 and _sz2 > 0:
-                                        resolved_path = _candidate
-                                        logger.info(
-                                            "[RecordingV3] resolved output via scan (attempt %d): %s (size=%d)",
-                                            _scan_attempt + 1, resolved_path, _sz2,
-                                        )
-                                        break
-                                    else:
-                                        logger.debug(
-                                            "[RecordingV3] file still growing (sz %d→%d), retry %d",
-                                            _sz1, _sz2, _scan_attempt + 1,
-                                        )
-                                else:
-                                    logger.debug("[RecordingV3] scan attempt %d: no candidates yet", _scan_attempt + 1)
-
-                                await asyncio.sleep(1.0)
-
-                            if resolved_path:
-                                rename_status = "from_scan"
-                            else:
-                                logger.warning(
-                                    "[RecordingV3] scan found nothing in %s "
-                                    "(cutoff=%.1f, %d candidate dir(s))",
-                                    _obs_dir, _cutoff,
-                                    len(_candidates) if "_candidates" in dir() else 0,
-                                )
-                                rename_status = "not_found"
-                        else:
-                            logger.warning(
-                                "[RecordingV3] OBS record directory not available; "
-                                "obs_record_directory=%r, legacy fallback=%r",
-                                result.obs_record_directory, _obs_dir,
-                            )
-                            rename_status = "not_found"
-
+                        logger.error(
+                            "[RecordingV3] OBS did not return the output path; refusing to guess "
+                            "which file belongs to request_id=%s",
+                            dto.request_id,
+                        )
+                        rename_status = "output_path_missing"
                     if resolved_path:
                         rename_meta = await self._rename_recording_output(
                             resolved_path, _clip_dict, demo_abs, _player,
@@ -3990,7 +4123,27 @@ class OBSDirector:
                 # _kill_cs2 calls _restore_user_configs internally.
                 await self._run_cleanup_step("CS2 shutdown after plan queue job", self._kill_cs2, timeout=30.0)
                 await self._run_cleanup_step("CS2 artifact cleanup after plan queue job", self._cleanup_cs2_artifacts, timeout=8.0)
+                await self._stop_cs2_exit_monitor(expected=True)
 
+        except CS2UnexpectedExitError:
+            logger.warning("[RecordingV3] CS2 exited unexpectedly; entering recovery cleanup")
+            self._set_state(DirectorState.STOPPING, "cs2_exited_unexpectedly")
+            completed_request_ids = {
+                str(item.get("request_id"))
+                for item in all_results
+                if item.get("request_id") is not None
+            }
+            for dto in requests:
+                if str(dto.request_id) in completed_request_ids:
+                    continue
+                all_results.append({
+                    "request_id": dto.request_id,
+                    "success": False,
+                    "error": "cs2_exited_unexpectedly",
+                    "error_code": "RECORDING_CS2_EXITED",
+                    "segment_results": [],
+                    "warnings": [],
+                })
         except RecordingAborted:
             logger.info("[RecordingV3] queue aborted by user; entering final cleanup")
             self._set_state(DirectorState.STOPPING, "aborted")
@@ -4015,6 +4168,7 @@ class OBSDirector:
             self._set_state(DirectorState.ERROR, str(e))
             raise
         finally:
+            await self._stop_cs2_exit_monitor(expected=True)
             # Force-stop OBS via a fresh connection in case the hot client's recv
             # thread is dead or StartRecord/ResumeRecord left OBS in an unknown state.
             from .recording.executor.obs_recording_controller import OBSRecordingController
@@ -4044,11 +4198,28 @@ class OBSDirector:
             if pov_mgr_v3 is not None:
                 try:
                     logger.info("[RecordingV3][POV] restore gameinfo.gi")
-                    pov_mgr_v3.restore()
+                    verification = pov_mgr_v3.restore()
+                    pov_restore_ok = bool(verification.get("verified"))
                 except Exception as _pov_restore_e:
                     logger.error("[RecordingV3][POV] restore failed: %s", _pov_restore_e)
+                    try:
+                        pov_restore_ok = not bool(pov_mgr_v3.status().get("needs_restore"))
+                    except Exception:
+                        pov_restore_ok = False
             self._pov_enabled = False
             self._set_state(DirectorState.COMPLETED)
+
+            recovery = {
+                **self._player_config_recovery_payload(),
+                "pov_enabled": pov_on_v3,
+                "pov_restore_verified": (pov_restore_ok is not None) if pov_on_v3 else True,
+                "pov_restored": bool(pov_restore_ok) if pov_on_v3 else True,
+            }
+            # Recovery belongs to the whole managed recording session, not only
+            # to unexpected-exit failures. Return the same verified summary with
+            # every item so success and ordinary failure UIs can report reality.
+            for item in all_results:
+                item["recovery"] = dict(recovery)
 
         logger.info("[RecordingV3] execute_plan_queue done: %d results", len(all_results))
         return all_results

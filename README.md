@@ -113,9 +113,19 @@
 
 前往 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载最新的 `CS2-Insight-Agent-Setup-x.x.x.exe`，双击运行安装包，按提示完成安装。
 
-安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**，Electron 主进程会自动在内部启动 Python 后端服务。
+安装完成后从桌面或开始菜单启动程序，**无需打开浏览器，无需手动启动后端**。轻量 Tauri 桌面壳会自动启动内嵌 Python 后端，并使用 Windows 系统 WebView2 显示界面。
 
-程序内置**在线更新**功能：启动时会自动检测是否有新版本，有更新时右上角会弹出提示，点击即可在程序内完成下载和安装，无需手动重新下载安装包。
+源码开发需先安装 `uv 0.11.x`，然后运行
+`.\packaging\demoparser-lean\setup-backend-dev.ps1`。脚本会依据仓库根目录的
+`uv.lock` 创建 Python 3.12 环境并安装经过哈希锁定的依赖。项目的高速 2D
+回放使用 PyO3 编译的定制 `demoparser2` Rust 扩展；后端会在启动阶段验证
+所需 Rust 接口，不会使用 PyPI 原版解析器静默降级。
+
+依赖边界保持独立：Python 后端使用 `uv`/`uv.lock`，前端与 Tauri JS
+工具链使用 `pnpm`/`pnpm-lock.yaml`，Rust 桌面壳使用 `cargo`/`Cargo.lock`；
+OBS 与 FFmpeg 仍由各自的运行时集成管理。
+
+当前不运行后台自动更新器；需要升级时，请直接从 [Releases 页面](https://github.com/DrEAmSs59/CS2-insight-agent/releases) 下载新版安装包。
 
 > **建议安装路径不含中文字符。** 例如 `D:\CS2-Insight-Agent\` ✅，`D:\游戏工具\CS2-Insight-Agent\` ❌
 
@@ -128,7 +138,7 @@
    - [X] AI 锐评
    - [X] 全自动导播
 - **V2**
-   - [X] Electron 桌面端、程序内在线更新
+   - [X] Tauri 轻量桌面端
    - [X] 合辑工作台（FFmpeg 导出）
    - [X] POV HUD 实验性功能
    - [X] 回合时间线浏览与入队录制

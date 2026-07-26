@@ -91,6 +91,18 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     assert item["uploaded_path"] == item["path"]
 
 
+def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
+    dest = tmp_path / "existing.dem"
+    dest.write_bytes(b"old-content-that-must-be-replaced")
+    upload = main.UploadFile(filename="existing.dem", file=io.BytesIO(b"new-demo-bytes"))
+
+    digest = main._save_uploaded_demo(upload, dest)
+
+    assert dest.read_bytes() == b"new-demo-bytes"
+    assert digest == hashlib.md5(b"new-demo-bytes").hexdigest()
+    assert not any(tmp_path.glob(".existing.dem.*.partial"))
+
+
 def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: Path):
     original = tmp_path / "manual.dem"
     original.write_bytes(b"manual-demo")

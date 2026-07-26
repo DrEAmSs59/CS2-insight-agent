@@ -12,7 +12,7 @@ import {
 } from "./liteCut/recoveryUtils.js";
 
 const SESSION_PROJECT_KEY = "liteCut:projectId";
-let activeSavePromise = null;
+const activeSavePromises = new Map();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -41,8 +41,6 @@ function recoveryCandidateForProject(data, normalizedBody) {
   }
   return { ...draft, body: normalizeLiteCutBody(draft.body).body };
 }
-
-export { mapRecordedClipRow } from "./liteCut/mediaUtils.js";
 
 export function normalizeLiteCutBody(rawBody) {
   const body = rawBody && typeof rawBody === "object" ? structuredClone(rawBody) : {};
@@ -256,11 +254,14 @@ export const useLiteCutEditorStore = create((set, get) => ({
   },
 
   saveProject: async () => {
-    if (activeSavePromise) return activeSavePromise;
-    activeSavePromise = (async () => {
+    const saveProjectId = Number(get().projectId);
+    if (!Number.isFinite(saveProjectId) || saveProjectId <= 0) return { ok: false };
+    if (activeSavePromises.has(saveProjectId)) return activeSavePromises.get(saveProjectId);
+    const savePromise = (async () => {
       for (let pass = 0; pass < 4; pass += 1) {
         const snapshot = get();
         const { projectId, projectName, body } = snapshot;
+        if (Number(projectId) !== saveProjectId) return { ok: true };
         if (!projectId || !body) return { ok: false };
         if (!snapshot.dirty && pass === 0) return { ok: true };
         set({ saving: true, error: null });
@@ -303,9 +304,12 @@ export const useLiteCutEditorStore = create((set, get) => ({
       set({ saving: false, dirty: true, error: "save_busy" });
       return { ok: false };
     })().finally(() => {
-      activeSavePromise = null;
+      if (activeSavePromises.get(saveProjectId) === savePromise) {
+        activeSavePromises.delete(saveProjectId);
+      }
     });
-    return activeSavePromise;
+    activeSavePromises.set(saveProjectId, savePromise);
+    return savePromise;
   },
 
   openProject: async (projectId) => {

@@ -1,0 +1,75 @@
+name: Publish patched demoparser wheel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/publish-demoparser-wheel.yml"
+      - "packaging/demoparser-lean/build-wheel.ps1"
+      - "packaging/demoparser-lean/demoparser-runtime.json"
+      - "packaging/demoparser-lean/demoparser2-v0.41.4.patch"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-cp312:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build patched wheel
+        shell: pwsh
+        run: ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe python -OutputDir "dist/wheels"
+
+      - name: Verify wheel and write checksum
+        id: runtime
+        shell: pwsh
+        run: |
+          $meta = Get-Content "packaging/demoparser-lean/demoparser-runtime.json" -Raw | ConvertFrom-Json
+          $wheel = Get-ChildItem "dist/wheels/demoparser2-$($meta.distribution_version)-cp312-cp312-win_amd64.whl" |
+            Select-Object -First 1
+          if (-not $wheel) { throw "Expected patched demoparser wheel was not produced" }
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, importlib.util as u; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert all(u.find_spec(name) is None for name in ('numpy', 'pandas', 'polars', 'pyarrow'))"
+          if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
+          $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText(
+            (Join-Path $wheel.DirectoryName ([string]$meta.checksum_asset)),
+            "$hash  $($wheel.Name)`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+          "release_tag=$($meta.release_tag)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "distribution_version=$($meta.distribution_version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish pinned runtime assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.runtime.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: demoparser2 ${{ steps.runtime.outputs.distribution_version }} runtime
+          prerelease: true
+          make_latest: false
+          overwrite_files: false
+          body: |
+            Patched CPython 3.12 x64 runtime used by CS2 Insight Agent.
+
+            The accompanying SHA256 file is verified by
+            `packaging/demoparser-lean/setup-backend-dev.ps1` before installation.
+          files: |
+            dist/wheels/demoparser2-*.whl
+            dist/wheels/demoparser2-SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

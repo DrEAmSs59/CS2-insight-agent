@@ -5,7 +5,7 @@ from ..platform_utils import (
     compute_voice_listen_mask_enemy,
     platform_slot_offset,
 )
-from .final_round_guard import apply_final_round_guard
+from .demo_end_guard import apply_demo_end_guard
 
 
 def sec_to_ticks(sec: float, tick_rate: float) -> int:
@@ -35,8 +35,8 @@ def postprocess_segments(
             "end_tick": end_tick,
         })
 
-        # Step 2: Apply FinalRoundGuard (returns tuple[segment, warnings])
-        segment, guard_warnings = apply_final_round_guard(segment, req)
+        # Step 2: Stop before actual demo EOF so CS2 cannot return to the menu.
+        segment, guard_warnings = apply_demo_end_guard(segment, req)
         warnings.extend(guard_warnings)
 
         # Voice identity follows the actual POV target of this final segment.

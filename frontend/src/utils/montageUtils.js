@@ -44,7 +44,7 @@ export const MONTAGE_THEMES = [
   },
 ];
 
-/** Return a resolved-name list suitable for MontageThemeSelector. */
+/** Return resolved theme names for montage UI consumers. */
 export function getThemesForSelector(t) {
   return MONTAGE_THEMES.map((th) => ({
     id: th.id,

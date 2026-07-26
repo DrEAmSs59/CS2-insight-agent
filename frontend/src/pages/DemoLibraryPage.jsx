@@ -13,14 +13,16 @@ import DemoPagination from "../components/demoLibrary/DemoPagination";
 import MatchCard, { MatchListRow } from "../components/MatchCard";
 import DemoInfoModal from "../components/DemoInfoModal";
 import IngestModal from "../components/IngestModal";
+import Modal from "../components/ui/Modal";
+import Button from "../components/ui/Button";
 import {
   applyClientSideDemoFilters,
   filterByPathAndTags,
   sortDemoRows,
 } from "../utils/demoLibraryDisplay";
-import { usePlayDemoToast } from "../hooks/usePlayDemoToast.jsx";
-import { playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
+import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
 import { useT } from "../i18n/useT.js";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -53,7 +55,8 @@ export default function DemoLibraryPage() {
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
   const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
-  const { showPlayToast, PlayDemoToast } = usePlayDemoToast();
+  const [batchDeleteCount, setBatchDeleteCount] = useState(0);
+  const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
 
   const queuedClientClipUids = useMemo(
     () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
@@ -84,16 +87,11 @@ export default function DemoLibraryPage() {
     }
   }, [s]);
 
-  const handleCardPlay = useCallback(async (demoId) => {
+  const handleCardPlay = useCallback((demoId) => {
     const item = s.demoLibraryItems.find((it) => it.id === demoId);
     const label = (item?.display_name && String(item.display_name).trim()) || item?.filename || `#${demoId}`;
-    try {
-      await playDemoInCs2({ id: demoId });
-      showPlayToast(true, label);
-    } catch (e) {
-      showPlayToast(false, playDemoErrorLabel(e));
-    }
-  }, [s, showPlayToast]);
+    void requestPlayDemo({ id: demoId, label });
+  }, [requestPlayDemo, s.demoLibraryItems]);
 
   const handleOpenFile = useCallback(
     async (demoId) => {
@@ -204,13 +202,19 @@ export default function DemoLibraryPage() {
   const handleBatchDelete = useCallback(() => {
     const ids = Array.from(s.selectedLibraryDemoIds);
     if (!ids.length) return;
-    if (
-      !window.confirm(t("library.batchDeleteConfirm", { count: ids.length }))
-    ) {
-      return;
-    }
+    setBatchDeleteCount(ids.length);
+  }, [s]);
+
+  const closeBatchDeleteConfirm = useCallback(() => {
+    setBatchDeleteCount(0);
+  }, []);
+
+  const confirmBatchDelete = useCallback(() => {
+    const ids = Array.from(s.selectedLibraryDemoIds);
+    setBatchDeleteCount(0);
+    if (!ids.length) return;
     void s.handleLibraryBatchDelete(ids);
-  }, [s, t]);
+  }, [s]);
 
   const onPageChange = useCallback(
     (page) => {
@@ -240,12 +244,18 @@ export default function DemoLibraryPage() {
     [s]
   );
 
+  const handleOpenLocalDemo = useCallback(async () => {
+    const paths = await desktopBridge?.chooseDemoFiles?.();
+    if (paths?.length) await s.handleUpload(paths);
+  }, [s]);
+
   return (
     <PageContainer className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
-        onScan={() => void s.handleScanDemos()}
+        onScan={s.handleScanDemos}
         onOpenIngest={() => setIngestModalOpen(true)}
+        onOpenLocalDemo={handleOpenLocalDemo}
         libraryLoading={s.libraryLoading}
         libraryScanning={s.libraryScanning}
         pageSelectableCount={filteredRows.length}
@@ -354,6 +364,30 @@ export default function DemoLibraryPage() {
         onClearSelection={s.clearLibrarySelection}
       />
 
+      <Modal
+        open={batchDeleteCount > 0}
+        onClose={closeBatchDeleteConfirm}
+        title={t("library.batchDelete")}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        zIndex={110}
+        className="!h-auto"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={closeBatchDeleteConfirm}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmBatchDelete}>
+              {t("common.confirm")}
+            </Button>
+          </div>
+        )}
+      >
+        <p className="px-5 py-4 text-[12px] leading-relaxed text-cs2-text-secondary">
+          {t("library.batchDeleteConfirm", { count: batchDeleteCount })}
+        </p>
+      </Modal>
+
       {s.libraryDeletePrompt ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-page/85 px-4"
@@ -430,11 +464,18 @@ export default function DemoLibraryPage() {
         open={watchPathsModalOpen}
         onClose={() => setWatchPathsModalOpen(false)}
         demoWatchPaths={s.demoWatchPaths}
+        demoWatchScanDepth={s.demoWatchScanDepth}
         onDemoWatchPathsChange={s.setDemoWatchPaths}
+        onDemoWatchScanDepthChange={s.setDemoWatchScanDepth}
         onSaveConfig={s.handleSaveConfig}
+        onScan={s.handleScanDemos}
+        onOpenIngest={() => {
+          setWatchPathsModalOpen(false);
+          setIngestModalOpen(true);
+        }}
       />
 
-      <PlayDemoToast />
+      <DemoPlaybackUi />
 
       {s.libraryRename ? (
         <div
@@ -499,7 +540,6 @@ export default function DemoLibraryPage() {
         isOpen={ingestModalOpen}
         onClose={() => setIngestModalOpen(false)}
         onIngest={handleBatchIngest}
-        onUpload={s.handleUpload}
       />
     </PageContainer>
   );

@@ -9,11 +9,9 @@ import {
   clipTrimmedSourceDuration,
   clipTimelineEnd,
   audioTracks,
-  findClipById,
   getTrack,
   sortClips,
   trackMainVideoClips,
-  v1Clips,
   videoTracks,
 } from "./timelineUtils.js";
 import { clipVolumeAtLocal } from "./audioKeyframeUtils.js";
@@ -135,57 +133,6 @@ export function resolveVideoUnderlayPlaybacksAt(body, timelineSec, topPlayback) 
     }
   }
   return layers;
-}
-
-/** Resolve which V1 clip is active at global timeline time. */
-export function resolveV1PlaybackAt(body, timelineSec) {
-  const clips = v1Clips(body);
-  if (!clips.length) return null;
-
-  const t = Math.max(0, timelineSec);
-  for (const clip of clips) {
-    const start = Number(clip.timeline_start) || 0;
-    const end = clipTimelineEnd(clip);
-    if (t >= start && t < end - 1e-4) {
-      const local = t - start;
-      const trimIn = Number(clip.trim_in) || 0;
-      const sourceDur = clipTrimmedSourceDuration(clip);
-      const sourceOffset = Math.max(0, Math.min(sourceDur, clipSourceTimeForTimeline(clip, local) - trimIn));
-      return {
-        clip,
-        sourceTime: clipReversePlayback(clip) ? trimIn + Math.max(0, sourceDur - sourceOffset) : trimIn + sourceOffset,
-        localTime: local,
-        clipStart: start,
-        clipEnd: end,
-      };
-    }
-  }
-
-  const last = clips[clips.length - 1];
-  const end = clipTimelineEnd(last);
-  if (t >= end - 1e-4) {
-    const sourceDur = clipTrimmedSourceDuration(last);
-    const timelineDur = clipSourceDuration(last);
-    const trimIn = Number(last.trim_in) || 0;
-    return {
-      clip: last,
-      sourceTime: clipReversePlayback(last) ? trimIn + 0.05 : trimIn + sourceDur - 0.05,
-      localTime: timelineDur - 0.05,
-      clipStart: last.timeline_start,
-      clipEnd: end,
-      atEnd: true,
-    };
-  }
-  return null;
-}
-
-export function nextClipAfter(body, currentClipId) {
-  const found = findClipById(body, currentClipId);
-  const trackId = found.trackId;
-  const clips = sortClips(getTrack(body, trackId)?.clips);
-  const idx = clips.findIndex((c) => c.id === currentClipId);
-  if (idx < 0 || idx >= clips.length - 1) return null;
-  return clips[idx + 1];
 }
 
 export function resolveIncomingTransitionPlayback(body, playback) {

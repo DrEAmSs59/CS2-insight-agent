@@ -23,12 +23,8 @@ export const DEFAULT_RECORDING_OPTIONS = {
   enable_fail_killer_pov: false,
   fail_killer_pre_sec: 3.0,
   fail_killer_post_sec: 2.0,
-  final_round_guard_sec: 4.0,
-  final_round_seek_guard_sec: 2.0,
-  final_round_min_duration_sec: 0.8,
-  final_round_demo_exit_guard_sec: 1.5,
-  final_round_extra_post_sec: 1.0,
-  final_round_win_panel_guard_sec: 2.0,
+  demo_end_guard_sec: 1.5,
+  final_round_extra_post_sec: 2.0,
   obs_transition_enabled: null,
   obs_transition_name: null,
   obs_transition_duration_ms: null,
@@ -72,8 +68,9 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
   // clip_max_tick is safe-per-round upper bound; use as final_round_end_tick when on final round
   const finalRoundEndTick = finalRound > 0 && clipRound === finalRound ? clipMaxTick : 0;
 
-  // demo_end_tick: use clip_max_tick as best available proxy (no true demo_end_tick in MatchMeta)
-  const demoEndTick = clipMaxTick || Number(clipData.end_tick) || 0;
+  // New analyses expose the real PBDEMS2 EOF. Keep the clip-derived fallback
+  // for old saved analyses created before demo_end_tick was added to MatchMeta.
+  const demoEndTick = Number(matchMeta?.demo_end_tick) || clipMaxTick || Number(clipData.end_tick) || 0;
 
   return {
     demo_path: queueItem.demoPath || "",
@@ -87,7 +84,6 @@ function buildDemoContext(clipData, queueItem, matchMeta) {
     final_round_end_tick: finalRoundEndTick,
     server_name: matchMeta?.server_name || "",
     all_players: matchMeta?.all_players || [],
-    win_panel_match_tick: Number(matchMeta?.win_panel_match_tick) || 0,
   };
 }
 
@@ -366,23 +362,26 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
 export function buildRoundCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
   const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
 
-  // demo_end_tick: use the max round_end_tick across selected windows so the backend
-  // planner can end at the actual round boundary. clip_max_tick is the frontend's
-  // crossRoundCap which can land inside a technical timeout, causing extra footage.
+  // Old saved analyses may not have the real PBDEMS2 EOF. In that fallback case,
+  // derive enough headroom from the selected round windows. A real matchMeta EOF
+  // is authoritative and must never be enlarged by a derived round boundary.
   const filter = clipData.freeze_to_death_round_filter;
   const filterSet =
     Array.isArray(filter) && filter.length > 0 ? new Set(filter.map(Number)) : null;
   // demo_end_tick must give the backend headroom for the final round's tail:
   //  - death window: end_tick is death+2s, round_end_tick is the real (later) round end
   //  - alive window: end_tick ≈ real demo end (freeze+150s capped to demo_max)
-  // Take the larger of the two per window so an alive final round can linger 1s past
+  // Take the larger of the two per window so an alive final round can linger 2s past
   // round_end into the post-round. Falls back gracefully when round_end_tick is absent.
   const maxRoundEndTick = (clipData.freeze_to_death_round_windows || [])
     .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
     .reduce((mx, w) => Math.max(mx, Number(w.round_end_tick) || 0, Number(w.end_tick) || 0), 0);
 
   const baseDemo = buildDemoContext(clipData, queueItem, matchMeta);
-  const demo = maxRoundEndTick > 0 ? { ...baseDemo, demo_end_tick: maxRoundEndTick } : baseDemo;
+  const hasRealDemoEndTick = Number(matchMeta?.demo_end_tick) > 0;
+  const demo = !hasRealDemoEndTick && maxRoundEndTick > 0
+    ? { ...baseDemo, demo_end_tick: Math.max(baseDemo.demo_end_tick, maxRoundEndTick) }
+    : baseDemo;
 
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);

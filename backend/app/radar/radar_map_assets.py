@@ -2,13 +2,13 @@
 
 数据来源与更新方式：与历史上 ``python -m awpy get maps`` 写入 ``~/.awpy/maps`` 的文件一致；
 可使用 ``backend/scripts/vendor_bundled_radar_maps.py`` 从本机该目录同步到仓库。
+``de_cache`` 则来自本机 CS2 ``pak01`` 的官方 overhead texture 和 overview 标定。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,6 @@ def bundled_radar_maps_dir() -> Path:
     return _backend_dir() / "assets" / "bundled_radar_maps"
 
 
-@lru_cache(maxsize=1)
 def _loaded_map_data() -> dict[str, dict]:
     path = bundled_radar_maps_dir() / "map-data.json"
     if not path.is_file():
@@ -59,15 +58,19 @@ def lookup_map_data(map_key: str) -> dict:
     )
 
 
-def resolve_map_png_path(map_key: str) -> Path:
-    """Resolve vendored radar PNG path (``{{map}}.png`` or ``{{map}}_radar.png``)."""
+def resolve_map_png_path(map_key: str, *, layer: str | None = None) -> Path:
+    """Resolve a vendored radar PNG, including lower-floor variants."""
     root = bundled_radar_maps_dir()
     mk = map_key.strip()
+    normalized_layer = str(layer or "upper").strip().lower()
+    if normalized_layer not in {"upper", "lower"}:
+        raise ValueError(f"Unsupported radar layer: {layer!r}")
+    suffix = "_lower" if normalized_layer == "lower" else ""
     candidates = [
-        root / f"{mk}.png",
-        root / f"{mk.lower()}.png",
-        root / f"{mk}_radar.png",
-        root / f"{mk.lower()}_radar.png",
+        root / f"{mk}{suffix}.png",
+        root / f"{mk.lower()}{suffix}.png",
+        root / f"{mk}{suffix}_radar.png",
+        root / f"{mk.lower()}{suffix}_radar.png",
     ]
     seen: set[Path] = set()
     for c in candidates:
@@ -76,7 +79,9 @@ def resolve_map_png_path(map_key: str) -> Path:
         seen.add(c)
         if c.is_file():
             return c
-    raise FileNotFoundError(f"No bundled radar PNG for {map_key!r} under {root}")
+    raise FileNotFoundError(
+        f"No bundled {normalized_layer} radar PNG for {map_key!r} under {root}"
+    )
 
 
 def warn_if_bundle_incomplete() -> None:

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock
 
-import pandas as pd
+from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -99,7 +99,9 @@ def test_round_economy_recovers_all_players_without_an_extra_parse():
 
     parser.parse_ticks.assert_called_once_with(
         PLAYER_TEAM_PARSE_FIELDS + [
-            "current_equip_value", "is_alive", "name", "steamid", "user_id",
+            "current_equip_value", "cash_spent_this_round", "start_balance",
+            "armor", "has_helmet", "has_defuser", "inventory",
+            "is_alive", "name", "steamid", "user_id",
         ],
         ticks=[100, 200],
     )

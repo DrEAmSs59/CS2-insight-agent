@@ -2,7 +2,7 @@ import inspect
 import sys
 from pathlib import Path
 
-import pandas as pd
+from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -184,6 +184,100 @@ def test_nonempty_but_unusable_precomputed_frames_retry_legacy_paths():
     ]
 
 
+def test_shared_event_groups_use_one_native_batch(monkeypatch):
+    batch_calls = []
+
+    def fake_batch(_parser, event_names, *, player=None, other=None):
+        batch_calls.append((event_names, player, other))
+        frames = {name: pd.DataFrame() for name in event_names}
+        frames["round_end"] = pd.DataFrame(
+            [{"tick": 200, "total_rounds_played": 1, "winner": "T"}]
+        )
+        frames["round_freeze_end"] = pd.DataFrame(
+            [{"tick": 150, "total_rounds_played": 0}]
+        )
+        frames["round_start"] = pd.DataFrame([{"tick": 120}])
+        frames["round_announce_match_start"] = pd.DataFrame([{"tick": 100}])
+        return frames
+
+    class Parser:
+        def __init__(self):
+            self.event_calls = []
+
+        def parse_event(self, event_name, **_kwargs):
+            self.event_calls.append(event_name)
+            if event_name in ("player_death", "player_blind"):
+                return pd.DataFrame()
+            raise AssertionError(event_name)
+
+        def parse_player_info(self):
+            return pd.DataFrame()
+
+    monkeypatch.setattr(analyzer_module, "safe_parse_events_batch", fake_batch)
+    monkeypatch.setattr(
+        analyzer_module,
+        "build_round_economy_shared",
+        lambda *_args, **_kwargs: ({}, {}, {}, {}, pd.DataFrame()),
+    )
+    monkeypatch.setattr(
+        analyzer_module,
+        "build_steam_to_team_from_player_info",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        analyzer_module,
+        "build_name_to_team_from_player_info",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        analyzer_module,
+        "build_group_side_by_round",
+        lambda *_args, **_kwargs: {},
+    )
+
+    analyzer = object.__new__(DemoAnalyzer)
+    analyzer.dem_path = Path("fixture.dem")
+    analyzer.parser = Parser()
+
+    shared = analyzer._parse_shared_events(match_start_tick=100)
+
+    assert len(batch_calls) == 1
+    assert batch_calls[0][0] == list(analyzer_module._SHARED_BATCH_EVENT_NAMES)
+    assert batch_calls[0][1] == list(analyzer_module._SHARED_BATCH_PLAYER_FIELDS)
+    assert batch_calls[0][2] == list(analyzer_module._SHARED_BATCH_OTHER_FIELDS)
+    assert analyzer.parser.event_calls == ["player_death", "player_blind"]
+    assert "win_panel_match_tick" not in shared
+
+
+def test_empty_unified_event_batch_retries_legacy_groups(monkeypatch):
+    batch_calls = []
+
+    def fake_batch(_parser, event_names, **_kwargs):
+        batch_calls.append(tuple(event_names))
+        if len(batch_calls) == 1:
+            return {name: pd.DataFrame() for name in event_names}
+        return {
+            name: pd.DataFrame([{"tick": len(batch_calls)}])
+            for name in event_names
+        }
+
+    class Parser:
+        def parse_event(self, event_name, **_kwargs):
+            raise AssertionError(event_name)
+
+    monkeypatch.setattr(analyzer_module, "safe_parse_events_batch", fake_batch)
+    analyzer = object.__new__(DemoAnalyzer)
+    analyzer.dem_path = Path("fixture.dem")
+    analyzer.parser = Parser()
+
+    batch = analyzer._parse_shared_event_batch()
+
+    assert batch_calls[0] == analyzer_module._SHARED_BATCH_EVENT_NAMES
+    assert len(batch_calls) == 6
+    assert not batch["weapon_fire"].empty
+    assert "cs_win_panel_match" not in batch
+
+
 def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
     empty = pd.DataFrame()
     shared_events = {
@@ -198,7 +292,6 @@ def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
         "begindefuse_df": empty,
         "nade_batch": {},
         "re_df_cached": empty,
-        "win_panel_match_tick": 0,
         "blind_df": empty,
         "economy_map_shared": {},
         "round_freeze_end_ticks_shared": {},
@@ -231,8 +324,21 @@ def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
     fact_builds = []
     finish_facts = []
 
-    monkeypatch.setattr(analyzer_module, "_get_match_start_tick", lambda _parser: 1)
-    monkeypatch.setattr(analyzer, "_parse_shared_events", lambda _tick: shared_events)
+    monkeypatch.setattr(
+        analyzer_module,
+        "_get_match_start_tick",
+        lambda _parser, **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        analyzer,
+        "_parse_shared_event_batch",
+        lambda: {"round_announce_match_start": empty},
+    )
+    monkeypatch.setattr(
+        analyzer,
+        "_parse_shared_events",
+        lambda _tick, **_kwargs: shared_events,
+    )
 
     def fake_build_facts(**kwargs):
         fact_builds.append(kwargs)

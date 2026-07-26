@@ -2,7 +2,7 @@
 Parser-level tests for freeze-to-death (回合合集) round windows.
 
 Focus: the per-round windows must carry the *real* round_end event tick so the
-recording planner / final_round_guard can tell a mid-round death (round still
+recording planner can tell a mid-round death (round still
 live, no scoreboard) apart from a round-ending death.
 
 Run:  python -m pytest backend/tests/test_round_compilation_windows.py -v

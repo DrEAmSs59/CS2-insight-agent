@@ -13,6 +13,7 @@ import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
+import { getPlayerClipScope } from "./utils/playerClipScope";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
@@ -30,11 +31,17 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
+import { buildPendingDemoAnalysisSpecs } from "./utils/demoAnalysisCache";
+import { resetDemoAnalysisDefaultView } from "./utils/demoAnalysisSession";
 import {
   recordingAbortToastKind,
+  recordingQueueHadUnexpectedCs2Exit,
   recordingQueueWasAborted,
+  unexpectedCs2ExitRecoveryMessageKey,
 } from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
+import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
+import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
 import { Loader2 } from "lucide-react";
 import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
 
@@ -42,7 +49,7 @@ import CustomTitleBar from "./components/CustomTitleBar";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
-const AnalysisPage = lazy(() => import("./pages/AnalysisPage"));
+const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
 const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
@@ -51,30 +58,10 @@ const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
 const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
+const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
+const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
-
-/** 根据频率和上次检查时间判断是否需要检查更新 */
-function shouldCheckUpdateByFrequency(frequency, lastCheckAt) {
-  if (frequency === "never") return false;
-  if (!lastCheckAt) return true; // 没有记录过，需要检查
-
-  try {
-    const lastCheck = new Date(lastCheckAt);
-    const now = new Date();
-    const diffMs = now.getTime() - lastCheck.getTime();
-    const diffDays = diffMs / 86400000;
-
-    if (frequency === "weekly") {
-      return diffDays >= 7;
-    } else if (frequency === "monthly") {
-      return diffDays >= 30;
-    }
-    return true;
-  } catch {
-    return true; // 解析失败，默认检查
-  }
-}
 
 function ensureDefaultCs2FullscreenArg(value) {
   const text = String(value ?? "").trim();
@@ -96,17 +83,7 @@ export default function App() {
   const startupInitStartedRef = useRef(false);
   const startupUpdateWaitRef = useRef(/** @type {(() => void) | null} */ (null));
   const [aiMode, setAiMode] = useState(false);
-  const [updateCheckFrequency, setUpdateCheckFrequency] = useState("weekly");
-  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
-  const shouldCheckUpdateRef = useRef(false);
 
-  // 修正 isPackaged 检测：同步判断
-  const [isPackaged, setIsPackaged] = useState(false);
-  useEffect(() => {
-    if (window.electron?.isPackaged) {
-      window.electron.isPackaged().then(setIsPackaged);
-    }
-  }, []);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "", obs_path: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
@@ -116,7 +93,8 @@ export default function App() {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateModalManual, setUpdateModalManual] = useState(false);
   const updateCheckOptsRef = useRef({ manual: false, awaitDismiss: false });
-  const updateStatusUnsubRef = useRef(null);
+  /** 当前活跃的 Tauri updater 控制器；旧控制器的迟到状态会被忽略 */
+  const updateControllerRef = useRef(null);
   /** 用户点「关闭」后忽略后续 cancelled 重开弹窗 */
   const updateModalDismissedRef = useRef(false);
   const obsConfigRef = useRef(obsConfig);
@@ -139,6 +117,7 @@ export default function App() {
   const [parsedMatches, setParsedMatches] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const currentMatchIndexRef = useRef(0);
+  const autoParseLoadedDemosRef = useRef(null);
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
@@ -150,6 +129,8 @@ export default function App() {
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
   const [activePlayerTabs, setActivePlayerTabs] = useState({});
+  const [aiReviewingPlayers, setAiReviewingPlayers] = useState({});
+  const aiReviewInFlightRef = useRef(new Set());
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
@@ -182,6 +163,10 @@ export default function App() {
   const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
   const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
   const [recordingBlockedCode, setRecordingBlockedCode] = useState(null);
+  const [recordingRecoveryPrompt, setRecordingRecoveryPrompt] = useState({
+    configRecoveryNeeded: null,
+    povRecoveryNeeded: false,
+  });
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
   const [warmupIntent, setWarmupIntent] = useState(null);
   /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
@@ -211,6 +196,7 @@ export default function App() {
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [montageEncoder, setMontageEncoder] = useState("auto");
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
+  const [demoWatchScanDepth, setDemoWatchScanDepth] = useState(2);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
   const [demoLibraryItems, setDemoLibraryItems] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -271,13 +257,11 @@ export default function App() {
     [currentParsed]
   );
 
-  // ── 当前 Tab 内的活跃玩家（默认第一个） ──
-  const currentActivePlayer =
-    activePlayerTabs[currentMatchIndex] ??
-    parsedPlayerNames[0] ??
-    "";
+  // ── 当前 Tab 内的活跃玩家（默认不选，避免全员解析后误触发 AI） ──
+  const currentActivePlayer = activePlayerTabs[currentMatchIndex] ?? "";
 
   const activePlayerData = currentParsed?.players?.[currentActivePlayer] ?? null;
+  const analysisWorkspace = currentParsed?.analysis_workspace ?? null;
   const clips = activePlayerData?.clips ?? [];
   const timeline = activePlayerData?.timeline ?? null;
   const roundTimeline = activePlayerData?.round_timeline ?? null;
@@ -586,11 +570,15 @@ export default function App() {
       const { data } = await API.post("/demos/scan");
       await refreshDemoLibrary(libraryPage, { manageLoading: false });
       const n = data?.discovered_count;
-      if (typeof n === "number" && n > 0) {
-        setProgressText(t("app.scanDone", { n }));
-      }
+      setProgressText(
+        typeof n === "number" && n > 0
+          ? t("app.scanDone", { n })
+          : t("app.scanDoneEmpty", { scanned: data?.scanned || 0 })
+      );
+      return data;
     } catch (e) {
       setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      return null;
     } finally {
       setLibraryScanning(false);
     }
@@ -699,6 +687,9 @@ export default function App() {
           };
         })
       );
+      // A fresh selection from the Demo library is a new analysis entry. Keep
+      // in-page navigation restorable, but always enter this flow on Highlights.
+      resetDemoAnalysisDefaultView(loaded);
       setUploadedDemos(loaded);
       setParsedMatches(
         loaded.map((d) => {
@@ -722,6 +713,7 @@ export default function App() {
             if (!Object.keys(players).length) return null;
             return {
               players,
+              analysis_workspace: r.analysis_workspace ?? null,
               demo_path: d.path,
               demo_filename: d.filename,
             };
@@ -737,6 +729,7 @@ export default function App() {
                 round_timeline: r.round_timeline ?? null,
               },
             },
+            analysis_workspace: r.analysis_workspace ?? null,
             demo_path: d.path,
             demo_filename: d.filename,
           };
@@ -744,13 +737,11 @@ export default function App() {
       );
       const idMap = {};
       const selectedMap = {};
-      const tabMap = {};
       loaded.forEach((x, i) => {
         idMap[i] = x.id;
         if (resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id)) {
           const r = resolvedByDemoId[x.id] ?? [];
           selectedMap[i] = r;
-          if (r.length) tabMap[i] = r[0];
         } else if (x.cached_result) {
           const r = x.cached_result;
           let names = [];
@@ -761,17 +752,24 @@ export default function App() {
           }
           if (names.length) {
             selectedMap[i] = names;
-            tabMap[i] = names[0];
           } else if (x.cached_auto_player) {
             selectedMap[i] = [x.cached_auto_player];
-            tabMap[i] = x.cached_auto_player;
           }
+        }
+        if (
+          !(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))
+          && !Object.prototype.hasOwnProperty.call(selectedMap, i)
+        ) {
+          const rosterNames = (x.players || [])
+            .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+            .filter((name) => typeof name === "string" && name.trim());
+          selectedMap[i] = rosterNames;
         }
       });
       setLibraryDemoIdsByIndex(idMap);
       setCurrentMatchIndex(0);
       setSelectedPlayers(selectedMap);
-      setActivePlayerTabs(tabMap);
+      setActivePlayerTabs({});
       const ftdByIndex = {};
       loaded.forEach((x, i) => {
         const r = x.cached_result;
@@ -827,7 +825,12 @@ export default function App() {
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
-      await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
+      const loaded = await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
+      if (loaded?.length) {
+        const idMap = Object.fromEntries(loaded.map((demo, index) => [index, demo.id]));
+        setLibraryLoadingOverlay(false);
+        await autoParseLoadedDemosRef.current?.(loaded, idMap);
+      }
     } catch (e) {
       const failed = e.response?.data?.detail?.failed;
       if (Array.isArray(failed) && failed.length) {
@@ -967,22 +970,11 @@ export default function App() {
           }
           if (data.cs2_path) setCs2Path(data.cs2_path);
           if (typeof data.ffmpeg_path === "string") setFfmpegPath(data.ffmpeg_path);
-          if (typeof data.update_check_frequency === "string") {
-            setUpdateCheckFrequency(data.update_check_frequency);
-          }
-          if (typeof data.last_update_check_at === "string") {
-            setLastUpdateCheckAt(data.last_update_check_at);
-          }
-          // 判断是否需要检查更新（根据频率和上次检查时间）
-          const needCheck = shouldCheckUpdateByFrequency(
-            data.update_check_frequency ?? "weekly",
-            data.last_update_check_at ?? ""
-          );
-          shouldCheckUpdateRef.current = needCheck;
           if (typeof data.montage_encoder === "string" && data.montage_encoder.trim()) {
             setMontageEncoder(data.montage_encoder.trim().toLowerCase());
           }
           if (Array.isArray(data.demo_watch_paths)) setDemoWatchPaths(data.demo_watch_paths);
+          if (Number.isInteger(data.demo_watch_scan_depth)) setDemoWatchScanDepth(data.demo_watch_scan_depth);
           if (Array.isArray(data.expected_parse_players)) {
             setExpectedParsePlayersText(data.expected_parse_players.join("\n"));
           }
@@ -1099,7 +1091,14 @@ export default function App() {
       setParsedMatches(uploads.map(() => null));
       setLibraryDemoIdsByIndex({});
       setCurrentMatchIndex(0);
-      setSelectedPlayers({});
+      const selectedMap = {};
+      uploads.forEach((upload, index) => {
+        const names = (upload.players || [])
+          .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+          .filter((name) => typeof name === "string" && name.trim());
+        selectedMap[index] = names;
+      });
+      setSelectedPlayers(selectedMap);
       setActivePlayerTabs({});
       setFreezeToDeathRoundsByMatch({});
       setSelectedClientClipUids(new Set());
@@ -1110,6 +1109,7 @@ export default function App() {
       setProgressText("");
       setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
       navigate("/analysis");
+      await autoParseLoadedDemosRef.current?.(uploads, {});
     } catch (e) {
       setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
     } finally {
@@ -1149,17 +1149,16 @@ export default function App() {
     ]
   );
 
-  const canAddAllHighlights = useMemo(
+  const currentPlayerClipScope = useMemo(
     () =>
-      Boolean(
-        parsedMatches?.some((pm) =>
-          Object.values(pm?.players ?? {}).some((pd) =>
-            pd.clips?.some((c) => c.category === "highlight")
-          )
-        )
+      getPlayerClipScope(
+        currentParsed?.players,
+        currentActivePlayer,
+        queuedClientClipUidsForCurrentDemo,
       ),
-    [parsedMatches]
+    [currentParsed, currentActivePlayer, queuedClientClipUidsForCurrentDemo],
   );
+  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
 
   /**
    * @param {number} idx
@@ -1215,6 +1214,7 @@ export default function App() {
           const mergedPlayers = { ...(cur?.players || {}), ...processedPlayers };
           base[idx] = {
             players: mergedPlayers,
+            analysis_workspace: data.analysis_workspace ?? cur?.analysis_workspace ?? null,
             demo_path: demos[idx].path,
             demo_filename: fn,
           };
@@ -1247,8 +1247,6 @@ export default function App() {
             : { picked: [] },
         }));
 
-        setActivePlayerTabs((prev) => ({ ...prev, [idx]: names[0] }));
-
         const rounds = firstMeta?.total_rounds ?? "?";
         const totalRegular = Object.values(processedPlayers).reduce(
           (s, pd) => s + (pd.clips ?? []).filter((c) => c.category !== "meme_death").length,
@@ -1268,12 +1266,14 @@ export default function App() {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
           else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
         }
+        return true;
       } catch (e) {
         const err = t("app.parseFail", { fn, msg: e.response?.data?.detail || e.message });
         if (!quietProgress) {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
           else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
         }
+        return false;
       } finally {
         setParsingByIndex((prev) => {
           const next = { ...prev };
@@ -1290,6 +1290,96 @@ export default function App() {
   }, [currentMatchIndex, handleParseForIndex]);
 
   const LIBRARY_PARSE_CONCURRENCY = 2;
+
+  const autoParseLoadedDemos = useCallback(async (loaded, demoIdsByIndex = {}) => {
+    const demos = Array.isArray(loaded) ? loaded : [];
+    const specs = buildPendingDemoAnalysisSpecs(demos);
+    if (!specs.length) {
+      setAnalysisInlineProgress({ active: false, text: "" });
+      return;
+    }
+
+    let done = 0;
+    let succeeded = 0;
+    const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
+    setAnalysisInlineProgress({
+      active: true,
+      text: `正在自动解析 ${specs.length} 个 Demo 的全部 ${totalPlayers} 名玩家（0/${specs.length}）…`,
+    });
+    const ctx = {
+      demos,
+      libraryDemoIdsByIndex: demoIdsByIndex,
+      suppressProgressText: true,
+    };
+    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
+      const ok = await handleParseForIndex(spec.index, spec.players, ctx);
+      done += 1;
+      if (ok) succeeded += 1;
+      setAnalysisInlineProgress({
+        active: done < specs.length,
+        text: done < specs.length
+          ? `正在自动解析每个 Demo 的全部玩家（${done}/${specs.length}）…`
+          : succeeded === specs.length
+            ? `已自动解析 ${specs.length} 个 Demo，共 ${totalPlayers} 名玩家`
+            : `自动解析完成：成功 ${succeeded} 个，失败 ${specs.length - succeeded} 个`,
+      });
+    });
+  }, [handleParseForIndex]);
+  autoParseLoadedDemosRef.current = autoParseLoadedDemos;
+
+  const ensurePlayerAiReview = useCallback(async (playerName, matchIndex = currentMatchIndex) => {
+    const name = String(playerName || "").trim();
+    if (!aiMode || !name) return false;
+    const playerData = parsedMatches?.[matchIndex]?.players?.[name];
+    const clipsToReview = Array.isArray(playerData?.clips) ? playerData.clips : [];
+    if (!clipsToReview.length) return false;
+    const alreadyReviewed = Boolean(playerData?.ai_reviewed) || clipsToReview.some((clip) => (
+      clip?.ai_score != null
+      || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
+    ));
+    if (alreadyReviewed) return true;
+
+    const requestKey = `${matchIndex}:${name}`;
+    if (aiReviewInFlightRef.current.has(requestKey)) return false;
+    aiReviewInFlightRef.current.add(requestKey);
+    setAiReviewingPlayers((previous) => ({ ...previous, [requestKey]: true }));
+    try {
+      const { data } = await API.post("/demo/review-clips", {
+        clips: clipsToReview,
+        match_meta: playerData?.match_meta || {},
+        locale: useLocaleStore.getState().locale,
+      });
+      const reviewedClips = ensureClientClipUidsOnClips(data?.clips || clipsToReview);
+      setParsedMatches((previous) => {
+        if (!Array.isArray(previous) || !previous[matchIndex]?.players?.[name]) return previous;
+        const next = [...previous];
+        const current = next[matchIndex];
+        next[matchIndex] = {
+          ...current,
+          players: {
+            ...current.players,
+            [name]: {
+              ...current.players[name],
+              clips: reviewedClips,
+              ai_reviewed: true,
+            },
+          },
+        };
+        return next;
+      });
+      return true;
+    } catch (error) {
+      setProgressText(`AI 锐评生成失败：${error.response?.data?.detail || error.message}`, { isError: true });
+      return false;
+    } finally {
+      aiReviewInFlightRef.current.delete(requestKey);
+      setAiReviewingPlayers((previous) => {
+        const next = { ...previous };
+        delete next[requestKey];
+        return next;
+      });
+    }
+  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText]);
 
   const runLibraryBatchLoad = useCallback(
     async ({ mode, manualLines }) => {
@@ -1507,39 +1597,43 @@ export default function App() {
     t,
   ]);
 
-  const handleAddAllHighlightsAllMatches = useCallback(() => {
-    if (!parsedMatches?.length) return;
+  const handleAddCurrentPlayerHighlights = useCallback(() => {
+    if (!currentParsed || !currentActivePlayer) return;
     const toAdd = [];
-    parsedMatches.forEach((pm, index) => {
-      if (!pm?.players) return;
-      Object.entries(pm.players).forEach(([playerName, playerData]) => {
-        const meta = queueItemMetaForPlayer(index, playerName);
-        for (const c of playerData.clips ?? []) {
-          if (c.category !== "highlight") continue;
-          if (!c.client_clip_uid || queuedClientClipUidsGlobal.has(c.client_clip_uid)) continue;
-          toAdd.push({
-            demoPath: meta.demoPath,
-            demoFilename: meta.demoFilename,
-            targetPlayer: meta.targetPlayer,
-            targetPlayerUserId: meta.targetPlayerUserId,
-            targetSteamId: meta.targetSteamId,
-            clipId: c.clip_id,
-            clientClipUid: c.client_clip_uid,
-            clipData: c,
-          });
-        }
+    const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
+    for (const c of currentPlayerClipScope.queueableHighlights) {
+      toAdd.push({
+        demoPath: meta.demoPath,
+        demoFilename: meta.demoFilename,
+        targetPlayer: meta.targetPlayer,
+        targetPlayerUserId: meta.targetPlayerUserId,
+        targetSteamId: meta.targetSteamId,
+        clipId: c.clip_id,
+        clientClipUid: c.client_clip_uid,
+        clipData: c,
       });
-    });
+    }
     if (!toAdd.length) {
-      setProgressText(t("app.enqueueAllHighlightsEmpty"));
+      setProgressText(t("app.enqueuePlayerHighlightsEmpty", { player: currentActivePlayer }));
       return;
     }
     addToQueue(toAdd);
-    setProgressText(t("app.enqueueAllHighlightsDone", { n: toAdd.length }), {
+    setProgressText(t("app.enqueuePlayerHighlightsDone", {
+      player: currentActivePlayer,
+      n: toAdd.length,
+    }), {
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [parsedMatches, addToQueue, queueItemMetaForPlayer, queuedClientClipUidsGlobal, t]);
+  }, [
+    currentParsed,
+    currentActivePlayer,
+    currentPlayerClipScope,
+    currentMatchIndex,
+    addToQueue,
+    queueItemMetaForPlayer,
+    t,
+  ]);
 
   const handleAddTimelineEventToQueue = useCallback(
     (event, roundRow) => {
@@ -1913,6 +2007,7 @@ export default function App() {
         if (!queue.length) return;
         recordingAbortRequestedRef.current = false;
         setRecordingAbortRequested(false);
+        setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
         setBatchRecording(true);
         setProgressText(t("app.preparingRecording"), { loading: true });
 
@@ -1991,17 +2086,54 @@ export default function App() {
           if (allSucceeded) clearQueue();
           setRecordingResults(annotated);
           setRecordingResultModalOpen(true);
+          const hadUnexpectedCs2Exit = recordingQueueHadUnexpectedCs2Exit(results);
           const wasAborted = recordingQueueWasAborted(
             results,
             recordingAbortRequestedRef.current,
           );
-          if (wasAborted) {
+          if (hadUnexpectedCs2Exit) {
+            const unexpectedExitResult = results.find(
+              (item) => item?.error_code === "RECORDING_CS2_EXITED" ||
+                String(item?.error || "").toLowerCase() === "cs2_exited_unexpectedly",
+            );
+            const reportedRecovery = unexpectedExitResult?.recovery;
             const backupStatus = await refreshConfigBackupStatus();
-            const toastKind = recordingAbortToastKind(backupStatus);
+            let povStatus = null;
+            if (session.experimental_pov_enabled) {
+              try {
+                const { data: nextPovStatus } = await API.get("experimental/pov/status");
+                povStatus = nextPovStatus && typeof nextPovStatus === "object"
+                  ? nextPovStatus
+                  : { fetch_failed: true };
+              } catch {
+                povStatus = { fetch_failed: true };
+              }
+            }
+            const configRecoveryNeeded = reportedRecovery?.player_config_restore_verified
+              ? reportedRecovery.player_config_restored !== true
+              : Boolean(backupStatus?.restore_required || backupStatus?.fetch_failed);
+            const povRecoveryNeeded = !session.experimental_pov_enabled
+              ? false
+              : reportedRecovery?.pov_restore_verified
+                ? reportedRecovery.pov_restored !== true
+                : Boolean(povStatus?.needs_restore || povStatus?.fetch_failed);
+            setRecordingRecoveryPrompt({ configRecoveryNeeded, povRecoveryNeeded });
+            setRecordingBlockedMessage(t(unexpectedCs2ExitRecoveryMessageKey({
+              configRecoveryNeeded,
+              povEnabled: session.experimental_pov_enabled,
+              povRecoveryNeeded,
+            })));
+            setRecordingBlockedCode("RECORDING_CS2_EXITED");
+            setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });
+          } else if (wasAborted) {
+            const backupStatus = await refreshConfigBackupStatus();
+            const toastKind = recordingAbortToastKind(backupStatus, results);
             if (toastKind === "restore_pending") {
               setProgressText(t("app.abortRestorePending"), { isError: true });
             } else if (toastKind === "unverified") {
               setProgressText(t("app.abortRestoreUnverified"), { isError: true });
+            } else if (toastKind === "not_needed") {
+              setProgressText(t("app.abortConfigNotModified"), { autoDismissMs: 5000 });
             } else {
               setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
             }
@@ -2112,10 +2244,12 @@ export default function App() {
   const handleSaveConfig = useCallback(async (config) => {
     try {
       await API.put("config", config);
-    } catch {
-      // silent
+      return true;
+    } catch (error) {
+      setProgressText(t("app.saveConfigFail", { msg: error?.response?.data?.detail || error?.message || t("common.requestFail") }), { isError: true });
+      return false;
     }
-  }, []);
+  }, [t]);
 
   const handleSaveExpectedParsePlayers = useCallback(async () => {
     const arr = expectedParsePlayersText
@@ -2251,6 +2385,8 @@ export default function App() {
     setCurrentMatchIndex(0);
     setSelectedPlayers({});
     setActivePlayerTabs({});
+    setAiReviewingPlayers({});
+    aiReviewInFlightRef.current.clear();
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
@@ -2362,6 +2498,10 @@ export default function App() {
       if (Array.isArray(raw.demo_watch_paths)) {
         put.demo_watch_paths = raw.demo_watch_paths;
         setDemoWatchPaths(raw.demo_watch_paths);
+      }
+      if (Number.isInteger(raw.demo_watch_scan_depth)) {
+        put.demo_watch_scan_depth = Math.max(0, Math.min(32, raw.demo_watch_scan_depth));
+        setDemoWatchScanDepth(put.demo_watch_scan_depth);
       }
       if (Array.isArray(raw.expected_parse_players)) {
         put.expected_parse_players = raw.expected_parse_players;
@@ -2480,50 +2620,60 @@ export default function App() {
 
   const markUpdateChecked = useCallback(async () => {
     const checkedAt = new Date().toISOString();
-    setLastUpdateCheckAt(checkedAt);
     try {
       await API.put("config", { last_update_check_at: checkedAt });
     } catch {
-      // ignore persistence failures; UI still reflects local time
+      // ignore persistence failures
     }
   }, []);
 
   const handleUpdateModalClose = useCallback(() => {
-    // 关闭弹窗时若仍在下载/准备下载，真正取消，避免后台继续下
     const st = String(updateInfo?.status || "");
+    const isForce = String(updateInfo?.update_mode || "").toLowerCase() === "force";
+    // force：发现更新后或下载中不可关闭
+    if (isForce && (st === "available" || st === "downloading" || st === "downloaded")) {
+      return;
+    }
     updateModalDismissedRef.current = true;
-    if (
-      window.electron?.cancelUpdate &&
-      (st === "checking" || st === "available" || st === "downloading")
-    ) {
-      window.electron.cancelUpdate();
+    if (st === "checking" || st === "available") {
+      if (typeof updateControllerRef.current?.defer === "function") {
+        updateControllerRef.current.defer();
+      } else {
+        updateControllerRef.current?.cancel();
+      }
     }
     setUpdateModalOpen(false);
     setUpdateModalManual(false);
     const resume = startupUpdateWaitRef.current;
     startupUpdateWaitRef.current = null;
     resume?.();
-  }, [updateInfo?.status]);
+  }, [updateInfo?.status, updateInfo?.update_mode]);
 
-  const handleUpdateCancel = useCallback(() => {
-    // 「停止更新」：取消下载并保留弹窗提示，不视为 dismiss
-    updateModalDismissedRef.current = false;
-    window.electron?.cancelUpdate?.();
+  const handleUpdateConfirm = useCallback(() => {
+    updateControllerRef.current?.confirm?.();
   }, []);
 
-  /** Cloudflare R2 + electron-updater（不走 GitHub /api/app/update-info） */
+  const handleUpdateCancel = useCallback(() => {
+    // 「停止更新」：仅 normal；下载开始后无法真正打断
+    if (String(updateInfo?.update_mode || "").toLowerCase() === "force") return;
+    updateModalDismissedRef.current = false;
+    updateControllerRef.current?.cancel();
+  }, [updateInfo?.update_mode]);
+
+  /** Cloudflare R2 + Tauri updater（不走 GitHub /api/app/update-info） */
   const fetchUpdateInfo = useCallback(
     async (opts = { manual: false, awaitDismiss: false }) => {
       const manual = Boolean(opts.manual);
       const awaitDismiss = Boolean(opts.awaitDismiss);
 
-      if (!(await shouldCheckAppUpdates()) || !window.electron?.checkForUpdates) {
+      if (!(await shouldCheckAppUpdates())) {
         if (manual) {
           setUpdateInfo({
             status: "error",
             error: t("settings.updateDevModeError"),
             current_version: "",
             latest_version: null,
+            update_mode: "normal",
           });
           setUpdateModalManual(true);
           setUpdateModalOpen(true);
@@ -2536,19 +2686,15 @@ export default function App() {
 
       let currentVersion = "";
       try {
-        if (window.electron?.getVersion) {
-          currentVersion = String((await window.electron.getVersion()) || "");
-        }
+        currentVersion = String((await getDesktopAppVersion()) || "");
       } catch {
         currentVersion = "";
       }
 
-      if (updateStatusUnsubRef.current) {
-        updateStatusUnsubRef.current();
-        updateStatusUnsubRef.current = null;
-      }
+      updateControllerRef.current?.cancel();
 
-      const unsub = window.electron.onUpdateStatus?.((statusPayload) => {
+      const controller = createDesktopUpdateCheck((statusPayload) => {
+        if (updateControllerRef.current !== controller) return;
         const status = String(statusPayload?.status || "");
         const incomingLatest =
           statusPayload?.latest_version || statusPayload?.info?.version || null;
@@ -2558,12 +2704,14 @@ export default function App() {
             : typeof statusPayload?.info?.releaseNotes === "string"
               ? statusPayload.info.releaseNotes
               : "";
-        // download-progress 等事件可能不带版本号，合并保留上次已知的 latest
+        const incomingMode =
+          statusPayload?.update_mode || statusPayload?.info?.update_mode || null;
         setUpdateInfo((prev) => ({
           status,
           current_version: currentVersion || prev?.current_version || "",
           latest_version: incomingLatest || prev?.latest_version || null,
           release_notes: incomingNotes || prev?.release_notes || "",
+          update_mode: incomingMode || prev?.update_mode || "normal",
           progress: statusPayload?.progress || null,
           error:
             statusPayload?.error === "dev-mode"
@@ -2591,7 +2739,6 @@ export default function App() {
         }
 
         if (status === "cancelled") {
-          // 点「关闭」已 dismiss：不再重开；点「停止更新」则保留提示
           if (updateModalDismissedRef.current) {
             setUpdateModalOpen(false);
             const resume = startupUpdateWaitRef.current;
@@ -2625,7 +2772,6 @@ export default function App() {
         }
 
         if (status === "error") {
-          // 检查失败不刷新 last_update_check_at，便于下次启动重试
           if (isManual) {
             setUpdateModalManual(true);
             setUpdateModalOpen(true);
@@ -2636,15 +2782,14 @@ export default function App() {
           }
         }
       });
-      if (typeof unsub === "function") {
-        updateStatusUnsubRef.current = unsub;
-      }
+      updateControllerRef.current = controller;
 
       setUpdateInfo({
         status: "checking",
         current_version: currentVersion,
         latest_version: null,
         release_notes: "",
+        update_mode: "normal",
         error: "",
       });
       if (manual) {
@@ -2652,9 +2797,8 @@ export default function App() {
         setUpdateModalOpen(true);
       }
 
-      // 先挂上 awaitDismiss，再发 IPC，避免 not-available 极快返回时丢 resume
       const dismissWait = awaitDismiss ? waitForUpdateModalDismiss() : null;
-      window.electron.checkForUpdates();
+      controller.start();
       if (dismissWait) await dismissWait;
     },
     [t, waitForUpdateModalDismiss, markUpdateChecked],
@@ -2662,10 +2806,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (updateStatusUnsubRef.current) {
-        updateStatusUnsubRef.current();
-        updateStatusUnsubRef.current = null;
-      }
+      updateControllerRef.current?.cancel();
+      updateControllerRef.current = null;
     };
   }, []);
 
@@ -2676,7 +2818,7 @@ export default function App() {
     let cancelled = false;
     const runStartupInit = async () => {
       try {
-        if ((await shouldCheckAppUpdates()) && shouldCheckUpdateRef.current) {
+        if ((await shouldCheckAppUpdates())) {
           setStartupInitPhase("update");
           await fetchUpdateInfo({ manual: false, awaitDismiss: true });
           if (cancelled) return;
@@ -2740,6 +2882,8 @@ export default function App() {
     setMontageEncoder,
     demoWatchPaths,
     setDemoWatchPaths,
+    demoWatchScanDepth,
+    setDemoWatchScanDepth,
     handleSaveConfig,
     fetchUpdateInfo,
     startupInitDone,
@@ -2778,6 +2922,7 @@ export default function App() {
     players,
     matchMeta,
     currentParsed,
+    analysisWorkspace,
     selectedPlayersList,
     setSelectedPlayers,
     handleParse,
@@ -2802,6 +2947,8 @@ export default function App() {
     parsedPlayerNames,
     currentActivePlayer,
     setActivePlayerTabs,
+    ensurePlayerAiReview,
+    aiReviewingPlayers,
     roundMontageMaxRounds,
     freezeToDeathDraft,
     setFreezeToDeathDraft,
@@ -2810,8 +2957,8 @@ export default function App() {
     handleSelectAll,
     handleDeselectAll,
     handleAddSelectedToQueue,
-    handleAddAllHighlightsAllMatches,
-    canAddAllHighlights,
+    handleAddCurrentPlayerHighlights,
+    canAddCurrentPlayerHighlights,
     handleResetDemo,
     removeFromQueue,
     clearQueue,
@@ -2867,16 +3014,18 @@ export default function App() {
     killFxTickOffset,
   };
 
-  const hasDemosInline = uploadedDemos && uploadedDemos.length > 0;
   const parsingShownInline =
     location.pathname === "/analysis" &&
-    hasDemosInline &&
-    (Boolean(parsingByIndex[currentMatchIndex]) || analysisInlineProgress?.active === true);
+    (parsing || anyDemoParsing || analysisInlineProgress?.active === true);
 
   const showGlobalNotice =
     batchRecording ||
-    Boolean(progressText?.trim()) ||
+    (Boolean(progressText?.trim()) && !parsingShownInline) ||
     (anyDemoParsing && !parsingShownInline);
+  const isStandalonePreview = [
+    "/obs-ai-preview",
+    "/obs-ai-entry-preview",
+  ].includes(location.pathname);
 
   return (
     <AppShellProvider value={shell}>
@@ -2894,10 +3043,9 @@ export default function App() {
           <SidebarNav
             queueLength={queue.length}
             disabled={batchRecording}
-            onCheckUpdate={() => void fetchUpdateInfo({ manual: true })}
           />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
-            {!backendReady ? (
+            {!isStandalonePreview && (!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-white/5 bg-cs2-bg-card shadow-2xl">
                   <div className="relative">
@@ -2930,14 +3078,15 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : null}
+            ) : null)}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/analysis" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
                 <Route path="/lite-cut" element={<LiteCutEditorPage />} />
@@ -2949,6 +3098,8 @@ export default function App() {
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />
+                <Route path="/obs-ai-entry-preview" element={<ObsAiEntryPreviewPage />} />
+                <Route path="/obs-ai-preview" element={<ObsAiTuningPreviewPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
               </Suspense>
@@ -3031,9 +3182,12 @@ export default function App() {
         <RecordingBlockedDialog
           message={recordingBlockedMessage}
           errorCode={recordingBlockedCode}
+          configRecoveryNeeded={recordingRecoveryPrompt.configRecoveryNeeded}
+          povRecoveryNeeded={recordingRecoveryPrompt.povRecoveryNeeded}
           onClose={() => {
             setRecordingBlockedMessage("");
             setRecordingBlockedCode(null);
+            setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
           }}
         />
 
@@ -3043,6 +3197,7 @@ export default function App() {
           title={updateModalManual ? t("app.checkUpdate") : t("app.updateFound")}
           onClose={handleUpdateModalClose}
           onCancel={handleUpdateCancel}
+          onConfirm={handleUpdateConfirm}
         />
       </div>
     </AppShellProvider>

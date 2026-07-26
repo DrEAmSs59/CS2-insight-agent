@@ -89,6 +89,10 @@ export default function ClipList({
       {/* ── 玩家 Tab 栏（仅多玩家时显示） ── */}
       {showTabs && (
         <div className="flex flex-wrap gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-card p-2">
+          <span className="flex items-center gap-1.5 px-2 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
+            <User className="h-3 w-3" />
+            {t("clip.fullMatchResults", { n: playerTabs.length })}
+          </span>
           {playerTabs.map((name) => {
             const pd = parsedPlayers[name];
             const cnt = (pd?.clips ?? []).filter((c) => c.category !== "meme_death").length;

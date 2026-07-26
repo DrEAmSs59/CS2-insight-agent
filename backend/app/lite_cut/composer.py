@@ -2108,6 +2108,20 @@ def _timeline_gap_plan(clips: list[dict[str, Any]], epsilon: float = 0.001) -> l
     return gaps
 
 
+def _timeline_overlap_pair(
+    clips: list[dict[str, Any]], epsilon: float = 0.001
+) -> tuple[str, str] | None:
+    cursor = 0.0
+    previous_id = ""
+    for index, clip in enumerate(clips):
+        start = max(0.0, float(clip.get("timeline_start") or 0.0))
+        if start < cursor - epsilon:
+            return previous_id or str(index - 1), str(clip.get("id") or index)
+        cursor = max(cursor, start + _clip_timeline_duration_sec(clip))
+        previous_id = str(clip.get("id") or index)
+    return None
+
+
 def _has_soft_positional_transition(clips: list[dict[str, Any]], transitions: dict[str, Any], fps: float) -> bool:
     for index in range(max(0, len(clips) - 1)):
         t_type, duration = _parse_transition_for_edge(transitions, index)
@@ -2475,6 +2489,10 @@ def compose_lite_cut_montage(
         paths.append(p)
         row_ids.append(i)
 
+    gap_plan = _timeline_gap_plan(clips)
+    if gap_plan is None:
+        raise MontageComposerError("LITECUT_TIMELINE_OVERLAP")
+
     transitions = _build_positional_transitions(clips)
     _codec = resolve_h264_codec_name(ffmpeg_bin, montage_encoder)
     video_encode_quality = h264_encode_cli_args(_codec, _project_encoder_tier(project_body))
@@ -2513,7 +2531,6 @@ def compose_lite_cut_montage(
             normed.append(out_ts)
             _emit_progress(progress_callback, 0.10 + 0.35 * ((i + 1) / max(1, len(clips))), "normalizing")
 
-        gap_plan = _timeline_gap_plan(clips)
         if gap_plan:
             gap_by_index = {index: duration for index, duration in gap_plan}
             timeline_paths: list[Path] = []

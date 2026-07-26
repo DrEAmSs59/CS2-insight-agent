@@ -66,10 +66,10 @@ git checkout -b fix/critical-bug main
 
 ## 环境与本地运行
 
-开发环境搭建见 [docs/developer.md](./docs/developer.md)。架构与命令速查见 [CLAUDE.md](./CLAUDE.md)。
+开发环境搭建、架构与命令速查见 [docs/developer.md](./docs/developer.md)；英文快速上手见 [docs/dev-setup.md](./docs/dev-setup.md)。
 
 - 后端：Python **3.12**，FastAPI
-- 前端：Node.js + Vite；`npm run dev` 代理 `/api` 到 `localhost:8000`
+- 前端：Node.js + pnpm + Vite；`pnpm run dev` 代理 `/api` 到 `localhost:8000`
 - 录制 / OBS / CS2 控制台注入：**仅 Windows** 可完整验证；macOS / Linux 可开发解析、Demo 库、前端等
 
 ## 报告问题
@@ -81,18 +81,3 @@ git checkout -b fix/critical-bug main
 ## 许可证
 
 贡献即表示你同意在 [PolyForm Noncommercial 1.0.0](./LICENSE) 下授权你的改动。
-
----
-
-## 维护者一次性迁移（采纳本策略时）
-
-若远程尚无 `develop`，由维护者执行一次：
-
-```bash
-git checkout main
-git pull origin main
-git checkout -b develop
-git push -u origin develop
-```
-
-建议在 GitHub 仓库设置中将 **默认分支保持为 `main`**（面向用户与 Release），并将 **PR 默认 base** 设为 `develop`（可在首次 PR 时选择，或通过仓库模板提示贡献者）。

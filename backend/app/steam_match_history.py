@@ -1,7 +1,6 @@
 """Steam Web API proxy for CS2 official match history."""
 from __future__ import annotations
 
-import asyncio
 import bz2
 import logging
 import time

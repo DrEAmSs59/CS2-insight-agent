@@ -5,8 +5,10 @@ import { calibrateObs, getObsConfigStatus } from "../api/obsConfigCenter";
 import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { useAppShell } from "../context/AppShellContext";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
+import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import {
   Settings as SettingsIcon,
@@ -34,16 +36,18 @@ import {
   X,
 } from "lucide-react";
 
+// The AI insight mode remains available for demo review, but OBS recommendation
+// is intentionally kept behind a local release gate until the workflow is ready.
+const AI_OBS_RECOMMENDATION_ENABLED = false;
+
 /* ---------------------------------------------------------------------------
  * Helper function to open external links in system default browser
  * ------------------------------------------------------------------------ */
 
 function openExternalLink(url) {
-  // Electron 环境：使用 shell.openExternal 打开系统默认浏览器
-  if (window.electron?.openExternal) {
-    window.electron.openExternal(url);
+  if (desktopBridge) {
+    void desktopBridge.openExternal(url);
   } else {
-    // 非 Electron 环境（浏览器）：使用 window.open
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 }
@@ -191,7 +195,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       }
     }
 
-    // 后端原生文件选择（Windows；Vite dev 与 Electron 均可返回完整路径）
+    // 后端原生文件选择（Windows；浏览器开发模式也可返回完整路径）
     try {
       const { data } = await API.post("file-picker", { file_type: "exe" });
       if (data?.path) {
@@ -202,11 +206,11 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       // 非 Windows 或选择器不可用，继续 fallback
     }
 
-    // Electron 文件选择对话框
-    if (window.electron?.showOpenDialog) {
+    // 桌面壳文件选择对话框
+    if (desktopBridge) {
       try {
         const defaultPath = value && value.trim() ? value : undefined;
-        const result = await window.electron.showOpenDialog({
+        const result = await desktopBridge.showOpenDialog({
           title: t("settings.browseFileTitle"),
           defaultPath,
           filters: [{ name: exeName, extensions: ["exe"] }],
@@ -217,7 +221,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
         }
         return;
       } catch (e) {
-        console.error("Electron dialog error:", e);
+        console.error("Desktop dialog error:", e);
       }
     }
 
@@ -242,7 +246,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
       >
         {detecting ? <Loader2 className="h-3 w-3 animate-spin" /> : t("settings.browseBtn")}
       </button>
-      {/* Fallback file input for non-Electron environments */}
+      {/* 浏览器环境的最后兜底 */}
       <input
         ref={fileRef}
         type="file"
@@ -328,19 +332,14 @@ const ENCODER_OPTIONS = [
   { value: "libx264", key: "settings.encoderX264" },
 ];
 
-const UPDATE_FREQUENCY_OPTIONS = [
-  { value: "weekly", key: "settings.updateFreqWeekly" },
-  { value: "monthly", key: "settings.updateFreqMonthly" },
-  { value: "never", key: "settings.updateFreqNever" },
-];
-
 /* ---------------------------------------------------------------------------
  * Tab definitions
  * ------------------------------------------------------------------------ */
 const TABS = [
-  { key: "general", icon: FolderOpen, labelKey: "settings.tabGeneral" },
-  { key: "parse", icon: Brain, labelKey: "settings.tabParse" },
+  { key: "general", icon: SettingsIcon, labelKey: "settings.tabGeneral" },
+  { key: "paths", icon: FolderOpen, labelKey: "settings.tabPaths" },
   { key: "video", icon: Monitor, labelKey: "settings.tabVideo" },
+  { key: "parse", icon: Brain, labelKey: "settings.tabParse" },
   { key: "recording", icon: SlidersHorizontal, labelKey: "settings.tabRecording" },
 ];
 
@@ -442,8 +441,8 @@ export default function SettingsPage() {
   const browseLiteCutStorage = useCallback(async () => {
     try {
       let selected = "";
-      if (window.electron?.chooseDirectory) {
-        selected = await window.electron.chooseDirectory(liteCutStorageDraft);
+      if (desktopBridge) {
+        selected = await desktopBridge.chooseDirectory(liteCutStorageDraft);
       } else {
         const { data } = await API.post("directory-picker");
         selected = data?.path ?? "";
@@ -505,11 +504,11 @@ export default function SettingsPage() {
     }
   }, [liteCutStorageBusy, liteCutStorageJob?.job_id]);
 
-  // Get app version (Electron only, fallback to "dev")
-  const [appVersion, setAppVersion] = useState("dev");
+  // 桌面包读取 Tauri 版本；浏览器预览使用 Vite 构建版本。
+  const [appVersion, setAppVersion] = useState(__APP_VERSION__);
   useEffect(() => {
-    if (window.electron?.getVersion) {
-      window.electron.getVersion().then((v) => {
+    if (desktopBridge) {
+      desktopBridge.getVersion().then((v) => {
         if (v) setAppVersion(v);
       }).catch(() => {});
     }
@@ -565,11 +564,11 @@ export default function SettingsPage() {
       payload.ffmpeg_path = config.ffmpeg_path ?? "";
       payload.montage_encoder = config.montage_encoder ?? "auto";
       payload.ai_mode = !!config.ai_mode;
+      payload.obs_agent_auto_prepare = !!config.obs_agent_auto_prepare;
       payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
-      payload.update_check_frequency = config.update_check_frequency ?? "weekly";
       payload.steam_api_key = config.steam_api_key ?? "";
       payload.steam_id64 = config.steam_id64 ?? "";
       payload.match_mode = config.match_mode ?? "premier";
@@ -733,6 +732,7 @@ export default function SettingsPage() {
 
   const obs = config.obs ?? {};
   const llm = config.llm ?? {};
+  const aiObsRecommendationEnabled = AI_OBS_RECOMMENDATION_ENABLED && Boolean(config.ai_mode);
   const isLocalEndpoint = llm.base_url && (
     llm.base_url.includes("localhost") || llm.base_url.includes("127.0.0.1")
   );
@@ -785,31 +785,31 @@ export default function SettingsPage() {
 
       {/* Content */}
       <div className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
-        <div className={activeTab === "recording" ? "flex min-h-0 flex-1 flex-col" : "mx-auto max-w-4xl px-4 pb-24 pt-2"}>
+        <div
+          className={
+            activeTab === "recording"
+              ? "flex min-h-0 flex-1 flex-col"
+              : activeTab === "video" && aiObsRecommendationEnabled
+                ? "w-full px-4 pb-24 pt-2 xl:px-6 2xl:px-8"
+                : "mx-auto max-w-4xl px-4 pb-24 pt-2"
+          }
+        >
 
           {/* ======================== 通用设置 ======================== */}
-          {activeTab === "general" && (
+          {(activeTab === "general" || activeTab === "paths") && (
             <div className="space-y-4">
+              {activeTab === "general" && (
+                <>
               {/* System + Language */}
-              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.labelUpdateFrequency"))}>
-                <FieldRow label={t("settings.currentVersion")} search={search && !matches(t("settings.currentVersion") + " version")}>
-                  <div className="flex items-center gap-3">
+              <SectionCard title={t("settings.sectionSystem")} hint={t("settings.sectionSystemHint")} search={search && !matches(t("settings.sectionSystem") + " " + t("settings.currentVersion") + " " + t("settings.checkUpdateBtn"))}>
+                <FieldRow label={t("settings.currentVersion")} hint={t("settings.hintAutoUpdateOnStartup")} search={search && !matches(t("settings.currentVersion") + " version " + t("settings.checkUpdateBtn"))}>
+                  <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs text-cs2-text-primary font-mono">{appVersion}</p>
                     {config.last_update_check_at && (
                       <span className="text-xs text-cs2-text-muted">
                         ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at)})
                       </span>
                     )}
-                  </div>
-                </FieldRow>
-                <FieldRow label={t("settings.labelUpdateFrequency")} hint={t("settings.hintUpdateFrequency")} search={search && !matches(t("settings.labelUpdateFrequency"))}>
-                  <div className="flex gap-2">
-                    <SelectInput
-                      value={config.update_check_frequency ?? "weekly"}
-                      onChange={(v) => set("update_check_frequency", v)}
-                      options={UPDATE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                      className="flex-1"
-                    />
                     <button
                       type="button"
                       onClick={() => void shell.fetchUpdateInfo({ manual: true })}
@@ -911,9 +911,12 @@ export default function SettingsPage() {
                   />
                 </FieldRow>
               </SectionCard>
+                </>
+              )}
 
-              {/* Paths (CS2 + Demo Directory only) */}
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelDataDirectory"))}>
+              {/* Paths (CS2 + application and LiteCut data directories) */}
+              {activeTab === "paths" && (
+              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}
@@ -924,26 +927,6 @@ export default function SettingsPage() {
                     detectField="cs2_path"
                     t={t}
                   />
-                </FieldRow>
-                <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={dataDirInfo?.path ?? ""}
-                      readOnly
-                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
-                    />
-                    <span className="text-xs text-cs2-text-muted min-w-[80px]">
-                      {dataDirInfo?.size_str ?? "—"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => API.post("config/open-dir").catch(() => {})}
-                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
-                    >
-                      {t("settings.openDirBtn")}
-                    </button>
-                  </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelLiteCutStorage")} hint={t("settings.hintLiteCutStorage")} search={search && !matches(t("settings.labelLiteCutStorage") + " " + liteCutStorageDraft)}>
                   <div className="space-y-2">
@@ -1026,9 +1009,48 @@ export default function SettingsPage() {
                     )}
                   </div>
                 </FieldRow>
+                <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={dataDirInfo?.path ?? ""}
+                      readOnly
+                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
+                    />
+                    <span className="text-xs text-cs2-text-muted min-w-[80px]">
+                      {dataDirInfo?.size_str ?? "—"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => API.post("config/open-dir").catch(() => {})}
+                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                    >
+                      {t("settings.openDirBtn")}
+                    </button>
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelLogDirectory")} hint={t("settings.hintLogDirectory")} search={search && !matches(t("settings.labelLogDirectory") + " " + (dataDirInfo?.logs_path ?? ""))}>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={dataDirInfo?.logs_path ?? ""}
+                      readOnly
+                      className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted cursor-not-allowed"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => API.post("config/open-logs").catch(() => {})}
+                      className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
+                    >
+                      {t("settings.openLogsBtn")}
+                    </button>
+                  </div>
+                </FieldRow>
               </SectionCard>
+              )}
 
               {/* Player Game Config */}
+              {activeTab === "general" && (
               <SectionCard title={t("playercfg.pageTitle")} hint={t("playercfg.pageSubtitle")} search={search && !matches(t("playercfg.pageTitle") + " player config")}>
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                   <button
@@ -1107,50 +1129,61 @@ export default function SettingsPage() {
                   </div>
                 )}
               </SectionCard>
+              )}
             </div>
           )}
 
           {/* ======================== 视频设置 ======================== */}
           {activeTab === "video" && (
             <div className="space-y-4">
-              {/* Paths: OBS + FFmpeg */}
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}>
-                <FieldRow label={t("settings.labelObsPath")} hint={t("settings.hintObsPath")} search={search && !matches(t("settings.labelObsPath") + " " + (obs.obs_path ?? ""))}>
-                  <PathPicker
-                    value={obs.obs_path ?? ""}
-                    onChange={(v) => set("obs.obs_path", v)}
-                    placeholder="obs64.exe"
-                    exeName="obs64.exe"
-                    detectApi="config/detect-obs"
-                    detectField="obs_path"
-                    t={t}
-                  />
-                </FieldRow>
-                <FieldRow label={t("settings.labelFfmpegPath")} hint={t("settings.hintFfmpegPath")} search={search && !matches(t("settings.labelFfmpegPath") + " " + (config.ffmpeg_path ?? ""))}>
-                  <PathPicker
-                    value={config.ffmpeg_path ?? ""}
-                    onChange={(v) => set("ffmpeg_path", v)}
-                    placeholder="ffmpeg.exe"
-                    exeName="ffmpeg.exe"
-                    detectApi="config/detect-ffmpeg"
-                    detectField="ffmpeg_path"
-                    t={t}
-                  />
-                </FieldRow>
-              </SectionCard>
+              <div className={aiObsRecommendationEnabled ? "grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]" : "space-y-4"}>
+                {/* Paths: OBS + FFmpeg */}
+                <SectionCard
+                  title={t("settings.sectionPaths")}
+                  hint={aiObsRecommendationEnabled ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
+                  search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}
+                >
+                  {!aiObsRecommendationEnabled && (
+                    <FieldRow label={t("settings.labelObsPath")} hint={t("settings.hintObsPath")} search={search && !matches(t("settings.labelObsPath") + " " + (obs.obs_path ?? ""))}>
+                      <PathPicker
+                        value={obs.obs_path ?? ""}
+                        onChange={(v) => set("obs.obs_path", v)}
+                        placeholder="obs64.exe"
+                        exeName="obs64.exe"
+                        detectApi="config/detect-obs"
+                        detectField="obs_path"
+                        t={t}
+                      />
+                    </FieldRow>
+                  )}
+                  <FieldRow label={t("settings.labelFfmpegPath")} hint={t("settings.hintFfmpegPath")} search={search && !matches(t("settings.labelFfmpegPath") + " " + (config.ffmpeg_path ?? ""))}>
+                    <PathPicker
+                      value={config.ffmpeg_path ?? ""}
+                      onChange={(v) => set("ffmpeg_path", v)}
+                      placeholder="ffmpeg.exe"
+                      exeName="ffmpeg.exe"
+                      detectApi="config/detect-ffmpeg"
+                      detectField="ffmpeg_path"
+                      t={t}
+                    />
+                  </FieldRow>
+                </SectionCard>
 
-              {/* Encoder */}
-              <SectionCard title={t("settings.sectionEncoder")} hint={t("settings.sectionEncoderHint")} search={search && !matches(t("settings.sectionEncoder") + " " + t("settings.labelMontageEncoder"))}>
-                <FieldRow label={t("settings.labelMontageEncoder")} search={search && !matches(t("settings.labelMontageEncoder"))}>
-                  <SelectInput
-                    value={config.montage_encoder ?? "auto"}
-                    onChange={(v) => set("montage_encoder", v)}
-                    options={ENCODER_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
-                  />
-                </FieldRow>
-              </SectionCard>
+                {/* Encoder */}
+                <SectionCard title={t("settings.sectionEncoder")} hint={t("settings.sectionEncoderHint")} search={search && !matches(t("settings.sectionEncoder") + " " + t("settings.labelMontageEncoder"))}>
+                  <FieldRow label={t("settings.labelMontageEncoder")} search={search && !matches(t("settings.labelMontageEncoder"))}>
+                    <SelectInput
+                      value={config.montage_encoder ?? "auto"}
+                      onChange={(v) => set("montage_encoder", v)}
+                      options={ENCODER_OPTIONS.map((o) => ({ value: o.value, label: t(o.key) }))}
+                    />
+                  </FieldRow>
+                </SectionCard>
+              </div>
 
-              {/* OBS connection */}
+              {/* OBS: manual controls or AI workspace */}
+              {!aiObsRecommendationEnabled ? (
+                <>
               <SectionCard title={t("settings.sectionObs")} hint={t("settings.sectionObsHint")} search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-cs2-text-secondary">{t("settings.labelObsVerified")}</span>
@@ -1292,6 +1325,18 @@ export default function SettingsPage() {
                   </div>
                 )}
               </SectionCard>
+                </>
+              ) : (
+                (!search || matches("AI OBS 调优 FPS 分辨率 推荐程度 安全变更计划")) && (
+                  <ObsAiSettingsPanel
+                    obsPath={obs.obs_path ?? ""}
+                    obsConnected={Boolean(status?.obs_connected)}
+                    ffmpegReady={Boolean(config.ffmpeg_path)}
+                    autoPrepare={Boolean(config.obs_agent_auto_prepare)}
+                    onAutoPrepareChange={(value) => set("obs_agent_auto_prepare", value)}
+                  />
+                )
+              )}
             </div>
           )}
 
@@ -1388,7 +1433,7 @@ export default function SettingsPage() {
       {/* Footer save bar */}
       {
         <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
-          <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
+          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
             <div className="min-w-0 flex-1">
               {activeTab !== "recording" && saveMsg && (
                 <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>

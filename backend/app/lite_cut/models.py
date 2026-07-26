@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
+import math
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 SCHEMA_VERSION = 2
@@ -25,80 +26,103 @@ OverlayAnchor = Literal["timeline_start", "clip_start", "clip_end", "each_clip_s
 class OutputConfig(BaseModel):
     dir: str = ""
     filename: str = "lite_cut_export.mp4"
-    width: int = 1920
-    height: int = 1080
-    fps: int = 60
+    width: int = Field(default=1920, ge=16, le=7680)
+    height: int = Field(default=1080, ge=16, le=4320)
+    fps: int = Field(default=60, ge=1, le=240)
     encoder: Literal["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"] = "auto"
     encoder_tier: Literal["quality", "fast"] = "quality"
     canvas_fit: Literal["contain", "cover", "blur"] = "contain"
     background_color: str = "#000000"
-    blur_amount: int = 24
+    blur_amount: int = Field(default=24, ge=0, le=100)
     range_mode: Literal["full", "custom"] = "full"
-    range_start_sec: float = 0.0
-    range_end_sec: Optional[float] = None
+    range_start_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    range_end_sec: Optional[float] = Field(default=None, ge=0.0, le=86400.0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "OutputConfig":
+        if self.range_mode == "custom" and self.range_end_sec is not None:
+            if self.range_end_sec <= self.range_start_sec:
+                raise ValueError("output range_end_sec must be greater than range_start_sec")
+        return self
 
 
 class Transition(BaseModel):
-    type: str = "cut"
-    duration_sec: float = 0.5
+    type: str = Field(default="cut", min_length=1, max_length=64)
+    duration_sec: float = Field(default=0.5, ge=0.0, le=10.0)
 
 
 class ColorGrade(BaseModel):
-    brightness: float = 0.0
-    contrast: float = 0.0
-    saturation: float = 0.0
+    brightness: float = Field(default=0.0, ge=-100.0, le=100.0)
+    contrast: float = Field(default=0.0, ge=-100.0, le=100.0)
+    saturation: float = Field(default=0.0, ge=-100.0, le=100.0)
     filter_preset: Optional[str] = None
 
 
 class ClipTransform(BaseModel):
-    x: float = 0.5
-    y: float = 0.5
-    scale: float = 1.0
-    rotation: float = 0.0
-    width: float = 1.0
-    height: float = 1.0
-    opacity: float = 1.0
+    x: float = Field(default=0.5, ge=-10.0, le=10.0)
+    y: float = Field(default=0.5, ge=-10.0, le=10.0)
+    scale: float = Field(default=1.0, gt=0.0, le=20.0)
+    rotation: float = Field(default=0.0, ge=-3600.0, le=3600.0)
+    width: float = Field(default=1.0, gt=0.0, le=20.0)
+    height: float = Field(default=1.0, gt=0.0, le=20.0)
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class ClipCrop(BaseModel):
-    x: float = 0.0
-    y: float = 0.0
-    width: float = 1.0
-    height: float = 1.0
+    x: float = Field(default=0.0, ge=0.0, le=1.0)
+    y: float = Field(default=0.0, ge=0.0, le=1.0)
+    width: float = Field(default=1.0, gt=0.0, le=1.0)
+    height: float = Field(default=1.0, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "ClipCrop":
+        if self.x + self.width > 1.000001 or self.y + self.height > 1.000001:
+            raise ValueError("crop rectangle must stay within the source frame")
+        return self
 
 
 class TimelineClip(BaseModel):
-    id: str
+    id: str = Field(min_length=1, max_length=160)
     source_type: Literal["recorded_clip", "file", "text", "template_asset"] = "recorded_clip"
     source_id: Optional[int] = None
     file_path: Optional[str] = None
-    timeline_start: float = 0.0
-    trim_in: float = 0.0
-    trim_out: Optional[float] = None
+    timeline_start: float = Field(default=0.0, ge=0.0, le=86400.0)
+    trim_in: float = Field(default=0.0, ge=0.0, le=86400.0)
+    trim_out: Optional[float] = Field(default=None, ge=0.0, le=86400.0)
     transition_in: Optional[Transition] = None
     transition_out: Optional[Transition] = None
     color: Optional[ColorGrade] = None
     transform: Optional[ClipTransform] = None
-    keyframes: list[dict[str, Any]] = Field(default_factory=list)
+    keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     crop: Optional[ClipCrop] = None
     canvas_fit: Optional[Literal["inherit", "contain", "cover", "blur"]] = None
     flip_horizontal: bool = False
     flip_vertical: bool = False
-    speed: float = 1.0
-    speed_keyframes: list[dict[str, Any]] = Field(default_factory=list)
+    speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    speed_keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     preserve_pitch: bool = True
     reverse: bool = False
-    freeze_frame_sec: float = 0.0
-    volume: float = 1.0
-    audio_keyframes: list[dict[str, Any]] = Field(default_factory=list)
+    freeze_frame_sec: float = Field(default=0.0, ge=0.0, le=30.0)
+    volume: float = Field(default=1.0, ge=0.0, le=5.0)
+    audio_keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     muted: bool = False
-    fade_in_sec: float = 0.0
-    fade_out_sec: float = 0.0
+    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
     meta: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def validate_timing_and_keyframes(self) -> "TimelineClip":
+        if self.trim_out is not None and self.trim_out <= self.trim_in:
+            raise ValueError("clip trim_out must be greater than trim_in")
+        for keyframe in self.speed_keyframes:
+            _validate_raw_keyframe(keyframe, "source_sec", "speed", 0.25, 4.0)
+        for keyframe in self.audio_keyframes:
+            _validate_raw_keyframe(keyframe, "time_sec", "volume", 0.0, 5.0)
+        return self
 
 
 class Track(BaseModel):
-    id: str
+    id: str = Field(min_length=1, max_length=160)
     type: Literal["video", "overlay", "audio"]
     label: str
     name: Optional[str] = Field(default=None, max_length=60)
@@ -106,8 +130,8 @@ class Track(BaseModel):
     hidden: bool = False
     muted: bool = False
     solo: bool = False
-    volume: float = 1.0
-    clips: list[TimelineClip] = Field(default_factory=list)
+    volume: float = Field(default=1.0, ge=0.0, le=5.0)
+    clips: list[TimelineClip] = Field(default_factory=list, max_length=500)
 
 
 class OverlayText(BaseModel):
@@ -123,29 +147,29 @@ class OverlayText(BaseModel):
 class OverlayTransform(BaseModel):
     x: float = 0.5
     y: float = 0.5
-    scale: float = 1.0
+    scale: float = Field(default=1.0, gt=0.0, le=20.0)
     rotation: float = 0.0
-    width: float = 0.33
-    height: float = 0.33
-    opacity: float = 1.0
+    width: float = Field(default=0.33, gt=0.0, le=20.0)
+    height: float = Field(default=0.33, gt=0.0, le=20.0)
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class OverlayKeyframe(BaseModel):
-    time_sec: float = 0.0
+    time_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
     transform: OverlayTransform = Field(default_factory=OverlayTransform)
 
 
 class OverlayLayer(BaseModel):
-    id: str
+    id: str = Field(min_length=1, max_length=160)
     type: Literal["text", "sticker", "webm", "name_card"]
-    timeline_start: float = 0.0
-    duration: float = 3.0
-    fade_in_sec: float = 0.0
-    fade_out_sec: float = 0.0
+    timeline_start: float = Field(default=0.0, ge=0.0, le=86400.0)
+    duration: float = Field(default=3.0, gt=0.0, le=86400.0)
+    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
     transition_in: Optional[Transition] = None
     transition_out: Optional[Transition] = None
     transform: OverlayTransform = Field(default_factory=OverlayTransform)
-    keyframes: list[OverlayKeyframe] = Field(default_factory=list)
+    keyframes: list[OverlayKeyframe] = Field(default_factory=list, max_length=500)
     flip_horizontal: bool = False
     flip_vertical: bool = False
     text: Optional[OverlayText] = None
@@ -158,17 +182,17 @@ class BgmConfig(BaseModel):
     name: Optional[str] = None
     asset_id: Optional[int] = None
     duration_sec: Optional[float] = None
-    volume: float = 1.0
-    start_sec: float = 0.0
-    fade_in_sec: float = 0.0
-    fade_out_sec: float = 0.0
+    volume: float = Field(default=1.0, ge=0.0, le=2.0)
+    start_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
     ducking_enabled: bool = False
-    ducking_volume: float = 0.35
+    ducking_volume: float = Field(default=0.35, ge=0.0, le=1.0)
 
 
 class AudioConfig(BaseModel):
     bgm: Optional[BgmConfig] = None
-    master_volume: float = 1.0
+    master_volume: float = Field(default=1.0, ge=0.0, le=5.0)
 
 
 class TimelineMarker(BaseModel):
@@ -181,13 +205,52 @@ class TimelineMarker(BaseModel):
 class LiteCutProjectBody(BaseModel):
     schema_version: Literal[2] = SCHEMA_VERSION
     output: OutputConfig = Field(default_factory=OutputConfig)
-    tracks: list[Track] = Field(default_factory=list)
-    overlays: list[OverlayLayer] = Field(default_factory=list)
-    overlay_tracks: list[dict[str, Any]] = Field(default_factory=list)
-    markers: list[TimelineMarker] = Field(default_factory=list)
+    tracks: list[Track] = Field(default_factory=list, max_length=32)
+    overlays: list[OverlayLayer] = Field(default_factory=list, max_length=32)
+    overlay_tracks: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+    markers: list[TimelineMarker] = Field(default_factory=list, max_length=500)
     audio: AudioConfig = Field(default_factory=AudioConfig)
     template_id: Optional[str] = None
     created_from_template: bool = False
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "LiteCutProjectBody":
+        _ensure_unique("track", [track.id for track in self.tracks])
+        _ensure_unique("clip", [clip.id for track in self.tracks for clip in track.clips])
+        _ensure_unique("overlay", [overlay.id for overlay in self.overlays])
+        _ensure_unique("marker", [marker.id for marker in self.markers])
+        return self
+
+
+def _ensure_unique(kind: str, values: list[str]) -> None:
+    seen: set[str] = set()
+    for value in values:
+        key = value.strip()
+        if not key:
+            raise ValueError(f"{kind} id must not be blank")
+        if key in seen:
+            raise ValueError(f"duplicate {kind} id: {value}")
+        seen.add(key)
+
+
+def _validate_raw_keyframe(
+    keyframe: dict[str, Any],
+    time_key: str,
+    value_key: str,
+    minimum: float,
+    maximum: float,
+) -> None:
+    if not isinstance(keyframe, dict):
+        raise ValueError("keyframe must be an object")
+    try:
+        time_value = float(keyframe[time_key])
+        value = float(keyframe[value_key])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"keyframe requires numeric {time_key} and {value_key}") from exc
+    if not math.isfinite(time_value) or time_value < 0.0 or time_value > 86400.0:
+        raise ValueError(f"keyframe {time_key} is out of range")
+    if not math.isfinite(value) or value < minimum or value > maximum:
+        raise ValueError(f"keyframe {value_key} is out of range")
 
 
 def _new_clip_id() -> str:

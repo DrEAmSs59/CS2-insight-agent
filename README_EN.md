@@ -112,9 +112,9 @@
 
 Download the latest `CS2-Insight-Agent-Setup-x.x.x.exe` from the [Releases page](https://github.com/DrEAmSs59/CS2-insight-agent/releases), run the installer and follow the prompts.
 
-After installation, launch from desktop or start menu. **No browser needed, no manual backend start** — the Electron main process automatically launches the Python backend service internally.
+After installation, launch from desktop or start menu. **No browser or manual backend start is required.** The lightweight Tauri shell starts the bundled Python backend and renders the UI with the Windows system WebView2 runtime.
 
-The app includes **online update** functionality: automatically checks for new versions on startup, with notifications in the top-right corner; click to download and install within the app, no manual re-download needed.
+The app does not run a background updater. Download new versions directly from the [Releases page](https://github.com/DrEAmSs59/CS2-insight-agent/releases).
 
 > **Recommended: Installation path without Chinese characters.** e.g., `D:\CS2-Insight-Agent\` ✅, `D:\游戏工具\CS2-Insight-Agent\` ❌
 
@@ -127,7 +127,7 @@ The app includes **online update** functionality: automatically checks for new v
    - [X] AI Commentary
    - [X] Auto Director
 - **V2**
-   - [X] Electron Desktop, In-app Online Updates
+   - [X] Lightweight Tauri Desktop
    - [X] Compilation Workbench (FFmpeg Export)
    - [X] POV HUD Experimental Feature
    - [X] Round Timeline Browse & Queue Recording

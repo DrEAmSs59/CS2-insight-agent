@@ -3,8 +3,8 @@ import dataclasses
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from .models import RecordingRequestDTO, RecordingPlan, RequestType, RecordingOptions
 from .plan_builder import build_plan
 from .normalizer import NormalizationError, normalize
@@ -23,6 +23,7 @@ from .services.result_writer import write_result
 from ..montage_db import MontageDB
 from ..api_errors import error_detail
 from ..demo_compat_service import ensure_demo_compatible
+from ..runtime_session import runtime_session_dependency
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -267,7 +268,7 @@ async def _persist_v3_results(
         clip_meta = build_v3_recorded_clip_meta(dto, None, r)
 
         try:
-            await db.insert_recorded_clip(
+            recorded_clip_id = await db.insert_recorded_clip(
                 clip_id=clip_id,
                 demo_path=demo_path,
                 demo_filename=demo_filename,
@@ -277,9 +278,15 @@ async def _persist_v3_results(
                 status="ready",
                 clip_meta=clip_meta,
             )
+            # The completion dialog is rendered immediately from this response.
+            # Return the material-library row id so it can stream the finished
+            # video as its preview frame without exposing an arbitrary file path.
+            r["recorded_clip_id"] = recorded_clip_id
+            if dur_f is not None:
+                r["recorded_clip_duration_sec"] = dur_f
             logger.info(
-                "[RecordingV3][DB] persisted clip_id=%s output=%s",
-                clip_id, output_path,
+                "[RecordingV3][DB] persisted recorded_clip_id=%s clip_id=%s output=%s",
+                recorded_clip_id, clip_id, output_path,
             )
             logger.info(
                 "[RecordingV3][DB] meta request_type=%s workbench_clip_kind=%s category=%s "
@@ -296,12 +303,13 @@ async def _persist_v3_results(
                 clip_id, output_path,
             )
 
-# Module-level abort event for the V3 queue; set when a queue is running, cleared in finally.
+# Module-level abort event for the active V3 recording operation; set for both
+# single execute and queue requests, and cleared in their finally blocks.
 _queue_abort_event: Optional[asyncio.Event] = None
 
 
 def get_queue_abort_event() -> Optional[asyncio.Event]:
-    """Return the current V3 queue abort event, or None if idle."""
+    """Return the current V3 recording abort event, or None if idle."""
     return _queue_abort_event
 
 
@@ -327,15 +335,7 @@ async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
     # Compute per-segment debug metadata for UI display
     def _seg_debug(s):
         meta: dict = dict(s.metadata)
-        meta["anchor_preserved"] = (
-            s.is_final_round
-            and bool(s.anchor_ticks)
-            and any("guard_skipped" in w or "anchor_preserved" in w for w in plan.warnings
-                    if f"segment {s.segment_index}:" in w)
-        )
-        meta["demo_exit_guard_applied"] = (
-            s.is_final_round and s.safe_end_tick is not None
-        )
+        meta["demo_end_guard_applied"] = s.safe_end_tick is not None
         meta["target_steamid64_missing"] = not bool(s.target_steamid64)
         return {
             "segment_index": s.segment_index,
@@ -372,8 +372,8 @@ async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
                 1 for s in plan.disabled_segments
                 if s.disabled_reason == "missing_victim_steamid64"
             ),
-            "guard_skipped_warnings": sum(
-                1 for w in plan.warnings if "guard_skipped" in w
+            "demo_end_guard_warnings": sum(
+                1 for w in plan.warnings if "demo_end" in w
             ),
         },
     }
@@ -425,7 +425,10 @@ async def ai_director_preview(dto: RecordingRequestDTO) -> dict:
 
 
 @router.post("/execute", response_model=dict)
-async def execute_recording(dto: RecordingRequestDTO) -> dict:
+async def execute_recording(
+    dto: RecordingRequestDTO,
+    _runtime_session: None = Depends(runtime_session_dependency),
+) -> dict:
     """
     Build a RecordingPlan and execute it using OBS + CS2.
     Returns execution result summary.
@@ -507,19 +510,29 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
     obs_client = OBSClient(obs_cfg)
-
+    global _queue_abort_event
+    abort_ev = asyncio.Event()
+    _queue_abort_event = abort_ev
     try:
-        obs_client.connect()
-    except OBSConnectionError as e:
-        raise HTTPException(status_code=503, detail=f"OBS connection failed: {e}")
+        try:
+            obs_client.connect()
+        except OBSConnectionError as e:
+            raise HTTPException(status_code=503, detail=f"OBS connection failed: {e}")
 
-    fade_config = _resolve_fade_config(dto.options, config)
-    fade_ctrl = OBSFadeController(obs_cfg, fade_config)
-    if not await fade_ctrl.setup():
-        logger.warning("OBS fade transition setup failed or disabled; recording in hard-cut mode")
+        fade_config = _resolve_fade_config(dto.options, config)
+        fade_ctrl = OBSFadeController(obs_cfg, fade_config)
+        if not await fade_ctrl.setup():
+            logger.warning("OBS fade transition setup failed or disabled; recording in hard-cut mode")
 
-    executor = RecordingExecutor(obs_client, fade_controller=fade_ctrl)
-    result = await executor.execute(plan)
+        executor = RecordingExecutor(
+            obs_client,
+            abort_event=abort_ev,
+            fade_controller=fade_ctrl,
+        )
+        result = await executor.execute(plan)
+    finally:
+        if _queue_abort_event is abort_ev:
+            _queue_abort_event = None
 
     try:
         write_result(result)
@@ -544,7 +557,7 @@ async def execute_recording(dto: RecordingRequestDTO) -> dict:
 
 
 class QueueRecordingRequest(BaseModel):
-    requests: list[RecordingRequestDTO]
+    requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
     pov_hud: Optional[dict] = None  # {enabled: bool, radar_mode: int, teamcounter_numeric: bool}
@@ -561,7 +574,10 @@ def get_kb_prebuild_status() -> dict:
 
 
 @router.post("/queue", response_model=list[dict])
-async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
+async def execute_recording_queue(
+    req: QueueRecordingRequest,
+    _runtime_session: None = Depends(runtime_session_dependency),
+) -> list[dict]:
     """
     [RecordingV3] Execute a batch of RecordingRequestDTOs through the new
     build_plan → RecordingExecutor pipeline.
@@ -730,10 +746,11 @@ async def execute_recording_queue(req: QueueRecordingRequest) -> list[dict]:
             raise HTTPException(422, f"Demo compatibility repair failed: {exc}") from exc
         logger.info(
             "[RecordingV3] compatibility ready: cached=%s outcome=%s "
-            "removed_type138=%d source=%s",
+            "removed_type138=%d removed_win_panel=%d source=%s",
             compat.cached,
             compat.report.outcome,
             compat.report.removed_messages,
+            compat.report.removed_win_panel_events,
             demo_path,
         )
 
