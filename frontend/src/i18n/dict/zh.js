@@ -210,7 +210,7 @@ export default {
   "library.sortOptRounds": "回合",
   "library.sortOptMap": "地图",
   "library.sortOptFilename": "文件名",
-  // analysis — AnalysisPage
+  // analysis
   "analysis.demosImported": "{n} 个 Demo 已导入",
   "analysis.demosImportedSuffix": "个 Demo 已导入",
   "analysis.linkDemoLibrary": "Demo 库",
@@ -263,7 +263,7 @@ export default {
   "analysis.modFirstkillTitle": "本回合首杀",
   "analysis.modFlashAssist": "闪协",
   "analysis.modFlashAssistTitle": "闪光助攻参与",
-  // analysis — DeathNoticeRow
+  // analysis timeline
   "analysis.assistFallback": "助攻",
   "analysis.assistLabel": "助攻：",
   "analysis.btnEnqueue": "加入录制",
@@ -1012,7 +1012,7 @@ export default {
   "settings.sponsorWx": "微信支付",
   "settings.sponsorAli": "支付宝",
 
-  // obscfg — ObsConfigCenterPage
+  // OBS configuration
   "obscfg.pageTitle": "OBS 配置中心",
   "obscfg.pageSubtitle": "一键校准 OBS 录制环境，自动修复画布/输出分辨率错位、4:3 黑边、Game Capture 源缺失、录像格式错误等问题。",
   "obscfg.sectionSettings": "OBS 程序设置",
@@ -1098,7 +1098,7 @@ export default {
   "playercfg.btnRestore": "一键恢复玩家配置",
   "playercfg.okTitle": "配置文件状态正常",
   "playercfg.okDesc": "当前无需从备份恢复；仍可随时打开备份目录或手动替换文件。",
-  // montage — MemeDeathMontageCard
+  // montage
   "montage.bundleLabel": "打包录制",
   "montage.bundleTitle": "👨‍🔬 节目效果专属：研发全过程",
   "montage.bundleDeathCount": "（本局共 {n} 次死亡）",
@@ -1110,14 +1110,14 @@ export default {
   "montage.pickerClear": "清空",
   "montage.pickerNoSelectionHint": "未勾选时不可加入录制队列。解析在未勾选时仍按整局合规非赛后回合生成合辑；勾选后再解析可只生成所选回合；整局合辑也可在格内保留默认全选后取消勾选，入队时按勾选子集切片。",
   "montage.pickerRoundTitle": "第 {n} 回合",
-  // montage — MontageExportResult
+  // montage export result
   "montage.exportDone": "导出完成",
   "montage.exportSegmentsDuration": "{n} 段 · 时长约 {dur}",
   "montage.exportVideoPath": "视频路径",
   "montage.exportCopyPath": "复制路径",
   "montage.exportCopyShare": "复制群聊文案",
   "montage.exportTip": "提示：本页无法直接打开系统文件夹时，请用资源管理器粘贴路径访问。",
-  // montage — MontageExportSettings
+  // montage export settings
   "montage.exportSettingsTitle": "导出设置",
   "montage.exportSettingsReady": "就绪",
   "montage.exportSettingsNotReady": "未完成",
@@ -1155,9 +1155,9 @@ export default {
   "montage.exportCopyBtn": "复制",
   "montage.exportClearBtn": "清空",
   "montage.exportExamplePrefix": "示例：",
-  // montage — MontageThemeSelector
+  // montage themes
   "montage.themeSectionLabel": "合辑主题",
-  // montage — MontageTimeline
+  // montage timeline
   "montage.timelineHeader": "当前合辑：{n} 个片段 · 预计 {dur}",
   "montage.timelineSortTimeline": "按时间线",
   "montage.timelineSortScore": "按评分",
@@ -1169,7 +1169,7 @@ export default {
   "montage.timelineAriaUp": "上移",
   "montage.timelineAriaDown": "下移",
   "montage.timelineAriaRemove": "移除",
-  // montage — RecordedClipCard
+  // recorded clips
   "montage.clipCardAiPrefix": "AI：",
   "montage.clipCardScore": "评分：",
   "montage.clipCardAddBtn": "加入合辑",
@@ -1553,7 +1553,7 @@ export default {
   "montage.poolCardVictimPovBadge": "受害者视角 ×{n}",
   "montage.poolCardSpectatorPerspective": "观战视角",
   "montage.poolCardAiScore": "AI 评分 {n} 分",
-  // dashboard — DashboardPage
+  // dashboard
   "dashboard.pageTitle": "仪表盘",
   "dashboard.pageSubtitle": "选择下方入口进入对应功能。解析高光、管理录制队列与合辑导出已分为独立页面，左侧导航可随时切换。",
   "dashboard.analysisMode": "分析模式",
@@ -2040,7 +2040,7 @@ export default {
   "match.scoreboardRounds": "回合: {n}",
   "match.scoreboardDuration": "时长: {n} 分钟",
   "match.scoreboardMap": "地图: {name}",
-  // match — MatchSwitcher
+  // match switching
   "match.switcherTitle": "比赛切换",
   "match.unknownMap": "未知地图",
   "match.switcherMatch": "第 {n} 场 · {label}",
