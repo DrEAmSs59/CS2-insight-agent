@@ -81,18 +81,3 @@ git checkout -b fix/critical-bug main
 ## 许可证
 
 贡献即表示你同意在 [PolyForm Noncommercial 1.0.0](./LICENSE) 下授权你的改动。
-
----
-
-## 维护者一次性迁移（采纳本策略时）
-
-若远程尚无 `develop`，由维护者执行一次：
-
-```bash
-git checkout main
-git pull origin main
-git checkout -b develop
-git push -u origin develop
-```
-
-建议在 GitHub 仓库设置中将 **默认分支保持为 `main`**（面向用户与 Release），并将 **PR 默认 base** 设为 `develop`（可在首次 PR 时选择，或通过仓库模板提示贡献者）。
