@@ -50,6 +50,15 @@ def _remove_decals_payload(target_entity: int) -> bytes:
     return b"\x08\x01\x12" + compat._encode_varint(len(nested)) + nested
 
 
+def _win_panel_event_payload(event_tick: int, *, event_id: int = 216) -> bytes:
+    return (
+        b"\x10"
+        + compat._encode_varint(event_id)
+        + b"\x20"
+        + compat._encode_varint(event_tick)
+    )
+
+
 def _packet_proto(packet_data: bytes) -> bytes:
     # Unknown fields around field 3 must remain byte-identical.
     return (
@@ -139,6 +148,29 @@ def _first_packet_proto(data: bytes) -> bytes:
     return compat._snappy_decompress(payload) if raw_command & 64 else payload
 
 
+def _first_packet_message_types(data: bytes) -> list[int]:
+    packet_proto = _first_packet_proto(data)
+    target = compat._parse_proto_fields(packet_proto, target_field_number=3)
+    assert target is not None
+    _key_end, value_start, value_end = target
+    return [
+        record.message_type
+        for record in compat._parse_netmessages(packet_proto[value_start:value_end])
+    ]
+
+
+def test_reads_real_outer_frame_end_tick_without_decoding_payloads(tmp_path: Path):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"first")])))
+    last = _frame(7, 9_999, _packet_proto(_packet_data([(76, b"last")])))
+    sentinel = _frame(0, compat._U32_MAX, b"stop")
+    source = _write(
+        tmp_path / "source.dem",
+        b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + last + sentinel,
+    )
+
+    assert compat.read_demo_end_tick(source) == 9_999
+
+
 @pytest.mark.parametrize("compressed", [False, True])
 def test_repairs_unaligned_207_138_76_and_remaps_header(tmp_path: Path, compressed: bool):
     old = _packet_data(
@@ -208,6 +240,152 @@ def test_accepts_strict_schema_with_non_sample_payload_length(tmp_path: Path):
 
     assert report.outcome == "repaired"
     assert report.removed_messages == 1
+
+
+def test_playback_copy_removes_only_win_panel_event_at_parser_tick(tmp_path: Path):
+    packet_data = _packet_data(
+        [
+            (207, _win_panel_event_payload(196_078)),
+            (375, b"end-of-match-player-data"),
+            (76, b"kept-packet-entity"),
+        ]
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(packet_data), compressed=True),
+    )
+    original = source.read_bytes()
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        win_panel_match_tick=42,
+        drop_legacy_type138=False,
+    )
+
+    assert report.outcome == "repaired"
+    assert report.removed_messages == 0
+    assert report.removed_win_panel_events == 1
+    assert report.first_tick == report.last_tick == 42
+    assert report.remaining_win_panel_events == 0
+    assert _first_packet_message_types(original) == [207, 375, 76]
+    assert _first_packet_message_types(destination.read_bytes()) == [375, 76]
+    assert source.read_bytes() == original
+
+
+def test_playback_copy_keeps_win_panel_event_when_parser_tick_does_not_match(tmp_path: Path):
+    packet_data = _packet_data(
+        [(207, _win_panel_event_payload(196_078)), (76, b"kept")]
+    )
+    source_bytes = _demo(_packet_proto(packet_data), compressed=True)
+    source = _write(tmp_path / "source.dem", source_bytes)
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        win_panel_match_tick=43,
+        drop_legacy_type138=False,
+    )
+
+    assert report.outcome == "clean"
+    assert report.removed_win_panel_events == 0
+    assert destination.read_bytes() == source_bytes
+
+
+def test_playback_copy_accepts_unique_keyless_event_at_parser_tick_when_id_changes(
+    tmp_path: Path,
+):
+    packet_data = _packet_data(
+        [(207, _win_panel_event_payload(196_078, event_id=999)), (76, b"kept")]
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(packet_data), compressed=True),
+    )
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        win_panel_match_tick=42,
+        drop_legacy_type138=False,
+    )
+
+    assert report.removed_win_panel_events == 1
+    assert _first_packet_message_types(destination.read_bytes()) == [76]
+
+
+def test_playback_copy_rejects_ambiguous_keyless_events_at_parser_tick(tmp_path: Path):
+    packet_data = _packet_data(
+        [
+            (207, _win_panel_event_payload(196_078, event_id=998)),
+            (207, _win_panel_event_payload(196_079, event_id=999)),
+            (76, b"kept"),
+        ]
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(packet_data), compressed=True),
+    )
+    destination = tmp_path / "playback.dem"
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="multiple keyless GameEvents",
+    ):
+        compat.prepare_cs2_playback_demo(
+            source,
+            destination,
+            win_panel_match_tick=42,
+            drop_legacy_type138=False,
+        )
+
+    assert not destination.exists()
+
+
+def test_persistent_repair_removes_win_panel_event(tmp_path: Path):
+    packet_data = _packet_data(
+        [(207, _win_panel_event_payload(196_078)), (76, b"kept")]
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(packet_data), compressed=True),
+    )
+    original = source.read_bytes()
+
+    report = compat.repair_demo_in_place(source)
+
+    assert report.outcome == "repaired"
+    assert report.removed_messages == 0
+    assert report.removed_win_panel_events == 1
+    assert report.remaining_win_panel_events == 0
+    assert source.read_bytes() != original
+    assert _first_packet_message_types(source.read_bytes()) == [76]
+
+
+def test_persistent_repair_does_not_guess_unknown_keyless_gameevent(tmp_path: Path):
+    packet_data = _packet_data(
+        [(207, _win_panel_event_payload(196_078, event_id=999)), (76, b"kept")]
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(packet_data), compressed=True),
+    )
+    original = source.read_bytes()
+
+    report = compat.repair_demo_in_place(source)
+
+    assert report.outcome == "clean"
+    assert report.removed_win_panel_events == 0
+    assert source.read_bytes() == original
+
+
+def test_win_panel_predicate_rejects_same_id_when_event_has_keys():
+    payload = _win_panel_event_payload(196_078) + b"\x1a\x02\x08\x01"
+
+    assert compat._is_win_panel_match_event(payload) is False
 
 
 @pytest.mark.parametrize("command", [8, 13])
@@ -343,7 +521,12 @@ def test_header_offset_must_point_to_expected_command(tmp_path: Path):
 
 def test_in_place_repair_atomically_replaces_affected_source(tmp_path: Path):
     packet_data = _packet_data(
-        [(207, b"before"), (138, _remove_decals_payload(300_000)), (76, b"after")]
+        [
+            (207, b"before"),
+            (138, _remove_decals_payload(300_000)),
+            (207, _win_panel_event_payload(196_078)),
+            (76, b"after"),
+        ]
     )
     source = _write(
         tmp_path / "source.dem",
@@ -356,7 +539,10 @@ def test_in_place_repair_atomically_replaces_affected_source(tmp_path: Path):
 
     assert report.outcome == "repaired"
     assert report.removed_messages == 1
+    assert report.removed_win_panel_events == 1
+    assert report.remaining_win_panel_events == 0
     assert source.read_bytes() != original
+    assert _first_packet_message_types(source.read_bytes()) == [207, 76]
     assert source.stat().st_mtime_ns >= original_mtime_ns + 1_000_000_000
     assert compat.scan_demo_legacy_type138(source).selected_messages == 0
     assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))

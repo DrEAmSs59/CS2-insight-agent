@@ -20,6 +20,34 @@ const STEM_ALIASES = {
 };
 
 /**
+ * demoparser2 exposes special knives as display names ("Stiletto Knife"),
+ * while the bundled HUD assets use the game schema order ("knife_stiletto").
+ * Keep these aliases exact so a player's equipped skin never turns into a
+ * blank current-weapon slot.
+ */
+const DISPLAY_NAME_ALIASES = {
+  bayonet: "bayonet",
+  bowie_knife: "knife_bowie",
+  butterfly_knife: "knife_butterfly",
+  classic_knife: "knife_css",
+  falchion_knife: "knife_falchion",
+  flip_knife: "knife_flip",
+  gut_knife: "knife_gut",
+  huntsman_knife: "knife_tactical",
+  karambit: "knife_karambit",
+  m9_bayonet: "knife_m9_bayonet",
+  navaja_knife: "knife_gypsy_jackknife",
+  nomad_knife: "knife_outdoor",
+  paracord_knife: "knife_cord",
+  shadow_daggers: "knife_push",
+  skeleton_knife: "knife_skeleton",
+  stiletto_knife: "knife_stiletto",
+  survival_knife: "knife_canis",
+  talon_knife: "knife_widowmaker",
+  ursus_knife: "knife_ursus",
+};
+
+/**
  * 与 `public/hud-death-notice/*.svg` 对应、且会出现在击杀上的武器 / 刀 / 雷 / C4。
  * 按长度降序排列（子串匹配时先匹配长的，避免 m4a1 吃掉 m4a1_silencer）。
  */
@@ -113,17 +141,43 @@ function normalizeWeaponHaystack(rawKey, rawName) {
  * @param {string | null | undefined} [rawName] weapon_name，辅助匹配 M4A1-S 等
  * @returns {string} 不含 `.svg` 的文件名
  */
-export function resolveHudWeaponStem(rawKey, rawName) {
+export function resolveHudWeaponStem(rawKey, rawName, options = {}) {
+  const fallback = Object.prototype.hasOwnProperty.call(options, "fallback")
+    ? options.fallback
+    : "ak47";
   const hay = normalizeWeaponHaystack(rawKey, rawName);
-  if (!hay) return "ak47";
+  if (!hay) return fallback;
 
   if (STEM_ALIASES[hay]) return STEM_ALIASES[hay];
-
-  for (const stem of WEAPON_STEMS_LONGEST_FIRST) {
-    if (hay.includes(stem)) {
-      return STEM_ALIASES[stem] || stem;
+  for (const [displayName, stem] of Object.entries(DISPLAY_NAME_ALIASES).sort(
+    ([left], [right]) => right.length - left.length,
+  )) {
+    if (
+      hay === displayName
+      || hay.startsWith(`${displayName}_`)
+      || hay.endsWith(`_${displayName}`)
+      || hay.includes(`_${displayName}_`)
+    ) {
+      return stem;
     }
   }
 
-  return "ak47";
+  // Compact form so "AK-47" / "ak_47" still match stem "ak47".
+  const hayCompact = hay.replace(/_/g, "");
+  for (const stem of WEAPON_STEMS_LONGEST_FIRST) {
+    const stemCompact = stem.replace(/_/g, "");
+    if (hay.includes(stem) || hayCompact.includes(stemCompact)) {
+      return STEM_ALIASES[stem] || stem;
+    }
+    // Skin names often omit the "knife_" prefix (e.g. "karambit").
+    if (stem.startsWith("knife_")) {
+      const short = stem.slice("knife_".length);
+      const shortCompact = short.replace(/_/g, "");
+      if (hay === short || hay.endsWith(`_${short}`) || hayCompact === shortCompact || hayCompact.endsWith(shortCompact)) {
+        return STEM_ALIASES[stem] || stem;
+      }
+    }
+  }
+
+  return fallback;
 }

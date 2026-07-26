@@ -1,9 +1,12 @@
 """Safe compatibility rewriting for legacy PBDEMS2 demos.
 
 The July 2026 CS2 client can lose netmessage framing when it encounters the
-legacy entity message ``EM_RemoveAllDecals`` (type 138).  This module can both
-prepare a disposable playback copy and atomically repair the source demo after
-the rewritten file has passed a complete rescan.
+legacy entity message ``EM_RemoveAllDecals`` (type 138).  The terminal
+``cs_win_panel_match`` event is also observed when CS2 enters the post-match
+panel, after which later ``demo_gototick`` commands are ignored.  This module
+can prepare a disposable playback copy without that event, and can atomically
+remove both compatibility blockers from the source demo after the rewritten
+file has passed a complete rescan.
 
 Detection is content-based.  File dates and demo filenames are deliberately
 not used: a packet is changed only when type 138 has the exact, previously
@@ -23,12 +26,17 @@ from typing import BinaryIO, Callable, Literal, Optional
 
 
 PATCH_ID = "drop-legacy-remove-all-decals-138"
-PATCH_REVISION = 1
+PATCH_REVISION = 2
+WIN_PANEL_PATCH_ID = "drop-cs-win-panel-match-gameevent-207"
+PERSISTENT_PATCH_ID = f"{PATCH_ID}+{WIN_PANEL_PATCH_ID}"
 
 _MAGIC = b"PBDEMS2\x00"
 _COMPRESSED_COMMAND_FLAG = 64
 _PACKET_COMMANDS = frozenset({7, 8, 13})
 _TYPE_REMOVE_ALL_DECALS = 138
+_TYPE_GAME_EVENT = 207
+_WIN_PANEL_MATCH_EVENT_ID = 216
+_WIN_PANEL_MATCH_EVENT_NAME = b"cs_win_panel_match"
 
 # Defensive limits.  Real packet frames are far below these ceilings.
 _MAX_OUTER_FRAME_SIZE = 256 * 1024 * 1024
@@ -51,6 +59,7 @@ class DemoCompatibilityScan:
     last_tick: Optional[int]
     max_per_frame: int
     outer_frames: int
+    selected_win_panel_events: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,6 +74,8 @@ class PlaybackDemoReport:
     last_tick: Optional[int]
     max_per_frame: int
     remaining_selected_messages: int
+    removed_win_panel_events: int = 0
+    remaining_win_panel_events: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -73,20 +84,28 @@ class PlaybackDemoReport:
 @dataclass
 class _PatchStats:
     removed_messages: int = 0
+    removed_win_panel_events: int = 0
     changed_frames: int = 0
     first_tick: Optional[int] = None
     last_tick: Optional[int] = None
     max_per_frame: int = 0
     outer_frames: int = 0
 
-    def add_frame(self, tick: int, removed: int) -> None:
-        if removed <= 0:
+    def add_frame(
+        self,
+        tick: int,
+        removed: int,
+        removed_win_panel_events: int = 0,
+    ) -> None:
+        removed_total = removed + removed_win_panel_events
+        if removed_total <= 0:
             return
         self.removed_messages += removed
+        self.removed_win_panel_events += removed_win_panel_events
         self.changed_frames += 1
         self.first_tick = tick if self.first_tick is None else self.first_tick
         self.last_tick = tick
-        self.max_per_frame = max(self.max_per_frame, removed)
+        self.max_per_frame = max(self.max_per_frame, removed_total)
 
 
 @dataclass(frozen=True)
@@ -216,8 +235,8 @@ def _snappy_decompress(payload: bytes) -> bytes:
         if backend_name == "cramjam":
             decoded = bytes(backend.snappy.decompress_raw(payload))  # type: ignore[attr-defined]
         else:
-            # Standard demoparser2 installs include PyArrow.  Lean release
-            # builds install cramjam explicitly through requirements.txt.
+            # Standard demoparser2 installs include PyArrow. Lean release
+            # builds install cramjam explicitly through the uv-locked runtime.
             decoded = bytes(  # type: ignore[attr-defined]
                 backend.Codec("snappy").decompress(payload, expected_size)
             )
@@ -406,6 +425,109 @@ def _validate_remove_all_decals_payload(payload: bytes) -> None:
         raise _fail("type 138 entity_msg contains duplicate, unknown, or trailing fields")
 
 
+def _is_win_panel_match_event(
+    payload: bytes,
+    *,
+    allow_tick_selected_fallback: bool = False,
+) -> bool:
+    """Match the terminal, keyless ``CSVCMsg_GameEvent`` conservatively.
+
+    The tested CS2 tournament demo omits ``event_name`` and encodes event id
+    216 plus the server event tick.  Some producers include the literal name,
+    which is even stronger evidence.  When demoparser has already selected the
+    exact outer tick, a unique keyless event may be accepted as a version-safe
+    fallback.  A message with keys, duplicate fields, unknown fields,
+    non-canonical framing, or no event tick is deliberately not selected.
+    """
+
+    pos = 0
+    event_name: Optional[bytes] = None
+    event_id: Optional[int] = None
+    event_tick: Optional[int] = None
+    try:
+        while pos < len(payload):
+            key, key_end, raw_key = _read_varint_bytes(
+                payload,
+                pos,
+                max_bits=64,
+                context="win-panel GameEvent field key",
+            )
+            if raw_key != _encode_varint(key) or key == 0:
+                return False
+            pos = key_end
+            field_number = key >> 3
+            wire_type = key & 7
+
+            if field_number == 1:
+                if wire_type != 2 or event_name is not None:
+                    return False
+                size, pos, raw_size = _read_varint_bytes(
+                    payload,
+                    pos,
+                    max_bits=64,
+                    context="win-panel GameEvent name length",
+                )
+                if raw_size != _encode_varint(size) or pos + size > len(payload):
+                    return False
+                event_name = payload[pos : pos + size]
+                pos += size
+            elif field_number in (2, 4):
+                if wire_type != 0:
+                    return False
+                value, pos, raw_value = _read_varint_bytes(
+                    payload,
+                    pos,
+                    max_bits=64,
+                    context="win-panel GameEvent varint",
+                )
+                if raw_value != _encode_varint(value):
+                    return False
+                if field_number == 2:
+                    if event_id is not None:
+                        return False
+                    event_id = value
+                else:
+                    if event_tick is not None:
+                        return False
+                    event_tick = value
+            else:
+                # Field 3 contains event keys.  cs_win_panel_match is keyless;
+                # rejecting it also protects against selecting another event
+                # if a future build reuses numeric id 216.
+                return False
+    except DemoPlaybackCompatibilityError:
+        return False
+
+    if event_tick is None:
+        return False
+    if event_name is not None:
+        return event_name == _WIN_PANEL_MATCH_EVENT_NAME
+    return event_id == _WIN_PANEL_MATCH_EVENT_ID or (
+        allow_tick_selected_fallback and event_id is not None
+    )
+
+
+def _validate_selected_record_framing(
+    packet_data: bytes,
+    target: _MessageRecord,
+    *,
+    label: str,
+) -> None:
+    if target.type_end_bit - target.start_bit != 10:
+        raise _fail(f"{label} does not use the canonical 10-bit UBitVar encoding")
+    canonical_size = _encode_varint(target.payload_size)
+    if (
+        target.payload_start_bit - target.type_end_bit != len(canonical_size) * 8
+        or _read_unaligned_bytes(
+            packet_data,
+            target.type_end_bit,
+            len(canonical_size),
+        )
+        != canonical_size
+    ):
+        raise _fail(f"{label} payload size does not use canonical varint framing")
+
+
 def _copy_bit_range(
     destination: bytearray,
     destination_bit: int,
@@ -446,34 +568,66 @@ def _bit_ranges_equal(
     return True
 
 
-def _strip_legacy_type138(packet_data: bytes) -> Optional[tuple[bytes, int]]:
+def _strip_playback_messages(
+    packet_data: bytes,
+    *,
+    drop_legacy_type138: bool,
+    drop_win_panel_match: bool,
+    allow_win_panel_tick_fallback: bool = False,
+) -> Optional[tuple[bytes, int, int]]:
     records = _parse_netmessages(packet_data)
-    targets = [record for record in records if record.message_type == _TYPE_REMOVE_ALL_DECALS]
+    type138_targets = (
+        [record for record in records if record.message_type == _TYPE_REMOVE_ALL_DECALS]
+        if drop_legacy_type138
+        else []
+    )
+    win_panel_targets: list[_MessageRecord] = []
+    if drop_win_panel_match:
+        fallback_targets: list[_MessageRecord] = []
+        for record in records:
+            if record.message_type != _TYPE_GAME_EVENT:
+                continue
+            payload = _read_unaligned_bytes(
+                packet_data,
+                record.payload_start_bit,
+                record.payload_size,
+            )
+            if _is_win_panel_match_event(payload):
+                win_panel_targets.append(record)
+            elif allow_win_panel_tick_fallback and _is_win_panel_match_event(
+                payload,
+                allow_tick_selected_fallback=True,
+            ):
+                fallback_targets.append(record)
+        if not win_panel_targets:
+            if len(fallback_targets) > 1:
+                raise _fail(
+                    "demoparser win-panel tick contains multiple keyless "
+                    "GameEvents; refusing an ambiguous rewrite"
+                )
+            win_panel_targets = fallback_targets
+
+    targets = [*type138_targets, *win_panel_targets]
     if not targets:
         return None
 
-    for target in targets:
-        if target.type_end_bit - target.start_bit != 10:
-            raise _fail("type 138 does not use the canonical 10-bit UBitVar encoding")
-        canonical_size = _encode_varint(target.payload_size)
-        if (
-            target.payload_start_bit - target.type_end_bit != len(canonical_size) * 8
-            or _read_unaligned_bytes(
-                packet_data,
-                target.type_end_bit,
-                len(canonical_size),
-            )
-            != canonical_size
-        ):
-            raise _fail("type 138 payload size does not use canonical varint framing")
+    for target in type138_targets:
+        _validate_selected_record_framing(packet_data, target, label="type 138")
         payload = _read_unaligned_bytes(
             packet_data,
             target.payload_start_bit,
             target.payload_size,
         )
         _validate_remove_all_decals_payload(payload)
+    for target in win_panel_targets:
+        _validate_selected_record_framing(
+            packet_data,
+            target,
+            label="cs_win_panel_match GameEvent",
+        )
 
-    kept = [record for record in records if record.message_type != _TYPE_REMOVE_ALL_DECALS]
+    target_starts = {record.start_bit for record in targets}
+    kept = [record for record in records if record.start_bit not in target_starts]
     kept_bits = sum(record.end_bit - record.start_bit for record in kept)
     rewritten = bytearray((kept_bits + 7) // 8)
     destination_bit = 0
@@ -506,9 +660,37 @@ def _strip_legacy_type138(packet_data: bytes) -> Optional[tuple[bytes, int]]:
             )
         ):
             raise _fail("rewritten packet changed a retained netmessage")
-    if any(record.message_type == _TYPE_REMOVE_ALL_DECALS for record in output_records):
+    if drop_legacy_type138 and any(
+        record.message_type == _TYPE_REMOVE_ALL_DECALS for record in output_records
+    ):
         raise _fail("rewritten packet still contains selected type 138")
-    return output, len(targets)
+    if drop_win_panel_match:
+        for record in output_records:
+            if record.message_type != _TYPE_GAME_EVENT:
+                continue
+            payload = _read_unaligned_bytes(
+                output,
+                record.payload_start_bit,
+                record.payload_size,
+            )
+            if _is_win_panel_match_event(payload):
+                raise _fail("rewritten packet still contains cs_win_panel_match GameEvent")
+    return output, len(type138_targets), len(win_panel_targets)
+
+
+def _strip_legacy_type138(packet_data: bytes) -> Optional[tuple[bytes, int]]:
+    """Backward-compatible helper retained for focused unit tests and callers."""
+
+    result = _strip_playback_messages(
+        packet_data,
+        drop_legacy_type138=True,
+        drop_win_panel_match=False,
+        allow_win_panel_tick_fallback=False,
+    )
+    if result is None:
+        return None
+    rewritten, removed, _removed_win_panel = result
+    return rewritten, removed
 
 
 def _parse_proto_fields(
@@ -594,16 +776,37 @@ def _replace_unique_length_delimited_field(
     )
 
 
-def _patch_cdemo_packet(packet_proto: bytes, tick: int, stats: _PatchStats) -> Optional[bytes]:
+def _patch_cdemo_packet(
+    packet_proto: bytes,
+    tick: int,
+    stats: _PatchStats,
+    *,
+    drop_legacy_type138: bool,
+    drop_win_panel_match: bool,
+    win_panel_match_tick: Optional[int],
+) -> Optional[bytes]:
     removed_in_packet = 0
+    removed_win_panel_in_packet = 0
 
     def transform(packet_data: bytes) -> Optional[bytes]:
-        nonlocal removed_in_packet
-        result = _strip_legacy_type138(packet_data)
+        nonlocal removed_in_packet, removed_win_panel_in_packet
+        tick_selected_panel = (
+            win_panel_match_tick is not None and tick == win_panel_match_tick
+        )
+        result = _strip_playback_messages(
+            packet_data,
+            drop_legacy_type138=drop_legacy_type138,
+            drop_win_panel_match=drop_win_panel_match or tick_selected_panel,
+            # The version-safe id fallback is only safe when demoparser has
+            # independently selected this exact outer tick.  A global source
+            # repair removes only the known id/name and never guesses.
+            allow_win_panel_tick_fallback=tick_selected_panel,
+        )
         if result is None:
             return None
-        rewritten, removed = result
+        rewritten, removed, removed_win_panel = result
         removed_in_packet = removed
+        removed_win_panel_in_packet = removed_win_panel
         return rewritten
 
     patched = _replace_unique_length_delimited_field(
@@ -612,7 +815,7 @@ def _patch_cdemo_packet(packet_proto: bytes, tick: int, stats: _PatchStats) -> O
         transform=transform,
     )
     if patched is not None:
-        stats.add_frame(tick, removed_in_packet)
+        stats.add_frame(tick, removed_in_packet, removed_win_panel_in_packet)
     return patched
 
 
@@ -621,14 +824,32 @@ def _patch_outer_payload(
     payload: bytes,
     tick: int,
     stats: _PatchStats,
+    *,
+    drop_legacy_type138: bool,
+    drop_win_panel_match: bool,
+    win_panel_match_tick: Optional[int],
 ) -> Optional[bytes]:
     if command in (7, 8):
-        return _patch_cdemo_packet(payload, tick, stats)
+        return _patch_cdemo_packet(
+            payload,
+            tick,
+            stats,
+            drop_legacy_type138=drop_legacy_type138,
+            drop_win_panel_match=drop_win_panel_match,
+            win_panel_match_tick=win_panel_match_tick,
+        )
     if command == 13:
         return _replace_unique_length_delimited_field(
             payload,
             field_number=2,
-            transform=lambda packet: _patch_cdemo_packet(packet, tick, stats),
+            transform=lambda packet: _patch_cdemo_packet(
+                packet,
+                tick,
+                stats,
+                drop_legacy_type138=drop_legacy_type138,
+                drop_win_panel_match=drop_win_panel_match,
+                win_panel_match_tick=win_panel_match_tick,
+            ),
         )
     return None
 
@@ -658,6 +879,9 @@ def _scan_stream(
     reader: BinaryIO,
     *,
     stop_after_first_selected: bool = False,
+    drop_legacy_type138: bool = True,
+    drop_win_panel_match: bool = False,
+    win_panel_match_tick: Optional[int] = None,
 ) -> tuple[_PatchStats, tuple[int, int]]:
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
@@ -688,14 +912,27 @@ def _scan_stream(
         if old_pos in (old_offset_a, old_offset_b):
             offset_commands[old_pos] = command
         stats.outer_frames += 1
-        if command in _PACKET_COMMANDS:
+        inspect_packet = drop_legacy_type138 or drop_win_panel_match or (
+            win_panel_match_tick is not None and tick == win_panel_match_tick
+        )
+        if command in _PACKET_COMMANDS and inspect_packet:
             decoded = (
                 _snappy_decompress(payload)
                 if raw_command & _COMPRESSED_COMMAND_FLAG
                 else payload
             )
-            _patch_outer_payload(command, decoded, tick, stats)
-            if stop_after_first_selected and stats.removed_messages:
+            _patch_outer_payload(
+                command,
+                decoded,
+                tick,
+                stats,
+                drop_legacy_type138=drop_legacy_type138,
+                drop_win_panel_match=drop_win_panel_match,
+                win_panel_match_tick=win_panel_match_tick,
+            )
+            if stop_after_first_selected and (
+                stats.removed_messages or stats.removed_win_panel_events
+            ):
                 return stats, (old_offset_a, old_offset_b)
         old_pos += (
             len(raw_command_bytes)
@@ -721,10 +958,46 @@ def scan_demo_legacy_type138(source_path: os.PathLike[str] | str) -> DemoCompati
         last_tick=stats.last_tick,
         max_per_frame=stats.max_per_frame,
         outer_frames=stats.outer_frames,
+        selected_win_panel_events=0,
     )
 
 
-def _rewrite_stream(reader: BinaryIO, writer: BinaryIO) -> _PatchStats:
+def scan_demo_playback_messages(
+    source_path: os.PathLike[str] | str,
+    *,
+    win_panel_match_tick: Optional[int],
+    scan_legacy_type138: bool = True,
+    scan_win_panel_match: bool = False,
+) -> DemoCompatibilityScan:
+    """Scan exactly the selected compatibility message classes."""
+
+    source = Path(source_path)
+    with source.open("rb") as reader:
+        stats, _offsets = _scan_stream(
+            reader,
+            drop_legacy_type138=scan_legacy_type138,
+            drop_win_panel_match=scan_win_panel_match,
+            win_panel_match_tick=win_panel_match_tick,
+        )
+    return DemoCompatibilityScan(
+        selected_messages=stats.removed_messages,
+        affected_frames=stats.changed_frames,
+        first_tick=stats.first_tick,
+        last_tick=stats.last_tick,
+        max_per_frame=stats.max_per_frame,
+        outer_frames=stats.outer_frames,
+        selected_win_panel_events=stats.removed_win_panel_events,
+    )
+
+
+def _rewrite_stream(
+    reader: BinaryIO,
+    writer: BinaryIO,
+    *,
+    drop_legacy_type138: bool = True,
+    drop_win_panel_match: bool = False,
+    win_panel_match_tick: Optional[int] = None,
+) -> _PatchStats:
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
         raise _fail("expected PBDEMS2 short header")
@@ -761,13 +1034,24 @@ def _rewrite_stream(reader: BinaryIO, writer: BinaryIO) -> _PatchStats:
         stats.outer_frames += 1
 
         replacement: Optional[bytes] = None
-        if command in _PACKET_COMMANDS:
+        inspect_packet = drop_legacy_type138 or drop_win_panel_match or (
+            win_panel_match_tick is not None and tick == win_panel_match_tick
+        )
+        if command in _PACKET_COMMANDS and inspect_packet:
             decoded = (
                 _snappy_decompress(payload)
                 if raw_command & _COMPRESSED_COMMAND_FLAG
                 else payload
             )
-            patched = _patch_outer_payload(command, decoded, tick, stats)
+            patched = _patch_outer_payload(
+                command,
+                decoded,
+                tick,
+                stats,
+                drop_legacy_type138=drop_legacy_type138,
+                drop_win_panel_match=drop_win_panel_match,
+                win_panel_match_tick=win_panel_match_tick,
+            )
             if patched is not None:
                 replacement = (
                     _snappy_compress(patched)
@@ -837,6 +1121,47 @@ def _files_equal(left: Path, right: Path) -> bool:
         return False
 
 
+def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
+    """Return the maximum PBDEMS2 outer-frame tick without decoding payloads.
+
+    This is the file's playback boundary, unlike event-derived maxima such as
+    the last death or round-end tick.  Recording uses it only to stop before
+    actual EOF so CS2 cannot finish the demo and return to the main menu.
+    """
+
+    source = Path(source_path)
+    file_size = source.stat().st_size
+    with source.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+
+        max_tick = 0
+        while True:
+            command_result = _read_stream_varint(
+                reader,
+                context="outer command",
+                allow_clean_eof=True,
+            )
+            if command_result is None:
+                return max_tick
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            tick, _raw_tick = tick_result
+            size, _raw_size = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload_end = reader.tell() + size
+            if payload_end > file_size:
+                raise _fail("outer frame payload extends past end of file")
+            reader.seek(size, os.SEEK_CUR)
+            # PBDEMS2 uses uint32(-1) on terminal metadata/stop frames.  It is
+            # a sentinel, not a playable tick.
+            if int(tick) != _U32_MAX:
+                max_tick = max(max_tick, int(tick))
+
+
 def _publish_without_overwrite(temp_path: Path, destination: Path) -> None:
     try:
         if os.name == "nt":
@@ -858,14 +1183,35 @@ def _verify_rewritten_demo(
     source: Path,
     rewritten: Path,
     stats: _PatchStats,
+    *,
+    drop_legacy_type138: bool = True,
+    drop_win_panel_match: bool = False,
+    win_panel_match_tick: Optional[int] = None,
 ) -> DemoCompatibilityScan:
-    verification = scan_demo_legacy_type138(rewritten)
-    if verification.selected_messages != 0:
+    verification = scan_demo_playback_messages(
+        rewritten,
+        win_panel_match_tick=win_panel_match_tick,
+        scan_legacy_type138=drop_legacy_type138,
+        scan_win_panel_match=drop_win_panel_match,
+    )
+    if drop_legacy_type138 and verification.selected_messages != 0:
         raise _fail(
             "rewritten demo still contains "
             f"{verification.selected_messages} selected type 138 message(s)"
         )
-    if stats.removed_messages == 0 and not _files_equal(source, rewritten):
+    if (
+        drop_win_panel_match or win_panel_match_tick is not None
+    ) and verification.selected_win_panel_events != 0:
+        raise _fail(
+            "rewritten demo still contains "
+            f"{verification.selected_win_panel_events} selected "
+            "cs_win_panel_match event(s)"
+        )
+    if (
+        stats.removed_messages == 0
+        and stats.removed_win_panel_events == 0
+        and not _files_equal(source, rewritten)
+    ):
         raise _fail("clean rewritten demo is not byte-identical to its source")
     return verification
 
@@ -873,11 +1219,17 @@ def _verify_rewritten_demo(
 def _build_report(
     stats: _PatchStats,
     verification: DemoCompatibilityScan,
+    *,
+    patch_id: str = PATCH_ID,
 ) -> PlaybackDemoReport:
     return PlaybackDemoReport(
         schema_version=1,
-        outcome="repaired" if stats.removed_messages else "clean",
-        patch_id=PATCH_ID,
+        outcome=(
+            "repaired"
+            if stats.removed_messages or stats.removed_win_panel_events
+            else "clean"
+        ),
+        patch_id=patch_id,
         patch_revision=PATCH_REVISION,
         removed_messages=stats.removed_messages,
         changed_frames=stats.changed_frames,
@@ -885,6 +1237,8 @@ def _build_report(
         last_tick=stats.last_tick,
         max_per_frame=stats.max_per_frame,
         remaining_selected_messages=verification.selected_messages,
+        removed_win_panel_events=stats.removed_win_panel_events,
+        remaining_win_panel_events=verification.selected_win_panel_events,
     )
 
 
@@ -904,12 +1258,17 @@ def _stat_fingerprint(stat_result: os.stat_result) -> tuple[int, int, int, int]:
 def prepare_cs2_playback_demo(
     source_path: os.PathLike[str] | str,
     destination_path: os.PathLike[str] | str,
+    *,
+    win_panel_match_tick: Optional[int] = None,
+    drop_legacy_type138: bool = True,
 ) -> PlaybackDemoReport:
-    """Create a verified CS2 playback copy, repairing only strict legacy 138s.
+    """Create a verified CS2 playback copy with selected blockers removed.
 
     The destination must not exist.  A secure temporary file in the destination
     directory is fully written, flushed, rescanned, and then published without
-    overwriting.  Any failure removes the unpublished partial file.
+    overwriting.  ``win_panel_match_tick`` must come from demoparser's
+    ``cs_win_panel_match`` event; only a strict keyless GameEvent at that exact
+    outer tick is removed.  Any failure removes the unpublished partial file.
     """
 
     source = Path(source_path)
@@ -922,6 +1281,11 @@ def prepare_cs2_playback_demo(
         raise _fail(f"playback destination already exists: {destination}")
     if not destination.parent.is_dir():
         raise FileNotFoundError(f"Playback destination directory not found: {destination.parent}")
+    if win_panel_match_tick is not None and int(win_panel_match_tick) < 0:
+        raise _fail("win_panel_match_tick must be non-negative")
+    selected_win_panel_tick = (
+        int(win_panel_match_tick) if win_panel_match_tick is not None else None
+    )
 
     temp_file = tempfile.NamedTemporaryFile(
         mode="w+b",
@@ -934,15 +1298,33 @@ def prepare_cs2_playback_demo(
     published = False
     try:
         with temp_file as writer, source.open("rb") as reader:
-            stats = _rewrite_stream(reader, writer)
+            stats = _rewrite_stream(
+                reader,
+                writer,
+                drop_legacy_type138=drop_legacy_type138,
+                win_panel_match_tick=selected_win_panel_tick,
+            )
             writer.flush()
             os.fsync(writer.fileno())
 
-        verification = _verify_rewritten_demo(source, temp_path, stats)
+        verification = _verify_rewritten_demo(
+            source,
+            temp_path,
+            stats,
+            drop_legacy_type138=drop_legacy_type138,
+            win_panel_match_tick=selected_win_panel_tick,
+        )
 
         _publish_without_overwrite(temp_path, destination)
         published = True
-        return _build_report(stats, verification)
+        playback_patch_id = (
+            PERSISTENT_PATCH_ID
+            if selected_win_panel_tick is not None and drop_legacy_type138
+            else WIN_PANEL_PATCH_ID
+            if selected_win_panel_tick is not None
+            else PATCH_ID
+        )
+        return _build_report(stats, verification, patch_id=playback_patch_id)
     finally:
         if not published:
             try:
@@ -956,7 +1338,7 @@ def prepare_cs2_playback_demo(
 
 
 def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoReport:
-    """Persistently repair a source demo using verified atomic replacement.
+    """Persistently remove legacy 138 and the terminal win-panel GameEvent.
 
     The candidate is created in the source directory so ``os.replace`` remains
     same-volume and atomic.  A clean demo is left untouched.  If parsing,
@@ -970,15 +1352,24 @@ def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoRep
     source_before = _stat_fingerprint(source.stat())
 
     # A clean demo needs only one read pass and no full-size temporary copy.
-    # Legacy demos normally expose the first selected message near the start,
-    # then continue through the existing rewrite + full verification path.
+    # Legacy demos normally expose the first selected message near the start.
+    # A panel-only demo requires one full scan to find its terminal event, then
+    # continues through the same rewrite + full verification path.
     with source.open("rb") as reader:
         if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
             raise _fail("source demo changed before compatibility scan started")
-        initial_stats, _ = _scan_stream(reader, stop_after_first_selected=True)
+        initial_stats, _ = _scan_stream(
+            reader,
+            stop_after_first_selected=True,
+            drop_legacy_type138=True,
+            drop_win_panel_match=True,
+        )
     if _stat_fingerprint(source.stat()) != source_before:
         raise _fail("source demo changed while compatibility scan was running")
-    if initial_stats.removed_messages == 0:
+    if (
+        initial_stats.removed_messages == 0
+        and initial_stats.removed_win_panel_events == 0
+    ):
         clean_scan = DemoCompatibilityScan(
             selected_messages=0,
             affected_frames=0,
@@ -986,8 +1377,13 @@ def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoRep
             last_tick=None,
             max_per_frame=0,
             outer_frames=initial_stats.outer_frames,
+            selected_win_panel_events=0,
         )
-        return _build_report(initial_stats, clean_scan)
+        return _build_report(
+            initial_stats,
+            clean_scan,
+            patch_id=PERSISTENT_PATCH_ID,
+        )
 
     temp_file = tempfile.NamedTemporaryFile(
         mode="w+b",
@@ -1002,14 +1398,29 @@ def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoRep
         with temp_file as writer, source.open("rb") as reader:
             if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
                 raise _fail("source demo changed before compatibility repair started")
-            stats = _rewrite_stream(reader, writer)
+            stats = _rewrite_stream(
+                reader,
+                writer,
+                drop_legacy_type138=True,
+                drop_win_panel_match=True,
+            )
             writer.flush()
             os.fsync(writer.fileno())
 
         if _stat_fingerprint(source.stat()) != source_before:
             raise _fail("source demo changed while compatibility repair was running")
-        verification = _verify_rewritten_demo(source, temp_path, stats)
-        report = _build_report(stats, verification)
+        verification = _verify_rewritten_demo(
+            source,
+            temp_path,
+            stats,
+            drop_legacy_type138=True,
+            drop_win_panel_match=True,
+        )
+        report = _build_report(
+            stats,
+            verification,
+            patch_id=PERSISTENT_PATCH_ID,
+        )
         if report.outcome == "clean":
             return report
 

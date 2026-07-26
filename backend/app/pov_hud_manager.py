@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .obs_director import is_cs2_running
+from .cs2_config_backup import is_cs2_running
 
 CS2_RUNNING_POV_MSG = (
     "检测到 CS2 正在运行。POV HUD 需要修改本地资源加载配置，请先关闭 CS2 后再继续。"
@@ -153,6 +153,60 @@ class PovHudManager:
     def is_gameinfo_patched(self, content: str) -> bool:
         return "csgo/pov.vpk" in content
 
+    def _read_manifest(self) -> dict[str, Any]:
+        path = self.get_manifest_path()
+        if not path.is_file():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def verify_restoration(self, expected_gameinfo_sha256: Optional[str] = None) -> dict[str, Any]:
+        """Return file-system evidence for POV restoration without inferring success."""
+        gi_path = self.get_gameinfo_path()
+        pov_path = self.get_pov_vpk_target_path()
+        manifest_path = self.get_manifest_path()
+        backup_path = self.get_backup_gameinfo_path()
+        expected_sha = str(expected_gameinfo_sha256 or "").strip().lower() or None
+        actual_sha: Optional[str] = None
+        gameinfo_has_pov_entry: Optional[bool] = None
+        errors: list[str] = []
+
+        if gi_path.is_file():
+            try:
+                actual_sha = sha256_file(gi_path)
+            except OSError as exc:
+                errors.append(f"Unable to hash gameinfo.gi: {exc}")
+            try:
+                content = gi_path.read_text(encoding="utf-8", errors="ignore")
+                gameinfo_has_pov_entry = self.is_gameinfo_patched(content)
+            except OSError as exc:
+                errors.append(f"Unable to read gameinfo.gi: {exc}")
+        else:
+            errors.append("gameinfo.gi does not exist")
+
+        gameinfo_restored = bool(expected_sha and actual_sha == expected_sha and gameinfo_has_pov_entry is False)
+        pov_vpk_exists = pov_path.is_file()
+        pov_vpk_removed = not pov_vpk_exists
+        return {
+            "verified": bool(gameinfo_restored and pov_vpk_removed),
+            "gameinfo_path": str(gi_path),
+            "gameinfo_exists": gi_path.is_file(),
+            "gameinfo_restored": gameinfo_restored,
+            "gameinfo_has_pov_entry": gameinfo_has_pov_entry,
+            "expected_gameinfo_sha256": expected_sha,
+            "actual_gameinfo_sha256": actual_sha,
+            "pov_vpk_path": str(pov_path),
+            "pov_vpk_exists": pov_vpk_exists,
+            "pov_vpk_removed": pov_vpk_removed,
+            "manifest_exists": manifest_path.is_file(),
+            "backup_exists": backup_path.is_file(),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "errors": errors,
+        }
+
     def status(self) -> dict[str, Any]:
         warnings: list[str] = []
         csgo = None
@@ -178,19 +232,25 @@ class PovHudManager:
         manifest_exists = bool(manifest_path and manifest_path.is_file())
         backup_exists = bool(bak_path and bak_path.is_file())
         pov_installed = bool(pov_dst and pov_dst.is_file())
+        manifest = self._read_manifest() if manifest_exists else {}
+        original_gameinfo_sha256 = str(manifest.get("original_gameinfo_sha256") or "").strip().lower() or None
 
         if gameinfo_patched and not manifest_exists:
             warnings.append(
                 "检测到 gameinfo.gi 中存在 csgo/pov.vpk，但未找到 CS2 Insight Agent 的备份记录。请用户手动检查 gameinfo.gi。"
             )
 
-        needs_restore = bool(manifest_exists)
+        if pov_installed and not manifest_exists:
+            warnings.append("Detected pov.vpk without a CS2 Insight Agent restore manifest; manual inspection is required.")
+
+        needs_restore = bool(manifest_exists or gameinfo_patched or pov_installed)
 
         return {
             "installed": pov_installed,
             "gameinfo_patched": gameinfo_patched,
             "backup_exists": backup_exists,
             "manifest_exists": manifest_exists,
+            "original_gameinfo_sha256": original_gameinfo_sha256,
             "cs2_running": cs2_running,
             "needs_restore": needs_restore,
             "warnings": warnings,
@@ -218,18 +278,16 @@ class PovHudManager:
 
         # 若残留 manifest，先尝试恢复再重装，避免重复备份错乱
         if manifest_path.is_file():
-            try:
-                self.restore()
-            except PovHudError:
-                pass
+            self.restore()
 
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         raw_gi = gi_path.read_text(encoding="utf-8", errors="surrogateescape")
         original_sha = sha256_file(gi_path)
 
-        if not bak_path.is_file():
-            shutil.copy2(gi_path, bak_path)
+        # Each session must back up the current gameinfo.gi. Reusing an older
+        # successful session's backup can roll back later Steam updates.
+        shutil.copy2(gi_path, bak_path)
 
         try:
             shutil.copy2(pov_src, pov_dst)
@@ -271,9 +329,19 @@ class PovHudManager:
         try:
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as e:
+            # Do not leave a patched game without a manifest that startup recovery can find.
+            try:
+                shutil.copy2(bak_path, gi_path)
+            except OSError:
+                pass
+            try:
+                if pov_dst.is_file():
+                    pov_dst.unlink()
+            except OSError:
+                pass
             raise PovHudError("无法写入 CS2 目录，请尝试以管理员权限运行，或检查 Steam / CS2 目录权限。") from e
 
-    def restore(self) -> None:
+    def restore(self) -> dict[str, Any]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
         if is_cs2_running():
@@ -290,15 +358,20 @@ class PovHudManager:
         if not bak_path.is_file():
             raise PovHudError("POV HUD 自动恢复失败，请到 .cs2_insight_pov_backup 目录手动恢复 gameinfo.gi.bak。")
 
+        manifest = self._read_manifest()
+        expected_sha = str(manifest.get("original_gameinfo_sha256") or "").strip().lower()
+        try:
+            backup_sha = sha256_file(bak_path)
+        except OSError as e:
+            raise PovHudError("POV HUD restore failed: unable to verify gameinfo.gi backup.") from e
+        if expected_sha and backup_sha != expected_sha:
+            raise PovHudError("POV HUD restore failed: gameinfo.gi backup hash does not match the install manifest.")
+        expected_sha = expected_sha or backup_sha
+
         try:
             shutil.copy2(bak_path, gi_path)
         except OSError as e:
             raise PovHudError("POV HUD 自动恢复失败，请到 .cs2_insight_pov_backup 目录手动恢复 gameinfo.gi.bak。") from e
-
-        try:
-            manifest_path.unlink()
-        except OSError:
-            pass
 
         try:
             if pov_dst.is_file():
@@ -306,11 +379,29 @@ class PovHudManager:
         except OSError as e:
             raise PovHudError("POV HUD 自动恢复失败：无法删除 pov.vpk。") from e
 
+        verification = self.verify_restoration(expected_sha)
+        if not verification.get("verified"):
+            raise PovHudError("POV HUD restore verification failed: gameinfo.gi or pov.vpk is not restored.")
+
+        try:
+            manifest_path.unlink()
+        except OSError as e:
+            raise PovHudError("POV HUD 自动恢复失败：无法删除恢复记录。") from e
+
+        try:
+            if bak_path.is_file():
+                bak_path.unlink()
+        except OSError:
+            # gameinfo and pov.vpk are already restored; an orphan backup is harmless
+            # and will be overwritten on the next install.
+            pass
+
         try:
             if backup_dir.is_dir() and not any(backup_dir.iterdir()):
                 backup_dir.rmdir()
         except OSError:
             pass
+        return self.verify_restoration(expected_sha)
 
     def debug_compare_reference_gameinfo(self) -> dict[str, Any]:
         """开发阶段：对比参考 gameinfo，不参与录制。"""

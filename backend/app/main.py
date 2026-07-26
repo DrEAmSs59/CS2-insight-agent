@@ -24,9 +24,9 @@ from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -50,6 +50,12 @@ from .env_utils import (
 from .demo_db import DemoDB, DemoListFilters, utc_now_iso
 from .demo_library_hub import demo_library_hub
 from .demo_compat_service import ensure_demo_compatible
+from .demo_playback_service import (
+    DemoPlaybackBusyError,
+    DemoPlaybackCs2RunningError,
+    DemoPlaybackPovOptions,
+    demo_playback_service,
+)
 from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import (
@@ -66,6 +72,18 @@ from .name_card_meta import (
     resolve_name_card_eyebrow,
 )
 from . import obs_config_center
+from .obs_tuning import (
+    ObsTuningApplyRequest,
+    ObsTuningPlanRequest,
+    ObsTuningRecommendationRequest,
+    build_change_plan as build_obs_tuning_plan,
+    discover_environment as discover_obs_tuning_environment,
+    recommend as recommend_obs_tuning_goal,
+)
+from .obs_tuning_executor import apply_video_tuning_plan
+from .obs_tuning_agent import review_tuning_plan
+from .runtime_session import runtime_session_dependency, runtime_session_state
+from .obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .lite_cut.db import LiteCutDB
@@ -77,6 +95,8 @@ from .cs2_config_backup import (
     open_backup_directory,
     restore_latest_user_config_backup,
 )
+from .api_errors import error_detail
+from .pov_hud_manager import PovHudError
 import httpx
 
 from .steam_match_history import (
@@ -87,6 +107,8 @@ from .steam_match_history import (
     game_type_to_mode,
     is_demo_expired,
 )
+
+APP_VERSION, _APP_VERSION_SOURCE = resolve_local_version_info()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 install_gsi_access_log_filter()
@@ -128,6 +150,12 @@ _DEMO_ROSTER_CACHE_VERSION = 1
 _enqueue_striped_locks: list[asyncio.Lock] = []
 _enqueue_striped_init_lock = asyncio.Lock()
 _ENQUEUE_STRIPE_COUNT = 64
+
+# /api/demo/replay single-flight: identical cache keys share one parse Future
+_replay_jobs: dict[str, asyncio.Future] = {}
+_replay_jobs_lock = asyncio.Lock()
+_replay_binary_jobs: dict[str, asyncio.Future] = {}
+_replay_binary_jobs_lock = asyncio.Lock()
 
 
 def infer_demo_source(filename: str, server_name: str | None = None) -> str:
@@ -205,6 +233,7 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
         except OSError:
             pass
         source = infer_demo_source(path.name)
+        watch_root = demo_watcher.watch_root_for(path) if demo_watcher is not None else None
 
         md5_hex: str | None = None
         if use_md5:
@@ -224,6 +253,7 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
             added_at=mtime_iso,
             content_md5=md5_hex if use_md5 else None,
             origin_zip=origin_zip if use_md5 else None,
+            watch_root=watch_root,
         )
         if not inserted:
             if can_store_md5:
@@ -234,16 +264,8 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
                     pass
             return
 
-        # 轻量解析：只提取地图与记分板元数据，避免重量级玩家片段解析。
-        try:
-            from .demo_parse_isolation import get_demo_match_summary_isolated
-
-            meta = await asyncio.to_thread(get_demo_match_summary_isolated, demo_path)
-            if isinstance(meta, dict):
-                refined_source = infer_demo_source(path.name, server_name=meta.get("server_name"))
-                await demo_db.update_lightweight_meta(demo_path, meta, source=refined_source)
-        except Exception:
-            logger.exception("Lightweight meta parse failed for %s", demo_path)
+        # 发现阶段只做文件登记、去重与基础校验。地图、名单和记分板在用户确认
+        # 入库时一次性提取，避免“扫描目录一次 + 入库一次”的重复 parser 读盘。
         await demo_db.update_status(demo_path, "pending", error_msg=None, parsed_at=None)
         if can_store_md5:
             try:
@@ -260,14 +282,22 @@ async def lifespan(_: FastAPI):
     仅初始化 DB 与 DemoWatcher 实例（不启动 watchdog Observer，也不做启动时扫描）。
 
     **为什么不再自动扫描**：watchdog Observer 会在目录出现新 .dem 时立刻触发
-    ``_enqueue_demo_path``，其中包含 ``get_demo_match_summary`` 的轻量解析。录制期我们会
+    ``_enqueue_demo_path``。录制期我们会
     准备一个兼容性复验后的 ``_insight_<uuid>.dem`` 到 CS2 的 ``csgo/``；若用户的监听目录与
     ``csgo/`` 有重叠（常见：就是把 CS2 的 replay 目录作为监听目录），**每次录制都会在后台触发
-    入库与轻量读盘**（记分板元数据等），仍可能与录制争用磁盘；历史上还曾叠加「名单自动深度解析」
+    登记新文件并做内容去重，仍可能与录制争用磁盘；历史上还曾叠加解析工作
     加重负载，故默认不在启动时全量扫描。
     保留 ``DemoWatcher`` 实例只是为 ``POST /api/demos/scan`` 这一条手动扫描接口
     服务；页面上改为用户点"刷新"按钮时主动扫描。
     """
+    from .demoparser_runtime import require_demoparser_runtime
+
+    demoparser_runtime = require_demoparser_runtime()
+    logger.info(
+        "Patched demoparser runtime ready: %s",
+        demoparser_runtime["installed_version"],
+    )
+
     global demo_watcher
     await demo_db.init_db()
     await montage_db.init_tables()
@@ -281,7 +311,12 @@ async def lifespan(_: FastAPI):
     removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
     if removed_gsi_configs:
         logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
-    demo_watcher = DemoWatcher(cfg.demo_watch_paths or [], _enqueue_demo_path, demo_db)
+    demo_watcher = DemoWatcher(
+        cfg.demo_watch_paths or [],
+        _enqueue_demo_path,
+        demo_db,
+        max_depth=cfg.demo_watch_scan_depth,
+    )
     from .pov_hud_manager import try_restore_stale_pov_on_startup
 
     for _msg in try_restore_stale_pov_on_startup(cfg):
@@ -290,11 +325,24 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        try:
+            from .recording.api import get_queue_abort_event
+
+            abort_event = get_queue_abort_event()
+            if abort_event is not None:
+                abort_event.set()
+            from .lite_cut.api import shutdown_lite_cut_jobs
+
+            await shutdown_lite_cut_jobs(timeout_sec=5.0)
+            if demo_watcher is not None:
+                await demo_watcher.stop()
+        except Exception:
+            logger.exception("Application shutdown cleanup failed")
         if _FAULT_LOG_FILE and not _FAULT_LOG_FILE.closed:
             _FAULT_LOG_FILE.close()
 
 
-app = FastAPI(title="CS2 Insight Agent", version="2.3.0", lifespan=lifespan)
+app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
@@ -306,6 +354,74 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _recovery_marker_path() -> Path:
+    return get_data_dir() / "recovery-required.json"
+
+
+def _write_recovery_marker(reason: str) -> None:
+    marker = _recovery_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {"reason": reason, "created_at": datetime.now().astimezone().isoformat()},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+@app.get("/api/app/runtime-state")
+async def app_runtime_state():
+    from .demoparser_runtime import inspect_demoparser_runtime
+
+    return {
+        "pid": os.getpid(),
+        "instance_id": (os.getenv("CS2_INSIGHT_INSTANCE_ID") or "").strip(),
+        "version": app.version,
+        "data_dir": str(get_data_dir()),
+        "recovery_required": _recovery_marker_path().is_file(),
+        "runtime_session": runtime_session_state(),
+        "demoparser_runtime": inspect_demoparser_runtime(),
+    }
+
+
+@app.post("/api/app/shutdown")
+async def app_shutdown():
+    """Abort owned jobs, flush cleanup and then ask uvicorn to exit normally."""
+    from .lite_cut.api import shutdown_lite_cut_jobs
+    from .recording.api import get_queue_abort_event
+    from .shutdown_state import request_server_shutdown
+
+    abort_event = get_queue_abort_event()
+    if abort_event is not None:
+        abort_event.set()
+    jobs_clean = await shutdown_lite_cut_jobs(timeout_sec=8.0)
+    if demo_watcher is not None:
+        await demo_watcher.stop()
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 8.0
+    while runtime_session_state()["busy"] and loop.time() < deadline:
+        await asyncio.sleep(0.1)
+    session_clean = not bool(runtime_session_state()["busy"])
+    safe_to_exit = jobs_clean and session_clean
+    if safe_to_exit:
+        _recovery_marker_path().unlink(missing_ok=True)
+    else:
+        reason = "runtime cleanup timed out before desktop exit"
+        await asyncio.to_thread(_write_recovery_marker, reason)
+
+    # Delay until the HTTP response has been handed back to the desktop shell.
+    loop.call_later(0.25, request_server_shutdown)
+    return {
+        "safe_to_exit": safe_to_exit,
+        "jobs_clean": jobs_clean,
+        "session_clean": session_clean,
+        "recovery_marker": str(_recovery_marker_path()) if not safe_to_exit else None,
+    }
 
 
 @app.middleware("http")
@@ -469,13 +585,42 @@ async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
 
 
 def _save_uploaded_demo(file: UploadFile, destination: Path) -> str:
-    """Save one upload and return the MD5 calculated during that same read."""
+    """Save one upload and return the MD5 calculated during that same read.
 
+    Writes via a unique ``.partial`` then ``os.replace`` so Windows does not
+    hit ``OSError: [Errno 22] Invalid argument`` when truncating a large
+    existing ``.dem`` that is briefly locked (Defender / prior parse handle).
+    """
+
+    if not destination.name or destination.name in {".", ".."}:
+        raise ValueError(f"invalid upload destination name: {destination!r}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.md5()
-    with destination.open("wb") as writer:
-        while chunk := file.file.read(1024 * 1024):
-            writer.write(chunk)
-            digest.update(chunk)
+    tmp = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.partial")
+    try:
+        with tmp.open("wb") as writer:
+            while chunk := file.file.read(1024 * 1024):
+                writer.write(chunk)
+                digest.update(chunk)
+        try:
+            os.replace(tmp, destination)
+        except OSError:
+            # Same-volume replace can still fail if the final name is locked.
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Could not remove locked upload destination before replace: %s",
+                    destination,
+                )
+            os.replace(tmp, destination)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     return digest.hexdigest()
 
 
@@ -535,8 +680,8 @@ def _upload_source_scope(persistent_path: Path, uploaded_path: Path) -> str:
         return "uploaded_copy"
 
 
-# 监听目录按「期望玩家」自动写库展示名时串行，避免大量 demo 同时读盘
 def _normalized_expected_parse_players(cfg: AppConfig) -> list[str]:
+    """Normalize the watched-player list used by batch resolve / load-mode parse."""
     raw = getattr(cfg, "expected_parse_players", None) or []
     seen: set[str] = set()
     out: list[str] = []
@@ -578,14 +723,6 @@ def _match_expected_to_roster_row(expected: str, roster: list[dict]) -> Optional
             if el in nl or nl in el:
                 return r
     return None
-
-
-def _matched_demo_players_in_order(expected: list[str], dem_path: str) -> list[dict]:
-    """按配置名单顺序，在本场 roster 中依次匹配；同一场可命中多名（去重后保留名单顺序）。"""
-    from .demo_parse_isolation import get_player_list_isolated
-
-    roster = get_player_list_isolated(str(dem_path))
-    return _match_expected_players_in_roster(expected, roster)
 
 
 def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -> list[dict]:
@@ -632,11 +769,10 @@ async def _run_library_demo_analyze(
             demo_id,
             idx.get("error"),
         )
-    await demo_db.clear_result(dem_path)
     await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
     try:
-        from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
+        from .demo_parse_isolation import analyze_multi_isolated
 
         batch_result = await asyncio.to_thread(
             analyze_multi_isolated,
@@ -644,6 +780,7 @@ async def _run_library_demo_analyze(
             target_players,
             freeze_to_death_rounds,
         )
+        analysis_workspace = batch_result.pop("__analysis_workspace__", None)
         players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
         missing = [p for p in target_players if p not in players_out]
         if missing:
@@ -651,7 +788,7 @@ async def _run_library_demo_analyze(
                 "analyze_multi_isolated missing players demo_id=%s missing=%s",
                 demo_id, missing,
             )
-    except IsolatedParseError as e:
+    except Exception as e:
         msg = f"Demo 解析失败：{e}"
         logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, dem_path, e)
         await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
@@ -664,30 +801,6 @@ async def _run_library_demo_analyze(
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, msg)
 
-    cfg = load_config()
-    if cfg.ai_mode and cfg.llm.api_key:
-        from .ai_reviewer import enrich_clips_dicts_with_reviewer
-
-        async def _enrich_library_player(player: str) -> None:
-            pdata = players_out.get(player)
-            if not isinstance(pdata, dict):
-                return
-            clips = pdata.get("clips") or []
-            meta = pdata.get("match_meta")
-            if not clips or not isinstance(meta, dict):
-                return
-            try:
-                pdata["clips"] = await enrich_clips_dicts_with_reviewer(clips, meta, cfg.llm, locale=locale)
-            except Exception:
-                logger.exception(
-                    "AI review failed for library demo_id=%s path=%s player=%s",
-                    demo_id,
-                    dem_path,
-                    player,
-                )
-
-        await asyncio.gather(*[_enrich_library_player(p) for p in target_players])
-
     first_player = next(
         (player for player in target_players if player in players_out),
         next(iter(players_out)),
@@ -696,6 +809,7 @@ async def _run_library_demo_analyze(
     players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
     composite: dict[str, Any] = {
         "players": players_payload,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
         "analyzed_target_players": [p for p in target_players if p in players_payload],
         "auto_target_player": first_player,
         # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
@@ -704,15 +818,27 @@ async def _run_library_demo_analyze(
         "timeline": first_pdata.get("timeline"),
         "round_timeline": first_pdata.get("round_timeline"),
     }
-    await demo_db.save_result(dem_path, composite)
-    for player, pdata in players_out.items():
-        if player == first_player:
-            continue
-        if isinstance(pdata, dict):
-            await demo_db.replace_timeline_events(dem_path, player, pdata)
-    await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
+    try:
+        # save_result replaces the previous snapshot transactionally; the old
+        # result remains readable until the new parse is complete.
+        await demo_db.save_result(
+            dem_path,
+            composite,
+            timeline_results=players_out,
+        )
+        await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
+    except Exception as e:
+        msg = f"保存新的 Demo 分析结果失败：{e}"
+        logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, dem_path)
+        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        await demo_library_hub.notify("parse_error")
+        raise HTTPException(500, msg) from e
     await demo_library_hub.notify("analyzed")
-    return {"players": players_out, "demo_path": dem_path}
+    return {
+        "players": players_out,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
+        "demo_path": dem_path,
+    }
 
 
 
@@ -729,7 +855,9 @@ class ConfigPayload(BaseModel):
     montage_encoder: Optional[str] = None
     cs2_path: Optional[str] = None
     demo_watch_paths: Optional[list[str]] = None
+    demo_watch_scan_depth: Optional[int] = Field(default=None, ge=0, le=32)
     ai_mode: Optional[bool] = None
+    obs_agent_auto_prepare: Optional[bool] = None
     locale: Optional[str] = None
     expected_parse_players: Optional[list[str]] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
@@ -862,6 +990,25 @@ def open_config_data_dir():
         return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
 
 
+@app.post("/api/config/open-logs")
+def open_log_directory():
+    """Open the desktop log directory used by Rust and the bundled backend."""
+    logs_dir = get_data_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    folder = str(logs_dir.resolve())
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", folder], check=False, timeout=30)
+        else:
+            subprocess.run(["xdg-open", folder], check=False, timeout=30)
+        return {"ok": True, "path": folder}
+    except Exception as e:  # noqa: BLE001
+        logging.warning("open log dir failed: %s", e)
+        return {"ok": False, "path": folder, "message": "无法自动打开日志目录，请手动复制路径。"}
+
+
 def _get_dir_size(path: Path) -> int:
     """计算文件夹总大小（字节）。"""
     if not path.is_dir():
@@ -899,6 +1046,7 @@ def get_data_dir_info():
     size_str = _format_size(size_bytes)
     return {
         "path": str(data_dir.resolve()),
+        "logs_path": str((data_dir / "logs").resolve()),
         "exists": data_dir.exists(),
         "size_bytes": size_bytes,
         "size_str": size_str,
@@ -1023,8 +1171,12 @@ async def update_config(payload: ConfigPayload):
         cfg.cs2_path = payload.cs2_path
     if payload.demo_watch_paths is not None:
         cfg.demo_watch_paths = [str(Path(p).expanduser()) for p in payload.demo_watch_paths if str(p).strip()]
+    if payload.demo_watch_scan_depth is not None:
+        cfg.demo_watch_scan_depth = int(payload.demo_watch_scan_depth)
     if payload.ai_mode is not None:
         cfg.ai_mode = payload.ai_mode
+    if payload.obs_agent_auto_prepare is not None:
+        cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
@@ -1123,11 +1275,13 @@ async def update_config(payload: ConfigPayload):
     if payload.last_update_check_at is not None:
         cfg.last_update_check_at = str(payload.last_update_check_at).strip()
     save_config(cfg)
-    if demo_watcher is not None and payload.demo_watch_paths is not None:
+    if demo_watcher is not None and (
+        payload.demo_watch_paths is not None or payload.demo_watch_scan_depth is not None
+    ):
         # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
         # 不再 restart watchdog、也不再自动 scan_existing，避免配置保存瞬间触发
         # 大量重型解析抢占 CS2 录制时的系统资源。
-        demo_watcher._paths = list(cfg.demo_watch_paths or [])
+        demo_watcher.configure(cfg.demo_watch_paths or [], cfg.demo_watch_scan_depth)
     return {"status": "ok"}
 
 
@@ -1154,10 +1308,10 @@ def experimental_pov_restore():
     cfg = ensure_cs2_path(cfg)
     try:
         mgr = PovHudManager(cfg)
-        mgr.restore()
+        verification = mgr.restore()
     except PovHudError as e:
         raise HTTPException(400, str(e)) from e
-    return {"ok": True, "message": "POV HUD 修改已恢复"}
+    return {"ok": bool(verification.get("verified")), "restore": verification}
 
 
 def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
@@ -1437,6 +1591,58 @@ def obs_config_status():
     return obs_config_center.get_status_payload(cfg.obs)
 
 
+@app.get("/api/obs-tuning/discovery")
+def obs_tuning_discovery():
+    """只读探测 OBS、硬件编码器、FFmpeg 与录制磁盘，不返回任何密码或密钥。"""
+    cfg = load_config()
+    payload = discover_obs_tuning_environment(cfg)
+    payload["ai_mode_enabled"] = bool(cfg.ai_mode)
+    payload["auto_prepare_enabled"] = bool(cfg.obs_agent_auto_prepare)
+    return payload
+
+
+@app.post("/api/obs-tuning/bootstrap")
+def obs_tuning_bootstrap(payload: ObsBootstrapRequest):
+    """受控准备 OBS 与 WebSocket；不修改 Profile、场景、音频或直播配置。"""
+    cfg = load_config()
+    with _obs_launch_lock:
+        return bootstrap_obs_environment(cfg, payload)
+
+
+@app.post("/api/obs-tuning/recommendation")
+def obs_tuning_recommendation(payload: ObsTuningRecommendationRequest):
+    """根据真实探测快照生成确定性推荐；推荐是预测，不代表稳定性已经通过。"""
+    cfg = load_config()
+    discovery = payload.discovery or discover_obs_tuning_environment(cfg)
+    return recommend_obs_tuning_goal(payload.goal, discovery)
+
+
+@app.post("/api/obs-tuning/plan")
+async def obs_tuning_plan(payload: ObsTuningPlanRequest):
+    """重新探测环境，调用受限 AI 评估并生成可审计计划；本接口不会写入 OBS。"""
+    cfg = load_config()
+    discovery = await asyncio.to_thread(discover_obs_tuning_environment, cfg)
+    recommendation = recommend_obs_tuning_goal(payload.goal, discovery)
+    plan = build_obs_tuning_plan(payload.goal, discovery, recommendation)
+    plan["ai_review"] = await review_tuning_plan(cfg.llm, payload.goal, discovery, recommendation)
+    return plan
+
+
+@app.post("/api/obs-tuning/apply")
+def obs_tuning_apply(
+    payload: ObsTuningApplyRequest,
+    _runtime_session: None = Depends(runtime_session_dependency),
+):
+    """备份并应用已确认的视频/录制设置，再用短录制、ffprobe、Stats 与日志完成验收。"""
+    cfg = load_config()
+    if not _obs_launch_lock.acquire(timeout=5.0):
+        raise HTTPException(409, "上一次 OBS 自动设置仍在收尾，请稍等几秒后重新检查；不会重复开始录制。")
+    try:
+        return apply_video_tuning_plan(cfg, payload)
+    finally:
+        _obs_launch_lock.release()
+
+
 @app.post("/api/obs-config/diagnose")
 def obs_config_diagnose(payload: Optional[OBSConfig] = Body(default=None)):
     cfg = load_config()
@@ -1664,8 +1870,6 @@ async def parse_demo_multi(
 
     dem_path = resolve_uploaded_demo_path(path or filename)
 
-    cfg = load_config()
-
     try:
         results_by_player = await asyncio.to_thread(
             analyze_multi_isolated,
@@ -1676,24 +1880,11 @@ async def parse_demo_multi(
     except IsolatedParseError as e:
         raise HTTPException(500, f"Demo 解析失败：{e}") from e
 
-    if cfg.ai_mode and cfg.llm.api_key:
-        from .ai_reviewer import enrich_clips_dicts_with_reviewer
-
-        async def _review(player: str, result) -> None:
-            try:
-                result["clips"] = await enrich_clips_dicts_with_reviewer(
-                    result.get("clips") or [],
-                    result.get("match_meta") or {},
-                    cfg.llm,
-                    locale=req.locale,
-                )
-            except Exception as e:
-                logging.error("AI review failed for %s: %s", player, e)
-
-        await asyncio.gather(*[_review(p, r) for p, r in results_by_player.items()])
+    analysis_workspace = results_by_player.pop("__analysis_workspace__", None)
 
     return {
-        "players": results_by_player
+        "players": results_by_player,
+        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
     }
 
 
@@ -2555,6 +2746,11 @@ class DemoDisplayNamePatch(BaseModel):
     display_name: str = Field(default="", max_length=512)
 
 
+class DemoWatchPathInspectBody(BaseModel):
+    path: str = Field(..., min_length=1, max_length=4096)
+    max_depth: int = Field(default=2, ge=0, le=32)
+
+
 @app.patch("/api/demos/{demo_id}")
 async def patch_demo_display_name(demo_id: int, body: DemoDisplayNamePatch):
     ok = await demo_db.update_display_name(demo_id, body.display_name)
@@ -2581,6 +2777,46 @@ async def scan_watch_paths():
     return {"scanned": scanned, "player_stats_index": None, "discovered_count": discovered_count}
 
 
+@app.post("/api/demos/watch-path/inspect")
+async def inspect_demo_watch_path(body: DemoWatchPathInspectBody):
+    """Validate and enumerate a watch directory without parsing demo contents."""
+    from .demo_watcher import iter_candidate_files
+
+    candidate = Path(body.path).expanduser()
+    if not candidate.is_dir():
+        return {
+            "valid": False,
+            "path": str(candidate),
+            "demo_count": 0,
+            "zip_count": 0,
+            "error": "目录不存在或无法访问",
+        }
+    try:
+        resolved = candidate.resolve()
+
+        def _count_candidates() -> tuple[int, int]:
+            demos = sum(1 for _ in iter_candidate_files(resolved, (".dem",), max_depth=body.max_depth))
+            zips = sum(1 for _ in iter_candidate_files(resolved, (".zip",), max_depth=body.max_depth))
+            return demos, zips
+
+        demo_count, zip_count = await asyncio.to_thread(_count_candidates)
+    except OSError as exc:
+        return {
+            "valid": False,
+            "path": str(candidate),
+            "demo_count": 0,
+            "zip_count": 0,
+            "error": str(exc),
+        }
+    return {
+        "valid": True,
+        "path": str(resolved),
+        "demo_count": demo_count,
+        "zip_count": zip_count,
+        "max_depth": body.max_depth,
+    }
+
+
 @app.post("/api/demos/{demo_id}/parse")
 async def reparse_demo(demo_id: int):
     row = await demo_db.get_demo_by_id(demo_id)
@@ -2597,6 +2833,511 @@ class DemoAnalyzeRequest(BaseModel):
     target_players: list[str] = Field(..., min_length=1)
     freeze_to_death_rounds: Optional[list[int]] = None
     locale: str = "zh"
+
+
+class DemoReplayRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    map_name: str = "unknown"
+    start_tick: int = Field(..., ge=0)
+    end_tick: int = Field(..., gt=0)
+    tick_rate: float = Field(64.0, gt=0, le=256)
+    fps: float = Field(32.0, ge=1, le=64)
+    pov_player_name: Optional[str] = None
+    pov_steamid64: Optional[str] = None
+
+
+class PlayerAnalysisReviewRequest(BaseModel):
+    player: dict[str, Any]
+    match: dict[str, Any] = Field(default_factory=dict)
+    locale: str = "zh"
+
+
+class PlayerClipReviewRequest(BaseModel):
+    clips: list[dict[str, Any]] = Field(..., min_length=1, max_length=32)
+    match_meta: dict[str, Any] = Field(default_factory=dict)
+    locale: str = "zh"
+
+
+@app.get("/api/demo/radar-map/{map_name}")
+async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
+    """Serve the bundled Insight Agent overhead radar used by 2D replay."""
+    map_key = str(map_name or "").strip().lower()
+    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
+        raise HTTPException(400, "Invalid map name")
+    if not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+    normalized_layer = str(layer or "upper").strip().lower()
+    if normalized_layer not in {"upper", "lower"}:
+        raise HTTPException(400, "Invalid radar layer")
+    from .radar.radar_map_assets import resolve_map_png_path
+    try:
+        map_path = resolve_map_png_path(map_key, layer=normalized_layer)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"No bundled radar map for {map_key}") from exc
+    return FileResponse(str(map_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/demo/utility-mask/{map_name}")
+async def get_demo_utility_mask(map_name: str, layer: Optional[str] = None):
+    """Serve radar-derived utility clip masks for 2D smoke/fire rendering."""
+    map_key = str(map_name or "").strip().lower()
+    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
+        raise HTTPException(400, "Invalid map name")
+    if not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+    normalized_layer = str(layer or "upper").strip().lower()
+    if normalized_layer not in {"upper", "lower"}:
+        raise HTTPException(400, "Invalid radar layer")
+    from .radar.radar_derived_assets import resolve_utility_mask_path
+    mask_path = resolve_utility_mask_path(map_key, layer=normalized_layer)
+    if mask_path is None:
+        raise HTTPException(404, f"No utility mask for {map_key}")
+    return FileResponse(str(mask_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/api/demo/replay")
+async def get_demo_replay(req: DemoReplayRequest):
+    """Return one active-round 2D replay from the original Insight Agent parser."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
+    estimated_frame_count = int(duration_sec * req.fps) + 1
+    if estimated_frame_count > 6000:
+        raise HTTPException(
+            422,
+            f"Replay request would generate about {estimated_frame_count} frames; maximum is 6000",
+        )
+    from .parser.replay_frames_cache import (
+        REPLAY_FRAMES_CACHE_VERSION,
+        demo_fingerprint,
+        frames_cache_key,
+        load_frames,
+        save_frames,
+    )
+    from .radar.radar_data_extractor import extract_radar_timeline
+    from .radar.radar_map_assets import lookup_map_data
+
+    map_key = str(req.map_name or "unknown").strip().lower()
+    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+
+    fp_meta = demo_fingerprint(str(dem_path))
+    transform: dict[str, Any] | None = None
+    if map_key not in {"unknown", ""}:
+        try:
+            transform = lookup_map_data(map_key)
+        except (KeyError, OSError):
+            transform = None
+    tv = int((transform or {}).get("transform_version") or 3)
+    cache_key = frames_cache_key(
+        str(dem_path),
+        round_number=None,
+        start_tick=int(req.start_tick),
+        end_tick=int(req.end_tick),
+        fps=float(req.fps),
+        transform_version=tv,
+    )
+
+    def _payload_from_cache(cached: dict[str, Any], *, frames_source: str, shared_job: bool = False) -> dict[str, Any]:
+        return {
+            "frames": list(cached.get("frames") or []),
+            "map_name": map_key or "unknown",
+            "map_transform": cached.get("map_transform"),
+            "tick_rate": req.tick_rate,
+            "fps": cached.get("fps") or req.fps,
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": int(cached.get("effect_tracks_version") or 1),
+            "effect_capabilities": cached.get("effect_capabilities") or {
+                "inferno_cells": False,
+                "smoke_voxels": False,
+                "smoke_mode": "legacy_circle",
+            },
+            "effect_tracks": list(cached.get("effect_tracks") or []),
+            "effect_warnings": list(cached.get("effect_warnings") or []),
+            "effect_parse_ms": cached.get("effect_parse_ms"),
+            "effects_pending": False,
+            "demo_fingerprint": cached.get("demo_fingerprint") or fp_meta,
+            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
+            "cache": {
+                "frames": frames_source,
+                "effects": (
+                    "parquet_hit"
+                    if frames_source == "parquet_hit" and cached.get("effect_tracks")
+                    else "disk_hit"
+                    if cached.get("effect_tracks")
+                    else "miss"
+                ),
+                "parsed": False,
+                "shared_job": shared_job,
+                "read_ms": cached.get("read_ms"),
+            },
+            "parse_stage": "ready",
+        }
+
+    try:
+        from .parser.replay_match_cache import load_match_replay_round
+
+        match_cached = await asyncio.to_thread(
+            load_match_replay_round,
+            str(dem_path),
+            start_tick=int(req.start_tick),
+            end_tick=int(req.end_tick),
+            fps=float(req.fps),
+            tick_rate=float(req.tick_rate),
+        )
+    except Exception as exc:  # noqa: BLE001 - legacy per-round cache remains available
+        logger.warning("whole-match replay parquet load failed: %s", exc)
+        match_cached = None
+    if match_cached is not None:
+        return _payload_from_cache(match_cached, frames_source="parquet_hit")
+
+    if cache_key:
+        cached = await asyncio.to_thread(load_frames, cache_key)
+        if cached is not None:
+            return _payload_from_cache(cached, frames_source="disk_hit")
+
+    async def _build() -> dict[str, Any]:
+        frames = await asyncio.to_thread(
+            extract_radar_timeline,
+            demo_path=str(dem_path),
+            map_name=map_key,
+            pov_player_name=req.pov_player_name,
+            pov_steamid64=req.pov_steamid64,
+            start_tick=req.start_tick,
+            end_tick=req.end_tick,
+            fps=req.fps,
+            duration_sec=duration_sec,
+            demo_tick_rate=req.tick_rate,
+            include_all_players=True,
+            include_effect_tracks=True,
+        )
+        effect_tracks: list = []
+        effect_capabilities = {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        }
+        effect_warnings: list = []
+        effect_parse_ms = None
+        effect_tracks_version = 1
+        if isinstance(frames, dict):
+            effect_tracks = list(frames.get("effect_tracks") or [])
+            effect_capabilities = frames.get("effect_capabilities") or effect_capabilities
+            effect_warnings = list(frames.get("effect_warnings") or [])
+            effect_parse_ms = frames.get("effect_parse_ms")
+            effect_tracks_version = int(frames.get("effect_tracks_version") or 1)
+            frames = list(frames.get("frames") or [])
+
+        if cache_key:
+            await asyncio.to_thread(
+                save_frames,
+                cache_key,
+                frames=frames,
+                fps=float(req.fps),
+                start_tick=int(req.start_tick),
+                end_tick=int(req.end_tick),
+                map_transform=transform,
+                effect_tracks=effect_tracks,
+                effect_capabilities=effect_capabilities,
+                effect_warnings=effect_warnings,
+                effect_parse_ms=effect_parse_ms,
+                effect_tracks_version=effect_tracks_version,
+                demo_fingerprint_meta=fp_meta,
+            )
+
+        return {
+            "frames": frames,
+            "map_name": map_key or "unknown",
+            "map_transform": transform,
+            "tick_rate": req.tick_rate,
+            "fps": req.fps,
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": effect_tracks_version,
+            "effect_capabilities": effect_capabilities,
+            "effect_tracks": effect_tracks,
+            "effect_warnings": effect_warnings,
+            "effect_parse_ms": effect_parse_ms,
+            "effects_pending": False,
+            "demo_fingerprint": fp_meta,
+            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
+            "cache": {
+                "frames": "parsed",
+                "effects": "parsed" if effect_tracks else "miss",
+                "parsed": True,
+                "shared_job": False,
+            },
+            "parse_stage": "ready",
+        }
+
+    job_key = cache_key or f"nocache|{dem_path}|{req.start_tick}|{req.end_tick}|{req.fps}"
+    async with _replay_jobs_lock:
+        existing = _replay_jobs.get(job_key)
+        if existing is not None:
+            shared = True
+            future = existing
+        else:
+            shared = False
+            future = asyncio.get_running_loop().create_future()
+            _replay_jobs[job_key] = future
+
+    if shared:
+        result = await future
+        out = dict(result)
+        cache_meta = dict(out.get("cache") or {})
+        cache_meta["shared_job"] = True
+        if cache_meta.get("frames") == "parsed":
+            cache_meta["frames"] = "shared_job"
+        out["cache"] = cache_meta
+        return out
+
+    try:
+        result = await _build()
+        if not future.done():
+            future.set_result(result)
+        return result
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        async with _replay_jobs_lock:
+            if _replay_jobs.get(job_key) is future:
+                _replay_jobs.pop(job_key, None)
+
+
+@app.post("/api/demo/replay/binary")
+async def get_demo_replay_binary(req: DemoReplayRequest):
+    """Return one Parquet row group as Rust-produced columnar bytes."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
+    estimated_frame_count = int(duration_sec * req.fps) + 1
+    if estimated_frame_count > 40_000:
+        raise HTTPException(
+            422,
+            f"Binary replay request would generate about {estimated_frame_count} frames; maximum is 40000",
+        )
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    from .parser.replay_match_cache import load_match_replay_round_binary
+
+    async def _load_packet() -> bytes | None:
+        return await asyncio.to_thread(
+            load_match_replay_round_binary,
+            str(dem_path),
+            start_tick=int(req.start_tick),
+            end_tick=int(req.end_tick),
+            fps=float(req.fps),
+            tick_rate=float(req.tick_rate),
+        )
+
+    try:
+        packet = await _load_packet()
+    except Exception as exc:  # noqa: BLE001 - report native/cache failures explicitly
+        logger.warning("whole-match binary replay load failed: %s", exc)
+        raise HTTPException(503, f"Binary replay unavailable: {type(exc).__name__}") from exc
+
+    if packet is None:
+        job_key = f"{dem_path}|{float(req.fps):.6f}|{float(req.tick_rate):.6f}"
+        async with _replay_binary_jobs_lock:
+            existing = _replay_binary_jobs.get(job_key)
+            if existing is not None:
+                shared = True
+                future = existing
+            else:
+                shared = False
+                future = asyncio.get_running_loop().create_future()
+                future.add_done_callback(
+                    lambda completed: (
+                        completed.exception() if not completed.cancelled() else None
+                    )
+                )
+                _replay_binary_jobs[job_key] = future
+
+        if shared:
+            try:
+                packet = await future
+            except Exception as exc:  # noqa: BLE001 - mirror the leader's repair failure
+                raise HTTPException(
+                    503,
+                    f"Binary replay cache repair failed: {type(exc).__name__}",
+                ) from exc
+        else:
+            try:
+                persisted = await demo_db.get_result(str(dem_path))
+                workspace = (
+                    persisted.get("analysis_workspace")
+                    if isinstance(persisted, dict)
+                    else None
+                )
+                if not isinstance(workspace, dict) or not workspace.get("rounds"):
+                    packet = None
+                else:
+                    from .demo_parse_isolation import (
+                        materialize_match_replay_parquet_isolated,
+                    )
+
+                    materialized = await asyncio.to_thread(
+                        materialize_match_replay_parquet_isolated,
+                        str(dem_path),
+                        workspace,
+                        fps=float(req.fps),
+                    )
+                    logger.info(
+                        "Cold replay Parquet cache repair: path=%s status=%s",
+                        dem_path,
+                        materialized.get("status"),
+                    )
+                    packet = await _load_packet()
+                if not future.done():
+                    future.set_result(packet)
+            except Exception as exc:  # noqa: BLE001 - native worker failure is explicit
+                if not future.done():
+                    future.set_exception(exc)
+                logger.warning("whole-match binary replay cold repair failed: %s", exc)
+                raise HTTPException(
+                    503,
+                    f"Binary replay cache repair failed: {type(exc).__name__}",
+                ) from exc
+            finally:
+                async with _replay_binary_jobs_lock:
+                    if _replay_binary_jobs.get(job_key) is future:
+                        _replay_binary_jobs.pop(job_key, None)
+
+    if packet is None:
+        raise HTTPException(
+            409,
+            "Binary replay cache is missing and no persisted analysis workspace can rebuild it; "
+            "analyze the demo again",
+        )
+    return Response(
+        content=packet,
+        media_type="application/vnd.cs2-insight.replay-v1",
+        headers={
+            "Cache-Control": "no-store",
+            "X-CS2-Replay-Protocol": "1",
+        },
+    )
+
+
+@app.post("/api/demo/replay/effects")
+async def get_demo_replay_effects(req: DemoReplayRequest):
+    """Compatibility sidecar for older replay packets without embedded effects."""
+    if req.end_tick <= req.start_tick:
+        raise HTTPException(422, "end_tick must be greater than start_tick")
+    max_span = int(req.tick_rate * 10 * 60)
+    if req.end_tick - req.start_tick > max_span:
+        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
+
+    dem_path = resolve_uploaded_demo_path(req.path)
+    from .radar.radar_data_extractor import extract_replay_effects
+
+    map_key = str(req.map_name or "unknown").strip().lower()
+    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
+        map_key = f"de_{map_key}"
+
+    try:
+        payload = await asyncio.to_thread(
+            extract_replay_effects,
+            demo_path=str(dem_path),
+            map_name=map_key,
+            start_tick=req.start_tick,
+            end_tick=req.end_tick,
+            demo_tick_rate=req.tick_rate,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail the round once frames are playable
+        return {
+            "map_name": map_key or "unknown",
+            "start_tick": req.start_tick,
+            "end_tick": req.end_tick,
+            "effect_tracks_version": 1,
+            "effect_capabilities": {
+                "inferno_cells": False,
+                "smoke_voxels": False,
+                "smoke_mode": "legacy_circle",
+            },
+            "effect_tracks": [],
+            "effect_warnings": [f"{type(exc).__name__}: {exc}"],
+            "effects_pending": False,
+        }
+
+    return {
+        "map_name": map_key or "unknown",
+        "start_tick": req.start_tick,
+        "end_tick": req.end_tick,
+        "effect_tracks_version": int(payload.get("effect_tracks_version") or 1),
+        "effect_capabilities": payload.get("effect_capabilities") or {
+            "inferno_cells": False,
+            "smoke_voxels": False,
+            "smoke_mode": "legacy_circle",
+        },
+        "effect_tracks": payload.get("effect_tracks") or [],
+        "effect_warnings": payload.get("effect_warnings") or [],
+        "effect_parse_ms": payload.get("effect_parse_ms"),
+        "effects_pending": False,
+    }
+
+
+@app.post("/api/demo/player-review")
+async def review_demo_player(req: PlayerAnalysisReviewRequest):
+    """Generate a player-level review from the current Insight Agent parse."""
+    cfg = load_config()
+    if not (
+        llm_api_key_configured(cfg.llm.api_key)
+        or llm_base_url_is_local_host(cfg.llm.base_url)
+    ):
+        raise HTTPException(400, "请先在设置中配置 AI 服务")
+    try:
+        from .ai_reviewer import review_player_stats_with_reviewer
+
+        commentary = await review_player_stats_with_reviewer(
+            req.player,
+            req.match,
+            cfg.llm,
+            locale=req.locale,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Player review failed: %s", exc)
+        raise HTTPException(502, f"AI 点评生成失败：{exc}") from exc
+    return {"commentary": commentary}
+
+
+@app.post("/api/demo/review-clips")
+async def review_demo_player_clips(req: PlayerClipReviewRequest):
+    """Review one selected player's existing clips without re-parsing the Demo."""
+    cfg = load_config()
+    if not cfg.ai_mode:
+        raise HTTPException(409, "AI 洞察模式未开启")
+    if not (
+        llm_api_key_configured(cfg.llm.api_key)
+        or llm_base_url_is_local_host(cfg.llm.base_url)
+    ):
+        raise HTTPException(400, "请先在设置中配置 AI 服务")
+    try:
+        from .ai_reviewer import enrich_clips_dicts_with_reviewer
+
+        clips = await enrich_clips_dicts_with_reviewer(
+            req.clips,
+            req.match_meta,
+            cfg.llm,
+            locale=req.locale,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Selected-player clip review failed: %s", exc)
+        raise HTTPException(502, f"AI 锐评生成失败：{exc}") from exc
+    return {"clips": clips, "reviewed": True}
 
 
 @app.get("/api/demos/{demo_id}/players")
@@ -2652,80 +3393,87 @@ async def delete_demo(
     return {"status": "deleted", "demo_id": demo_id}
 
 
-def _launch_cs2_play_demo(dem_path: Path) -> None:
-    """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
-    cfg = load_config()
-    cs2_path = cfg.cs2_path
-    if not cs2_path or not Path(cs2_path).is_file():
-        raise HTTPException(400, "CS2 路径未配置或文件不存在，请先在设置中配置 CS2 路径。")
-
-    if not dem_path.is_file():
-        raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
-
-    try:
-        cs2_bin = Path(cs2_path)
-        # 约定路径结构: …/game/bin/win64/cs2.exe → game/
-        game_root = cs2_bin.parents[2]
-        csgo_dir = game_root / "csgo"
-        dest = csgo_dir / "cs2_insight_preview.dem"
-        compat = ensure_demo_compatible(dem_path)
-        dest.unlink(missing_ok=True)
-        shutil.copy2(dem_path, dest)
-        logger.info(
-            "Direct CS2 demo compatibility ready: cached=%s outcome=%s "
-            "removed_type138=%d source=%s",
-            compat.cached,
-            compat.report.outcome,
-            compat.report.removed_messages,
-            dem_path,
-        )
-        logger.info("Launch CS2 for playback: cwd=%s demo=%s", game_root, dest)
-        import subprocess as _sp
-
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = (
-                getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(_sp, "DETACHED_PROCESS", 0)
-            )
-        _sp.Popen(
-            [
-                str(cs2_bin),
-                "-steam",
-                "-insecure",
-                "-novid",
-                "-console",
-                "+playdemo",
-                "cs2_insight_preview.dem",
-            ],
-            cwd=str(game_root),
-            stdin=_sp.DEVNULL,
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
-            close_fds=True,
-            creationflags=creationflags,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to launch CS2 for playback")
-        raise HTTPException(500, f"启动 CS2 失败: {e}") from e
+class DemoPlaybackPovBody(BaseModel):
+    enabled: bool = False
+    radar_mode: Literal[-1, 0] = 0
+    teamcounter_numeric: bool = False
 
 
-class DemoPlayByPathBody(BaseModel):
+class DemoPlaybackOptionsBody(BaseModel):
+    pov_hud: DemoPlaybackPovBody = Field(default_factory=DemoPlaybackPovBody)
+
+
+class DemoPlayByPathBody(DemoPlaybackOptionsBody):
     path: str = Field(..., min_length=1)
 
 
+def _launch_cs2_play_demo(
+    dem_path: Path,
+    options: Optional[DemoPlaybackOptionsBody] = None,
+) -> dict[str, Any]:
+    """Launch managed direct playback; both normal and POV modes require CS2 to be closed."""
+    cfg = ensure_cs2_path(load_config())
+    if not cfg.cs2_path or not Path(cfg.cs2_path).is_file():
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING"))
+    if not dem_path.is_file():
+        raise HTTPException(422, error_detail("DEMO_PLAYBACK_DEMO_NOT_FOUND", path=str(dem_path)))
+
+    body = options or DemoPlaybackOptionsBody()
+    pov = body.pov_hud
+    try:
+        return demo_playback_service.launch(
+            dem_path,
+            cfg,
+            DemoPlaybackPovOptions(
+                enabled=bool(pov.enabled),
+                radar_mode=int(pov.radar_mode),
+                teamcounter_numeric=bool(pov.teamcounter_numeric),
+            ),
+        )
+    except DemoPlaybackCs2RunningError as exc:
+        raise HTTPException(409, error_detail("DEMO_PLAYBACK_CS2_RUNNING")) from exc
+    except DemoPlaybackBusyError as exc:
+        raise HTTPException(409, error_detail("DEMO_PLAYBACK_BUSY")) from exc
+    except PovHudError as exc:
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_POV_FAILED", err=str(exc))) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING")) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to launch CS2 for direct playback")
+        raise HTTPException(500, error_detail("DEMO_PLAYBACK_LAUNCH_FAILED", err=str(exc))) from exc
+
+
+@app.get("/api/demo/playback/preflight")
+async def demo_playback_preflight():
+    """Preflight for the playback dialog; launch performs the authoritative recheck."""
+    cfg = ensure_cs2_path(load_config())
+    return await asyncio.to_thread(demo_playback_service.preflight, cfg)
+
+
+@app.get("/api/demo/playback/status")
+async def demo_playback_status(session_id: str = Query(..., min_length=1, max_length=128)):
+    """Return the measured lifecycle and POV file-restoration result for one playback session."""
+    return await asyncio.to_thread(demo_playback_service.session_status, session_id)
+
+
 @app.post("/api/demo/play")
-async def play_demo_by_path(body: DemoPlayByPathBody):
+async def play_demo_by_path(
+    body: DemoPlayByPathBody,
+    _runtime_session: None = Depends(runtime_session_dependency),
+):
     """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
     dem_path = resolve_uploaded_demo_path(body.path)
-    await asyncio.to_thread(_launch_cs2_play_demo, dem_path)
-    return {"ok": True}
+    return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
 
 
 @app.post("/api/demos/{demo_id}/play")
-async def play_demo_in_cs2(demo_id: int):
+async def play_demo_in_cs2(
+    demo_id: int,
+    body: Annotated[Optional[DemoPlaybackOptionsBody], Body()] = None,
+    _runtime_session: None = Depends(runtime_session_dependency),
+):
     """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
@@ -2735,8 +3483,7 @@ async def play_demo_in_cs2(demo_id: int):
     if not dem_path or not Path(dem_path).is_file():
         raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
 
-    await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path))
-    return {"ok": True}
+    return await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path), body)
 
 
 @app.post("/api/demos/{demo_id}/delete-file")
@@ -2746,23 +3493,31 @@ async def delete_demo_file(demo_id: int):
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     disk_path = str(demo["path"])
-    import os as _os
-    deleted_files: list[str] = []
-    errors: list[str] = []
-    for target in (disk_path, disk_path.rsplit(".", 1)[0] + ".zip" if "." in _os.path.basename(disk_path) else None):
-        if target is None:
-            continue
+    from .file_quarantine import quarantine_files
+
+    targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
+    try:
+        quarantined = await asyncio.to_thread(quarantine_files, targets, "demos")
+    except OSError as exc:
+        raise HTTPException(409, f"Demo 文件无法安全移入回收区，数据库记录未删除：{exc}") from exc
+    # Only commit the database deletion after every owned file is recoverable.
+    try:
+        deleted = await demo_db.delete_demo(demo_id, rescan="reimport")
+        if not deleted:
+            raise HTTPException(404, f"Demo not found: {demo_id}")
+    except Exception:
         try:
-            _os.remove(target)
-            deleted_files.append(target)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            errors.append(f"{target}: {e}")
-    # 无论文件删除成功与否，都删除库内记录
-    await demo_db.delete_demo(demo_id, rescan="skip")
+            await asyncio.to_thread(quarantined.restore)
+        except OSError:
+            logger.exception("Failed to restore quarantined demo files for demo_id=%s", demo_id)
+        raise
     await demo_library_hub.notify("deleted")
-    return {"status": "deleted", "demo_id": demo_id, "deleted_files": deleted_files, "errors": errors}
+    return {
+        "status": "deleted",
+        "demo_id": demo_id,
+        "quarantined_files": [str(item.original) for item in quarantined.files],
+        "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+    }
 
 
 class BatchIngestBody(BaseModel):
@@ -2801,7 +3556,8 @@ async def batch_ingest_demos(body: BatchIngestBody):
         demo_id, row, dem_path = candidate
         try:
             async with inspect_sem:
-                await asyncio.to_thread(ensure_demo_compatible, dem_path)
+                # Compat repair is deferred to play/analyze/record — ingest only
+                # needs lightweight inspect metadata for library cards.
                 players, meta = await _inspect_demo_meta(Path(dem_path))
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
@@ -2887,15 +3643,6 @@ async def cs2_gsi(payload: Optional[dict] = Body(default=None)):
     """CS2 Game State Integration sink used as a recording startup ready gate."""
     _payload = payload or {}
     ready = notify_gsi_payload(_payload)
-    # 实时雷达缓存：转发快照到活跃会话
-    try:
-        from app.radar.radar_live_session import get_active_session
-        _sess = get_active_session()
-        if _sess is not None:
-            import time as _time
-            _sess.push_gsi_snapshot(_payload, wall_time=_time.monotonic())
-    except Exception:
-        pass
     return {"ok": True, "ready": ready}
 
 
@@ -2905,14 +3652,6 @@ def cs2_gsi_status():
 
 
 # ─── Montage (V2) ─────────────────────────────────────────────
-
-
-class RadarOverlayOptions(BaseModel):
-    enabled: bool = False
-    hud_overlay: bool = False
-    killfeed_overlay: bool = False
-    crosshair_overlay: bool = False
-    lens_overlay: bool = False
 
 
 class PlayerAvatar(BaseModel):
@@ -2936,7 +3675,6 @@ class MontageProjectBody(BaseModel):
     outro_image_duration: Optional[float] = None
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
     transitions: Optional[dict[str, Any]] = None
-    radar_overlay: Optional[RadarOverlayOptions] = None
     theme_id: Optional[str] = Field(default=None, max_length=64)
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
@@ -3053,8 +3791,6 @@ async def save_montage_project(body: MontageProjectBody):
         proj_body["transitions"] = body.transitions
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
-    # 后期 FFmpeg 雷达叠层已下线；忽略客户端传入的旧开关，写入占位以兼容旧前端读取。
-    proj_body["radar_overlay"] = {"enabled": False}
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -3109,7 +3845,6 @@ class MontageExportBody(BaseModel):
     output_path: str = Field(..., min_length=1, max_length=2048)
     theme_id: Optional[str] = Field(default=None, max_length=64)
     transitions: Optional[dict[str, Any]] = None
-    radar_overlay: Optional[RadarOverlayOptions] = None
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
 
@@ -3282,7 +4017,6 @@ async def montage_export(body: MontageExportBody):
     }
     if isinstance(transitions_eff, dict):
         snap["transitions"] = transitions_eff
-    snap["radar_overlay"] = {"enabled": False}
     if body.ordered_ids is not None:
         snap["ordered_ids"] = list(body.ordered_ids)
     if body.theme_id is not None:
@@ -3613,7 +4347,7 @@ async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.3.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/")

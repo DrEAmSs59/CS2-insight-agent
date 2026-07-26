@@ -16,6 +16,7 @@ import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { LITECUT_PROJECT_TEMPLATES, projectBodyFromTemplate } from "./projectTemplates.js";
 import { inspectorTabForTimelineSelection } from "./inspectorSelectionUtils.js";
 import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
 import { collectUsedLiteCutAssetIds, mapAssetRow } from "../../../stores/liteCut/assetUtils.js";
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
@@ -279,8 +280,10 @@ export default function LiteCutEditorShell({
     if (selectionInspectorTab) setInspectorTab(selectionInspectorTab);
   }, [selectedClipId, selectedTrackId, selectionInspectorTab]);
 
-  const checkFfmpegGate = useCallback(async () => {
-    setFfmpegGate((prev) => ({ ...prev, loading: true }));
+  const checkFfmpegGate = useCallback(async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    }
     try {
       const { data } = await API.get("config/ffmpeg-check");
       if (data?.ok) {
@@ -308,7 +311,10 @@ export default function LiteCutEditorShell({
   }, [checkFfmpegGate, location.pathname]);
 
   useEffect(() => {
-    const onFocus = () => void checkFfmpegGate();
+    // Native file pickers temporarily blur the window. Recheck FFmpeg after
+    // focus returns without unmounting the editor and losing the file input's
+    // pending change event or the media-bin tab state.
+    const onFocus = () => void checkFfmpegGate({ showLoading: false });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [checkFfmpegGate]);
@@ -1463,6 +1469,10 @@ export default function LiteCutEditorShell({
   const handleImportProject = useCallback(
     async (file) => {
       try {
+        if (dirty || saving) {
+          const saved = await saveProject();
+          if (!saved?.ok) return { ok: false };
+        }
         const raw = JSON.parse(await file.text());
         const importedBody = raw?.body && typeof raw.body === "object" ? raw.body : raw;
         if (!importedBody || typeof importedBody !== "object" || !Array.isArray(importedBody.tracks)) return { ok: false };
@@ -1477,7 +1487,7 @@ export default function LiteCutEditorShell({
         return { ok: false };
       }
     },
-    [importProject, setPlayhead, clearSelection],
+    [dirty, saving, saveProject, importProject, setPlayhead, clearSelection],
   );
 
   const handleOpenProject = useCallback(
@@ -1553,6 +1563,10 @@ export default function LiteCutEditorShell({
   }, [projectId, dirty, saving, saveProject, projectName, setPlaying, setPlayhead, clearSelection]);
 
   const handleImportPortable = useCallback(async (file) => {
+    if (dirty || saving) {
+      const saved = await saveProject();
+      if (!saved?.ok) return { ok: false };
+    }
     const form = new FormData();
     form.append("file", file);
     const { data } = await API.post("/lite-cut/projects/portable-import", form, { headers: { "Content-Type": "multipart/form-data" } });
@@ -1560,15 +1574,15 @@ export default function LiteCutEditorShell({
     setPlayhead(0);
     clearSelection();
     return { ok: true };
-  }, [openProject, setPlayhead, clearSelection]);
+  }, [dirty, saving, saveProject, openProject, setPlayhead, clearSelection]);
 
   const handleStartPortableExport = useCallback(async () => {
     if (!projectId) return { cancelled: true };
     // Desktop builds use the native folder chooser so the final location is
     // explicit. Browser builds retain a normal download after preparation.
     let destination = "";
-    if (window.electron?.chooseDirectory) {
-      destination = await window.electron.chooseDirectory("");
+    if (desktopBridge?.chooseDirectory) {
+      destination = await desktopBridge.chooseDirectory("");
       if (!destination) return { cancelled: true };
     }
     const { data } = await API.post(`/lite-cut/projects/${projectId}/portable-package/start`, { destination });
@@ -1609,7 +1623,7 @@ export default function LiteCutEditorShell({
           title={t("liteCut.ffmpegRequiredTitle")}
           subtitle={ffmpegGate.subtitle}
           message={ffmpegGate.message}
-          onGoSettings={() => navigate("/settings")}
+          onGoSettings={() => navigate("/settings?tab=video")}
         />
       </div>
     );

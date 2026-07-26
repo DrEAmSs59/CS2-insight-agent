@@ -21,12 +21,19 @@ New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $tarball = Join-Path $tmp "cpython-windows.tar.gz"
 $previousNoUserSite = $env:PYTHONNOUSERSITE
 $env:PYTHONNOUSERSITE = "1"
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv) {
+  throw "uv 0.11.x is required to assemble the bundled Python runtime."
+}
 
 function Remove-TreeIfExists([string]$Path) {
   if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
 }
 
 try {
+  if (-not $DemoparserWheel.Trim()) {
+    throw "DemoparserWheel is required; refusing to stage a runtime with the stock parser."
+  }
   Write-Host "[CS2 Insight Agent] Downloading embedded Python (this may take a few minutes)..."
   $curl = Join-Path $env:SystemRoot "System32\curl.exe"
   if (Test-Path $curl) {
@@ -51,25 +58,20 @@ try {
   Move-Item -Path $inner.FullName -Destination $destPython
   $py = Join-Path $destPython "python.exe"
   if (-not (Test-Path $py)) { throw "python.exe missing under $destPython" }
-  & $py -m ensurepip --upgrade
-  & $py -m pip install --no-cache-dir --upgrade pip==25.0
-  if ($DemoparserWheel.Trim()) {
-    $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
-    Write-Host "[CS2 Insight Agent] Installing lean demoparser wheel..."
-    & $py -m pip install --no-cache-dir --no-deps $leanWheel
-    if ($LASTEXITCODE -ne 0) { throw "lean demoparser wheel install failed: $LASTEXITCODE" }
-  }
-  $req = Join-Path $repoRoot "backend\requirements.txt"
-  & $py -m pip install --no-cache-dir -r $req
-  if ($LASTEXITCODE -ne 0) { throw "backend requirements install failed: $LASTEXITCODE" }
-  if ($DemoparserWheel.Trim()) {
-    & $py -m pip uninstall -y polars pyarrow polars-runtime-32
-    $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
-    & $py -c "import importlib.metadata as m, importlib.util as u, sys; assert m.version('demoparser2') == sys.argv[1]; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
-    if ($LASTEXITCODE -ne 0) { throw "lean demoparser runtime verification failed: $LASTEXITCODE" }
-  }
-  & $py -m pip uninstall -y pip setuptools wheel
-  if ($LASTEXITCODE -ne 0) { throw "runtime build-tool removal failed: $LASTEXITCODE" }
+  $runtimeRequirements = Join-Path $tmp "runtime-requirements.txt"
+  & $uv.Source export --project $repoRoot --frozen --no-dev --no-emit-project `
+    --no-emit-package demoparser2 --output-file $runtimeRequirements
+  if ($LASTEXITCODE -ne 0) { throw "Exporting the locked backend runtime failed: $LASTEXITCODE" }
+  Write-Host "[CS2 Insight Agent] Installing locked Python runtime with uv..."
+  & $uv.Source pip install --python $py --requirements $runtimeRequirements --compile-bytecode
+  if ($LASTEXITCODE -ne 0) { throw "locked backend runtime install failed: $LASTEXITCODE" }
+  $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
+  Write-Host "[CS2 Insight Agent] Installing patched demoparser wheel..."
+  & $uv.Source pip install --python $py --no-deps $leanWheel --compile-bytecode
+  if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed: $LASTEXITCODE" }
+  $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
+  & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+  if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed: $LASTEXITCODE" }
   Write-Host "[CS2 Insight Agent] Trimming Python runtime to reduce installer size..."
   foreach ($rel in @(
       "Lib\test",
@@ -102,12 +104,8 @@ try {
   $sp = Join-Path $destPython "Lib\site-packages"
   if (Test-Path $sp) {
     foreach ($pkgRel in @(
-        "pandas\tests",
-        "numpy\tests",
-        "numpy\f2py\tests",
         "matplotlib\tests",
-        "matplotlib\mpl-data\sample_data",
-        "pyarrow\tests"
+        "matplotlib\mpl-data\sample_data"
       )) {
       Remove-TreeIfExists (Join-Path $sp $pkgRel)
     }

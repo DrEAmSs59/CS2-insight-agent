@@ -375,6 +375,8 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     obs: OBSConfig = Field(default_factory=OBSConfig)
+    # 用户首次明确授权后，进入 AI OBS 调优时可自动准备 OBS 与 WebSocket。
+    obs_agent_auto_prepare: bool = False
     llm: LLMConfig = Field(default_factory=LLMConfig)
     experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
     spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)
@@ -390,10 +392,12 @@ class AppConfig(BaseModel):
     cs2_path: str = ""
     demo_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
+    # Demo 库扫描深度：0=仅所选目录，1=再含一级子目录，依此类推。
+    demo_watch_scan_depth: int = Field(default=2, ge=0, le=32)
     ai_mode: bool = False
     # 前端界面语言：auto=跟随操作系统（中文系统→zh，其他→en）；亦可显式设为 zh / en
     locale: str = "auto"
-    # 监听目录新入库时：按名单在 demo roster 中匹配（同一场可多名），展示名写成「A K/D/A · B K/D/A」作标记（不做高光解析）
+    # 关注玩家名单：批量载入时可按 roster 匹配解析目标（不做自动改展示名 / 高光解析）
     expected_parse_players: list[str] = Field(default_factory=list)
     # 前端录制队列「全局节奏」覆写（仅含用户改过的字段；空对象表示沿用内置默认）
     recording_global_pacing: dict[str, Any] = Field(default_factory=dict)

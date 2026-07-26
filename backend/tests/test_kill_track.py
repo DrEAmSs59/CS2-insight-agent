@@ -1,4 +1,4 @@
-import pandas as pd
+from app import native_table as pd
 
 from app.parser import kill_track
 

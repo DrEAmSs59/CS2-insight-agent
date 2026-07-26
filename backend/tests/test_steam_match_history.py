@@ -1,7 +1,5 @@
 import sys, time
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
-import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.steam_match_history import (

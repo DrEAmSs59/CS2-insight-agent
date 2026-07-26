@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
 import {
@@ -11,7 +11,6 @@ import {
   RefreshCcw,
   Plus,
   HardDrive,
-  Upload,
 } from "lucide-react";
 
 // Source labels that should NOT be translated (proper names / abbreviations)
@@ -22,7 +21,7 @@ const SOURCE_I18N_KEYS = {
   "Matchmaking": "ingest.sourceMatchmaking",
 };
 
-export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
+export default function IngestModal({ isOpen, onClose, onIngest }) {
   const t = useT();
   const [items, setItems] = useState([]);
   const [listLoading, setListLoading] = useState(false);
@@ -34,16 +33,6 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const limit = 10;
-
-  const fileInputRef = React.useRef(null);
-
-  const handleFileChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      onUpload?.(files);
-      e.target.value = ""; // reset
-    }
-  };
 
   const fetchDiscovered = useCallback(async () => {
     setListLoading(true);
@@ -127,41 +116,20 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
           </div>
         ) : null}
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-cs2-border px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-cs2-accent" />
-            <h2 className="text-sm font-bold text-cs2-text-primary">{t("dialog.ingestTitle")}</h2>
-            <span className="rounded bg-cs2-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-cs2-accent">
-              {total}
-            </span>
+        <div className="flex items-start justify-between border-b border-cs2-border px-5 py-4">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <Database className="mt-0.5 h-5 w-5 shrink-0 text-cs2-accent" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-cs2-text-primary">{t("dialog.ingestTitle")}</h2>
+                <span className="rounded bg-cs2-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-cs2-accent">{total}</span>
+              </div>
+              <p className="mt-1 text-[10px] leading-relaxed text-cs2-text-muted">{t("dialog.ingestSubtitle")}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="file"
-              multiple
-              accept=".dem"
-              className="hidden"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              disabled={ingesting}
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-hover px-3 py-1.5 text-[10px] font-bold text-cs2-text-secondary transition-all hover:bg-cs2-bg-active hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              {t("dialog.ingestUploadBtn")}
-            </button>
-            <button
-              type="button"
-              disabled={ingesting}
-              onClick={onClose}
-              className="rounded-full p-1.5 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button type="button" disabled={ingesting} onClick={onClose} className="rounded-full p-1.5 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40">
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Toolbar */}
@@ -190,13 +158,13 @@ export default function IngestModal({ isOpen, onClose, onIngest, onUpload }) {
         {items.length > 0 && (
           <div className="flex items-center gap-2 border-b border-cs2-border bg-cs2-bg-input/30 px-5 py-2 text-[10px]">
             <button type="button" disabled={ingesting} onClick={handleSelectAll} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
-              {t("dialog.ingestSelectAll")}
+              {t("dialog.ingestSelectAll", { count: items.length })}
             </button>
             <span className="text-cs2-text-muted">|</span>
             <button type="button" disabled={ingesting} onClick={handleClearSelection} className="text-cs2-text-secondary hover:text-cs2-text-primary disabled:opacity-40">
               {t("dialog.ingestClear")}
             </button>
-            <span className="ml-auto text-cs2-text-muted">{t("dialog.ingestSelected", { sel: selectedIds.size, total: items.length })}</span>
+            <span className="ml-auto text-cs2-text-muted">{t("dialog.ingestSelected", { sel: selectedIds.size, total })}</span>
           </div>
         )}
 

@@ -30,8 +30,7 @@
  *   demo_end_tick: number,
  *   final_round: number,
  *   final_round_start_tick: number,
- *   final_round_end_tick: number,
- *   win_panel_match_tick: number
+ *   final_round_end_tick: number
  * }} DemoContext
  */
 
@@ -79,10 +78,7 @@
  *   round_freeze_preroll_sec: number,
  *   round_death_post_sec: number,
  *   enable_victim_pov: boolean,
- *   final_round_guard_sec: number,
- *   final_round_seek_guard_sec: number,
- *   final_round_min_duration_sec: number,
- *   final_round_win_panel_guard_sec: number
+ *   demo_end_guard_sec: number
  * }} RecordingOptions
  */
 

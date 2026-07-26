@@ -150,6 +150,7 @@ class DemoDB:
                     error_msg TEXT,
                     display_name TEXT,
                     source TEXT,
+                    watch_root TEXT,
                     remark TEXT
                 )
                 """,
@@ -253,6 +254,8 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN team_b_name TEXT")
             if "source" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN source TEXT")
+            if "watch_root" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN watch_root TEXT")
             if "remark" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN remark TEXT")
             if "content_md5" not in cols:
@@ -529,6 +532,7 @@ class DemoDB:
         added_at: str | None = None,
         content_md5: str | None = None,
         origin_zip: str | None = None,
+        watch_root: str | None = None,
     ) -> tuple[int, bool]:
         """返回 (id, inserted)。path 已存在时 inserted=False，调用方应跳过后续轻量解析以加速扫描。"""
         p = Path(path)
@@ -537,21 +541,27 @@ class DemoDB:
             if self.ingest_md5_supported:
                 cur = await conn.execute(
                     """
-                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source, content_md5, origin_zip)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source, content_md5, origin_zip, watch_root)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (str(p), p.name, file_size, status, final_added_at, source, content_md5, origin_zip),
+                    (str(p), p.name, file_size, status, final_added_at, source, content_md5, origin_zip, watch_root),
                 )
             else:
                 cur = await conn.execute(
                     """
-                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO demo_files(path, filename, file_size, status, added_at, source, watch_root)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (str(p), p.name, file_size, status, final_added_at, source),
+                    (str(p), p.name, file_size, status, final_added_at, source, watch_root),
                 )
             await conn.commit()
             if cur.rowcount == 0:
+                if watch_root:
+                    await conn.execute(
+                        "UPDATE demo_files SET watch_root = COALESCE(watch_root, ?) WHERE path = ?",
+                        (watch_root, str(p)),
+                    )
+                    await conn.commit()
                 existing = await conn.execute("SELECT id FROM demo_files WHERE path = ?", (str(p),))
                 row = await existing.fetchone()
                 if not row:
@@ -677,7 +687,98 @@ class DemoDB:
                 )
             await conn.commit()
 
-    async def save_result(self, demo_path: str, result: dict[str, Any]) -> None:
+    async def _replace_timeline_events_in_connection(
+        self,
+        conn: aiosqlite.Connection,
+        demo_path: str,
+        target_player: str,
+        result: dict[str, Any],
+        *,
+        created_at: str,
+    ) -> None:
+        """Replace one player's timeline inside the caller's transaction."""
+        tp = str(target_player or "").strip()
+        rt = result.get("round_timeline")
+        await conn.execute(
+            "DELETE FROM demo_timeline_events WHERE demo_path = ? AND target_player = ?",
+            (demo_path, tp),
+        )
+        if not tp or not isinstance(rt, list):
+            return
+        rows: list[tuple[Any, ...]] = []
+        for bucket in rt:
+            if not isinstance(bucket, dict):
+                continue
+            try:
+                rn = int(bucket.get("round_number") or 0)
+            except (TypeError, ValueError):
+                rn = 0
+            htags = bucket.get("highlight_tags")
+            if rn >= 1 and isinstance(htags, list) and any(str(x).strip() for x in htags):
+                clean_ht = [str(x).strip() for x in htags if str(x).strip()]
+                rows.append(
+                    (
+                        demo_path,
+                        tp,
+                        f"hr{rn}-highlight",
+                        rn,
+                        -1,
+                        "highlight_round",
+                        json.dumps(clean_ht, ensure_ascii=False),
+                        json.dumps(
+                            {"round_number": rn, "highlight_tags": clean_ht},
+                            ensure_ascii=False,
+                        ),
+                        created_at,
+                    ),
+                )
+            for ev in bucket.get("events") or []:
+                if not isinstance(ev, dict):
+                    continue
+                typ = str(ev.get("type") or "").strip()
+                if typ not in ("kill", "death", "assist_only"):
+                    continue
+                eid = str(ev.get("id") or "").strip()
+                if not eid:
+                    continue
+                try:
+                    tick = int(ev.get("tick") or 0)
+                except (TypeError, ValueError):
+                    tick = 0
+                rows.append(
+                    (
+                        demo_path,
+                        tp,
+                        eid,
+                        rn,
+                        tick,
+                        typ,
+                        "[]",
+                        json.dumps(
+                            {key: value for key, value in ev.items() if key != "tags"},
+                            ensure_ascii=False,
+                        ),
+                        created_at,
+                    ),
+                )
+        if rows:
+            await conn.executemany(
+                """
+                INSERT INTO demo_timeline_events(
+                    demo_path, target_player, event_id, round_number, tick,
+                    record_type, tags_json, event_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    async def save_result(
+        self,
+        demo_path: str,
+        result: dict[str, Any],
+        *,
+        timeline_results: dict[str, Any] | None = None,
+    ) -> None:
         now = utc_now_iso()
         payload = json.dumps(result, ensure_ascii=False)
         (
@@ -729,92 +830,42 @@ class DemoDB:
                 result,
                 primary_target,
             )
+            if timeline_results is not None:
+                for target_player, player_result in timeline_results.items():
+                    if isinstance(player_result, dict):
+                        await self._replace_timeline_events_in_connection(
+                            conn,
+                            demo_path,
+                            target_player,
+                            player_result,
+                            created_at=now,
+                        )
+            else:
+                meta = result.get("match_meta")
+                target_player = str(meta.get("target_player") or "").strip() if isinstance(meta, dict) else ""
+                if not target_player:
+                    target_player = str(result.get("auto_target_player") or "").strip()
+                if target_player:
+                    await self._replace_timeline_events_in_connection(
+                        conn,
+                        demo_path,
+                        target_player,
+                        result,
+                        created_at=now,
+                    )
             await conn.commit()
-        meta = result.get("match_meta")
-        tp = ""
-        if isinstance(meta, dict):
-            tp = str(meta.get("target_player") or "").strip()
-        if not tp:
-            tp = str(result.get("auto_target_player") or "").strip()
-        if tp:
-            await self.replace_timeline_events(demo_path, tp, result)
 
     async def replace_timeline_events(self, demo_path: str, target_player: str, result: dict[str, Any]) -> None:
         """按玩家写入时间线：击杀/死亡/助攻行 + 每回合高光标签行（先删后插）。"""
-        tp = str(target_player or "").strip()
         now = utc_now_iso()
-        rt = result.get("round_timeline")
         async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute(
-                "DELETE FROM demo_timeline_events WHERE demo_path = ? AND target_player = ?",
-                (demo_path, tp),
+            await self._replace_timeline_events_in_connection(
+                conn,
+                demo_path,
+                target_player,
+                result,
+                created_at=now,
             )
-            if not tp or not isinstance(rt, list):
-                await conn.commit()
-                return
-            rows: list[tuple[Any, ...]] = []
-            for bucket in rt:
-                if not isinstance(bucket, dict):
-                    continue
-                try:
-                    rn = int(bucket.get("round_number") or 0)
-                except (TypeError, ValueError):
-                    rn = 0
-                htags = bucket.get("highlight_tags")
-                if rn >= 1 and isinstance(htags, list) and any(str(x).strip() for x in htags):
-                    clean_ht = [str(x).strip() for x in htags if str(x).strip()]
-                    tags_json = json.dumps(clean_ht, ensure_ascii=False)
-                    ev_wrap = {"round_number": rn, "highlight_tags": clean_ht}
-                    rows.append(
-                        (
-                            demo_path,
-                            tp,
-                            f"hr{rn}-highlight",
-                            rn,
-                            -1,
-                            "highlight_round",
-                            tags_json,
-                            json.dumps(ev_wrap, ensure_ascii=False),
-                            now,
-                        ),
-                    )
-                for ev in bucket.get("events") or []:
-                    if not isinstance(ev, dict):
-                        continue
-                    typ = str(ev.get("type") or "").strip()
-                    if typ not in ("kill", "death", "assist_only"):
-                        continue
-                    eid = str(ev.get("id") or "").strip()
-                    if not eid:
-                        continue
-                    try:
-                        tick = int(ev.get("tick") or 0)
-                    except (TypeError, ValueError):
-                        tick = 0
-                    ev_clean = {k: v for k, v in ev.items() if k != "tags"}
-                    rows.append(
-                        (
-                            demo_path,
-                            tp,
-                            eid,
-                            rn,
-                            tick,
-                            typ,
-                            "[]",
-                            json.dumps(ev_clean, ensure_ascii=False),
-                            now,
-                        ),
-                    )
-            if rows:
-                await conn.executemany(
-                    """
-                    INSERT INTO demo_timeline_events(
-                        demo_path, target_player, event_id, round_number, tick,
-                        record_type, tags_json, event_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
-                )
             await conn.commit()
 
     async def clear_result(self, demo_path: str) -> None:
@@ -1659,14 +1710,12 @@ class DemoDB:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
-    async def purge_deleted_demo_files(self, existing_paths: set[str]) -> int:
-        """删除 `demo_files` 中 ``path`` 不在 ``existing_paths`` 里的记录（物理文件已被手动删除）。
+    async def purge_deleted_demo_files(self, watch_root: str, existing_paths: set[str]) -> int:
+        """Delete missing rows owned by one successfully scanned watch root.
 
         用临时表收集现有路径集合，然后单条 ``DELETE ... WHERE path NOT IN (SELECT ...)`` 级联清理，
         避免全表预读和 ``NOT IN`` 参数数量限制。
         """
-        if not existing_paths:
-            return 0
         batch_size = 500
         all_paths = list(existing_paths)
         async with aiosqlite.connect(self.db_path) as conn:
@@ -1675,16 +1724,28 @@ class DemoDB:
             for i in range(0, len(all_paths), batch_size):
                 chunk = all_paths[i:i + batch_size]
                 await conn.executemany("INSERT INTO _tmp_existing_paths(path) VALUES (?)", [(p,) for p in chunk])
-            await conn.execute("DELETE FROM match_results WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
-            await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
-            await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path NOT IN (SELECT path FROM _tmp_existing_paths)")
-            await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id NOT IN (SELECT d.id FROM demo_files d WHERE d.path IN (SELECT path FROM _tmp_existing_paths))")
-            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id NOT IN (SELECT d.id FROM demo_files d WHERE d.path IN (SELECT path FROM _tmp_existing_paths))")
-            cur = await conn.execute("DELETE FROM demo_files WHERE path NOT IN (SELECT path FROM _tmp_existing_paths)")
+            await conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS _tmp_missing_demo_ids (id INTEGER PRIMARY KEY, path TEXT NOT NULL)"
+            )
+            await conn.execute("DELETE FROM _tmp_missing_demo_ids")
+            await conn.execute(
+                """
+                INSERT INTO _tmp_missing_demo_ids(id, path)
+                SELECT id, path FROM demo_files
+                WHERE watch_root = ? AND path NOT IN (SELECT path FROM _tmp_existing_paths)
+                """,
+                (watch_root,),
+            )
+            await conn.execute("DELETE FROM match_results WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
+            await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
+            await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
+            await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
+            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
+            cur = await conn.execute("DELETE FROM demo_files WHERE id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.commit()
             total = cur.rowcount
             if total:
-                logger.info("purge_deleted_demo_files: removed %d rows for files no longer on disk", total)
+                logger.info("purge_deleted_demo_files: root=%s removed=%d", watch_root, total)
             return total
 
     async def all_content_md5_hexes(self) -> set[str]:

@@ -438,7 +438,8 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
     monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
     monkeypatch.setattr(main, "load_config", AppConfig)
-    monkeypatch.setattr(main.demo_db, "clear_result", AsyncMock())
+    clear_result = AsyncMock(side_effect=AssertionError("last-known-good result must not be cleared before parse"))
+    monkeypatch.setattr(main.demo_db, "clear_result", clear_result)
     monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
     save_result = AsyncMock()
     monkeypatch.setattr(main.demo_db, "save_result", save_result)
@@ -457,6 +458,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     composite = save_result.await_args.args[1]
     assert composite["auto_target_player"] == "alpha"
     assert composite["analyzed_target_players"] == ["alpha"]
+    clear_result.assert_not_awaited()
 
 
 def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
@@ -556,7 +558,13 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
 
     monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
     monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
-    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: None)
+    compat_calls: list[str] = []
+
+    def fake_ensure(path):
+        compat_calls.append(str(path))
+        raise AssertionError("batch ingest must not call ensure_demo_compatible")
+
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_list_items",
@@ -574,6 +582,7 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
     )
 
     assert response == {"ingested": 3, "failed": []}
+    assert compat_calls == []
     assert max_active == 2
     assert [call.args[0] for call in index_stats.await_args_list] == [1, 2, 3]
     assert [

@@ -104,21 +104,6 @@ export function liteCutRangePatchFromDraggedEdge(output = {}, totalSec = 0, edge
   };
 }
 
-export async function exportLiteCutProject({ projectId, body, outputDir, filename }) {
-  const output_path = buildLiteCutOutputPath(outputDir, filename);
-  if (!output_path) {
-    const err = new Error("output_path_invalid");
-    err.code = "MONTAGE_OUTPUT_PATH_EMPTY";
-    throw err;
-  }
-  const { data } = await API.post("/lite-cut/export", {
-    project_id: projectId ?? null,
-    body,
-    output_path,
-  });
-  return { ...data, output_path };
-}
-
 export async function startLiteCutExport({ projectId, body, outputDir, filename }) {
   const output_path = buildLiteCutOutputPath(outputDir, filename);
   if (!output_path) {

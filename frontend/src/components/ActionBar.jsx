@@ -8,20 +8,34 @@ export default function ActionBar({
   onSelectAll,
   onDeselectAll,
   onAddSelectedToQueue,
-  onAddAllHighlightsAllMatches,
+  onAddCurrentPlayerHighlights,
+  currentPlayer,
   queueLength,
   batchRecording,
-  canAddAllHighlights,
+  canAddCurrentPlayerHighlights,
+  sticky = false,
 }) {
   const t = useT();
   return (
-    <div className="border-t border-cs2-border bg-cs2-bg-sidebar px-4 py-3 sm:px-5">
+    <div
+      data-testid="clip-selection-action-bar"
+      className={`border-t border-cs2-border bg-cs2-bg-sidebar px-4 py-3 sm:px-5 ${
+        sticky
+          ? "sticky bottom-0 z-40 shadow-[0_-12px_30px_rgba(0,0,0,0.28)]"
+          : ""
+      }`}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-4">
           <div className="font-mono text-sm">
             <span className="font-bold text-cs2-accent">{selectedCount}</span>
             <span className="text-cs2-text-secondary"> {t("actionbar.selectedOf", { total: totalCount })}</span>
           </div>
+          {currentPlayer ? (
+            <span className="rounded border border-cs2-accent/25 bg-cs2-accent/[0.07] px-2 py-1 text-[10px] font-semibold text-cs2-accent">
+              {t("actionbar.currentPlayerScope", { player: currentPlayer })}
+            </span>
+          ) : null}
           <div className="flex gap-1">
             <button
               type="button"
@@ -43,15 +57,15 @@ export default function ActionBar({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {canAddAllHighlights && (
+          {canAddCurrentPlayerHighlights && (
             <button
               type="button"
               disabled={batchRecording}
-              onClick={onAddAllHighlightsAllMatches}
+              onClick={onAddCurrentPlayerHighlights}
               className="flex items-center gap-2 rounded-lg border border-cs2-accent/35 bg-cs2-accent/10 px-4 py-2.5 text-xs font-bold text-cs2-accent transition-colors hover:border-cs2-accent/60 hover:bg-cs2-accent/15 disabled:opacity-30"
             >
               <Sparkles className="h-3.5 w-3.5" />
-              {t("actionbar.addAllHighlights")}
+              {t("actionbar.addCurrentPlayerHighlights", { player: currentPlayer })}
             </button>
           )}
           <button

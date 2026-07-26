@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .tag_constants import TICK_RATE
@@ -21,32 +20,16 @@ PLAYER_CONTROLLER_TEAM_PROP = "CCSPlayerController.m_iTeamNum"
 PLAYER_TEAM_PARSE_FIELDS = ["team_num", PLAYER_CONTROLLER_TEAM_PROP]
 
 
-def win_panel_ceiling_from_match_tick(
-    win_panel_match_tick: int, tick_rate: float
-) -> "Optional[int]":
-    """终局回合录制上限 = cs_win_panel_match tick − 守护（env CS2_INSIGHT_WIN_PANEL_GUARD_SEC，默认 2.0s）。
-
-    cs_win_panel_match 事件 tick 比结算界面「视觉出现」晚约 1.5~2s，故守护默认 2.0s，
-    避免终局整回合/合集录到结算画面。win_panel_match_tick <= 0 → None（demo 无结算事件，回退旧逻辑）。
-    """
-    if not win_panel_match_tick or int(win_panel_match_tick) <= 0:
-        return None
-    trf = float(tick_rate) if float(tick_rate) > 0 else 64.0
-    guard_ticks = int(float(
-        os.environ.get("CS2_INSIGHT_WIN_PANEL_GUARD_SEC", "2.0") or "2.0"
-    ) * trf)
-    return int(win_panel_match_tick) - guard_ticks
-
-
 def _to_pandas_df(result) -> pd.DataFrame:
-    """将 demoparser2 的 parse_event / parse_ticks 返回值统一为 pandas DataFrame。"""
+    """Normalize demoparser column data into the dependency-free table."""
     if isinstance(result, pd.DataFrame):
         return result
     if hasattr(result, "to_pandas"):
-        return result.to_pandas()
-    if isinstance(result, list):
-        return pd.DataFrame(result) if result else pd.DataFrame()
-    return pd.DataFrame()
+        result = result.to_pandas()
+    try:
+        return pd.DataFrame(result)
+    except (TypeError, ValueError):
+        return pd.DataFrame()
 
 
 def coalesce_player_team_num(df: pd.DataFrame) -> pd.DataFrame:

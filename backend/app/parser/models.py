@@ -49,8 +49,8 @@ class MatchMeta:
     server_name: str = ""
     # 全员名单：[{name, steamid64, spec_slot, team_num}, ...]；spec_slot 为原始未校准值
     all_players: list = field(default_factory=list)
-    # 比赛结算界面（cs_win_panel_match）出现的 tick；0 = demo 无该事件。供录制侧最后一回合封顶。
-    win_panel_match_tick: int = 0
+    # PBDEMS2 最后外层帧 tick；录制只用它在真实 EOF 前停止，避免返回主菜单。
+    demo_end_tick: int = 0
 
 
 @dataclass
@@ -96,8 +96,7 @@ class Clip:
     clip_min_tick: Optional[int] = None
     # 目标玩家在本回合的死亡 tick（供"虽败犹荣"类片段延伸录制到结局画面；赢了的回合亦填充，但导播默认不延伸）
     death_tick: Optional[int] = None
-    # 本回合 demo 可安全录制的最晚 tick 上限（约等于下一回合 freeze_end - 5s）。
-    # 超过此 tick，CS2 比赛结算界面会单向锁定渲染，demo_gototick 倒退无法恢复画面。
+    # 本回合建议录制窗口的最晚 tick；最后一回合使用真实 PBDEMS2 结束 tick。
     clip_max_tick: Optional[int] = None
     ai_score: Optional[float] = None
     ai_commentary: Optional[str] = None

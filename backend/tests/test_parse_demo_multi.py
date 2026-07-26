@@ -33,11 +33,11 @@ def test_parse_demo_multi_uses_one_shared_worker(monkeypatch, tmp_path):
 
     response = _run_parse_multi(players=["alpha", "bravo"])
 
-    assert response == {"players": expected}
+    assert response == {"players": expected, "analysis_workspace": None}
     assert calls == [(str(demo_path), ["alpha", "bravo"], None)]
 
 
-def test_parse_demo_multi_keeps_per_player_ai_review(monkeypatch, tmp_path):
+def test_parse_demo_multi_defers_ai_review_until_player_is_selected(monkeypatch, tmp_path):
     from app import ai_reviewer
 
     demo_path = tmp_path / "match.dem"
@@ -65,6 +65,34 @@ def test_parse_demo_multi_keeps_per_player_ai_review(monkeypatch, tmp_path):
 
     response = _run_parse_multi(players=["alpha", "bravo"], locale="en")
 
-    assert sorted(reviewed_players) == [("alpha", "en"), ("bravo", "en")]
-    assert response["players"]["alpha"]["clips"] == [{"id": "a", "reviewed": True}]
-    assert response["players"]["bravo"]["clips"] == [{"id": "b", "reviewed": True}]
+    assert reviewed_players == []
+    assert response["players"]["alpha"]["clips"] == [{"id": "a"}]
+    assert response["players"]["bravo"]["clips"] == [{"id": "b"}]
+
+    request = main.PlayerClipReviewRequest(
+        clips=response["players"]["alpha"]["clips"],
+        match_meta=response["players"]["alpha"]["match_meta"],
+        locale="en",
+    )
+    reviewed = asyncio.run(main.review_demo_player_clips(request))
+
+    assert reviewed_players == [("alpha", "en")]
+    assert reviewed == {"clips": [{"id": "a", "reviewed": True}], "reviewed": True}
+
+
+def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_path):
+    demo_path = tmp_path / "match.dem"
+    demo_path.write_bytes(b"demo")
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(main, "load_config", AppConfig)
+    workspace = {"version": 1, "map_name": "de_mirage", "players": [], "rounds": []}
+    parsed = {
+        "__analysis_workspace__": workspace,
+        "alpha": {"clips": [], "match_meta": {"target_player": "alpha"}},
+    }
+    monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", lambda *_args: parsed)
+
+    response = _run_parse_multi(players=["alpha"])
+
+    assert response["analysis_workspace"] == workspace
+    assert "__analysis_workspace__" not in response["players"]

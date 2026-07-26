@@ -1,0 +1,49 @@
+{
+  "demo": "absolute-or-test-relative-path.dem",
+  "map": "de_mirage",
+  "tick_rate": 64,
+  "scenarios": [
+    {
+      "name": "smoke_open_ground",
+      "round": 1,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "空旷地面中心爆烟"
+    },
+    {
+      "name": "smoke_against_wall",
+      "round": 1,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "烟雾紧贴墙壁，观察是否穿墙"
+    },
+    {
+      "name": "smoke_doorway",
+      "round": 1,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "门洞或狭窄通道爆烟"
+    },
+    {
+      "name": "smoke_he_interaction",
+      "round": 2,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "烟雾形成后使用 HE 炸烟"
+    },
+    {
+      "name": "inferno_open_ground",
+      "round": 3,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "空旷地面燃烧弹"
+    },
+    {
+      "name": "inferno_corner",
+      "round": 3,
+      "start_tick": 0,
+      "end_tick": 0,
+      "notes": "燃烧弹在墙角铺开"
+    }
+  ]
+}
