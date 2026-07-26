@@ -2,8 +2,6 @@
 
 import effectContract from "../../../../../data/lite_cut_effect_contract.json";
 
-export const LITE_CUT_EFFECT_CONTRACT = effectContract;
-
 const FILTER_THUMBNAIL_BACKGROUNDS = {
   none: "linear-gradient(135deg, #52525b 0%, #27272a 100%)",
   esports: "linear-gradient(135deg, #047857 0%, #18181b 100%)",
@@ -148,5 +146,3 @@ export const TRANSITION_OPTIONS = [
   { id: "glitch", label: "故障", icon: "⌗", builtin: true },
   { id: "spin", label: "旋转", icon: "↻", builtin: true },
 ];
-
-export const TOTAL_DURATION_SEC = 68;

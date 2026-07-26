@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.pov_constants import POV_CORE_FORCED_COMMANDS, command_conflicts_with_pov
+from app.pov_constants import POV_CORE_FORCED_COMMANDS
 from app import pov_hud_manager
 from app.pov_hud_manager import PovHudManager, resolve_pov_vpk_source_in_project_pov_dir
 
@@ -25,7 +25,6 @@ def test_pov_forces_rotating_round_scaled_radar():
     }
 
     assert expected.issubset(POV_CORE_FORCED_COMMANDS)
-    assert all(command_conflicts_with_pov(command) for command in expected)
 
 
 def test_pov_restore_removes_session_backup_and_next_install_uses_fresh_gameinfo(monkeypatch, tmp_path: Path):

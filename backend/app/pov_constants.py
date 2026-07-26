@@ -24,27 +24,3 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "cl_radar_square_when_spectating 0",
     "cl_radar_scale 0.4",
 ]
-
-# 兼容旧引用（测试或外部导入）
-POV_FORCED_COMMANDS: list[str] = [*POV_CORE_FORCED_COMMANDS]
-
-POV_CONFLICT_CVAR_NAMES: frozenset[str] = frozenset(
-    {
-        "cl_draw_only_deathnotices",
-        "cl_trueview_show_status",
-        "cl_spec_show_bindings",
-        "cl_teamcounter_playercount_instead_of_avatars",
-        "cl_drawhud_force_radar",
-        "r_spectator_flashbang_opacity",
-        "cl_radar_always_centered",
-        "cl_radar_square_when_spectating",
-        "cl_radar_scale",
-    },
-)
-
-
-def command_conflicts_with_pov(command: str) -> bool:
-    s = str(command).strip().lower()
-    if not s or s.startswith("//"):
-        return False
-    return any(c in s for c in POV_CONFLICT_CVAR_NAMES)
