@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
 import logging
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import uuid
 import weakref
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -26,29 +21,23 @@ import faulthandler
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .env_utils import (
     AppConfig,
-    OBSConfig,
-    LLMConfig,
-    ExperimentalConfig,
     load_config,
-    save_config,
     ensure_cs2_path,
-    detect_cs2_path,
-    detect_ffmpeg_path,
-    detect_obs_path,
-    minimize_obs_window,
     resolve_config_path,
     llm_api_key_configured,
     llm_base_url_is_local_host,
     get_data_dir,
 )
-from .demo_db import DemoDB, DemoListFilters, utc_now_iso
+from .demo_db import DemoListFilters, utc_now_iso
+from .databases import demo_db, lite_cut_db, montage_db
 from .demo_library_hub import demo_library_hub
+from .demo_paths import UPLOAD_DIR, resolve_demo_path
 from .demo_compat_service import ensure_demo_compatible
 from .demo_playback_service import (
     DemoPlaybackBusyError,
@@ -64,30 +53,28 @@ from .gsi_ready import (
     install_gsi_access_log_filter,
     notify_gsi_payload,
 )
-from .update_info import build_update_payload, resolve_local_version_info
-from .montage_db import MontageDB
-from .name_card_meta import (
-    build_name_card_tags_and_result,
-    resolve_name_card_category,
-    resolve_name_card_eyebrow,
-)
-from . import obs_config_center
-from .obs_tuning import (
-    ObsTuningApplyRequest,
-    ObsTuningPlanRequest,
-    ObsTuningRecommendationRequest,
-    build_change_plan as build_obs_tuning_plan,
-    discover_environment as discover_obs_tuning_environment,
-    recommend as recommend_obs_tuning_goal,
-)
-from .obs_tuning_executor import apply_video_tuning_plan
-from .obs_tuning_agent import review_tuning_plan
+from .update_info import resolve_local_version_info
 from .runtime_session import runtime_session_dependency, runtime_session_state
-from .obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
+from .app_state import application_state
+from .api.config import (
+    build_data_dir_info,
+    open_directory,
+    router as config_router,
+)
+from .api.obs import router as obs_router
+from .api.montage import router as montage_router
+from .api.montage_exports import router as montage_exports_router
+from .api.recorded_clips import router as recorded_clips_router
+from .api.desktop import router as desktop_router
+from .api.demo_replay import (
+    DemoReplayRequest,
+    PlayerAnalysisReviewRequest,
+    PlayerClipReviewRequest,
+    get_demo_replay_binary,
+    router as demo_replay_router,
+)
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
-from .lite_cut.db import LiteCutDB
-from .lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
 from .cs2_config_backup import (
     build_config_backup_status_payload,
     is_cs2_running,
@@ -105,8 +92,23 @@ from .steam_match_history import (
     parse_match_row,
     download_demo,
     game_type_to_mode,
-    is_demo_expired,
 )
+
+
+# Compatibility exports for tests and older integrations that call helpers from
+# ``app.main`` directly. The HTTP routes themselves live in ``app.api.config``.
+def get_data_dir_info():
+    return build_data_dir_info(get_data_dir())
+
+
+def open_log_directory():
+    logs_dir = get_data_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return open_directory(
+        str(logs_dir.resolve()),
+        "无法自动打开日志目录，请手动复制路径。",
+    )
+
 
 APP_VERSION, _APP_VERSION_SOURCE = resolve_local_version_info()
 
@@ -136,11 +138,6 @@ try:
 except Exception:
     logging.getLogger(__name__).exception("Backend file logging setup failed")
 
-DB_PATH = resolve_config_path().parent / "cs2-insight.db"
-demo_db = DemoDB(DB_PATH)
-montage_db = MontageDB(DB_PATH)
-lite_cut_db = LiteCutDB(DB_PATH)
-demo_watcher: DemoWatcher | None = None
 _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
     weakref.WeakValueDictionary()
 )
@@ -150,13 +147,6 @@ _DEMO_ROSTER_CACHE_VERSION = 1
 _enqueue_striped_locks: list[asyncio.Lock] = []
 _enqueue_striped_init_lock = asyncio.Lock()
 _ENQUEUE_STRIPE_COUNT = 64
-
-# /api/demo/replay single-flight: identical cache keys share one parse Future
-_replay_jobs: dict[str, asyncio.Future] = {}
-_replay_jobs_lock = asyncio.Lock()
-_replay_binary_jobs: dict[str, asyncio.Future] = {}
-_replay_binary_jobs_lock = asyncio.Lock()
-
 
 def infer_demo_source(filename: str, server_name: str | None = None) -> str:
     fn = filename.lower()
@@ -233,7 +223,8 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
         except OSError:
             pass
         source = infer_demo_source(path.name)
-        watch_root = demo_watcher.watch_root_for(path) if demo_watcher is not None else None
+        watcher = application_state.demo_watcher
+        watch_root = watcher.watch_root_for(path) if watcher is not None else None
 
         md5_hex: str | None = None
         if use_md5:
@@ -298,7 +289,6 @@ async def lifespan(_: FastAPI):
         demoparser_runtime["installed_version"],
     )
 
-    global demo_watcher
     await demo_db.init_db()
     await montage_db.init_tables()
     await lite_cut_db.init_tables()
@@ -311,7 +301,7 @@ async def lifespan(_: FastAPI):
     removed_gsi_configs = cleanup_stale_gsi_configs(cfg.cs2_path)
     if removed_gsi_configs:
         logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
-    demo_watcher = DemoWatcher(
+    application_state.demo_watcher = DemoWatcher(
         cfg.demo_watch_paths or [],
         _enqueue_demo_path,
         demo_db,
@@ -334,8 +324,8 @@ async def lifespan(_: FastAPI):
             from .lite_cut.api import shutdown_lite_cut_jobs
 
             await shutdown_lite_cut_jobs(timeout_sec=5.0)
-            if demo_watcher is not None:
-                await demo_watcher.stop()
+            if application_state.demo_watcher is not None:
+                await application_state.demo_watcher.stop()
         except Exception:
             logger.exception("Application shutdown cleanup failed")
         if _FAULT_LOG_FILE and not _FAULT_LOG_FILE.closed:
@@ -346,6 +336,13 @@ app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
+app.include_router(config_router)
+app.include_router(obs_router)
+app.include_router(montage_router)
+app.include_router(montage_exports_router)
+app.include_router(recorded_clips_router)
+app.include_router(desktop_router)
+app.include_router(demo_replay_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -399,8 +396,8 @@ async def app_shutdown():
     if abort_event is not None:
         abort_event.set()
     jobs_clean = await shutdown_lite_cut_jobs(timeout_sec=8.0)
-    if demo_watcher is not None:
-        await demo_watcher.stop()
+    if application_state.demo_watcher is not None:
+        await application_state.demo_watcher.stop()
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 8.0
@@ -431,9 +428,6 @@ async def log_unhandled_http_errors(request: Request, call_next):
     except Exception:
         logger.exception("Unhandled request error: %s %s", request.method, request.url.path)
         raise
-
-UPLOAD_DIR = Path(tempfile.gettempdir()) / "cs2_insight_demos"
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
@@ -533,16 +527,7 @@ def resolve_spectator_for_demo(dem_path: Path, requested: Optional[str]) -> Opti
 
 def resolve_uploaded_demo_path(p: str) -> Path:
     """接受绝对路径或仅文件名（相对 ``UPLOAD_DIR``）。"""
-    raw = (p or "").strip()
-    if not raw:
-        raise HTTPException(400, "Demo 路径为空")
-    cand = Path(raw)
-    if cand.is_file():
-        return cand.resolve()
-    dest = (UPLOAD_DIR / cand.name).resolve()
-    if dest.is_file():
-        return dest
-    raise HTTPException(404, f"未找到 Demo 文件: {raw}")
+    return resolve_demo_path(p, upload_dir=UPLOAD_DIR)
 
 
 def _analyze_demo_sync(
@@ -699,7 +684,9 @@ def _normalized_expected_parse_players(cfg: AppConfig) -> list[str]:
 
 
 def _norm_player_key(s: str) -> str:
-    return "".join((s or "").split()).casefold()
+    from .player_names import normalize_player_key
+
+    return normalize_player_key(s)
 
 
 def _match_expected_to_roster_row(expected: str, roster: list[dict]) -> Optional[dict]:
@@ -842,849 +829,10 @@ async def _run_library_demo_analyze(
 
 
 
-# ─── Config endpoints ─────────────────────────────────────────
-
-class ExperimentalPayload(BaseModel):
-    pov_enabled: Optional[bool] = None
-
-
-class ConfigPayload(BaseModel):
-    obs: Optional[OBSConfig] = None
-    llm: Optional[LLMConfig] = None
-    ffmpeg_path: Optional[str] = None
-    montage_encoder: Optional[str] = None
-    cs2_path: Optional[str] = None
-    demo_watch_paths: Optional[list[str]] = None
-    demo_watch_scan_depth: Optional[int] = Field(default=None, ge=0, le=32)
-    ai_mode: Optional[bool] = None
-    obs_agent_auto_prepare: Optional[bool] = None
-    locale: Optional[str] = None
-    expected_parse_players: Optional[list[str]] = None
-    recording_global_pacing: Optional[dict[str, Any]] = None
-    default_record_warmup: Optional[dict[str, Any]] = None
-    cs2_extra_launch_args: Optional[str] = None
-    cs2_extra_launch_args_user_configured: Optional[bool] = None
-    record_inject_console_lines: Optional[str] = None
-    record_inject_console_lines_user_configured: Optional[bool] = None
-    obs_transition_enabled: Optional[bool] = None
-    obs_transition_name: Optional[str] = None
-    obs_transition_duration_ms: Optional[int] = None
-    kb_overlay_enabled: Optional[bool] = None
-    kb_overlay_tick_offset: Optional[int] = None
-    kb_overlay_position: Optional[str] = None
-    kill_fx_enabled: Optional[bool] = None
-    kill_fx_tick_offset: Optional[int] = None
-    experimental: Optional[ExperimentalPayload] = None
-    steam_api_key: Optional[str] = None
-    steam_id64: Optional[str] = None
-    match_mode: Optional[str] = None
-    match_count: Optional[int] = None
-    # Cloudflare / electron-updater 启动检查频率（不再用于 GitHub update-info）
-    update_check_frequency: Optional[str] = None
-    last_update_check_at: Optional[str] = None
-
-
 class MatchHistoryDownloadBody(BaseModel):
     demo_url: str
     match_id: str
     filename: str  # e.g. "match730_3733386468353335412.dem"
-
-
-@app.get("/api/config")
-def get_config():
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    data = cfg.model_dump()
-    if data["llm"]["api_key"]:
-        data["llm"]["api_key"] = "****" + data["llm"]["api_key"][-4:]
-    if data.get("steam_api_key"):
-        raw = data["steam_api_key"]
-        data["steam_api_key"] = "****" + raw[-4:] if len(raw) >= 4 else "****"
-    obs_pw = (data.get("obs") or {}).get("password") or ""
-    if obs_pw:
-        data.setdefault("obs", {})
-        data["obs"]["password"] = "****" + str(obs_pw)[-4:] if len(str(obs_pw)) > 4 else "****"
-    # 返回原始配置值 + 解析后的实际语言（auto → zh/en）
-    from app.env_utils import resolve_effective_locale
-    data["effective_locale"] = resolve_effective_locale(data.get("locale", "auto"))
-    return data
-
-
-@app.get("/api/app/update-info")
-def get_app_update_info(force: bool = False):
-    """对比 GitHub 最新 Release；force=true 跳过进程内短缓存（手动「检查更新」）。"""
-    cur, src = resolve_local_version_info()
-    payload = build_update_payload(cur, src, force_refresh=bool(force))
-    # 保存检查时间到配置
-    if payload.get("checked_at"):
-        try:
-            cfg = load_config()
-            cfg.last_update_check_at = payload["checked_at"]
-            save_config(cfg)
-        except Exception:
-            pass
-    return payload
-
-
-@app.post("/api/config/detect-encoder")
-async def detect_encoder():
-    """检测当前 FFmpeg 支持哪些 H.264 编码器，返回自动选择结果与各硬件编码器探测详情。"""
-    from .montage_encoder import diagnose_encoders
-    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
-
-    cfg = load_config()
-    try:
-        ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
-    except MontageComposerError as e:
-        raise HTTPException(400, str(e)) from e
-    result = await asyncio.to_thread(diagnose_encoders, ffmpeg_bin)
-    result["ffmpeg_path"] = str(ffmpeg_bin)
-    return result
-
-
-@app.post("/api/config/detect-cs2")
-def detect_cs2_save():
-    """扫描本机 Steam 库并写入 cs2-insight.config.json 中的 cs2_path。"""
-    path = detect_cs2_path()
-    if not path:
-        raise HTTPException(
-            404,
-            "未找到 CS2（cs2.exe）。请确认已安装游戏，或在侧栏手动填写 cs2.exe 的完整路径。",
-        )
-    cfg = load_config()
-    cfg.cs2_path = path
-    save_config(cfg)
-    return {"cs2_path": path}
-
-
-@app.post("/api/config/detect-ffmpeg")
-def detect_ffmpeg_save():
-    """扫描本机常见位置并写入 cs2-insight.config.json 中的 ffmpeg_path。"""
-    path = detect_ffmpeg_path()
-    if not path:
-        raise HTTPException(
-            404,
-            "未找到 FFmpeg（ffmpeg.exe）。请安装 FFmpeg 并确保其在系统 PATH 中，或在设置中手动填写完整路径。",
-        )
-    cfg = load_config()
-    cfg.ffmpeg_path = path
-    save_config(cfg)
-    return {"ffmpeg_path": path}
-
-
-@app.post("/api/config/open-dir")
-def open_config_data_dir():
-    """在资源管理器中打开主配置文件所在目录（含 cs2-insight.config.json）。"""
-    path = resolve_config_path()
-    folder = str(path.parent.resolve())
-    try:
-        if sys.platform == "win32":
-            os.startfile(folder)  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.run(["open", folder], check=False, timeout=30)
-        else:
-            subprocess.run(["xdg-open", folder], check=False, timeout=30)
-        return {"ok": True, "path": folder}
-    except Exception as e:  # noqa: BLE001
-        logging.warning("open config dir failed: %s", e)
-        return {"ok": False, "path": folder, "message": "无法自动打开目录，请手动复制路径。"}
-
-
-@app.post("/api/config/open-logs")
-def open_log_directory():
-    """Open the desktop log directory used by Rust and the bundled backend."""
-    logs_dir = get_data_dir() / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    folder = str(logs_dir.resolve())
-    try:
-        if sys.platform == "win32":
-            os.startfile(folder)  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.run(["open", folder], check=False, timeout=30)
-        else:
-            subprocess.run(["xdg-open", folder], check=False, timeout=30)
-        return {"ok": True, "path": folder}
-    except Exception as e:  # noqa: BLE001
-        logging.warning("open log dir failed: %s", e)
-        return {"ok": False, "path": folder, "message": "无法自动打开日志目录，请手动复制路径。"}
-
-
-def _get_dir_size(path: Path) -> int:
-    """计算文件夹总大小（字节）。"""
-    if not path.is_dir():
-        return 0
-    total = 0
-    try:
-        for entry in path.rglob("*"):
-            if entry.is_file():
-                try:
-                    total += entry.stat().st_size
-                except OSError:
-                    pass
-    except OSError:
-        pass
-    return total
-
-
-def _format_size(bytes: int) -> str:
-    """格式化字节大小为人类可读字符串。"""
-    if bytes < 1024:
-        return f"{bytes} B"
-    elif bytes < 1024 * 1024:
-        return f"{bytes / 1024:.1f} KB"
-    elif bytes < 1024 * 1024 * 1024:
-        return f"{bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{bytes / (1024 * 1024 * 1024):.2f} GB"
-
-
-@app.get("/api/config/data-dir-info")
-def get_data_dir_info():
-    """返回数据目录路径和大小信息。"""
-    data_dir = get_data_dir()
-    size_bytes = _get_dir_size(data_dir)
-    size_str = _format_size(size_bytes)
-    return {
-        "path": str(data_dir.resolve()),
-        "logs_path": str((data_dir / "logs").resolve()),
-        "exists": data_dir.exists(),
-        "size_bytes": size_bytes,
-        "size_str": size_str,
-    }
-
-
-@app.post("/api/config/detect-obs")
-def detect_obs_path_save():
-    """扫描常见安装路径并写入 cs2-insight.config.json 中的 obs.obs_path。"""
-    path = detect_obs_path()
-    if not path:
-        raise HTTPException(
-            404,
-            "未找到 OBS（obs64.exe）。请确认已安装 OBS，或在 OBS 配置中心手动填写完整路径。",
-        )
-    cfg = load_config()
-    cfg.obs.obs_path = path
-    save_config(cfg)
-    return {"obs_path": path}
-
-
-@app.post("/api/config/test-llm")
-async def test_llm_connection():
-    """轻量探测当前大模型配置是否可用（本地 HTTP 或云端一次极短补全）。"""
-    cfg = load_config()
-    llm = cfg.llm
-    bu_raw = (llm.base_url or "").strip()
-    if bu_raw and llm_base_url_is_local_host(bu_raw):
-        root = bu_raw.rstrip("/").removesuffix("/v1").rstrip("/")
-        probe_urls = []
-        for u in (f"{root}/api/tags", f"{root}/v1/models"):
-            if u not in probe_urls:
-                probe_urls.append(u)
-
-        def _ping_one(url: str) -> tuple[bool, str]:
-            import urllib.error
-            import urllib.request
-
-            try:
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})  # noqa: S310
-                with urllib.request.urlopen(req, timeout=4.0) as r:  # noqa: S310
-                    return True, f"HTTP {r.getcode()} {url}"
-            except urllib.error.HTTPError as e:
-                return False, f"HTTP {e.code} {url}"
-            except Exception as ex:  # noqa: BLE001
-                return False, str(ex)[:200]
-
-        def _ping_local() -> tuple[bool, str]:
-            last_err = "无可用探测 URL"
-            for url in probe_urls:
-                ok, detail = _ping_one(url)
-                if ok:
-                    return True, detail
-                last_err = detail
-            return False, last_err
-
-        ok, detail = await asyncio.to_thread(_ping_local)
-        return {"ok": ok, "detail": detail if ok else detail}
-
-    api_key = (llm.api_key or "").strip()
-    if not llm_api_key_configured(llm.api_key):
-        return {"ok": False, "detail": "请填写 API 密钥并保存后再测试。"}
-    if api_key.startswith("****"):
-        return {
-            "ok": False,
-            "detail": "配置文件中的密钥为脱敏占位（****…），请在设置中重新粘贴完整 API 密钥并保存后再测试。",
-        }
-
-    from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
-
-    bu = (llm.base_url or "").strip() or None
-    model = (llm.model or "").strip() or "gpt-4o-mini"
-    try:
-        client = AsyncOpenAI(api_key=api_key, base_url=bu, timeout=12.0)
-        resp = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=2,
-            ),
-            timeout=18.0,
-        )
-        ok = bool(resp.choices)
-        return {"ok": ok, "detail": "连接成功" if ok else "未收到模型输出"}
-    except asyncio.TimeoutError:
-        return {"ok": False, "detail": "请求超时"}
-    except (APIConnectionError, APITimeoutError, RateLimitError, APIError) as e:
-        return {"ok": False, "detail": str(e)[:300]}
-    except Exception as e:  # noqa: BLE001
-        logging.warning("test_llm: %s", e)
-        return {"ok": False, "detail": str(e)[:300]}
-
-
-@app.put("/api/config")
-async def update_config(payload: ConfigPayload):
-    global demo_watcher
-    cfg = load_config()
-    if payload.obs:
-        o = payload.obs
-        cfg.obs.host = o.host
-        try:
-            cfg.obs.port = int(o.port)
-        except (TypeError, ValueError):
-            cfg.obs.port = o.port if isinstance(o.port, int) else cfg.obs.port
-        raw_pw = (o.password or "").strip()
-        if raw_pw.startswith("****"):
-            pass
-        elif raw_pw:
-            cfg.obs.password = raw_pw
-        # 空字符串：GET 脱敏后输入框为空或未提交密码，不覆盖已保存的密码
-        if o.obs_path is not None:
-            cfg.obs.obs_path = str(o.obs_path).strip()
-    if payload.llm:
-        if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
-            cfg.llm = payload.llm
-        else:
-            cfg.llm.provider = payload.llm.provider
-            cfg.llm.model = payload.llm.model
-            if payload.llm.base_url is not None:
-                cfg.llm.base_url = payload.llm.base_url
-    if payload.cs2_path is not None:
-        cfg.cs2_path = payload.cs2_path
-    if payload.demo_watch_paths is not None:
-        cfg.demo_watch_paths = [str(Path(p).expanduser()) for p in payload.demo_watch_paths if str(p).strip()]
-    if payload.demo_watch_scan_depth is not None:
-        cfg.demo_watch_scan_depth = int(payload.demo_watch_scan_depth)
-    if payload.ai_mode is not None:
-        cfg.ai_mode = payload.ai_mode
-    if payload.obs_agent_auto_prepare is not None:
-        cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
-    if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
-        cfg.locale = payload.locale
-    if payload.expected_parse_players is not None:
-        cleaned: list[str] = []
-        for x in payload.expected_parse_players:
-            if not isinstance(x, str):
-                continue
-            s = x.strip()
-            if s and s not in cleaned:
-                cleaned.append(s)
-            if len(cleaned) >= 50:
-                break
-        cfg.expected_parse_players = cleaned
-    if payload.ffmpeg_path is not None:
-        cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
-    if payload.montage_encoder is not None:
-        cfg.montage_encoder = str(payload.montage_encoder).strip().lower() or "auto"
-    if payload.recording_global_pacing is not None:
-        cfg.recording_global_pacing = (
-            dict(payload.recording_global_pacing)
-            if isinstance(payload.recording_global_pacing, dict)
-            else {}
-        )
-    if payload.default_record_warmup is not None:
-        cfg.default_record_warmup = (
-            dict(payload.default_record_warmup)
-            if isinstance(payload.default_record_warmup, dict)
-            else {}
-        )
-    if payload.cs2_extra_launch_args is not None:
-        next_launch_args = str(payload.cs2_extra_launch_args)
-        if payload.cs2_extra_launch_args_user_configured is not None:
-            cfg.cs2_extra_launch_args = next_launch_args
-            cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
-        elif next_launch_args != cfg.cs2_extra_launch_args:
-            cfg.cs2_extra_launch_args = next_launch_args
-            cfg.cs2_extra_launch_args_user_configured = True
-    elif payload.cs2_extra_launch_args_user_configured is not None:
-        cfg.cs2_extra_launch_args_user_configured = bool(payload.cs2_extra_launch_args_user_configured)
-    if payload.record_inject_console_lines is not None:
-        next_inject_lines = str(payload.record_inject_console_lines)
-        if payload.record_inject_console_lines_user_configured is not None:
-            cfg.record_inject_console_lines = next_inject_lines
-            cfg.record_inject_console_lines_user_configured = bool(
-                payload.record_inject_console_lines_user_configured
-            )
-        elif next_inject_lines != cfg.record_inject_console_lines:
-            cfg.record_inject_console_lines = next_inject_lines
-            cfg.record_inject_console_lines_user_configured = True
-    elif payload.record_inject_console_lines_user_configured is not None:
-        cfg.record_inject_console_lines_user_configured = bool(
-            payload.record_inject_console_lines_user_configured
-        )
-    if payload.obs_transition_enabled is not None:
-        cfg.obs_transition_enabled = bool(payload.obs_transition_enabled)
-    if payload.obs_transition_name is not None:
-        name = str(payload.obs_transition_name).strip()
-        cfg.obs_transition_name = name or "Fade"
-    if payload.obs_transition_duration_ms is not None:
-        try:
-            cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
-        except (TypeError, ValueError):
-            pass
-    if payload.kb_overlay_enabled is not None:
-        cfg.kb_overlay_enabled = bool(payload.kb_overlay_enabled)
-    if payload.kb_overlay_tick_offset is not None:
-        try:
-            cfg.kb_overlay_tick_offset = int(payload.kb_overlay_tick_offset)
-        except (TypeError, ValueError):
-            pass
-    if payload.kb_overlay_position is not None:
-        if str(payload.kb_overlay_position) in ("bottom_center", "minimap_below", "weapon_right"):
-            cfg.kb_overlay_position = str(payload.kb_overlay_position)
-    if payload.kill_fx_enabled is not None:
-        cfg.kill_fx_enabled = bool(payload.kill_fx_enabled)
-    if payload.kill_fx_tick_offset is not None:
-        try:
-            cfg.kill_fx_tick_offset = int(payload.kill_fx_tick_offset)
-        except (TypeError, ValueError):
-            pass
-    if payload.experimental is not None:
-        if payload.experimental.pov_enabled is not None:
-            cfg.experimental.pov_enabled = bool(payload.experimental.pov_enabled)
-    if payload.steam_api_key is not None and payload.steam_api_key and not payload.steam_api_key.startswith("****"):
-        cfg.steam_api_key = payload.steam_api_key.strip()
-    if payload.steam_id64 is not None and payload.steam_id64:
-        cfg.steam_id64 = payload.steam_id64.strip()
-    if payload.match_mode is not None and payload.match_mode in ("premier", "competitive"):
-        cfg.match_mode = payload.match_mode
-    if payload.match_count is not None and payload.match_count in (20, 50, 100):
-        cfg.match_count = payload.match_count
-    if payload.update_check_frequency is not None:
-        freq = str(payload.update_check_frequency).strip().lower()
-        if freq in ("weekly", "monthly", "never"):
-            cfg.update_check_frequency = freq
-    if payload.last_update_check_at is not None:
-        cfg.last_update_check_at = str(payload.last_update_check_at).strip()
-    save_config(cfg)
-    if demo_watcher is not None and (
-        payload.demo_watch_paths is not None or payload.demo_watch_scan_depth is not None
-    ):
-        # 只更新路径配置（供后续 /api/demos/scan 手动扫描使用）；
-        # 不再 restart watchdog、也不再自动 scan_existing，避免配置保存瞬间触发
-        # 大量重型解析抢占 CS2 录制时的系统资源。
-        demo_watcher.configure(cfg.demo_watch_paths or [], cfg.demo_watch_scan_depth)
-    return {"status": "ok"}
-
-
-@app.get("/api/experimental/pov/status")
-def experimental_pov_status():
-    from .pov_hud_manager import PovHudError, PovHudManager
-
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    try:
-        mgr = PovHudManager(cfg)
-        st = mgr.status()
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    st["enabled"] = bool(cfg.experimental.pov_enabled)
-    return st
-
-
-@app.post("/api/experimental/pov/restore")
-def experimental_pov_restore():
-    from .pov_hud_manager import PovHudError, PovHudManager
-
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-    try:
-        mgr = PovHudManager(cfg)
-        verification = mgr.restore()
-    except PovHudError as e:
-        raise HTTPException(400, str(e)) from e
-    return {"ok": bool(verification.get("verified")), "restore": verification}
-
-
-def merge_obs_for_connection(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
-    """
-    将请求体中的 OBS 与已保存配置合并，供 WebSocket 连接（测试 / 录制）使用。
-    前端常附带 host/port 且 password 留空（表示沿用服务器已保存密码）；若整段省略则完全使用 saved。
-    """
-    if payload is None:
-        return saved
-    host = (payload.host or "").strip() or saved.host
-    try:
-        port = int(payload.port)
-    except (TypeError, ValueError):
-        port = int(saved.port) if isinstance(saved.port, int) else saved.port
-    raw_pw = (payload.password or "").strip()
-    if raw_pw.startswith("****"):
-        raw_pw = ""
-    password = raw_pw if raw_pw else saved.password
-    return OBSConfig(host=host, port=port, password=password)
-
-
-def _normalize_obs_path_auto_detect(cfg: AppConfig) -> None:
-    """OBS 验证成功后：若 obs_path 为空，尝试自动探测并写入配置。"""
-    if cfg.obs.obs_path and Path(cfg.obs.obs_path).is_file():
-        return
-    detected = detect_obs_path()
-    if detected:
-        cfg.obs.obs_path = detected
-
-
-# ─── Setup status endpoint ─────────────────────────────────────
-
-def _setup_status_obs_handshake_timeout_sec() -> float:
-    """新手引导 ``/api/status/setup`` 中 OBS 行探测用的握手超时（秒），过短易误判，过长会拖住整页。"""
-    raw = (os.environ.get("CS2_INSIGHT_SETUP_OBS_PROBE_SEC") or "").strip()
-    if raw:
-        try:
-            return max(0.5, min(float(raw), 60.0))
-        except ValueError:
-            pass
-    return 4.0
-
-
-@app.get("/api/config/quick-check")
-def config_quick_check():
-    """轻量配置核查：返回各项配置是否已检测通过（OBS 为 obs_config_verified 标记，
-    CS2 路径为实际文件存在性）。**不尝试连接 OBS**。
-    供首页引导页、录制队列页状态展示使用，避免 /api/status/setup 的 WebSocket 开销。
-    """
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-
-    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
-
-    ffmpeg_ok = False
-    if cfg.ffmpeg_path:
-        ffmpeg_ok = Path(cfg.ffmpeg_path).is_file()
-    else:
-        ffmpeg_ok = shutil.which("ffmpeg") is not None
-
-    ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
-        cfg.llm.base_url
-    )
-
-    try:
-        port_val = int(cfg.obs.port) if cfg.obs.port is not None else 0
-    except (TypeError, ValueError):
-        port_val = 0
-    return {
-        "obs_configured": cfg.obs.obs_config_verified,
-        "cs2_path_ok": cs2_path_ok,
-        "ffmpeg_ok": ffmpeg_ok,
-        "ai_key_ok": ai_key_ok,
-        "cs2_path": cfg.cs2_path or "",
-        "ffmpeg_path": cfg.ffmpeg_path or "",
-    }
-
-
-@app.get("/api/config/ffmpeg-check")
-def ffmpeg_montage_gate_check():
-    """合辑工作台门控：须配置 ffmpeg_path，且与合辑导出相同的解析逻辑可找到可执行文件。"""
-    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
-
-    cfg = load_config()
-    raw = (cfg.ffmpeg_path or "").strip()
-    if not raw:
-        return {"ok": False, "reason": "not_configured", "ffmpeg_path": ""}
-    if not Path(raw).is_file():
-        return {"ok": False, "reason": "path_not_found", "ffmpeg_path": raw}
-    try:
-        resolved = resolve_ffmpeg_binary(raw)
-        return {"ok": True, "ffmpeg_path": str(resolved)}
-    except MontageComposerError:
-        return {"ok": False, "reason": "not_usable", "ffmpeg_path": raw}
-
-
-@app.get("/api/status/setup")
-def setup_status():
-    """快速核查四项配置是否就绪，供录制启动前调用（含 OBS 真实连接检测）。"""
-    from .video_composer import MontageComposerError, resolve_ffmpeg_binary
-
-    cfg = load_config()
-    cfg = ensure_cs2_path(cfg)
-
-    # 本地项先算好（不依赖网络），OBS 失败时也能立刻返回其余状态
-    cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
-
-    # 与 video_composer.resolve_ffmpeg_binary 一致：配置路径 → 安装目录 third_party/ffmpeg → PATH
-    ffmpeg_ok = False
-    try:
-        resolve_ffmpeg_binary(cfg.ffmpeg_path or None)
-        ffmpeg_ok = True
-    except MontageComposerError:
-        ffmpeg_ok = False
-
-    ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
-        cfg.llm.base_url
-    )
-
-    obs_connected = False
-    try:
-        from .obs_director import OBSDirector
-
-        director = OBSDirector(
-            cfg.obs,
-            cfg.cs2_path,
-            cs2_extra_launch_args=cfg.cs2_extra_launch_args,
-            record_inject_console_lines=cfg.record_inject_console_lines,
-        )
-        probe_timeout = _setup_status_obs_handshake_timeout_sec()
-        result = director.test_obs_connection(handshake_timeout_sec=probe_timeout)
-        obs_connected = bool(result.get("ok", False))
-
-        # OBS 验证成功后自动写入配置文件，标记为已验证
-        if obs_connected:
-            _normalize_obs_path_auto_detect(cfg)
-            cfg.obs.obs_config_verified = True
-            save_config(cfg)
-    except Exception:
-        obs_connected = False
-
-    return {
-        "obs_connected": obs_connected,
-        "cs2_path_ok": cs2_path_ok,
-        "ffmpeg_ok": ffmpeg_ok,
-        "ai_key_ok": ai_key_ok,
-        "cs2_path": cfg.cs2_path or "",
-        "ffmpeg_path": cfg.ffmpeg_path or "",
-    }
-
-
-# ─── OBS endpoints ─────────────────────────────────────────────
-
-@app.post("/api/obs/config-check")
-def obs_config_check(payload: OBSConfig | None = Body(default=None)):
-    """配置检查：先测路径（拉起 OBS），再测连接。"""
-    import time as _time
-
-    cfg = load_config()
-    obs_use = merge_obs_for_connection(payload, cfg.obs)
-
-    path_ok = False
-    launched_obs = False
-    connected = False
-    obs_version = None
-
-    obs_path = (obs_use.obs_path or cfg.obs.obs_path or "").strip()
-    logger.info("[OBS config-check] obs_path=%r", obs_path)
-
-    if obs_path and Path(obs_path).is_file():
-        with _obs_launch_lock:
-            # 双重检查：第一个请求可能已经拉起了 OBS
-            running = _is_obs_process_running(obs_path)
-            logger.info("[OBS config-check] Path OK, OBS already running=%s", running)
-            if not running:
-                logger.info("[OBS config-check] Launching OBS: %s", obs_path)
-                try:
-                    subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
-                    launched_obs = True
-                    path_ok = True
-                    # 轮询等待 OBS 进程出现，最多 15 秒
-                    for _attempt in range(30):
-                        if _is_obs_process_running(obs_path):
-                            break
-                        _time.sleep(0.5)
-                    else:
-                        logger.warning("[OBS config-check] OBS did not appear after 15s; continuing anyway")
-                    _time.sleep(1)
-                except Exception as e:
-                    logger.error("[OBS config-check] Failed to launch OBS: %s", e)
-                    return {"path_ok": False, "error": f"无法启动 OBS: {e}"}
-            else:
-                path_ok = True
-    elif obs_path:
-        logger.warning("[OBS config-check] Path configured but file not found: %s", obs_path)
-        return {"path_ok": False, "error": "OBS 路径不存在"}
-    else:
-        logger.info("[OBS config-check] No obs_path configured, skipping launch")
-        return {"path_ok": False, "connected": False, "error": "请先配置 OBS 路径，再点击配置检查"}
-
-    # 2) 测试 WebSocket 连接 — 15s 内每 1s 重试一次
-    try:
-        from .obs_director import OBSDirector
-        director = OBSDirector(obs_use, cfg.cs2_path)
-
-        connected = False
-        for _attempt in range(15):
-            result = director.test_obs_connection()
-            if result.get("ok"):
-                connected = True
-                break
-            _time.sleep(1)
-        else:
-            logger.warning("[OBS config-check] WebSocket connection failed after 15 retries")
-
-        if connected:
-            _normalize_obs_path_auto_detect(cfg)
-            cfg.obs.obs_config_verified = True
-            save_config(cfg)
-    except Exception as e:
-        logger.warning("[OBS config-check] OBS connection test exception: %s", e)
-        connected = False
-
-    # 连接成功后最小化 OBS 窗口（放在 try 外确保执行）
-    if connected:
-        minimize_obs_window()
-
-    return {
-        "path_ok": path_ok,
-        "connected": connected,
-        "launched_obs": launched_obs,
-    }
-
-
-def _is_obs_process_running(obs_path: str) -> bool:
-    """检查 OBS 进程是否已在运行（Windows 上按可执行文件名匹配）。"""
-    import subprocess as _sp
-    try:
-        exe_name = Path(obs_path).name
-        result = _sp.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/NH", "/FO", "CSV"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return exe_name.lower() in result.stdout.lower()
-    except Exception:
-        return False
-
-
-@app.post("/api/obs/is-running")
-def obs_is_running():
-    """检查 OBS 进程是否在运行（不尝试连接 WebSocket）。"""
-    cfg = load_config()
-    obs_path = (cfg.obs.obs_path or "").strip()
-    running = _is_obs_process_running(obs_path) if obs_path else False
-    return {"running": running, "obs_path": obs_path}
-
-
-@app.post("/api/obs/launch")
-def obs_launch():
-    """拉起 OBS 进程（不等待 WebSocket）。"""
-    import time as _t
-    cfg = load_config()
-    obs_path = (cfg.obs.obs_path or "").strip()
-    if not obs_path or not Path(obs_path).is_file():
-        raise HTTPException(400, "OBS 路径未配置或文件不存在")
-    try:
-        subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
-        _t.sleep(2)
-    except Exception as e:
-        raise HTTPException(400, f"无法启动 OBS: {e}")
-    return {"ok": True}
-
-
-@app.get("/api/obs-config/status")
-def obs_config_status():
-    cfg = load_config()
-    return obs_config_center.get_status_payload(cfg.obs)
-
-
-@app.get("/api/obs-tuning/discovery")
-def obs_tuning_discovery():
-    """只读探测 OBS、硬件编码器、FFmpeg 与录制磁盘，不返回任何密码或密钥。"""
-    cfg = load_config()
-    payload = discover_obs_tuning_environment(cfg)
-    payload["ai_mode_enabled"] = bool(cfg.ai_mode)
-    payload["auto_prepare_enabled"] = bool(cfg.obs_agent_auto_prepare)
-    return payload
-
-
-@app.post("/api/obs-tuning/bootstrap")
-def obs_tuning_bootstrap(payload: ObsBootstrapRequest):
-    """受控准备 OBS 与 WebSocket；不修改 Profile、场景、音频或直播配置。"""
-    cfg = load_config()
-    with _obs_launch_lock:
-        return bootstrap_obs_environment(cfg, payload)
-
-
-@app.post("/api/obs-tuning/recommendation")
-def obs_tuning_recommendation(payload: ObsTuningRecommendationRequest):
-    """根据真实探测快照生成确定性推荐；推荐是预测，不代表稳定性已经通过。"""
-    cfg = load_config()
-    discovery = payload.discovery or discover_obs_tuning_environment(cfg)
-    return recommend_obs_tuning_goal(payload.goal, discovery)
-
-
-@app.post("/api/obs-tuning/plan")
-async def obs_tuning_plan(payload: ObsTuningPlanRequest):
-    """重新探测环境，调用受限 AI 评估并生成可审计计划；本接口不会写入 OBS。"""
-    cfg = load_config()
-    discovery = await asyncio.to_thread(discover_obs_tuning_environment, cfg)
-    recommendation = recommend_obs_tuning_goal(payload.goal, discovery)
-    plan = build_obs_tuning_plan(payload.goal, discovery, recommendation)
-    plan["ai_review"] = await review_tuning_plan(cfg.llm, payload.goal, discovery, recommendation)
-    return plan
-
-
-@app.post("/api/obs-tuning/apply")
-def obs_tuning_apply(
-    payload: ObsTuningApplyRequest,
-    _runtime_session: None = Depends(runtime_session_dependency),
-):
-    """备份并应用已确认的视频/录制设置，再用短录制、ffprobe、Stats 与日志完成验收。"""
-    cfg = load_config()
-    if not _obs_launch_lock.acquire(timeout=5.0):
-        raise HTTPException(409, "上一次 OBS 自动设置仍在收尾，请稍等几秒后重新检查；不会重复开始录制。")
-    try:
-        return apply_video_tuning_plan(cfg, payload)
-    finally:
-        _obs_launch_lock.release()
-
-
-@app.post("/api/obs-config/diagnose")
-def obs_config_diagnose(payload: Optional[OBSConfig] = Body(default=None)):
-    cfg = load_config()
-    obs_use = merge_obs_for_connection(payload, cfg.obs)
-    return obs_config_center.diagnose(obs_use)
-
-
-@app.post("/api/obs-config/calibrate")
-def obs_config_calibrate():
-    cfg = load_config()
-    try:
-        return obs_config_center.calibrate(cfg.obs)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.get("/api/obs-config/backups")
-def obs_config_backups_list():
-    return {"ok": True, "items": obs_config_center.list_backups()}
-
-
-@app.post("/api/obs-config/backups/{backup_id}/restore")
-def obs_config_restore_backup(backup_id: str, payload: Optional[OBSConfig] = Body(default=None)):
-    cfg = load_config()
-    obs_use = merge_obs_for_connection(payload, cfg.obs)
-    try:
-        return obs_config_center.restore_backup(backup_id, obs_use)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.delete("/api/obs-config/backups/{backup_id}")
-def obs_config_delete_backup(backup_id: str):
-    try:
-        return obs_config_center.delete_backup(backup_id)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.post("/api/obs-config/backups/open-folder")
-def obs_config_open_backup_folder():
-    return obs_config_center.open_backup_folder()
 
 
 # ─── Demo parsing endpoints ───────────────────────────────────
@@ -2765,9 +1913,10 @@ async def patch_demo_display_name(demo_id: int, body: DemoDisplayNamePatch):
 
 @app.post("/api/demos/scan")
 async def scan_watch_paths():
-    if demo_watcher is None:
+    watcher = application_state.demo_watcher
+    if watcher is None:
         return {"scanned": 0, "player_stats_index": None, "discovered_count": 0}
-    scanned = await demo_watcher.scan_existing()
+    scanned = await watcher.scan_existing()
     logger.info("POST /api/demos/scan: scan_existing finished scanned=%s", scanned)
     try:
         discovered_count = await demo_db.count_discovered_demos()
@@ -2835,457 +1984,6 @@ class DemoAnalyzeRequest(BaseModel):
     locale: str = "zh"
 
 
-class DemoReplayRequest(BaseModel):
-    path: str = Field(..., min_length=1)
-    map_name: str = "unknown"
-    start_tick: int = Field(..., ge=0)
-    end_tick: int = Field(..., gt=0)
-    tick_rate: float = Field(64.0, gt=0, le=256)
-    fps: float = Field(32.0, ge=1, le=64)
-    pov_player_name: Optional[str] = None
-    pov_steamid64: Optional[str] = None
-
-
-class PlayerAnalysisReviewRequest(BaseModel):
-    player: dict[str, Any]
-    match: dict[str, Any] = Field(default_factory=dict)
-    locale: str = "zh"
-
-
-class PlayerClipReviewRequest(BaseModel):
-    clips: list[dict[str, Any]] = Field(..., min_length=1, max_length=32)
-    match_meta: dict[str, Any] = Field(default_factory=dict)
-    locale: str = "zh"
-
-
-@app.get("/api/demo/radar-map/{map_name}")
-async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
-    """Serve the bundled Insight Agent overhead radar used by 2D replay."""
-    map_key = str(map_name or "").strip().lower()
-    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
-        raise HTTPException(400, "Invalid map name")
-    if not map_key.startswith(("de_", "cs_", "ar_")):
-        map_key = f"de_{map_key}"
-    normalized_layer = str(layer or "upper").strip().lower()
-    if normalized_layer not in {"upper", "lower"}:
-        raise HTTPException(400, "Invalid radar layer")
-    from .radar.radar_map_assets import resolve_map_png_path
-    try:
-        map_path = resolve_map_png_path(map_key, layer=normalized_layer)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, f"No bundled radar map for {map_key}") from exc
-    return FileResponse(str(map_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
-
-
-@app.get("/api/demo/utility-mask/{map_name}")
-async def get_demo_utility_mask(map_name: str, layer: Optional[str] = None):
-    """Serve radar-derived utility clip masks for 2D smoke/fire rendering."""
-    map_key = str(map_name or "").strip().lower()
-    if not map_key or len(map_key) > 64 or not map_key.replace("_", "").isalnum():
-        raise HTTPException(400, "Invalid map name")
-    if not map_key.startswith(("de_", "cs_", "ar_")):
-        map_key = f"de_{map_key}"
-    normalized_layer = str(layer or "upper").strip().lower()
-    if normalized_layer not in {"upper", "lower"}:
-        raise HTTPException(400, "Invalid radar layer")
-    from .radar.radar_derived_assets import resolve_utility_mask_path
-    mask_path = resolve_utility_mask_path(map_key, layer=normalized_layer)
-    if mask_path is None:
-        raise HTTPException(404, f"No utility mask for {map_key}")
-    return FileResponse(str(mask_path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
-
-
-@app.post("/api/demo/replay")
-async def get_demo_replay(req: DemoReplayRequest):
-    """Return one active-round 2D replay from the original Insight Agent parser."""
-    if req.end_tick <= req.start_tick:
-        raise HTTPException(422, "end_tick must be greater than start_tick")
-    max_span = int(req.tick_rate * 10 * 60)
-    if req.end_tick - req.start_tick > max_span:
-        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
-
-    dem_path = resolve_uploaded_demo_path(req.path)
-    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
-    estimated_frame_count = int(duration_sec * req.fps) + 1
-    if estimated_frame_count > 6000:
-        raise HTTPException(
-            422,
-            f"Replay request would generate about {estimated_frame_count} frames; maximum is 6000",
-        )
-    from .parser.replay_frames_cache import (
-        REPLAY_FRAMES_CACHE_VERSION,
-        demo_fingerprint,
-        frames_cache_key,
-        load_frames,
-        save_frames,
-    )
-    from .radar.radar_data_extractor import extract_radar_timeline
-    from .radar.radar_map_assets import lookup_map_data
-
-    map_key = str(req.map_name or "unknown").strip().lower()
-    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
-        map_key = f"de_{map_key}"
-
-    fp_meta = demo_fingerprint(str(dem_path))
-    transform: dict[str, Any] | None = None
-    if map_key not in {"unknown", ""}:
-        try:
-            transform = lookup_map_data(map_key)
-        except (KeyError, OSError):
-            transform = None
-    tv = int((transform or {}).get("transform_version") or 3)
-    cache_key = frames_cache_key(
-        str(dem_path),
-        round_number=None,
-        start_tick=int(req.start_tick),
-        end_tick=int(req.end_tick),
-        fps=float(req.fps),
-        transform_version=tv,
-    )
-
-    def _payload_from_cache(cached: dict[str, Any], *, frames_source: str, shared_job: bool = False) -> dict[str, Any]:
-        return {
-            "frames": list(cached.get("frames") or []),
-            "map_name": map_key or "unknown",
-            "map_transform": cached.get("map_transform"),
-            "tick_rate": req.tick_rate,
-            "fps": cached.get("fps") or req.fps,
-            "start_tick": req.start_tick,
-            "end_tick": req.end_tick,
-            "effect_tracks_version": int(cached.get("effect_tracks_version") or 1),
-            "effect_capabilities": cached.get("effect_capabilities") or {
-                "inferno_cells": False,
-                "smoke_voxels": False,
-                "smoke_mode": "legacy_circle",
-            },
-            "effect_tracks": list(cached.get("effect_tracks") or []),
-            "effect_warnings": list(cached.get("effect_warnings") or []),
-            "effect_parse_ms": cached.get("effect_parse_ms"),
-            "effects_pending": False,
-            "demo_fingerprint": cached.get("demo_fingerprint") or fp_meta,
-            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
-            "cache": {
-                "frames": frames_source,
-                "effects": (
-                    "parquet_hit"
-                    if frames_source == "parquet_hit" and cached.get("effect_tracks")
-                    else "disk_hit"
-                    if cached.get("effect_tracks")
-                    else "miss"
-                ),
-                "parsed": False,
-                "shared_job": shared_job,
-                "read_ms": cached.get("read_ms"),
-            },
-            "parse_stage": "ready",
-        }
-
-    try:
-        from .parser.replay_match_cache import load_match_replay_round
-
-        match_cached = await asyncio.to_thread(
-            load_match_replay_round,
-            str(dem_path),
-            start_tick=int(req.start_tick),
-            end_tick=int(req.end_tick),
-            fps=float(req.fps),
-            tick_rate=float(req.tick_rate),
-        )
-    except Exception as exc:  # noqa: BLE001 - legacy per-round cache remains available
-        logger.warning("whole-match replay parquet load failed: %s", exc)
-        match_cached = None
-    if match_cached is not None:
-        return _payload_from_cache(match_cached, frames_source="parquet_hit")
-
-    if cache_key:
-        cached = await asyncio.to_thread(load_frames, cache_key)
-        if cached is not None:
-            return _payload_from_cache(cached, frames_source="disk_hit")
-
-    async def _build() -> dict[str, Any]:
-        frames = await asyncio.to_thread(
-            extract_radar_timeline,
-            demo_path=str(dem_path),
-            map_name=map_key,
-            pov_player_name=req.pov_player_name,
-            pov_steamid64=req.pov_steamid64,
-            start_tick=req.start_tick,
-            end_tick=req.end_tick,
-            fps=req.fps,
-            duration_sec=duration_sec,
-            demo_tick_rate=req.tick_rate,
-            include_all_players=True,
-            include_effect_tracks=True,
-        )
-        effect_tracks: list = []
-        effect_capabilities = {
-            "inferno_cells": False,
-            "smoke_voxels": False,
-            "smoke_mode": "legacy_circle",
-        }
-        effect_warnings: list = []
-        effect_parse_ms = None
-        effect_tracks_version = 1
-        if isinstance(frames, dict):
-            effect_tracks = list(frames.get("effect_tracks") or [])
-            effect_capabilities = frames.get("effect_capabilities") or effect_capabilities
-            effect_warnings = list(frames.get("effect_warnings") or [])
-            effect_parse_ms = frames.get("effect_parse_ms")
-            effect_tracks_version = int(frames.get("effect_tracks_version") or 1)
-            frames = list(frames.get("frames") or [])
-
-        if cache_key:
-            await asyncio.to_thread(
-                save_frames,
-                cache_key,
-                frames=frames,
-                fps=float(req.fps),
-                start_tick=int(req.start_tick),
-                end_tick=int(req.end_tick),
-                map_transform=transform,
-                effect_tracks=effect_tracks,
-                effect_capabilities=effect_capabilities,
-                effect_warnings=effect_warnings,
-                effect_parse_ms=effect_parse_ms,
-                effect_tracks_version=effect_tracks_version,
-                demo_fingerprint_meta=fp_meta,
-            )
-
-        return {
-            "frames": frames,
-            "map_name": map_key or "unknown",
-            "map_transform": transform,
-            "tick_rate": req.tick_rate,
-            "fps": req.fps,
-            "start_tick": req.start_tick,
-            "end_tick": req.end_tick,
-            "effect_tracks_version": effect_tracks_version,
-            "effect_capabilities": effect_capabilities,
-            "effect_tracks": effect_tracks,
-            "effect_warnings": effect_warnings,
-            "effect_parse_ms": effect_parse_ms,
-            "effects_pending": False,
-            "demo_fingerprint": fp_meta,
-            "replay_cache_version": REPLAY_FRAMES_CACHE_VERSION,
-            "cache": {
-                "frames": "parsed",
-                "effects": "parsed" if effect_tracks else "miss",
-                "parsed": True,
-                "shared_job": False,
-            },
-            "parse_stage": "ready",
-        }
-
-    job_key = cache_key or f"nocache|{dem_path}|{req.start_tick}|{req.end_tick}|{req.fps}"
-    async with _replay_jobs_lock:
-        existing = _replay_jobs.get(job_key)
-        if existing is not None:
-            shared = True
-            future = existing
-        else:
-            shared = False
-            future = asyncio.get_running_loop().create_future()
-            _replay_jobs[job_key] = future
-
-    if shared:
-        result = await future
-        out = dict(result)
-        cache_meta = dict(out.get("cache") or {})
-        cache_meta["shared_job"] = True
-        if cache_meta.get("frames") == "parsed":
-            cache_meta["frames"] = "shared_job"
-        out["cache"] = cache_meta
-        return out
-
-    try:
-        result = await _build()
-        if not future.done():
-            future.set_result(result)
-        return result
-    except Exception as exc:
-        if not future.done():
-            future.set_exception(exc)
-        raise
-    finally:
-        async with _replay_jobs_lock:
-            if _replay_jobs.get(job_key) is future:
-                _replay_jobs.pop(job_key, None)
-
-
-@app.post("/api/demo/replay/binary")
-async def get_demo_replay_binary(req: DemoReplayRequest):
-    """Return one Parquet row group as Rust-produced columnar bytes."""
-    if req.end_tick <= req.start_tick:
-        raise HTTPException(422, "end_tick must be greater than start_tick")
-    max_span = int(req.tick_rate * 10 * 60)
-    if req.end_tick - req.start_tick > max_span:
-        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
-    duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
-    estimated_frame_count = int(duration_sec * req.fps) + 1
-    if estimated_frame_count > 40_000:
-        raise HTTPException(
-            422,
-            f"Binary replay request would generate about {estimated_frame_count} frames; maximum is 40000",
-        )
-
-    dem_path = resolve_uploaded_demo_path(req.path)
-    from .parser.replay_match_cache import load_match_replay_round_binary
-
-    async def _load_packet() -> bytes | None:
-        return await asyncio.to_thread(
-            load_match_replay_round_binary,
-            str(dem_path),
-            start_tick=int(req.start_tick),
-            end_tick=int(req.end_tick),
-            fps=float(req.fps),
-            tick_rate=float(req.tick_rate),
-        )
-
-    try:
-        packet = await _load_packet()
-    except Exception as exc:  # noqa: BLE001 - report native/cache failures explicitly
-        logger.warning("whole-match binary replay load failed: %s", exc)
-        raise HTTPException(503, f"Binary replay unavailable: {type(exc).__name__}") from exc
-
-    if packet is None:
-        job_key = f"{dem_path}|{float(req.fps):.6f}|{float(req.tick_rate):.6f}"
-        async with _replay_binary_jobs_lock:
-            existing = _replay_binary_jobs.get(job_key)
-            if existing is not None:
-                shared = True
-                future = existing
-            else:
-                shared = False
-                future = asyncio.get_running_loop().create_future()
-                future.add_done_callback(
-                    lambda completed: (
-                        completed.exception() if not completed.cancelled() else None
-                    )
-                )
-                _replay_binary_jobs[job_key] = future
-
-        if shared:
-            try:
-                packet = await future
-            except Exception as exc:  # noqa: BLE001 - mirror the leader's repair failure
-                raise HTTPException(
-                    503,
-                    f"Binary replay cache repair failed: {type(exc).__name__}",
-                ) from exc
-        else:
-            try:
-                persisted = await demo_db.get_result(str(dem_path))
-                workspace = (
-                    persisted.get("analysis_workspace")
-                    if isinstance(persisted, dict)
-                    else None
-                )
-                if not isinstance(workspace, dict) or not workspace.get("rounds"):
-                    packet = None
-                else:
-                    from .demo_parse_isolation import (
-                        materialize_match_replay_parquet_isolated,
-                    )
-
-                    materialized = await asyncio.to_thread(
-                        materialize_match_replay_parquet_isolated,
-                        str(dem_path),
-                        workspace,
-                        fps=float(req.fps),
-                    )
-                    logger.info(
-                        "Cold replay Parquet cache repair: path=%s status=%s",
-                        dem_path,
-                        materialized.get("status"),
-                    )
-                    packet = await _load_packet()
-                if not future.done():
-                    future.set_result(packet)
-            except Exception as exc:  # noqa: BLE001 - native worker failure is explicit
-                if not future.done():
-                    future.set_exception(exc)
-                logger.warning("whole-match binary replay cold repair failed: %s", exc)
-                raise HTTPException(
-                    503,
-                    f"Binary replay cache repair failed: {type(exc).__name__}",
-                ) from exc
-            finally:
-                async with _replay_binary_jobs_lock:
-                    if _replay_binary_jobs.get(job_key) is future:
-                        _replay_binary_jobs.pop(job_key, None)
-
-    if packet is None:
-        raise HTTPException(
-            409,
-            "Binary replay cache is missing and no persisted analysis workspace can rebuild it; "
-            "analyze the demo again",
-        )
-    return Response(
-        content=packet,
-        media_type="application/vnd.cs2-insight.replay-v1",
-        headers={
-            "Cache-Control": "no-store",
-            "X-CS2-Replay-Protocol": "1",
-        },
-    )
-
-
-@app.post("/api/demo/replay/effects")
-async def get_demo_replay_effects(req: DemoReplayRequest):
-    """Compatibility sidecar for older replay packets without embedded effects."""
-    if req.end_tick <= req.start_tick:
-        raise HTTPException(422, "end_tick must be greater than start_tick")
-    max_span = int(req.tick_rate * 10 * 60)
-    if req.end_tick - req.start_tick > max_span:
-        raise HTTPException(422, "Replay range cannot exceed 10 minutes")
-
-    dem_path = resolve_uploaded_demo_path(req.path)
-    from .radar.radar_data_extractor import extract_replay_effects
-
-    map_key = str(req.map_name or "unknown").strip().lower()
-    if map_key not in {"unknown", ""} and not map_key.startswith(("de_", "cs_", "ar_")):
-        map_key = f"de_{map_key}"
-
-    try:
-        payload = await asyncio.to_thread(
-            extract_replay_effects,
-            demo_path=str(dem_path),
-            map_name=map_key,
-            start_tick=req.start_tick,
-            end_tick=req.end_tick,
-            demo_tick_rate=req.tick_rate,
-        )
-    except Exception as exc:  # noqa: BLE001 — never fail the round once frames are playable
-        return {
-            "map_name": map_key or "unknown",
-            "start_tick": req.start_tick,
-            "end_tick": req.end_tick,
-            "effect_tracks_version": 1,
-            "effect_capabilities": {
-                "inferno_cells": False,
-                "smoke_voxels": False,
-                "smoke_mode": "legacy_circle",
-            },
-            "effect_tracks": [],
-            "effect_warnings": [f"{type(exc).__name__}: {exc}"],
-            "effects_pending": False,
-        }
-
-    return {
-        "map_name": map_key or "unknown",
-        "start_tick": req.start_tick,
-        "end_tick": req.end_tick,
-        "effect_tracks_version": int(payload.get("effect_tracks_version") or 1),
-        "effect_capabilities": payload.get("effect_capabilities") or {
-            "inferno_cells": False,
-            "smoke_voxels": False,
-            "smoke_mode": "legacy_circle",
-        },
-        "effect_tracks": payload.get("effect_tracks") or [],
-        "effect_warnings": payload.get("effect_warnings") or [],
-        "effect_parse_ms": payload.get("effect_parse_ms"),
-        "effects_pending": False,
-    }
 
 
 @app.post("/api/demo/player-review")
@@ -3651,696 +2349,12 @@ def cs2_gsi_status():
     return gsi_status()
 
 
-# ─── Montage (V2) ─────────────────────────────────────────────
+# Montage and recorded-clip routes live in app.api.montage.
 
 
-class PlayerAvatar(BaseModel):
-    player_key: str
-    steamid64: Optional[str] = None
-    player_name: str = ""
-    avatar_path: Optional[str] = None
-    enabled: bool = True
+# Native file and folder dialogs live in app.api.desktop.
 
 
-class MontageProjectBody(BaseModel):
-    project_id: Optional[int] = None
-    name: str = ""
-    recorded_clip_ids: list[int] = Field(default_factory=list)
-    bgm_path: Optional[str] = None
-    bgm_volume: Optional[float] = None
-    bgm_start_sec: Optional[float] = None
-    intro_path: Optional[str] = None
-    intro_image_duration: Optional[float] = None
-    outro_path: Optional[str] = None
-    outro_image_duration: Optional[float] = None
-    output_filename: str = Field(default="montage_export.mp4", max_length=240)
-    transitions: Optional[dict[str, Any]] = None
-    theme_id: Optional[str] = Field(default=None, max_length=64)
-    player_avatars: list[PlayerAvatar] = Field(default_factory=list)
-    name_cards_enabled: bool = False
-
-
-@app.get("/api/recorded-clips")
-async def list_recorded_clips(
-    limit: int = Query(default=300, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-):
-    rows = await montage_db.list_recorded_clips(limit=limit, offset=offset)
-    return {"items": rows, "limit": limit, "offset": offset}
-
-
-class RecordedClipDurationPatch(BaseModel):
-    duration_sec: float = Field(gt=0.05, le=86400)
-
-
-@app.patch("/api/recorded-clips/{clip_id}/duration")
-async def patch_recorded_clip_duration(clip_id: int, body: RecordedClipDurationPatch):
-    """Store the duration measured by the browser from the completed media file."""
-    updated = await montage_db.update_recorded_clip_duration(clip_id, body.duration_sec)
-    if not updated:
-        from .api_errors import error_detail
-
-        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
-    return {"id": int(clip_id), "duration_sec": float(body.duration_sec)}
-
-
-@app.get("/api/recorded-clips/{clip_id}/stream")
-async def stream_recorded_clip(clip_id: int, request: Request):
-    """HTTP Range streaming for LiteCut / montage preview (<video> seek)."""
-    rows = await montage_db.get_recorded_clips_by_ids([int(clip_id)])
-    row = rows.get(int(clip_id))
-    if not row:
-        from .api_errors import error_detail
-
-        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
-    file_path = validate_recorded_clip_path(str(row.get("output_path") or ""))
-    return await stream_file_with_range(file_path, request)
-
-
-@app.get("/api/recorded-clips/{clip_id}/waveform")
-async def get_recorded_clip_waveform(
-    clip_id: int,
-    buckets: int = Query(default=72, ge=8, le=512),
-    start_sec: float = Query(default=0, ge=0),
-    end_sec: float | None = Query(default=None, ge=0),
-):
-    rows = await montage_db.get_recorded_clips_by_ids([int(clip_id)])
-    row = rows.get(int(clip_id))
-    if not row:
-        from .api_errors import error_detail
-
-        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
-    from .lite_cut.waveform import load_or_create_waveform_cache, waveform_view
-    from .video_composer import resolve_ffmpeg_binary
-
-    file_path = validate_recorded_clip_path(str(row.get("output_path") or ""))
-    try:
-        payload, cached = await asyncio.to_thread(
-            load_or_create_waveform_cache,
-            file_path,
-            ffmpeg_bin=resolve_ffmpeg_binary(load_config().ffmpeg_path),
-            duration_sec=row.get("duration_sec"),
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Recorded clip waveform generation failed for %s", file_path.name, exc_info=True)
-        raise HTTPException(422, str(exc) or "无法生成素材波形") from exc
-    return {**waveform_view(payload, start_sec=start_sec, end_sec=end_sec, buckets=buckets), "cached": cached}
-
-
-@app.delete("/api/recorded-clips/{clip_id}")
-async def delete_recorded_clip(clip_id: int):
-    try:
-        r = await montage_db.delete_recorded_clip(clip_id)
-    except ValueError as e:
-        raise HTTPException(500, str(e)) from e
-    if r is None:
-        from .api_errors import error_detail
-
-        raise HTTPException(404, error_detail("MONTAGE_CLIP_ALREADY_DELETED"))
-    return r
-
-
-class BatchDeleteRecordedClipsBody(BaseModel):
-    ids: list[int] = Field(..., min_length=1, max_length=500)
-
-
-@app.post("/api/recorded-clips/batch-delete")
-async def batch_delete_recorded_clips(body: BatchDeleteRecordedClipsBody):
-    try:
-        return await montage_db.delete_recorded_clips_batch(body.ids)
-    except ValueError as e:
-        raise HTTPException(500, str(e)) from e
-
-
-@app.post("/api/recorded-clips/purge-missing")
-async def purge_missing_recorded_clips():
-    """删除 output_path 文件已不存在的孤儿记录，进入合集工作台时调用。"""
-    return await montage_db.purge_missing_recorded_clips()
-
-
-@app.post("/api/montage/projects")
-async def save_montage_project(body: MontageProjectBody):
-    proj_body = {
-        "recorded_clip_ids": list(body.recorded_clip_ids),
-        "bgm_path": body.bgm_path,
-        "intro_path": body.intro_path,
-        "outro_path": body.outro_path,
-        "output_filename": (body.output_filename or "montage_export.mp4").strip() or "montage_export.mp4",
-    }
-    if body.transitions is not None:
-        proj_body["transitions"] = body.transitions
-    proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
-    proj_body["name_cards_enabled"] = body.name_cards_enabled
-    if body.theme_id is not None:
-        tid = str(body.theme_id).strip()
-        if tid:
-            proj_body["theme_id"] = tid
-    if body.bgm_volume is not None:
-        try:
-            proj_body["bgm_volume"] = max(0.0, min(2.0, float(body.bgm_volume)))
-        except (TypeError, ValueError):
-            pass
-    if body.bgm_start_sec is not None:
-        try:
-            proj_body["bgm_start_sec"] = max(0.0, float(body.bgm_start_sec))
-        except (TypeError, ValueError):
-            pass
-    if body.intro_image_duration is not None:
-        try:
-            proj_body["intro_image_duration"] = max(1.0, float(body.intro_image_duration))
-        except (TypeError, ValueError):
-            pass
-    if body.outro_image_duration is not None:
-        try:
-            proj_body["outro_image_duration"] = max(1.0, float(body.outro_image_duration))
-        except (TypeError, ValueError):
-            pass
-    try:
-        pid = await montage_db.save_project(name=body.name.strip() or None, body=proj_body, project_id=body.project_id)
-    except ValueError as e:
-        from .api_errors import error_detail
-
-        if str(e) == "project not found":
-            raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND")) from e
-        raise HTTPException(400, error_detail("MONTAGE_EXPORT_FAILED")) from e
-    item = await montage_db.get_project(pid)
-    if not item:
-        from .api_errors import error_detail
-
-        raise HTTPException(500, error_detail("MONTAGE_EXPORT_FAILED"))
-    return item
-
-
-class MontageExportBody(BaseModel):
-    project_id: Optional[int] = None
-    recorded_clip_ids: Optional[list[int]] = None
-    ordered_ids: Optional[list[str]] = None
-    bgm_path: Optional[str] = None
-    bgm_volume: Optional[float] = None
-    bgm_start_sec: Optional[float] = None
-    intro_path: Optional[str] = None
-    intro_image_duration: Optional[float] = None
-    outro_path: Optional[str] = None
-    outro_image_duration: Optional[float] = None
-    output_path: str = Field(..., min_length=1, max_length=2048)
-    theme_id: Optional[str] = Field(default=None, max_length=64)
-    transitions: Optional[dict[str, Any]] = None
-    player_avatars: list[PlayerAvatar] = Field(default_factory=list)
-    name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
-
-
-@app.post("/api/montage/export")
-async def montage_export(body: MontageExportBody):
-    cfg = load_config()
-    try:
-        from .video_composer import MontageComposerError, resolve_ffmpeg_binary
-
-        ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
-    except MontageComposerError as e:
-        from .montage_errors import montage_detail_from_exception
-
-        raise HTTPException(400, montage_detail_from_exception(e)) from e
-
-    extras: dict[str, Any] = {}
-    if body.project_id is not None:
-        proj = await montage_db.get_project(int(body.project_id))
-        if not proj:
-            from .api_errors import error_detail
-
-            raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND"))
-        extras = proj.get("body") if isinstance(proj.get("body"), dict) else {}
-
-    clip_ids = list(body.recorded_clip_ids) if body.recorded_clip_ids is not None else list(extras.get("recorded_clip_ids") or [])
-    if not clip_ids:
-        from .api_errors import error_detail
-
-        raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))
-
-    def _coalesce(req_val: Optional[str], key: str) -> Optional[str]:
-        if req_val is not None:
-            s = str(req_val).strip()
-            return s or None
-        v = extras.get(key)
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s or None
-
-    bgm_s = _coalesce(body.bgm_path, "bgm_path")
-    intro_s = _coalesce(body.intro_path, "intro_path")
-    outro_s = _coalesce(body.outro_path, "outro_path")
-
-    def _coalesce_volume(req_val: Optional[float], key: str) -> Optional[float]:
-        if req_val is not None:
-            try:
-                return max(0.0, min(2.0, float(req_val)))
-            except (TypeError, ValueError):
-                return None
-        if not isinstance(extras, dict):
-            return None
-        v = extras.get(key)
-        if v is None:
-            return None
-        try:
-            return max(0.0, min(2.0, float(v)))
-        except (TypeError, ValueError):
-            return None
-
-    bgm_volume_eff = _coalesce_volume(body.bgm_volume, "bgm_volume")
-
-    def _coalesce_float(req_val: Optional[float], key: str, lo: float = 0.0, hi: float = 1e9) -> Optional[float]:
-        v = req_val if req_val is not None else (extras.get(key) if isinstance(extras, dict) else None)
-        if v is None:
-            return None
-        try:
-            return max(lo, min(hi, float(v)))
-        except (TypeError, ValueError):
-            return None
-
-    bgm_start_eff = _coalesce_float(body.bgm_start_sec, "bgm_start_sec", lo=0.0)
-    intro_img_dur_eff = _coalesce_float(body.intro_image_duration, "intro_image_duration", lo=1.0, hi=60.0)
-    outro_img_dur_eff = _coalesce_float(body.outro_image_duration, "outro_image_duration", lo=1.0, hi=60.0)
-
-    transitions_eff: Any = body.transitions
-    if transitions_eff is None and isinstance(extras, dict):
-        transitions_eff = extras.get("transitions")
-
-    # player_avatars / name_cards_enabled — coalesce from request or project extras
-    player_avatars_eff: list[PlayerAvatar]
-    if body.player_avatars:
-        player_avatars_eff = body.player_avatars
-    else:
-        raw_pas = extras.get("player_avatars") if isinstance(extras, dict) else None
-        if isinstance(raw_pas, list):
-            player_avatars_eff = [PlayerAvatar(**pa) for pa in raw_pas if isinstance(pa, dict)]
-        else:
-            player_avatars_eff = []
-
-    name_cards_enabled_eff: bool
-    if body.name_cards_enabled is not None:
-        name_cards_enabled_eff = bool(body.name_cards_enabled)
-    else:
-        name_cards_enabled_eff = bool(extras.get("name_cards_enabled")) if isinstance(extras, dict) else False
-
-    try:
-        from .video_composer import MontageComposerError, validate_output_path
-
-        out = validate_output_path(body.output_path)
-    except MontageComposerError as e:
-        from .montage_errors import montage_detail_from_exception
-
-        raise HTTPException(400, montage_detail_from_exception(e)) from e
-
-    rows = await montage_db.get_recorded_clips_by_ids([int(x) for x in clip_ids])
-    clip_paths: list[Path] = []
-    for cid in clip_ids:
-        row = rows.get(int(cid))
-        if not row:
-            from .api_errors import error_detail
-
-            raise HTTPException(400, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(cid)))
-        clip_paths.append(Path(str(row["output_path"])))
-
-    intro_p = Path(intro_s).expanduser() if intro_s else None
-    outro_p = Path(outro_s).expanduser() if outro_s else None
-    bgm_p = Path(bgm_s).expanduser() if bgm_s else None
-
-    # Build name_cards list parallel to clip_paths
-    # Build a lookup from player_key → PlayerAvatar for fast matching
-    _pa_lookup: dict[str, PlayerAvatar] = {pa.player_key: pa for pa in player_avatars_eff}
-
-    name_cards_list: list[Optional[dict]] = []
-    for cid in clip_ids:
-        row = rows.get(int(cid))
-        if row is None:
-            name_cards_list.append(None)
-            continue
-        # Determine player_key for this clip row (steamid takes priority)
-        steamid_val = (
-            row.get("target_steamid64")
-            or row.get("target_steam_id")
-            or row.get("steamid")
-        )
-        if steamid_val:
-            pk = "sid:" + str(steamid_val)
-        else:
-            pk = "name:" + _norm_player_key(str(row.get("player_name") or ""))
-
-        matched_pa = _pa_lookup.get(pk)
-        if matched_pa is None or not matched_pa.enabled:
-            name_cards_list.append(None)
-        else:
-            display_name = matched_pa.player_name or str(row.get("player_name") or "")
-            category = resolve_name_card_category(row)
-            eyebrow = resolve_name_card_eyebrow(row, category)
-            tags, result_tag = build_name_card_tags_and_result(row, category)
-            name_cards_list.append(
-                {
-                    "avatar_path": matched_pa.avatar_path,
-                    "display_name": display_name,
-                    "category": category,
-                    "eyebrow": eyebrow,
-                    "result": result_tag,
-                    "tags": tags,
-                    "enabled": True,
-                }
-            )
-
-    name_cards_arg = name_cards_list if name_cards_enabled_eff else None
-
-    snap = {
-        "recorded_clip_ids": clip_ids,
-        "bgm_path": bgm_s,
-        "intro_path": intro_s,
-        "outro_path": outro_s,
-        "output_path": str(out),
-    }
-    if isinstance(transitions_eff, dict):
-        snap["transitions"] = transitions_eff
-    if body.ordered_ids is not None:
-        snap["ordered_ids"] = list(body.ordered_ids)
-    if body.theme_id is not None:
-        tid = str(body.theme_id).strip()
-        if tid:
-            snap["theme_id"] = tid
-    if bgm_volume_eff is not None:
-        snap["bgm_volume"] = bgm_volume_eff
-    if bgm_start_eff is not None:
-        snap["bgm_start_sec"] = bgm_start_eff
-    if intro_img_dur_eff is not None:
-        snap["intro_image_duration"] = intro_img_dur_eff
-    if outro_img_dur_eff is not None:
-        snap["outro_image_duration"] = outro_img_dur_eff
-    snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
-    snap["name_cards_enabled"] = name_cards_enabled_eff
-    export_id = await montage_db.create_export(
-        project_id=int(body.project_id) if body.project_id is not None else None,
-        body=snap,
-        status="running",
-    )
-
-    try:
-        from .video_composer import MontageComposerError, compose_montage
-
-        await asyncio.to_thread(
-            compose_montage,
-            ffmpeg_bin=ffmpeg_bin,
-            clip_paths=clip_paths,
-            intro_path=intro_p,
-            outro_path=outro_p,
-            bgm_path=bgm_p,
-            output_path=out,
-            transitions=transitions_eff if isinstance(transitions_eff, dict) else None,
-            clip_row_ids=[int(x) for x in clip_ids],
-            bgm_volume=bgm_volume_eff,
-            bgm_start_sec=bgm_start_eff,
-            intro_image_duration=intro_img_dur_eff,
-            outro_image_duration=outro_img_dur_eff,
-            montage_encoder=cfg.montage_encoder or "auto",
-            name_cards=name_cards_arg,
-        )
-    except MontageComposerError as e:
-        from .montage_errors import montage_detail_from_exception
-
-        detail = montage_detail_from_exception(e)
-        await montage_db.update_export(
-            export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED"), output_path=None,
-        )
-        raise HTTPException(400, detail) from e
-
-    await montage_db.update_export(export_id, status="done", error_msg="", output_path=str(out))
-    return {"export_id": export_id, "status": "done", "output_path": str(out)}
-
-
-_AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
-_ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-
-# Subtitle label displayed under the player name in the burned-in name card
-_CATEGORY_SUBTITLE: dict[str, str] = {
-    "highlight": "高光",
-    "fail": "下饭",
-    "meme_death": "梗死亡",
-    "compilation": "合集",
-}
-
-_CATEGORY_EYEBROW: dict[str, str] = {
-    "highlight":   "HIGHLIGHT · 高光",
-    "fail":        "LOWLIGHT · 下饭",
-    "meme_death":  "MEME · 梗死亡",
-    "compilation": "ROUND · 合集",
-}
-
-# 高光片段 RESULT 块显示的杀数 tag 集合
-_KILL_COUNT_TAGS: frozenset[str] = frozenset({
-    "五杀 (ACE)", "四杀", "三杀", "双杀",
-})
-
-
-@app.post("/api/montage/avatars")
-async def upload_montage_avatar(file: UploadFile = File(...)):
-    """接收玩家头像图片上传，存储到 data/montage_avatars/，返回绝对路径。"""
-    content_type = file.content_type or ""
-    if content_type not in _ALLOWED_AVATAR_TYPES:
-        raise HTTPException(400, "仅支持 JPEG / PNG / WebP / GIF 格式图片")
-
-    data = await file.read()
-    if len(data) > _AVATAR_MAX_BYTES:
-        raise HTTPException(400, "图片文件大小不能超过 5MB")
-
-    avatars_dir = get_data_dir() / "montage_avatars"
-    avatars_dir.mkdir(parents=True, exist_ok=True)
-
-    original_name = file.filename or ""
-    suffix = Path(original_name).suffix if original_name else ""
-    if not suffix:
-        suffix = ".jpg"
-    dest = avatars_dir / (str(uuid.uuid4()) + suffix)
-
-    def _write(p: Path, d: bytes) -> None:
-        p.write_bytes(d)
-
-    await asyncio.to_thread(_write, dest, data)
-    return {"path": str(dest), "url": f"/api/montage/avatars/{dest.name}"}
-
-
-@app.get("/api/montage/avatars/{filename}")
-async def serve_montage_avatar(filename: str):
-    import re
-    # Reject path traversal attempts
-    if not re.fullmatch(r"[a-zA-Z0-9_\-\.]+", filename):
-        raise HTTPException(400, "Invalid filename")
-    avatar_dir = get_data_dir() / "montage_avatars"
-    file_path = avatar_dir / filename
-    if not file_path.is_file() or not str(file_path.resolve()).startswith(str(avatar_dir.resolve())):
-        raise HTTPException(404, "Avatar not found")
-    return FileResponse(str(file_path))
-
-
-class FilePickerBody(BaseModel):
-    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|exe|any)$")
-
-
-_FILE_PICKER_FILTERS: dict[str, str] = {
-    "audio": "音频文件|*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a|所有文件|*.*",
-    "video_or_image": "视频与图片|*.mp4;*.mov;*.mkv;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif|所有文件|*.*",
-    "exe": "可执行文件|*.exe|所有文件|*.*",
-    "any": "所有文件|*.*",
-}
-
-
-@app.post("/api/file-picker")
-async def file_picker(body: FilePickerBody):
-    import sys
-    import subprocess as sp
-
-    if sys.platform != "win32":
-        raise HTTPException(400, "文件浏览对话框仅 Windows 可用")
-
-    ft = body.file_type if body.file_type in _FILE_PICKER_FILTERS else "any"
-    filt = _FILE_PICKER_FILTERS[ft].replace("'", "''")
-
-    ps = (
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
-        "Add-Type -AssemblyName System.Windows.Forms;"
-        "$d = New-Object System.Windows.Forms.OpenFileDialog;"
-        f"$d.Filter = '{filt}';"
-        "$d.Multiselect = $false;"
-        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }"
-    )
-
-    def _run() -> str:
-        r = sp.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True,
-            timeout=120,
-        )
-        return (r.stdout or b"").decode("utf-8", errors="replace").strip()
-
-    try:
-        path = await asyncio.to_thread(_run)
-    except Exception as exc:
-        raise HTTPException(500, f"文件选择器失败: {exc}") from exc
-
-    return {"path": path or None}
-
-
-@app.post("/api/directory-picker")
-async def directory_picker():
-    """Windows directory chooser fallback for browser-based development mode."""
-    if sys.platform != "win32":
-        raise HTTPException(400, "文件夹选择对话框仅 Windows 可用")
-    ps = (
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
-        "Add-Type -AssemblyName System.Windows.Forms;"
-        "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
-        "$d.Description = '选择 LiteCut 素材存储目录';"
-        "$d.ShowNewFolderButton = $true;"
-        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }"
-    )
-
-    def _run_directory_picker() -> str:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True,
-            timeout=120,
-        )
-        return (result.stdout or b"").decode("utf-8", errors="replace").strip()
-
-    try:
-        path = await asyncio.to_thread(_run_directory_picker)
-    except Exception as exc:
-        raise HTTPException(500, f"文件夹选择器失败: {exc}") from exc
-    return {"path": path or None}
-
-
-class OpenFolderBody(BaseModel):
-    path: str = Field(..., min_length=1, max_length=2048)
-
-
-class RevealFileInExplorerBody(BaseModel):
-    path: str = Field(..., min_length=1, max_length=2600)
-
-
-@app.post("/api/open-folder")
-def open_folder(body: OpenFolderBody):
-    import os, subprocess as sp, sys
-    p = body.path.strip()
-    try:
-        if sys.platform == "win32":
-            os.startfile(p)  # noqa: S606
-        elif sys.platform == "darwin":
-            sp.run(["open", p], check=False, timeout=10)
-        else:
-            sp.run(["xdg-open", p], check=False, timeout=10)
-    except Exception as e:
-        raise HTTPException(400, str(e)) from e
-    return {"ok": True}
-
-
-@app.post("/api/reveal-file-in-explorer")
-def reveal_file_in_explorer(body: RevealFileInExplorerBody):
-    """在文件管理器中显示该 Demo：Windows 资源管理器 /select；macOS Finder -R；Linux 打开所在目录。"""
-    import subprocess as sp
-    import sys
-
-    raw = (body.path or "").strip().strip('"')
-    if not raw:
-        raise HTTPException(400, "path 为空")
-    try:
-        p = Path(raw).expanduser().resolve(strict=False)
-    except OSError as exc:
-        raise HTTPException(400, f"无效路径: {exc}") from exc
-    if not p.exists():
-        raise HTTPException(404, f"路径不存在: {p}")
-    try:
-        if sys.platform == "win32":
-            if p.is_dir():
-                os.startfile(str(p))  # noqa: S606
-            else:
-                # `/select, <path>` 分成两个参数更稳；把路径拼进同一个参数时，
-                # Explorer 在含空格/特殊字符场景下可能退回默认“文档”目录。
-                sp.Popen(["explorer.exe", "/select,", str(p)])
-        elif sys.platform == "darwin":
-            sp.run(["open", "-R", str(p)], check=False, timeout=20)
-        else:
-            target = str(p.parent) if p.is_file() else str(p)
-            sp.run(["xdg-open", target], check=False, timeout=20)
-    except Exception as e:
-        raise HTTPException(400, str(e)) from e
-    return {"ok": True}
-
-
-@app.get("/api/montage/exports")
-async def list_montage_exports(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    status: str | None = Query(None),
-):
-    items, total = await montage_db.list_exports(limit=limit, offset=offset, status=status or None)
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
-
-
-@app.get("/api/montage/exports/{export_id}")
-async def get_montage_export(export_id: int):
-    row = await montage_db.get_export(export_id)
-    if not row:
-        raise HTTPException(404, "导出记录不存在")
-    return row
-
-
-class RenameExportBody(BaseModel):
-    name: str = Field(..., max_length=200)
-
-
-@app.patch("/api/montage/exports/{export_id}")
-async def rename_montage_export(export_id: int, body: RenameExportBody):
-    await montage_db.rename_export(export_id, body.name)
-    return {"ok": True}
-
-
-@app.delete("/api/montage/exports/{export_id}")
-async def delete_montage_export(
-    export_id: int,
-    delete_file: bool = Query(False),
-):
-    output_path = await montage_db.delete_export(export_id)
-    if output_path is None:
-        raise HTTPException(404, "导出记录不存在")
-    file_deleted = False
-    if delete_file and output_path:
-        try:
-            import os as _os
-            _os.remove(output_path)
-            file_deleted = True
-        except FileNotFoundError:
-            file_deleted = False
-        except OSError as e:
-            raise HTTPException(400, f"文件删除失败：{e}") from e
-    return {"ok": True, "file_deleted": file_deleted}
-
-
-class BatchDeleteExportsBody(BaseModel):
-    ids: list[int] = Field(..., min_length=1)
-    delete_files: bool = False
-
-
-@app.post("/api/montage/exports/batch-delete")
-async def batch_delete_montage_exports(body: BatchDeleteExportsBody):
-    paths = await montage_db.delete_exports_batch(body.ids)
-    file_results: dict[str, str] = {}
-    if body.delete_files:
-        import os as _os
-        for p in paths:
-            if not p:
-                continue
-            try:
-                _os.remove(p)
-                file_results[p] = "deleted"
-            except FileNotFoundError:
-                file_results[p] = "not_found"
-            except OSError as e:
-                file_results[p] = f"error: {e}"
-    return {"ok": True, "deleted_count": len(paths), "file_results": file_results}
 
 
 # ─── Health ────────────────────────────────────────────────────
