@@ -141,10 +141,10 @@ export function MatchListRow({
       <div className="flex items-center gap-3 w-[180px] shrink-0">
         <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-cs2-bg-input/70 border border-cs2-border relative">
           <img
-            src={`/images/maps/${mapName}.png`}
+            src={`/images/maps/${mapName}.webp`}
             alt={mapName}
             className="h-full w-full object-cover opacity-60"
-            onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.png"; }}
+            onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.webp"; }}
           />
           <span className="absolute text-[10px] font-black text-cs2-text-primary uppercase italic tracking-tighter drop-shadow-md">
             {mapName.replace('de_', '').replace('cs_', '').slice(0, 3)}
@@ -310,7 +310,7 @@ export default function MatchCard({
   };
 
   const mapName = matchMeta.map_name || "unknown";
-  const mapThumbnail = `/images/maps/${mapName}.png`;
+  const mapThumbnail = `/images/maps/${mapName}.webp`;
   const sourceLogo = SOURCE_LOGOS[demo.source] || SOURCE_LOGOS["Local/Other"];
 
   const players = demo.players || [];
@@ -380,7 +380,7 @@ export default function MatchCard({
           src={mapThumbnail}
           alt={mapName}
           className="h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
-          onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.png"; }}
+          onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.webp"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
 
