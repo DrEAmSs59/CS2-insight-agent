@@ -1310,7 +1310,7 @@ class DemoAnalyzer:
             logger.exception("build_match_workspace failed for %s", self.dem_path)
             self.analysis_workspace = {
                 "version": 1,
-                "algorithm_version": "match-workspace-2026.07.1",
+                "algorithm_version": "match-workspace-2026.07.4",
                 "data_source": "demo_parser_with_derived_metrics",
                 "team_assignment_source": "unavailable",
                 "derived_fields": [],
