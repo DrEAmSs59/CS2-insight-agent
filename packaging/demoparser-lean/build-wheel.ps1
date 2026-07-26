@@ -33,7 +33,7 @@ if ($patchHash -ne ([string]$metadata.patch_sha256).ToLowerInvariant()) {
 
 & $UvExe --version
 if ($LASTEXITCODE -ne 0) { throw "uv is required to build the patched demoparser wheel." }
-& $UvExe sync --project $repoRoot --frozen --group parser-build
+& $UvExe sync --project $repoRoot --frozen --only-group parser-build
 if ($LASTEXITCODE -ne 0) { throw "Installing the locked parser-build environment with uv failed." }
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
@@ -56,7 +56,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Applying lean demoparser patch failed" }
 
     $manifest = Join-Path $sourceRoot "src\python\Cargo.toml"
-    & $UvExe run --project $repoRoot --frozen --group parser-build python -m maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
+    & $UvExe run --project $repoRoot --frozen --only-group parser-build python -m maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
     if ($LASTEXITCODE -ne 0) { throw "maturin build failed with exit code $LASTEXITCODE" }
 
     $wheel = Get-ChildItem -LiteralPath $outputPath -File -Filter "demoparser2-$($metadata.distribution_version)-*.whl" |
