@@ -51,6 +51,20 @@ def test_clean_rounds_repairs_cached_final_round_tail():
     assert rounds[1]["end_tick"] == 400
 
 
+def test_cache_key_changes_with_parser_runtime(monkeypatch, tmp_path):
+    demo_path = tmp_path / "match.dem"
+    demo_path.write_bytes(b"demo")
+
+    current = replay_match_cache.replay_match_cache_key(str(demo_path))
+    monkeypatch.setattr(
+        replay_match_cache,
+        "REQUIRED_DEMOPARSER_VERSION",
+        "0.41.4+cache-invalidation-test",
+    )
+
+    assert replay_match_cache.replay_match_cache_key(str(demo_path)) != current
+
+
 def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_path):
     import demoparser2
     from app.parser import replay_effects

@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .. import native_table as pd
+from ..demoparser_runtime import REQUIRED_DEMOPARSER_VERSION
 
 logger = logging.getLogger(__name__)
 
-REPLAY_MATCH_CACHE_VERSION = 4
+REPLAY_MATCH_CACHE_VERSION = 5
 REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (
@@ -98,7 +99,8 @@ def replay_match_cache_key(
     if not fingerprint:
         return None
     raw = (
-        f"{REPLAY_MATCH_CACHE_VERSION}|{fingerprint['path']}|{fingerprint['size']}|"
+        f"{REPLAY_MATCH_CACHE_VERSION}|{REQUIRED_DEMOPARSER_VERSION}|"
+        f"{fingerprint['path']}|{fingerprint['size']}|"
         f"{fingerprint['mtime_ns']}|{float(fps):.6f}|{float(tick_rate):.6f}"
     )
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:40]
@@ -613,6 +615,7 @@ def materialize_match_replay_parquet_impl(
             map_transform = None
         meta = {
             "version": REPLAY_MATCH_CACHE_VERSION,
+            "parser_runtime": REQUIRED_DEMOPARSER_VERSION,
             "cache_key": cache_key,
             "created_at": time.time(),
             "demo_fingerprint": _demo_fingerprint(demo_path),

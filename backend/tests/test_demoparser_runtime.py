@@ -40,6 +40,6 @@ def test_stock_runtime_fails_with_setup_command(monkeypatch):
         demoparser_runtime.require_demoparser_runtime()
 
     message = str(error.value)
-    assert "0.41.4+cs2insight6" in message
+    assert "0.41.4+cs2insight7" in message
     assert "write_replay_parquet" in message
     assert "setup-backend-dev.ps1" in message

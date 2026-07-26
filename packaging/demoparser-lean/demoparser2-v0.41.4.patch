@@ -1429,6 +1429,28 @@ index 12fa567..db0320e 100644
                  };
                  match prop {
                      Some(prop) => {
+@@ -1174,7 +1528,7 @@ impl<'a> SecondPassParser<'a> {
+             };
+             let player_entid = match self.prop_controller.special_ids.player_pawn {
+                 Some(id) => match self.get_prop_from_ent(&id, entity_id) {
+-                    Ok(Variant::U32(handle)) => Some((handle & 0x7FF) as i32),
++                    Ok(Variant::U32(handle)) => Some((handle & ((1 << 14) - 1)) as i32),
+                     Ok(_) => return Err(DemoParserError::IncorrectMetaDataProp),
+                     Err(_) => None,
+                 },
+diff --git a/src/parser/src/second_pass/game_events.rs b/src/parser/src/second_pass/game_events.rs
+index 718d8fd..2874ff7 100644
+--- a/src/parser/src/second_pass/game_events.rs
++++ b/src/parser/src/second_pass/game_events.rs
+@@ -574,7 +574,7 @@ impl<'a> SecondPassParser<'a> {
+                 let player_entid = match self.prop_controller.special_ids.player_pawn {
+                     Some(id) => match self.get_prop_from_ent(&id, entity_id) {
+                         Ok(player_entid) => match player_entid {
+-                            Variant::U32(handle) => Some((handle & 0x7FF) as i32),
++                            Variant::U32(handle) => Some((handle & ((1 << 14) - 1)) as i32),
+                             _ => return Err(DemoParserError::IncorrectMetaDataProp),
+                         },
+                         Err(_) => None,
 diff --git a/src/parser/src/second_pass/entities.rs b/src/parser/src/second_pass/entities.rs
 index 9d205ac..1adcd0f 100644
 --- a/src/parser/src/second_pass/entities.rs
@@ -2001,7 +2023,7 @@ index 2e62735..915d708 100644
  [[package]]
  name = "demoparser2"
 -version = "0.40.2"
-+version = "0.41.4+cs2insight6"
++version = "0.41.4+cs2insight7"
  dependencies = [
   "ahash",
   "csgoproto",
@@ -3723,7 +3745,7 @@ index 99f044e..2051dba 100644
  [package]
  name = "demoparser2"
 -version = "0.41.4"
-+version = "0.41.4+cs2insight6"
++version = "0.41.4+cs2insight7"
  edition = "2021"
  
  
