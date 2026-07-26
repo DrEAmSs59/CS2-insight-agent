@@ -88,6 +88,70 @@ def test_grenade_trajectory_never_matches_a_different_known_actor():
     assert "throw_tick" not in events[1][0]
 
 
+def test_grenade_trajectory_starts_at_weapon_fire_release_position():
+    trajectories = _extract_grenade_trajectories(_Parser(), 64)
+    kind = trajectories[0]["kind"]
+    events = {1: [{"type": "grenade", "kind": kind, "tick": 180, "actor": "Alpha"}]}
+    fire_df = pd.DataFrame([
+        {
+            "tick": 158,
+            "total_rounds_played": 0,
+            "user_name": "Bravo",
+            "user_steamid": "2",
+            "weapon": "weapon_smokegrenade",
+            "user_X": 999.0,
+            "user_Y": 999.0,
+        },
+        {
+            "tick": 147,
+            "total_rounds_played": 0,
+            "user_name": "Alpha",
+            "user_steamid": "1",
+            "weapon": "weapon_smokegrenade",
+            "user_X": 72.0,
+            "user_Y": 172.0,
+            "user_Z": -80.0,
+        },
+    ])
+    windows = [{"round_number": 1, "start_tick": 50, "end_tick": 300}]
+
+    _enrich_grenade_events(events, trajectories, windows, 64, fire_df)
+
+    grenade = events[1][0]
+    assert grenade["throw_tick"] == 147
+    assert grenade["trajectory"][0] == {
+        "tick": 147,
+        "x": 72.0,
+        "y": 172.0,
+        # Preserve projectile height/floor instead of the player's feet Z.
+        "z": 20.0,
+    }
+    assert grenade["trajectory"][1]["tick"] == 160
+
+
+def test_grenade_trajectory_ignores_a_stale_freeze_time_release_candidate():
+    trajectories = _extract_grenade_trajectories(_Parser(), 64)
+    kind = trajectories[0]["kind"]
+    events = {1: [{"type": "grenade", "kind": kind, "tick": 180, "actor": "Alpha"}]}
+    fire_df = pd.DataFrame([{
+        "tick": 90,
+        "total_rounds_played": 0,
+        "user_name": "Alpha",
+        "user_steamid": "1",
+        "weapon": "weapon_smokegrenade",
+        "user_X": -500.0,
+        "user_Y": -500.0,
+    }])
+    windows = [{"round_number": 1, "start_tick": 50, "end_tick": 300}]
+
+    _enrich_grenade_events(events, trajectories, windows, 64, fire_df)
+
+    grenade = events[1][0]
+    assert grenade["throw_tick"] == 160
+    assert grenade["trajectory"][0]["tick"] == 160
+    assert grenade["trajectory"][0]["x"] == 100.0
+
+
 def test_build_match_workspace_reuses_shared_parse_for_all_views():
     deaths = pd.DataFrame([
         {
