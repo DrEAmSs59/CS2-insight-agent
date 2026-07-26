@@ -99,8 +99,10 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
             "headshot": True,
             "attacker_X": 100.0,
             "attacker_Y": 200.0,
+            "attacker_Z": 50.0,
             "user_X": 300.0,
             "user_Y": 400.0,
+            "user_Z": -25.0,
         },
         {
             "tick": 350,
@@ -134,7 +136,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
         {"tick": 300, "name": "Bravo", "current_equip_value": 1500, "cash_spent_this_round": 1500, "start_balance": 2000},
     ])
     grenade = pd.DataFrame([
-        {"tick": 180, "total_rounds_played": 0, "user_name": "Alpha", "user_X": 210.0, "user_Y": 310.0},
+        {"tick": 180, "total_rounds_played": 0, "user_name": "Alpha", "user_X": 210.0, "user_Y": 310.0, "user_Z": 10.0},
     ])
     shared_events = {
         "events": deaths,
@@ -147,6 +149,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
                 "weapon": "ak47",
                 "user_X": 180.0,
                 "user_Y": 280.0,
+                "user_Z": 45.0,
                 "user_yaw": 45.0,
                 "user_pitch": -2.0,
             },
@@ -219,12 +222,16 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
     assert result["rounds"][1]["team_b_score_after"] == 1
     kill = next(event for event in result["rounds"][0]["events"] if event["type"] == "kill")
     assert kill["actor_x"] == 100.0
+    assert kill["actor_z"] == 50.0
+    assert kill["target_z"] == -25.0
     smoke = next(event for event in result["rounds"][0]["events"] if event["type"] == "grenade")
     assert smoke["kind"] == "烟雾弹"
     assert smoke["x"] == 210.0
     assert smoke["y"] == 310.0
+    assert smoke["z"] == 10.0
     assert smoke["throw_tick"] == 160
     assert len(smoke["trajectory"]) == 3
+    assert [point["z"] for point in smoke["trajectory"]] == [20.0, 30.0, 10.0]
     plant = next(event for event in result["rounds"][0]["events"] if event["type"] == "plant")
     assert plant["site"] == "B"
     assert plant["x"] == 333.0
@@ -243,6 +250,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
         "pitch": -2.0,
         "x": 180.0,
         "y": 280.0,
+        "z": 45.0,
     }]
     by_name = {row["name"]: row for row in result["players"]}
     # Overkill 120 on full HP still counts as 100 → ADR 50.0 across 2 rounds.

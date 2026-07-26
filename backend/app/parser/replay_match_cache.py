@@ -15,7 +15,7 @@ from .. import native_table as pd
 
 logger = logging.getLogger(__name__)
 
-REPLAY_MATCH_CACHE_VERSION = 3
+REPLAY_MATCH_CACHE_VERSION = 4
 REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (

@@ -356,7 +356,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/).className).toContain("h-[32px]");
     expect(screen.getByTitle(/ZywOo 烟雾弹 · 剩余/).getAttribute("style")).not.toContain("border");
     expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke")).toBe("#38bdf8");
-    expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke-width")).toBe("0.205");
+    expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke-width")).toBe("2.25");
+    expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("vector-effect")).toBe("non-scaling-stroke");
     expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')?.getAttribute("stroke-dasharray")).toBeNull();
     fireEvent.change(screen.getByRole("slider", { name: "回放时间轴" }), { target: { value: "4" } });
     await waitFor(() => expect(view.container.querySelector('.demo-grenade-trajectory[data-side="CT"]')).toBeTruthy());
@@ -389,13 +390,16 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "序号" }));
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
     expect(view.container.querySelector(".demo-player-id-label")).toBeNull();
-    expect(view.container.querySelector(".demo-player-trace")?.getAttribute("stroke-width")).toBe("0.175");
-    expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("stroke-width")).toBe("0.12");
+    expect(view.container.querySelector(".replay-trajectory-layer")?.className.baseVal).toContain("z-[10]");
+    expect(view.container.querySelector(".demo-player-trace")?.getAttribute("stroke-width")).toBe("1.8");
+    expect(view.container.querySelector(".demo-player-trace")?.getAttribute("vector-effect")).toBe("non-scaling-stroke");
+    expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("stroke-width")).toBe("1.8");
+    expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("vector-effect")).toBe("non-scaling-stroke");
     expect(view.container.querySelector(".demo-shot-tracer")?.getAttribute("opacity")).toBe("1");
     await waitFor(() => expect(view.container.querySelector(".demo-death-line")).toBeTruthy());
-    expect(view.container.querySelector(".demo-death-line")?.getAttribute("stroke-width")).toBe("0.14");
-    expect(view.container.querySelector(".demo-death-circle")?.getAttribute("stroke-width")).toBe("0.09");
-    expect(view.container.querySelector(".demo-death-x")?.getAttribute("stroke-width")).toBe("0.07");
+    expect(view.container.querySelector(".demo-death-line")?.getAttribute("stroke-width")).toBe("1.6");
+    expect(view.container.querySelector(".demo-death-circle")?.getAttribute("stroke-width")).toBe("1.3");
+    expect(view.container.querySelector(".demo-death-x")?.getAttribute("stroke-width")).toBe("1.2");
     expect(screen.getByRole("slider", { name: "回放时间轴" }).getAttribute("step")).toBe("0.01");
     expect(view.container.querySelector("style")?.textContent).toContain(".demo-shot-tracer { filter:none; }");
     expect(screen.getAllByText("b1t", { selector: "span" }).length).toBeGreaterThan(0);
@@ -524,6 +528,20 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
       ...shell.analysisWorkspace,
       map_name: "de_nuke",
       map_transform: { pos_x: 0, pos_y: 1024, scale: 1, lower_level_max_units: -495 },
+      rounds: shell.analysisWorkspace.rounds.map((round, index) => index === 0 ? {
+        ...round,
+        shots: [{ tick: 300, actor: "ZywOo", weapon: "ak47", x: 510, y: 510, yaw: 90, pitch: 0 }],
+        events: [{
+          type: "grenade",
+          tick: 300,
+          throw_tick: 200,
+          actor: "ZywOo",
+          kind: "烟雾弹",
+          x: 510,
+          y: 510,
+          trajectory: [{ tick: 200, x: 500, y: 500 }, { tick: 300, x: 510, y: 510 }],
+        }],
+      } : round),
     };
     API.post.mockResolvedValueOnce({
       data: {
@@ -562,6 +580,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
     expect(view.container.querySelector('[data-player-trace="ZywOo"]')).toBeTruthy();
     expect(view.container.querySelector('[data-player-trace="b1t"]')).toBeNull();
+    expect(view.container.querySelector(".demo-shot-tracer")).toBeTruthy();
+    expect(view.container.querySelector(".demo-grenade-trajectory")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "下层" }));
     expect(screen.getByAltText("de_nuke 下层 雷达地图").getAttribute("src")).toContain("layer=lower");
@@ -570,6 +590,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeTruthy();
     expect(view.container.querySelector('[data-player-trace="ZywOo"]')).toBeNull();
     expect(view.container.querySelector('[data-player-trace="b1t"]')).toBeTruthy();
+    expect(view.container.querySelector(".demo-shot-tracer")).toBeNull();
+    expect(view.container.querySelector(".demo-grenade-trajectory")).toBeNull();
   });
 
   test("keeps every player unselected until the user chooses one, then requests only that player's AI review", () => {
