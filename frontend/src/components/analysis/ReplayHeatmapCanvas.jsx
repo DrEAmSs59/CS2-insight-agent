@@ -9,6 +9,12 @@ const COLOR_STOPS = [
   [0.72, 249, 115, 22, 195],
   [1, 225, 29, 72, 225],
 ];
+const MODE_LABELS = {
+  movement: "整场走位热力图",
+  combat: "整场交战热力图",
+  kills: "整场击杀热力图",
+  deaths: "整场死亡热力图",
+};
 
 function interpolateColor(value) {
   const normalized = Math.max(0, Math.min(1, Number(value) || 0));
@@ -81,7 +87,7 @@ export default memo(function ReplayHeatmapCanvas({ heatmap, mode = "off" }) {
       width={RENDER_SIZE}
       height={RENDER_SIZE}
       data-heatmap-mode={mode}
-      aria-label={mode === "combat" ? "整场交战热力图" : "整场走位热力图"}
+      aria-label={MODE_LABELS[mode] || "整场热力图"}
       className="pointer-events-none absolute inset-0 h-full w-full opacity-90"
       style={{ mixBlendMode: "screen" }}
     />

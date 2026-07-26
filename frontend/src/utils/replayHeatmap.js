@@ -121,6 +121,10 @@ function depositWorldPoint(grid, point, transform, weight) {
   return depositHeatmapPoint(grid, radarPoint.x, radarPoint.y, weight);
 }
 
+export function replayHeatmapPlayerKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function nearestFrame(frames, tick) {
   if (!Array.isArray(frames) || !frames.length) return null;
   let low = 0;
@@ -144,8 +148,8 @@ function nearestFrame(frames, tick) {
 
 function playerAtEvent(frames, tick, name) {
   const frame = nearestFrame(frames, tick);
-  const key = String(name || "").trim().toLowerCase();
-  return frame?.players?.find((player) => String(player?.name || "").trim().toLowerCase() === key) || null;
+  const key = replayHeatmapPlayerKey(name);
+  return frame?.players?.find((player) => replayHeatmapPlayerKey(player?.name) === key) || null;
 }
 
 function killPoint(event, prefix, fallback) {
@@ -175,14 +179,99 @@ function depositCombat(grid, attacker, victim, transform) {
   }
 }
 
-function accumulateRoundLayer({ movement, combat }, bundle, transform, layer) {
+function createLayerAccumulators() {
+  return {
+    movement: createHeatmapGrid(),
+    combat: createHeatmapGrid(),
+    kills: createHeatmapGrid(),
+    deaths: createHeatmapGrid(),
+  };
+}
+
+function createSpatialAccumulators(hasMapLayers) {
+  return {
+    upper: createLayerAccumulators(),
+    lower: hasMapLayers ? createLayerAccumulators() : null,
+  };
+}
+
+function createPlayerAccumulator(name, hasMapLayers) {
+  return {
+    name,
+    ...createSpatialAccumulators(hasMapLayers),
+    sides: {
+      CT: createSpatialAccumulators(hasMapLayers),
+      T: createSpatialAccumulators(hasMapLayers),
+    },
+  };
+}
+
+function playerAccumulator(playerAccumulators, name, hasMapLayers) {
+  const key = replayHeatmapPlayerKey(name);
+  if (!key) return null;
+  if (!playerAccumulators.has(key)) {
+    playerAccumulators.set(key, createPlayerAccumulator(String(name || "").trim(), hasMapLayers));
+  }
+  return playerAccumulators.get(key);
+}
+
+function incrementEvent(grid) {
+  if (grid) grid.eventCount += 1;
+}
+
+function accumulateCombatForLayer(accumulators, attacker, victim, transform) {
+  if (!accumulators || (!attacker && !victim)) return;
+  depositCombat(accumulators.combat, attacker, victim, transform);
+  incrementEvent(accumulators.combat);
+}
+
+function normalizeSide(value) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "2" || raw === "T" || raw === "TERRORIST") return "T";
+  if (raw === "3" || raw === "CT" || raw === "COUNTERTERRORIST") return "CT";
+  return "";
+}
+
+function normalizePlayerTeamKeys(playerTeamKeys) {
+  const entries = playerTeamKeys instanceof Map
+    ? Array.from(playerTeamKeys.entries())
+    : Object.entries(playerTeamKeys || {});
+  return new Map(entries.map(([name, teamKey]) => [replayHeatmapPlayerKey(name), teamKey]));
+}
+
+function playerSide(player, name, bundle, playerTeamKeys) {
+  const frameSide = normalizeSide(player?.team ?? player?.team_number);
+  if (frameSide) return frameSide;
+  const teamKey = playerTeamKeys.get(replayHeatmapPlayerKey(name));
+  const roundSide = teamKey === "a"
+    ? bundle?.round?.team_a_side
+    : teamKey === "b"
+      ? bundle?.round?.team_b_side
+      : "";
+  return normalizeSide(roundSide);
+}
+
+function accumulateRound(
+  { aggregate, playerAccumulators },
+  bundle,
+  transform,
+  hasMapLayers,
+  playerTeamKeys,
+) {
   const frames = Array.isArray(bundle?.frames) ? bundle.frames : [];
   const fps = Math.max(1, Number(bundle?.fps) || 32);
   const stride = Math.max(1, Math.round(fps / MOVEMENT_SAMPLE_HZ));
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex += stride) {
     for (const player of frames[frameIndex]?.players || []) {
-      if (player?.is_alive === false || !heatmapPointMatchesLayer(player, transform, layer)) continue;
-      depositWorldPoint(movement, player, transform, 1);
+      if (player?.is_alive === false) continue;
+      const individual = playerAccumulator(playerAccumulators, player?.name, hasMapLayers);
+      const side = playerSide(player, player?.name, bundle, playerTeamKeys);
+      for (const layer of hasMapLayers ? ["upper", "lower"] : ["upper"]) {
+        if (!heatmapPointMatchesLayer(player, transform, layer)) continue;
+        depositWorldPoint(aggregate[layer].movement, player, transform, 1);
+        if (individual) depositWorldPoint(individual[layer].movement, player, transform, 1);
+        if (individual && side) depositWorldPoint(individual.sides[side][layer].movement, player, transform, 1);
+      }
     }
   }
 
@@ -193,43 +282,101 @@ function accumulateRoundLayer({ movement, combat }, bundle, transform, layer) {
     const victimFallback = playerAtEvent(frames, tick, event.target);
     const attacker = killPoint(event, "actor", attackerFallback);
     const victim = killPoint(event, "target", victimFallback);
-    const layerAttacker = attacker && heatmapPointMatchesLayer(attacker, transform, layer)
-      ? attacker
-      : null;
-    const layerVictim = victim && heatmapPointMatchesLayer(victim, transform, layer)
-      ? victim
-      : null;
-    if (!layerAttacker && !layerVictim) continue;
-    depositCombat(combat, layerAttacker, layerVictim, transform);
-    combat.eventCount += 1;
-  }
-}
+    const attackerName = String(event.actor || attackerFallback?.name || "").trim();
+    const victimName = String(event.target || victimFallback?.name || "").trim();
+    const attackerAccumulator = playerAccumulator(playerAccumulators, attackerName, hasMapLayers);
+    const victimAccumulator = playerAccumulator(playerAccumulators, victimName, hasMapLayers);
+    const attackerSide = playerSide(attackerFallback, attackerName, bundle, playerTeamKeys);
+    const victimSide = playerSide(victimFallback, victimName, bundle, playerTeamKeys);
+    const attackerSideAccumulator = attackerSide ? attackerAccumulator?.sides?.[attackerSide] : null;
+    const victimSideAccumulator = victimSide ? victimAccumulator?.sides?.[victimSide] : null;
 
-function createLayerAccumulators() {
-  return {
-    movement: createHeatmapGrid(),
-    combat: createHeatmapGrid(),
-  };
+    for (const layer of hasMapLayers ? ["upper", "lower"] : ["upper"]) {
+      const layerAttacker = attacker && heatmapPointMatchesLayer(attacker, transform, layer)
+        ? attacker
+        : null;
+      const layerVictim = victim && heatmapPointMatchesLayer(victim, transform, layer)
+        ? victim
+        : null;
+      if (!layerAttacker && !layerVictim) continue;
+
+      accumulateCombatForLayer(aggregate[layer], layerAttacker, layerVictim, transform);
+      accumulateCombatForLayer(attackerAccumulator?.[layer], layerAttacker, layerVictim, transform);
+      accumulateCombatForLayer(attackerSideAccumulator?.[layer], layerAttacker, layerVictim, transform);
+      if (victimAccumulator && victimAccumulator !== attackerAccumulator) {
+        accumulateCombatForLayer(victimAccumulator[layer], layerAttacker, layerVictim, transform);
+      }
+      if (victimSideAccumulator && victimSideAccumulator !== attackerSideAccumulator) {
+        accumulateCombatForLayer(victimSideAccumulator[layer], layerAttacker, layerVictim, transform);
+      }
+
+      if (layerAttacker && depositWorldPoint(aggregate[layer].kills, layerAttacker, transform, 1)) {
+        incrementEvent(aggregate[layer].kills);
+      }
+      if (layerAttacker && attackerAccumulator
+        && depositWorldPoint(attackerAccumulator[layer].kills, layerAttacker, transform, 1)) {
+        incrementEvent(attackerAccumulator[layer].kills);
+      }
+      if (layerAttacker && attackerSideAccumulator
+        && depositWorldPoint(attackerSideAccumulator[layer].kills, layerAttacker, transform, 1)) {
+        incrementEvent(attackerSideAccumulator[layer].kills);
+      }
+      if (layerVictim && depositWorldPoint(aggregate[layer].deaths, layerVictim, transform, 1)) {
+        incrementEvent(aggregate[layer].deaths);
+      }
+      if (layerVictim && victimAccumulator
+        && depositWorldPoint(victimAccumulator[layer].deaths, layerVictim, transform, 1)) {
+        incrementEvent(victimAccumulator[layer].deaths);
+      }
+      if (layerVictim && victimSideAccumulator
+        && depositWorldPoint(victimSideAccumulator[layer].deaths, layerVictim, transform, 1)) {
+        incrementEvent(victimSideAccumulator[layer].deaths);
+      }
+    }
+  }
 }
 
 function finalizeLayer(layer) {
   return {
     movement: normalizeGrid(layer.movement),
     combat: normalizeGrid(layer.combat),
+    kills: normalizeGrid(layer.kills),
+    deaths: normalizeGrid(layer.deaths),
   };
 }
 
-export function buildReplayHeatmapSet({ roundBundles = [], transform, hasMapLayers = false } = {}) {
+export function buildReplayHeatmapSet({
+  roundBundles = [],
+  transform,
+  hasMapLayers = false,
+  playerTeamKeys = {},
+} = {}) {
   if (!transform) return null;
-  const upper = createLayerAccumulators();
-  const lower = hasMapLayers ? createLayerAccumulators() : null;
+  const aggregate = createSpatialAccumulators(hasMapLayers);
+  const playerAccumulators = new Map();
+  const normalizedPlayerTeamKeys = normalizePlayerTeamKeys(playerTeamKeys);
   for (const bundle of roundBundles) {
-    accumulateRoundLayer(upper, bundle, transform, "upper");
-    if (lower) accumulateRoundLayer(lower, bundle, transform, "lower");
+    accumulateRound(
+      { aggregate, playerAccumulators },
+      bundle,
+      transform,
+      hasMapLayers,
+      normalizedPlayerTeamKeys,
+    );
   }
+  const players = Object.fromEntries(Array.from(playerAccumulators, ([key, value]) => [key, {
+    name: value.name,
+    upper: finalizeLayer(value.upper),
+    lower: value.lower ? finalizeLayer(value.lower) : null,
+    sides: Object.fromEntries(["CT", "T"].map((side) => [side, {
+      upper: finalizeLayer(value.sides[side].upper),
+      lower: value.sides[side].lower ? finalizeLayer(value.sides[side].lower) : null,
+    }])),
+  }]));
   return {
-    upper: finalizeLayer(upper),
-    lower: lower ? finalizeLayer(lower) : null,
+    upper: finalizeLayer(aggregate.upper),
+    lower: aggregate.lower ? finalizeLayer(aggregate.lower) : null,
+    players,
     roundCount: roundBundles.length,
   };
 }

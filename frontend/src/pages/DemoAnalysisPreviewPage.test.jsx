@@ -437,8 +437,23 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByRole("heading", { name: "整场热力图" })).toBeTruthy();
     expect(screen.queryByRole("slider", { name: "回放时间轴" })).toBeNull();
     expect(screen.getByRole("group", { name: "热力图类型" })).toBeTruthy();
+    const sideSelector = screen.getByRole("group", { name: "热力图阵营" });
+    expect(within(sideSelector).getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("group", { name: "热力图玩家列表" })).toBeTruthy();
+    const zywooHeatmapButton = screen.getByRole("button", { name: "查看 ZywOo 的热力图" });
+    expect(zywooHeatmapButton.getAttribute("aria-pressed")).toBe("true");
+    expect(zywooHeatmapButton.textContent).toContain("Vitality");
+    expect(screen.getByText("统计回合")).toBeTruthy();
+    expect(screen.queryByText("轨迹采样点")).toBeNull();
+    expect(screen.queryByText(/播放期间不会重复计算/)).toBeNull();
     await waitFor(() => expect(view.container.querySelector('[data-heatmap-mode="movement"]')).toBeTruthy());
     expect(screen.getByAltText("de_mirage 走位热力图")).toBeTruthy();
+
+    fireEvent.click(within(sideSelector).getByRole("button", { name: "CT" }));
+    expect(screen.getByAltText("de_mirage CT 走位热力图")).toBeTruthy();
+    fireEvent.click(within(sideSelector).getByRole("button", { name: "T" }));
+    expect(screen.getByAltText("de_mirage T 走位热力图")).toBeTruthy();
+    fireEvent.click(within(sideSelector).getByRole("button", { name: "全部" }));
     expect(API.post).toHaveBeenCalledWith(
       "/demo/replay/binary",
       expect.objectContaining({ path: "C:/demos/one.dem", fps: 32 }),
@@ -448,6 +463,17 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "交战热点" }));
     expect(view.container.querySelector('[data-heatmap-mode="combat"]')).toBeTruthy();
     expect(screen.getByAltText("de_mirage 交战热力图")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "击杀热点" }));
+    expect(view.container.querySelector('[data-heatmap-mode="kills"]')).toBeTruthy();
+    expect(screen.getByAltText("de_mirage 击杀热力图")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "死亡热点" }));
+    expect(view.container.querySelector('[data-heatmap-mode="deaths"]')).toBeTruthy();
+    expect(screen.getByAltText("de_mirage 死亡热力图")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 b1t 的热力图" }));
+    expect(screen.getByRole("button", { name: "查看 b1t 的热力图" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   test("restores the analysis workspace, replay round and playhead within the session", async () => {

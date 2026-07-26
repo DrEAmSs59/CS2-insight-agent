@@ -165,7 +165,7 @@ dependencies = [
     { name = "pandas", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight5-r1/demoparser2-0.41.4%2Bcs2insight5-cp312-cp312-win_amd64.whl", hash = "sha256:3f2ab888e43f3759eae569323728bf8e030ad315fc956b059404c01801760e3c" },
+    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight5-r1/demoparser2-0.41.4%2Bcs2insight5-cp312-cp312-win_amd64.whl", hash = "sha256:d24961737c72faa2e9104ef27c072c71d9daa148428f197db4638047621fb6c7" },
 ]
 
 [package.metadata]
