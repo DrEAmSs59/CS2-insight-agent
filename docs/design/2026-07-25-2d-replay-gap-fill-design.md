@@ -6,6 +6,10 @@
 > 来源：`CS2_2D回放一次性完整修复方案.md`（用户确认方案 A）  
 > 注：`docs/superpowers/` 被 gitignore；本文件为可提交的权威副本（路径 `docs/design/`）。
 
+> 2026-07-26 更正：当时认为体素轴内核已正确的结论已被真实 journal
+> 的 mask 数据推翻；当前协议为 XYZ、无镜像、12u、中心 15.5。详见
+> `docs/replay-effects-validation/probe-output/smoke-geometry-r1r2-conclusion.md`。
+
 ---
 
 ## 1. 目标与非目标
@@ -33,7 +37,7 @@
 
 | 能力 | 状态 |
 |------|------|
-| 全局 `VOXEL_AXIS_SIGN` / zyx packing | 完成 |
+| 全局体素坐标 / XYZ packing / Morton mask | 已于 2026-07-26 更正 |
 | 烟雾 density + marching squares + sample crossfade | 完成 |
 | `replayRadarTransform.js` | 完成（支持 content_*，元数据未填） |
 | `replayStore` + frames/effects 磁盘缓存 + single-flight | 完成 |

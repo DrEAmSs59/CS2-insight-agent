@@ -1,44 +1,47 @@
-# Smoke geometry Round 1–2 verification (Anubis)
+# Smoke geometry verification correction
 
-**Date:** 2026-07-25  
-**Demo:** `C:\soft\cs2_demo_lib\liquid-vs-vitality-m1-anubis.dem`  
-**Diag:** `data/smoke-diag-anubis.json` (40 occupancy snapshots, 1 entity sampled in CLI limits)
+**Corrected:** 2026-07-26
 
-## Automated regression
+The 2026-07-25 conclusion in this file was wrong. It treated the type-3 seed
+list as the complete render geometry and used seed-centroid distance to choose
+an axis mapping. A centroid score is invariant under many planar rotations and
+reflections, so it could not establish that the prior `zyx`, mirrored-X,
+20-world-unit mapping was correct.
 
-- Backend: `test_smoke_voxel_diagnostics.py` + `test_smoke_voxel_decode.py` + `test_replay_effects.py` → **22 passed**
-- Frontend `src/components/analysis/`: **43 passed** (includes smokeContour, smokeDebugGate, ReplayAreaEffectsCanvas)
+## Actual journal format
 
-## Center 16 vs 15.5
+- Each journal record is `u16 sequence`, `u16 payload length`, then payload.
+- Type 3 is a keyframe: phase, type, 8-byte XYZ seed entries, and Morton mask
+  entries.
+- Type 2 replaces Morton masks in the current grid state.
+- Type 0 is a heartbeat and does not change geometry.
+- Both Morton levels interleave X, Y, Z.
+- The 32x32x32 cell grid uses 12 world units per cell and centre 15.5, with no
+  planar mirror: `world = detonation + (grid - 15.5) * 12`.
+- Mask bits describe the smoke shell. Boundary flood-fill reconstructs the
+  enclosed volume before XY projection.
 
-Across all 40 snapshots, mean |voxel-mean − detonation|:
+## Why the old preview was rotated and undersized
 
-| Anchor | Mean | Median | Closer count |
-|--------|------|--------|--------------|
-| center=16 | ~41.4 wu | ~41.4 | **40/40** |
-| center=15.5 | ~49.1 wu | ~49.1 | 0/40 |
+The decoder consumed only the roughly 44 initialization seeds, interpreted
+their bytes as Z/Y/X, ignored all trailing mask data and all type-2 deltas, then
+projected them at 20 units with mirrored world X. The Canvas therefore received
+already-wrong sparse cells; its common world-to-radar transform was not the
+source of this smoke-only fault.
 
-**Do not switch production center to 15.5** without new evidence. Residual ~2 voxel mean offset is expected for asymmetric occupancy; not a reason to change the decoder default.
+## Real-demo check
 
-## State bytes
+On a local Mirage demo, the first smoke keyframe contains 44 seeds plus 36 mask
+entries. The old path produced 15 unique XY columns. Reconstructing the keyframe
+produces 619 occupied 3D cells and 190 unique XY columns; the emitted replay
+sample spans 180 by 132 world units at a 12-unit cell size. The complete first
+smoke lifecycle builds 14 changing samples with no decoder warnings.
 
-Aggregated `state0` over snapshots: mostly `5` (1520) with some `0` (240). Other bytes not used for density in production beyond this coarse mapping — no change recommended from this pass.
+An end-to-end geometry build over 17,787 smoke rows (92 lifecycles, 1,608
+changing samples) completes in about 5.6 seconds on the development machine.
+The equivalent per-voxel Python flood-fill took about 84.8 seconds, so the final
+implementation performs the same boundary fill with NumPy array shifts.
 
-## Raw grid shape (largest span sample, tick 23971)
-
-Unique XY span `dx=7`, `dy=5` (24 cells). Occupancy is a **2D irregular cluster**, not a single horizontal line and not a perfect diagonal strip. Example cells include columns 11–18 with y mostly 16/18 plus scattered neighbors — consistent with sparse seed voxels, not a decode that “flattened” a diagonal into a horizontal bar.
-
-## Failure-case conclusion (plan §5.3)
-
-**Primary historical failure: Case 1 — frontend render.**  
-Production previously used circular bloom + distance cull, which erased diagonal/irregular edges. Round 2 replaced that with density-mask + marching-squares contours and active→next sample crossfade.
-
-**Not indicated this pass:** Case 3 (raw_grid already wrong as a flat line). Raw grids show 2D extent.
-
-**Deferred (Round 3 map unify):** residual player/radar transform and Nuke CSS zoom issues are out of Round 1–2 scope. Use `?smokeDebug=1` + `radar_cells` vs contour `final_render` for visual A/B on Anubis B door in the app.
-
-## Manual UI (operator)
-
-1. Load Anubis demo → 2D replay → seek B-door smoke.  
-2. `?smokeDebug=1` → compare `radar_cells` squares vs contour fill.  
-3. Confirm molotov/inferno still uses soft radial cells.
+The legacy axis-candidate script remains only as a coarse seed-corruption
+diagnostic. It now enumerates all XYZ permutations and explicitly does not claim
+that centroid ranking proves orientation.

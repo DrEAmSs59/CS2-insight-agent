@@ -23,12 +23,36 @@ def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
     return bytes(out)
 
 
-def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
-    # entries are (z, y, x) matching CS2 occupancy packing
-    out = [0x00, flags, len(entries)]
-    for z, y, x in entries:
-        out.extend([z, y, x, 5, 0, 0, 0, 0])
+def _occ_payload(entries: list[tuple[int, int, int]]) -> list[int]:
+    # Type-3 keyframe; seed entries are packed (x, y, z).
+    out = [0x00, 0x03, len(entries)]
+    for x, y, z in entries:
+        out.extend([x, y, z, 5, 0, 0, 0, 0])
+    out.extend([0, 0])  # no Morton mask entries
     return out
+
+
+def _morton3(x: int, y: int, z: int, bits: int) -> int:
+    value = 0
+    for bit in range(bits):
+        value |= ((x >> bit) & 1) << (3 * bit)
+        value |= ((y >> bit) & 1) << (3 * bit + 1)
+        value |= ((z >> bit) & 1) << (3 * bit + 2)
+    return value
+
+
+def _mask_entry(cell_xyz: tuple[int, int, int], sub_xyz: tuple[int, int, int]) -> list[int]:
+    cell_index = _morton3(*cell_xyz, bits=3)
+    mask = 1 << _morton3(*sub_xyz, bits=2)
+    return list(cell_index.to_bytes(2, "little") + mask.to_bytes(8, "little"))
+
+
+def _masked_keyframe(cell_xyz: tuple[int, int, int], sub_xyz: tuple[int, int, int]) -> list[int]:
+    return [0, 3, 0, 1, 0, *_mask_entry(cell_xyz, sub_xyz)]
+
+
+def _mask_delta(cell_xyz: tuple[int, int, int], sub_xyz: tuple[int, int, int]) -> list[int]:
+    return [0, 2, 1, 0, *_mask_entry(cell_xyz, sub_xyz)]
 
 
 class TestDecodeSmokeVoxelJournal:
@@ -56,11 +80,11 @@ class TestDecodeSmokeVoxelJournal:
 
 class TestOccupancyAndWorld:
     def test_occupancy_entries(self):
-        # payload bytes are [z, y, x]; SmokeVoxel stores named axes
+        # Payload bytes are [x, y, z].
         voxels = decode_voxel_frame_occupancy(bytes(_occ_payload([(14, 16, 18), (16, 16, 18)])))
         assert voxels is not None
         assert len(voxels) == 2
-        assert (voxels[0].z, voxels[0].y, voxels[0].x) == (14, 16, 18)
+        assert (voxels[0].x, voxels[0].y, voxels[0].z) == (14, 16, 18)
 
     def test_get_occupancy_at(self):
         frames = decode_smoke_voxel_journal(
@@ -74,22 +98,42 @@ class TestOccupancyAndWorld:
         assert len(get_smoke_occupancy_at(frames)[1]) == 2
 
     def test_voxel_to_world(self):
-        assert voxel_to_world(16, 16, 16, [100, 200, 50]) == (100.0, 200.0, 50.0)
-        # sign_x = -1 → grid x=17 is west of origin
-        assert voxel_to_world(17, 16, 16, [100, 200, 50]) == (80.0, 200.0, 50.0)
-        assert voxel_to_world(16, 17, 16, [100, 200, 50]) == (100.0, 220.0, 50.0)
-        assert voxel_to_world(16, 16, 17, [100, 200, 50]) == (100.0, 200.0, 70.0)
+        assert voxel_to_world(15.5, 15.5, 15.5, [100, 200, 50]) == (100.0, 200.0, 50.0)
+        assert voxel_to_world(16.5, 15.5, 15.5, [100, 200, 50]) == (112.0, 200.0, 50.0)
+        assert voxel_to_world(15.5, 16.5, 15.5, [100, 200, 50]) == (100.0, 212.0, 50.0)
+        assert voxel_to_world(15.5, 15.5, 16.5, [100, 200, 50]) == (100.0, 200.0, 62.0)
 
 
 class TestDecodeSmokeCells:
     def test_ok_path_projects_cells(self):
-        # entries are (z, y, x); different x → distinct projected XY cells
-        data = _make_journal([(0, _occ_payload([(16, 16, 16), (16, 16, 17)]))])
+        data = _make_journal([(0, _occ_payload([(16, 16, 16), (17, 16, 16)]))])
         out = decode_smoke_cells(data, declared_size=len(data), detonation_pos=[100.0, 200.0, 50.0])
         assert out["ok"] is True
         assert out["voxel_count"] == 2
         assert out["cell_size"] == VOXEL_CELL_SIZE_WORLD
         assert len(out["cells"]) == 2
+
+    def test_keyframe_projects_morton_mask_not_only_seeds(self):
+        # Coarse (1,2,3) + subcell (3,1,2) becomes grid (7,9,14).
+        data = _make_journal([(0, _masked_keyframe((1, 2, 3), (3, 1, 2)))])
+        out = decode_smoke_cells(data, declared_size=len(data), detonation_pos=[100.0, 200.0, 50.0])
+        assert out["ok"] is True
+        assert out["voxel_count"] == 1
+        assert out["cell_size"] == 12.0
+        assert out["cells"] == [[-2.0, 122.0, 32.0, 1.0]]
+
+    def test_delta_replaces_coarse_cell_mask(self):
+        keyframe = _masked_keyframe((1, 2, 3), (0, 0, 0))
+        delta = _mask_delta((1, 2, 3), (3, 0, 0))
+        data = _make_journal([(0, keyframe), (1, delta)])
+        early = decode_smoke_cells(
+            data, declared_size=len(data), detonation_pos=[0.0, 0.0, 0.0], target_seq=0
+        )
+        late = decode_smoke_cells(
+            data, declared_size=len(data), detonation_pos=[0.0, 0.0, 0.0], target_seq=1
+        )
+        assert early["cells"] == [[-138.0, -90.0, -42.0, 1.0]]
+        assert late["cells"] == [[-102.0, -90.0, -42.0, 1.0]]
 
     def test_target_seq_limits_to_earlier_occupancy(self):
         data = _make_journal([

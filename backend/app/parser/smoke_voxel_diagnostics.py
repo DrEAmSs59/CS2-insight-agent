@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 from collections import Counter
 from pathlib import Path
@@ -107,22 +108,18 @@ def build_projection_snapshot(
 def parse_occupancy_grid_bytes(payload: bytes | bytearray, packing: str) -> list[tuple[int, int, int]]:
     """Return ``(x, y, z)`` grid tuples for one occupancy payload under a packing."""
     blob = bytes(payload)
-    if len(blob) < 3 or (blob[1] & 1) == 0:
+    if len(blob) < 3 or blob[1] != 3:
         return []
+    if len(packing) != 3 or set(packing) != {"x", "y", "z"}:
+        raise ValueError(f"unknown packing {packing}")
     count = blob[2]
     off = 3
     out: list[tuple[int, int, int]] = []
     for _ in range(count):
         if off + 8 > len(blob):
             break
-        z, a, b = blob[off], blob[off + 1], blob[off + 2]
-        if packing == "zxy":
-            x, y = a, b
-        elif packing == "zyx":
-            x, y = b, a
-        else:
-            raise ValueError(f"unknown packing {packing}")
-        out.append((int(x), int(y), int(z)))
+        axes = dict(zip(packing, blob[off : off + 3]))
+        out.append((int(axes["x"]), int(axes["y"]), int(axes["z"])))
         off += 8
     return out
 
@@ -179,7 +176,7 @@ def score_axis_candidate(
         "center": center,
         "n": len(offsets),
         "mean_center_offset_world": mean_off,
-        "score": 1.0 / (1.0 + mean_off / 20.0),
+        "score": 1.0 / (1.0 + mean_off / VOXEL_WORLD_SIZE),
         "is_production": (
             packing == VOXEL_BYTE_PACKING
             and float(sign_x) == float(VOXEL_AXIS_SIGN[0])
@@ -190,9 +187,10 @@ def score_axis_candidate(
 
 
 def iter_axis_candidates() -> list[dict[str, Any]]:
-    """All 16 planar candidates: 2 packings × 4 sign pairs × 2 centers."""
+    """All 48 seed-coordinate candidates: 6 packings × 4 sign pairs × 2 centers."""
     out: list[dict[str, Any]] = []
-    for packing in ("zxy", "zyx"):
+    for packing_tuple in itertools.permutations("xyz"):
+        packing = "".join(packing_tuple)
         for sign_x in (1.0, -1.0):
             for sign_y in (1.0, -1.0):
                 for center in (16.0, 15.5):
@@ -218,10 +216,12 @@ def rank_axis_candidates(
         )
         for c in iter_axis_candidates()
     ]
-    # Prefer tighter centroid, then production packing/signs as tie-break.
+    # A centroid score cannot distinguish rotations/reflections for symmetric
+    # clouds. Keep this as a coarse corruption check, with the protocol-backed
+    # production mapping as the tie-break rather than calling it axis proof.
     ranked.sort(key=lambda row: (
         -float(row["score"]),
-        float(row["mean_center_offset_world"] or 1e9),
+        float("inf") if row["mean_center_offset_world"] is None else float(row["mean_center_offset_world"]),
         0 if row.get("is_production") else 1,
     ))
     return ranked
