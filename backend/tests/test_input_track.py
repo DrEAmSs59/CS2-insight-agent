@@ -2,7 +2,7 @@ import sys, os
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pandas as pd
+from app import native_table as pd
 from app.parser import input_track as input_track_module
 from app.parser.input_track import (
     KEYS,

@@ -7,7 +7,7 @@ import math
 from collections import defaultdict
 from typing import Any, Optional
 
-import pandas as pd
+from . import native_table as pd
 
 logger = logging.getLogger(__name__)
 

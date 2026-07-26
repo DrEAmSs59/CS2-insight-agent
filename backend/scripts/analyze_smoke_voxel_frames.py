@@ -26,7 +26,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app import native_table as pd
 
 
 def shannon_entropy(data: bytes) -> float:

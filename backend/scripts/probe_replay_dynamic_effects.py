@@ -43,7 +43,9 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app import native_table as pd
 
 # ─── 探测的字段清单（来自 CS2 实体 Schema；实际可用性以探针输出为准） ───────────
 
@@ -227,10 +229,11 @@ def _to_df(result: Any) -> pd.DataFrame:
     if isinstance(result, pd.DataFrame):
         return result
     if hasattr(result, "to_pandas"):
-        return result.to_pandas()
-    if isinstance(result, list):
-        return pd.DataFrame(result) if result else pd.DataFrame()
-    return pd.DataFrame()
+        result = result.to_pandas()
+    try:
+        return pd.DataFrame(result)
+    except (TypeError, ValueError):
+        return pd.DataFrame()
 
 
 def _event_tick_samples(frame: pd.DataFrame, limit: int = 60) -> list[dict[str, Any]]:
@@ -260,7 +263,7 @@ def probe_environment(parser_cls: Any) -> dict[str, Any]:
         "python": sys.version,
         "platform": platform.platform(),
         "demoparser2_version": version,
-        "pandas_version": pd.__version__,
+        "table_backend": f"native_table/{pd.__version__}",
         "demo_parser_methods": methods,
     }
 

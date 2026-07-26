@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 
-import pandas as pd
+from app import native_table as pd
 
 from app.parser.replay_effects import (
     _parse_effect_rows,

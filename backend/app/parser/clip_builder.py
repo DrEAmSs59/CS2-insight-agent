@@ -5,7 +5,7 @@ import os
 import uuid
 from typing import Any, Optional
 
-import pandas as pd
+from .. import native_table as pd
 
 from .models import Clip
 from .parse_utils import _int, _bool, _cell_str

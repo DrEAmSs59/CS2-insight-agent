@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 
-import pandas as pd
+from app import native_table as pd
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "probe_replay_dynamic_effects.py"
 _spec = importlib.util.spec_from_file_location("probe_replay_dynamic_effects", _SCRIPT)
@@ -41,9 +41,11 @@ class TestToBytesOrNone:
         assert probe.to_bytes_or_none([True]) is None
 
     def test_numpy_like_array_via_tolist(self):
-        import numpy as np
+        class ArrayLike:
+            def tolist(self):
+                return [7, 8]
 
-        assert probe.to_bytes_or_none(np.array([7, 8], dtype=np.uint8)) == b"\x07\x08"
+        assert probe.to_bytes_or_none(ArrayLike()) == b"\x07\x08"
 
 
 class TestSummarizeBinaryValue:
@@ -73,14 +75,12 @@ class TestSummarizeBinaryValue:
 
 class TestJsonSafe:
     def test_output_is_json_serializable(self):
-        import numpy as np
-
         blob = {
-            "a": np.int64(3),
-            "b": np.float32(1.5),
+            "a": 3,
+            "b": 1.5,
             "c": float("nan"),
             "d": b"\x00\xff",
-            "e": [np.uint8(1), (2, 3)],
+            "e": [1, (2, 3)],
             "f": {1: "x"},
         }
         out = probe.json_safe(blob)

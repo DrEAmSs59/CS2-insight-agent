@@ -5,9 +5,9 @@ from typing import Any, Iterable, Optional
 
 import math
 
-import pandas as pd
+from .. import native_table as pd
 
-from .parse_utils import _bool, _int, _round_end_winner_team_num
+from .parse_utils import _bool, _int, _round_end_winner_team_num, _to_pandas_df
 
 
 _UTILITY_WEAPONS = {"hegrenade", "inferno", "molotov", "incgrenade", "incendiary"}
@@ -405,7 +405,7 @@ def _extract_grenade_trajectories(parser: Any, tick_rate: float) -> list[dict[st
     if parser is None:
         return []
     try:
-        frame = parser.parse_grenades()
+        frame = _to_pandas_df(parser.parse_grenades())
     except BaseException:
         return []
     required = {"grenade_type", "grenade_entity_id", "tick", "x", "y"}

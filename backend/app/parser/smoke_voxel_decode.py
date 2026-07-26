@@ -19,8 +19,6 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
-import numpy as np
-
 VOXEL_GRID_DIM = 32
 VOXEL_WORLD_SIZE = 12.0
 # Grid coordinates identify cells, so 15.5 is the centre of cells 15 and 16.
@@ -41,6 +39,7 @@ _SEED_ENTRY_SIZE = 8
 _MASK_ENTRY_SIZE = 10
 _HEARTBEAT_LEN = 3
 _NEIGHBOR_6 = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+_GRID_ROW_MASK = (1 << VOXEL_GRID_DIM) - 1
 
 
 @dataclass(frozen=True)
@@ -193,13 +192,32 @@ def _demorton3(index: int, bits: int) -> tuple[int, int, int]:
     return x, y, z
 
 
-def _rebuild_occupied_grid(state: SmokeVoxelGridState) -> np.ndarray:
-    """Build the 32³ occupancy grid, including mask-enclosed interior cells."""
-    occupied = np.zeros((VOXEL_GRID_DIM, VOXEL_GRID_DIM, VOXEL_GRID_DIM), dtype=np.bool_)
+def _spread_row_bits(seed: int, empty: int) -> int:
+    """Expand reachable bits through one 32-cell Z row."""
+    reached = int(seed) & int(empty) & _GRID_ROW_MASK
+    while True:
+        expanded = (
+            reached
+            | ((reached << 1) & _GRID_ROW_MASK)
+            | (reached >> 1)
+        ) & empty
+        if expanded == reached:
+            return reached
+        reached = expanded
+
+
+def _rebuild_occupied_grid(state: SmokeVoxelGridState) -> list[list[int]]:
+    """Build the filled 32³ grid as 32-bit Z rows.
+
+    Each ``grid[x][y]`` integer stores all 32 Z cells. Flooding therefore moves
+    whole Z spans with integer bit operations instead of allocating a NumPy
+    tensor or visiting every neighbour as an individual Python object.
+    """
+    occupied = [[0 for _ in range(VOXEL_GRID_DIM)] for _ in range(VOXEL_GRID_DIM)]
 
     def mark(x: int, y: int, z: int) -> None:
         if 0 <= x < VOXEL_GRID_DIM and 0 <= y < VOXEL_GRID_DIM and 0 <= z < VOXEL_GRID_DIM:
-            occupied[x, y, z] = True
+            occupied[x][y] |= 1 << z
 
     for x, y, z in state.seeds:
         mark(x, y, z)
@@ -210,31 +228,53 @@ def _rebuild_occupied_grid(state: SmokeVoxelGridState) -> np.ndarray:
                 sub_x, sub_y, sub_z = _demorton3(bit, 2)
                 mark(cell_x * 4 + sub_x, cell_y * 4 + sub_y, cell_z * 4 + sub_z)
 
-    # Flood empty space from all six boundary faces. NumPy shifts keep each
-    # expansion in native array operations, avoiding hundreds of millions of
-    # Python neighbour calls when reconstructing every delta in a full match.
-    empty = ~occupied
-    outside = np.zeros_like(occupied)
-    outside[0, :, :] = empty[0, :, :]
-    outside[-1, :, :] = empty[-1, :, :]
-    outside[:, 0, :] = empty[:, 0, :]
-    outside[:, -1, :] = empty[:, -1, :]
-    outside[:, :, 0] = empty[:, :, 0]
-    outside[:, :, -1] = empty[:, :, -1]
+    empty = [
+        [_GRID_ROW_MASK ^ occupied[x][y] for y in range(VOXEL_GRID_DIM)]
+        for x in range(VOXEL_GRID_DIM)
+    ]
+    outside = [[0 for _ in range(VOXEL_GRID_DIM)] for _ in range(VOXEL_GRID_DIM)]
+    pending: deque[tuple[int, int]] = deque()
+    queued: set[tuple[int, int]] = set()
 
-    while True:
-        expanded = outside.copy()
-        expanded[1:, :, :] |= outside[:-1, :, :]
-        expanded[:-1, :, :] |= outside[1:, :, :]
-        expanded[:, 1:, :] |= outside[:, :-1, :]
-        expanded[:, :-1, :] |= outside[:, 1:, :]
-        expanded[:, :, 1:] |= outside[:, :, :-1]
-        expanded[:, :, :-1] |= outside[:, :, 1:]
-        expanded &= empty
-        if np.array_equal(expanded, outside):
-            break
-        outside = expanded
-    return occupied | ~outside
+    def add_reachable(x: int, y: int, bits: int) -> None:
+        old = outside[x][y]
+        new = _spread_row_bits(old | bits, empty[x][y])
+        if new == old:
+            return
+        outside[x][y] = new
+        key = (x, y)
+        if key not in queued:
+            queued.add(key)
+            pending.append(key)
+
+    # Seed all six boundary faces. X/Y faces expose the full row; Z faces
+    # expose only their respective low/high bit.
+    for y in range(VOXEL_GRID_DIM):
+        add_reachable(0, y, empty[0][y])
+        add_reachable(VOXEL_GRID_DIM - 1, y, empty[-1][y])
+    for x in range(VOXEL_GRID_DIM):
+        add_reachable(x, 0, empty[x][0])
+        add_reachable(x, VOXEL_GRID_DIM - 1, empty[x][-1])
+        for y in range(VOXEL_GRID_DIM):
+            add_reachable(x, y, (1 | (1 << (VOXEL_GRID_DIM - 1))) & empty[x][y])
+
+    while pending:
+        x, y = pending.popleft()
+        queued.discard((x, y))
+        bits = outside[x][y]
+        if x > 0:
+            add_reachable(x - 1, y, bits)
+        if x + 1 < VOXEL_GRID_DIM:
+            add_reachable(x + 1, y, bits)
+        if y > 0:
+            add_reachable(x, y - 1, bits)
+        if y + 1 < VOXEL_GRID_DIM:
+            add_reachable(x, y + 1, bits)
+
+    return [
+        [occupied[x][y] | (_GRID_ROW_MASK ^ outside[x][y]) for y in range(VOXEL_GRID_DIM)]
+        for x in range(VOXEL_GRID_DIM)
+    ]
 
 
 def project_smoke_grid_to_cells(
@@ -249,14 +289,14 @@ def project_smoke_grid_to_cells(
     occupied = _rebuild_occupied_grid(state)
     columns: dict[tuple[int, int], tuple[int, int]] = {}
     voxel_count = 0
-    for x_raw, y_raw, z_raw in np.argwhere(occupied):
-        voxel_count += 1
-        x, y, z = int(x_raw), int(y_raw), int(z_raw)
-        previous = columns.get((x, y))
-        if previous is None:
-            columns[(x, y)] = (z, z)
-        else:
-            columns[(x, y)] = (min(previous[0], z), max(previous[1], z))
+    for x, rows in enumerate(occupied):
+        for y, bits in enumerate(rows):
+            if not bits:
+                continue
+            voxel_count += bits.bit_count()
+            min_z = (bits & -bits).bit_length() - 1
+            max_z = bits.bit_length() - 1
+            columns[(x, y)] = (min_z, max_z)
 
     cells: list[list[float]] = []
     for (x, y), (min_z, max_z) in sorted(columns.items()):

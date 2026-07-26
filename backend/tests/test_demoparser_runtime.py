@@ -9,6 +9,7 @@ def test_required_patched_runtime_is_ready(monkeypatch):
     import demoparser2
 
     class CompleteParser:
+        decode_smoke_voxel_journal = staticmethod(lambda: None)
         write_replay_parquet = staticmethod(lambda: None)
         read_replay_parquet_round = staticmethod(lambda: None)
         read_replay_parquet_round_binary = staticmethod(lambda: None)
@@ -39,6 +40,6 @@ def test_stock_runtime_fails_with_setup_command(monkeypatch):
         demoparser_runtime.require_demoparser_runtime()
 
     message = str(error.value)
-    assert "0.41.4+cs2insight5" in message
+    assert "0.41.4+cs2insight6" in message
     assert "write_replay_parquet" in message
     assert "setup-backend-dev.ps1" in message

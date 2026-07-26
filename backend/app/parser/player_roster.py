@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import (
@@ -592,7 +592,7 @@ def _compute_spec_slot_legacy_team_steam_sort(
         mask = work["name"].astype(str).str.strip().str.lower() == target_l
         if not mask.any():
             return None
-        pos = int(mask.to_numpy().argmax())
+        pos = mask.tolist().index(True)
         one_based = pos + 1
         if os.environ.get("CS2_SPEC_SLOT_ZERO_BASED", "").strip().lower() in ("1", "true", "yes"):
             return pos

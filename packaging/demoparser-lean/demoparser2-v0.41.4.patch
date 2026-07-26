@@ -1741,7 +1741,7 @@ index fc83ce4..b9b4afb 100644
              }
          }
 diff --git a/src/python/Cargo.lock b/src/python/Cargo.lock
-index 2e62735..75cc881 100644
+index 2e62735..915d708 100644
 --- a/src/python/Cargo.lock
 +++ b/src/python/Cargo.lock
 @@ -9,6 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2001,7 +2001,7 @@ index 2e62735..75cc881 100644
  [[package]]
  name = "demoparser2"
 -version = "0.40.2"
-+version = "0.41.4+cs2insight5"
++version = "0.41.4+cs2insight6"
  dependencies = [
   "ahash",
   "csgoproto",
@@ -3716,14 +3716,14 @@ index 2e62735..75cc881 100644
  name = "zstd"
  version = "0.13.3"
 diff --git a/src/python/Cargo.toml b/src/python/Cargo.toml
-index 99f044e..a5429a1 100644
+index 99f044e..2051dba 100644
 --- a/src/python/Cargo.toml
 +++ b/src/python/Cargo.toml
 @@ -1,6 +1,6 @@
  [package]
  name = "demoparser2"
 -version = "0.41.4"
-+version = "0.41.4+cs2insight5"
++version = "0.41.4+cs2insight6"
  edition = "2021"
  
  
@@ -3743,25 +3743,59 @@ index 99f044e..a5429a1 100644
  [dependencies.parser]
  path = "../parser"
 diff --git a/src/python/demoparser2.pyi b/src/python/demoparser2.pyi
-index bbdb48e..37cc3da 100644
+index bbdb48e..af8a333 100644
 --- a/src/python/demoparser2.pyi
 +++ b/src/python/demoparser2.pyi
-@@ -36,6 +36,12 @@ class DemoParser:
+@@ -1,5 +1,5 @@
+-import pandas as pd
+ from typing import (
++    Any,
+     Dict,
+     Sequence,
+     Optional,
+@@ -12,6 +12,8 @@ from typing import (
+     TypedDict
+ )
+ 
++NativeColumns = Dict[str, List[Any]]
++
+ @type_check_only
+ class VoiceData(TypedDict):
+     tick: int
+@@ -35,25 +37,57 @@ class DemoParser:
+     def list_game_events(self) -> List[str]: ...
      def parse_grenades(
          self, *, extra: Optional[Sequence[str]] = None, grenades: bool = True
-     ) -> pd.DataFrame: ...
+-    ) -> pd.DataFrame: ...
+-    def parse_player_info(self) -> pd.DataFrame: ...
+-    def parse_item_drops(self) -> pd.DataFrame: ...
+-    def parse_skins(self) -> pd.DataFrame: ...
++    ) -> NativeColumns: ...
 +    def parse_infernos(
 +        self, *, extra: Optional[Sequence[str]] = None
-+    ) -> pd.DataFrame: ...
++    ) -> NativeColumns: ...
 +    def parse_utility_effects(
 +        self, *, extra: Optional[Sequence[str]] = None
-+    ) -> pd.DataFrame: ...
-     def parse_player_info(self) -> pd.DataFrame: ...
-     def parse_item_drops(self) -> pd.DataFrame: ...
-     def parse_skins(self) -> pd.DataFrame: ...
-@@ -54,6 +60,25 @@ class DemoParser:
++    ) -> NativeColumns: ...
++    def parse_player_info(self) -> NativeColumns: ...
++    def parse_item_drops(self) -> NativeColumns: ...
++    def parse_skins(self) -> NativeColumns: ...
+     def parse_event(
+         self,
+         event_name: str,
+         *,
+         player: Optional[Sequence[str]] = None,
          other: Optional[Sequence[str]] = None,
-     ) -> List[Tuple[str, pd.DataFrame]]: ...
+-    ) -> pd.DataFrame: ...
++    ) -> NativeColumns: ...
+     def parse_events(
+         self,
+         event_name: Sequence[str],
+         *,
+         player: Optional[Sequence[str]] = None,
+         other: Optional[Sequence[str]] = None,
+-    ) -> List[Tuple[str, pd.DataFrame]]: ...
++    ) -> List[Tuple[str, NativeColumns]]: ...
      def parse_voice(self) -> List[VoiceData]: ...
 +    def write_replay_parquet(
 +        self,
@@ -3771,10 +3805,17 @@ index bbdb48e..37cc3da 100644
 +        round_numbers: Sequence[int],
 +    ) -> dict: ...
 +    @staticmethod
++    def decode_smoke_voxel_journal(
++        data: bytes,
++        declared_size: int,
++        detonation_pos: Sequence[float],
++        max_seq: Optional[int] = None,
++    ) -> List[dict]: ...
++    @staticmethod
 +    def read_replay_parquet_round(
 +        parquet_path: str,
 +        row_group: int,
-+    ) -> pd.DataFrame: ...
++    ) -> NativeColumns: ...
 +    @staticmethod
 +    def read_replay_parquet_round_binary(
 +        parquet_path: str,
@@ -3785,8 +3826,26 @@ index bbdb48e..37cc3da 100644
      def parse_ticks(
          self,
          wanted_props: Sequence[str],
+@@ -63,7 +97,7 @@ class DemoParser:
+         prop_states: Optional[
+             Sequence[WantedPropStateProtocol | WantedPropState]
+         ] = None,
+-    ) -> pd.DataFrame:
++    ) -> NativeColumns:
+         """Parse the specified props.
+ 
+         Args:
+@@ -74,7 +108,7 @@ class DemoParser:
+                 `None` or an empty Sequence means all ticks. Defaults to `None`.
+ 
+         Returns:
+-            pd.DataFrame: Dataframe of all the parsed props for each player at each tick.
++            NativeColumns: Column-oriented parsed props for each player at each tick.
+         """
+ 
+ __all__ = ["DemoParser", "WantedPropState"]
 diff --git a/src/python/pyproject.toml b/src/python/pyproject.toml
-index 7d2deac..507e224 100644
+index 7d2deac..f9136b8 100644
 --- a/src/python/pyproject.toml
 +++ b/src/python/pyproject.toml
 @@ -6,7 +6,7 @@ build-backend = "maturin"
@@ -3794,7 +3853,7 @@ index 7d2deac..507e224 100644
  dynamic = ["version"]
  requires-python = ">=3.8"
 -dependencies = ["pandas>=1.5.0", "numpy", "polars", "pyarrow", "tqdm"]
-+dependencies = ["pandas>=1.5.0"]
++dependencies = []
  classifiers = [
      "Programming Language :: Rust",
      "Programming Language :: Python :: Implementation :: CPython",
@@ -3806,10 +3865,10 @@ index 7d2deac..507e224 100644
 \ No newline at end of file
 +overflow-checks = false
 diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
-index c950726..30fa2a4 100644
+index c950726..0646a28 100644
 --- a/src/python/src/lib.rs
 +++ b/src/python/src/lib.rs
-@@ -1,28 +1,28 @@
+@@ -1,43 +1,952 @@
  use ahash::{AHashMap, RandomState};
  use itertools::Itertools;
  use memmap2::Mmap;
@@ -3846,33 +3905,296 @@ index c950726..30fa2a4 100644
 -use pyo3::ffi::Py_uintptr_t;
  use pyo3::impl_::frompyobject::extract_struct_field;
  use pyo3::prelude::*;
- use pyo3::types::IntoPyDict;
-@@ -32,12 +32,661 @@ use pyo3::types::PyList;
+-use pyo3::types::IntoPyDict;
+ use pyo3::types::PyBytes;
+ use pyo3::types::PyDict;
+ use pyo3::types::PyList;
  use pyo3::IntoPyObjectExt;
  use pyo3::{intern, Python};
  use pyo3::{PyAny, PyResult};
 -use std::collections::HashMap;
-+use std::collections::{BTreeMap, HashMap};
++use std::collections::{BTreeMap, HashMap, VecDeque};
 +use std::fs::File;
  use std::sync::Arc;
  
  use pyo3::create_exception;
  create_exception!(DemoParser, Exception, pyo3::exceptions::PyException);
  
-+fn pandas_dataframe(
++const SMOKE_GRID_DIM: usize = 32;
++const SMOKE_GRID_ROWS: usize = SMOKE_GRID_DIM * SMOKE_GRID_DIM;
++const SMOKE_ROW_MASK: u32 = u32::MAX;
++const SMOKE_VOXEL_SIZE: f64 = 12.0;
++const SMOKE_GRID_CENTER: f64 = 15.5;
++
++struct SmokeProjectionSample {
++    seq: u16,
++    phase: u8,
++    voxel_count: usize,
++    cells: Vec<[f64; 4]>,
++}
++
++fn smoke_demorton3(index: u16, bits: usize) -> (usize, usize, usize) {
++    let mut x = 0usize;
++    let mut y = 0usize;
++    let mut z = 0usize;
++    let value = usize::from(index);
++    for bit in 0..bits {
++        x |= ((value >> (3 * bit)) & 1) << bit;
++        y |= ((value >> (3 * bit + 1)) & 1) << bit;
++        z |= ((value >> (3 * bit + 2)) & 1) << bit;
++    }
++    (x, y, z)
++}
++
++fn smoke_spread_row(seed: u32, empty: u32) -> u32 {
++    let mut reached = seed & empty;
++    loop {
++        let expanded = (reached | reached.wrapping_shl(1) | (reached >> 1)) & empty;
++        if expanded == reached {
++            return reached;
++        }
++        reached = expanded;
++    }
++}
++
++fn smoke_add_reachable(
++    row: usize,
++    bits: u32,
++    empty: &[u32; SMOKE_GRID_ROWS],
++    outside: &mut [u32; SMOKE_GRID_ROWS],
++    queued: &mut [bool; SMOKE_GRID_ROWS],
++    pending: &mut VecDeque<usize>,
++) {
++    let old = outside[row];
++    let new = smoke_spread_row(old | bits, empty[row]);
++    if new == old {
++        return;
++    }
++    outside[row] = new;
++    if !queued[row] {
++        queued[row] = true;
++        pending.push_back(row);
++    }
++}
++
++fn smoke_occupied_rows(
++    seeds: &HashMap<(u8, u8, u8), u8>,
++    masks: &HashMap<u16, u64>,
++) -> [u32; SMOKE_GRID_ROWS] {
++    let mut occupied = [0u32; SMOKE_GRID_ROWS];
++    for (&(x, y, z), &density) in seeds {
++        if density > 0
++            && usize::from(x) < SMOKE_GRID_DIM
++            && usize::from(y) < SMOKE_GRID_DIM
++            && usize::from(z) < SMOKE_GRID_DIM
++        {
++            occupied[usize::from(x) * SMOKE_GRID_DIM + usize::from(y)] |= 1u32 << z;
++        }
++    }
++    for (&cell_index, &mask) in masks {
++        let (cell_x, cell_y, cell_z) = smoke_demorton3(cell_index, 3);
++        let mut remaining = mask;
++        while remaining != 0 {
++            let bit = remaining.trailing_zeros() as u16;
++            remaining &= remaining - 1;
++            let (sub_x, sub_y, sub_z) = smoke_demorton3(bit, 2);
++            let x = cell_x * 4 + sub_x;
++            let y = cell_y * 4 + sub_y;
++            let z = cell_z * 4 + sub_z;
++            if x < SMOKE_GRID_DIM && y < SMOKE_GRID_DIM && z < SMOKE_GRID_DIM {
++                occupied[x * SMOKE_GRID_DIM + y] |= 1u32 << z;
++            }
++        }
++    }
++    occupied
++}
++
++fn smoke_fill_enclosed(occupied: &[u32; SMOKE_GRID_ROWS]) -> [u32; SMOKE_GRID_ROWS] {
++    let mut empty = [0u32; SMOKE_GRID_ROWS];
++    let mut outside = [0u32; SMOKE_GRID_ROWS];
++    let mut queued = [false; SMOKE_GRID_ROWS];
++    let mut pending = VecDeque::with_capacity(SMOKE_GRID_ROWS);
++    for (target, source) in empty.iter_mut().zip(occupied) {
++        *target = SMOKE_ROW_MASK ^ *source;
++    }
++    for y in 0..SMOKE_GRID_DIM {
++        smoke_add_reachable(0 * SMOKE_GRID_DIM + y, empty[y], &empty, &mut outside, &mut queued, &mut pending);
++        let last = (SMOKE_GRID_DIM - 1) * SMOKE_GRID_DIM + y;
++        smoke_add_reachable(last, empty[last], &empty, &mut outside, &mut queued, &mut pending);
++    }
++    let z_faces = 1u32 | (1u32 << (SMOKE_GRID_DIM - 1));
++    for x in 0..SMOKE_GRID_DIM {
++        let first = x * SMOKE_GRID_DIM;
++        smoke_add_reachable(first, empty[first], &empty, &mut outside, &mut queued, &mut pending);
++        let last = first + SMOKE_GRID_DIM - 1;
++        smoke_add_reachable(last, empty[last], &empty, &mut outside, &mut queued, &mut pending);
++        for y in 0..SMOKE_GRID_DIM {
++            let row = first + y;
++            smoke_add_reachable(row, z_faces & empty[row], &empty, &mut outside, &mut queued, &mut pending);
++        }
++    }
++    while let Some(row) = pending.pop_front() {
++        queued[row] = false;
++        let bits = outside[row];
++        let x = row / SMOKE_GRID_DIM;
++        let y = row % SMOKE_GRID_DIM;
++        if x > 0 {
++            smoke_add_reachable(row - SMOKE_GRID_DIM, bits, &empty, &mut outside, &mut queued, &mut pending);
++        }
++        if x + 1 < SMOKE_GRID_DIM {
++            smoke_add_reachable(row + SMOKE_GRID_DIM, bits, &empty, &mut outside, &mut queued, &mut pending);
++        }
++        if y > 0 {
++            smoke_add_reachable(row - 1, bits, &empty, &mut outside, &mut queued, &mut pending);
++        }
++        if y + 1 < SMOKE_GRID_DIM {
++            smoke_add_reachable(row + 1, bits, &empty, &mut outside, &mut queued, &mut pending);
++        }
++    }
++    let mut filled = [0u32; SMOKE_GRID_ROWS];
++    for row in 0..SMOKE_GRID_ROWS {
++        filled[row] = occupied[row] | (SMOKE_ROW_MASK ^ outside[row]);
++    }
++    filled
++}
++
++fn smoke_project(
++    seeds: &HashMap<(u8, u8, u8), u8>,
++    masks: &HashMap<u16, u64>,
++    origin: [f64; 3],
++) -> (Vec<[f64; 4]>, usize) {
++    let occupied = smoke_occupied_rows(seeds, masks);
++    let filled = smoke_fill_enclosed(&occupied);
++    let mut cells: Vec<[f64; 4]> = Vec::new();
++    let mut voxel_count = 0usize;
++    for x in 0..SMOKE_GRID_DIM {
++        for y in 0..SMOKE_GRID_DIM {
++            let bits = filled[x * SMOKE_GRID_DIM + y];
++            if bits == 0 {
++                continue;
++            }
++            voxel_count += bits.count_ones() as usize;
++            let min_z = bits.trailing_zeros() as usize;
++            let max_z = (u32::BITS - 1 - bits.leading_zeros()) as usize;
++            let wx = (((x as f64 - SMOKE_GRID_CENTER) * SMOKE_VOXEL_SIZE + origin[0]) * 2.0)
++                .round_ties_even()
++                / 2.0;
++            let wy = (((y as f64 - SMOKE_GRID_CENTER) * SMOKE_VOXEL_SIZE + origin[1]) * 2.0)
++                .round_ties_even()
++                / 2.0;
++            let z_values = [min_z, max_z];
++            let z_count = if min_z == max_z { 1 } else { 2 };
++            for &z in &z_values[..z_count] {
++                let wz = (((z as f64 - SMOKE_GRID_CENTER) * SMOKE_VOXEL_SIZE + origin[2]) * 2.0)
++                    .round_ties_even()
++                    / 2.0;
++                cells.push([wx, wy, wz, 1.0]);
++            }
++        }
++    }
++    (cells, voxel_count)
++}
++
++fn decode_smoke_projection_samples(
++    data: &[u8],
++    declared_size: usize,
++    origin: [f64; 3],
++    max_seq: Option<u16>,
++) -> Result<Vec<SmokeProjectionSample>, String> {
++    let end = declared_size.min(data.len());
++    let limit = max_seq.unwrap_or(u16::MAX);
++    let mut offset = 0usize;
++    let mut ready = false;
++    let mut seeds: HashMap<(u8, u8, u8), u8> = HashMap::new();
++    let mut masks: HashMap<u16, u64> = HashMap::new();
++    let mut samples = Vec::new();
++    while offset + 4 <= end {
++        let seq = u16::from_le_bytes([data[offset], data[offset + 1]]);
++        let length = usize::from(u16::from_le_bytes([data[offset + 2], data[offset + 3]]));
++        let payload_start = offset + 4;
++        let payload_end = payload_start + length;
++        if payload_end > end {
++            return Err(format!("smoke voxel record at offset {offset} overruns declared size {end}"));
++        }
++        offset = payload_end;
++        if seq > limit || length < 2 {
++            continue;
++        }
++        let blob = &data[payload_start..payload_end];
++        let phase = blob[0];
++        let frame_type = blob[1];
++        let mut changed = false;
++        if frame_type == 3 {
++            if blob.len() < 3 {
++                continue;
++            }
++            let count = usize::from(blob[2]);
++            let mut cursor = 3usize;
++            let seed_end = cursor + count * 8;
++            if seed_end + 2 > blob.len() {
++                continue;
++            }
++            seeds.clear();
++            for _ in 0..count {
++                let density = blob[cursor + 3];
++                if density > 0 {
++                    seeds.insert((blob[cursor], blob[cursor + 1], blob[cursor + 2]), density);
++                }
++                cursor += 8;
++            }
++            let mask_count = usize::from(u16::from_le_bytes([blob[cursor], blob[cursor + 1]]));
++            cursor += 2;
++            if cursor + mask_count * 10 > blob.len() {
++                continue;
++            }
++            masks.clear();
++            for _ in 0..mask_count {
++                let cell = u16::from_le_bytes([blob[cursor], blob[cursor + 1]]);
++                let mask = u64::from_le_bytes(blob[cursor + 2..cursor + 10].try_into().unwrap());
++                masks.insert(cell, mask);
++                cursor += 10;
++            }
++            ready = true;
++            changed = true;
++        } else if frame_type == 2 && ready && blob.len() >= 4 {
++            let mask_count = usize::from(u16::from_le_bytes([blob[2], blob[3]]));
++            let mut cursor = 4usize;
++            if cursor + mask_count * 10 <= blob.len() {
++                for _ in 0..mask_count {
++                    let cell = u16::from_le_bytes([blob[cursor], blob[cursor + 1]]);
++                    let mask = u64::from_le_bytes(blob[cursor + 2..cursor + 10].try_into().unwrap());
++                    masks.insert(cell, mask);
++                    cursor += 10;
++                }
++                changed = mask_count > 0;
++            }
++        }
++        if changed {
++            let (cells, voxel_count) = smoke_project(&seeds, &masks, origin);
++            samples.push(SmokeProjectionSample {
++                seq,
++                phase,
++                voxel_count,
++                cells,
++            });
++        }
++    }
++    Ok(samples)
++}
++
++fn native_columns(
 +    py: Python<'_>,
 +    columns: Vec<(String, Py<PyAny>)>,
 +    column_order: Vec<String>,
 +) -> PyResult<Py<PyAny>> {
++    let mut columns_by_name: HashMap<String, Py<PyAny>> = columns.into_iter().collect();
 +    let data = PyDict::new(py);
-+    for (name, values) in columns {
-+        data.set_item(name, values)?;
++    for name in column_order {
++        if let Some(values) = columns_by_name.remove(&name) {
++            data.set_item(name, values)?;
++        }
 +    }
-+    let pandas = py.import("pandas")?;
-+    let kwargs = vec![("columns", column_order)].into_py_dict(py)?;
-+    pandas
-+        .call_method("DataFrame", (data,), Some(&kwargs))?
-+        .into_py_any(py)
++    data.into_py_any(py)
 +}
 +
 +fn demo_output_dataframe(py: Python<'_>, output: &DemoOutput) -> PyResult<Py<PyAny>> {
@@ -3954,7 +4276,7 @@ index c950726..30fa2a4 100644
 +    named_columns.extend(object_names.iter().cloned().zip(object_columns));
 +    let mut column_order: Vec<String> = object_names.iter().rev().cloned().collect();
 +    column_order.extend(arrow_names);
-+    pandas_dataframe(py, named_columns, column_order)
++    native_columns(py, named_columns, column_order)
 +}
 +
 +fn replay_parquet_field(name: &str, data: &VarVec) -> Result<ParquetType, String> {
@@ -4141,7 +4463,7 @@ index c950726..30fa2a4 100644
 +    rows: Vec<parquet::record::Row>,
 +) -> PyResult<Py<PyAny>> {
 +    let Some(first_row) = rows.first() else {
-+        return pandas_dataframe(py, vec![], vec![]);
++        return native_columns(py, vec![], vec![]);
 +    };
 +    let names: Vec<String> = first_row
 +        .get_column_iter()
@@ -4164,7 +4486,7 @@ index c950726..30fa2a4 100644
 +        .cloned()
 +        .zip(lists.into_iter().map(|list| list.into_py_any(py).unwrap()))
 +        .collect();
-+    pandas_dataframe(py, columns, names)
++    native_columns(py, columns, names)
 +}
 +
 +const REPLAY_BINARY_MAGIC: &[u8; 8] = b"CS2RPL01";
@@ -4510,7 +4832,7 @@ index c950726..30fa2a4 100644
  #[derive(Clone)]
  struct PyVariant(Variant);
  
-@@ -138,6 +787,7 @@ impl DemoParser {
+@@ -138,6 +1047,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4518,7 +4840,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -166,6 +816,7 @@ impl DemoParser {
+@@ -166,6 +1076,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4526,7 +4848,7 @@ index c950726..30fa2a4 100644
              only_header: false,
              list_props: true,
              only_convars: false,
-@@ -192,6 +843,7 @@ impl DemoParser {
+@@ -192,6 +1103,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4534,7 +4856,7 @@ index c950726..30fa2a4 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -243,6 +895,7 @@ impl DemoParser {
+@@ -243,6 +1155,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: true,
              parse_grenades: grenades,
@@ -4542,7 +4864,7 @@ index c950726..30fa2a4 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -267,29 +920,27 @@ impl DemoParser {
+@@ -267,29 +1180,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -4578,7 +4900,7 @@ index c950726..30fa2a4 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -307,26 +958,243 @@ impl DemoParser {
+@@ -307,26 +1218,243 @@ impl DemoParser {
                          df_column_names_py.push(prop_info.prop_friendly_name);
                          all_pyobjects.push(data.into_py_any(py)?);
                      }
@@ -4625,7 +4947,7 @@ index c950726..30fa2a4 100644
 +        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
 +        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
 +        column_order.extend(df_column_names_arrow);
-+        pandas_dataframe(py, columns, column_order)
++        native_columns(py, columns, column_order)
 +    }
 +
 +    /// Parse sparse smoke-voxel and inferno-cell state changes in one demo pass.
@@ -4833,11 +5155,11 @@ index c950726..30fa2a4 100644
 +        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
 +        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
 +        column_order.extend(df_column_names_arrow);
-+        pandas_dataframe(py, columns, column_order)
++        native_columns(py, columns, column_order)
      }
  
      pub fn parse_player_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-@@ -341,6 +1209,7 @@ impl DemoParser {
+@@ -341,6 +1469,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4845,7 +5167,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -359,24 +1228,19 @@ impl DemoParser {
+@@ -359,24 +1488,19 @@ impl DemoParser {
          let names: Vec<Option<String>> = output.player_md.iter().map(|p| p.name.clone()).collect();
  
          // SoA form
@@ -4867,7 +5189,7 @@ index c950726..30fa2a4 100644
 -            let pandas_df = df.call_method("to_pandas", (), Some(&kwargs))?;
 -            pandas_df.into_py_any(py)
 -        })
-+        pandas_dataframe(
++        native_columns(
 +            py,
 +            vec![
 +                ("steamid".to_string(), steamids.into_py_any(py)?),
@@ -4883,7 +5205,7 @@ index c950726..30fa2a4 100644
      }
      pub fn parse_item_drops(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -390,6 +1254,7 @@ impl DemoParser {
+@@ -390,6 +1514,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4891,7 +5213,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -416,52 +1281,32 @@ impl DemoParser {
+@@ -416,52 +1541,32 @@ impl DemoParser {
              .iter()
              .map(|x| x.custom_name.clone())
              .collect();
@@ -4952,7 +5274,7 @@ index c950726..30fa2a4 100644
 +            "paint_wear",
 +            "custom_name",
 +        ];
-+        pandas_dataframe(
++        native_columns(
 +            py,
 +            vec![
 +                (names[0].to_string(), account_id.into_py_any(py)?),
@@ -4970,7 +5292,7 @@ index c950726..30fa2a4 100644
      }
      pub fn parse_skins(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
          let settings = ParserInputs {
-@@ -475,6 +1320,7 @@ impl DemoParser {
+@@ -475,6 +1580,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -4978,7 +5300,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -497,45 +1343,28 @@ impl DemoParser {
+@@ -497,45 +1603,28 @@ impl DemoParser {
          let custom_name: Vec<Option<String>> =
              output.skins.iter().map(|s| s.custom_name.clone()).collect();
  
@@ -5030,7 +5352,7 @@ index c950726..30fa2a4 100644
 +            "custom_name",
 +            "steamid",
 +        ];
-+        pandas_dataframe(
++        native_columns(
 +            py,
 +            vec![
 +                (names[0].to_string(), def_idx_vec.into_py_any(py)?),
@@ -5046,7 +5368,7 @@ index c950726..30fa2a4 100644
      }
  
      #[pyo3(signature = (event_name, *, player=None, other=None))]
-@@ -580,6 +1409,7 @@ impl DemoParser {
+@@ -580,6 +1669,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -5054,7 +5376,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -641,6 +1471,7 @@ impl DemoParser {
+@@ -641,6 +1731,7 @@ impl DemoParser {
              wanted_ticks: vec![],
              parse_projectiles: false,
              parse_grenades: false,
@@ -5062,7 +5384,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -671,6 +1502,7 @@ impl DemoParser {
+@@ -671,6 +1762,7 @@ impl DemoParser {
              parse_ents: false,
              parse_projectiles: false,
              parse_grenades: false,
@@ -5070,7 +5392,7 @@ index c950726..30fa2a4 100644
              only_header: false,
              list_props: false,
              only_convars: false,
-@@ -698,6 +1530,258 @@ impl DemoParser {
+@@ -698,6 +1790,289 @@ impl DemoParser {
          hm.into_py_any(py)
      }
  
@@ -5271,6 +5593,37 @@ index c950726..30fa2a4 100644
 +        Ok(result.into_py_any(py)?)
 +    }
 +
++    /// Decode a cumulative CS2 smoke journal and project every geometry change.
++    #[staticmethod]
++    #[pyo3(signature = (data, declared_size, detonation_pos, max_seq=None))]
++    pub fn decode_smoke_voxel_journal(
++        py: Python<'_>,
++        data: Vec<u8>,
++        declared_size: usize,
++        detonation_pos: Vec<f64>,
++        max_seq: Option<u32>,
++    ) -> PyResult<Py<PyAny>> {
++        if detonation_pos.len() < 3 {
++            return Err(PyValueError::new_err("detonation_pos must contain x, y, z"));
++        }
++        let origin = [detonation_pos[0], detonation_pos[1], detonation_pos[2]];
++        let limit = max_seq.map(|value| value.min(u32::from(u16::MAX)) as u16);
++        let samples = py
++            .detach(move || decode_smoke_projection_samples(&data, declared_size, origin, limit))
++            .map_err(PyValueError::new_err)?;
++        let result = PyList::empty(py);
++        for sample in samples {
++            let item = PyDict::new(py);
++            item.set_item("seq", sample.seq)?;
++            item.set_item("phase", sample.phase)?;
++            item.set_item("voxel_count", sample.voxel_count)?;
++            item.set_item("cell_size", SMOKE_VOXEL_SIZE)?;
++            item.set_item("cells", sample.cells)?;
++            result.append(item)?;
++        }
++        result.into_py_any(py)
++    }
++
 +    /// Read one replay Parquet row group without requiring PyArrow in Python.
 +    #[staticmethod]
 +    pub fn read_replay_parquet_round(
@@ -5329,7 +5682,7 @@ index c950726..30fa2a4 100644
      #[pyo3(signature = (wanted_props, *, players=None, ticks=None, prop_states=None))]
      pub fn parse_ticks(
          &self,
-@@ -750,6 +1834,7 @@ impl DemoParser {
+@@ -750,6 +2125,7 @@ impl DemoParser {
              wanted_ticks,
              parse_projectiles: false,
              parse_grenades: false,
@@ -5337,7 +5690,7 @@ index c950726..30fa2a4 100644
              only_header: true,
              list_props: false,
              only_convars: false,
-@@ -773,29 +1858,27 @@ impl DemoParser {
+@@ -773,29 +2149,27 @@ impl DemoParser {
                  match &output.df[&prop_info.id].data {
                      Some(VarVec::F32(data)) => {
                          df_column_names_arrow.push(prop_info.prop_friendly_name);
@@ -5373,7 +5726,7 @@ index c950726..30fa2a4 100644
                      }
                      Some(VarVec::StringVec(data)) => {
                          df_column_names_py.push(prop_info.prop_friendly_name);
-@@ -813,6 +1896,29 @@ impl DemoParser {
+@@ -813,6 +2187,29 @@ impl DemoParser {
                          df_column_names_py.push(prop_info.prop_friendly_name);
                          all_pyobjects.push(data.into_py_any(py)?);
                      }
@@ -5403,7 +5756,7 @@ index c950726..30fa2a4 100644
  
                      Some(VarVec::Stickers(data)) => {
                          let mut dicts = vec![];
-@@ -863,146 +1969,50 @@ impl DemoParser {
+@@ -863,146 +2260,50 @@ impl DemoParser {
                  }
              }
          }
@@ -5431,7 +5784,7 @@ index c950726..30fa2a4 100644
 +        columns.extend(df_column_names_py.iter().cloned().zip(all_pyobjects));
 +        let mut column_order: Vec<String> = df_column_names_py.iter().rev().cloned().collect();
 +        column_order.extend(df_column_names_arrow);
-+        pandas_dataframe(py, columns, column_order)
++        native_columns(py, columns, column_order)
      }
  }
  
@@ -5567,11 +5920,11 @@ index c950726..30fa2a4 100644
 +            let mut column_order: Vec<String> =
 +                columns.iter().map(|(name, _)| name.clone()).collect();
 +            column_order.sort();
-+            let dfp = pandas_dataframe(py, columns, column_order)?;
++            let dfp = native_columns(py, columns, column_order)?;
              vv.push((k, dfp));
          }
      }
-@@ -1010,66 +2020,37 @@ pub fn series_from_multiple_events(
+@@ -1010,66 +2311,37 @@ pub fn series_from_multiple_events(
  }
  
  pub enum DataFrameColumn {
@@ -5645,7 +5998,7 @@ index c950726..30fa2a4 100644
 +    }
 +    let mut column_order: Vec<String> = columns.iter().map(|(name, _)| name.clone()).collect();
 +    column_order.sort();
-+    let dfp = pandas_dataframe(py, columns, column_order)?;
++    let dfp = native_columns(py, columns, column_order)?;
      Ok(dfp)
  }
 -fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
@@ -5653,7 +6006,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1077,9 +2058,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1077,9 +2349,9 @@ fn to_f32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5665,7 +6018,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1087,9 +2068,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1087,9 +2359,9 @@ fn to_u32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5677,7 +6030,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1097,9 +2078,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1097,9 +2369,9 @@ fn to_i32_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5689,7 +6042,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1107,7 +2088,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1107,7 +2379,7 @@ fn to_u64_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5698,7 +6051,7 @@ index c950726..30fa2a4 100644
  }
  fn to_py_string_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1139,7 +2120,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
+@@ -1139,7 +2411,7 @@ fn to_py_u32_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrame
      }
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
@@ -5707,7 +6060,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1147,10 +2128,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1147,10 +2419,10 @@ fn to_string_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5720,7 +6073,7 @@ index c950726..30fa2a4 100644
      let mut v = vec![];
      for pair in pairs {
          match &pair.data {
-@@ -1158,7 +2139,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
+@@ -1158,7 +2430,7 @@ fn to_bool_series(pairs: &Vec<&EventField>, name: &str) -> DataFrameColumn {
              _ => v.push(None),
          }
      }
@@ -5729,7 +6082,7 @@ index c950726..30fa2a4 100644
  }
  fn to_py_xyz_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataFrameColumn {
      let mut v = vec![];
-@@ -1203,13 +2184,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
+@@ -1203,13 +2475,13 @@ fn to_py_sticker_col(pairs: &Vec<&EventField>, _name: &str, py: Python) -> DataF
      DataFrameColumn::Pyany(v.into_py_any(py).unwrap())
  }
  
@@ -5745,7 +6098,7 @@ index c950726..30fa2a4 100644
  }
  
  pub fn column_from_pairs(
-@@ -1220,13 +2201,13 @@ pub fn column_from_pairs(
+@@ -1220,13 +2492,13 @@ pub fn column_from_pairs(
      let field_type = find_type_of_vals(pairs)?;
  
      let s = match field_type {
@@ -5766,3 +6119,70 @@ index c950726..30fa2a4 100644
          Some(Variant::StringVec(_)) => to_py_string_col(pairs, name, py),
          Some(Variant::U64Vec(_)) => to_py_u64_col(pairs, name, py),
          Some(Variant::U32Vec(_)) => to_py_u32_col(pairs, name, py),
+diff --git a/src/python/tests/signature_tests.py b/src/python/tests/signature_tests.py
+index 28ac6fc..606343f 100644
+--- a/src/python/tests/signature_tests.py
++++ b/src/python/tests/signature_tests.py
+@@ -2,7 +2,6 @@ import unittest
+ from unittest import TestCase
+ from typing import Union
+ 
+-import pandas as pd
+ from demoparser2 import DemoParser, WantedPropState
+ 
+ demo_path = "../parser/test_demo.dem"
+@@ -38,7 +37,7 @@ class SignatureTest(TestCase):
+     def test_parse_grenades_signature(self):
+         parser = DemoParser(demo_path)
+         grenades = parser.parse_grenades()
+-        self.assertIsInstance(grenades, pd.DataFrame)
++        self.assertIsInstance(grenades, dict)
+         parser.parse_grenades(extra=["game_time"], grenades=True)
+         parser.parse_grenades(extra=["game_time"], grenades=False)
+         with self.assertRaises(TypeError):
+@@ -51,23 +50,23 @@ class SignatureTest(TestCase):
+     def test_parse_player_info_signature(self):
+         parser = DemoParser(demo_path)
+         player_info = parser.parse_player_info()
+-        self.assertIsInstance(player_info, pd.DataFrame)
++        self.assertIsInstance(player_info, dict)
+ 
+     def test_parse_item_drops_signature(self):
+         parser = DemoParser(demo_path)
+         item_drops = parser.parse_item_drops()
+-        self.assertIsInstance(item_drops, pd.DataFrame)
++        self.assertIsInstance(item_drops, dict)
+ 
+     def test_parse_skins_signature(self):
+         parser = DemoParser(demo_path)
+         skins = parser.parse_skins()
+-        self.assertIsInstance(skins, pd.DataFrame)
++        self.assertIsInstance(skins, dict)
+ 
+     def test_parse_event_signature(self):
+         parser = DemoParser(demo_path)
+ 
+         event = parser.parse_event("player_death")
+-        self.assertIsInstance(event, pd.DataFrame)
++        self.assertIsInstance(event, dict)
+ 
+         parser.parse_event(
+             "player_death",
+@@ -102,7 +101,7 @@ class SignatureTest(TestCase):
+         for event in events:
+             self.assertIsInstance(event, tuple)
+             self.assertIsInstance(event[0], str)
+-            self.assertIsInstance(event[1], pd.DataFrame)
++            self.assertIsInstance(event[1], dict)
+ 
+         parser.parse_events(
+             ["player_death"],
+@@ -146,7 +145,7 @@ class SignatureTest(TestCase):
+         parser = DemoParser(demo_path)
+ 
+         ticks = parser.parse_ticks(["X", "Y"])
+-        self.assertIsInstance(ticks, pd.DataFrame)
++        self.assertIsInstance(ticks, dict)
+ 
+         parser.parse_ticks(["X", "Y"], players=[1, 2, 3], ticks=[1, 2, 3])
+         parser.parse_ticks(["X", "Y"], players=None, ticks=None)

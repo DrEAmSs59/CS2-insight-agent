@@ -139,13 +139,12 @@ function Install-BackendRequirements {
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed (exit $LASTEXITCODE)" }
     Remove-Item -LiteralPath $runtimeRequirements -Force -ErrorAction SilentlyContinue
     $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
-    & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+    & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed (exit $LASTEXITCODE)" }
     $pythonRoot = Split-Path -Parent $PythonExe
     $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
     foreach ($rel in @(
         "Scripts",
-        "Lib\site-packages\pandas\tests",
         "Lib\site-packages\websocket\tests",
         "Lib\site-packages\aiosqlite\tests",
         "Lib\site-packages\colorama\tests",
@@ -156,13 +155,7 @@ function Install-BackendRequirements {
             Remove-Item -LiteralPath $path -Recurse -Force
         }
     }
-    $numpyRoot = Join-Path $sitePackages "numpy"
-    if (Test-Path -LiteralPath $numpyRoot) {
-        Get-ChildItem -LiteralPath $numpyRoot -Recurse -Directory -Filter "tests" -ErrorAction SilentlyContinue |
-            Sort-Object { $_.FullName.Length } -Descending |
-            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-    & $PythonExe -c "import demoparser2, fastapi, numpy, openai, pandas, PIL, uvicorn"
+    & $PythonExe -c "import demoparser2, fastapi, openai, PIL, uvicorn"
     if ($LASTEXITCODE -ne 0) { throw "trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     Get-ChildItem -LiteralPath $pythonRoot -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
         Sort-Object { $_.FullName.Length } -Descending |
@@ -182,7 +175,7 @@ function Install-BackendRequirements {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     Get-ChildItem -LiteralPath (Join-Path $sitePackages "PIL") -File -Filter "_avif*.pyd" -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-    & $PythonExe -c "from PIL import Image; import demoparser2, fastapi, numpy, openai, pandas, uvicorn"
+    & $PythonExe -c "from PIL import Image; import demoparser2, fastapi, openai, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
     if ($LASTEXITCODE -ne 0) { throw "final trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     } finally {
         if ($null -eq $previousNoUserSite) {

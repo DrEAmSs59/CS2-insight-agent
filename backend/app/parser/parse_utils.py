@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .tag_constants import TICK_RATE
@@ -21,14 +21,15 @@ PLAYER_TEAM_PARSE_FIELDS = ["team_num", PLAYER_CONTROLLER_TEAM_PROP]
 
 
 def _to_pandas_df(result) -> pd.DataFrame:
-    """将 demoparser2 的 parse_event / parse_ticks 返回值统一为 pandas DataFrame。"""
+    """Normalize demoparser column data into the dependency-free table."""
     if isinstance(result, pd.DataFrame):
         return result
     if hasattr(result, "to_pandas"):
-        return result.to_pandas()
-    if isinstance(result, list):
-        return pd.DataFrame(result) if result else pd.DataFrame()
-    return pd.DataFrame()
+        result = result.to_pandas()
+    try:
+        return pd.DataFrame(result)
+    except (TypeError, ValueError):
+        return pd.DataFrame()
 
 
 def coalesce_player_team_num(df: pd.DataFrame) -> pd.DataFrame:
