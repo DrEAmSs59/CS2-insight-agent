@@ -20,6 +20,16 @@ _GRENADE_PROJECTILES = {
     "CMolotovProjectile": "燃烧弹",
     "CDecoyProjectile": "诱饵弹",
 }
+_GRENADE_WEAPON_KINDS = {
+    "smokegrenade": _GRENADE_PROJECTILES["CSmokeGrenadeProjectile"],
+    "flashbang": _GRENADE_PROJECTILES["CFlashbangProjectile"],
+    "hegrenade": _GRENADE_PROJECTILES["CHEGrenadeProjectile"],
+    "molotov": _GRENADE_PROJECTILES["CMolotovProjectile"],
+    "incgrenade": _GRENADE_PROJECTILES["CMolotovProjectile"],
+    "incendiary": _GRENADE_PROJECTILES["CMolotovProjectile"],
+    "inferno": _GRENADE_PROJECTILES["CMolotovProjectile"],
+    "decoy": _GRENADE_PROJECTILES["CDecoyProjectile"],
+}
 _NON_BULLET_WEAPONS = {
     "", "c4", "knife", "knife_t", "taser", "hegrenade", "flashbang",
     "smokegrenade", "molotov", "incgrenade", "incendiary", "decoy",
@@ -430,6 +440,48 @@ def _shots_by_round(
     return out
 
 
+def _grenade_throws_by_round(
+    fire_df: Optional[pd.DataFrame],
+    windows: list[dict[str, Any]],
+) -> dict[tuple[int, str], list[dict[str, Any]]]:
+    """Return the authoritative grenade release events from ``weapon_fire``.
+
+    Projectile entities can first become visible several ticks after the throw
+    event.  Keeping the release position here lets the replay draw that short
+    initial part of the flight instead of making a moving player appear to
+    throw from their later position.
+    """
+    out: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    if fire_df is None or fire_df.empty:
+        return out
+    for _, row in fire_df.iterrows():
+        tick = _int(row.get("tick"))
+        kind = _GRENADE_WEAPON_KINDS.get(_normalize_weapon(row.get("weapon")))
+        round_number = _round_number_for_tick(tick, windows, row)
+        actor = _clean_name(row.get("user_name") or row.get("player_name") or row.get("name"))
+        if tick <= 0 or round_number <= 0 or not kind or not actor:
+            continue
+        release: dict[str, Any] = {
+            "tick": tick,
+            "actor": actor,
+            "steamid64": _clean_name(
+                row.get("user_steamid") or row.get("player_steamid") or row.get("steamid")
+            ),
+        }
+        x = _float(row.get("user_X", row.get("player_X", row.get("X"))), float("nan"))
+        y = _float(row.get("user_Y", row.get("player_Y", row.get("Y"))), float("nan"))
+        z = _float(row.get("user_Z", row.get("player_Z", row.get("Z"))), float("nan"))
+        if not pd.isna(x) and not pd.isna(y):
+            release["x"] = round(x, 2)
+            release["y"] = round(y, 2)
+            if not pd.isna(z):
+                release["z"] = round(z, 2)
+        out[(round_number, kind)].append(release)
+    for releases in out.values():
+        releases.sort(key=lambda item: _int(item.get("tick")))
+    return out
+
+
 def _extract_grenade_trajectories(parser: Any, tick_rate: float) -> list[dict[str, Any]]:
     """Compact demoparser projectile rows into real per-throw flight paths."""
     if parser is None:
@@ -518,6 +570,7 @@ def _enrich_grenade_events(
     trajectories: list[dict[str, Any]],
     windows: list[dict[str, Any]],
     tick_rate: float,
+    fire_df: Optional[pd.DataFrame] = None,
 ) -> None:
     if not trajectories:
         return
@@ -528,8 +581,14 @@ def _enrich_grenade_events(
         if window is not None:
             by_round_kind[(_int(window.get("round_number")), _clean_name(trajectory.get("kind")))].append(trajectory)
 
+    releases_by_round_kind = _grenade_throws_by_round(fire_df, windows)
     used: set[int] = set()
+    used_releases: set[int] = set()
     tolerance = max(32, int(round(float(tick_rate) * 2.0)))
+    # Real demos observed so far expose the projectile 6-14 ticks after
+    # weapon_fire. Keep this bounded so a grenade selected/primed during
+    # freeze time cannot stretch into a fake multi-second flight path.
+    release_tolerance = max(8, int(round(float(tick_rate) * 0.75)))
     for round_number, events in events_by_round.items():
         for event in events:
             if event.get("type") != "grenade":
@@ -552,8 +611,63 @@ def _enrich_grenade_events(
                 continue
             _, matched = min(candidates, key=lambda item: item[0])
             used.add(id(matched))
-            event["throw_tick"] = _int(matched.get("throw_tick"))
-            event["trajectory"] = matched.get("points") or []
+            trajectory = [dict(point) for point in (matched.get("points") or [])]
+            trajectory.sort(key=lambda point: _int(point.get("tick")))
+            throw_tick = _int(matched.get("throw_tick"))
+
+            release_candidates = []
+            trajectory_actor = _clean_name(matched.get("actor")).lower()
+            trajectory_steamid = _clean_name(matched.get("steamid64"))
+            for release in releases_by_round_kind.get(
+                (round_number, _clean_name(event.get("kind"))),
+                [],
+            ):
+                identity = id(release)
+                release_tick = _int(release.get("tick"))
+                if identity in used_releases or release_tick > throw_tick:
+                    continue
+                delta = throw_tick - release_tick
+                if delta > release_tolerance:
+                    continue
+                release_actor = _clean_name(release.get("actor")).lower()
+                if actor and release_actor and release_actor != actor:
+                    continue
+                if trajectory_actor and release_actor and release_actor != trajectory_actor:
+                    continue
+                release_steamid = _clean_name(release.get("steamid64"))
+                if trajectory_steamid and release_steamid and release_steamid != trajectory_steamid:
+                    continue
+                release_x = _float(release.get("x"), float("nan"))
+                release_y = _float(release.get("y"), float("nan"))
+                if pd.isna(release_x) or pd.isna(release_y):
+                    continue
+                release_candidates.append((delta, release))
+
+            if release_candidates and trajectory:
+                _, release = min(release_candidates, key=lambda item: item[0])
+                used_releases.add(id(release))
+                first = trajectory[0]
+                release_tick = _int(release.get("tick"))
+                if release_tick < _int(first.get("tick")):
+                    release_point = {
+                        "tick": release_tick,
+                        "x": round(_float(release.get("x")), 2),
+                        "y": round(_float(release.get("y")), 2),
+                    }
+                    # Player event Z is feet height; the projectile's first Z
+                    # preserves the correct radar floor while X/Y come from
+                    # the actual release position.
+                    first_z = _float(first.get("z"), float("nan"))
+                    release_z = _float(release.get("z"), float("nan"))
+                    if not pd.isna(first_z):
+                        release_point["z"] = round(first_z, 2)
+                    elif not pd.isna(release_z):
+                        release_point["z"] = round(release_z, 2)
+                    trajectory.insert(0, release_point)
+                    throw_tick = release_tick
+
+            event["throw_tick"] = throw_tick
+            event["trajectory"] = trajectory
 
 
 def _initial_bomb_carrier(events: list[dict[str, Any]]) -> str:
@@ -953,6 +1067,7 @@ def build_match_workspace(
         _extract_grenade_trajectories(parser, tick_rate),
         windows,
         tick_rate,
+        shared_events.get("fire_df"),
     )
 
     round_winner_team: dict[int, Optional[str]] = {}
@@ -1080,7 +1195,7 @@ def build_match_workspace(
     # round's tracks in the binary replay packet.
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.07.3",
+        "algorithm_version": "match-workspace-2026.07.4",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
