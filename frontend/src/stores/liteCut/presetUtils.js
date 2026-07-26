@@ -52,10 +52,3 @@ export function packagingBundleFromBody(body) {
     bgm: bgm ? { ...bgm } : null,
   };
 }
-
-export const PRESET_KIND_LABELS = {
-  color_grade: "调色",
-  transition_rhythm: "转场节奏",
-  text_style: "文字样式",
-  packaging_bundle: "组合包装",
-};

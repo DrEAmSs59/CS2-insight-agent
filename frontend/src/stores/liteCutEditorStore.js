@@ -42,8 +42,6 @@ function recoveryCandidateForProject(data, normalizedBody) {
   return { ...draft, body: normalizeLiteCutBody(draft.body).body };
 }
 
-export { mapRecordedClipRow } from "./liteCut/mediaUtils.js";
-
 export function normalizeLiteCutBody(rawBody) {
   const body = rawBody && typeof rawBody === "object" ? structuredClone(rawBody) : {};
   let changed = false;

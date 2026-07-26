@@ -442,8 +442,6 @@ export function GlobalPacingPanel({
   queue,
   onToggleAllVictimPov,
   onToggleAllKillerPov,
-  // eslint-disable-next-line no-unused-vars
-  defaultExpanded = false,
 }) {
   const t = useT();
   const post = globalPacing.post_last_sec ?? DEFAULT_PACING.post_last_sec;

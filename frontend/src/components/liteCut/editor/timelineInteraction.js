@@ -1,5 +1,3 @@
-import { snapTimelineSec } from "../../../stores/liteCut/timelineUtils.js";
-
 /** 与 OpenCut TIMELINE_DRAG_THRESHOLD_PX 对齐 */
 export const DRAG_THRESHOLD_PX = 5;
 
@@ -21,26 +19,6 @@ export function hideNativeDragImage(dataTransfer) {
   }
 }
 
-/** RAF-throttle state updates during pointer drag. */
-export function rafThrottle(fn) {
-  let raf = null;
-  let latest = null;
-  return (...args) => {
-    latest = args;
-    if (raf != null) return;
-    raf = requestAnimationFrame(() => {
-      raf = null;
-      fn(...latest);
-    });
-  };
-}
-
-export function previewSnapSec(sec, body, { enabled, playheadSec }) {
-  if (!enabled) return { time: sec, snapped: false };
-  const snapped = snapTimelineSec(sec, body, { enabled: true, playheadSec });
-  return { time: snapped, snapped: Math.abs(snapped - sec) < 0.001 };
-}
-
 export function snapPlayheadToBoundaries(sec, boundaries, pixelsPerSecond, thresholdPx = 9) {
   const raw = Math.max(0, Number(sec) || 0);
   const pps = Math.max(0.001, Number(pixelsPerSecond) || 0);
@@ -60,112 +38,8 @@ export function snapPlayheadToBoundaries(sec, boundaries, pixelsPerSecond, thres
     : { time: nearest, snapped: true, point: nearest };
 }
 
-export function timeFromClientX(clientX, rect, totalSec) {
-  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  return ratio * totalSec;
-}
-
 export function timelineLaneWidth(contentWidth) {
   return Math.max(1, contentWidth - TIMELINE_LANE_HEADER_W - TIMELINE_CONTENT_PADDING_RIGHT);
-}
-
-function laneMetrics(scrollEl, seekSurfaceEl, contentWidth) {
-  if (seekSurfaceEl && scrollEl) {
-    const laneWidth = seekSurfaceEl.offsetWidth;
-    if (laneWidth > 0) {
-      const scrollRect = scrollEl.getBoundingClientRect();
-      const seekLeftContent =
-        seekSurfaceEl.getBoundingClientRect().left - scrollRect.left + scrollEl.scrollLeft;
-      return { laneWidth, seekLeftContent };
-    }
-  }
-  const laneWidth = timelineLaneWidth(contentWidth);
-  return { laneWidth, seekLeftContent: TIMELINE_LANE_HEADER_W };
-}
-
-function mouseXContent(clientX, scrollEl) {
-  const scrollRect = scrollEl.getBoundingClientRect();
-  return clientX - scrollRect.left + scrollEl.scrollLeft;
-}
-
-/**
- * 将 clientX 转为时间轴时间（秒）。
- * scrollLeft 由底部横条驱动（主区域 overflow-x-hidden 时必传）。
- */
-export function mouseTimeFromClientX(
-  clientX,
-  scrollEl,
-  contentWidth,
-  totalSec,
-  seekSurfaceEl = null,
-  scrollLeft = null,
-) {
-  if (!scrollEl || !contentWidth) return 0;
-  const sl = scrollLeft ?? scrollEl.scrollLeft ?? 0;
-  if (seekSurfaceEl) {
-    const laneWidth = seekSurfaceEl.offsetWidth;
-    if (laneWidth > 0) {
-      const seekRect = seekSurfaceEl.getBoundingClientRect();
-      const mouseInLane = sl + (clientX - seekRect.left);
-      const ratio = Math.max(0, Math.min(1, mouseInLane / laneWidth));
-      return ratio * totalSec;
-    }
-  }
-  const { laneWidth, seekLeftContent } = laneMetrics(scrollEl, seekSurfaceEl, contentWidth);
-  const mouseInLane = clientX - scrollEl.getBoundingClientRect().left + sl - seekLeftContent;
-  const ratio = Math.max(0, Math.min(1, mouseInLane / laneWidth));
-  return ratio * totalSec;
-}
-
-/** 从片段 DOM 计算抓取时间偏移（像素 → 秒，含 scroll） */
-export function grabOffsetSecFromPointer(
-  pointerClientX,
-  clipEl,
-  scrollEl,
-  contentWidth,
-  totalSec,
-  seekSurfaceEl = null,
-  scrollLeft = null,
-) {
-  if (!scrollEl || !clipEl || !contentWidth) return 0;
-  const sl = scrollLeft ?? scrollEl.scrollLeft ?? 0;
-  if (seekSurfaceEl) {
-    const laneWidth = seekSurfaceEl.offsetWidth;
-    if (laneWidth > 0) {
-      const seekRect = seekSurfaceEl.getBoundingClientRect();
-      const clipRect = clipEl.getBoundingClientRect();
-      const clipLeftInLane = sl + (clipRect.left - seekRect.left);
-      const clickInLane = sl + (pointerClientX - seekRect.left);
-      return ((clickInLane - clipLeftInLane) / laneWidth) * totalSec;
-    }
-  }
-  const { laneWidth, seekLeftContent } = laneMetrics(scrollEl, seekSurfaceEl, contentWidth);
-  const scrollRect = scrollEl.getBoundingClientRect();
-  const clipRect = clipEl.getBoundingClientRect();
-  const clipLeftContent = clipRect.left - scrollRect.left + sl;
-  const clickContent = pointerClientX - scrollRect.left + sl;
-  return ((clickContent - clipLeftContent) / laneWidth) * totalSec;
-}
-
-/** 根据指针在轨道上的位置 + 按下时的抓取偏移，计算片段起始时间 */
-export function clipStartFromPointer(
-  clientX,
-  scrollEl,
-  contentWidth,
-  totalSec,
-  grabOffsetSec,
-  seekSurfaceEl = null,
-  scrollLeft = null,
-) {
-  const pointerSec = mouseTimeFromClientX(
-    clientX,
-    scrollEl,
-    contentWidth,
-    totalSec,
-    seekSurfaceEl,
-    scrollLeft,
-  );
-  return Math.max(0, pointerSec - grabOffsetSec);
 }
 
 export function formatRulerTime(sec) {
@@ -223,16 +97,8 @@ export function buildTimelineRulerTicks(totalSec, contentWidth) {
   return ticks;
 }
 
-export function pxPerSec(totalSec, zoom) {
-  return Math.max(8, 14 * zoom);
-}
-
 export function normalizeTimelineZoom(zoom) {
   return Math.max(0.5, Math.min(4, Number(zoom) || 1));
-}
-
-export function timelineContentWidth(totalSec, zoom) {
-  return Math.max(640, totalSec * pxPerSec(totalSec, normalizeTimelineZoom(zoom)));
 }
 
 export function fitTimelineZoom(totalSec, viewportWidth) {
@@ -319,24 +185,6 @@ export function timelineClipIntersectsRange(startSec, durationSec, range) {
   const start = Math.max(0, Number(startSec) || 0);
   const end = start + Math.max(0.001, Number(durationSec) || 0);
   return end >= Math.max(0, Number(range?.start) || 0) && start <= Math.max(0, Number(range?.end) || 0);
-}
-
-export function autoScrollTimeline(clientX, viewportEl, hBarEl, speed = 14) {
-  if (!viewportEl || !hBarEl) return;
-  const r = viewportEl.getBoundingClientRect();
-  const margin = 56;
-  if (clientX < r.left + margin) {
-    hBarEl.scrollLeft = Math.max(0, hBarEl.scrollLeft - speed);
-  } else if (clientX > r.right - margin) {
-    hBarEl.scrollLeft += speed;
-  }
-}
-
-/** 将 clientY 转为轨道区域相对 Y（相对 lanes 容器顶部） */
-export function mouseYInLanes(clientY, lanesEl) {
-  if (!lanesEl) return 0;
-  const rect = lanesEl.getBoundingClientRect();
-  return clientY - rect.top;
 }
 
 export function selectedTimelineItemsInMarquee(rows, timeA, timeB, yA, yB) {
