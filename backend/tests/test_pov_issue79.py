@@ -5,7 +5,12 @@ import pytest
 
 from app.pov_constants import POV_CORE_FORCED_COMMANDS
 from app import pov_hud_manager
-from app.pov_hud_manager import PovHudManager, resolve_pov_vpk_source_in_project_pov_dir
+from app.pov_hud_manager import (
+    PovHudError,
+    PovHudManager,
+    resolve_pov_vpk_source_in_project_pov_dir,
+    restore_pov_after_cs2_exit,
+)
 
 
 def test_all_maps_use_default_pov_asset(tmp_path: Path):
@@ -89,3 +94,76 @@ def test_pov_restore_refuses_a_backup_that_no_longer_matches_the_install_manifes
     verification = manager.verify_restoration(manager.status()["original_gameinfo_sha256"])
     assert verification["verified"] is False
     assert verification["pov_vpk_exists"] is True
+
+
+def test_shared_pov_restore_retries_until_strict_verification_passes():
+    expected_sha = "a" * 64
+    sleeps: list[float] = []
+
+    class FakeManager:
+        def __init__(self):
+            self.restore_calls = 0
+            self.restored = False
+
+        def status(self):
+            return {
+                "needs_restore": not self.restored,
+                "original_gameinfo_sha256": expected_sha.upper(),
+            }
+
+        def restore(self):
+            self.restore_calls += 1
+            if self.restore_calls == 1:
+                raise PovHudError("files are still locked")
+            self.restored = True
+            return self.verify_restoration(expected_sha)
+
+        def verify_restoration(self, expected_gameinfo_sha256=None):
+            return {
+                "verified": self.restored and expected_gameinfo_sha256 == expected_sha,
+                "gameinfo_restored": self.restored,
+                "pov_vpk_removed": self.restored,
+                "expected_gameinfo_sha256": expected_gameinfo_sha256,
+                "actual_gameinfo_sha256": expected_sha if self.restored else "b" * 64,
+            }
+
+    manager = FakeManager()
+    verification = restore_pov_after_cs2_exit(
+        manager,
+        None,
+        is_running=lambda: False,
+        sleep=sleeps.append,
+        max_attempts=3,
+    )
+
+    assert manager.restore_calls == 2
+    assert sleeps == [0.5]
+    assert verification["verified"] is True
+    assert verification["expected_gameinfo_sha256"] == expected_sha
+
+
+def test_shared_pov_restore_never_infers_success_without_original_hash():
+    class FakeManager:
+        @staticmethod
+        def status():
+            return {"needs_restore": False, "original_gameinfo_sha256": None}
+
+        @staticmethod
+        def verify_restoration(expected_gameinfo_sha256=None):
+            return {
+                "verified": True,
+                "gameinfo_restored": True,
+                "pov_vpk_removed": True,
+                "expected_gameinfo_sha256": expected_gameinfo_sha256,
+            }
+
+    verification = restore_pov_after_cs2_exit(
+        FakeManager(),
+        None,
+        is_running=lambda: False,
+        sleep=lambda _seconds: None,
+        max_attempts=1,
+    )
+
+    assert verification["verified"] is False
+    assert "without the original gameinfo.gi hash" in verification["error"]

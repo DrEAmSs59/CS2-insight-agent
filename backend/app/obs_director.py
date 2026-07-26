@@ -3633,7 +3633,11 @@ class OBSDirector:
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.normalizer import NormalizationError
-        from .pov_hud_manager import PovHudManager, PovHudError
+        from .pov_hud_manager import (
+            PovHudError,
+            PovHudManager,
+            restore_pov_after_cs2_exit,
+        )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
@@ -3657,7 +3661,9 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
-        pov_restore_ok: Optional[bool] = None
+        pov_install_attempted = False
+        pov_expected_gameinfo_sha256: Optional[str] = None
+        pov_restoration: Optional[dict[str, Any]] = None
 
         try:
             # ── Phase 0: 预构建 plan + 提取 overlay 轨道（CS2 启动前完成，避免进游戏后卡顿）────
@@ -3824,7 +3830,16 @@ class OBSDirector:
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
                     logger.info("[RecordingV3][POV] install unified pov_default.vpk")
+                    pov_install_attempted = True
                     pov_mgr_v3.install()
+                    installed_status = pov_mgr_v3.status()
+                    pov_expected_gameinfo_sha256 = str(
+                        installed_status.get("original_gameinfo_sha256") or ""
+                    ).strip().lower() or None
+                    if not pov_expected_gameinfo_sha256:
+                        raise PovHudError(
+                            "POV HUD install manifest does not contain the original gameinfo.gi hash."
+                        )
                     logger.info("[RecordingV3][POV] patch gameinfo.gi")
                     self._pov_enabled = True
                 except PovHudError as _pov_e:
@@ -4195,26 +4210,66 @@ class OBSDirector:
                 self._cleanup_cs2_artifacts,
                 timeout=8.0,
             )
-            if pov_mgr_v3 is not None:
+            pov_restore_needed = bool(pov_expected_gameinfo_sha256)
+            if pov_mgr_v3 is not None and pov_install_attempted and not pov_restore_needed:
                 try:
-                    logger.info("[RecordingV3][POV] restore gameinfo.gi")
-                    verification = pov_mgr_v3.restore()
-                    pov_restore_ok = bool(verification.get("verified"))
+                    residual_status = pov_mgr_v3.status()
+                    pov_expected_gameinfo_sha256 = str(
+                        residual_status.get("original_gameinfo_sha256") or ""
+                    ).strip().lower() or None
+                    pov_restore_needed = bool(
+                        pov_expected_gameinfo_sha256
+                        or residual_status.get("needs_restore")
+                    )
+                except Exception as _pov_status_e:
+                    logger.warning(
+                        "[RecordingV3][POV] could not inspect install residue before restore: %s",
+                        _pov_status_e,
+                    )
+                    pov_restore_needed = True
+            if pov_mgr_v3 is not None and pov_restore_needed:
+                try:
+                    logger.info(
+                        "[RecordingV3][POV] wait for CS2 exit, restore files, and verify original gameinfo.gi"
+                    )
+                    pov_restoration = await asyncio.to_thread(
+                        restore_pov_after_cs2_exit,
+                        pov_mgr_v3,
+                        pov_expected_gameinfo_sha256,
+                        is_running=is_cs2_running,
+                        logger=logger,
+                    )
                 except Exception as _pov_restore_e:
-                    logger.error("[RecordingV3][POV] restore failed: %s", _pov_restore_e)
-                    try:
-                        pov_restore_ok = not bool(pov_mgr_v3.status().get("needs_restore"))
-                    except Exception:
-                        pov_restore_ok = False
+                    logger.exception("[RecordingV3][POV] shared restore flow failed: %s", _pov_restore_e)
+                    pov_restoration = {
+                        "verified": False,
+                        "error": str(_pov_restore_e),
+                    }
             self._pov_enabled = False
             self._set_state(DirectorState.COMPLETED)
 
+            pov_restore_checked = bool(
+                isinstance(pov_restoration, dict)
+                and "verified" in pov_restoration
+            )
+            pov_restore_ok = bool(
+                pov_restore_checked and pov_restoration.get("verified")
+            )
             recovery = {
                 **self._player_config_recovery_payload(),
                 "pov_enabled": pov_on_v3,
-                "pov_restore_verified": (pov_restore_ok is not None) if pov_on_v3 else True,
-                "pov_restored": bool(pov_restore_ok) if pov_on_v3 else True,
+                "pov_restore_verified": pov_restore_checked if pov_on_v3 else True,
+                "pov_restored": pov_restore_ok if pov_on_v3 else True,
             }
+            if pov_on_v3:
+                recovery["pov_restore_state"] = (
+                    "restored"
+                    if pov_restore_ok
+                    else "restore_failed"
+                    if pov_restore_checked
+                    else "unverified"
+                )
+                recovery["pov_restore"] = pov_restoration
             # Recovery belongs to the whole managed recording session, not only
             # to unexpected-exit failures. Return the same verified summary with
             # every item so success and ordinary failure UIs can report reality.
