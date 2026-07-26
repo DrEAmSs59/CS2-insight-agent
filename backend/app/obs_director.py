@@ -40,6 +40,7 @@ from .cs2_config_backup import (
     is_cs2_running,
     is_restore_required,
     restore_latest_user_config_backup,
+    write_recording_state,
     write_persistent_backup_from_snap,
 )
 from .env_utils import OBSConfig, SpecPlayerVerifyConfig, _steam_install_from_registry as _get_steam_install_root
@@ -1977,6 +1978,8 @@ class OBSDirector:
         self._cs2_shutdown_expected = False
         self._cs2_exited_unexpectedly = False
         self._last_player_config_restore_result: Optional[dict[str, Any]] = None
+        self._player_config_restore_results: list[dict[str, Any]] = []
+        self._player_config_snapshot_attempted = False
         # 实验性 POV：在首次片段预热注入末尾追加强制 cvar
         self._pov_enabled = False
         # 启动 CS2 前对用户配置文件做的字节级快照：{Path: bytes | None}。
@@ -2978,6 +2981,7 @@ class OBSDirector:
         """对用户 CS2 配置文件做字节级快照，存到 ``self._user_config_snapshot``。
         启动 CS2 之前调用；跳过我们自己写的 ``_insight_<uuid>.cfg``。"""
         snap: dict[Path, Optional[bytes]] = {}
+        self._player_config_snapshot_attempted = True
         self._last_player_config_restore_result = None
 
         def add_path(p: Path, record_missing: bool) -> None:
@@ -3038,7 +3042,14 @@ class OBSDirector:
                 logger.warning("Manifest restore raised: %s", e)
         if not snap:
             self._user_config_snapshot = {}
-            return {"ok": True, "restored": 0, "failed": [], "source": "none"}
+            return {
+                "ok": True,
+                "verified": False,
+                "checked": 0,
+                "restored": 0,
+                "failed": [],
+                "source": "none",
+            }
         restored = 0
         failed: list[dict[str, str]] = []
         for p, original in snap.items():
@@ -3062,14 +3073,89 @@ class OBSDirector:
             except OSError as e:
                 logger.warning("Restore user config %s failed: %s", p, e)
                 failed.append({"original": str(p), "error": str(e)})
+        checked = 0
+        failed_paths = {item.get("original") for item in failed}
+        for p, original in snap.items():
+            if str(p) in failed_paths:
+                continue
+            try:
+                if original is None:
+                    if p.exists():
+                        failed.append({
+                            "original": str(p),
+                            "error": "file that did not originally exist is still present",
+                        })
+                        continue
+                elif not p.is_file() or p.read_bytes() != original:
+                    failed.append({
+                        "original": str(p),
+                        "error": "restored content does not match the in-memory snapshot",
+                    })
+                    continue
+                checked += 1
+            except OSError as e:
+                failed.append({
+                    "original": str(p),
+                    "error": f"post-restore verification failed: {e}",
+                })
+
+        if not failed and is_restore_required():
+            try:
+                write_recording_state("recorded")
+            except OSError as e:
+                failed.append({
+                    "original": "",
+                    "error": f"could not finalize recovery state: {e}",
+                })
+
         if restored:
             logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
         self._user_config_snapshot = {}
         return {
             "ok": not failed,
+            "verified": not failed and checked == len(snap),
+            "checked": checked,
             "restored": restored,
             "failed": failed,
             "source": "memory",
+        }
+
+    def _player_config_recovery_payload(self) -> dict[str, Any]:
+        reports = list(self._player_config_restore_results)
+        attempted = bool(reports or self._player_config_snapshot_attempted)
+        if not attempted:
+            state = "not_needed"
+        elif reports and all(
+            report.get("ok") is True and report.get("verified") is True
+            for report in reports
+        ) and not self._player_config_snapshot_attempted:
+            state = "restored"
+        elif any(report.get("ok") is False or report.get("failed") for report in reports):
+            state = "failed"
+        else:
+            state = "unverified"
+
+        failed = [
+            failure
+            for report in reports
+            for failure in list(report.get("failed") or [])
+        ]
+        checked = sum(int(report.get("checked") or 0) for report in reports)
+        restored_files = sum(int(report.get("restored") or 0) for report in reports)
+        sources = sorted({
+            str(report.get("source") or "")
+            for report in reports
+            if str(report.get("source") or "")
+        })
+        return {
+            "player_config_restore_state": state,
+            "player_config_restore_attempted": attempted,
+            "player_config_restore_verified": state in {"restored", "not_needed"},
+            "player_config_restored": state in {"restored", "not_needed"},
+            "player_config_checked_files": checked,
+            "player_config_restored_files": restored_files,
+            "player_config_restore_sources": sources,
+            "player_config_restore_failures": failed,
         }
 
     def _voice_ban_paths(self) -> list[Path]:
@@ -3235,15 +3321,26 @@ class OBSDirector:
         # CS2 进程已结束，文件锁已释放。此时回滚用户配置，确保我们的 archive cvar
         # 修改不会泄漏到用户下一次启动（包括 5E / 竞技服的正式对局）。
         try:
-            self._last_player_config_restore_result = self._restore_user_configs()
+            restore_result = self._restore_user_configs()
+            self._last_player_config_restore_result = restore_result
+            if self._player_config_snapshot_attempted:
+                self._player_config_restore_results.append(dict(restore_result))
+                self._player_config_snapshot_attempted = False
         except Exception as e:  # noqa: BLE001
             logger.warning("Restore user configs after kill failed: %s", e)
             self._last_player_config_restore_result = {
                 "ok": False,
+                "verified": False,
+                "checked": 0,
                 "restored": 0,
                 "failed": [{"original": "", "error": str(e)}],
                 "source": "exception",
             }
+            if self._player_config_snapshot_attempted:
+                self._player_config_restore_results.append(
+                    dict(self._last_player_config_restore_result)
+                )
+                self._player_config_snapshot_attempted = False
 
     async def _await_cs2_window(self, timeout: float = 45.0) -> bool:
         """录制前等待 CS2 主窗口出现（便于后续 SendInput 注入 demo_gototick）。"""
@@ -4112,18 +4209,17 @@ class OBSDirector:
             self._pov_enabled = False
             self._set_state(DirectorState.COMPLETED)
 
-            if self._cs2_exited_unexpectedly:
-                config_result = self._last_player_config_restore_result
-                recovery = {
-                    "player_config_restore_verified": config_result is not None,
-                    "player_config_restored": bool(config_result and config_result.get("ok")),
-                    "pov_enabled": pov_on_v3,
-                    "pov_restore_verified": (pov_restore_ok is not None) if pov_on_v3 else True,
-                    "pov_restored": bool(pov_restore_ok) if pov_on_v3 else True,
-                }
-                for item in all_results:
-                    if item.get("error_code") == "RECORDING_CS2_EXITED":
-                        item["recovery"] = recovery
+            recovery = {
+                **self._player_config_recovery_payload(),
+                "pov_enabled": pov_on_v3,
+                "pov_restore_verified": (pov_restore_ok is not None) if pov_on_v3 else True,
+                "pov_restored": bool(pov_restore_ok) if pov_on_v3 else True,
+            }
+            # Recovery belongs to the whole managed recording session, not only
+            # to unexpected-exit failures. Return the same verified summary with
+            # every item so success and ordinary failure UIs can report reality.
+            for item in all_results:
+                item["recovery"] = dict(recovery)
 
         logger.info("[RecordingV3] execute_plan_queue done: %d results", len(all_results))
         return all_results

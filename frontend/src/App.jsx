@@ -2123,11 +2123,13 @@ export default function App() {
             setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });
           } else if (wasAborted) {
             const backupStatus = await refreshConfigBackupStatus();
-            const toastKind = recordingAbortToastKind(backupStatus);
+            const toastKind = recordingAbortToastKind(backupStatus, results);
             if (toastKind === "restore_pending") {
               setProgressText(t("app.abortRestorePending"), { isError: true });
             } else if (toastKind === "unverified") {
               setProgressText(t("app.abortRestoreUnverified"), { isError: true });
+            } else if (toastKind === "not_needed") {
+              setProgressText(t("app.abortConfigNotModified"), { autoDismissMs: 5000 });
             } else {
               setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
             }

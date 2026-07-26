@@ -24,6 +24,14 @@ describe("recording abort outcome", () => {
     expect(recordingAbortToastKind({ restore_required: true })).toBe("restore_pending");
     expect(recordingAbortToastKind({ fetch_failed: true })).toBe("unverified");
     expect(recordingAbortToastKind({ restore_required: false })).toBe("completed");
+    expect(recordingAbortToastKind(
+      { restore_required: false },
+      [{ recovery: { player_config_restore_state: "unverified" } }],
+    )).toBe("unverified");
+    expect(recordingAbortToastKind(
+      { restore_required: false },
+      [{ recovery: { player_config_restore_state: "not_needed" } }],
+    )).toBe("not_needed");
   });
 
   it("recognizes a managed CS2 process that exited outside Insight cleanup", () => {

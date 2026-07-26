@@ -221,17 +221,31 @@ def restore_latest_user_config_backup(*, skip_cs2_running_check: bool = False) -
         if status_was == "recording":
             return {
                 "ok": False,
+                "verified": False,
+                "checked": 0,
                 "restored": 0,
                 "failed": [{"original": "", "error": "manifest 缺失或 entries 为空，无法恢复"}],
+                "source": "manifest",
             }
-        return {"ok": True, "restored": 0, "failed": [], "code": "CONFIG_NO_MANIFEST"}
+        return {
+            "ok": True,
+            "verified": False,
+            "checked": 0,
+            "restored": 0,
+            "failed": [],
+            "code": "CONFIG_NO_MANIFEST",
+            "source": "none",
+        }
 
     if not skip_cs2_running_check and is_cs2_running():
         return {
             "ok": False,
+            "verified": False,
+            "checked": 0,
             "code": "CS2_RUNNING",
             "restored": 0,
             "failed": [],
+            "source": "manifest",
         }
 
     failed: list[dict[str, str]] = []
@@ -264,18 +278,81 @@ def restore_latest_user_config_backup(*, skip_cs2_running_check: bool = False) -
         except OSError as e:
             failed.append({"original": str(original), "error": str(e)})
 
-    # recording_state 必须先清，无论恢复是否完整——否则下次录制会拒绝写新备份，
-    # 形成"旧 manifest → 恢复失败 → 拒绝备份"死循环。
-    if status_was == "recording":
+    # A write call returning successfully is not proof that recovery stuck.
+    # Re-read each destination and compare it byte-for-byte with the backup.
+    checked = 0
+    failed_paths = {item.get("original") for item in failed}
+    for ent in entries:
+        orig_s = ent.get("original")
+        if not orig_s or orig_s in failed_paths:
+            continue
+        original = Path(orig_s)
+        existed = bool(ent.get("existed", True))
+        rel = ent.get("backup_relpath")
+        try:
+            if existed:
+                if not rel:
+                    failed.append({
+                        "original": str(original),
+                        "error": "manifest missing backup_relpath; recovery cannot be verified",
+                    })
+                    continue
+                source = backup_root / str(rel)
+                if not source.is_file() or not original.is_file():
+                    failed.append({
+                        "original": str(original),
+                        "error": "restored file is missing; recovery cannot be verified",
+                    })
+                    continue
+                if original.read_bytes() != source.read_bytes():
+                    failed.append({
+                        "original": str(original),
+                        "error": "restored content does not match the backup",
+                    })
+                    continue
+            elif original.exists():
+                failed.append({
+                    "original": str(original),
+                    "error": "file that did not originally exist is still present",
+                })
+                continue
+            checked += 1
+        except OSError as e:
+            failed.append({
+                "original": str(original),
+                "error": f"post-restore verification failed: {e}",
+            })
+
+    # Only clear the recovery-required marker after every destination has been
+    # verified. If verification fails, keep the original backup actionable.
+    if not failed and status_was == "recording":
         try:
             write_recording_state("recorded")
         except OSError as e:
             logger.warning("write_recording_state(recorded) failed: %s", e)
+            failed.append({
+                "original": str(get_recording_state_path()),
+                "error": f"could not finalize recovery state: {e}",
+            })
 
     if failed:
-        return {"ok": False, "restored": restored, "failed": failed}
+        return {
+            "ok": False,
+            "verified": False,
+            "checked": checked,
+            "restored": restored,
+            "failed": failed,
+            "source": "manifest",
+        }
 
-    return {"ok": True, "restored": restored, "failed": []}
+    return {
+        "ok": True,
+        "verified": checked == len(entries),
+        "checked": checked,
+        "restored": restored,
+        "failed": [],
+        "source": "manifest",
+    }
 
 
 def write_persistent_backup_from_snap(snap: dict[Path, Optional[bytes]]) -> Optional[Path]:

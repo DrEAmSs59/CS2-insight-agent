@@ -76,6 +76,19 @@ def test_abort_before_cs2_launch_runs_final_cleanup_and_returns_aborted(monkeypa
             "error": "aborted",
             "segment_results": [],
             "warnings": [],
+            "recovery": {
+                "player_config_restore_state": "not_needed",
+                "player_config_restore_attempted": False,
+                "player_config_restore_verified": True,
+                "player_config_restored": True,
+                "player_config_checked_files": 0,
+                "player_config_restored_files": 0,
+                "player_config_restore_sources": [],
+                "player_config_restore_failures": [],
+                "pov_enabled": False,
+                "pov_restore_verified": True,
+                "pov_restored": True,
+            },
         }
     ]
     assert cleanup_calls == ["obs", "cs2_and_config", "artifacts"]
@@ -211,12 +224,17 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
 
         def restore_configs():
             cleanup_calls.append("cs2_and_config")
-            director._last_player_config_restore_result = {
+            restore_result = {
                 "ok": True,
+                "verified": True,
+                "checked": 2,
                 "restored": 2,
                 "failed": [],
                 "source": "manifest",
             }
+            director._last_player_config_restore_result = restore_result
+            director._player_config_restore_results.append(restore_result)
+            director._player_config_snapshot_attempted = False
 
         monkeypatch.setattr(
             director,
@@ -241,8 +259,14 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
             "segment_results": [],
             "warnings": [],
             "recovery": {
+                "player_config_restore_state": "restored",
+                "player_config_restore_attempted": True,
                 "player_config_restore_verified": True,
                 "player_config_restored": True,
+                "player_config_checked_files": 2,
+                "player_config_restored_files": 2,
+                "player_config_restore_sources": ["manifest"],
+                "player_config_restore_failures": [],
                 "pov_enabled": False,
                 "pov_restore_verified": True,
                 "pov_restored": True,
