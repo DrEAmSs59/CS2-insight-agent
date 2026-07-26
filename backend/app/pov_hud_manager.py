@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .cs2_config_backup import is_cs2_running
 
@@ -417,6 +419,74 @@ class PovHudManager:
             "pov_has_pov": "csgo/pov.vpk" in tp,
             "len_delta": len(tp) - len(td),
         }
+
+
+def restore_pov_after_cs2_exit(
+    manager: PovHudManager,
+    expected_gameinfo_sha256: Optional[str],
+    *,
+    is_running: Optional[Callable[[], bool]] = None,
+    sleep: Optional[Callable[[float], None]] = None,
+    max_attempts: int = 20,
+    logger: Optional[logging.Logger] = None,
+) -> dict[str, Any]:
+    """Wait for CS2 to exit, then restore and strictly verify POV HUD files."""
+    running_check = is_running or is_cs2_running
+    sleep_fn = sleep or time.sleep
+    event_logger = logger or logging.getLogger(__name__)
+    expected_sha = str(expected_gameinfo_sha256 or "").strip().lower() or None
+
+    # A newly started external CS2 process must also finish before files can be restored.
+    while running_check():
+        sleep_fn(1.0)
+
+    last_error: Optional[Exception] = None
+    verification: dict[str, Any] = {}
+    for _ in range(max_attempts):
+        try:
+            status = manager.status()
+            if not expected_sha:
+                expected_sha = (
+                    str(status.get("original_gameinfo_sha256") or "").strip().lower() or None
+                )
+            if status.get("needs_restore"):
+                restored = manager.restore()
+                verification = restored if isinstance(restored, dict) else {}
+                if not expected_sha:
+                    expected_sha = (
+                        str(verification.get("expected_gameinfo_sha256") or "").strip().lower() or None
+                    )
+            verification = manager.verify_restoration(expected_sha)
+            if expected_sha and verification.get("verified"):
+                verification["error"] = ""
+                event_logger.info("POV HUD files restored and verified after CS2 exit")
+                return verification
+            if expected_sha:
+                last_error = PovHudError("restore verification did not pass")
+            else:
+                last_error = PovHudError(
+                    "restore verification cannot pass without the original gameinfo.gi hash"
+                )
+        except PovHudError as exc:
+            last_error = exc
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+        if running_check():
+            while running_check():
+                sleep_fn(1.0)
+        else:
+            sleep_fn(0.5)
+
+    try:
+        verification = manager.verify_restoration(expected_sha)
+    except Exception as exc:  # noqa: BLE001
+        last_error = last_error or exc
+        verification = {"verified": False, "errors": [str(exc)]}
+    verification["verified"] = False
+    verification["error"] = str(last_error or "restore verification failed")
+    event_logger.error("POV HUD restore failed; manual restore is required: %s", last_error)
+    return verification
 
 
 def try_restore_stale_pov_on_startup(cfg: Any) -> list[str]:

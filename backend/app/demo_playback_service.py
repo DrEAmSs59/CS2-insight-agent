@@ -17,7 +17,7 @@ from typing import Any, Optional
 from .cs2_config_backup import is_cs2_running
 from .demo_compat_service import ensure_demo_compatible
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
-from .pov_hud_manager import PovHudError, PovHudManager
+from .pov_hud_manager import PovHudError, PovHudManager, restore_pov_after_cs2_exit
 
 logger = logging.getLogger(__name__)
 
@@ -158,44 +158,13 @@ class DemoPlaybackService:
         manager: PovHudManager,
         expected_gameinfo_sha256: Optional[str],
     ) -> dict[str, Any]:
-        # A newly started external CS2 process must also finish before files can be restored.
-        while is_cs2_running():
-            time.sleep(1.0)
-
-        last_error: Optional[Exception] = None
-        verification: dict[str, Any] = {}
-        for _ in range(20):
-            try:
-                status = manager.status()
-                if status.get("needs_restore"):
-                    restored = manager.restore()
-                    verification = restored if isinstance(restored, dict) else {}
-                verification = manager.verify_restoration(expected_gameinfo_sha256)
-                if verification.get("verified"):
-                    verification["error"] = ""
-                    logger.info("Direct playback POV HUD files restored and verified")
-                    return verification
-                last_error = PovHudError("restore verification did not pass")
-            except PovHudError as exc:
-                last_error = exc
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-
-            if is_cs2_running():
-                while is_cs2_running():
-                    time.sleep(1.0)
-            else:
-                time.sleep(0.5)
-
-        try:
-            verification = manager.verify_restoration(expected_gameinfo_sha256)
-        except Exception as exc:  # noqa: BLE001
-            last_error = last_error or exc
-            verification = {"verified": False, "errors": [str(exc)]}
-        verification["verified"] = False
-        verification["error"] = str(last_error or "restore verification failed")
-        logger.error("Direct playback POV HUD restore failed; manual restore is required: %s", last_error)
-        return verification
+        return restore_pov_after_cs2_exit(
+            manager,
+            expected_gameinfo_sha256,
+            is_running=is_cs2_running,
+            sleep=time.sleep,
+            logger=logger,
+        )
 
     def _monitor_session(self, session: DemoPlaybackSession) -> None:
         try:

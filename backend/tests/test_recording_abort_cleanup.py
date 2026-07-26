@@ -3,9 +3,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import env_utils
+from app import env_utils, pov_hud_manager
 from app.env_utils import OBSConfig
-from app.obs_director import CS2UnexpectedExitError, OBSDirector
+from app.obs_director import (
+    CS2UnexpectedExitError,
+    OBSDirector,
+    RecordingWarmupExtras,
+)
+from app.recording import plan_builder
 from app.recording.executor import obs_recording_controller
 from app.recording.executor.recording_executor import RecordingExecutor
 from app.recording.models import (
@@ -274,3 +279,112 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
         }
     ]
     assert cleanup_calls == ["obs", "cs2_and_config", "artifacts"]
+
+
+@pytest.mark.parametrize("restore_verified", [True, False])
+def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
+    monkeypatch,
+    tmp_path,
+    restore_verified,
+):
+    expected_sha = "a" * 64
+    calls: list[tuple] = []
+
+    class FakeFinalController:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def force_stop_recording(self):
+            return True
+
+    class FakePovManager:
+        def __init__(self, config):
+            calls.append(("manager", config))
+
+        def install(self):
+            calls.append(("install",))
+
+        def status(self):
+            return {"original_gameinfo_sha256": f"  {'A' * 64}  "}
+
+    restoration = {
+        "verified": restore_verified,
+        "gameinfo_restored": restore_verified,
+        "pov_vpk_removed": restore_verified,
+        "expected_gameinfo_sha256": expected_sha,
+        "actual_gameinfo_sha256": expected_sha if restore_verified else "b" * 64,
+        "error": "" if restore_verified else "restore verification did not pass",
+    }
+
+    def fake_restore_after_exit(manager, original_sha, **kwargs):
+        calls.append(("restore", manager, original_sha, kwargs))
+        return dict(restoration)
+
+    monkeypatch.setattr(
+        obs_recording_controller,
+        "OBSRecordingController",
+        FakeFinalController,
+    )
+    config = SimpleNamespace(kill_fx_enabled=False)
+    monkeypatch.setattr(env_utils, "load_config", lambda: config)
+
+    def skip_plan_build(_request):
+        raise RuntimeError("skip plan build")
+
+    monkeypatch.setattr(
+        plan_builder,
+        "build_plan",
+        skip_plan_build,
+    )
+    monkeypatch.setattr(pov_hud_manager, "PovHudManager", FakePovManager)
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "restore_pov_after_cs2_exit",
+        fake_restore_after_exit,
+    )
+
+    request = SimpleNamespace(
+        request_id=f"pov-restore-{restore_verified}",
+        demo=SimpleNamespace(
+            demo_path=str(tmp_path / "pov.dem"),
+            demo_filename="pov.dem",
+        ),
+        options=SimpleNamespace(
+            kb_overlay_enabled=False,
+            kill_fx_enabled=False,
+        ),
+    )
+
+    async def run():
+        director = OBSDirector(OBSConfig(), "", abort_event=asyncio.Event())
+
+        def fail_launch(*_args, **_kwargs):
+            raise RuntimeError("launch failed for test")
+
+        monkeypatch.setattr(director, "_launch_cs2", fail_launch)
+        monkeypatch.setattr(director, "_kill_cs2", lambda: calls.append(("kill",)))
+        monkeypatch.setattr(director, "_cleanup_cs2_artifacts", lambda: None)
+        return await director.execute_plan_queue(
+            [request],
+            warmup=RecordingWarmupExtras(pov_hud_enabled=True),
+        )
+
+    results = asyncio.run(run())
+
+    call_names = [entry[0] for entry in calls]
+    assert call_names[:2] == ["manager", "install"]
+    assert call_names.count("kill") >= 1
+    assert call_names[-1] == "restore"
+    restore_call = calls[-1]
+    assert isinstance(restore_call[1], FakePovManager)
+    assert restore_call[2] == expected_sha
+    assert callable(restore_call[3]["is_running"])
+
+    recovery = results[0]["recovery"]
+    assert recovery["pov_enabled"] is True
+    assert recovery["pov_restore_verified"] is True
+    assert recovery["pov_restored"] is restore_verified
+    assert recovery["pov_restore_state"] == (
+        "restored" if restore_verified else "restore_failed"
+    )
+    assert recovery["pov_restore"] == restoration
