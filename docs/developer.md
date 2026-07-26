@@ -17,10 +17,12 @@ git checkout -b feat/my-change
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19 + React Router + TailwindCSS 4 + Vite 6 + Zustand |
-| Desktop | Tauri 2 + 系统 WebView2（Windows NSIS 安装包） |
-| Backend | Python 3.12 + FastAPI + uvicorn |
-| 解析引擎 | demoparser2 + pandas（子进程隔离，防 Rust panic 拖垮主进程） |
+| Frontend | React 19 + React Router 7 + Ant Design 5 + TailwindCSS 4 + Vite 6 + Zustand 5 |
+| Desktop | Tauri 2 + Rust + 系统 WebView2（Windows NSIS 安装包与 Tauri updater） |
+| Backend | Python 3.12 + FastAPI + uvicorn（API、任务编排与业务分析） |
+| 解析 / 回放引擎 | 定制 `demoparser2 0.41.4+cs2insight6`（PyO3/Rust）；整场 32 Hz 回放直接写 Parquet，并由 Rust 按回合读取二进制帧；烟雾体素也由 Rust 解码 |
+| Python 表数据 | 项目内置的轻量 `native_table`；生产依赖不包含 pandas、NumPy、Polars 或 PyArrow |
+| 包管理 | Python 使用 `uv` + 根目录 `uv.lock`；前端使用 `pnpm` + `frontend/pnpm-lock.yaml`；Rust 使用 Cargo + `frontend/src-tauri/Cargo.lock` |
 | AI 网关 | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等） |
 | 录制管线 | `RecordingRequestDTO` → `plan_builder` → `RecordingExecutor`；CS2 启停与批量队列由 `obs_director` 编排 |
 | OBS 控制 | obs-websocket-py（分段 `StartRecord` / `PauseRecord` jump-cut；可选场景转场淡入淡出） |
@@ -47,8 +49,11 @@ CS2-insight-agent/
 │       │   ├── executor/              # RecordingExecutor、OBS 控制、demo seek、GSI 观战校验
 │       │   └── services/              # 单次录制结果落盘
 │       ├── obs_director.py            # CS2 启停、GSI 门控、预热 cvar、批量队列 execute_plan_queue
-│       ├── demo_parser.py             # 高光 / 下饭 / 梗死亡 / 合集判定引擎
-│       ├── demo_parse_isolation.py    # 子进程隔离解析（parse_worker.py）
+│       ├── demo_parser.py             # 高光 / 下饭 / 梗死亡 / 合集判定入口
+│       ├── demo_parse_isolation.py    # Rust 解析子进程边界（parse_worker.py）
+│       ├── demoparser_runtime.py      # 校验定制 wheel 版本与必需的 Rust 接口
+│       ├── native_table.py            # 无第三方依赖的轻量列式表 API
+│       ├── parser/                    # 分析管线、32 Hz Parquet 回放缓存、烟火效果轨迹
 │       ├── ai_reviewer.py             # 毒舌 AI 锐评（OpenAI 兼容）
 │       ├── montage_db.py              # 已录片段 & 合辑工程（SQLite recorded_clips / projects）
 │       ├── montage_encoder.py         # FFmpeg H.264 编码器探测
@@ -110,16 +115,18 @@ CS2-insight-agent/
 ```
 
 发行版内置的 Python 运行时为 `3.12`。2D 回放依赖项目固定的
-`demoparser2 0.41.4+cs2insight5` PyO3/Rust 扩展，不能用 PyPI 原版替代。
+`demoparser2 0.41.4+cs2insight6` PyO3/Rust 扩展，不能用 PyPI 原版替代。
 如果需要重建 wheel，已安装 Rust 工具链的开发者可以执行：
 
 ```powershell
 .\packaging\demoparser-lean\setup-backend-dev.ps1 -BuildFromSource
 ```
 
-后端启动时会校验 wheel 版本以及 `write_replay_parquet`、
-`read_replay_parquet_round`、`read_replay_parquet_round_binary` 三个 Rust
-接口。运行时不匹配会直接终止启动，不会静默退回 JSON 回放。
+后端启动时会校验 wheel 版本以及 `decode_smoke_voxel_journal`、
+`write_replay_parquet`、`read_replay_parquet_round`、
+`read_replay_parquet_round_binary` 四个 Rust 接口。运行时不匹配会直接终止
+启动，不会静默退回 JSON 回放。发布构建还会检查 pandas、NumPy、Polars 与
+PyArrow 均未进入内置 Python runtime。
 
 #### 2. Frontend
 
@@ -142,11 +149,16 @@ pnpm run desktop:dev
 # 仅打包前端静态资源
 pnpm run build
 
-# 打包 Tauri NSIS 安装包
+# 日常 smoke build：打包 Tauri NSIS 安装包
 pnpm run desktop:build
+
+# 正式版本构建：统一注入前端、Tauri 与内置后端版本号
+pnpm run desktop:build:ver -- 2.4.0
 ```
 
-安装包输出至 `frontend/src-tauri/target/release/bundle/nsis/`。正式发布版不启用应用内自动更新，用户从 Releases 页面下载新版。
+安装包输出至 `frontend/src-tauri/target/release/bundle/nsis/`。正式发布版通过
+Cloudflare R2 上的 `latest.json` 使用 Tauri updater 检查、下载和安装更新；
+GitHub Releases 同时保留可手动下载的安装包。
 
 ---
 
