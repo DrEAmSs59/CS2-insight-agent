@@ -43,7 +43,7 @@ jobs:
           $wheel = Get-ChildItem "dist/wheels/demoparser2-$($meta.distribution_version)-cp312-cp312-win_amd64.whl" |
             Select-Object -First 1
           if (-not $wheel) { throw "Expected patched demoparser wheel was not produced" }
-          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')"
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, importlib.util as u; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert all(u.find_spec(name) is None for name in ('numpy', 'pandas', 'polars', 'pyarrow'))"
           if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
           $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText(
