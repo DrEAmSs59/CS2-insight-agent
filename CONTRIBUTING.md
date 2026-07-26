@@ -66,7 +66,7 @@ git checkout -b fix/critical-bug main
 
 ## 环境与本地运行
 
-开发环境搭建见 [docs/developer.md](./docs/developer.md)。架构与命令速查见 [CLAUDE.md](./CLAUDE.md)。
+开发环境搭建、架构与命令速查见 [docs/developer.md](./docs/developer.md)；英文快速上手见 [docs/dev-setup.md](./docs/dev-setup.md)。
 
 - 后端：Python **3.12**，FastAPI
 - 前端：Node.js + pnpm + Vite；`pnpm run dev` 代理 `/api` 到 `localhost:8000`

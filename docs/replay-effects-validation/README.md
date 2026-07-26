@@ -22,7 +22,7 @@ python backend/scripts/probe_replay_dynamic_effects.py \
 - `--start-tick` / `--end-tick` 可选；缺省时按 `smokegrenade_detonate` / `inferno_startburn` 事件自动推导探测窗口。
 - 探针不会修改任何生产 API 或工作区缓存。
 - 二进制数据只记录 SHA-256、长度和前 256 字节十六进制。
-- 需要 `demoparser2>=0.41.4+cs2insight2`（含 `parse_infernos`）；烟雾走 `parse_grenades(extra=...)`，燃烧走 `parse_infernos(extra=...)`。
+- 需要仓库锁定的 `demoparser2 0.41.4+cs2insight5`；烟雾走 `parse_grenades(extra=...)`，燃烧走 `parse_infernos(extra=...)`。
 
 烟雾字节可读后的格式研究（阶段 S-A）：
 
@@ -48,7 +48,6 @@ probe-output/run-XXX/
 docs/replay-effects-validation/
 ├── README.md                     # 本文件
 ├── sample-manifest.example.json  # 专用样本 demo 的 manifest 模板
-├── RESULTS_TEMPLATE.md           # 验证报告模板
 ├── RESULTS.md                    # 实际验证结论（闸门文件；没有它不得进入实现阶段）
 ├── captures/                     # 对照录屏（不提交大文件）
 └── probe-output/                 # 探针输出
