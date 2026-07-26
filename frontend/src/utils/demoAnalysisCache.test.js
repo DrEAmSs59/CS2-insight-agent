@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildPendingDemoAnalysisSpecs,
+  DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION,
   hasCompleteCachedDemoAnalysis,
 } from "./demoAnalysisCache";
 
@@ -15,6 +16,7 @@ function demo(overrides = {}) {
       },
       analysis_workspace: {
         version: 1,
+        algorithm_version: DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION,
         rounds: [{ round_number: 1 }],
       },
     },
@@ -52,5 +54,13 @@ describe("demo analysis cache coverage", () => {
     });
     expect(hasCompleteCachedDemoAnalysis(legacy)).toBe(false);
     expect(buildPendingDemoAnalysisSpecs([legacy])).toHaveLength(1);
+  });
+
+  test("rebuilds a cached workspace produced by an older replay algorithm", () => {
+    const stale = demo();
+    stale.cached_result.analysis_workspace.algorithm_version = "match-workspace-2026.07.3";
+
+    expect(hasCompleteCachedDemoAnalysis(stale)).toBe(false);
+    expect(buildPendingDemoAnalysisSpecs([stale])).toHaveLength(1);
   });
 });

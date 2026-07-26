@@ -10,6 +10,8 @@ function normalizedName(value) {
   return String(value || "").trim().toLocaleLowerCase();
 }
 
+export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.07.4";
+
 export function demoAnalysisRoster(demo) {
   const seen = new Set();
   const names = [];
@@ -37,6 +39,7 @@ export function hasCompleteCachedDemoAnalysis(demo) {
     || !workspace
     || typeof workspace !== "object"
     || !workspace.version
+    || workspace.algorithm_version !== DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION
     || !Array.isArray(workspace.rounds)
     || !workspace.rounds.length
   ) {
