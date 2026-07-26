@@ -140,7 +140,7 @@ jobs:
           $env:PYTHONNOUSERSITE = "1"
           $env:PYTHONDONTWRITEBYTECODE = "1"
           $backend = Join-Path $resources "backend"
-          & $py -c "import sys; sys.path.insert(0, sys.argv[1]); import app.main, demoparser2, fastapi, importlib.metadata as m, importlib.util as u, numpy, openai, pandas, PIL, uvicorn; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None; print('runtime-ok', m.version('demoparser2'))" $backend
+          & $py -c "import sys; sys.path.insert(0, sys.argv[1]); import app.main, demoparser2, fastapi, importlib.metadata as m, importlib.util as u, openai, PIL, uvicorn; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None; print('runtime-ok', m.version('demoparser2'))" $backend
           if ($LASTEXITCODE -ne 0) { throw "Bundled runtime verification failed: $LASTEXITCODE" }
           $expectedVersion = $env:RELEASE_TAG -replace '^[vV]', ''
           $bundledVersion = (Get-Content (Join-Path $backend "app/release_version.txt") -Raw).Trim()
@@ -148,7 +148,7 @@ jobs:
 
       - name: Report bundled runtime size
         shell: pwsh
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 160
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 100
 
       - name: Write SHA256SUMS
         shell: pwsh
@@ -158,7 +158,7 @@ jobs:
           if (-not $installer) { throw "Tauri NSIS installer not found" }
           $installerMiB = $installer.Length / 1MB
           Write-Host ("Installer size: {0:N2} MiB" -f $installerMiB)
-          if ($installerMiB -gt 70) { throw ("Installer exceeds 70 MiB budget: {0:N2} MiB" -f $installerMiB) }
+          if ($installerMiB -gt 45) { throw ("Installer exceeds 45 MiB budget: {0:N2} MiB" -f $installerMiB) }
           $appExe = Get-Item "frontend/src-tauri/target/release/cs2-insight-agent-desktop.exe"
           if ($env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT) {
             $expectedThumbprint = $env:CS2_INSIGHT_WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', ''
@@ -173,7 +173,7 @@ jobs:
           $resourceBytes = (Get-ChildItem "frontend/src-tauri/bundle-resources" -Recurse -File | Measure-Object Length -Sum).Sum
           $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
           Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
-          if ($installedMiB -gt 190) { throw ("Installed footprint exceeds 190 MiB budget: {0:N2} MiB" -f $installedMiB) }
+          if ($installedMiB -gt 120) { throw ("Installed footprint exceeds 120 MiB budget: {0:N2} MiB" -f $installedMiB) }
           $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }
