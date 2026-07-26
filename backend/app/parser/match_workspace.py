@@ -268,9 +268,12 @@ def _events_by_round(
                 for prefix in prefixes:
                     x = _float(row.get(f"{prefix}X", row.get(f"{prefix}x")), float("nan"))
                     y = _float(row.get(f"{prefix}Y", row.get(f"{prefix}y")), float("nan"))
+                    z = _float(row.get(f"{prefix}Z", row.get(f"{prefix}z")), float("nan"))
                     if not pd.isna(x) and not pd.isna(y):
                         payload[f"{role}_x"] = round(x, 2)
                         payload[f"{role}_y"] = round(y, 2)
+                        if not pd.isna(z):
+                            payload[f"{role}_z"] = round(z, 2)
                         break
             round_number = _round_number_for_tick(tick, windows, row)
             if round_number > 0:
@@ -316,9 +319,12 @@ def _events_by_round(
             }
             x = _float(row.get("user_X", row.get("player_X", row.get("X"))), float("nan"))
             y = _float(row.get("user_Y", row.get("player_Y", row.get("Y"))), float("nan"))
+            z = _float(row.get("user_Z", row.get("player_Z", row.get("Z"))), float("nan"))
             if not pd.isna(x) and not pd.isna(y):
                 payload["x"] = round(x, 2)
                 payload["y"] = round(y, 2)
+                if not pd.isna(z):
+                    payload["z"] = round(z, 2)
             out[round_number].append(payload)
 
     grenade_labels = {
@@ -343,6 +349,10 @@ def _events_by_round(
                 row.get("y", row.get("Y", row.get("user_Y", row.get("player_Y")))),
                 float("nan"),
             )
+            z = _float(
+                row.get("z", row.get("Z", row.get("user_Z", row.get("player_Z")))),
+                float("nan"),
+            )
             payload: dict[str, Any] = {
                 "type": "grenade",
                 "kind": grenade_labels.get(event_name, event_name),
@@ -352,6 +362,8 @@ def _events_by_round(
             if not pd.isna(x) and not pd.isna(y):
                 payload["x"] = round(x, 2)
                 payload["y"] = round(y, 2)
+                if not pd.isna(z):
+                    payload["z"] = round(z, 2)
             round_number = _round_number_for_tick(tick, windows, row)
             if round_number > 0:
                 out[round_number].append(payload)
@@ -406,9 +418,12 @@ def _shots_by_round(
         }
         x = _float(row.get("user_X", row.get("player_X", row.get("X"))), float("nan"))
         y = _float(row.get("user_Y", row.get("player_Y", row.get("Y"))), float("nan"))
+        z = _float(row.get("user_Z", row.get("player_Z", row.get("Z"))), float("nan"))
         if not pd.isna(x) and not pd.isna(y):
             shot["x"] = round(x, 2)
             shot["y"] = round(y, 2)
+            if not pd.isna(z):
+                shot["z"] = round(z, 2)
         out[round_number].append(shot)
     for shots in out.values():
         shots.sort(key=lambda item: _int(item.get("tick")))
@@ -428,7 +443,9 @@ def _extract_grenade_trajectories(parser: Any, tick_rate: float) -> list[dict[st
         return []
     try:
         work = frame.loc[frame["grenade_type"].isin(_GRENADE_PROJECTILES)].copy()
-        for column in ("tick", "x", "y"):
+        for column in ("tick", "x", "y", "z"):
+            if column not in work.columns:
+                continue
             work[column] = pd.to_numeric(work[column], errors="coerce")
         work = work.dropna(subset=["tick", "x", "y"])
         if work.empty:
@@ -474,14 +491,17 @@ def _extract_grenade_trajectories(parser: Any, tick_rate: float) -> list[dict[st
         sampled = rows.iloc[::stride]
         if sampled.index[-1] != rows.index[-1]:
             sampled = pd.concat([sampled, rows.iloc[[-1]]])
-        points = [
-            {
+        points = []
+        for _, row in sampled.iterrows():
+            point = {
                 "tick": int(row["tick"]),
                 "x": round(float(row["x"]), 2),
                 "y": round(float(row["y"]), 2),
             }
-            for _, row in sampled.iterrows()
-        ]
+            z = row.get("z")
+            if z is not None and not pd.isna(z):
+                point["z"] = round(float(z), 2)
+            points.append(point)
         trajectories.append({
             "kind": kind,
             "actor": _clean_name(first.get("name")),
