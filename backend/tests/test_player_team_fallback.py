@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock
 
-import pandas as pd
+from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

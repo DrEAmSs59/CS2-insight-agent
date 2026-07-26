@@ -6,8 +6,9 @@ import json
 from importlib import metadata
 from typing import Any
 
-REQUIRED_DEMOPARSER_VERSION = "0.41.4+cs2insight5"
+REQUIRED_DEMOPARSER_VERSION = "0.41.4+cs2insight6"
 REQUIRED_DEMOPARSER_METHODS = (
+    "decode_smoke_voxel_journal",
     "write_replay_parquet",
     "read_replay_parquet_round",
     "read_replay_parquet_round_binary",

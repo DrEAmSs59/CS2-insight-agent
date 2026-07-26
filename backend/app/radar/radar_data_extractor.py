@@ -268,7 +268,7 @@ def extract_radar_timeline_impl(
     map_name_for_effects = map_name
     del map_name
 
-    import pandas as pd
+    from app import native_table as pd
     from demoparser2 import DemoParser
 
     from app.demo_parser import _to_pandas_df

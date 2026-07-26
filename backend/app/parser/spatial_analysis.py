@@ -4,7 +4,7 @@ import math
 from bisect import bisect_left, bisect_right
 from typing import Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import (
@@ -62,15 +62,9 @@ def _smallest_angle_diff_deg(a: float, b: float) -> float:
 
 
 def _is_nan(v) -> bool:
-    """NaN/None/pd.NA 检测，兼容 float / pandas NA / numpy NaN。"""
-    if v is None:
+    """NaN/None/NA detection without importing a numeric dataframe stack."""
+    if pd.isna(v):
         return True
-    try:
-        import pandas as _pd
-        if _pd.isna(v):
-            return True
-    except (TypeError, ValueError):
-        pass
     try:
         return math.isnan(float(v))
     except (TypeError, ValueError):

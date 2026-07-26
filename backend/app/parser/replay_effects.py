@@ -8,12 +8,13 @@ import os
 import time
 from typing import Any
 
+from demoparser2 import DemoParser
+
+from .. import native_table as pd
+
 from .smoke_voxel_decode import (
     SMOKE_FORMATION_SECONDS,
     VOXEL_CELL_SIZE_WORLD,
-    SmokeVoxelGridState,
-    decode_smoke_cells,
-    decode_smoke_occupancy_sequence,
     iter_smoke_occupancy_frames,
     project_voxels_to_cells,
     synthesize_formation_from_seeds,
@@ -139,6 +140,31 @@ def _map_smoke_seq_to_tick(
     if lower is not None:
         return int(anchors[lower]), "post_anchor"
     return int(begin_tick), "begin"
+
+
+def _geometry_frame_seqs(journal: bytes, start_offset: int = 0) -> list[int]:
+    """Read only smoke journal headers to align Rust samples with update rows."""
+    out: list[int] = []
+    offset = max(0, int(start_offset))
+    end = len(journal)
+    while offset + 4 <= end:
+        seq = journal[offset] | (journal[offset + 1] << 8)
+        length = journal[offset + 2] | (journal[offset + 3] << 8)
+        payload_start = offset + 4
+        payload_end = payload_start + length
+        if payload_end > end:
+            break
+        payload = journal[payload_start:payload_end]
+        if len(payload) >= 2:
+            frame_type = payload[1]
+            if frame_type == 3 or (
+                frame_type == 2
+                and len(payload) >= 4
+                and (payload[2] | (payload[3] << 8)) > 0
+            ):
+                out.append(seq)
+        offset = payload_end
+    return out
 
 
 def _split_entity_lifecycles(rows: list[dict[str, Any]], tick_gap: int) -> list[list[dict[str, Any]]]:
@@ -344,9 +370,8 @@ def build_smoke_tracks_from_rows(
             prev_update: Any = object()
             prev_sig: tuple | None = None
             cell_size = VOXEL_CELL_SIZE_WORLD
-            previous_journal = b""
-            journal_offset = 0
-            voxel_state = SmokeVoxelGridState()
+            journal_segments: list[dict[str, Any]] = []
+            current_segment: dict[str, Any] | None = None
 
             for row in group:
                 update = row.get("m_nVoxelUpdate")
@@ -370,47 +395,55 @@ def build_smoke_tracks_from_rows(
                     declared_i = actual_size
                 declared_i = max(0, min(declared_i, actual_size))
                 journal = bytes(data[:declared_i])
-                if previous_journal and journal.startswith(previous_journal):
-                    start_offset = journal_offset
-                else:
-                    # Entity reuse, a buffer rewrite, or a non-prefix update.
-                    start_offset = 0
-                    voxel_state = SmokeVoxelGridState()
-
-                sequence = decode_smoke_occupancy_sequence(
-                    journal,
-                    declared_size=declared_i,
-                    detonation_pos=stable_origin,
-                    max_seq=float(update_i) if update_i is not None else None,
-                    start_offset=start_offset,
-                    state=voxel_state,
-                )
-                previous_journal = journal
-                journal_offset = len(journal)
-                if not sequence and start_offset == 0:
-                    # Fallback: single snapshot decode with target_seq when journal expand yields nothing.
-                    decoded = decode_smoke_cells(
-                        journal,
-                        declared_size=declared_i,
-                        detonation_pos=stable_origin,
-                        target_seq=float(update_i) if update_i is not None else None,
-                    )
-                    if not decoded.get("ok") or not decoded.get("cells"):
-                        prev_update = update_i
-                        continue
-                    sequence = [
-                        {
-                            "seq": int(decoded.get("seq") or update_i or 0),
-                            "cells": decoded["cells"],
-                            "cell_size": float(decoded.get("cell_size") or VOXEL_CELL_SIZE_WORLD),
-                            "voxel_count": int(decoded.get("voxel_count") or 0),
-                        }
+                candidate = {
+                    "journal": journal,
+                    "declared": declared_i,
+                    "update": update_i,
+                    "row": row,
+                    "frames": [(seq, update_i) for seq in _geometry_frame_seqs(journal)],
+                }
+                if current_segment is None:
+                    current_segment = candidate
+                elif journal.startswith(current_segment["journal"]):
+                    # Keep only the final cumulative buffer. Rust decodes the
+                    # complete journal once instead of rebuilding every prefix.
+                    old_size = len(current_segment["journal"])
+                    candidate["frames"] = [
+                        *current_segment["frames"],
+                        *(
+                            (seq, update_i)
+                            for seq in _geometry_frame_seqs(journal, old_size)
+                        ),
                     ]
-                elif not sequence:
-                    # The appended journal tail contains heartbeat/non-occupancy
-                    # records only. Re-decoding the cumulative prefix here makes
-                    # long smokes quadratic without changing their occupancy.
-                    prev_update = update_i
+                    current_segment = candidate
+                elif current_segment["journal"].startswith(journal):
+                    # Ignore a stale shorter snapshot observed after a longer one.
+                    pass
+                else:
+                    journal_segments.append(current_segment)
+                    current_segment = candidate
+                prev_update = update_i
+
+            if current_segment is not None:
+                journal_segments.append(current_segment)
+
+            for segment in journal_segments:
+                journal = segment["journal"]
+                actual_size = len(journal)
+                declared_i = int(segment["declared"])
+                update_i = segment["update"]
+                row = segment["row"]
+                try:
+                    sequence = DemoParser.decode_smoke_voxel_journal(
+                        journal,
+                        declared_i,
+                        stable_origin,
+                        update_i,
+                    )
+                except (TypeError, ValueError) as exc:
+                    warnings.append(
+                        f"smoke entity {entity_id} tick {row['tick']}: Rust voxel decode failed: {exc}"
+                    )
                     continue
 
                 for idx, item in enumerate(sequence):
@@ -425,6 +458,20 @@ def build_smoke_tracks_from_rows(
                         continue
                     cell_size = float(item.get("cell_size") or VOXEL_CELL_SIZE_WORLD)
                     sig = _cells_signature(cells)
+                    frame_rows = segment.get("frames") or []
+                    availability = (
+                        frame_rows[idx][1]
+                        if idx < len(frame_rows) and int(frame_rows[idx][0]) == seq
+                        else update_i
+                    )
+                    threshold = max(
+                        seq,
+                        int(availability) if availability is not None else seq,
+                    )
+                    exposed_update = min(
+                        (anchor for anchor in anchors if anchor >= threshold),
+                        default=update_i,
+                    )
 
                     # Cumulative journals: each seq once. Real demos often keep a single
                     # occupancy frame at seq=0 while m_nVoxelUpdate advances — re-emit only
@@ -434,7 +481,8 @@ def build_smoke_tracks_from_rows(
                         is_tip = idx == len(sequence) - 1
                         if not is_tip or sig == prev_sig:
                             continue
-                        mapped_tick, anchor_mode = int(row["tick"]), "row"
+                        mapped_tick = int(anchors.get(exposed_update, row["tick"]))
+                        anchor_mode = "row"
                     else:
                         if sig == prev_sig:
                             seen_seqs.add(seq)
@@ -464,10 +512,8 @@ def build_smoke_tracks_from_rows(
                         "anchor_mode": anchor_mode,
                     }
                     if update_i is not None:
-                        sample["voxel_update"] = update_i
+                        sample["voxel_update"] = exposed_update
                     samples.append(sample)
-
-                prev_update = update_i
 
             if not samples:
                 continue
@@ -566,17 +612,17 @@ def _dataframe_to_rows(frame: Any) -> list[dict[str, Any]]:
     if frame is None:
         return []
     try:
-        return frame.to_dict(orient="records")
-    except Exception:
+        return pd.DataFrame(frame).to_dict(orient="records")
+    except (TypeError, ValueError):
         return []
 
 
 def _filter_smoke_frame(frame: Any) -> Any:
     """Keep only smoke projectile rows before materializing Python dicts."""
-    if frame is None or not hasattr(frame, "columns"):
+    if frame is None:
         return frame
     try:
-        work = frame
+        work = pd.DataFrame(frame)
         if "grenade_type" in work.columns:
             work = work[work["grenade_type"] == "CSmokeGrenadeProjectile"]
         if "m_bDidSmokeEffect" in work.columns:
@@ -588,9 +634,10 @@ def _filter_smoke_frame(frame: Any) -> Any:
 
 def _filter_inferno_frame(frame: Any) -> Any:
     """Keep only CInferno rows from the combined utility parser."""
-    if frame is None or not hasattr(frame, "columns"):
+    if frame is None:
         return frame
     try:
+        frame = pd.DataFrame(frame)
         if "grenade_type" in frame.columns:
             return frame[frame["grenade_type"] == "CInferno"]
         return frame

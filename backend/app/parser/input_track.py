@@ -5,7 +5,7 @@ import math
 import os
 import threading
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import _to_pandas_df as _to_df

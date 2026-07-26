@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-import pandas as pd
+from .. import native_table as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import (

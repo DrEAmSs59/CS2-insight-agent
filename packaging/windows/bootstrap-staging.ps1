@@ -70,7 +70,7 @@ try {
   & $uv.Source pip install --python $py --no-deps $leanWheel --compile-bytecode
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed: $LASTEXITCODE" }
   $leanMeta = Get-Content (Join-Path $repoRoot "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
-  & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
+  & $py -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
   if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed: $LASTEXITCODE" }
   Write-Host "[CS2 Insight Agent] Trimming Python runtime to reduce installer size..."
   foreach ($rel in @(
@@ -104,9 +104,6 @@ try {
   $sp = Join-Path $destPython "Lib\site-packages"
   if (Test-Path $sp) {
     foreach ($pkgRel in @(
-        "pandas\tests",
-        "numpy\tests",
-        "numpy\f2py\tests",
         "matplotlib\tests",
         "matplotlib\mpl-data\sample_data"
       )) {

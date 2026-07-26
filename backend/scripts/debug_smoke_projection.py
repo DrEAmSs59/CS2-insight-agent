@@ -23,10 +23,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app import native_table as pd
 from app.parser.replay_effects import SMOKE_EXTRA
 from app.parser.smoke_voxel_decode import (
     SmokeVoxel,

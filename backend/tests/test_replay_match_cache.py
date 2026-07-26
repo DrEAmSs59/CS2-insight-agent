@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-import pandas as pd
+from app import native_table as pd
 
 from app.parser import replay_match_cache
 

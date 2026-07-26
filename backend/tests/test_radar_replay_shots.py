@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pandas as pd
+from app import native_table as pd
 
 from app.radar.radar_data_extractor import extract_radar_timeline_impl
 from app.radar.radar_map_assets import lookup_map_data, resolve_map_png_path

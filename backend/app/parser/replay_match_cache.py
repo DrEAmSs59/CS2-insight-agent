@@ -11,6 +11,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .. import native_table as pd
+
 logger = logging.getLogger(__name__)
 
 REPLAY_MATCH_CACHE_VERSION = 2
@@ -421,6 +423,10 @@ def _frames_from_dataframe(frame: Any, spec: dict[str, Any], meta: dict[str, Any
         return []
     pov_sid = _normalize_sid(meta.get("pov_steamid64"))
     pov_name = _safe_text(meta.get("pov_player_name")).lower()
+    try:
+        frame = pd.DataFrame(frame)
+    except (TypeError, ValueError):
+        frame = pd.DataFrame()
     groups: dict[int, list[dict[str, Any]]] = {}
     if frame is not None and not frame.empty and "tick" in frame.columns:
         columns = list(frame.columns)

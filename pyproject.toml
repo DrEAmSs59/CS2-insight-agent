@@ -6,14 +6,12 @@ requires-python = "==3.12.*"
 dependencies = [
     "aiosqlite==0.22.1",
     "cramjam==2.11.0",
-    "demoparser2==0.41.4+cs2insight5; sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "demoparser2==0.41.4+cs2insight6; sys_platform == 'win32' and platform_machine == 'AMD64'",
     "fastapi==0.136.3",
     "httpx==0.28.1",
-    "numpy==2.4.6",
     "obs-websocket-py==1.0",
     "openai==2.41.0",
     "packaging==26.2",
-    "pandas==3.0.3",
     "pillow==12.2.0",
     "pydantic==2.13.4",
     "python-dateutil==2.9.0.post0",
@@ -36,4 +34,4 @@ package = false
 required-version = ">=0.11.8,<0.12"
 
 [tool.uv.sources]
-demoparser2 = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight5-r1/demoparser2-0.41.4%2Bcs2insight5-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" }
+demoparser2 = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight6-r1/demoparser2-0.41.4%2Bcs2insight6-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" }
