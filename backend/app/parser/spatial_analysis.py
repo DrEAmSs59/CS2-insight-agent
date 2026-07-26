@@ -804,21 +804,25 @@ def enrich_kill_action_tags_spatial(
             vxy: Optional[float] = None
             vxy_imm: Optional[float] = None
             if atk is not None and "X" in atk and "Y" in atk:
-                ax, ay = float(atk["X"]), float(atk["Y"])
-                prev_row8 = _spatial_player_row(spatial_cache.get(kt - 8), target_player)
                 try:
-                    if prev_row8 is not None and "X" in prev_row8 and "Y" in prev_row8:
-                        px8, py8 = float(prev_row8["X"]), float(prev_row8["Y"])
-                        vxy = math.hypot(ax - px8, ay - py8) * 8
+                    ax, ay = float(atk["X"]), float(atk["Y"])
                 except (TypeError, ValueError):
-                    vxy = None
-                prev_row2 = _spatial_player_row(spatial_cache.get(kt - 2), target_player)
-                try:
-                    if prev_row2 is not None and "X" in prev_row2 and "Y" in prev_row2:
-                        px2, py2 = float(prev_row2["X"]), float(prev_row2["Y"])
-                        vxy_imm = math.hypot(ax - px2, ay - py2) * 32
-                except (TypeError, ValueError):
-                    vxy_imm = None
+                    pass
+                else:
+                    prev_row8 = _spatial_player_row(spatial_cache.get(kt - 8), target_player)
+                    try:
+                        if prev_row8 is not None and "X" in prev_row8 and "Y" in prev_row8:
+                            px8, py8 = float(prev_row8["X"]), float(prev_row8["Y"])
+                            vxy = math.hypot(ax - px8, ay - py8) * 8
+                    except (TypeError, ValueError):
+                        vxy = None
+                    prev_row2 = _spatial_player_row(spatial_cache.get(kt - 2), target_player)
+                    try:
+                        if prev_row2 is not None and "X" in prev_row2 and "Y" in prev_row2:
+                            px2, py2 = float(prev_row2["X"]), float(prev_row2["Y"])
+                            vxy_imm = math.hypot(ax - px2, ay - py2) * 32
+                    except (TypeError, ValueError):
+                        vxy_imm = None
 
             _is_jump = is_jump_kill(spatial_cache, kt, target_player)
             if vxy is not None:

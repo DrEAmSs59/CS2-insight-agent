@@ -52,3 +52,21 @@ def test_static_kill_has_no_velocity_tags():
     assert "🎿 一个大拉" not in tags
     assert "🚀 上去就是干" not in tags
     assert "🏃‍♂️ 跑打" not in tags
+
+
+def test_missing_current_position_does_not_abort_enrichment():
+    kt = 10000
+    current = _row(0.0, 0.0)
+    current.update({"X": None, "Y": None, "Z": None, "yaw": None})
+    cache = {
+        kt: {"Hero": current},
+        kt - 8: {"Hero": _row(100.0, 0.0)},
+    }
+    round_kills = {1: [{"tick": kt, "victim": "Foe", "weapon": "ak47", "tags": []}]}
+
+    enrich_kill_action_tags_spatial(round_kills, cache, "Hero")
+
+    tags = round_kills[1][0]["tags"]
+    assert "🎿 一个大拉" not in tags
+    assert "🚀 上去就是干" not in tags
+    assert "🏃‍♂️ 跑打" not in tags
