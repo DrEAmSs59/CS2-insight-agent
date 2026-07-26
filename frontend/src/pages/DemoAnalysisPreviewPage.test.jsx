@@ -675,6 +675,52 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getAllByTitle(/ZywOo 烟雾弹 · 剩余/)).toHaveLength(1);
   });
 
+  test("renders a real long-distance smoke from its release instead of 2.25 seconds before landing", async () => {
+    const shell = buildShell();
+    shell.analysisWorkspace = {
+      ...shell.analysisWorkspace,
+      rounds: shell.analysisWorkspace.rounds.map((round, index) => index === 0 ? {
+        ...round,
+        start_tick: 35_918,
+        freeze_end_tick: 35_918,
+        end_tick: 36_500,
+        events: [{
+          type: "grenade",
+          tick: 36_442,
+          throw_tick: 35_934,
+          actor: "ZywOo",
+          kind: "烟雾弹",
+          x: 512,
+          y: 512,
+          trajectory: [
+            { tick: 35_934, x: 490, y: 490 },
+            { tick: 36_326, x: 500, y: 500 },
+            { tick: 36_440, x: 512, y: 512 },
+          ],
+        }],
+      } : round),
+    };
+    API.post.mockResolvedValueOnce({
+      data: {
+        frames: [
+          { tick: 35_918, time_sec: 0, players: [{ name: "ZywOo", team: "CT", x: 490, y: 490, z: 0, is_alive: true }] },
+          { tick: 35_950, time_sec: 0.5, players: [{ name: "ZywOo", team: "CT", x: 491, y: 491, z: 0, is_alive: true }] },
+          { tick: 36_326, time_sec: 6.375, players: [{ name: "ZywOo", team: "CT", x: 500, y: 500, z: 0, is_alive: true }] },
+          { tick: 36_442, time_sec: 8.188, players: [{ name: "ZywOo", team: "CT", x: 512, y: 512, z: 0, is_alive: true }] },
+        ],
+      },
+    });
+    const view = renderPage(shell);
+
+    fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
+    await waitFor(() => expect(API.post).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("slider", { name: "回放时间轴" }), { target: { value: "1" } });
+
+    await waitFor(() => expect(view.container.querySelector(".demo-grenade-projectile")).toBeTruthy());
+    expect(view.container.querySelector('.demo-grenade-trajectory[data-inferred="true"]')).toBeNull();
+    expect(view.container.querySelector(".demo-grenade-trajectory")).toBeTruthy();
+  });
+
   test("rejects stale smoke paths whose long stationary tail belongs to another landing", async () => {
     const shell = buildShell();
     shell.analysisWorkspace = {

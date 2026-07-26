@@ -35,6 +35,10 @@ import {
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 import { replayUtilityExposureByName, roundEnemyKillCounts } from "../../utils/replayHudState";
+import {
+  MAX_SMOKE_TRAJECTORY_SECONDS,
+  grenadeTrajectoryTimingIsValid,
+} from "../../utils/replayGrenadeTrajectory";
 
 const SAMPLE_HZ = 32;
 const REPLAY_CACHE_VERSION = REPLAY_STORE_CACHE_VERSION;
@@ -166,8 +170,12 @@ function smokeTrajectoryQuality(event, tickRate) {
   const endpointDistance = landing && endpoint
     ? Math.hypot(Number(endpoint.x) - landing.x, Number(endpoint.y) - landing.y)
     : 0;
-  if (span <= 0 || span > tickRate * 5 || endpointDistance > 256) return -1;
-  return points.length + Math.min(span, tickRate * 5) / Math.max(1, tickRate);
+  if (
+    !grenadeTrajectoryTimingIsValid(points, event?.tick, tickRate, true)
+    || endpointDistance > 256
+  ) return -1;
+  return points.length
+    + Math.min(span, tickRate * MAX_SMOKE_TRAJECTORY_SECONDS) / Math.max(1, tickRate);
 }
 
 function grenadeThrowTick(event, tickRate) {
