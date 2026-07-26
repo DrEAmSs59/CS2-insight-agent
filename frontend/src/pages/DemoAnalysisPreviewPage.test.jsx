@@ -527,14 +527,24 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     };
     API.post.mockResolvedValueOnce({
       data: {
-        frames: [{
-          tick: 200,
-          time_sec: 0,
-          players: [
-            { name: "ZywOo", team: "CT", x: 500, y: 500, z: 0, yaw: 90, health: 100, weapon: "ak47", is_alive: true },
-            { name: "b1t", team: "T", x: 520, y: 520, z: -600, yaw: 0, health: 100, weapon: "glock", is_alive: true },
-          ],
-        }],
+        frames: [
+          {
+            tick: 200,
+            time_sec: 0,
+            players: [
+              { name: "ZywOo", team: "CT", x: 500, y: 500, z: 0, yaw: 90, health: 100, weapon: "ak47", is_alive: true },
+              { name: "b1t", team: "T", x: 520, y: 520, z: -600, yaw: 0, health: 100, weapon: "glock", is_alive: true },
+            ],
+          },
+          {
+            tick: 300,
+            time_sec: 1.5,
+            players: [
+              { name: "ZywOo", team: "CT", x: 510, y: 510, z: 0, yaw: 90, health: 100, weapon: "ak47", is_alive: true },
+              { name: "b1t", team: "T", x: 530, y: 530, z: -600, yaw: 0, health: 100, weapon: "glock", is_alive: true },
+            ],
+          },
+        ],
       },
     });
     const view = renderPage(shell);
@@ -547,14 +557,19 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(scene).toBeTruthy();
     expect(scene.getAttribute("style")).toContain("scale(");
     expect(screen.getByRole("group", { name: "地图缩放" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("slider", { name: "回放时间轴" }), { target: { value: "1" } });
     expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeTruthy();
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeNull();
+    expect(view.container.querySelector('[data-player-trace="ZywOo"]')).toBeTruthy();
+    expect(view.container.querySelector('[data-player-trace="b1t"]')).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "下层" }));
     expect(screen.getByAltText("de_nuke 下层 雷达地图").getAttribute("src")).toContain("layer=lower");
     expect(screen.getByRole("button", { name: "下层" }).getAttribute("aria-pressed")).toBe("true");
     expect(view.container.querySelector('[title^="ZywOo ·"]')).toBeNull();
     expect(view.container.querySelector('[title^="b1t ·"]')).toBeTruthy();
+    expect(view.container.querySelector('[data-player-trace="ZywOo"]')).toBeNull();
+    expect(view.container.querySelector('[data-player-trace="b1t"]')).toBeTruthy();
   });
 
   test("keeps every player unselected until the user chooses one, then requests only that player's AI review", () => {

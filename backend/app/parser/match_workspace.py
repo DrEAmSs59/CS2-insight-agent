@@ -160,6 +160,8 @@ def _build_round_windows(
     round_end_tick_map: dict[int, int],
     re_df: pd.DataFrame,
     match_start_tick: int,
+    tick_rate: float = 64.0,
+    demo_end_tick: int = 0,
 ) -> list[dict[str, Any]]:
     winner_side_by_round: dict[int, int] = {}
     reason_by_round: dict[int, str] = {}
@@ -216,6 +218,19 @@ def _build_round_windows(
         next_start_tick = _int(out[index + 1].get("start_tick"))
         if next_start_tick > _int(out[index].get("end_tick")):
             out[index]["end_tick"] = next_start_tick - 1
+    if out:
+        # The final round has no following freeze period from which to derive its
+        # visible result phase. Keep up to three seconds after round_end so the
+        # last kill/death feedback is actually present in the 2D replay.
+        final = out[-1]
+        raw_end = _int(final.get("round_end_tick") or final.get("end_tick"))
+        tail_end = raw_end + max(1, int(round(float(tick_rate or 64.0) * 3.0)))
+        eof_tick = _int(demo_end_tick)
+        if eof_tick > raw_end:
+            tail_end = min(tail_end, eof_tick)
+            final["end_tick"] = max(_int(final.get("end_tick")), tail_end)
+    for window in out:
+        window["record_end_tick"] = _int(window.get("end_tick"))
     return out
 
 
@@ -856,6 +871,10 @@ def build_match_workspace(
         round_end_tick_map=shared_facts.round_end_tick_map,
         re_df=shared_events.get("re_df_cached"),
         match_start_tick=match_start_tick,
+        tick_rate=tick_rate,
+        demo_end_tick=int(
+            getattr(shared_facts, "demo_end_tick", getattr(shared_facts, "demo_max_tick", 0)) or 0
+        ),
     )
     round_numbers = [int(row["round_number"]) for row in windows]
     halftime_round = _detect_halftime_round(group_side_by_round)
@@ -1036,9 +1055,9 @@ def build_match_workspace(
     except (KeyError, OSError):
         map_transform = None
 
-    # Smoke/inferno area tracks are intentionally NOT extracted here.
-    # Full-demo parse_infernos + parse_grenades(voxel) can add minutes to
-    # parse-multi. 2D replay loads them per-round via /api/demo/replay/effects.
+    # Smoke/inferno area tracks are intentionally NOT stored in the workspace.
+    # The whole-match replay cache extracts them once and embeds the requested
+    # round's tracks in the binary replay packet.
     return {
         "version": 1,
         "algorithm_version": "match-workspace-2026.07.3",

@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import { ReplayRosterAmbientEffect } from "./Demo2DReplayPreview";
+import { ReplayRosterAmbientEffect, replayEndTickForRound } from "./Demo2DReplayPreview";
 
 describe("ReplayRosterAmbientEffect", () => {
   test("uses compositor-friendly static sheets without a Canvas frame loop", () => {
@@ -22,5 +22,22 @@ describe("ReplayRosterAmbientEffect", () => {
     );
 
     expect(view.container.firstChild).toBeNull();
+  });
+});
+
+describe("replayEndTickForRound", () => {
+  test("keeps the final round alive for its post-kill result tail", () => {
+    const rounds = [
+      { round_number: 1, end_tick: 1_000, round_end_tick: 900 },
+      { round_number: 2, end_tick: 2_000, round_end_tick: 2_000 },
+    ];
+
+    expect(replayEndTickForRound(rounds[0], rounds, { demo_end_tick: 2_500 }, 64)).toBe(1_000);
+    expect(replayEndTickForRound(rounds[1], rounds, { demo_end_tick: 2_500 }, 64)).toBe(2_192);
+  });
+
+  test("caps the final tail at the real demo end", () => {
+    const round = { round_number: 1, end_tick: 2_000, round_end_tick: 2_000 };
+    expect(replayEndTickForRound(round, [round], { demo_end_tick: 2_080 }, 64)).toBe(2_080);
   });
 });

@@ -5,11 +5,28 @@ from dataclasses import dataclass
 from app import native_table as pd
 
 from app.parser.match_workspace import (
+    _build_round_windows,
     _enrich_grenade_events,
     _extract_grenade_trajectories,
     _player_stats,
     build_match_workspace,
 )
+
+
+def test_final_round_window_keeps_visible_result_tail_until_demo_end():
+    windows = _build_round_windows(
+        round_freeze_end_ticks={1: 100},
+        round_freeze_start_ticks={1: 50},
+        round_end_tick_map={1: 500},
+        re_df=pd.DataFrame(),
+        match_start_tick=1,
+        tick_rate=64,
+        demo_end_tick=620,
+    )
+
+    assert windows[0]["round_end_tick"] == 500
+    assert windows[0]["end_tick"] == 620
+    assert windows[0]["record_end_tick"] == 620
 
 
 @dataclass

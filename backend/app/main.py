@@ -3232,7 +3232,7 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
 
 @app.post("/api/demo/replay/effects")
 async def get_demo_replay_effects(req: DemoReplayRequest):
-    """Async sidecar: sparse smoke/inferno tracks for an already-loaded replay window."""
+    """Compatibility sidecar for older replay packets without embedded effects."""
     if req.end_tick <= req.start_tick:
         raise HTTPException(422, "end_tick must be greater than start_tick")
     max_span = int(req.tick_rate * 10 * 60)

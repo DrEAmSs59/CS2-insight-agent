@@ -32,6 +32,7 @@ import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
 import { buildPendingDemoAnalysisSpecs } from "./utils/demoAnalysisCache";
+import { resetDemoAnalysisDefaultView } from "./utils/demoAnalysisSession";
 import {
   recordingAbortToastKind,
   recordingQueueHadUnexpectedCs2Exit,
@@ -686,6 +687,9 @@ export default function App() {
           };
         })
       );
+      // A fresh selection from the Demo library is a new analysis entry. Keep
+      // in-page navigation restorable, but always enter this flow on Highlights.
+      resetDemoAnalysisDefaultView(loaded);
       setUploadedDemos(loaded);
       setParsedMatches(
         loaded.map((d) => {

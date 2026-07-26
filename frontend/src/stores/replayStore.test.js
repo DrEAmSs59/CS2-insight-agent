@@ -73,7 +73,8 @@ describe("replayStore", () => {
     expect(again.frames).toHaveLength(1);
   });
 
-  test("loads sparse effects after binary frames without blocking playback", async () => {
+  test("keeps replay loading until sparse effects are ready", async () => {
+    let resolveEffects;
     API.post
       .mockResolvedValueOnce({
         data: {
@@ -84,21 +85,29 @@ describe("replayStore", () => {
           cache: { frames: "parquet_binary_hit", effects: "pending", parsed: false },
         },
       })
-      .mockResolvedValueOnce({
-        data: {
-          effect_tracks: [{ id: "smoke:1", type: "smoke" }],
-          effect_capabilities: { smoke_voxels: true },
-        },
-      });
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveEffects = resolve;
+      }));
     const onEffects = vi.fn();
 
-    const replay = await useReplayStore.getState().ensureReplay(
+    const pendingReplay = useReplayStore.getState().ensureReplay(
       "binary-effects",
       { path: "a.dem" },
       { onEffects },
     );
 
+    await vi.waitFor(() => expect(API.post).toHaveBeenCalledTimes(2));
+    expect(useReplayStore.getState().entries["binary-effects"].status).toBe("loading");
+    resolveEffects({
+      data: {
+        effect_tracks: [{ id: "smoke:1", type: "smoke" }],
+        effect_capabilities: { smoke_voxels: true },
+      },
+    });
+    const replay = await pendingReplay;
+
     expect(replay.frames).toHaveLength(1);
+    expect(replay.effect_tracks).toHaveLength(1);
     expect(API.post).toHaveBeenNthCalledWith(
       1,
       "/demo/replay/binary",
@@ -112,6 +121,23 @@ describe("replayStore", () => {
     expect(onEffects).toHaveBeenCalledWith(expect.objectContaining({
       effect_tracks: [{ id: "smoke:1", type: "smoke" }],
     }));
+  });
+
+  test("uses effects embedded in the binary packet without a sidecar request", async () => {
+    API.post.mockResolvedValueOnce({
+      data: {
+        frames: [{ tick: 1 }],
+        fps: 32,
+        effect_tracks: [{ id: "inferno:1", type: "inferno" }],
+        effect_capabilities: { inferno_cells: true },
+        effects_pending: false,
+      },
+    });
+
+    const replay = await useReplayStore.getState().ensureReplay("binary-complete", { path: "a.dem" });
+
+    expect(replay.effect_tracks).toHaveLength(1);
+    expect(API.post).toHaveBeenCalledTimes(1);
   });
 
   test("surfaces binary runtime failures without silently falling back to JSON", async () => {

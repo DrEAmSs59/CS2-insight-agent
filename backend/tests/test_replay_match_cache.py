@@ -41,6 +41,16 @@ def _workspace() -> dict:
     }
 
 
+def test_clean_rounds_repairs_cached_final_round_tail():
+    workspace = _workspace()
+    workspace["demo_end_tick"] = 400
+
+    rounds = replay_match_cache._clean_rounds(workspace)
+
+    assert rounds[0]["end_tick"] == 164
+    assert rounds[1]["end_tick"] == 400
+
+
 def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_path):
     import demoparser2
     from app.parser import replay_effects
@@ -58,6 +68,7 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
             self.path = path
 
         def write_replay_parquet(self, output_path, wanted_props, ticks, round_numbers):
+            row_groups.clear()
             write_calls.append(
                 {
                     "output_path": output_path,
@@ -247,7 +258,9 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
         {"tick": 132, "actor": "Alpha", "weapon": "ak47"}
     ]
     assert binary_calls[0]["metadata"]["cache"]["frames"] == "parquet_binary_hit"
-    assert binary_calls[0]["metadata"]["effects_pending"] is True
+    assert binary_calls[0]["metadata"]["effects_pending"] is False
+    assert binary_calls[0]["metadata"]["cache"]["effects"] == "parquet_hit"
+    assert [track["type"] for track in binary_calls[0]["metadata"]["effect_tracks"]] == ["smoke"]
 
     again = replay_match_cache.materialize_match_replay_parquet_impl(
         demo_path=str(demo_path),
@@ -255,3 +268,23 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
     )
     assert again["status"] == "parquet_hit"
     assert len(write_calls) == 1
+
+    # A cache created before the final-round result tail was introduced can
+    # still have the current protocol version. Its round boundaries must be
+    # validated instead of treating the metadata as an unconditional hit.
+    tail_workspace = _workspace()
+    tail_workspace["demo_end_tick"] = 400
+    rebuilt = replay_match_cache.materialize_match_replay_parquet_impl(
+        demo_path=str(demo_path),
+        workspace=tail_workspace,
+    )
+    assert rebuilt["status"] == "materialized"
+    assert len(write_calls) == 2
+    assert row_groups[2][-1] == 399
+    assert replay_match_cache.load_match_replay_round_binary(
+        str(demo_path),
+        start_tick=200,
+        end_tick=400,
+        fps=replay_match_cache.REPLAY_MATCH_FPS,
+        tick_rate=64,
+    ) == b"CS2RPL01-binary-test"
