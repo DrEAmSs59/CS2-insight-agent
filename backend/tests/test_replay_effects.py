@@ -26,11 +26,12 @@ def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:
     return bytes(out)
 
 
-def _occ_payload(entries: list[tuple[int, int, int]], flags: int = 0x01) -> list[int]:
-    # entries are (z, y, x) matching CS2 occupancy packing
-    out = [0x00, flags, len(entries)]
-    for z, y, x in entries:
-        out.extend([z, y, x, 5, 0, 0, 0, 0])
+def _occ_payload(entries: list[tuple[int, int, int]]) -> list[int]:
+    # Type-3 keyframe; seed entries are packed (x, y, z).
+    out = [0x00, 0x03, len(entries)]
+    for x, y, z in entries:
+        out.extend([x, y, z, 5, 0, 0, 0, 0])
+    out.extend([0, 0])  # no Morton mask entries
     return out
 
 

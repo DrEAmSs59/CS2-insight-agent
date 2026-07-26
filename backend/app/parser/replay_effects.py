@@ -11,9 +11,11 @@ from typing import Any
 from .smoke_voxel_decode import (
     SMOKE_FORMATION_SECONDS,
     VOXEL_CELL_SIZE_WORLD,
+    SmokeVoxelGridState,
     decode_smoke_cells,
     decode_smoke_occupancy_sequence,
     iter_smoke_occupancy_frames,
+    project_voxels_to_cells,
     synthesize_formation_from_seeds,
 )
 
@@ -344,6 +346,7 @@ def build_smoke_tracks_from_rows(
             cell_size = VOXEL_CELL_SIZE_WORLD
             previous_journal = b""
             journal_offset = 0
+            voxel_state = SmokeVoxelGridState()
 
             for row in group:
                 update = row.get("m_nVoxelUpdate")
@@ -372,6 +375,7 @@ def build_smoke_tracks_from_rows(
                 else:
                     # Entity reuse, a buffer rewrite, or a non-prefix update.
                     start_offset = 0
+                    voxel_state = SmokeVoxelGridState()
 
                 sequence = decode_smoke_occupancy_sequence(
                     journal,
@@ -379,6 +383,7 @@ def build_smoke_tracks_from_rows(
                     detonation_pos=stable_origin,
                     max_seq=float(update_i) if update_i is not None else None,
                     start_offset=start_offset,
+                    state=voxel_state,
                 )
                 previous_journal = journal
                 journal_offset = len(journal)
@@ -467,9 +472,9 @@ def build_smoke_tracks_from_rows(
             if not samples:
                 continue
 
-            # CS2 typically networks one full seed occupancy (~44 voxels). The client
-            # expands locally; approximate that with adjacency BFS formation samples
-            # so 2D replay does not pop open at the first snapshot.
+            # Preserve formation samples for legacy seed-only payloads. Real CS2
+            # keyframes include Morton masks and are rejected by the signature
+            # check below, so they always use reconstructed journal geometry.
             first_voxels = None
             for row in group:
                 data = row.get("m_VoxelFrameData")
@@ -485,6 +490,13 @@ def build_smoke_tracks_from_rows(
                     first_voxels = occ_frames[0][1]
                     break
 
+            if first_voxels is not None:
+                # Real keyframes include Morton masks and therefore project to
+                # many more cells than their 44 initialization seeds. Only use
+                # synthetic seed formation for genuinely seed-only payloads.
+                seed_sig = _cells_signature(project_voxels_to_cells(first_voxels, stable_origin))
+                if not any(_cells_signature(sample["cells"]) == seed_sig for sample in samples):
+                    first_voxels = None
             if first_voxels is not None:
                 cell_counts = {len(sample["cells"]) for sample in samples}
                 # Skip when the journal already supplied a growing occupancy sequence.

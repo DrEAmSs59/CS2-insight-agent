@@ -1,38 +1,44 @@
 """CS2 smoke ``m_VoxelFrameData`` journal decoder.
 
-Format (reverse-engineered from the game client / community verification):
+The journal contains an initial keyframe followed by mask deltas:
 
-- Buffer capacity is often 3072; valid length is ``m_nVoxelFrameDataSize``.
-- Bytes are a journal of records: ``u16le seq``, ``u16le payload_len``, payload.
-- Occupancy payload: ``u8 active``, ``u8 section_flags``; if bit0 set then
-  ``u8 count`` + ``count`` × 8-byte entries ``[z, y, x, state0..state4]``.
-- Occupancy frames fully replace the active set.
-- World: ``world = sign * (grid - 16) * 20 + detonationPos`` with signs ``[-1, +1, +1]``
-  (world X is mirrored relative to the voxel grid — matches ``client.dll`` / cs2parser).
+- record: ``u16le seq``, ``u16le payload_len``, payload;
+- keyframe (type 3): ``phase``, ``type``, seed count, 8-byte ``[x,y,z,density,pad...]``
+  seeds, then 2-byte mask count and 10-byte ``[cell_morton, voxel_mask]`` entries;
+- delta (type 2): ``phase``, ``type``, 2-byte mask count, then replacement masks;
+- heartbeat (type 0): no geometry change.
+
+Both Morton levels interleave X, Y, then Z. A 32³ cell centre maps to world space as
+``detonation + (grid - 15.5) * 12`` on every axis. The masks carry the actual cloud
+boundary; the small seed list alone is not a renderable approximation.
 """
 
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
-VOXEL_GRID_DIM = 32
-VOXEL_WORLD_SIZE = 20.0
-VOXEL_GRID_CENTER = VOXEL_GRID_DIM / 2.0
-# client.dll: world X is mirrored vs grid X; Y/Z align.
-VOXEL_AXIS_SIGN: tuple[float, float, float] = (-1.0, 1.0, 1.0)
-VOXEL_CELL_SIZE_WORLD = VOXEL_WORLD_SIZE
-# Byte packing for occupancy entries: (z, y, x).
-VOXEL_BYTE_PACKING = "zyx"
+import numpy as np
 
-# Networked occupancy is a ~44-voxel seed set; the game client expands locally.
-# We approximate that expansion by revealing seeds in adjacency order (not a circle).
+VOXEL_GRID_DIM = 32
+VOXEL_WORLD_SIZE = 12.0
+# Grid coordinates identify cells, so 15.5 is the centre of cells 15 and 16.
+VOXEL_GRID_CENTER = (VOXEL_GRID_DIM - 1) / 2.0
+VOXEL_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, 1.0)
+VOXEL_CELL_SIZE_WORLD = VOXEL_WORLD_SIZE
+VOXEL_BYTE_PACKING = "xyz"
+
+# Legacy seed-only fixtures/exports have no Morton masks. Preserve their prior
+# formation approximation without applying it to real mask-backed journals.
 SMOKE_FORMATION_SECONDS = 1.2
 SMOKE_FORMATION_STEPS = 8
 
-_SECTION_OCCUPANCY = 1
-_ENTRY_SIZE = 8
+_FRAME_HEARTBEAT = 0
+_FRAME_DELTA = 2
+_FRAME_KEYFRAME = 3
+_SEED_ENTRY_SIZE = 8
+_MASK_ENTRY_SIZE = 10
 _HEARTBEAT_LEN = 3
 _NEIGHBOR_6 = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 
@@ -50,6 +56,16 @@ class SmokeVoxelFrame:
     seq: int
     payload: bytes
     is_heartbeat: bool
+
+
+@dataclass
+class SmokeVoxelGridState:
+    """Mutable reconstructed smoke grid for one projectile journal."""
+
+    seeds: dict[tuple[int, int, int], int] = field(default_factory=dict)
+    masks: dict[int, int] = field(default_factory=dict)
+    ready: bool = False
+    phase: int = 0
 
 
 class SmokeVoxelDecodeError(ValueError):
@@ -87,27 +103,173 @@ def decode_smoke_voxel_journal(
 
 
 def decode_voxel_frame_occupancy(payload: bytes | bytearray) -> list[SmokeVoxel] | None:
-    """Decode occupancy list from one frame payload, or None if no occupancy section."""
+    """Decode the keyframe seed list, or ``None`` for delta/heartbeat frames."""
     blob = bytes(payload)
-    if len(blob) < 2:
-        return None
-    section_flags = blob[1]
-    if (section_flags & _SECTION_OCCUPANCY) == 0:
-        return None
-    if len(blob) < 3:
+    if len(blob) < 3 or blob[1] != _FRAME_KEYFRAME:
         return None
     count = blob[2]
     voxels: list[SmokeVoxel] = []
     off = 3
     for _ in range(count):
-        if off + _ENTRY_SIZE > len(blob):
+        if off + _SEED_ENTRY_SIZE > len(blob):
             break
-        # CS2 packs seed entries as [z, y, x, state…] (client.dll / cs2parser).
-        z, y, x = blob[off], blob[off + 1], blob[off + 2]
-        state = blob[off + 3 : off + _ENTRY_SIZE]
+        x, y, z = blob[off], blob[off + 1], blob[off + 2]
+        state = blob[off + 3 : off + _SEED_ENTRY_SIZE]
         voxels.append(SmokeVoxel(x=x, y=y, z=z, state=state))
-        off += _ENTRY_SIZE
+        off += _SEED_ENTRY_SIZE
     return voxels
+
+
+def _read_u16le(blob: bytes, off: int) -> int:
+    return blob[off] | (blob[off + 1] << 8)
+
+
+def _read_u64le(blob: bytes, off: int) -> int:
+    return int.from_bytes(blob[off : off + 8], "little")
+
+
+def _decode_mask_entries(blob: bytes, off: int, count: int) -> dict[int, int] | None:
+    end = off + count * _MASK_ENTRY_SIZE
+    if end > len(blob):
+        return None
+    entries: dict[int, int] = {}
+    for _ in range(count):
+        cell_index = _read_u16le(blob, off)
+        entries[cell_index] = _read_u64le(blob, off + 2)
+        off += _MASK_ENTRY_SIZE
+    return entries
+
+
+def apply_smoke_voxel_frame(state: SmokeVoxelGridState, frame: SmokeVoxelFrame) -> bool:
+    """Apply one keyframe/delta to ``state`` and report a geometry change."""
+    blob = frame.payload
+    if len(blob) < 2:
+        return False
+    state.phase = int(blob[0])
+    frame_type = int(blob[1])
+
+    if frame_type == _FRAME_KEYFRAME:
+        if len(blob) < 3:
+            return False
+        count = int(blob[2])
+        off = 3
+        seed_end = off + count * _SEED_ENTRY_SIZE
+        if seed_end + 2 > len(blob):
+            return False
+        seeds: dict[tuple[int, int, int], int] = {}
+        for _ in range(count):
+            x, y, z, density = blob[off], blob[off + 1], blob[off + 2], blob[off + 3]
+            if density > 0:
+                seeds[(int(x), int(y), int(z))] = int(density)
+            off += _SEED_ENTRY_SIZE
+        mask_count = _read_u16le(blob, off)
+        masks = _decode_mask_entries(blob, off + 2, mask_count)
+        if masks is None:
+            return False
+        state.seeds = seeds
+        state.masks = masks
+        state.ready = True
+        return True
+
+    if frame_type == _FRAME_DELTA:
+        if not state.ready or len(blob) < 4:
+            return False
+        mask_count = _read_u16le(blob, 2)
+        masks = _decode_mask_entries(blob, 4, mask_count)
+        if masks is None:
+            return False
+        state.masks.update(masks)
+        return bool(masks)
+
+    return False
+
+
+def _demorton3(index: int, bits: int) -> tuple[int, int, int]:
+    x = y = z = 0
+    for bit in range(bits):
+        x |= ((index >> (3 * bit)) & 1) << bit
+        y |= ((index >> (3 * bit + 1)) & 1) << bit
+        z |= ((index >> (3 * bit + 2)) & 1) << bit
+    return x, y, z
+
+
+def _rebuild_occupied_grid(state: SmokeVoxelGridState) -> np.ndarray:
+    """Build the 32³ occupancy grid, including mask-enclosed interior cells."""
+    occupied = np.zeros((VOXEL_GRID_DIM, VOXEL_GRID_DIM, VOXEL_GRID_DIM), dtype=np.bool_)
+
+    def mark(x: int, y: int, z: int) -> None:
+        if 0 <= x < VOXEL_GRID_DIM and 0 <= y < VOXEL_GRID_DIM and 0 <= z < VOXEL_GRID_DIM:
+            occupied[x, y, z] = True
+
+    for x, y, z in state.seeds:
+        mark(x, y, z)
+    for cell_index, mask in state.masks.items():
+        cell_x, cell_y, cell_z = _demorton3(cell_index, 3)
+        for bit in range(64):
+            if (mask >> bit) & 1:
+                sub_x, sub_y, sub_z = _demorton3(bit, 2)
+                mark(cell_x * 4 + sub_x, cell_y * 4 + sub_y, cell_z * 4 + sub_z)
+
+    # Flood empty space from all six boundary faces. NumPy shifts keep each
+    # expansion in native array operations, avoiding hundreds of millions of
+    # Python neighbour calls when reconstructing every delta in a full match.
+    empty = ~occupied
+    outside = np.zeros_like(occupied)
+    outside[0, :, :] = empty[0, :, :]
+    outside[-1, :, :] = empty[-1, :, :]
+    outside[:, 0, :] = empty[:, 0, :]
+    outside[:, -1, :] = empty[:, -1, :]
+    outside[:, :, 0] = empty[:, :, 0]
+    outside[:, :, -1] = empty[:, :, -1]
+
+    while True:
+        expanded = outside.copy()
+        expanded[1:, :, :] |= outside[:-1, :, :]
+        expanded[:-1, :, :] |= outside[1:, :, :]
+        expanded[:, 1:, :] |= outside[:, :-1, :]
+        expanded[:, :-1, :] |= outside[:, 1:, :]
+        expanded[:, :, 1:] |= outside[:, :, :-1]
+        expanded[:, :, :-1] |= outside[:, :, 1:]
+        expanded &= empty
+        if np.array_equal(expanded, outside):
+            break
+        outside = expanded
+    return occupied | ~outside
+
+
+def project_smoke_grid_to_cells(
+    state: SmokeVoxelGridState,
+    origin: Sequence[float],
+) -> tuple[list[list[float]], int]:
+    """Project reconstructed occupancy to sparse 2D cells.
+
+    Keep the lowest and highest occupied Z for each XY column so multi-level
+    radar filtering can select the appropriate layer before contouring.
+    """
+    occupied = _rebuild_occupied_grid(state)
+    columns: dict[tuple[int, int], tuple[int, int]] = {}
+    voxel_count = 0
+    for x_raw, y_raw, z_raw in np.argwhere(occupied):
+        voxel_count += 1
+        x, y, z = int(x_raw), int(y_raw), int(z_raw)
+        previous = columns.get((x, y))
+        if previous is None:
+            columns[(x, y)] = (z, z)
+        else:
+            columns[(x, y)] = (min(previous[0], z), max(previous[1], z))
+
+    cells: list[list[float]] = []
+    for (x, y), (min_z, max_z) in sorted(columns.items()):
+        wx, wy, _ = voxel_to_world(x, y, min_z, origin)
+        for z in (min_z,) if min_z == max_z else (min_z, max_z):
+            _, _, wz = voxel_to_world(x, y, z, origin)
+            cells.append([
+                round(wx * 2) / 2.0,
+                round(wy * 2) / 2.0,
+                round(wz * 2) / 2.0,
+                1.0,
+            ])
+    return cells, voxel_count
 
 
 def get_smoke_occupancy_at(
@@ -163,24 +325,40 @@ def decode_smoke_occupancy_sequence(
     detonation_pos: Sequence[float] | None,
     max_seq: float | None = None,
     start_offset: int = 0,
+    state: SmokeVoxelGridState | None = None,
 ) -> list[dict[str, Any]]:
-    """Project every journal occupancy frame to 2D cells (one entry per seq)."""
+    """Apply every geometry frame and project its reconstructed 2D occupancy."""
     if detonation_pos is None or len(detonation_pos) < 3:
         return []
+    if data is None or not isinstance(data, (bytes, bytearray)) or len(data) == 0:
+        return []
+    try:
+        size = int(declared_size) if declared_size is not None else len(data)
+    except (TypeError, ValueError):
+        size = len(data)
+    if size <= 0:
+        return []
+    try:
+        frames = decode_smoke_voxel_journal(bytes(data), size, start_offset=start_offset)
+    except SmokeVoxelDecodeError:
+        return []
+
+    grid_state = state if state is not None else SmokeVoxelGridState()
+    limit = float("inf") if max_seq is None else float(max_seq)
     sequence: list[dict[str, Any]] = []
-    for seq, voxels in iter_smoke_occupancy_frames(
-        data,
-        declared_size=declared_size,
-        max_seq=max_seq,
-        start_offset=start_offset,
-    ):
-        cells = project_voxels_to_cells(voxels, detonation_pos)
+    for frame in frames:
+        if frame.seq > limit:
+            break
+        if not apply_smoke_voxel_frame(grid_state, frame):
+            continue
+        cells, voxel_count = project_smoke_grid_to_cells(grid_state, detonation_pos)
         sequence.append(
             {
-                "seq": seq,
+                "seq": frame.seq,
                 "cells": cells,
                 "cell_size": VOXEL_CELL_SIZE_WORLD,
-                "voxel_count": len(voxels),
+                "voxel_count": voxel_count,
+                "phase": grid_state.phase,
             }
         )
     return sequence
@@ -214,7 +392,7 @@ def project_voxels_to_cells(
     voxels: Iterable[SmokeVoxel],
     origin: Sequence[float],
 ) -> list[list[float]]:
-    """Project 3D seed voxels to sparse 2D cells ``[x, y, z, density]`` (max density per XY)."""
+    """Project keyframe seeds to sparse 2D cells (diagnostics/legacy fallback)."""
     buckets: dict[tuple[int, int], list[float]] = {}
     for voxel in voxels:
         wx, wy, wz = voxel_to_world(voxel.x, voxel.y, voxel.z, origin)
@@ -336,16 +514,22 @@ def decode_smoke_cells(
         frames = decode_smoke_voxel_journal(bytes(data), size)
     except SmokeVoxelDecodeError as exc:
         return {"ok": False, "cells": [], "cell_size": VOXEL_CELL_SIZE_WORLD, "voxel_count": 0, "error": str(exc)}
-    occupancy = get_smoke_occupancy_at(frames, float("inf") if target_seq is None else float(target_seq))
-    if occupancy is None:
+    limit = float("inf") if target_seq is None else float(target_seq)
+    state = SmokeVoxelGridState()
+    latest_seq: int | None = None
+    for frame in frames:
+        if frame.seq > limit:
+            break
+        if apply_smoke_voxel_frame(state, frame):
+            latest_seq = frame.seq
+    if latest_seq is None or not state.ready:
         return {"ok": False, "cells": [], "cell_size": VOXEL_CELL_SIZE_WORLD, "voxel_count": 0, "error": "no_occupancy"}
-    seq, voxels = occupancy
-    cells = project_voxels_to_cells(voxels, detonation_pos)
+    cells, voxel_count = project_smoke_grid_to_cells(state, detonation_pos)
     return {
         "ok": True,
         "cells": cells,
         "cell_size": VOXEL_CELL_SIZE_WORLD,
-        "voxel_count": len(voxels),
-        "seq": seq,
+        "voxel_count": voxel_count,
+        "seq": latest_seq,
         "error": None,
     }

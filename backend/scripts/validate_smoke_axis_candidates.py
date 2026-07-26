@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Rank the 16 smoke voxel axis candidates for a demo.
+"""Run the legacy seed-centroid smoke diagnostic for a demo.
+
+This catches grossly corrupt seed coordinates, but a centroid cannot prove
+orientation. The production mapping comes from the keyframe/mask protocol.
 
 Usage::
 
@@ -64,7 +67,7 @@ def collect_snapshots(demo: str, limit: int = 40) -> list[tuple[list[float], byt
             except (TypeError, ValueError):
                 size = len(data)
             for record in decode_smoke_voxel_journal(bytes(data), size):
-                if len(record.payload) >= 3 and (record.payload[1] & 1):
+                if len(record.payload) >= 3 and record.payload[1] == 3:
                     snaps.append((origin, bytes(record.payload)))
                     break
             if snaps and snaps[-1][0] == origin:
@@ -98,10 +101,6 @@ def main() -> int:
     if not snaps:
         print("no snapshots", file=sys.stderr)
         return 2
-    # Prefer center 16; packing/signs follow client.dll (zyx, -1, +1).
-    best_center16 = next(row for row in ranked if row["center"] == 16.0)
-    if best_center16["center"] != 16.0:
-        return 1
     return 0
 
 
