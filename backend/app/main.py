@@ -3643,15 +3643,6 @@ async def cs2_gsi(payload: Optional[dict] = Body(default=None)):
     """CS2 Game State Integration sink used as a recording startup ready gate."""
     _payload = payload or {}
     ready = notify_gsi_payload(_payload)
-    # 实时雷达缓存：转发快照到活跃会话
-    try:
-        from app.radar.radar_live_session import get_active_session
-        _sess = get_active_session()
-        if _sess is not None:
-            import time as _time
-            _sess.push_gsi_snapshot(_payload, wall_time=_time.monotonic())
-    except Exception:
-        pass
     return {"ok": True, "ready": ready}
 
 
@@ -3661,14 +3652,6 @@ def cs2_gsi_status():
 
 
 # ─── Montage (V2) ─────────────────────────────────────────────
-
-
-class RadarOverlayOptions(BaseModel):
-    enabled: bool = False
-    hud_overlay: bool = False
-    killfeed_overlay: bool = False
-    crosshair_overlay: bool = False
-    lens_overlay: bool = False
 
 
 class PlayerAvatar(BaseModel):
@@ -3692,7 +3675,6 @@ class MontageProjectBody(BaseModel):
     outro_image_duration: Optional[float] = None
     output_filename: str = Field(default="montage_export.mp4", max_length=240)
     transitions: Optional[dict[str, Any]] = None
-    radar_overlay: Optional[RadarOverlayOptions] = None
     theme_id: Optional[str] = Field(default=None, max_length=64)
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
@@ -3809,8 +3791,6 @@ async def save_montage_project(body: MontageProjectBody):
         proj_body["transitions"] = body.transitions
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
-    # 后期 FFmpeg 雷达叠层已下线；忽略客户端传入的旧开关，写入占位以兼容旧前端读取。
-    proj_body["radar_overlay"] = {"enabled": False}
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -3865,7 +3845,6 @@ class MontageExportBody(BaseModel):
     output_path: str = Field(..., min_length=1, max_length=2048)
     theme_id: Optional[str] = Field(default=None, max_length=64)
     transitions: Optional[dict[str, Any]] = None
-    radar_overlay: Optional[RadarOverlayOptions] = None
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
 
@@ -4038,7 +4017,6 @@ async def montage_export(body: MontageExportBody):
     }
     if isinstance(transitions_eff, dict):
         snap["transitions"] = transitions_eff
-    snap["radar_overlay"] = {"enabled": False}
     if body.ordered_ids is not None:
         snap["ordered_ids"] = list(body.ordered_ids)
     if body.theme_id is not None:

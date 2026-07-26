@@ -3039,7 +3039,6 @@ export default function App() {
           <SidebarNav
             queueLength={queue.length}
             disabled={batchRecording}
-            onCheckUpdate={() => void fetchUpdateInfo({ manual: true })}
           />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
             {!isStandalonePreview && (!backendReady ? (

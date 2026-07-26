@@ -1,3 +1,3 @@
-"""Radar / map utilities (parse timeline extraction, live preview). Post-process montage overlay removed."""
+"""Radar and map utilities for parsed replay timelines."""
 
 __all__: list[str] = []

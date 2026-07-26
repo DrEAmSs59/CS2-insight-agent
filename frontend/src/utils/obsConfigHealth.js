@@ -1,4 +1,4 @@
-/** OBS 配置中心健康检查（与 ObsConfigCenterPage 状态列表一致）。 */
+/** OBS 配置健康检查。 */
 
 export function obsConfigHasIssues(status) {
   if (!status?.obs_connected) return false;

@@ -58,9 +58,8 @@ CS2-insight-agent/
 │       ├── cs2_config_backup.py       # 玩家 config 备份与回滚
 │       ├── demo_db.py / demo_watcher.py / demo_library_hub.py
 │       ├── obs_config_center.py       # OBS 场景 / 源管理 API
-│       ├── pov_experimental.py        # 实验性 POV HUD（pov.vpk / gameinfo.gi）
 │       ├── env_utils.py               # 配置管理 & CS2 路径探测
-│       └── radar/                     # 雷达图渲染（POV HUD / 录制叠加）
+│       └── radar/                     # 回放时间线提取、地图与派生资源
 ├── frontend/
 │   ├── src-tauri/                     # Tauri 桌面壳（Python 生命周期 / NSIS resources）
 │   └── src/
@@ -72,11 +71,11 @@ CS2-insight-agent/
 │       ├── stores/                    # recordingQueueStore / montageStore / themeStore
 │       ├── components/
 │       │   ├── recordingQueue/        # 队列工作区、检视器、控制坞
-│       │   ├── montage/               # 合辑工作台（时间轴、导出、已录片段卡）
-│       │   ├── demoLibrary/           # Demo 库表格、筛选、批量操作
+│       │   ├── montage/               # 合辑工作台面板
+│       │   ├── demoLibrary/           # Demo 库筛选、批量操作与分页
 │       │   ├── analysis/timeline/     # 回合时间轴与击杀 feed
 │       │   ├── SidebarNav.jsx         # 侧栏导航
-│       │   ├── ClipCard.jsx / ClipList.jsx / MemeDeathMontageCard.jsx
+│       │   ├── ClipCard.jsx / ClipList.jsx
 │       │   ├── RecordWarmupModal.jsx  # 录制前观战预热 & POV HUD 选项
 │       │   └── RecordingBlockedDialog.jsx
 │       └── utils/                     # recordingBatch、timelineQueue、warmupDefaults 等

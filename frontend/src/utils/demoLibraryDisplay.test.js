@@ -5,7 +5,6 @@ import {
   classifyDemoStatus,
   deriveTags,
 } from "./demoLibraryDisplay";
-import { canLikelyPreviewScoreboard } from "./demoScoreboardModel";
 
 
 describe("compact demo library rows", () => {
@@ -24,7 +23,6 @@ describe("compact demo library rows", () => {
       "de_mirage",
     ]);
     expect(classifyDemoStatus(row).kind).toBe("done");
-    expect(canLikelyPreviewScoreboard(row)).toBe(true);
   });
 
   test("matches SteamID64 and account IDs from compact roster rows", () => {

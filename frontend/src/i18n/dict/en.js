@@ -209,7 +209,7 @@ export default {
   "library.sortOptRounds": "Rounds",
   "library.sortOptMap": "Map",
   "library.sortOptFilename": "Filename",
-  // analysis — AnalysisPage
+  // analysis
   "analysis.demosImported": "{n} demo(s) imported",
   "analysis.demosImportedSuffix": "demo(s) imported",
   "analysis.linkDemoLibrary": "Demo Library",
@@ -262,7 +262,7 @@ export default {
   "analysis.modFirstkillTitle": "First kill of round",
   "analysis.modFlashAssist": "FA",
   "analysis.modFlashAssistTitle": "Flash-assisted kill",
-  // analysis — DeathNoticeRow
+  // analysis timeline
   "analysis.assistFallback": "Assist",
   "analysis.assistLabel": "Assist: ",
   "analysis.btnEnqueue": "Add to record",
@@ -1011,7 +1011,7 @@ export default {
   "settings.sponsorWx": "WeChat Pay",
   "settings.sponsorAli": "Alipay",
 
-  // obscfg — ObsConfigCenterPage
+  // OBS configuration
   "obscfg.pageTitle": "OBS Config Center",
   "obscfg.pageSubtitle": "One-click calibration of the OBS recording environment — automatically fixes canvas/output resolution mismatch, 4:3 letterboxing, missing Game Capture source, wrong recording format, and more.",
   "obscfg.sectionSettings": "OBS Program Settings",
@@ -1097,7 +1097,7 @@ export default {
   "playercfg.btnRestore": "Restore player config",
   "playercfg.okTitle": "Config file status: OK",
   "playercfg.okDesc": "No restore needed right now. You can still open the backup directory or replace files manually at any time.",
-  // montage — MemeDeathMontageCard
+  // montage
   "montage.bundleLabel": "Bundle Record",
   "montage.bundleTitle": "👨‍🔬 Lab Special: Full Death Reel",
   "montage.bundleDeathCount": "({n} deaths this match)",
@@ -1109,14 +1109,14 @@ export default {
   "montage.pickerClear": "Clear",
   "montage.pickerNoSelectionHint": "Nothing can be queued when no rounds are selected. Without a selection, analysis still generates a compilation from all valid non-post-match rounds; select rounds first to limit generation to those; you can also keep the default full selection and deselect rounds — queuing will slice by the checked subset.",
   "montage.pickerRoundTitle": "Round {n}",
-  // montage — MontageExportResult
+  // montage export result
   "montage.exportDone": "Export complete",
   "montage.exportSegmentsDuration": "{n} clip(s) · ~{dur}",
   "montage.exportVideoPath": "Video path",
   "montage.exportCopyPath": "Copy path",
   "montage.exportCopyShare": "Copy share text",
   "montage.exportTip": "Tip: if this page cannot open the system folder directly, paste the path in Explorer.",
-  // montage — MontageExportSettings
+  // montage export settings
   "montage.exportSettingsTitle": "Export Settings",
   "montage.exportSettingsReady": "Ready",
   "montage.exportSettingsNotReady": "Incomplete",
@@ -1154,9 +1154,9 @@ export default {
   "montage.exportCopyBtn": "Copy",
   "montage.exportClearBtn": "Clear",
   "montage.exportExamplePrefix": "Example: ",
-  // montage — MontageThemeSelector
+  // montage themes
   "montage.themeSectionLabel": "Montage theme",
-  // montage — MontageTimeline
+  // montage timeline
   "montage.timelineHeader": "Current montage: {n} clip(s) · est. {dur}",
   "montage.timelineSortTimeline": "By timeline",
   "montage.timelineSortScore": "By score",
@@ -1168,7 +1168,7 @@ export default {
   "montage.timelineAriaUp": "Move up",
   "montage.timelineAriaDown": "Move down",
   "montage.timelineAriaRemove": "Remove",
-  // montage — RecordedClipCard
+  // recorded clips
   "montage.clipCardAiPrefix": "AI: ",
   "montage.clipCardScore": "Score: ",
   "montage.clipCardAddBtn": "Add to montage",
@@ -1552,7 +1552,7 @@ export default {
   "montage.poolCardVictimPovBadge": "Victim POV ×{n}",
   "montage.poolCardSpectatorPerspective": "Spectator view",
   "montage.poolCardAiScore": "AI score {n}",
-  // dashboard — DashboardPage
+  // dashboard
   "dashboard.pageTitle": "Dashboard",
   "dashboard.pageSubtitle": "Select an entry below to open the corresponding feature. Highlight analysis, recording queue management, and montage export are each on their own page — use the left navigation to switch between them.",
   "dashboard.analysisMode": "Analysis mode",
@@ -2039,7 +2039,7 @@ export default {
   "match.scoreboardRounds": "Rounds: {n}",
   "match.scoreboardDuration": "Duration: {n} min",
   "match.scoreboardMap": "Map: {name}",
-  // match — MatchSwitcher
+  // match switching
   "match.switcherTitle": "Switch match",
   "match.unknownMap": "Unknown map",
   "match.switcherMatch": "Match {n} · {label}",
