@@ -26,6 +26,7 @@ import {
   zoomAtPointer,
 } from "../../utils/replayCamera";
 import { useReplayStore } from "../../stores/replayStore";
+import { grenadeTrajectoryTimingIsValid } from "../../utils/replayGrenadeTrajectory";
 
 const HUD_ICON_BASE = "/hud-death-notice";
 const MOTION_DURATION = "0ms";
@@ -669,8 +670,7 @@ export default function ReplaySceneCanvas({
           ? Math.hypot(Number(rawEnd.x) - Number(event.x), Number(rawEnd.y) - Number(event.y))
           : 0;
         const trajectoryValid = rawTrajectory.length >= 2
-          && rawEndTick > rawStartTick
-          && rawEndTick - rawStartTick <= tickRate * (isSmoke ? 5 : 9)
+          && grenadeTrajectoryTimingIsValid(rawTrajectory, eventTick, tickRate, isSmoke)
           && rawEndpointDistance <= 256;
         const parsedThrowTick = trajectoryValid ? Number(event.throw_tick || rawStartTick || 0) : 0;
         const fallbackFlightTicks = tickRate * (isSmoke ? 2.25 : 1);
