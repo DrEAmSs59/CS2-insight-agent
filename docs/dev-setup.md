@@ -31,8 +31,7 @@ Start the backend and frontend in separate terminals.
 Terminal 1, from the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app `
-  --app-dir backend --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --port 8000
 ```
 
 Terminal 2:

@@ -7,8 +7,6 @@ on:
       - develop
     paths:
       - ".github/workflows/publish-demoparser-wheel.yml"
-      - "pyproject.toml"
-      - "uv.lock"
       - "packaging/demoparser-lean/build-wheel.ps1"
       - "packaging/demoparser-lean/demoparser-runtime.json"
       - "packaging/demoparser-lean/demoparser2-v0.41.4.patch"
@@ -64,6 +62,7 @@ jobs:
           name: demoparser2 ${{ steps.runtime.outputs.distribution_version }} runtime
           prerelease: true
           make_latest: false
+          overwrite_files: false
           body: |
             Patched CPython 3.12 x64 runtime used by CS2 Insight Agent.
 

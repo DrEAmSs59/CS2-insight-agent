@@ -6,6 +6,8 @@ import {
   Layers3,
   Loader2,
   RefreshCw,
+  Skull,
+  Swords,
 } from "lucide-react";
 import { getDemoRadarMapUrl } from "../../api/api";
 import useSessionState from "../../hooks/useSessionState";
@@ -14,7 +16,10 @@ import {
   requestReplayFrames,
   useReplayStore,
 } from "../../stores/replayStore";
-import { buildReplayHeatmapSet } from "../../utils/replayHeatmap";
+import {
+  buildReplayHeatmapSet,
+  replayHeatmapPlayerKey,
+} from "../../utils/replayHeatmap";
 import { resolveReplayTransform } from "../../utils/replayRadarTransform";
 import ReplayHeatmapCanvas from "./ReplayHeatmapCanvas";
 
@@ -22,6 +27,24 @@ const HEATMAP_FPS = 32;
 const REQUEST_CONCURRENCY = 4;
 const MAX_HEATMAP_CACHE_ENTRIES = 6;
 const heatmapCache = new Map();
+const HEATMAP_MODES = [
+  { key: "movement", label: "走位密度", mapLabel: "走位", icon: Footprints },
+  { key: "combat", label: "交战热点", mapLabel: "交战", icon: Swords },
+  { key: "kills", label: "击杀热点", mapLabel: "击杀", icon: Crosshair },
+  { key: "deaths", label: "死亡热点", mapLabel: "死亡", icon: Skull },
+];
+const HEATMAP_SIDES = [
+  { key: "all", label: "全部" },
+  { key: "CT", label: "CT" },
+  { key: "T", label: "T" },
+];
+
+const MODE_DESCRIPTIONS = {
+  movement: "显示所选玩家全场存活时的空间占用密度，适合观察默认站位、转点路线和控制区域。",
+  combat: "显示所选玩家参与交战时的双方位置与交火连线，其中受害者位置权重更高。",
+  kills: "显示所选玩家完成击杀时自身所在的位置，用于识别最常创造击杀的枪位与区域。",
+  deaths: "显示所选玩家被击杀时所在的位置，用于识别高风险站位、路线和反复失守区域。",
+};
 
 function rememberHeatmap(key, value) {
   heatmapCache.delete(key);
@@ -35,6 +58,22 @@ function mapKey(value) {
   const raw = String(value || "unknown").trim().toLowerCase();
   if (!raw || raw === "unknown") return "unknown";
   return /^(de|cs|ar)_/.test(raw) ? raw : `de_${raw}`;
+}
+
+function playerName(player) {
+  return String(player?.name || player?.player_name || "").trim();
+}
+
+function playerTeamKey(player, index, total) {
+  if (player?.team_key === "a" || player?.team_key === "b") return player.team_key;
+  const teamNumber = Number(player?.team ?? player?.team_number);
+  if (teamNumber === 2) return "a";
+  if (teamNumber === 3) return "b";
+  return index < Math.ceil(total / 2) ? "a" : "b";
+}
+
+function teamDot(teamKey) {
+  return teamKey === "a" ? "bg-violet-400" : "bg-emerald-400";
 }
 
 function heatmapRequest(round, { demoPath, mapName, tickRate, povPlayer }) {
@@ -92,10 +131,33 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
   const rounds = workspace?.rounds || [];
   const mapName = mapKey(workspace?.map_name);
   const tickRate = Math.max(1, Number(workspace?.tick_rate) || 64);
-  const workspacePlayers = workspace?.players?.length ? workspace.players : players;
+  const workspacePlayers = useMemo(
+    () => (workspace?.players?.length ? workspace.players : players),
+    [players, workspace?.players],
+  );
+  const playerOptions = useMemo(() => workspacePlayers
+    .map((player, index) => ({
+      ...player,
+      name: playerName(player),
+      team_key: playerTeamKey(player, index, workspacePlayers.length),
+    }))
+    .filter((player) => player.name), [workspacePlayers]);
+  const playerTeamKeys = useMemo(() => Object.fromEntries(playerOptions.map((player) => [
+    replayHeatmapPlayerKey(player.name),
+    player.team_key,
+  ])), [playerOptions]);
+  const playerTeamSignature = useMemo(
+    () => Object.entries(playerTeamKeys).map(([name, teamKey]) => `${name}:${teamKey}`).join(","),
+    [playerTeamKeys],
+  );
   const sessionIdentity = encodeURIComponent(String(demoPath || workspace?.demo_fingerprint || mapName));
   const [mode, setMode] = useSessionState(`demo-heatmap:${sessionIdentity}:mode`, "movement");
   const [mapLayer, setMapLayer] = useSessionState(`demo-heatmap:${sessionIdentity}:layer`, "upper");
+  const [selectedSide, setSelectedSide] = useSessionState(`demo-heatmap:${sessionIdentity}:side`, "all");
+  const [selectedPlayer, setSelectedPlayer] = useSessionState(
+    `demo-heatmap:${sessionIdentity}:player`,
+    playerOptions[0]?.name || "",
+  );
   const [reloadEpoch, setReloadEpoch] = useState(0);
   const [loadState, setLoadState] = useState({
     status: "idle",
@@ -115,12 +177,20 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
     }))
     .filter(Boolean), [demoPath, mapName, rounds, tickRate, workspacePlayers]);
   const heatmapCacheKey = useMemo(() => [
+    "v3",
     demoPath,
     workspace?.demo_fingerprint || "",
     mapName,
     `f${HEATMAP_FPS}`,
-    ...jobs.map((job) => `${job.requestBody.start_tick}-${job.requestBody.end_tick}`),
-  ].join("|"), [demoPath, jobs, mapName, workspace?.demo_fingerprint]);
+    `teams:${playerTeamSignature}`,
+    ...jobs.map((job) => `${job.requestBody.start_tick}-${job.requestBody.end_tick}:${job.round?.team_a_side || ""}-${job.round?.team_b_side || ""}`),
+  ].join("|"), [demoPath, jobs, mapName, playerTeamSignature, workspace?.demo_fingerprint]);
+
+  useEffect(() => {
+    if (!playerOptions.some((player) => player.name === selectedPlayer)) {
+      setSelectedPlayer(playerOptions[0]?.name || "");
+    }
+  }, [playerOptions, selectedPlayer, setSelectedPlayer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,6 +264,7 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
         roundBundles: bundles.filter(Boolean),
         transform,
         hasMapLayers,
+        playerTeamKeys,
       });
       if (cancelled) return;
       const readyState = {
@@ -222,51 +293,123 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
     return () => {
       cancelled = true;
     };
-  }, [demoPath, heatmapCacheKey, jobs, mapName, reloadEpoch, workspace?.map_transform]);
+  }, [demoPath, heatmapCacheKey, jobs, mapName, playerTeamKeys, reloadEpoch, workspace?.map_transform]);
 
   const hasMapLayers = Boolean(loadState.data?.lower);
   useEffect(() => {
     if (!hasMapLayers) setMapLayer("upper");
   }, [hasMapLayers]);
-  const activeLayer = loadState.data?.[mapLayer] || loadState.data?.upper || null;
+  const selectedPlayerData = loadState.data?.players?.[replayHeatmapPlayerKey(selectedPlayer)] || null;
+  const selectedSideData = selectedSide === "all"
+    ? selectedPlayerData
+    : selectedPlayerData?.sides?.[selectedSide] || null;
+  const activeLayer = selectedSideData?.[mapLayer] || selectedSideData?.upper || null;
   const activeHeatmap = activeLayer?.[mode] || null;
   const movementSamples = activeLayer?.movement?.sampleCount || 0;
   const combatEvents = activeLayer?.combat?.eventCount || 0;
+  const killEvents = activeLayer?.kills?.eventCount || 0;
+  const deathEvents = activeLayer?.deaths?.eventCount || 0;
+  const activeMode = HEATMAP_MODES.find((item) => item.key === mode) || HEATMAP_MODES[0];
+  const activeEventCount = mode === "movement" ? movementSamples : activeHeatmap?.eventCount || 0;
+  const selectedPlayerOption = playerOptions.find((player) => player.name === selectedPlayer) || null;
+  const activeRoundCount = selectedSide === "all"
+    ? loadState.data?.roundCount || jobs.length || 0
+    : rounds.filter((round) => {
+      const roundSide = selectedPlayerOption?.team_key === "a" ? round?.team_a_side : round?.team_b_side;
+      return String(roundSide || "").toUpperCase() === selectedSide;
+    }).length;
 
   return (
     <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
         <div>
-          <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-cs2-accent">Whole-match spatial analysis</p>
           <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">整场热力图</h2>
-          <p className="mt-1 text-[9px] text-cs2-text-muted">32Hz 原始轨迹按 4Hz 空间采样，投影到 48×48 双线性节点并平滑为连续场。</p>
         </div>
-        <div role="group" aria-label="热力图类型" className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
-          {[
-            { key: "movement", label: "走位密度", icon: Footprints },
-            { key: "combat", label: "交战热点", icon: Crosshair },
-          ].map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={mode === key}
-              onClick={() => setMode(key)}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[9px] font-bold transition-colors ${
-                mode === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-primary"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div role="group" aria-label="热力图阵营" className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
+            {HEATMAP_SIDES.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={selectedSide === key}
+                onClick={() => setSelectedSide(key)}
+                className={`rounded-md px-2.5 py-1.5 text-[9px] font-black transition-colors ${
+                  selectedSide === key
+                    ? key === "CT"
+                      ? "bg-sky-400 text-sky-950"
+                      : key === "T"
+                        ? "bg-amber-300 text-amber-950"
+                        : "bg-cs2-accent text-cs2-text-on-accent"
+                    : "text-cs2-text-muted hover:text-cs2-text-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="热力图类型" className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
+            {HEATMAP_MODES.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={mode === key}
+                onClick={() => setMode(key)}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[9px] font-bold transition-colors ${
+                  mode === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-primary"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
-      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+      <div className="grid gap-4 p-4 xl:grid-cols-[240px_minmax(0,1fr)_240px]">
+        <aside className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/20">
+          <div className="border-b border-cs2-border px-4 py-3">
+            <h3 className="text-[11px] font-black text-cs2-text-primary">全部玩家</h3>
+            <p className="mt-0.5 font-mono text-[8px] text-cs2-text-muted">{playerOptions.length} / {playerOptions.length} 已分析</p>
+          </div>
+          <div role="group" aria-label="热力图玩家列表" className="divide-y divide-cs2-border">
+            {playerOptions.map((player) => {
+              const active = player.name === selectedPlayer;
+              const playerTeamName = String(
+                player.team_name
+                || (player.team_key === "a" ? workspace?.team_a_name : workspace?.team_b_name)
+                || (player.team_key === "a" ? "A 队" : "B 队"),
+              ).trim();
+              return (
+                <button
+                  key={`${player.name}-${player.steam_id64 || player.steam_id || ""}`}
+                  type="button"
+                  aria-label={`查看 ${player.name} 的热力图`}
+                  aria-pressed={active}
+                  onClick={() => setSelectedPlayer(player.name)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${active ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-[11px] font-bold ${active ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{player.name}</span>
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[8px] text-cs2-text-muted">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${teamDot(player.team_key)}`} />
+                      <span className="max-w-[78px] truncate font-semibold" title={playerTeamName}>{playerTeamName}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="shrink-0 font-mono">
+                        {Number(player.kills || 0)}–{Number(player.deaths || 0)} · {Number(player.adr || 0).toFixed(1)} ADR
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
         <div className="relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner">
           <img
             src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
-            alt={`${mapName} ${mode === "combat" ? "交战" : "走位"}热力图`}
+            alt={`${mapName} ${selectedSide === "all" ? "" : `${selectedSide} `}${activeMode.mapLabel}热力图`}
             draggable={false}
             className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
           />
@@ -316,13 +459,37 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
               </div>
             </div>
           )}
+          {loadState.status === "ready" && activeEventCount === 0 && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20 p-8 text-center">
+              <p className="rounded-md border border-white/10 bg-black/65 px-4 py-2 text-[10px] font-semibold text-white/70">
+                {selectedPlayer || "所选玩家"}{selectedSide === "all" ? "" : `在 ${selectedSide} 方`}暂无{activeMode.label}数据
+              </p>
+            </div>
+          )}
         </div>
 
         <aside className="space-y-3">
+          <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
+            <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">当前玩家</p>
+            <div className="mt-1 flex items-center gap-2">
+              <p className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{selectedPlayer || "未选择"}</p>
+              <span className={`rounded px-1.5 py-0.5 font-mono text-[8px] font-black ${
+                selectedSide === "CT"
+                  ? "bg-sky-400/15 text-sky-400"
+                  : selectedSide === "T"
+                    ? "bg-amber-300/15 text-amber-300"
+                    : "bg-cs2-accent-soft text-cs2-accent"
+              }`}>{selectedSide === "all" ? "全部阵营" : selectedSide}</span>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
-            <StatCard label="正式回合" value={loadState.data?.roundCount || jobs.length || "—"} detail="全场累计，不随当前回合变化" />
-            <StatCard label="轨迹采样点" value={movementSamples.toLocaleString("en-US")} detail="存活选手坐标，约 4Hz" />
-            <StatCard label="有效交战" value={combatEvents.toLocaleString("en-US")} detail="击杀双方与交战走廊" />
+            <StatCard
+              label="统计回合"
+              value={activeRoundCount}
+              detail={selectedSide === "all" ? "包含该玩家的全部比赛回合" : `该玩家担任 ${selectedSide} 时的回合`}
+            />
+            <StatCard label="参与交战" value={combatEvents.toLocaleString("en-US")} detail="作为击杀者或受害者" />
+            <StatCard label="击杀 / 死亡" value={`${killEvents} / ${deathEvents}`} detail="按当前地图楼层统计" />
           </div>
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-3">
             <div className="flex items-center gap-2">
@@ -335,13 +502,8 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
               <span>频繁</span>
             </div>
             <p className="mt-3 text-[9px] leading-relaxed text-cs2-text-muted">
-              {mode === "movement"
-                ? "显示双方全场存活时的空间占用密度，适合观察默认站位、转点路线和控制区域。"
-                : "受害者位置权重最高，同时计入击杀者和交火连线，用于识别真正的交战核心区。"}
+              {MODE_DESCRIPTIONS[mode] || MODE_DESCRIPTIONS.movement}
             </p>
-          </div>
-          <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-3 text-[8px] leading-relaxed text-cs2-text-muted">
-            播放期间不会重复计算：整场数据只在进入本页时汇总一次，渲染结果是静态像素层。
           </div>
         </aside>
       </div>

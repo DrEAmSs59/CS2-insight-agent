@@ -237,7 +237,6 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
   return (
     <Panel
       title="选择玩家"
-      eyebrow="先选人，再查看高光与录制"
       action={(
         <span className="inline-flex items-center gap-1.5 font-mono text-[9px] text-cs2-text-muted">
           {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-emerald-400" />}
