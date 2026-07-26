@@ -1,4 +1,4 @@
-> English quick start: [Development Setup](dev-setup.md)
+> 快速开始：[简体中文版](dev-setup.zh-CN.md) | [English](dev-setup.md)
 
 ## 分支与贡献
 
