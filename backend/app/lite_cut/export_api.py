@@ -36,7 +36,7 @@ async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
     from ..env_utils import load_config
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
-    from .composer import _main_video_clips_sorted, _recorded_source_ids_for_export, _timeline_overlap_pair
+    from .timeline import _main_video_clips_sorted, _recorded_source_ids_for_export, _timeline_overlap_pair
     from .export_preflight import (
         ensure_ffmpeg_runnable,
         ensure_files_readable,
@@ -118,7 +118,7 @@ async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
 async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, Any]) -> None:
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError
-    from .composer import export_lite_cut_project
+    from .render_pipeline import export_lite_cut_project
     from .export_preflight import remove_partial_output, validate_export_output
 
     db = get_lite_cut_db()
@@ -180,7 +180,7 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
 async def lite_cut_export(body: LiteCutExportBody):
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError
-    from .composer import export_lite_cut_project
+    from .render_pipeline import export_lite_cut_project
     from .export_preflight import remove_partial_output, validate_export_output
 
     prepared = await _prepare_lite_cut_export(body)

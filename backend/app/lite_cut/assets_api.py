@@ -38,7 +38,7 @@ class LiteCutAssetValidationBody(BaseModel):
 @router.post("/assets/validate")
 async def validate_lite_cut_assets(body: LiteCutAssetValidationBody):
     """Report media references that cannot be resolved on this machine."""
-    from .composer import _missing_file_assets_for_export, _recorded_source_ids_for_export
+    from .timeline import _missing_file_assets_for_export, _recorded_source_ids_for_export
 
     project_body = normalize_project_body(body.body)
     missing = _missing_file_assets_for_export(project_body)

@@ -148,6 +148,31 @@ def test_single_keyframe_holds_its_value_for_the_entire_clip():
     assert animated is False
 
 
+def test_overlay_filter_uses_single_keyframe_values_instead_of_base_transform():
+    fc = _overlay_filter_complex(
+        enable_expr="between(t,0,3)",
+        timeline_start=0,
+        duration=3,
+        tx=0.5,
+        ty=0.5,
+        size_frac=0.4,
+        rotation=0,
+        opacity=1,
+        video_input=False,
+        keyframes=[
+            {
+                "time_sec": 1,
+                "transform": {"x": 0.2, "y": 0.8, "rotation": 30, "opacity": 0.35},
+            }
+        ],
+    )
+
+    assert "main_w*0.200000-w/2" in fc
+    assert "main_h*0.800000-h/2" in fc
+    assert "rotate='0.523599'" in fc
+    assert "colorchannelmixer=aa=0.350000" in fc
+
+
 def test_alpha_webm_uses_libvpx_decoder_but_ordinary_video_keeps_default(monkeypatch, tmp_path):
     alpha = tmp_path / "overlay.webm"
     plain = tmp_path / "clip.mp4"
@@ -637,6 +662,37 @@ def test_audio_mix_passes_full_source_to_filter_to_avoid_double_trim(monkeypatch
     assert "-ss" not in command
     graph = command[command.index("-filter_complex") + 1]
     assert "[1:a]atrim=start=1.500000:end=5.250000" in graph
+
+
+def test_audio_mix_keeps_silent_base_video_duration_when_added_audio_ends_early(monkeypatch, tmp_path):
+    base = tmp_path / "silent-base.mp4"
+    audio = tmp_path / "short.wav"
+    output = tmp_path / "mixed.mp4"
+    base.write_bytes(b"base")
+    audio.write_bytes(b"audio")
+    commands = []
+    monkeypatch.setitem(
+        _mix_audio_tracks_on_base.__globals__,
+        "probe_video_audio_summary",
+        lambda *_args: {"has_audio": False, "duration": 8.0},
+    )
+    monkeypatch.setitem(
+        _mix_audio_tracks_on_base.__globals__,
+        "_run_ffmpeg_process",
+        lambda cmd, **_kwargs: commands.append(cmd) or SimpleNamespace(returncode=0, stderr="", stdout=""),
+    )
+
+    _mix_audio_tracks_on_base(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        ffprobe=tmp_path / "ffprobe.exe",
+        base_mp4=base,
+        audio_clips=[{"file_path": str(audio), "trim_out": 2, "timeline_start": 0}],
+        out_mp4=output,
+    )
+
+    command = commands[0]
+    assert "-shortest" not in command
+    assert command[command.index("-t") + 1] == "8.000000"
 
 
 def test_clip_canvas_fit_uses_clip_override_or_project_fallback():
