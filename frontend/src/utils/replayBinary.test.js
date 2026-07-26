@@ -24,8 +24,9 @@ function packetFixture() {
     frame_count: 2,
     row_count: 4,
     shots: [{ tick: 108, actor: "Alpha", weapon: "ak47" }],
+    effect_tracks: [{ id: "smoke:1", type: "smoke", start_tick: 100, end_tick: 140, samples: [] }],
     cache: { frames: "parquet_binary_hit", parsed: false },
-    effects_pending: true,
+    effects_pending: false,
   };
   const header = encoder.encode(JSON.stringify(metadata));
   const output = [];
@@ -99,6 +100,10 @@ describe("decodeReplayBinary", () => {
     expect(decoded.frames[1].shots).toEqual([
       { tick: 108, actor: "Alpha", weapon: "ak47" },
     ]);
+    expect(decoded.effect_tracks).toEqual([
+      expect.objectContaining({ id: "smoke:1", type: "smoke" }),
+    ]);
+    expect(decoded.effects_pending).toBe(false);
   });
 
   it("works with the existing interpolation helpers without materializing the round", () => {

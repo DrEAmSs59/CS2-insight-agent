@@ -150,7 +150,27 @@ export const useReplayStore = create((set, get) => ({
     }
 
     const promise = requestReplayFrames(requestBody)
-      .then((data) => {
+      .then(async (frameData) => {
+        let data = frameData;
+        if (frameData?.effects_pending) {
+          onStatus?.({ source: "effects_loading", shared: false });
+          const { data: effectsData } = await API.post("/demo/replay/effects", requestBody);
+          data = {
+            ...frameData,
+            effect_tracks: Array.isArray(effectsData?.effect_tracks) ? effectsData.effect_tracks : [],
+            effect_capabilities: effectsData?.effect_capabilities
+              && typeof effectsData.effect_capabilities === "object"
+              ? effectsData.effect_capabilities
+              : null,
+            effect_warnings: effectsData?.effect_warnings || [],
+            effects_pending: false,
+            cache: {
+              ...(frameData?.cache || {}),
+              effects: "sidecar_ready",
+            },
+          };
+          onEffects?.(data);
+        }
         const frames = Array.isArray(data?.frames) ? data.frames : [];
         const mapTransform = data?.map_transform && typeof data.map_transform === "object"
           ? data.map_transform
@@ -184,76 +204,12 @@ export const useReplayStore = create((set, get) => ({
               createdAt: Date.now(),
               lastAccessAt: Date.now(),
               sizeBytes,
-              effectsPromise: null,
             },
           },
           activeKey: cacheKey,
         });
         get().evictIfNeeded();
         onStatus?.({ source, cache: data?.cache || null });
-        if (data?.effects_pending) {
-          const effectsPromise = API.post("/demo/replay/effects", requestBody)
-            .then(({ data: effectsData }) => {
-              const effectTracks = Array.isArray(effectsData?.effect_tracks)
-                ? effectsData.effect_tracks
-                : [];
-              const effectCapabilities = effectsData?.effect_capabilities
-                && typeof effectsData.effect_capabilities === "object"
-                ? effectsData.effect_capabilities
-                : null;
-              const current = get().entries[cacheKey];
-              if (current?.status === "ready") {
-                set({
-                  entries: {
-                    ...get().entries,
-                    [cacheKey]: {
-                      ...current,
-                      effectTracks,
-                      effectCapabilities,
-                      effectsPromise: null,
-                      sizeBytes: estimateSizeBytes({
-                        frames: current.frames,
-                        effectTracks,
-                        mapTransform: current.mapTransform,
-                      }),
-                    },
-                  },
-                });
-                get().evictIfNeeded();
-              }
-              onEffects?.({
-                effect_tracks: effectTracks,
-                effect_capabilities: effectCapabilities,
-                effect_warnings: effectsData?.effect_warnings || [],
-              });
-              return effectsData;
-            })
-            .catch((error) => {
-              const current = get().entries[cacheKey];
-              if (current?.status === "ready") {
-                set({
-                  entries: {
-                    ...get().entries,
-                    [cacheKey]: { ...current, effectsPromise: null },
-                  },
-                });
-              }
-              onStatus?.({
-                source: "effects_error",
-                error: error?.response?.data?.detail || error?.message,
-              });
-              return null;
-            });
-          const current = get().entries[cacheKey];
-          if (current?.status === "ready") {
-            set({
-              entries: {
-                ...get().entries,
-                [cacheKey]: { ...current, effectsPromise },
-              },
-            });
-          }
-        }
         return data;
       })
       .catch((error) => {
@@ -275,7 +231,6 @@ export const useReplayStore = create((set, get) => ({
               createdAt: Date.now(),
               lastAccessAt: Date.now(),
               sizeBytes: 0,
-              effectsPromise: null,
             },
           },
         });
@@ -300,7 +255,6 @@ export const useReplayStore = create((set, get) => ({
           createdAt: Date.now(),
           lastAccessAt: Date.now(),
           sizeBytes: 0,
-          effectsPromise: null,
         },
       },
       activeKey: cacheKey,

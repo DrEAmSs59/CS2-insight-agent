@@ -180,7 +180,7 @@ function grenadeThrowTick(event, tickRate) {
 
 function replayEventsForRound(round, tickRate = 64) {
   const startTick = Number(round?.freeze_end_tick ?? round?.start_tick ?? -Infinity);
-  const endTick = Number(round?.end_tick ?? Infinity);
+  const endTick = Number(round?.record_end_tick ?? round?.end_tick ?? Infinity);
   const seen = new Set();
   const terminalEvents = new Set();
   const filtered = (round?.events || []).filter((event) => {
@@ -226,6 +226,21 @@ function replayEventsForRound(round, tickRate = 64) {
     }
   }
   return merged.sort((left, right) => Number(left.tick || 0) - Number(right.tick || 0));
+}
+
+export function replayEndTickForRound(round, rounds, workspace, tickRate = 64) {
+  const storedEnd = Number(round?.record_end_tick ?? round?.end_tick ?? round?.round_end_tick ?? 0);
+  const roundEnd = Number(round?.round_end_tick ?? round?.end_tick ?? 0);
+  const roundNumber = Number(round?.round_number || 0);
+  const isFinalRound = !rounds.some((candidate) => Number(candidate?.round_number || 0) > roundNumber);
+  if (!isFinalRound || !(roundEnd > 0)) return storedEnd;
+  const demoEndTick = Number(workspace?.demo_end_tick || 0);
+  if (!(demoEndTick > roundEnd)) return storedEnd;
+  const desiredEnd = Math.min(
+    roundEnd + Math.max(1, Math.round((Number(tickRate) || 64) * 3)),
+    demoEndTick,
+  );
+  return Math.max(storedEnd, desiredEnd);
 }
 
 function eventFrameRatio(event, frames, selectedRound) {
@@ -694,7 +709,7 @@ export default function Demo2DReplayPreview({
   useEffect(() => {
     if (!selectedRound || !demoPath) return undefined;
     const replayStartTick = Number(selectedRound.freeze_end_tick || selectedRound.start_tick);
-    const replayEndTick = Number(selectedRound.end_tick);
+    const replayEndTick = replayEndTickForRound(selectedRound, rounds, workspace, tickRate);
     const cacheKey = [
       demoPath,
       `v${REPLAY_CACHE_VERSION}`,
@@ -784,6 +799,7 @@ export default function Demo2DReplayPreview({
       onStatus: ({ source, shared }) => {
         if (cancelled) return;
         if (shared) setLoadHint("正在等待同一解析任务…");
+        else if (source === "effects_loading") setLoadHint("正在同步加载烟雾与燃烧范围…");
         else if (source === "parsed") setLoadHint("正在读取当前回合二进制轨迹…");
       },
       onEffects: (effectsData) => {
@@ -805,7 +821,7 @@ export default function Demo2DReplayPreview({
       }
     });
     return () => { cancelled = true; };
-  }, [demoPath, mapName, selectedRound, workspace?.tick_rate, workspacePlayers]);
+  }, [demoPath, mapName, rounds, selectedRound, tickRate, workspace?.demo_end_tick, workspacePlayers]);
 
   useEffect(() => {
     const synced = pauseSyncRef.current;

@@ -15,7 +15,7 @@ from .. import native_table as pd
 
 logger = logging.getLogger(__name__)
 
-REPLAY_MATCH_CACHE_VERSION = 2
+REPLAY_MATCH_CACHE_VERSION = 3
 REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (
@@ -124,7 +124,7 @@ def _clean_rounds(workspace: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         round_number = _int(raw.get("round_number"))
         start_tick = _int(raw.get("freeze_end_tick") or raw.get("start_tick"))
-        end_tick = _int(raw.get("end_tick") or raw.get("round_end_tick"))
+        end_tick = _int(raw.get("record_end_tick") or raw.get("end_tick") or raw.get("round_end_tick"))
         if round_number <= 0 or start_tick < 0 or end_tick <= start_tick:
             continue
         rounds.append(
@@ -139,7 +139,38 @@ def _clean_rounds(workspace: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     rounds.sort(key=lambda item: (item["round_number"], item["start_tick"]))
+    if rounds:
+        # Repair persisted workspaces created before final-round result tails
+        # were stored. This keeps cached Demo-library entries compatible.
+        final = rounds[-1]
+        source = next(
+            (
+                raw for raw in workspace.get("rounds") or []
+                if isinstance(raw, dict) and _int(raw.get("round_number")) == final["round_number"]
+            ),
+            {},
+        )
+        raw_end = _int(source.get("round_end_tick") or source.get("end_tick"))
+        tick_rate = max(0.001, float(workspace.get("tick_rate") or 64.0))
+        desired_end = raw_end + max(1, int(round(tick_rate * 3.0)))
+        demo_end_tick = _int(workspace.get("demo_end_tick"))
+        if demo_end_tick > raw_end:
+            desired_end = min(desired_end, demo_end_tick)
+            final["end_tick"] = max(final["end_tick"], desired_end)
     return rounds
+
+
+def _round_boundaries(rounds: list[dict[str, Any]]) -> list[tuple[int, int, int]]:
+    """Return the cache-shaping round identity for stale metadata checks."""
+    return [
+        (
+            _int(round_row.get("round_number")),
+            _int(round_row.get("start_tick")),
+            _int(round_row.get("end_tick")),
+        )
+        for round_row in rounds
+        if isinstance(round_row, dict)
+    ]
 
 
 def _sample_ticks(start_tick: int, end_tick: int, tick_rate: float, fps: float) -> list[int]:
@@ -488,7 +519,13 @@ def materialize_match_replay_parquet_impl(
     parquet_path, meta_path = _cache_paths(cache_key)
 
     existing = _load_meta(cache_key)
-    if existing is not None and parquet_path.is_file():
+    expected_boundaries = _round_boundaries(rounds)
+    existing_boundaries = _round_boundaries(existing.get("rounds") or []) if existing else []
+    if (
+        existing is not None
+        and parquet_path.is_file()
+        and existing_boundaries == expected_boundaries
+    ):
         return {
             "status": "parquet_hit",
             "cache_key": cache_key,
@@ -497,6 +534,13 @@ def materialize_match_replay_parquet_impl(
             "bytes": parquet_path.stat().st_size,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
         }
+    if existing is not None and parquet_path.is_file():
+        logger.info(
+            "Rebuilding stale replay Parquet round boundaries: key=%s cached=%s expected=%s",
+            cache_key,
+            existing_boundaries,
+            expected_boundaries,
+        )
 
     round_specs: list[dict[str, Any]] = []
     all_ticks: list[int] = []
@@ -783,12 +827,19 @@ def load_match_replay_round_binary(
         "effect_tracks_version": int(meta.get("effect_tracks_version") or 1),
         "effect_capabilities": meta.get("effect_capabilities") or {},
         "effect_warnings": list(meta.get("effect_warnings") or []),
-        "effects_pending": True,
+        "effect_tracks": [
+            dict(track)
+            for track in meta.get("effect_tracks") or []
+            if isinstance(track, dict)
+            and _int(track.get("end_tick")) >= int(start_tick)
+            and _int(track.get("start_tick")) <= int(end_tick)
+        ],
+        "effects_pending": False,
         "demo_fingerprint": meta.get("demo_fingerprint"),
         "cache_key": cache_key,
         "cache": {
             "frames": "parquet_binary_hit",
-            "effects": "pending",
+            "effects": "parquet_hit",
             "parsed": False,
         },
     }

@@ -97,8 +97,10 @@ function mapLayerThreshold(transform) {
 function pointMatchesMapLayer(point, transform, layer) {
   const threshold = mapLayerThreshold(transform);
   if (threshold == null) return true;
-  const z = Number(point?.z);
-  if (!Number.isFinite(z)) return true;
+  const rawZ = point?.z;
+  if (rawZ == null || rawZ === "") return false;
+  const z = Number(rawZ);
+  if (!Number.isFinite(z)) return false;
   return layer === "lower" ? z <= threshold : z > threshold;
 }
 
@@ -443,11 +445,9 @@ export default function ReplaySceneCanvas({
   const onViewportPointerDown = (event) => {
     const current = cameraRef.current;
     if (!current) return;
-    // After zoom: left-drag pans (Space+LMB and middle-mouse still work).
-    const canPan = current.userZoom > 1;
     const isMiddle = event.button === 1;
     const isLeft = event.button === 0;
-    if (!canPan || (!isMiddle && !isLeft)) return;
+    if (!isMiddle && !isLeft) return;
     // Ignore interactive chrome (zoom controls, floor toggle).
     if (event.target?.closest?.("button, input, a, [data-no-pan]")) return;
     event.preventDefault();
@@ -488,7 +488,7 @@ export default function ReplaySceneCanvas({
     panSessionRef.current = null;
     const node = viewportRef.current;
     if (node) {
-      node.style.cursor = cameraRef.current?.userZoom > 1 ? "grab" : "default";
+      node.style.cursor = "grab";
     }
   };
 
@@ -582,15 +582,32 @@ export default function ReplaySceneCanvas({
     for (let sourceIndex = start; sourceIndex <= frameCursorIndex; sourceIndex += stride) {
       const sourceFrame = frames[sourceIndex];
       for (const player of sourceFrame.players || []) {
-        if (!pointMatchesMapLayer(player, transform, mapLayer)) continue;
+        const key = safeLabel(player.name);
+        if (!key) continue;
+        const entry = byName.get(key) || { segments: [], active: null };
+        if (!pointMatchesMapLayer(player, transform, mapLayer)) {
+          entry.active = null;
+          byName.set(key, entry);
+          continue;
+        }
         const point = worldToPercent(player, transform);
         if (!point) continue;
-        const list = byName.get(player.name) || [];
-        list.push(point);
-        byName.set(player.name, list);
+        if (!entry.active) {
+          entry.active = [];
+          entry.segments.push(entry.active);
+        }
+        entry.active.push(point);
+        byName.set(key, entry);
       }
     }
-    return [...byName.entries()].map(([name, points]) => ({ name, points, team_key: workspacePlayers.find((player) => player.name === name)?.team_key || "a" }));
+    return [...byName.entries()].flatMap(([name, entry]) => entry.segments
+      .filter((points) => points.length > 1)
+      .map((points, segmentIndex) => ({
+        id: `${name}:${segmentIndex}`,
+        name,
+        points,
+        team_key: workspacePlayers.find((player) => player.name === name)?.team_key || "a",
+      })));
   }, [frames, frameCursorIndex, layers.traces, mapLayer, playing, sampleStride, transform, workspacePlayers]);
 
   const recentEvents = useMemo(() => {
@@ -660,7 +677,12 @@ export default function ReplaySceneCanvas({
         }
         const flightTick = Math.min(currentTick, eventTick);
         const interpolated = interpolateTrajectoryPoint(trajectory, flightTick);
-        const visibleTrajectory = trajectory.filter((point) => Number(point.tick || 0) < flightTick && pointMatchesMapLayer(point, transform, mapLayer));
+        const visibleTrajectory = [];
+        for (const point of trajectory) {
+          if (Number(point.tick || 0) >= flightTick) break;
+          if (pointMatchesMapLayer(point, transform, mapLayer)) visibleTrajectory.push(point);
+          else visibleTrajectory.length = 0;
+        }
         if (interpolated && pointMatchesMapLayer(interpolated, transform, mapLayer)) visibleTrajectory.push(interpolated);
         const path = visibleTrajectory
           .map((point) => worldToPercent(point, transform))
@@ -783,7 +805,7 @@ export default function ReplaySceneCanvas({
         onPointerUp={endPanSession}
         onPointerCancel={endPanSession}
         onDoubleClick={() => fitCameraToViewport()}
-        style={{ cursor: camera.userZoom > 1 ? "grab" : "default" }}
+        style={{ cursor: "grab" }}
       >
         <div
           className="replay-scene demo-radar-plane absolute left-0 top-0"
@@ -810,7 +832,7 @@ export default function ReplaySceneCanvas({
             smokeDebugLayer={smokeDebugLayer}
           />
           <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-            {traces.map((trace) => <polyline key={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
+            {traces.map((trace) => <polyline key={trace.id} data-player-trace={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
             {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
             {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="0.12" strokeLinecap="round" opacity="1" />; })}
             {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="0.205" strokeLinecap="round" strokeLinejoin="round" opacity="1" />)}

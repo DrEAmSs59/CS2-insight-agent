@@ -70,8 +70,10 @@ function mapLayerThreshold(transform) {
 function pointMatchesMapLayer(point, transform, mapLayer) {
   const threshold = mapLayerThreshold(transform);
   if (threshold == null || !mapLayer) return true;
-  const z = Number(point?.z);
-  if (!Number.isFinite(z)) return true;
+  const rawZ = point?.z;
+  if (rawZ == null || rawZ === "") return false;
+  const z = Number(rawZ);
+  if (!Number.isFinite(z)) return false;
   return mapLayer === "lower" ? z <= threshold : z > threshold;
 }
 
