@@ -24,6 +24,8 @@ import {
 import { weaponUsedTokens } from "../../i18n/weaponNames.js";
 import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore";
+import { recordingErrorMessage } from "../../utils/recordingErrorMessages.js";
+import { recordingRecoverySummary } from "../../utils/recordingRecovery.js";
 
 const TYPE_ACCENT_CLASSES = {
   "高光": "bg-cs2-highlight",
@@ -185,7 +187,6 @@ function RecordingResultCard({ result, copiedIdx, onCopy, onReveal, onDurationDe
   const title = friendlyClipTitleForQueue(clip, t);
   const playerName = String(clip.player_name || result?._queueItem?.targetPlayer || "").trim();
   const demo = fileName(clip.demo_filename || clip.demo_path || result?._queueItem?.demoFilename || result?._queueItem?.demoPath);
-  const recordId = String(clip.clip_id || result?._queueItem?.clipId || result?.request_id || clip.recorded_clip_id || "").trim();
   const map = String(clip.map_name || clip.map || "").trim();
   const round = Number(clip.round);
   const killCount = Number(clip.kill_count);
@@ -229,11 +230,6 @@ function RecordingResultCard({ result, copiedIdx, onCopy, onReveal, onDurationDe
               {t(clipTypeI18nKey(type))}
             </span>
             {playerName ? <span className="text-[13px] font-bold text-cs2-text-primary">{playerName}</span> : null}
-            {recordId ? (
-              <span className="max-w-full truncate rounded border border-cs2-border-subtle bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-cs2-text-muted" title={recordId}>
-                {t("queue.modalRecordId")} · {recordId}
-              </span>
-            ) : null}
             <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] text-cs2-text-muted">
               {statusIcon}
               {result.success ? null : aborted ? t("queue.modalItemAborted") : t("queue.modalFailed", { n: 1 })}
@@ -279,8 +275,8 @@ function RecordingResultCard({ result, copiedIdx, onCopy, onReveal, onDurationDe
             </div>
           ) : null}
 
-          {!result.success && !aborted && result.error ? (
-            <p className="mt-2 text-[11px] text-cs2-rose-on-surface">{result.error}</p>
+          {!result.success && !aborted ? (
+            <p className="mt-2 text-[11px] text-cs2-rose-on-surface">{recordingErrorMessage(result, t)}</p>
           ) : null}
 
           {result.success && result.output_path ? (
@@ -326,6 +322,7 @@ export default function RecordingResultModal({
   const successCount = results.filter((result) => result.success).length;
   const abortedCount = results.filter((result) => isAborted(result)).length;
   const failCount = results.filter((result) => !result.success && !isAborted(result)).length;
+  const recovery = recordingRecoverySummary(results);
   const pendingMediaDuration = results.some((result, index) => {
     if (!result.success) return false;
     const clip = resultClip(result);
@@ -404,6 +401,41 @@ export default function RecordingResultModal({
       maxHeight="max-h-[90vh]"
       footer={footer}
     >
+      <div
+        className={`mx-4 mt-4 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] sm:mx-5 ${
+          recovery.state === "restored"
+            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+            : recovery.state === "failed"
+              ? "border-rose-400/35 bg-rose-400/10 text-cs2-rose-on-surface"
+              : recovery.state === "not_needed"
+                ? "border-cs2-border bg-cs2-bg-input/60 text-cs2-text-secondary"
+                : "border-amber-400/35 bg-amber-400/10 text-amber-100"
+        }`}
+        role="status"
+      >
+        {recovery.state === "restored" ? (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+        ) : recovery.state === "failed" ? (
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-cs2-rose-on-surface" />
+        ) : (
+          <Ban className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+        )}
+        <div>
+          <p className="font-semibold">
+            {t(`queue.configRecovery.${recovery.state}.title`)}
+          </p>
+          <p className="mt-0.5 opacity-80">
+            {recovery.state === "restored"
+              ? t("queue.configRecovery.restored.desc", {
+                  checked: recovery.checkedFiles,
+                  restored: recovery.restoredFiles,
+                })
+              : recovery.state === "failed"
+                ? t("queue.configRecovery.failed.desc", { n: recovery.failureCount })
+                : t(`queue.configRecovery.${recovery.state}.desc`)}
+          </p>
+        </div>
+      </div>
       {(failCount > 0 || abortedCount > 0) ? (
         <div className="flex flex-wrap items-center gap-4 border-b border-cs2-border px-5 py-2 text-[11px]">
           {failCount > 0 ? <span className="flex items-center gap-1 text-cs2-rose-on-surface"><XCircle className="h-3.5 w-3.5" />{t("queue.modalFailed", { n: failCount })}</span> : null}
