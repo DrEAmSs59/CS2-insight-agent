@@ -104,6 +104,14 @@ function pointMatchesMapLayer(point, transform, layer) {
   return layer === "lower" ? z <= threshold : z > threshold;
 }
 
+function withFallbackZ(point, fallback) {
+  if (!point) return point;
+  if (point.z != null && point.z !== "" && Number.isFinite(Number(point.z))) return point;
+  if (fallback?.z == null || fallback.z === "") return point;
+  const fallbackZ = Number(fallback?.z);
+  return Number.isFinite(fallbackZ) ? { ...point, z: fallbackZ } : point;
+}
+
 function grenadeDurationSeconds(kind) {
   const value = safeLabel(kind);
   if (/烟|smoke/i.test(value)) return 18;
@@ -632,19 +640,31 @@ export default function ReplaySceneCanvas({
         const sourceFrame = nearestFrame(eventTick);
         const frameActor = sourceFrame?.players?.find((item) => String(item.name || "").toLowerCase() === String(event.actor || "").toLowerCase());
         const frameTarget = sourceFrame?.players?.find((item) => String(item.name || "").toLowerCase() === String(event.target || "").toLowerCase());
-        const actorSource = Number.isFinite(Number(event.actor_x)) ? { x: event.actor_x, y: event.actor_y, z: event.actor_z } : frameActor;
-        const targetSource = Number.isFinite(Number(event.target_x)) ? { x: event.target_x, y: event.target_y, z: event.target_z } : frameTarget;
+        const actorSource = Number.isFinite(Number(event.actor_x))
+          ? withFallbackZ({ x: event.actor_x, y: event.actor_y, z: event.actor_z }, frameActor)
+          : frameActor;
+        const targetSource = Number.isFinite(Number(event.target_x))
+          ? withFallbackZ({ x: event.target_x, y: event.target_y, z: event.target_z }, frameTarget)
+          : frameTarget;
         if (!pointMatchesMapLayer(actorSource, transform, mapLayer) || !pointMatchesMapLayer(targetSource, transform, mapLayer)) continue;
         const actor = worldToPercent(actorSource, transform);
         const target = worldToPercent(targetSource, transform);
         if (actor && target) kills.push({ ...event, actor, target, opacity: 1 - age / Math.max(1, tickRate * 5) });
       }
       if (event.type === "grenade" && layers.grenades) {
-        const rawTrajectory = [...(event.trajectory || [])].sort((a, b) => Number(a.tick || 0) - Number(b.tick || 0));
+        const rawTrajectory = [...(event.trajectory || [])]
+          .sort((a, b) => Number(a.tick || 0) - Number(b.tick || 0))
+          .map((point) => {
+            const sourceFrame = nearestFrame(Number(point.tick || eventTick));
+            const thrower = sourceFrame?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
+            return withFallbackZ(point, thrower);
+          });
         const isSmoke = /烟|smoke/i.test(safeLabel(event.kind));
         const rawStartTick = Number(rawTrajectory[0]?.tick || 0);
         const rawEndTick = Number(rawTrajectory.at(-1)?.tick || 0);
         const rawEnd = rawTrajectory.at(-1);
+        const eventFrameActor = nearestFrame(eventTick)?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
+        const eventPoint = withFallbackZ(event, rawEnd || eventFrameActor);
         const rawEndpointDistance = rawEnd && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))
           ? Math.hypot(Number(rawEnd.x) - Number(event.x), Number(rawEnd.y) - Number(event.y))
           : 0;
@@ -670,7 +690,7 @@ export default function ReplaySceneCanvas({
           if (thrower && Number.isFinite(Number(thrower.x)) && Number.isFinite(Number(thrower.y))) {
             trajectory = [
               { tick: throwTick, x: Number(thrower.x), y: Number(thrower.y), z: Number(thrower.z) },
-              { tick: eventTick, x: Number(event.x), y: Number(event.y), z: Number(event.z) },
+              { tick: eventTick, x: Number(event.x), y: Number(event.y), z: Number(eventPoint.z) },
             ];
             trajectoryInferred = true;
           }
@@ -687,9 +707,9 @@ export default function ReplaySceneCanvas({
         const path = visibleTrajectory
           .map((point) => worldToPercent(point, transform))
           .filter(Boolean);
-        const effectPosition = worldToPercent(event, transform) || path.at(-1) || null;
+        const effectPosition = worldToPercent(eventPoint, transform) || path.at(-1) || null;
         const phase = currentTick < eventTick ? "flight" : "effect";
-        const layerPoint = phase === "flight" ? interpolated : event;
+        const layerPoint = phase === "flight" ? interpolated : eventPoint;
         if (!pointMatchesMapLayer(layerPoint, transform, mapLayer)) continue;
         const position = phase === "flight" ? path.at(-1) : effectPosition;
         const effectAge = Math.max(0, currentTick - eventTick) / Math.max(1, tickRate);
@@ -754,7 +774,7 @@ export default function ReplaySceneCanvas({
         Math.abs(Number(item.tick) - Number(shot.tick || 0)) < Math.abs(Number(best?.tick ?? Infinity) - Number(shot.tick || 0)) ? item : best
       ), null);
       const frameActor = sourceFrame?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(shot.actor).toLowerCase());
-      const shotSource = Number.isFinite(Number(shot.x)) ? shot : frameActor;
+      const shotSource = Number.isFinite(Number(shot.x)) ? withFallbackZ(shot, frameActor) : frameActor;
       if (!pointMatchesMapLayer(shotSource, transform, mapLayer)) return [];
       const origin = worldToPercent(shotSource, transform);
       if (!origin) return [];
@@ -831,11 +851,11 @@ export default function ReplaySceneCanvas({
             capabilities={effectCapabilities}
             smokeDebugLayer={smokeDebugLayer}
           />
-          <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-            {traces.map((trace) => <polyline key={trace.id} data-player-trace={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="0.175" strokeOpacity="0.45" />)}
-            {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="0.14" strokeDasharray="1.5 1" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="0.09" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="0.07" /></g>)}
-            {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="0.12" strokeLinecap="round" opacity="1" />; })}
-            {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="0.205" strokeLinecap="round" strokeLinejoin="round" opacity="1" />)}
+          <svg viewBox="0 0 100 100" className="replay-trajectory-layer pointer-events-none absolute inset-0 z-[10] h-full w-full overflow-visible" shapeRendering="geometricPrecision">
+            {traces.map((trace) => <polyline key={trace.id} data-player-trace={trace.name} className="demo-player-trace" points={trace.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={isBlueReplaySide(replaySideForTeamKey(trace.team_key, selectedRound), trace.team_key === "a") ? "#38bdf8" : "#fbbf24"} strokeWidth="1.8" strokeOpacity="0.58" vectorEffect="non-scaling-stroke" />)}
+            {recentEvents.kills.map((kill) => <g key={`kill-${kill.tick}-${kill.actor}-${kill.target}`} opacity={Math.max(0.2, kill.opacity)}><line className="demo-death-line" x1={kill.actor.x} y1={kill.actor.y} x2={kill.target.x} y2={kill.target.y} stroke="#fb7185" strokeWidth="1.6" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" /><circle className="demo-death-circle" cx={kill.target.x} cy={kill.target.y} r="1.2" fill="none" stroke="#fb7185" strokeWidth="1.3" vectorEffect="non-scaling-stroke" /><path className="demo-death-x" d={`M${kill.target.x - 0.8},${kill.target.y - 0.8} L${kill.target.x + 0.8},${kill.target.y + 0.8} M${kill.target.x + 0.8},${kill.target.y - 0.8} L${kill.target.x - 0.8},${kill.target.y + 0.8}`} stroke="#fb7185" strokeWidth="1.2" vectorEffect="non-scaling-stroke" /></g>)}
+            {recentShots.map((shot, index) => { const teamKey = teamKeyForPlayerName(shot.actor); return <line key={`shot-${shot.tick}-${shot.actor}-${index}`} className="demo-shot-tracer" x1={shot.origin.x} y1={shot.origin.y} x2={shot.target.x} y2={shot.target.y} stroke={isBlueReplaySide(replaySideForTeamKey(teamKey, selectedRound), teamKey === "a") ? "#bae6fd" : "#fde68a"} strokeWidth="1.8" strokeLinecap="round" opacity="1" vectorEffect="non-scaling-stroke" />; })}
+            {recentEvents.grenades.filter((grenade) => grenade.showTrajectory && grenade.renderedPath.length > 1).map((grenade) => <polyline key={`trajectory-${grenade.tick}-${grenade.actor}-${grenade.kind}`} className="demo-grenade-trajectory" data-inferred={grenade.trajectoryInferred ? "true" : undefined} data-side={grenade.side || undefined} points={grenade.renderedPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={grenade.teamColor} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" opacity="1" vectorEffect="non-scaling-stroke" />)}
           </svg>
           {recentEvents.grenades.map((grenade) => {
             const isSmoke = /烟|smoke/i.test(grenade.kind);

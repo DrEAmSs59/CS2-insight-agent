@@ -2,7 +2,7 @@ import { create } from "zustand";
 import API from "../api/api";
 import { decodeReplayBinary } from "../utils/replayBinary";
 
-export const REPLAY_STORE_CACHE_VERSION = 12;
+export const REPLAY_STORE_CACHE_VERSION = 13;
 const MAX_READY_ENTRIES = 64;
 const MAX_BYTES = 150 * 1024 * 1024;
 
