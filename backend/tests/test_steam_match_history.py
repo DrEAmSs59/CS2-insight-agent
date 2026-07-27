@@ -1,8 +1,14 @@
-import sys, time
+import bz2
+import sys
+import time
 from pathlib import Path
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.steam_match_history import (
+    _decompress_bz2_atomic,
     is_demo_expired,
     demo_expires_at_iso,
     map_enum_to_name,
@@ -11,6 +17,30 @@ from app.steam_match_history import (
     build_demo_url,
     parse_match_row,
 )
+
+
+def test_decompress_bz2_publishes_complete_demo_atomically(tmp_path: Path):
+    compressed = tmp_path / "match.dem.bz2"
+    compressed.write_bytes(bz2.compress(b"complete-demo"))
+    destination = tmp_path / "match.dem"
+
+    _decompress_bz2_atomic(compressed, destination)
+
+    assert destination.read_bytes() == b"complete-demo"
+    assert not list(tmp_path.glob(".match.dem.*.partial"))
+
+
+def test_decompress_bz2_failure_preserves_existing_demo(tmp_path: Path):
+    compressed = tmp_path / "broken.dem.bz2"
+    compressed.write_bytes(b"not-bzip2")
+    destination = tmp_path / "broken.dem"
+    destination.write_bytes(b"known-good-demo")
+
+    with pytest.raises(OSError):
+        _decompress_bz2_atomic(compressed, destination)
+
+    assert destination.read_bytes() == b"known-good-demo"
+    assert not list(tmp_path.glob(".broken.dem.*.partial"))
 
 def test_is_demo_expired_fresh():
     ts = int(time.time()) - 3 * 24 * 3600  # 3 days ago

@@ -1,9 +1,12 @@
 """Steam Web API proxy for CS2 official match history."""
 from __future__ import annotations
 
+import asyncio
 import bz2
 import logging
+import os
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -190,25 +193,53 @@ async def fetch_player_summary(api_key: str, steam_id64: str) -> dict:
     return players[0] if players else {}
 
 
+def _decompress_bz2_atomic(compressed_path: Path, destination: Path) -> None:
+    """Decompress into a sibling temporary file and publish only on success."""
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.partial")
+    try:
+        with bz2.open(compressed_path, "rb") as source, temporary.open("wb") as target:
+            while chunk := source.read(1024 * 1024):
+                target.write(chunk)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _decompress_download(compressed_path: Path, destination: Path) -> None:
+    """Finish one downloaded archive and always retire its temporary source."""
+    try:
+        _decompress_bz2_atomic(compressed_path, destination)
+    finally:
+        compressed_path.unlink(missing_ok=True)
+
+
 async def download_demo(demo_url: str, dest_dir: Path, filename: str) -> Path:
     """Download a .bz2 demo and decompress into dest_dir. Returns the .dem path."""
     dest_dir.mkdir(parents=True, exist_ok=True)
-    bz2_path = dest_dir / (filename + ".bz2")
     dem_path = dest_dir / filename
 
     if dem_path.exists():
         return dem_path
 
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        async with client.stream("GET", demo_url) as resp:
-            resp.raise_for_status()
-            with open(bz2_path, "wb") as f:
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
+    compressed_path = dest_dir / f".{filename}.{uuid.uuid4().hex}.bz2.partial"
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async with client.stream("GET", demo_url) as resp:
+                resp.raise_for_status()
+                with compressed_path.open("wb") as writer:
+                    async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                        await asyncio.to_thread(writer.write, chunk)
+                    await asyncio.to_thread(writer.flush)
+                    await asyncio.to_thread(os.fsync, writer.fileno())
 
-    # Stream decompress — avoids double-buffering full file in RAM
-    with bz2.open(bz2_path, "rb") as src, open(dem_path, "wb") as dst:
-        while chunk := src.read(65536):
-            dst.write(chunk)
-    bz2_path.unlink(missing_ok=True)
-    return dem_path
+        await asyncio.to_thread(_decompress_download, compressed_path, dem_path)
+        return dem_path
+    finally:
+        try:
+            compressed_path.unlink(missing_ok=True)
+        except OSError:
+            # Cancellation cannot stop an already-running worker thread. That
+            # worker owns the same cleanup after it closes the archive.
+            logger.debug("deferred compressed demo cleanup: %s", compressed_path)

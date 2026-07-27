@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -143,6 +144,66 @@ def test_list_demo_ids_returns_only_filtered_ids(monkeypatch):
             "offset": 0,
         }
     ]
+
+
+def test_match_history_batches_library_lookup(monkeypatch):
+    raw_matches = [
+        {
+            "matchid": match_id,
+            "matchtime": 1_700_000_000,
+            "watchablematchinfo": {"game_type": 2048},
+            "roundstatsall": [{
+                "map": 6,
+                "num_rounds": 2,
+                "match_duration": 180,
+                "team_scores": [2, 0],
+                "kills": [2],
+                "assists": [0],
+                "deaths": [1],
+                "enemy_headshots": [1],
+                "enemy_kills": [2],
+                "mvps": [1],
+                "damage": [200],
+            }],
+        }
+        for match_id in ("1", "2")
+    ]
+
+    async def fake_matches(*_args):
+        return raw_matches
+
+    async def fake_player(*_args):
+        return {"personaname": "Player", "avatarfull": "avatar"}
+
+    batch_calls: list[list[str]] = []
+
+    async def fake_existing(filenames):
+        names = list(filenames)
+        batch_calls.append(names)
+        return {"match730_2.dem"}
+
+    async def forbidden_single_lookup(_filename):
+        raise AssertionError("match history must not issue per-row filename queries")
+
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: SimpleNamespace(
+            steam_api_key="key",
+            steam_id64="76561198000000000",
+            match_count=20,
+            match_mode="premier",
+        ),
+    )
+    monkeypatch.setattr(main, "fetch_match_history", fake_matches)
+    monkeypatch.setattr(main, "fetch_player_summary", fake_player)
+    monkeypatch.setattr(main.demo_db, "find_existing_filenames", fake_existing)
+    monkeypatch.setattr(main.demo_db, "find_by_filename", forbidden_single_lookup)
+
+    response = _run(main.get_match_history())
+
+    assert batch_calls == [["match730_1.dem", "match730_2.dem"]]
+    assert [row["demo_in_library"] for row in response["matches"]] == [False, True]
 
 
 def test_batch_summary_reports_corrupt_result_as_item_error(monkeypatch):

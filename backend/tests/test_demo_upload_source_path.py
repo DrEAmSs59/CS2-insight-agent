@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -101,6 +102,30 @@ def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
     assert dest.read_bytes() == b"new-demo-bytes"
     assert digest == hashlib.md5(b"new-demo-bytes").hexdigest()
     assert not any(tmp_path.glob(".existing.dem.*.partial"))
+
+
+def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path: Path):
+    upload = main.UploadFile(filename="threaded.dem", file=io.BytesIO(b"demo"))
+    caller_thread = threading.get_ident()
+    save_threads: list[int] = []
+
+    def fake_save(file, destination: Path) -> str:
+        save_threads.append(threading.get_ident())
+        destination.write_bytes(file.file.read())
+        return hashlib.md5(b"demo").hexdigest()
+
+    async def fake_meta(_path: Path):
+        return [], {}
+
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(main, "_save_uploaded_demo", fake_save)
+    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+
+    response = asyncio.run(main.upload_demo(upload))
+
+    assert response["path"] == str(tmp_path / "threaded.dem")
+    assert save_threads and save_threads[0] != caller_thread
 
 
 def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: Path):
