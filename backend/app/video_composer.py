@@ -118,6 +118,7 @@ def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
     vw, vh = 1920, 1080
     fps = 60.0
     has_audio = False
+    audio_codec_name = ""
     pixel_format = ""
     codec_name = ""
     for st in streams:
@@ -135,12 +136,15 @@ def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
             codec_name = str(st.get("codec_name") or "").strip().lower()
         elif ct == "audio":
             has_audio = True
+            if not audio_codec_name:
+                audio_codec_name = str(st.get("codec_name") or "").strip().lower()
     has_alpha = pixel_format.startswith("yuva") or pixel_format in {"rgba", "argb", "bgra", "abgr", "gbrap", "gbrap10le", "gbrap12le", "gbrap16le"}
     return {
         "width": vw,
         "height": vh,
         "fps": fps,
         "has_audio": has_audio,
+        "audio_codec_name": audio_codec_name,
         "duration": dur_s,
         "pixel_format": pixel_format,
         "codec_name": codec_name,

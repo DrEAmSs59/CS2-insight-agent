@@ -2232,6 +2232,7 @@ export default {
   "liteCut.media.cancelUpload": "取消上传",
   "liteCut.media.uploadFailed": "上传失败，请检查文件后重试。",
   "liteCut.media.proxyGenerating": "正在生成预览代理…",
+  "liteCut.media.proxyRemuxing": "正在快速准备兼容预览…",
   "liteCut.media.proxyFailed": "预览代理生成失败",
   "liteCut.media.proxyRetry": "重新生成",
   "liteCut.media.proxyRetrying": "正在重试…",
