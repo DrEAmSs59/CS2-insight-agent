@@ -74,9 +74,13 @@ export default function DemoLibraryPage() {
   }, [addToQueue]);
 
   const handleBatchIngest = useCallback(async (ids) => {
-    await API.post("/demos/batch-ingest", { demo_ids: ids });
-    void s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
-  }, [s]);
+    const { data } = await API.post("/demos/batch-ingest", { demo_ids: ids });
+    await s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
+    if (!data?.failed?.length) {
+      s.setProgressText(t("library.ingestSuccess", { count: data?.ingested ?? ids.length }));
+    }
+    return data;
+  }, [s, t]);
 
   const handleUpdateRemark = useCallback(async (demoId, remark) => {
     try {

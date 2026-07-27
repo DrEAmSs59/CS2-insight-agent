@@ -247,23 +247,12 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
             watch_root=watch_root,
         )
         if not inserted:
-            if can_store_md5:
-                try:
-                    fill = await asyncio.to_thread(file_md5_hex, path)
-                    await demo_db.update_demo_content_md5_if_absent(demo_path, fill, origin_zip)
-                except OSError:
-                    pass
+            if use_md5 and md5_hex:
+                await demo_db.update_demo_content_md5_if_absent(demo_path, md5_hex, origin_zip)
             return
 
         # 发现阶段只做文件登记、去重与基础校验。地图、名单和记分板在用户确认
         # 入库时一次性提取，避免“扫描目录一次 + 入库一次”的重复 parser 读盘。
-        await demo_db.update_status(demo_path, "pending", error_msg=None, parsed_at=None)
-        if can_store_md5:
-            try:
-                fill = md5_hex if md5_hex else await asyncio.to_thread(file_md5_hex, path)
-                await demo_db.update_demo_content_md5_if_absent(demo_path, fill, origin_zip)
-            except OSError:
-                pass
     await demo_library_hub.notify("enqueue")
 
 
@@ -1723,8 +1712,11 @@ async def list_discovered_demos(
 ):
     """列出已发现但尚未入库（status='pending'）的 demo。"""
     qn = (q or "").strip() or None
-    total = await demo_db.count_discovered_demos(name_query=qn)
-    rows = await demo_db.list_discovered_demos(limit=limit, offset=offset, name_query=qn)
+    rows, total = await demo_db.list_discovered_page(
+        limit=limit,
+        offset=offset,
+        name_query=qn,
+    )
     return {"items": rows, "limit": limit, "offset": offset, "total": total, "q": qn}
 
 
