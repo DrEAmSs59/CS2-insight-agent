@@ -267,8 +267,18 @@ export default function App() {
     [currentParsed]
   );
 
-  // ── 当前 Tab 内的活跃玩家（默认不选，避免全员解析后误触发 AI） ──
-  const currentActivePlayer = activePlayerTabs[currentMatchIndex] ?? "";
+  const players = currentUpload?.players ?? [];
+  const rosterPlayerNames = players
+    .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+    .map((name) => String(name).trim())
+    .filter(Boolean);
+  const availablePlayerNames = rosterPlayerNames.length ? rosterPlayerNames : parsedPlayerNames;
+
+  // ── 当前 Tab 内的活跃玩家（无有效记忆时自然落到阵容首位，不触发 AI 请求） ──
+  const requestedActivePlayer = String(activePlayerTabs[currentMatchIndex] ?? "").trim();
+  const currentActivePlayer = availablePlayerNames.includes(requestedActivePlayer)
+    ? requestedActivePlayer
+    : (availablePlayerNames[0] ?? "");
 
   const activePlayerData = currentParsed?.players?.[currentActivePlayer] ?? null;
   const analysisWorkspace = currentParsed?.analysis_workspace ?? null;
@@ -277,7 +287,6 @@ export default function App() {
   const roundTimeline = activePlayerData?.round_timeline ?? null;
   const matchMeta = activePlayerData?.match_meta ?? currentUpload?.match_meta ?? null;
 
-  const players = currentUpload?.players ?? [];
   const selectedPlayersList = selectedPlayers[currentMatchIndex] ?? [];
   const freezeToDeathDraft =
     freezeToDeathRoundsByMatch[currentMatchIndex] ?? { picked: [] };

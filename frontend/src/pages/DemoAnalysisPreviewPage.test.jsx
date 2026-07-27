@@ -205,7 +205,40 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     useLocaleStore.setState({ locale: "zh", effectiveLocale: "zh", hydrated: true, persistenceError: null });
     useReplayStore.setState({ entries: {}, activeKey: null });
     sessionStorage.clear();
+    localStorage.clear();
     vi.clearAllMocks();
+  });
+
+  test("defaults highlights to the first roster player without firing an AI request", () => {
+    const shell = buildShell({
+      currentParsed: {
+        players: {
+          ZywOo: { clips: [], round_timeline: [] },
+          flameZ: { clips: [], round_timeline: [] },
+        },
+      },
+      parsedPlayerNames: ["ZywOo", "flameZ"],
+      currentActivePlayer: "",
+    });
+    renderPage(shell);
+
+    expect(screen.queryByText("先选择一名玩家")).toBeNull();
+    expect(screen.getAllByText("ZywOo").length).toBeGreaterThan(0);
+    expect(shell.ensurePlayerAiReview).not.toHaveBeenCalled();
+  });
+
+  test("exposes one edit mode for the outer workspace and the replay modules", async () => {
+    const view = renderPage(buildShell());
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑布局" }));
+    fireEvent.click(screen.getByRole("button", { name: "将比赛与玩家向右移动" }));
+    expect([...view.container.querySelectorAll('[data-testid="dock-row-analysis-workspace"] [data-dock-panel]')]
+      .map((node) => node.getAttribute("data-dock-panel")))
+      .toEqual(["analysis-view", "left-rail", "right-rail"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
+    await waitFor(() => expect(screen.getByLabelText("2D 回放布局")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "折叠战术雷达" })).toBeTruthy();
   });
 
   test("the selector only contains demos uploaded or selected for this session", () => {
@@ -248,13 +281,16 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     await waitFor(() => expect(API.get).toHaveBeenCalledWith("/steam/player-avatars", {
       params: { steam_ids: "76561198000000001" },
     }));
-    const avatar = await screen.findByAltText("ZywOo Steam avatar");
+    const avatars = await screen.findAllByAltText("ZywOo Steam avatar");
+    const avatar = avatars[0];
     const avatarFrame = avatar.parentElement;
     expect(avatar.getAttribute("src")).toContain("avatars.cloudflare.steamstatic.com");
-    expect(avatarFrame?.getAttribute("data-player-color-source")).toBe("demo");
-    expect(avatarFrame?.getAttribute("style")).toContain("--cs2-player-purple");
+    avatars.forEach((item) => {
+      expect(item.parentElement?.getAttribute("data-player-color-source")).toBe("demo");
+      expect(item.parentElement?.getAttribute("style")).toContain("--cs2-player-purple");
+    });
 
-    fireEvent.error(avatar);
+    avatars.forEach((item) => fireEvent.error(item));
     expect(view.container.querySelector('img[alt="ZywOo Steam avatar"]')).toBeNull();
     expect(avatarFrame?.textContent).toContain("Z");
   });
@@ -628,7 +664,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector(".demo-grenade-trajectory")).toBeNull();
   });
 
-  test("keeps every player unselected until the user chooses one, then requests only that player's AI review", () => {
+  test("shows the first player immediately but waits for an explicit click before requesting an AI review", () => {
     const shell = buildShell({
       aiMode: true,
       currentParsed: { players: { ZywOo: { clips: [{ clip_id: "clip-1", category: "highlight" }], match_meta: {} } } },
@@ -636,8 +672,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     });
     renderPage(shell);
 
-    expect(screen.getByText("先选择一名玩家")).toBeTruthy();
+    expect(screen.queryByText("先选择一名玩家")).toBeNull();
+    expect(screen.getAllByText("ZywOo").length).toBeGreaterThan(0);
     expect(screen.queryByText(/AI 锐评/)).toBeNull();
+    expect(shell.ensurePlayerAiReview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "选择 ZywOo" }));
     expect(shell.ensurePlayerAiReview).toHaveBeenCalledTimes(1);
     expect(shell.ensurePlayerAiReview).toHaveBeenCalledWith("ZywOo", 0);

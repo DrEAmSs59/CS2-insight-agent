@@ -13,6 +13,7 @@ import {
   ListChecks,
   Loader2,
   MapPin,
+  PanelsTopLeft,
   Play,
   RefreshCw,
   Swords,
@@ -26,6 +27,7 @@ import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import Demo2DReplayPreview from "../components/analysis/Demo2DReplayPreview";
 import DemoHeatmapView from "../components/analysis/DemoHeatmapView";
 import PlayerIdentityAvatar from "../components/analysis/PlayerIdentityAvatar";
+import DockableRow, { clearDockLayout } from "../components/layout/DockableRow";
 import { useReplayStore } from "../stores/replayStore";
 import {
   EconomyView,
@@ -60,6 +62,7 @@ const TABS = [
 const ALL_TAG = "__all__";
 
 function playerName(player) {
+  if (typeof player === "string") return player.trim();
   return String(player?.name || player?.player_name || "").trim();
 }
 
@@ -292,7 +295,7 @@ function PlayerContextRail({
   const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
   const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   return (
-    <aside className="analysis-workspace-right custom-scrollbar min-h-0 space-y-3 overflow-y-auto">
+    <aside className="custom-scrollbar h-full min-h-0 space-y-3 overflow-y-auto">
       <section className="analysis-rail-card overflow-hidden">
         <header className="border-b border-cs2-border-subtle px-3 py-2.5">
           <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
@@ -320,7 +323,7 @@ function PlayerContextRail({
                 </div>
               ))}
             </div>
-            {aiMode && activeTab === "highlights" && activeHighlightView === "clips" ? (
+            {aiMode && activeTab === "highlights" && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
               <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/8 px-2.5 py-2 text-[10px] text-violet-300">
                 {playerAiReviewing ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
                 <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
@@ -408,6 +411,8 @@ export default function DemoAnalysisPreviewPage() {
   const [selectedRound, setSelectedRound] = useSessionState(`${sessionPrefix}:round`, null);
   const [replayRound, setReplayRound] = useSessionState(`${sessionPrefix}:replay-round`, null);
   const [statsPlayer, setStatsPlayer] = useSessionState(`${sessionPrefix}:stats-player`, "");
+  const [layoutEditing, setLayoutEditing] = useState(false);
+  const [layoutResetSignal, setLayoutResetSignal] = useState(0);
   const uploadedDemoCount = s.uploadedDemos?.length || 0;
   const parsedDemoCount = matches.filter((match) => match?.parsed).length;
   const allDemosParsed = uploadedDemoCount > 0
@@ -443,7 +448,7 @@ export default function DemoAnalysisPreviewPage() {
   const selectedCount = s.selectedPlayersList?.length || 0;
   const parsedNames = s.parsedPlayerNames || [];
   const parsedPlayers = s.currentParsed?.players || {};
-  const activePlayer = s.currentActivePlayer || "";
+  const activePlayer = s.currentActivePlayer || playerName(s.players?.[0]) || "";
   const selectedPlayer = (s.players || []).find((player) => playerName(player) === activePlayer) || null;
   const activePlayerResult = activePlayer ? parsedPlayers[activePlayer] : null;
   const playerAiReviewed = Boolean(activePlayerResult?.ai_reviewed) || (activePlayerResult?.clips || []).some((clip) => (
@@ -494,6 +499,12 @@ export default function DemoAnalysisPreviewPage() {
     setActiveTab("replay");
   };
 
+  const resetWorkspaceLayout = () => {
+    clearDockLayout("analysis-workspace");
+    clearDockLayout("analysis-replay-board");
+    setLayoutResetSignal((value) => value + 1);
+  };
+
   if (!s.hasDemos) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
@@ -532,12 +543,43 @@ export default function DemoAnalysisPreviewPage() {
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent"><BarChart3 className="h-4 w-4" /></div>
             <div className="min-w-0"><h1 className="text-[14px] font-black tracking-wide">{t("analysis.workspace.title")}</h1><p className="truncate font-mono text-[9px] text-cs2-text-muted">{s.currentFilename} · {s.currentMatchIndex + 1}/{matches.length}</p></div>
           </div>
-          <DemoSelector matches={matches} currentIndex={s.currentMatchIndex} onChange={s.setCurrentMatchIndex} disabled={s.batchRecording} />
+          <div className="flex items-center gap-2">
+            <Button
+              variant={layoutEditing ? "primary" : "secondary"}
+              size="sm"
+              aria-pressed={layoutEditing}
+              onClick={() => setLayoutEditing((value) => !value)}
+            >
+              <PanelsTopLeft className="h-3.5 w-3.5" />
+              {layoutEditing ? t("analysis.layout.done") : t("analysis.layout.edit")}
+            </Button>
+            {layoutEditing ? (
+              <Button variant="secondary" size="sm" onClick={resetWorkspaceLayout}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t("analysis.layout.reset")}
+              </Button>
+            ) : null}
+            <DemoSelector matches={matches} currentIndex={s.currentMatchIndex} onChange={s.setCurrentMatchIndex} disabled={s.batchRecording} />
+          </div>
         </div>
       </header>
 
-      <main className={`${PAGE_CONTAINER_CLASS} analysis-workspace-grid min-h-0 flex-1 py-3`} data-testid="demo-analysis-content-container">
-        <aside className="analysis-workspace-left flex min-h-0 flex-col gap-3">
+      <main className={`${PAGE_CONTAINER_CLASS} min-h-0 flex-1 py-3`} data-testid="demo-analysis-content-container">
+        <DockableRow
+          storageKey="analysis-workspace"
+          ariaLabel={t("analysis.layout.outer")}
+          editMode={layoutEditing}
+          resetSignal={layoutResetSignal}
+          className="analysis-workspace-grid h-full"
+          panels={[
+            {
+              id: "left-rail",
+              label: t("analysis.layout.leftRail"),
+              minSize: 164,
+              defaultSize: 228,
+              className: "analysis-workspace-left",
+              content: (
+        <aside className="flex h-full min-h-0 flex-col gap-3">
           <MatchRailSummary
             teamAName={teamAName}
             teamBName={teamBName}
@@ -549,8 +591,17 @@ export default function DemoAnalysisPreviewPage() {
           />
           <PlayerPicker teams={teams} teamAName={teamAName} teamBName={teamBName} activePlayer={activePlayer} parsedPlayers={parsedPlayers} totalPlayers={s.players.length} parsing={parsingCurrent} avatars={steamAvatars} onSelect={selectPlayer} />
         </aside>
+              ),
+            },
+            {
+              id: "analysis-view",
+              label: t("analysis.layout.center"),
+              minSize: 480,
+              defaultSize: 900,
+              className: "analysis-workspace-center",
+              content: (
 
-        <section className="analysis-workspace-center flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-sm">
+        <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-sm">
           <nav className="flex min-h-11 shrink-0 gap-0.5 overflow-x-auto border-b border-cs2-border-subtle p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("analysis.workspace.demoViews")}>
             {TABS.map(({ key, labelKey, icon: Icon }) => (
               <button
@@ -608,6 +659,8 @@ export default function DemoAnalysisPreviewPage() {
               teamBName={workspace.team_b_name || teamBName}
               initialRound={replayRound}
               onRoundChange={setReplayRound}
+              layoutEditing={layoutEditing}
+              layoutResetSignal={layoutResetSignal}
             />
             )}
 
@@ -653,6 +706,15 @@ export default function DemoAnalysisPreviewPage() {
             )}
           </div>
         </section>
+              ),
+            },
+            {
+              id: "right-rail",
+              label: t("analysis.layout.rightRail"),
+              minSize: 164,
+              defaultSize: 250,
+              className: "analysis-workspace-right",
+              content: (
 
         <PlayerContextRail
           activeTab={activeTab}
@@ -673,6 +735,10 @@ export default function DemoAnalysisPreviewPage() {
           onSwitchDemo={s.handleResetDemo}
           switchDisabled={s.anyDemoParsing || s.batchRecording}
           avatars={steamAvatars}
+        />
+              ),
+            },
+          ]}
         />
       </main>
       <DemoPlaybackUi />
