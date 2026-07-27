@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import DemoUpload from "./DemoUpload.jsx";
@@ -9,10 +9,12 @@ const desktopBridgeMock = vi.hoisted(() => ({
 
 vi.mock("../desktop/desktopBridge.js", () => ({
   desktopBridge: desktopBridgeMock,
+  isDesktopApp: false,
 }));
 
 describe("DemoUpload", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -37,5 +39,18 @@ describe("DemoUpload", () => {
     fireEvent.click(screen.getByRole("status"));
     expect(desktopBridgeMock.chooseDemoFiles).not.toHaveBeenCalled();
     expect(onUpload).not.toHaveBeenCalled();
+  });
+
+  test("rotates flavor copy without replacing factual analysis progress", () => {
+    vi.useFakeTimers();
+    render(<DemoUpload onUpload={vi.fn()} loading loadingText="真实进度 2/5" />);
+
+    const firstFlavor = screen.getByTestId("demo-loading-message").textContent;
+    expect(screen.getByTestId("demo-loading-detail").textContent).toBe("真实进度 2/5");
+
+    act(() => vi.advanceTimersByTime(2400));
+
+    expect(screen.getByTestId("demo-loading-message").textContent).not.toBe(firstFlavor);
+    expect(screen.getByTestId("demo-loading-detail").textContent).toBe("真实进度 2/5");
   });
 });

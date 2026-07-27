@@ -661,7 +661,26 @@ body {
     opacity 420ms ease-out;
 }
 
+@keyframes demo-loading-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.demo-loading-message {
+  animation: demo-loading-message-in 280ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .demo-loading-message {
+    animation: none;
+  }
+
   .replay-observer-damage-flash {
     animation: none;
   }
