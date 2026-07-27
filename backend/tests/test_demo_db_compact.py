@@ -138,6 +138,22 @@ def test_compact_list_uses_materialized_summary_and_two_selects(tmp_path: Path, 
     _run(scenario())
 
 
+def test_find_existing_filenames_uses_one_batch_result(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "filenames.sqlite3")
+        await db.init_db()
+        await db.add_demo(str(tmp_path / "match730_1.dem"), status="loaded")
+        await db.add_demo(str(tmp_path / "match730_2.dem"), status="loaded")
+
+        existing = await db.find_existing_filenames(
+            ["match730_1.dem", "missing.dem", "match730_2.dem", "match730_1.dem"]
+        )
+
+        assert existing == {"match730_1.dem", "match730_2.dem"}
+
+    _run(scenario())
+
+
 def test_init_backfills_summary_for_legacy_match_results(tmp_path: Path):
     db_path = tmp_path / "legacy.sqlite3"
     demo_path = str(tmp_path / "legacy.dem")
