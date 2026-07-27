@@ -51,6 +51,7 @@ import { Loader2 } from "lucide-react";
 import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+import SidebarNav from "./components/SidebarNav";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
@@ -3191,9 +3192,11 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex flex-col h-screen overflow-hidden bg-cs2-bg-dark">
-        <CustomTitleBar queueLength={queue.length} disabled={batchRecording} />
-        <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-page">
+        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <CustomTitleBar />
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {libraryLoadingOverlay && (
             <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
@@ -3263,6 +3266,7 @@ export default function App() {
               </Suspense>
             </div>
           </main>
+          </div>
         </div>
 
         {showGlobalNotice ? (

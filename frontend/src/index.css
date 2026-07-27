@@ -355,7 +355,40 @@
 
 .app-topbar {
   height: 50px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--cs2-border-subtle) 82%, transparent), var(--cs2-shadow-sm);
+}
+
+.app-sidebar {
+  transition: width 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.app-sidebar[data-resizing="true"] {
+  transition: none;
+}
+
+.app-sidebar__nav-item--active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cs2-accent) 25%, transparent);
+}
+
+.app-sidebar__resize-handle::after {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--cs2-border-subtle);
+  content: "";
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.app-sidebar__resize-handle:hover::after,
+.app-sidebar__resize-handle:focus-visible::after,
+.app-sidebar[data-resizing="true"] .app-sidebar__resize-handle::after {
+  background: var(--cs2-accent);
+  opacity: 0.9;
 }
 
 .analysis-workspace-grid {

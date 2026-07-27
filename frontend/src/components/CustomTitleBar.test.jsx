@@ -2,12 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import CustomTitleBar from "./CustomTitleBar";
-import API from "../api/api";
 import { desktopBridge } from "../desktop/desktopBridge";
-
-vi.mock("../api/api", () => ({
-  default: { post: vi.fn().mockResolvedValue({ data: { ok: true } }) },
-}));
 
 vi.mock("../desktop/desktopBridge", () => ({
   isDesktopApp: true,
@@ -36,9 +31,8 @@ describe("CustomTitleBar", () => {
     expect(desktopBridge.toggleMaximize).toHaveBeenCalledTimes(1);
   });
 
-  test("opens the desktop log directory from the title bar", () => {
+  test("does not repeat the current page title in the window chrome", () => {
     renderTitleBar();
-    fireEvent.click(screen.getByRole("button", { name: /打开日志目录|Open log folder/ }));
-    expect(API.post).toHaveBeenCalledWith("config/open-logs");
+    expect(screen.queryByText(/上手指南|Getting Started|Demo 分析|Analysis/)).toBeNull();
   });
 });
