@@ -1694,7 +1694,7 @@ async def upload_demo(
 
     filename = Path(file.filename).name
     dest = UPLOAD_DIR / filename
-    uploaded_md5 = _save_uploaded_demo(file, dest)
+    uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
     persistent_path = await asyncio.to_thread(
         _verified_upload_source_path,
         source_path,
@@ -1730,7 +1730,7 @@ async def upload_demos(
             raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
         filename = Path(file.filename).name
         dest = UPLOAD_DIR / filename
-        uploaded_md5 = _save_uploaded_demo(file, dest)
+        uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
         persistent_path = await asyncio.to_thread(
             _verified_upload_source_path,
             source_path,
@@ -2452,8 +2452,10 @@ async def get_match_history():
         raise HTTPException(400, "Steam API Key 和 SteamID64 未配置，请先保存凭据")
 
     try:
-        raw_matches = await fetch_match_history(cfg.steam_api_key, cfg.steam_id64, cfg.match_count)
-        player = await fetch_player_summary(cfg.steam_api_key, cfg.steam_id64)
+        raw_matches, player = await asyncio.gather(
+            fetch_match_history(cfg.steam_api_key, cfg.steam_id64, cfg.match_count),
+            fetch_player_summary(cfg.steam_api_key, cfg.steam_id64),
+        )
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         if status == 403:
@@ -2467,7 +2469,7 @@ async def get_match_history():
         raise HTTPException(502, str(e))
 
     mode_filter = cfg.match_mode
-    rows = []
+    parsed_rows: list[tuple[dict, str]] = []
     for i, m in enumerate(raw_matches):
         wmi = m.get("watchablematchinfo") or {}
         mode = game_type_to_mode(int(wmi.get("game_type", 0)))
@@ -2478,10 +2480,14 @@ async def get_match_history():
         except Exception:
             logger.exception("Failed to parse match %s", m.get("matchid"))
             continue
-        # check if already in library
         dem_name = f"match730_{row['match_id']}.dem"
-        in_lib = await demo_db.find_by_filename(dem_name) is not None
-        row["demo_in_library"] = in_lib
+        parsed_rows.append((row, dem_name))
+    existing_filenames = await demo_db.find_existing_filenames(
+        dem_name for _, dem_name in parsed_rows
+    )
+    rows = []
+    for row, dem_name in parsed_rows:
+        row["demo_in_library"] = dem_name in existing_filenames
         rows.append(row)
 
     wins = sum(1 for r in rows if r["result"] == "win")
@@ -2540,7 +2546,14 @@ async def download_match_demo(body: MatchHistoryDownloadBody):
         raise HTTPException(400, "未配置 Demo 库监听目录，请先在「Demo 库」设置监听路径")
 
     dest_dir = Path(watch_paths[0])
-    filename = body.filename if body.filename.endswith(".dem") else body.filename + ".dem"
+    requested_filename = Path(body.filename).name.strip()
+    if not requested_filename or requested_filename in {".", ".."}:
+        raise HTTPException(400, "Demo 文件名无效")
+    filename = (
+        requested_filename
+        if requested_filename.lower().endswith(".dem")
+        else requested_filename + ".dem"
+    )
     try:
         dem_path = await download_demo(body.demo_url, dest_dir, filename)
     except httpx.HTTPStatusError as e:

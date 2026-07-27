@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Iterable, Literal, Optional
 
 import aiosqlite
 
@@ -897,6 +897,23 @@ class DemoDB:
             ) as cur:
                 row = await cur.fetchone()
         return dict(row) if row else None
+
+    async def find_existing_filenames(self, filenames: Iterable[str]) -> set[str]:
+        """Return all matching filenames with bounded SQLite parameter batches."""
+        ordered = list(dict.fromkeys(str(value) for value in filenames if str(value)))
+        if not ordered:
+            return set()
+        existing: set[str] = set()
+        async with aiosqlite.connect(self.db_path) as db:
+            for start in range(0, len(ordered), 500):
+                chunk = ordered[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                cur = await db.execute(
+                    f"SELECT filename FROM demo_files WHERE filename IN ({placeholders})",
+                    chunk,
+                )
+                existing.update(str(row[0]) for row in await cur.fetchall())
+        return existing
 
     @staticmethod
     def _need_player_join(f: DemoListFilters) -> bool:
