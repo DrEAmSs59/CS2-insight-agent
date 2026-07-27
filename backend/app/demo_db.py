@@ -286,6 +286,19 @@ class DemoDB:
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_content_md5 ON demo_files(content_md5)",
             )
+            # The pending-ingest picker compares candidate rows by path,
+            # filename and content hash.  The default UNIQUE(path) index uses
+            # binary collation, so it cannot serve the case-insensitive path
+            # comparison used by that query.
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_status_id ON demo_files(status, id)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_path_nocase ON demo_files(path COLLATE NOCASE)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_filename_nocase ON demo_files(filename COLLATE NOCASE)",
+            )
             cur_z = await conn.execute("PRAGMA table_info(zip_extract_state)")
             zcols = {str(r[1]) for r in await cur_z.fetchall()}
             if "zip_md5" not in zcols:
@@ -1644,34 +1657,70 @@ class DemoDB:
             return cur.rowcount > 0
 
     @staticmethod
-    def _discovered_duplicate_match_sql(left_alias: str, right_alias: str) -> str:
-        la, ra = left_alias, right_alias
-        return f"""(
-            lower({la}.path) = lower({ra}.path)
-            OR lower({la}.filename) = lower({ra}.filename)
-            OR (
-                {la}.content_md5 IS NOT NULL AND trim({la}.content_md5) != ''
-                AND {ra}.content_md5 IS NOT NULL AND trim({ra}.content_md5) != ''
-                AND {la}.content_md5 = {ra}.content_md5
-            )
-        )"""
-
-    @staticmethod
     def _discovered_not_already_in_library_sql(alias: str = "d") -> str:
         """待入库列表去重：排除主库已有 demo，以及与其它 pending 重复的条目（保留 id 最小的一条）。"""
         a = alias
-        dup = DemoDB._discovered_duplicate_match_sql(a, "ing")
+        preferred_row = f"""(
+            ing.status != 'pending'
+            OR ing.id < {a}.id
+        )"""
+        # Keep the three duplicate keys in separate anti-joins.  A single
+        # correlated subquery joined by OR makes SQLite scan demo_files once
+        # per pending row; the split form is equivalent by De Morgan's law and
+        # lets every branch use its dedicated index.
         return f"""
         AND NOT EXISTS (
             SELECT 1 FROM demo_files ing
             WHERE ing.id != {a}.id
-            AND {dup}
-            AND (
-                ing.status != 'pending'
-                OR ing.id < {a}.id
-            )
+            AND ing.path COLLATE NOCASE = {a}.path
+            AND {preferred_row}
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM demo_files ing
+            WHERE ing.id != {a}.id
+            AND ing.filename COLLATE NOCASE = {a}.filename
+            AND {preferred_row}
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM demo_files ing
+            WHERE ing.id != {a}.id
+            AND {a}.content_md5 IS NOT NULL
+            AND trim({a}.content_md5) != ''
+            AND ing.content_md5 = {a}.content_md5
+            AND {preferred_row}
         )
         """
+
+    async def list_discovered_page(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        name_query: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return one pending-ingest page and its total from one DB snapshot."""
+        where_sql = (
+            " FROM demo_files d WHERE d.status = 'pending'"
+            + self._discovered_not_already_in_library_sql("d")
+        )
+        params: list[Any] = []
+        if name_query:
+            where_sql += " AND d.filename LIKE ?"
+            params.append(f"%{name_query}%")
+
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("BEGIN")
+            count_cur = await conn.execute("SELECT COUNT(*)" + where_sql, params)
+            count_row = await count_cur.fetchone()
+            total = int(count_row[0]) if count_row else 0
+            list_sql = (
+                "SELECT d.id, d.path, d.filename, d.file_size, d.source, d.added_at"
+                + where_sql
+                + " ORDER BY d.id DESC LIMIT ? OFFSET ?"
+            )
+            list_cur = await conn.execute(list_sql, [*params, limit, offset])
+            rows = [dict(row) for row in await list_cur.fetchall()]
+        return rows, total
 
     async def list_discovered_demos(
         self,
