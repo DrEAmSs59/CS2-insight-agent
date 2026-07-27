@@ -97,6 +97,9 @@ export function MatchListRow({
 
   const listStatus = classifyDemoStatus(demo);
   const listStatusLabel = t(listStatus.labelKey, listStatus.labelParams);
+  const listStatusTooltip = listStatus.tooltipKey
+    ? t(listStatus.tooltipKey, listStatus.tooltipParams)
+    : listStatus.tooltip;
   const listStatusDot =
     listStatus.kind === "done"
       ? "bg-cs2-highlight"
@@ -210,7 +213,7 @@ export function MatchListRow({
                   listStatus.kind === "pending" || listStatus.kind === "parsing" ? "animate-pulse" : ""
                 }`}
               />
-              <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatus.tooltip || listStatusLabel}>
+              <span className={`max-w-[9rem] truncate text-[10px] font-bold ${listStatusText}`} title={listStatusTooltip || listStatusLabel}>
                 {listStatusLabel}
               </span>
             </div>

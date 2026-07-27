@@ -32,7 +32,12 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
-import { buildPendingDemoAnalysisSpecs } from "./utils/demoAnalysisCache";
+import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./utils/demoAnalysisCache";
+import {
+  DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
+  demoBatchFailureMessage,
+  normalizeDemoBatchFailures,
+} from "./utils/demoBatchFailures";
 import { resetDemoAnalysisDefaultView } from "./utils/demoAnalysisSession";
 import {
   recordingAbortToastKind,
@@ -237,7 +242,11 @@ export default function App() {
   const [libraryPageSize, setLibraryPageSize] = useState(12);
   const libraryPageSizeEffectSkipRef = useRef(false);
   const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
-  const [batchLoadError, setBatchLoadError] = useState({ open: false, failed: [] });
+  const [batchLoadError, setBatchLoadError] = useState({
+    open: false,
+    failed: [],
+    mode: "load",
+  });
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
   llmConfigRef.current = llmConfig;
@@ -808,7 +817,9 @@ export default function App() {
       navigate("/analysis");
       return loaded;
     } catch (e) {
-      setProgressText(t("app.libraryLoadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      setProgressText(t("app.libraryLoadFail", {
+        msg: demoBatchFailureMessage(e, t),
+      }), { isError: true });
       return null;
     } finally {
       if (!skipLoadingOverlay) {
@@ -826,18 +837,33 @@ export default function App() {
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
+      const failedItems = Array.isArray(data.failed) ? data.failed : [];
+      if (!data.items?.length) {
+        setBatchLoadError({
+          open: true,
+          failed: normalizeDemoBatchFailures(failedItems, t, "library"),
+          mode: "analysis",
+        });
+        return;
+      }
       const loaded = await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
       if (loaded?.length) {
         const idMap = Object.fromEntries(loaded.map((demo, index) => [index, demo.id]));
         setLibraryLoadingOverlay(false);
-        await autoParseLoadedDemosRef.current?.(loaded, idMap);
+        await autoParseLoadedDemosRef.current?.(loaded, idMap, failedItems);
       }
     } catch (e) {
       const failed = e.response?.data?.detail?.failed;
       if (Array.isArray(failed) && failed.length) {
-        setBatchLoadError({ open: true, failed });
+        setBatchLoadError({
+          open: true,
+          failed: normalizeDemoBatchFailures(failed, t, "library"),
+          mode: "load",
+        });
       } else {
-        setProgressText(t("app.libraryLoadSelectedFail", { msg: e.response?.data?.detail?.message || e.response?.data?.detail || e.message }), { isError: true });
+        setProgressText(t("app.libraryLoadSelectedFail", {
+          msg: demoBatchFailureMessage(e, t),
+        }), { isError: true });
       }
     } finally {
       setLibraryLoadingOverlay(false);
@@ -1088,6 +1114,16 @@ export default function App() {
         ({ data } = await API.post("/demo/upload-multiple", formData));
       }
       const uploads = data.uploads ?? [];
+      const preparationFailures = Array.isArray(data.failed) ? data.failed : [];
+      if (!uploads.length) {
+        const failed = normalizeDemoBatchFailures(preparationFailures, t, "upload");
+        setAnalysisInlineProgress({ active: false, text: t("app.autoParseNoUsable") });
+        setProgressText(t("app.autoParseNoUsable"), { isError: true });
+        if (failed.length) {
+          setBatchLoadError({ open: true, failed, mode: "analysis" });
+        }
+        return;
+      }
       setUploadedDemos(uploads);
       setParsedMatches(uploads.map(() => null));
       setLibraryDemoIdsByIndex({});
@@ -1110,9 +1146,9 @@ export default function App() {
       setProgressText("");
       setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
       navigate("/analysis");
-      await autoParseLoadedDemosRef.current?.(uploads, {});
+      await autoParseLoadedDemosRef.current?.(uploads, {}, preparationFailures);
     } catch (e) {
-      setProgressText(t("app.uploadFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      setProgressText(t("app.uploadFail", { msg: demoBatchFailureMessage(e, t) }), { isError: true });
     } finally {
       setParsing(false);
     }
@@ -1194,10 +1230,13 @@ export default function App() {
         // null = 后端按全部合规非赛后回合生成回合合集；[] 会显式跳过生成（见 demo_parser）
         body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
         const { data } = activeLibraryDemoId
-          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body)
+          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body, {
+              timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
+            })
           : await API.post(
               `/demo/parse-multi?filename=${encodeURIComponent(fn)}&path=${encodeURIComponent(demos[idx]?.path || fn)}`,
-              body
+              body,
+              { timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS },
             );
 
         const processedPlayers = {};
@@ -1267,14 +1306,15 @@ export default function App() {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
           else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
         }
-        return true;
+        return { ok: true };
       } catch (e) {
-        const err = t("app.parseFail", { fn, msg: e.response?.data?.detail || e.message });
+        const reason = demoBatchFailureMessage(e, t);
+        const err = t("app.parseFail", { fn, msg: reason });
         if (!quietProgress) {
           if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
           else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
         }
-        return false;
+        return { ok: false, reason };
       } finally {
         setParsingByIndex((prev) => {
           const next = { ...prev };
@@ -1292,42 +1332,100 @@ export default function App() {
 
   const LIBRARY_PARSE_CONCURRENCY = 2;
 
-  const autoParseLoadedDemos = useCallback(async (loaded, demoIdsByIndex = {}) => {
+  const autoParseLoadedDemos = useCallback(async (
+    loaded,
+    demoIdsByIndex = {},
+    initialFailures = [],
+  ) => {
     const demos = Array.isArray(loaded) ? loaded : [];
     const specs = buildPendingDemoAnalysisSpecs(demos);
+    const inferredFailures = demos
+      .map((demo, index) => ({ demo, index }))
+      .filter(({ demo }) => demoAnalysisRoster(demo).length === 0)
+      .map(({ demo, index }) => ({
+        id: demo?.id ?? `roster-${index}`,
+        filename: demo?.filename || `Demo ${index + 1}`,
+        code: demo?.inspection_error?.code || "DEMO_INSPECTION_FAILED",
+      }));
+    const failures = normalizeDemoBatchFailures(
+      [...(Array.isArray(initialFailures) ? initialFailures : []), ...inferredFailures],
+      t,
+      "analysis",
+    );
     if (!specs.length) {
-      setAnalysisInlineProgress({ active: false, text: "" });
+      setAnalysisInlineProgress({
+        active: false,
+        text: failures.length ? t("app.autoParseNoUsable") : "",
+      });
+      if (failures.length) {
+        setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
+      }
       return;
     }
 
-    let done = 0;
+    let done = failures.length;
     let succeeded = 0;
+    const activeNames = new Set();
+    const total = specs.length + failures.length;
     const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
     setAnalysisInlineProgress({
       active: true,
-      text: t("app.autoParseStart", { demos: specs.length, players: totalPlayers }),
+      text: t("app.autoParseStart", { demos: total, players: totalPlayers }),
     });
     const ctx = {
       demos,
       libraryDemoIdsByIndex: demoIdsByIndex,
       suppressProgressText: true,
     };
-    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
-      const ok = await handleParseForIndex(spec.index, spec.players, ctx);
-      done += 1;
-      if (ok) succeeded += 1;
+
+    const showRunningProgress = () => {
       setAnalysisInlineProgress({
-        active: done < specs.length,
-        text: done < specs.length
-          ? t("app.autoParseProgress", { done, total: specs.length })
-          : succeeded === specs.length
+        active: done < total,
+        text: t("app.autoParseProgressDetail", {
+          done,
+          total,
+          failed: failures.length,
+          active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
+        }),
+      });
+    };
+
+    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
+      const filename = demos[spec.index]?.filename || `Demo ${spec.index + 1}`;
+      activeNames.add(filename);
+      showRunningProgress();
+      const result = await handleParseForIndex(spec.index, spec.players, ctx);
+      activeNames.delete(filename);
+      done += 1;
+      if (result?.ok) {
+        succeeded += 1;
+      } else {
+        failures.push({
+          id: demos[spec.index]?.id ?? `analysis-${spec.index}`,
+          filename,
+          reason: result?.reason || t("api.err.demoAnalysisFailed"),
+        });
+      }
+      setAnalysisInlineProgress({
+        active: done < total,
+        text: done < total
+          ? t("app.autoParseProgressDetail", {
+              done,
+              total,
+              failed: failures.length,
+              active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
+            })
+          : failures.length === 0
             ? t("app.autoParseDone", { demos: specs.length, players: totalPlayers })
             : t("app.autoParsePartial", {
                 succeeded,
-                failed: specs.length - succeeded,
+                failed: failures.length,
               }),
       });
     });
+    if (failures.length) {
+      setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
+    }
   }, [handleParseForIndex, t]);
   autoParseLoadedDemosRef.current = autoParseLoadedDemos;
 
@@ -1396,7 +1494,17 @@ export default function App() {
         setLibraryLoadingText(t("app.libraryLoadingAndParsing"));
       }
       try {
-        const items = await Promise.all(ids.map((id) => API.get(`/demos/${id}`).then((r) => r.data)));
+        const { data: summary } = await API.post("/demos/batch-summary", { ids });
+        const items = Array.isArray(summary.items) ? summary.items : [];
+        const failureItems = Array.isArray(summary.failed) ? [...summary.failed] : [];
+        if (!items.length) {
+          setBatchLoadError({
+            open: true,
+            failed: normalizeDemoBatchFailures(failureItems, t, "library-mode"),
+            mode: "analysis",
+          });
+          return;
+        }
         let resolvedByDemoId = null;
         if (mode !== "none") {
           if (holdOverlayUntilParsed) {
@@ -1404,10 +1512,11 @@ export default function App() {
           }
           const apiMode = mode === "expected" ? "config_expected" : "manual";
           const { data } = await API.post("/demos/batch-resolve-players", {
-            demo_ids: ids.map((id) => Number(id)),
+            demo_ids: items.map((item) => Number(item.id)),
             mode: apiMode,
             manual_lines: mode === "manual" ? manualLines : null,
           });
+          if (Array.isArray(data.failed)) failureItems.push(...data.failed);
           const raw = data.resolved || {};
           resolvedByDemoId = {};
           for (const it of items) {
@@ -1423,7 +1532,13 @@ export default function App() {
           skipLoadingOverlay: holdOverlayUntilParsed,
         });
         if (!loaded?.length) return;
-        if (mode === "none") return;
+        const failures = normalizeDemoBatchFailures(failureItems, t, "library-mode");
+        if (mode === "none") {
+          if (failures.length) {
+            setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
+          }
+          return;
+        }
         const idMap = {};
         loaded.forEach((x, i) => {
           idMap[i] = x.id;
@@ -1438,6 +1553,9 @@ export default function App() {
           setProgressText((prev) =>
             `${prev || ""}\n${t("app.libraryNoPlayersMatched")}`.trim()
           );
+          if (failures.length) {
+            setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
+          }
           return;
         }
         if (holdOverlayUntilParsed) {
@@ -1449,16 +1567,57 @@ export default function App() {
           suppressProgressText: holdOverlayUntilParsed,
         };
         let done = 0;
+        let succeeded = 0;
+        const activeNames = new Set();
         await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
-          await handleParseForIndex(spec.index, spec.players, ctx);
+          const filename = loaded[spec.index]?.filename || `Demo ${spec.index + 1}`;
+          activeNames.add(filename);
           if (holdOverlayUntilParsed) {
-            done += 1;
-            setLibraryLoadingText(t("app.libraryParsingHighlights", { done, total: specs.length }));
+            setLibraryLoadingText(t("app.libraryParsingHighlightsDetail", {
+              done,
+              total: specs.length,
+              active: Array.from(activeNames).join("、"),
+              failed: failures.length,
+            }));
+          }
+          const result = await handleParseForIndex(spec.index, spec.players, ctx);
+          activeNames.delete(filename);
+          if (result?.ok) {
+            succeeded += 1;
+          } else {
+            failures.push({
+              id: loaded[spec.index]?.id ?? `library-analysis-${spec.index}`,
+              filename,
+              reason: result?.reason || t("api.err.demoAnalysisFailed"),
+            });
+          }
+          done += 1;
+          if (holdOverlayUntilParsed) {
+            setLibraryLoadingText(t("app.libraryParsingHighlightsDetail", {
+              done,
+              total: specs.length,
+              active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
+              failed: failures.length,
+            }));
           }
         });
         setProgressText("");
+        setAnalysisInlineProgress({
+          active: false,
+          text: failures.length
+            ? t("app.autoParsePartial", { succeeded, failed: failures.length })
+            : t("app.autoParseDone", {
+                demos: specs.length,
+                players: specs.reduce((sum, spec) => sum + spec.players.length, 0),
+              }),
+        });
+        if (failures.length) {
+          setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
+        }
       } catch (e) {
-        setProgressText(t("app.libraryLoadAndParseFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+        setProgressText(t("app.libraryLoadAndParseFail", {
+          msg: demoBatchFailureMessage(e, t),
+        }), { isError: true });
       } finally {
         if (holdOverlayUntilParsed) {
           setLibraryLoadingOverlay(false);
@@ -3170,7 +3329,8 @@ export default function App() {
         <BatchLoadErrorModal
           open={batchLoadError.open}
           failed={batchLoadError.failed}
-          onClose={() => setBatchLoadError({ open: false, failed: [] })}
+          mode={batchLoadError.mode}
+          onClose={() => setBatchLoadError({ open: false, failed: [], mode: "load" })}
         />
 
         <RecordingResultModal
