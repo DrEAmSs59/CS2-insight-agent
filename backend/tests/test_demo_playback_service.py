@@ -120,6 +120,9 @@ def test_normal_playback_uses_unique_demo_and_cleans_it(monkeypatch, tmp_path: P
     assert result["pov_hud_enabled"] is False
     assert session is not None and session.copied_demo.is_file()
     argv, kwargs = calls[0]
+    predict_index = argv.index("+cl_demo_predict")
+    assert argv[predict_index:predict_index + 2] == ["+cl_demo_predict", "0"]
+    assert predict_index < argv.index("+playdemo")
     assert argv[-2] == "+playdemo"
     assert argv[-1] == session.copied_demo.name
     assert kwargs["cwd"] == str(game_root)
@@ -157,7 +160,11 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert "cl_draw_only_deathnotices false" in cfg_text
     assert "cl_drawhud_force_radar -1" in cfg_text
     assert "cl_teamcounter_playercount_instead_of_avatars true" in cfg_text
-    assert calls[0][0][-2:] == ["+exec", session.copied_demo.stem]
+    argv = calls[0][0]
+    predict_index = argv.index("+cl_demo_predict")
+    assert argv[predict_index:predict_index + 2] == ["+cl_demo_predict", "0"]
+    assert predict_index < argv.index("+exec")
+    assert argv[-2:] == ["+exec", session.copied_demo.stem]
 
     session.started_at_monotonic = time.monotonic() - 4
     service._monitor_session(session)
