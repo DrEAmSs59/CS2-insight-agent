@@ -70,6 +70,7 @@ git checkout -b fix/critical-bug main
 
 - 后端：Python **3.12**，FastAPI
 - 前端：Node.js + pnpm + Vite；`pnpm run dev` 代理 `/api` 到 `localhost:8000`
+- 桌面联调：`pnpm --dir frontend run desktop:dev`（Vite 热更新，不生成 NSIS）；提交前可运行 `desktop:check`
 - 录制 / OBS / CS2 控制台注入：**仅 Windows** 可完整验证；macOS / Linux 可开发解析、Demo 库、前端等
 
 ## 报告问题

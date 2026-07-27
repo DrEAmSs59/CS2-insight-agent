@@ -51,12 +51,30 @@ Open `http://localhost:5173`. Vite proxies `/api/*` to the backend on port
 ## Tauri desktop development
 
 Do not start the backend separately. Tauri starts it automatically from the
-repository `.venv`.
+repository `.venv`. This is the default desktop development loop: React and CSS
+edits use Vite HMR, and the command neither stages release runtimes nor creates
+an NSIS installer.
 
 ```powershell
 Set-Location frontend
 pnpm run desktop:dev
 ```
+
+Or launch the same workflow directly from the repository root:
+
+```powershell
+.\packaging\windows\dev_desktop.bat
+```
+
+To check the production frontend and Rust shell before committing, without
+building an installer:
+
+```powershell
+pnpm --dir frontend run desktop:check
+```
+
+Only use the NSIS flows below when testing installation, upgrades, uninstallation,
+embedded release resources, or an actual release.
 
 ## Manual Windows packaging
 

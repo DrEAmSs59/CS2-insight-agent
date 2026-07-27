@@ -2,14 +2,15 @@ import { useState, useCallback, useRef } from "react";
 import { Upload, FileCode2, Loader2 } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 import { desktopBridge } from "../desktop/desktopBridge.js";
+import DemoLoadingCopy from "./DemoLoadingCopy.jsx";
 
 function collectDemFiles(fileList) {
   if (!fileList?.length) return [];
   return Array.from(fileList).filter((f) => f.name?.toLowerCase().endsWith(".dem"));
 }
 
-/** @param {{ onUpload: (files: File[] | string[]) => void, loading?: boolean, loadingText?: string }} props */
-export default function DemoUpload({ onUpload, loading = false, loadingText = "" }) {
+/** @param {{ onUpload: (files: File[] | string[]) => void, loading?: boolean, loadingText?: string, aiEnabled?: boolean }} props */
+export default function DemoUpload({ onUpload, loading = false, loadingText = "", aiEnabled = false }) {
   const t = useT();
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
@@ -95,16 +96,23 @@ export default function DemoUpload({ onUpload, loading = false, loadingText = ""
 
       <p className="mb-1 text-sm font-semibold">
         {loading ? (
-          <span className="text-cs2-text-primary">正在处理 Demo</span>
+          <span className="text-cs2-text-secondary">{t("upload.processingTitle")}</span>
         ) : dragOver ? (
           <span className="text-cs2-accent">{t("upload.dragReleaseMsg")}</span>
         ) : (
           t("upload.dragDropMsg")
         )}
       </p>
-      <p className="max-w-2xl px-6 text-center text-xs leading-5 text-cs2-text-secondary">
-        {loading ? (loadingText || "正在上传并解析所选 Demo，请稍候…") : t("upload.clickBrowse")}
-      </p>
+      {loading ? (
+        <DemoLoadingCopy
+          aiEnabled={aiEnabled}
+          detail={loadingText || t("upload.processingFallback")}
+        />
+      ) : (
+        <p className="max-w-2xl px-6 text-center text-xs leading-5 text-cs2-text-secondary">
+          {t("upload.clickBrowse")}
+        </p>
+      )}
 
       {loading && (
         <div className="mt-5 h-1.5 w-[min(32rem,72%)] overflow-hidden rounded-full bg-cs2-bg-input" aria-hidden>
