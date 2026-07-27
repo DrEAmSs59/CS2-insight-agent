@@ -1471,7 +1471,7 @@ export default function App() {
       });
       return true;
     } catch (error) {
-      setProgressText(`AI 锐评生成失败：${error.response?.data?.detail || error.message}`, { isError: true });
+      setProgressText(t("app.aiReviewFailed", { message: error.response?.data?.detail || error.message || t("common.requestFail") }), { isError: true });
       return false;
     } finally {
       aiReviewInFlightRef.current.delete(requestKey);
@@ -1481,7 +1481,7 @@ export default function App() {
         return next;
       });
     }
-  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText]);
+  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText, t]);
 
   const runLibraryBatchLoad = useCallback(
     async ({ mode, manualLines }) => {
@@ -3244,7 +3244,7 @@ export default function App() {
             ) : null)}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
+              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label={t("app.loadingPage")}><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />

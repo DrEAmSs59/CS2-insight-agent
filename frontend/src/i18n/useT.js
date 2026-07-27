@@ -4,12 +4,28 @@ import zh from "./dict/zh.js";
 import en from "./dict/en.js";
 
 const DICTS = { zh, en };
+const pluralRules = new Map();
+const PLURAL_TOKEN = /\{(\w+),\s*plural,\s*one=([^{}]+?),\s*other=([^{}]+?)\}/g;
 
-function interpolate(str, params) {
+function pluralCategory(locale, value) {
+  let rules = pluralRules.get(locale);
+  if (!rules) {
+    rules = new Intl.PluralRules(locale === "zh" ? "zh-CN" : "en");
+    pluralRules.set(locale, rules);
+  }
+  return rules.select(Number(value));
+}
+
+function interpolate(str, params, locale) {
   if (!params) return str;
-  return str.replace(/\{(\w+)\}/g, (m, k) =>
-    Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : m,
-  );
+  return str
+    .replace(PLURAL_TOKEN, (match, key, one, other) => {
+      if (!Object.prototype.hasOwnProperty.call(params, key)) return match;
+      return (pluralCategory(locale, params[key]) === "one" ? one : other).trim();
+    })
+    .replace(/\{(\w+)\}/g, (match, key) =>
+      Object.prototype.hasOwnProperty.call(params, key) ? String(params[key]) : match,
+    );
 }
 
 export function translate(locale, key, params) {
@@ -22,7 +38,7 @@ export function translate(locale, key, params) {
     }
     return key; // 最终回退：原样返回 key
   }
-  return interpolate(value, params);
+  return interpolate(value, params, locale);
 }
 
 export function useT() {

@@ -61,7 +61,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         </NavLink>
         <NavLink to="/analysis" className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkIdle}`}>
           <BarChart3 className="h-4 w-4 shrink-0 opacity-90" />
-          Demo 分析
+          {t("nav.analysis")}
         </NavLink>
         <NavLink
           to="/queue"

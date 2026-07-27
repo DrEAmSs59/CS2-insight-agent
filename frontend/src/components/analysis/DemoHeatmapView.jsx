@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { getDemoRadarMapUrl } from "../../api/api";
 import useSessionState from "../../hooks/useSessionState";
+import { useT } from "../../i18n/useT.js";
 import {
   createReplayCacheKey,
   requestReplayFrames,
@@ -28,22 +29,22 @@ const REQUEST_CONCURRENCY = 4;
 const MAX_HEATMAP_CACHE_ENTRIES = 6;
 const heatmapCache = new Map();
 const HEATMAP_MODES = [
-  { key: "movement", label: "走位密度", mapLabel: "走位", icon: Footprints },
-  { key: "combat", label: "交战热点", mapLabel: "交战", icon: Swords },
-  { key: "kills", label: "击杀热点", mapLabel: "击杀", icon: Crosshair },
-  { key: "deaths", label: "死亡热点", mapLabel: "死亡", icon: Skull },
+  { key: "movement", labelKey: "analysis.heatmap.modeMovement", mapLabelKey: "analysis.heatmap.modeMovementMap", icon: Footprints },
+  { key: "combat", labelKey: "analysis.heatmap.modeCombat", mapLabelKey: "analysis.heatmap.modeCombatMap", icon: Swords },
+  { key: "kills", labelKey: "analysis.heatmap.modeKills", mapLabelKey: "analysis.heatmap.modeKillsMap", icon: Crosshair },
+  { key: "deaths", labelKey: "analysis.heatmap.modeDeaths", mapLabelKey: "analysis.heatmap.modeDeathsMap", icon: Skull },
 ];
 const HEATMAP_SIDES = [
-  { key: "all", label: "全部" },
-  { key: "CT", label: "CT" },
-  { key: "T", label: "T" },
+  { key: "all", labelKey: "analysis.heatmap.sideAll" },
+  { key: "CT", labelKey: null },
+  { key: "T", labelKey: null },
 ];
 
 const MODE_DESCRIPTIONS = {
-  movement: "显示所选玩家全场存活时的空间占用密度，适合观察默认站位、转点路线和控制区域。",
-  combat: "显示所选玩家参与交战时的双方位置与交火连线，其中受害者位置权重更高。",
-  kills: "显示所选玩家完成击杀时自身所在的位置，用于识别最常创造击杀的枪位与区域。",
-  deaths: "显示所选玩家被击杀时所在的位置，用于识别高风险站位、路线和反复失守区域。",
+  movement: "analysis.heatmap.movementDescription",
+  combat: "analysis.heatmap.combatDescription",
+  kills: "analysis.heatmap.killsDescription",
+  deaths: "analysis.heatmap.deathsDescription",
 };
 
 function rememberHeatmap(key, value) {
@@ -120,14 +121,15 @@ async function loadRoundFrames(job) {
 function StatCard({ label, value, detail }) {
   return (
     <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
-      <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{label}</p>
       <p className="mt-1 font-mono text-xl font-black text-cs2-text-primary">{value}</p>
-      <p className="mt-0.5 text-[8px] text-cs2-text-muted">{detail}</p>
+      <p className="mt-0.5 text-[10px] text-cs2-text-muted">{detail}</p>
     </div>
   );
 }
 
 export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
+  const t = useT();
   const rounds = workspace?.rounds || [];
   const mapName = mapKey(workspace?.map_name);
   const tickRate = Math.max(1, Number(workspace?.tick_rate) || 64);
@@ -195,11 +197,11 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
   useEffect(() => {
     let cancelled = false;
     if (!demoPath) {
-      setLoadState((current) => ({ ...current, status: "error", error: "当前 Demo 缺少本地路径。" }));
+      setLoadState((current) => ({ ...current, status: "error", error: t("analysis.heatmap.missingPath") }));
       return undefined;
     }
     if (!jobs.length) {
-      setLoadState((current) => ({ ...current, status: "error", error: "当前 Demo 没有可用于热力图的正式回合。" }));
+      setLoadState((current) => ({ ...current, status: "error", error: t("analysis.heatmap.noRounds") }));
       return undefined;
     }
 
@@ -257,7 +259,7 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
         responseTransform: liveTransform,
         workspaceTransform: workspace?.map_transform,
       });
-      if (!transform) throw new Error("当前地图缺少坐标变换元数据，无法对齐热力图。");
+      if (!transform) throw new Error(t("analysis.heatmap.missingTransform"));
       const hasMapLayers = Number.isFinite(Number(transform.lower_level_max_units))
         && ["de_nuke", "de_vertigo"].includes(mapName);
       const data = buildReplayHeatmapSet({
@@ -287,13 +289,13 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
         total: jobs.length,
         data: null,
         transform: null,
-        error: reason?.response?.data?.detail || reason?.message || "整场热力图生成失败",
+        error: reason?.response?.data?.detail || reason?.message || t("analysis.heatmap.loadFailed"),
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [demoPath, heatmapCacheKey, jobs, mapName, playerTeamKeys, reloadEpoch, workspace?.map_transform]);
+  }, [demoPath, heatmapCacheKey, jobs, mapName, playerTeamKeys, reloadEpoch, t, workspace?.map_transform]);
 
   const hasMapLayers = Boolean(loadState.data?.lower);
   useEffect(() => {
@@ -323,17 +325,17 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
     <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
         <div>
-          <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">整场热力图</h2>
+          <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">{t("analysis.heatmap.title")}</h2>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <div role="group" aria-label="热力图阵营" className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
-            {HEATMAP_SIDES.map(({ key, label }) => (
+          <div role="group" aria-label={t("analysis.heatmap.sideGroup")} className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
+            {HEATMAP_SIDES.map(({ key, labelKey }) => (
               <button
                 key={key}
                 type="button"
                 aria-pressed={selectedSide === key}
                 onClick={() => setSelectedSide(key)}
-                className={`rounded-md px-2.5 py-1.5 text-[9px] font-black transition-colors ${
+                className={`rounded-md px-2.5 py-1.5 text-[10px] font-black transition-colors ${
                   selectedSide === key
                     ? key === "CT"
                       ? "bg-sky-400 text-sky-950"
@@ -343,23 +345,23 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
                     : "text-cs2-text-muted hover:text-cs2-text-primary"
                 }`}
               >
-                {label}
+                {labelKey ? t(labelKey) : key}
               </button>
             ))}
           </div>
-          <div role="group" aria-label="热力图类型" className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
-            {HEATMAP_MODES.map(({ key, label, icon: Icon }) => (
+          <div role="group" aria-label={t("analysis.heatmap.typeGroup")} className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
+            {HEATMAP_MODES.map(({ key, labelKey, icon: Icon }) => (
               <button
                 key={key}
                 type="button"
                 aria-pressed={mode === key}
                 onClick={() => setMode(key)}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[9px] font-bold transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[10px] font-bold transition-colors ${
                   mode === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-primary"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </div>
@@ -369,29 +371,29 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
       <div className="grid gap-4 p-4 xl:grid-cols-[240px_minmax(0,1fr)_240px]">
         <aside className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/20">
           <div className="border-b border-cs2-border px-4 py-3">
-            <h3 className="text-[11px] font-black text-cs2-text-primary">全部玩家</h3>
-            <p className="mt-0.5 font-mono text-[8px] text-cs2-text-muted">{playerOptions.length} / {playerOptions.length} 已分析</p>
+            <h3 className="text-[11px] font-black text-cs2-text-primary">{t("analysis.heatmap.allPlayers")}</h3>
+            <p className="mt-0.5 font-mono text-[10px] text-cs2-text-muted">{t("analysis.heatmap.analyzedPlayers", { done: playerOptions.length, total: playerOptions.length })}</p>
           </div>
-          <div role="group" aria-label="热力图玩家列表" className="divide-y divide-cs2-border">
+          <div role="group" aria-label={t("analysis.heatmap.playerList")} className="divide-y divide-cs2-border">
             {playerOptions.map((player) => {
               const active = player.name === selectedPlayer;
               const playerTeamName = String(
                 player.team_name
                 || (player.team_key === "a" ? workspace?.team_a_name : workspace?.team_b_name)
-                || (player.team_key === "a" ? "A 队" : "B 队"),
+                || t(player.team_key === "a" ? "analysis.heatmap.teamA" : "analysis.heatmap.teamB"),
               ).trim();
               return (
                 <button
                   key={`${player.name}-${player.steam_id64 || player.steam_id || ""}`}
                   type="button"
-                  aria-label={`查看 ${player.name} 的热力图`}
+                  aria-label={t("analysis.heatmap.viewPlayer", { name: player.name })}
                   aria-pressed={active}
                   onClick={() => setSelectedPlayer(player.name)}
                   className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${active ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}
                 >
                   <span className="min-w-0 flex-1">
                     <span className={`block truncate text-[11px] font-bold ${active ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{player.name}</span>
-                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[8px] text-cs2-text-muted">
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-cs2-text-muted">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${teamDot(player.team_key)}`} />
                       <span className="max-w-[78px] truncate font-semibold" title={playerTeamName}>{playerTeamName}</span>
                       <span aria-hidden="true">·</span>
@@ -409,27 +411,27 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
         <div className="relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner">
           <img
             src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
-            alt={`${mapName} ${selectedSide === "all" ? "" : `${selectedSide} `}${activeMode.mapLabel}热力图`}
+            alt={t("analysis.heatmap.imageAlt", { map: mapName, side: selectedSide === "all" ? "" : `${selectedSide} `, mode: t(activeMode.mapLabelKey) })}
             draggable={false}
             className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
           />
           {activeHeatmap && <ReplayHeatmapCanvas heatmap={activeHeatmap} mode={mode} />}
           {hasMapLayers && (
-            <div role="group" aria-label="热力图地图楼层" className="absolute left-3 top-3 z-10 flex rounded-md border border-white/15 bg-black/75 p-0.5 backdrop-blur-sm">
+            <div role="group" aria-label={t("analysis.heatmap.floorGroup")} className="absolute left-3 top-3 z-10 flex rounded-md border border-white/15 bg-black/75 p-0.5 backdrop-blur-sm">
               {[
-                ["upper", "上层"],
-                ["lower", "下层"],
-              ].map(([key, label]) => (
+                ["upper", "analysis.heatmap.upperFloor"],
+                ["lower", "analysis.heatmap.lowerFloor"],
+              ].map(([key, labelKey]) => (
                 <button
                   key={key}
                   type="button"
                   aria-pressed={mapLayer === key}
                   onClick={() => setMapLayer(key)}
-                  className={`rounded px-2.5 py-1 text-[8px] font-bold ${
+                  className={`rounded px-2.5 py-1 text-[10px] font-bold ${
                     mapLayer === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-white/55"
                   }`}
                 >
-                  {label}
+                  {t(labelKey)}
                 </button>
               ))}
             </div>
@@ -438,8 +440,8 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/65 text-center backdrop-blur-[2px]">
               <Loader2 className="h-7 w-7 animate-spin text-cs2-accent" />
               <div>
-                <p className="text-[11px] font-bold text-white">正在汇总整场二进制轨迹</p>
-                <p className="mt-1 font-mono text-[9px] text-white/60">{loadState.completed}/{loadState.total} 回合</p>
+                <p className="text-[11px] font-bold text-white">{t("analysis.heatmap.aggregating")}</p>
+                <p className="mt-1 font-mono text-[10px] text-white/60">{t("analysis.heatmap.roundProgress", { done: loadState.completed, total: loadState.total })}</p>
               </div>
             </div>
           )}
@@ -451,10 +453,10 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
                 <button
                   type="button"
                   onClick={() => setReloadEpoch((value) => value + 1)}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-white/20 px-3 py-1.5 text-[9px] font-bold text-white"
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-white/20 px-3 py-1.5 text-[10px] font-bold text-white"
                 >
                   <RefreshCw className="h-3 w-3" />
-                  重试
+                  {t("analysis.heatmap.retry")}
                 </button>
               </div>
             </div>
@@ -462,7 +464,11 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
           {loadState.status === "ready" && activeEventCount === 0 && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20 p-8 text-center">
               <p className="rounded-md border border-white/10 bg-black/65 px-4 py-2 text-[10px] font-semibold text-white/70">
-                {selectedPlayer || "所选玩家"}{selectedSide === "all" ? "" : `在 ${selectedSide} 方`}暂无{activeMode.label}数据
+                {t("analysis.heatmap.noModeData", {
+                  player: selectedPlayer || t("analysis.heatmap.selectedPlayerFallback"),
+                  side: selectedSide === "all" ? "" : t("analysis.heatmap.sideContext", { side: selectedSide }),
+                  mode: t(activeMode.labelKey),
+                })}
               </p>
             </div>
           )}
@@ -470,39 +476,39 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
 
         <aside className="space-y-3">
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
-            <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">当前玩家</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{t("analysis.heatmap.currentPlayer")}</p>
             <div className="mt-1 flex items-center gap-2">
-              <p className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{selectedPlayer || "未选择"}</p>
-              <span className={`rounded px-1.5 py-0.5 font-mono text-[8px] font-black ${
+              <p className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{selectedPlayer || t("analysis.heatmap.notSelected")}</p>
+              <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-black ${
                 selectedSide === "CT"
                   ? "bg-sky-400/15 text-sky-400"
                   : selectedSide === "T"
                     ? "bg-amber-300/15 text-amber-300"
                     : "bg-cs2-accent-soft text-cs2-accent"
-              }`}>{selectedSide === "all" ? "全部阵营" : selectedSide}</span>
+              }`}>{selectedSide === "all" ? t("analysis.heatmap.allSides") : selectedSide}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
             <StatCard
-              label="统计回合"
+              label={t("analysis.heatmap.statRounds")}
               value={activeRoundCount}
-              detail={selectedSide === "all" ? "包含该玩家的全部比赛回合" : `该玩家担任 ${selectedSide} 时的回合`}
+              detail={selectedSide === "all" ? t("analysis.heatmap.statRoundsAll") : t("analysis.heatmap.statRoundsSide", { side: selectedSide })}
             />
-            <StatCard label="参与交战" value={combatEvents.toLocaleString("en-US")} detail="作为击杀者或受害者" />
-            <StatCard label="击杀 / 死亡" value={`${killEvents} / ${deathEvents}`} detail="按当前地图楼层统计" />
+            <StatCard label={t("analysis.heatmap.statCombat")} value={combatEvents.toLocaleString("en-US")} detail={t("analysis.heatmap.statCombatDetail")} />
+            <StatCard label={t("analysis.heatmap.statKillsDeaths")} value={`${killEvents} / ${deathEvents}`} detail={t("analysis.heatmap.statFloorDetail")} />
           </div>
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-3">
             <div className="flex items-center gap-2">
               <Layers3 className="h-3.5 w-3.5 text-cs2-accent" />
-              <h3 className="text-[10px] font-bold text-cs2-text-primary">密度图例</h3>
+              <h3 className="text-[10px] font-bold text-cs2-text-primary">{t("analysis.heatmap.legend")}</h3>
             </div>
             <div className="mt-3 h-2.5 rounded-full bg-gradient-to-r from-transparent via-cyan-400 via-45% to-rose-600" />
-            <div className="mt-1 flex justify-between text-[8px] font-semibold text-cs2-text-muted">
-              <span>较少</span>
-              <span>频繁</span>
+            <div className="mt-1 flex justify-between text-[10px] font-semibold text-cs2-text-muted">
+              <span>{t("analysis.heatmap.legendLow")}</span>
+              <span>{t("analysis.heatmap.legendHigh")}</span>
             </div>
-            <p className="mt-3 text-[9px] leading-relaxed text-cs2-text-muted">
-              {MODE_DESCRIPTIONS[mode] || MODE_DESCRIPTIONS.movement}
+            <p className="mt-3 text-[10px] leading-relaxed text-cs2-text-muted">
+              {t(MODE_DESCRIPTIONS[mode] || MODE_DESCRIPTIONS.movement)}
             </p>
           </div>
         </aside>

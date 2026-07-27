@@ -31,6 +31,13 @@ describe("useT", () => {
     expect(result.current("test.greet", { name: "Neo" })).toBe("你好 Neo");
   });
 
+  test("支持基于参数的英文复数", () => {
+    useLocaleStore.getState().hydrate("en");
+    const { result } = renderHook(() => useT());
+    expect(result.current("test.items", { n: 1 })).toBe("1 item");
+    expect(result.current("test.items", { n: 2 })).toBe("2 items");
+  });
+
   test("LiteCut 调色面板使用中文词条", () => {
     const { result } = renderHook(() => useT());
     expect(result.current("liteCut.color.filters")).toBe("滤镜");

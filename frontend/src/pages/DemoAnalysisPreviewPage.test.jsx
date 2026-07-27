@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppShellProvider } from "../context/AppShellContext";
 import DemoAnalysisPreviewPage from "./DemoAnalysisPreviewPage";
 import API from "../api/api";
+import { useLocaleStore } from "../i18n/localeStore.js";
 import { useReplayStore } from "../stores/replayStore";
 
 vi.mock("../api/api", () => ({
@@ -201,6 +202,7 @@ function renderPage(shell) {
 
 describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
   beforeEach(() => {
+    useLocaleStore.setState({ locale: "zh", effectiveLocale: "zh", hydrated: true, persistenceError: null });
     useReplayStore.setState({ entries: {}, activeKey: null });
     sessionStorage.clear();
     vi.clearAllMocks();
@@ -789,5 +791,16 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     renderPage(buildShell({ hasDemos: false, uploadedDemos: [], matchTabsData: [], players: [], selectedPlayersList: [] }));
     expect(screen.getByText("上传单个或多个 Demo，或从 Demo 库勾选本次要分析的文件。")).toBeTruthy();
     expect(screen.getByText("前往 Demo 库")).toBeTruthy();
+  });
+
+  test("renders the analysis entry and navigation in English", () => {
+    useLocaleStore.getState().hydrate("en");
+    renderPage(buildShell());
+
+    expect(screen.getByRole("heading", { name: "Demo Analysis" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Demo analysis views" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2D Replay" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Switch demo" })).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
   });
 });

@@ -262,7 +262,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
   );
 }
 
-function TagList({ items, onChange, placeholder, addLabel }) {
+function TagList({ items, onChange, placeholder, addLabel, emptyLabel }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const v = draft.trim();
@@ -274,7 +274,7 @@ function TagList({ items, onChange, placeholder, addLabel }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
-        {items.length === 0 && <span className="text-[11px] text-cs2-text-muted">尚未添加玩家</span>}
+        {items.length === 0 && <span className="text-[11px] text-cs2-text-muted">{emptyLabel}</span>}
         {items.map((name, idx) => (
           <span key={`${name}-${idx}`} className="inline-flex items-center gap-1 rounded-md bg-cs2-bg-input px-2 py-1 text-[11px] text-cs2-text-primary">
             {name}
@@ -304,7 +304,7 @@ function TagList({ items, onChange, placeholder, addLabel }) {
  * ------------------------------------------------------------------------ */
 
 // 格式化上次检查时间（ISO 8601 UTC -> 本地友好显示）
-function formatLastCheckTime(isoUtc) {
+function formatLastCheckTime(isoUtc, t, locale) {
   if (!isoUtc) return "";
   try {
     const d = new Date(isoUtc);
@@ -314,12 +314,13 @@ function formatLastCheckTime(isoUtc) {
     const diffMin = Math.floor(diffMs / 60000);
     const diffHour = Math.floor(diffMs / 3600000);
     const diffDay = Math.floor(diffMs / 86400000);
-    if (diffMin < 1) return "刚刚";
-    if (diffMin < 60) return `${diffMin} 分钟前`;
-    if (diffHour < 24) return `${diffHour} 小时前`;
-    if (diffDay < 7) return `${diffDay} 天前`;
+    if (diffMin < 1) return t("settings.timeJustNow");
+    if (diffMin < 60) return t("settings.timeMinutesAgo", { n: diffMin });
+    if (diffHour < 24) return t("settings.timeHoursAgo", { n: diffHour });
+    if (diffDay < 7) return t("settings.timeDaysAgo", { n: diffDay });
     // 超过一周显示具体日期
-    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const dateLocale = locale === "zh" ? "zh-CN" : "en";
+    return d.toLocaleDateString(dateLocale) + " " + d.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
   } catch {
     return isoUtc;
   }
@@ -356,6 +357,7 @@ function resolveTabFromSearch(searchParams) {
 
 export default function SettingsPage() {
   const t = useT();
+  const effectiveLocale = useLocaleStore((state) => state.effectiveLocale);
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -844,7 +846,7 @@ export default function SettingsPage() {
                     <p className="text-xs text-cs2-text-primary font-mono">{appVersion}</p>
                     {config.last_update_check_at && (
                       <span className="text-xs text-cs2-text-muted">
-                        ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at)})
+                        ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at, t, effectiveLocale)})
                       </span>
                     )}
                     <button
@@ -912,8 +914,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const locale = useLocaleStore.getState().locale;
-                      const subject = locale === 'zh' ? 'CS2-Insight-Agent 联系' : 'CS2-Insight-Agent Contact';
+                      const subject = t("settings.contactEmailSubject");
                       openExternalLink(`mailto:dreamss29_@outlook.com?subject=${encodeURIComponent(subject)}`);
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
@@ -933,12 +934,16 @@ export default function SettingsPage() {
               </SectionCard>
 
               <SectionCard title={t("settings.sectionLanguage")} search={search && !matches(t("settings.sectionLanguage") + " " + t("settings.labelLocale"))}>
-                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? "中文" : "English" }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
+                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? t("settings.localeZh") : t("settings.localeEn") }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
                   <SelectInput
                     value={config.locale ?? "auto"}
                     onChange={(v) => {
+                      const previousLocale = config.locale ?? "auto";
                       set("locale", v);
-                      useLocaleStore.getState().setLocale(v);
+                      void useLocaleStore.getState().setLocale(v).catch(() => {
+                        set("locale", previousLocale);
+                        setSaveMsg({ text: t("settings.localePersistFailed"), tone: "error" });
+                      });
                     }}
                     options={[
                       { value: "auto", label: t("settings.localeAuto") },
@@ -1206,7 +1211,7 @@ export default function SettingsPage() {
                 {/* Paths: OBS + FFmpeg */}
                 <SectionCard
                   title={t("settings.sectionPaths")}
-                  hint={aiObsRecommendationEnabled ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
+                  hint={aiObsRecommendationEnabled ? t("settings.sectionPathsAgentHint") : t("settings.sectionPathsHint")}
                   search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}
                 >
                   {!aiObsRecommendationEnabled && (
@@ -1393,7 +1398,7 @@ export default function SettingsPage() {
               </SectionCard>
                 </>
               ) : (
-                (!search || matches("AI OBS 调优 FPS 分辨率 推荐程度 安全变更计划")) && (
+                (!search || matches(t("settings.obsAgentSearchTerms"))) && (
                   <ObsAiSettingsPanel
                     obsPath={obs.obs_path ?? ""}
                     obsConnected={Boolean(status?.obs_connected)}
@@ -1465,6 +1470,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("expected_parse_players", v)}
                     placeholder={t("settings.playerInputPlaceholder")}
                     addLabel={t("settings.playerAddBtn")}
+                    emptyLabel={t("settings.playersEmpty")}
                   />
                 </FieldRow>
               </SectionCard>
@@ -1477,6 +1483,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("demo_watch_paths", v)}
                     placeholder="C:\\demos\\auto-watch"
                     addLabel={t("settings.sidebarWatchAdd")}
+                    emptyLabel={t("settings.watchPathsEmpty")}
                   />
                 </FieldRow>
               </SectionCard>

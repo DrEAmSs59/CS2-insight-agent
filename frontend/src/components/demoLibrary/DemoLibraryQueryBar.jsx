@@ -90,6 +90,7 @@ export default function DemoLibraryQueryBar({
           <Calendar className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
           <input
             type="date"
+            aria-label={t("library.dateFromAriaLabel")}
             className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateFrom}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateFrom: e.target.value }))}
@@ -97,6 +98,7 @@ export default function DemoLibraryQueryBar({
           <span className="text-cs2-text-muted">—</span>
           <input
             type="date"
+            aria-label={t("library.dateToAriaLabel")}
             className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateTo}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateTo: e.target.value }))}

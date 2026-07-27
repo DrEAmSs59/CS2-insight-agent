@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
+import IconButton from "../ui/IconButton.jsx";
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48, 96];
 
@@ -18,27 +19,27 @@ export default function DemoPagination({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-cs2-text-muted">
-      <button
-        type="button"
+      <IconButton
+        label={t("library.paginationPrevious")}
+        size="sm"
         disabled={libraryPage <= 1}
-        className="rounded border border-cs2-border px-1.5 py-1 text-cs2-text-secondary hover:border-cs2-accent/40 hover:text-cs2-text-primary disabled:opacity-35"
         onClick={() => onPageChange(Math.max(1, libraryPage - 1))}
       >
         <ChevronLeft className="h-3.5 w-3.5" />
-      </button>
+      </IconButton>
       <span className="tabular-nums text-cs2-text-muted">
         {libraryTotalPages == null
           ? t("library.paginationPage", { page: libraryPage })
           : t("library.paginationPageOf", { page: libraryPage, total: libraryTotalPages })}
       </span>
-      <button
-        type="button"
+      <IconButton
+        label={t("library.paginationNext")}
+        size="sm"
         disabled={!libraryHasNextPage}
-        className="rounded border border-cs2-border px-1.5 py-1 text-cs2-text-secondary hover:border-cs2-accent/40 hover:text-cs2-text-primary disabled:opacity-35"
         onClick={() => onPageChange(libraryPage + 1)}
       >
         <ChevronRight className="h-3.5 w-3.5" />
-      </button>
+      </IconButton>
       <label className="flex items-center gap-1 border-l border-cs2-border pl-2">
         <span className="text-cs2-text-muted">{t("library.paginationPerPage")}</span>
         <select
@@ -77,9 +78,10 @@ export default function DemoPagination({
         />
         <button
           type="submit"
+          aria-label={t("library.paginationGo")}
           className="rounded border border-cs2-border px-1.5 py-0.5 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"
         >
-          Go
+          {t("library.paginationGo")}
         </button>
       </form>
     </div>

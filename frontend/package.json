@@ -15,6 +15,7 @@
     "desktop:build": "pnpm run desktop:stage-python && pnpm run desktop:stage-resources && tauri build",
     "desktop:build:ver": "node scripts/tauri-build-version.mjs",
     "deploy:r2": "node scripts/deploy-r2.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
