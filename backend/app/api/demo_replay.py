@@ -46,6 +46,23 @@ class PlayerClipReviewRequest(BaseModel):
     locale: str = "zh"
 
 
+@router.get("/api/demo/replay/cache")
+async def get_demo_replay_cache():
+    """Report the persistent 2D replay cache managed under application data."""
+    from ..parser.replay_cache_storage import replay_cache_summary
+
+    return await asyncio.to_thread(replay_cache_summary)
+
+
+@router.delete("/api/demo/replay/cache")
+async def delete_demo_replay_cache():
+    """Release all generated 2D replay assets without touching source Demos."""
+    from ..parser.replay_cache_storage import clear_replay_cache, replay_cache_summary
+
+    removed = await asyncio.to_thread(clear_replay_cache)
+    return {**removed, "cache": await asyncio.to_thread(replay_cache_summary)}
+
+
 @router.get("/api/demo/radar-map/{map_name}")
 async def get_demo_radar_map(map_name: str, layer: Optional[str] = None):
     """Serve the bundled Insight Agent overhead radar used by 2D replay."""

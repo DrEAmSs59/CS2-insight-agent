@@ -6,9 +6,15 @@ import gzip
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
+
+from .replay_cache_storage import (
+    replay_cache_namespace_root,
+    replay_cache_namespace_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +22,16 @@ REPLAY_FRAMES_CACHE_VERSION = 1
 
 
 def _cache_root() -> Path:
-    try:
-        from app.env_utils import get_data_dir
+    return replay_cache_namespace_root("frames")
 
-        root = get_data_dir() / "replay-frames"
-    except Exception:
-        root = Path.cwd() / "data" / "replay-frames"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+
+def _cache_roots() -> tuple[Path, ...]:
+    primary = _cache_root()
+    roots = [primary]
+    for candidate in replay_cache_namespace_roots("frames", create_primary=False):
+        if candidate not in roots:
+            roots.append(candidate)
+    return tuple(roots)
 
 
 def demo_fingerprint(demo_path: str) -> dict[str, Any] | None:
@@ -59,8 +67,11 @@ def frames_cache_key(
 
 
 def load_frames(cache_key: str) -> dict[str, Any] | None:
-    path = _cache_root() / f"{cache_key}.json.gz"
-    if not path.is_file():
+    path = next(
+        (root / f"{cache_key}.json.gz" for root in _cache_roots() if (root / f"{cache_key}.json.gz").is_file()),
+        None,
+    )
+    if path is None:
         return None
     try:
         with gzip.open(path, "rt", encoding="utf-8") as handle:
@@ -81,6 +92,40 @@ def load_frames(cache_key: str) -> dict[str, Any] | None:
     if not isinstance(payload.get("frames"), list):
         return None
     return payload
+
+
+def _normalized_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def remove_frames_for_demo(demo_path: str) -> dict[str, int]:
+    """Remove legacy per-round payloads belonging to one Demo."""
+    wanted = _normalized_path(demo_path)
+    removed_files = 0
+    removed_bytes = 0
+    seen: set[str] = set()
+    for root in _cache_roots():
+        if not root.is_dir():
+            continue
+        for path in root.glob("*.json.gz"):
+            path_key = _normalized_path(str(path))
+            if path_key in seen:
+                continue
+            seen.add(path_key)
+            try:
+                with gzip.open(path, "rt", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                fingerprint = payload.get("demo_fingerprint") if isinstance(payload, dict) else None
+                cached_path = fingerprint.get("path") if isinstance(fingerprint, dict) else None
+                if not cached_path or _normalized_path(str(cached_path)) != wanted:
+                    continue
+                size = int(path.stat().st_size)
+                path.unlink(missing_ok=True)
+                removed_files += 1
+                removed_bytes += size
+            except Exception as exc:  # noqa: BLE001 - cleanup is best effort
+                logger.warning("replay frames cache cleanup failed for %s: %s", path, exc)
+    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
 
 
 def save_frames(

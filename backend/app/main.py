@@ -2089,11 +2089,17 @@ async def delete_demo(
     demo_id: int,
     rescan: Annotated[Literal["reimport", "skip"], Query(description="reimport=再次扫描可入库; skip=扫描不再入库")] = "reimport",
 ):
+    demo = await demo_db.get_demo_by_id(demo_id)
+    if not demo:
+        raise HTTPException(404, f"Demo not found: {demo_id}")
     ok = await demo_db.delete_demo(demo_id, rescan=rescan)
     if not ok:
         raise HTTPException(404, f"Demo not found: {demo_id}")
+    from .parser.replay_cache_storage import remove_demo_replay_cache
+
+    cache_removed = await asyncio.to_thread(remove_demo_replay_cache, str(demo["path"]))
     await demo_library_hub.notify("deleted")
-    return {"status": "deleted", "demo_id": demo_id}
+    return {"status": "deleted", "demo_id": demo_id, "replay_cache": cache_removed}
 
 
 class DemoPlaybackPovBody(BaseModel):
@@ -2199,6 +2205,11 @@ async def delete_demo_file(demo_id: int):
     from .file_quarantine import quarantine_files
 
     targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
+    from .parser.replay_cache_storage import remove_demo_replay_cache
+
+    # Generated replay assets are disposable. Reclaim them while the source
+    # Demo still exists so legacy fingerprint-only entries remain attributable.
+    cache_removed = await asyncio.to_thread(remove_demo_replay_cache, disk_path)
     try:
         quarantined = await asyncio.to_thread(quarantine_files, targets, "demos")
     except OSError as exc:
@@ -2220,6 +2231,7 @@ async def delete_demo_file(demo_id: int):
         "demo_id": demo_id,
         "quarantined_files": [str(item.original) for item in quarantined.files],
         "recovery_directory": str(quarantined.directory) if quarantined.files else None,
+        "replay_cache": cache_removed,
     }
 
 
