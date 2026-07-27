@@ -760,6 +760,7 @@ class DemoAnalyzer:
             name_to_team_pi=shared_events.get("name_to_final_team_shared") or {},
             player_ticks_df=roster_ticks_df,
             expected_names=expected_roster_names,
+            require_player_color=True,
         )
         server_name = str(header.get("server_name") or "").strip()
         round_scores_by_round = build_round_scores(

@@ -437,22 +437,33 @@ def test_shared_facts_materialize_event_indexes_and_copy_rosters(monkeypatch):
         "build_player_name_to_user_id",
         lambda *_args, **_kwargs: {"alpha": 1, "bravo": 2},
     )
+    roster_call_kwargs = {}
+
+    def fake_spec_slots(*_args, **kwargs):
+        assert "require_player_color" not in kwargs
+        return {"alpha": 1, "bravo": 2}
+
     monkeypatch.setattr(
         analyzer_module,
         "build_player_name_to_spec_player_slot_dict",
-        lambda *_args, **_kwargs: {"alpha": 1, "bravo": 2},
+        fake_spec_slots,
     )
     monkeypatch.setattr(
         analyzer_module,
         "build_player_name_to_steam_id",
         lambda *_args, **_kwargs: {"alpha": 76561198000000001},
     )
+
+    def fake_roster(*_args, **kwargs):
+        roster_call_kwargs.update(kwargs)
+        return [
+            {"name": "alpha", "steamid64": "76561198000000001", "team_num": 2}
+        ]
+
     monkeypatch.setattr(
         analyzer_module,
         "_build_all_players_roster",
-        lambda *_args, **_kwargs: [
-            {"name": "alpha", "steamid64": "76561198000000001", "team_num": 2}
-        ],
+        fake_roster,
     )
     monkeypatch.setattr(
         analyzer_module,
@@ -469,6 +480,7 @@ def test_shared_facts_materialize_event_indexes_and_copy_rosters(monkeypatch):
     assert facts.match_summary == (13, 9, "", 42, "A", "B")
     assert facts.demo_max_tick == 999
     assert facts.server_name == "FACEIT"
+    assert roster_call_kwargs["require_player_color"] is True
     assert facts.victim_blind_index == {"bravo": [(110, 2.0), (130, 1.5)]}
     assert facts.grenade_detonate_points == [
         (120, 10.0, 15.0),
