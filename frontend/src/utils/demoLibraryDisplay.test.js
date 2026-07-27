@@ -45,4 +45,14 @@ describe("compact demo library rows", () => {
     const row = { total_rounds: 24, duration_mins: 35 };
     expect(applyClientSideDemoFilters([row], { roundsMax: "-1", durationMax: "-1" })).toEqual([row]);
   });
+
+  test("never exposes stored parser internals as an error tooltip", () => {
+    expect(classifyDemoStatus({
+      status: "error",
+      error_msg: "Traceback: native parser exit code 3221225477",
+    })).toMatchObject({
+      kind: "error",
+      tooltipKey: "api.err.demoAnalysisFailed",
+    });
+  });
 });

@@ -149,6 +149,36 @@ def test_batch_demo_summary_uses_roster_cache(monkeypatch):
     lookup_mock.assert_awaited_once()
 
 
+def test_batch_resolve_players_reports_roster_failure_without_raw_error(monkeypatch):
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_by_id",
+        AsyncMock(return_value={
+            "id": 21,
+            "path": "broken.dem",
+            "filename": "broken.dem",
+        }),
+    )
+    monkeypatch.setattr(
+        main,
+        "get_or_index_demo_roster",
+        AsyncMock(side_effect=RuntimeError("native parser implementation detail")),
+    )
+
+    response = asyncio.run(main.batch_resolve_players(main.BatchResolvePlayersBody(
+        demo_ids=[21],
+        mode="manual",
+        manual_lines=["alpha"],
+    )))
+
+    assert response["resolved"] == {"21": []}
+    assert response["failed"] == [{
+        "id": 21,
+        "filename": "broken.dem",
+        "code": "DEMO_INSPECTION_FAILED",
+    }]
+
+
 def test_get_or_index_demo_roster_single_flights_concurrent_misses(monkeypatch):
     state = {"indexed": False, "calls": 0}
     parsed = [{
@@ -474,11 +504,29 @@ def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
 
     monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
 
-    players, match_meta = asyncio.run(main._safe_upload_demo_meta(Path("match.dem")))
+    players, match_meta, error_code = asyncio.run(
+        main._safe_upload_demo_meta(Path("match.dem"))
+    )
 
     assert players == expected["players"]
     assert match_meta == expected["match_meta"]
+    assert error_code is None
     assert calls == ["match.dem"]
+
+
+def test_upload_metadata_returns_safe_timeout_code(monkeypatch):
+    def fake_inspect(_dem_path):
+        raise RuntimeError("worker timed out with internal details")
+
+    monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
+
+    players, match_meta, error_code = asyncio.run(
+        main._safe_upload_demo_meta(Path("broken.dem"))
+    )
+
+    assert players == []
+    assert match_meta == {}
+    assert error_code == "DEMO_INSPECTION_TIMEOUT"
 
 
 def test_parse_worker_dispatches_combined_inspection(monkeypatch):
