@@ -44,7 +44,7 @@ import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
 import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
 import { Loader2 } from "lucide-react";
-import API, { API_BASE_URL, BACKEND_CONNECT_LABEL } from "./api/api";
+import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 
@@ -518,7 +518,7 @@ export default function App() {
     const connect = () => {
       if (cancelled) return;
       try {
-        es = new EventSource(`${API_BASE_URL}/api/demos/stream`);
+        es = new EventSource(getDemosStreamUrl());
       } catch {
         return;
       }

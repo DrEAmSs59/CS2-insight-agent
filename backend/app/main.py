@@ -21,7 +21,7 @@ import faulthandler
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,13 @@ from .gsi_ready import (
 )
 from .update_info import resolve_local_version_info
 from .runtime_session import runtime_session_dependency, runtime_session_state
+from .session_auth import (
+    authorize_websocket_protocols,
+    request_session_token,
+    session_auth_enabled,
+    session_token_matches,
+    strip_session_token_query,
+)
 from .app_state import application_state
 from .api.config import (
     build_data_dir_info,
@@ -323,6 +330,28 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
 
+
+@app.middleware("http")
+async def require_desktop_session(request: Request, call_next):
+    """Reject localhost API calls not owned by this Tauri process."""
+    if (
+        session_auth_enabled()
+        and request.url.path.startswith("/api/")
+        and request.method.upper() != "OPTIONS"
+    ):
+        if not session_token_matches(request_session_token(request)):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": {
+                        "code": "DESKTOP_SESSION_REQUIRED",
+                        "message": "A valid desktop session token is required.",
+                    }
+                },
+            )
+        strip_session_token_query(request.scope)
+    return await call_next(request)
+
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
 app.include_router(config_router)
@@ -335,8 +364,14 @@ app.include_router(demo_replay_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -463,7 +498,13 @@ app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay
 
 @app.websocket("/ws/kb-overlay")
 async def kb_overlay_ws(ws: WebSocket) -> None:
-    await ws.accept()
+    authorized, accepted_protocol = authorize_websocket_protocols(
+        ws.headers.get("sec-websocket-protocol"),
+    )
+    if not authorized:
+        await ws.close(code=1008, reason="desktop session required")
+        return
+    await ws.accept(subprotocol=accepted_protocol)
     await _kb_overlay_bus.register(ws)
     try:
         while True:
