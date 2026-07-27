@@ -7,11 +7,18 @@ round switches slower than a fresh parse. v2 stores only built tracks.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
 import pickle
 import time
 from pathlib import Path
 from typing import Any
+
+from .replay_cache_storage import (
+    replay_cache_namespace_root,
+    replay_cache_namespace_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +27,16 @@ CACHE_VERSION = 7
 
 
 def _cache_root() -> Path:
-    try:
-        from app.env_utils import get_data_dir
+    return replay_cache_namespace_root("effects")
 
-        root = get_data_dir() / "replay-effects-cache"
-    except Exception:
-        root = Path.cwd() / "data" / "replay-effects-cache"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+
+def _cache_roots() -> tuple[Path, ...]:
+    primary = _cache_root()
+    roots = [primary]
+    for candidate in replay_cache_namespace_roots("effects", create_primary=False):
+        if candidate not in roots:
+            roots.append(candidate)
+    return tuple(roots)
 
 
 def demo_cache_key(demo_path: str) -> str | None:
@@ -44,25 +53,29 @@ def demo_cache_key(demo_path: str) -> str | None:
 
 def _cleanup_stale_cache_files(keep_name: str | None = None) -> None:
     """Drop oversized legacy v1 pickles and other stale entries."""
-    root = _cache_root()
-    for path in root.glob("*.pkl"):
-        if keep_name and path.name == keep_name:
-            continue
-        try:
-            # Legacy raw-row caches were multi-GB; tracks caches are tiny.
-            if path.stat().st_size > 64 * 1024 * 1024:
-                path.unlink(missing_ok=True)
-                logger.info("removed oversized replay-effects cache %s", path.name)
-        except OSError:
-            pass
+    for root in _cache_roots():
+        for path in root.glob("*.pkl"):
+            if keep_name and path.name == keep_name:
+                continue
+            try:
+                # Legacy raw-row caches were multi-GB; tracks caches are tiny.
+                if path.stat().st_size > 64 * 1024 * 1024:
+                    path.unlink(missing_ok=True)
+                    path.with_suffix(".meta.json").unlink(missing_ok=True)
+                    logger.info("removed oversized replay-effects cache %s", path.name)
+            except OSError:
+                pass
 
 
 def load_tracks(demo_path: str) -> dict[str, Any] | None:
     key = demo_cache_key(demo_path)
     if not key:
         return None
-    path = _cache_root() / f"{key}.pkl"
-    if not path.is_file():
+    path = next(
+        (root / f"{key}.pkl" for root in _cache_roots() if (root / f"{key}.pkl").is_file()),
+        None,
+    )
+    if path is None:
         _cleanup_stale_cache_files()
         return None
     try:
@@ -72,18 +85,57 @@ def load_tracks(demo_path: str) -> dict[str, Any] | None:
         logger.warning("replay effects track cache load failed: %s", exc)
         try:
             path.unlink(missing_ok=True)
+            path.with_suffix(".meta.json").unlink(missing_ok=True)
         except OSError:
             pass
         return None
     if not isinstance(payload, dict) or payload.get("version") != CACHE_VERSION:
         try:
             path.unlink(missing_ok=True)
+            path.with_suffix(".meta.json").unlink(missing_ok=True)
         except OSError:
             pass
         return None
     if not isinstance(payload.get("tracks"), list):
         return None
     return payload
+
+
+def remove_tracks_for_demo(demo_path: str) -> dict[str, int]:
+    """Remove sparse-effects entries attributed to one Demo path."""
+    key = demo_cache_key(demo_path)
+    wanted = os.path.normcase(os.path.abspath(os.path.expanduser(str(demo_path))))
+    removed_files = 0
+    removed_bytes = 0
+    seen: set[str] = set()
+    for root in _cache_roots():
+        if not root.is_dir():
+            continue
+        matched_keys = {key} if key else set()
+        for meta_path in root.glob("*.meta.json"):
+            try:
+                payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                cached_path = payload.get("demo_path") if isinstance(payload, dict) else None
+                if cached_path and os.path.normcase(
+                    os.path.abspath(os.path.expanduser(str(cached_path)))
+                ) == wanted:
+                    matched_keys.add(meta_path.name.removesuffix(".meta.json"))
+            except Exception as exc:  # noqa: BLE001 - cleanup skips unknown files
+                logger.warning("replay effects cache metadata read failed for %s: %s", meta_path, exc)
+        for matched_key in matched_keys:
+            for path in (root / f"{matched_key}.pkl", root / f"{matched_key}.meta.json"):
+                path_key = str(path.absolute()).casefold()
+                if path_key in seen or not path.is_file():
+                    continue
+                seen.add(path_key)
+                try:
+                    size = int(path.stat().st_size)
+                    path.unlink(missing_ok=True)
+                    removed_files += 1
+                    removed_bytes += size
+                except OSError as exc:
+                    logger.warning("replay effects cache cleanup failed for %s: %s", path, exc)
+    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
 
 
 def save_tracks(
@@ -99,10 +151,13 @@ def save_tracks(
     root = _cache_root()
     path = root / f"{key}.pkl"
     tmp = path.with_suffix(".pkl.partial")
+    meta_path = root / f"{key}.meta.json"
+    meta_tmp = root / f"{key}.meta.json.partial"
+    resolved_demo_path = str(Path(demo_path).resolve())
     payload = {
         "version": CACHE_VERSION,
         "saved_at": time.time(),
-        "demo_path": str(demo_path),
+        "demo_path": resolved_demo_path,
         "tracks": tracks,
         "capabilities": capabilities or {},
         "warnings": list(warnings or []),
@@ -110,7 +165,20 @@ def save_tracks(
     try:
         with tmp.open("wb") as handle:
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        meta_tmp.write_text(
+            json.dumps(
+                {
+                    "version": CACHE_VERSION,
+                    "demo_path": resolved_demo_path,
+                    "cache_key": key,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
         tmp.replace(path)
+        meta_tmp.replace(meta_path)
         _cleanup_stale_cache_files(keep_name=path.name)
         logger.info(
             "replay effects track cache saved key=%s tracks=%s bytes=%s",
@@ -122,6 +190,7 @@ def save_tracks(
         logger.warning("replay effects track cache save failed: %s", exc)
         try:
             tmp.unlink(missing_ok=True)
+            meta_tmp.unlink(missing_ok=True)
         except OSError:
             pass
 
