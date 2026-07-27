@@ -381,9 +381,12 @@ FunctionEnd
   ; Validate the exact installed runtime before the finish page can launch
   ; Tauri. This catches stale metadata, a missing extension, or an incomplete
   ; file copy at install time instead of surfacing as a backend startup dialog.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
-  ${If} ${Errors}
+  ; nsExec captures the console process instead of letting Windows create a
+  ; terminal window over the installer for this short-lived validation.
+  nsExec::ExecToStack '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"'
+  Pop $R0
+  Pop $R1
+  ${If} $R0 == "error"
     StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
@@ -394,9 +397,12 @@ FunctionEnd
 
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export' $R0
-  ${If} ${Errors}
+  ; Keep the migration synchronous and exit-code checked, but run it behind
+  ; nsExec so the bundled console Python never flashes a terminal window.
+  nsExec::ExecToStack '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export'
+  Pop $R0
+  Pop $R1
+  ${If} $R0 == "error"
     StrCpy $R7 "Tauri 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
