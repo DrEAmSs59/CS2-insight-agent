@@ -61,7 +61,7 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     upload = main.UploadFile(filename="match.dem", file=io.BytesIO(original.read_bytes()))
 
     async def fake_meta(_path: Path):
-        return [{"name": "player"}], {"map_name": "de_mirage"}
+        return [{"name": "player"}], {"map_name": "de_mirage"}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", upload_dir)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
@@ -79,7 +79,7 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     upload = main.UploadFile(filename="browser.dem", file=io.BytesIO(b"browser-demo"))
 
     async def fake_meta(_path: Path):
-        return [], {}
+        return [{"name": "player"}], {}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
@@ -90,6 +90,31 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     item = response["uploads"][0]
     assert item["path"] == str(tmp_path / "browser.dem")
     assert item["uploaded_path"] == item["path"]
+
+
+def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_path: Path):
+    bad = main.UploadFile(filename="broken.dem", file=io.BytesIO(b"broken"))
+    good = main.UploadFile(filename="good.dem", file=io.BytesIO(b"good"))
+
+    def fake_ensure(path):
+        if Path(path).name == "broken.dem":
+            raise RuntimeError("parser implementation detail")
+        return _compat_result()
+
+    async def fake_meta(_path: Path):
+        return [{"name": "player"}], {"map_name": "de_nuke"}, None
+
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+
+    response = asyncio.run(main.upload_demos([bad, good], json.dumps(["", ""])))
+
+    assert [item["filename"] for item in response["uploads"]] == ["good.dem"]
+    assert response["failed"] == [{
+        "filename": "broken.dem",
+        "code": "DEMO_PREPARE_FAILED",
+    }]
 
 
 def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
@@ -108,6 +133,7 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
     upload = main.UploadFile(filename="threaded.dem", file=io.BytesIO(b"demo"))
     caller_thread = threading.get_ident()
     save_threads: list[int] = []
+    ensure_threads: list[int] = []
 
     def fake_save(file, destination: Path) -> str:
         save_threads.append(threading.get_ident())
@@ -115,17 +141,22 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
         return hashlib.md5(b"demo").hexdigest()
 
     async def fake_meta(_path: Path):
-        return [], {}
+        return [{"name": "player"}], {}, None
+
+    def fake_ensure(_path: Path):
+        ensure_threads.append(threading.get_ident())
+        return _compat_result()
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "_save_uploaded_demo", fake_save)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
-    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
 
     response = asyncio.run(main.upload_demo(upload))
 
     assert response["path"] == str(tmp_path / "threaded.dem")
     assert save_threads and save_threads[0] != caller_thread
+    assert ensure_threads and ensure_threads[0] != caller_thread
 
 
 def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: Path):
@@ -140,7 +171,7 @@ def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: P
 
     async def fake_meta(path: Path):
         inspected.append(path)
-        return [{"name": "player"}], {"map_name": "de_nuke"}
+        return [{"name": "player"}], {"map_name": "de_nuke"}, None
 
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)

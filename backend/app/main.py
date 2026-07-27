@@ -605,13 +605,53 @@ async def _inspect_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
     return players, match_meta
 
 
-async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
-    """Best-effort metadata for upload responses; upload must not fail if parsing does."""
+def _demo_failure_code(error: BaseException, phase: str) -> str:
+    if isinstance(error, FileNotFoundError):
+        return "DEMO_FILE_NOT_FOUND"
+    text = str(error).casefold()
+    if any(marker in text for marker in ("not found", "no such file", "找不到", "不存在")):
+        return "DEMO_FILE_NOT_FOUND"
+    if "timeout" in text or "timed out" in text or "超时" in text:
+        if phase == "inspection":
+            return "DEMO_INSPECTION_TIMEOUT"
+        if phase == "analysis":
+            return "DEMO_ANALYSIS_TIMEOUT"
+        return "DEMO_PREPARE_FAILED"
+    return {
+        "prepare": "DEMO_PREPARE_FAILED",
+        "inspection": "DEMO_INSPECTION_FAILED",
+        "analysis": "DEMO_ANALYSIS_FAILED",
+        "save": "DEMO_ANALYSIS_SAVE_FAILED",
+    }.get(phase, "DEMO_ANALYSIS_FAILED")
+
+
+def _demo_failure_item(
+    filename: str,
+    error: BaseException,
+    phase: str,
+    *,
+    demo_id: Optional[int] = None,
+) -> dict:
+    item = {
+        "filename": str(filename or "Demo"),
+        "code": _demo_failure_code(error, phase),
+    }
+    if demo_id is not None:
+        item["id"] = int(demo_id)
+    return item
+
+
+async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict, Optional[str]]:
+    """Return metadata or a stable public error code while keeping the batch alive."""
     try:
-        return await _inspect_demo_meta(dem_path)
+        players, match_meta = await _inspect_demo_meta(dem_path)
+        if not players:
+            logger.warning("Demo inspection returned no players for %s", dem_path)
+            return [], match_meta, "DEMO_INSPECTION_FAILED"
+        return players, match_meta, None
     except Exception as e:  # noqa: BLE001
         logger.exception("Upload metadata inspection failed for %s: %s", dem_path, e)
-        return [], {}
+        return [], {}, _demo_failure_code(e, "inspection")
 
 
 def _save_uploaded_demo(file: UploadFile, destination: Path) -> str:
@@ -819,17 +859,17 @@ async def _run_library_demo_analyze(
                 demo_id, missing,
             )
     except Exception as e:
-        msg = f"Demo 解析失败：{e}"
+        code = _demo_failure_code(e, "analysis")
         logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, dem_path, e)
-        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, msg) from e
+        raise HTTPException(500, error_detail(code)) from e
 
     if not players_out:
-        msg = "Demo 解析未返回任何目标玩家结果"
-        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        code = "DEMO_ANALYSIS_EMPTY"
+        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, msg)
+        raise HTTPException(500, error_detail(code))
 
     first_player = next(
         (player for player in target_players if player in players_out),
@@ -858,11 +898,11 @@ async def _run_library_demo_analyze(
         )
         await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
     except Exception as e:
-        msg = f"保存新的 Demo 分析结果失败：{e}"
+        code = _demo_failure_code(e, "save")
         logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, dem_path)
-        await demo_db.update_status(dem_path, "error", error_msg=msg, parsed_at=None)
+        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, msg) from e
+        raise HTTPException(500, error_detail(code)) from e
     await demo_library_hub.notify("analyzed")
     return {
         "players": players_out,
@@ -1744,7 +1784,7 @@ async def upload_demo(
     )
     compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
 
-    players, match_meta = await _safe_upload_demo_meta(persistent_path)
+    players, match_meta, inspection_error = await _safe_upload_demo_meta(persistent_path)
     return {
         "filename": filename,
         "path": str(persistent_path),
@@ -1753,6 +1793,7 @@ async def upload_demo(
         "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
         "players": players,
         "match_meta": match_meta,
+        "inspection_error": {"code": inspection_error} if inspection_error else None,
     }
 
 
@@ -1766,20 +1807,25 @@ async def upload_demos(
         raise HTTPException(400, "请至少选择一个文件")
     source_paths = _decode_upload_source_paths(source_paths_json, len(files))
     saved: list[tuple[str, Path, Path, Any]] = []
+    failed: list[dict] = []
     for file, source_path in zip(files, source_paths):
-        if not file.filename or not str(file.filename).lower().endswith(".dem"):
-            raise HTTPException(400, f"仅接受 .dem 文件: {file.filename!r}")
-        filename = Path(file.filename).name
-        dest = UPLOAD_DIR / filename
-        uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
-        persistent_path = await asyncio.to_thread(
-            _verified_upload_source_path,
-            source_path,
-            dest,
-            uploaded_md5,
-        )
-        compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
-        saved.append((filename, dest, persistent_path, compat))
+        filename = Path(str(file.filename or "Demo")).name
+        try:
+            if not file.filename or not str(file.filename).lower().endswith(".dem"):
+                raise ValueError("not a .dem file")
+            dest = UPLOAD_DIR / filename
+            uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
+            persistent_path = await asyncio.to_thread(
+                _verified_upload_source_path,
+                source_path,
+                dest,
+                uploaded_md5,
+            )
+            compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
+            saved.append((filename, dest, persistent_path, compat))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Demo preparation failed for %s", filename)
+            failed.append(_demo_failure_item(filename, exc, "prepare"))
 
     inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
 
@@ -1791,7 +1837,10 @@ async def upload_demos(
         *(_inspect_one(persistent_path) for _, _, persistent_path, _ in saved)
     )
     out: list[dict] = []
-    for (filename, dest, persistent_path, compat), (players, match_meta) in zip(saved, inspected):
+    for (filename, dest, persistent_path, compat), (players, match_meta, inspection_error) in zip(saved, inspected):
+        if inspection_error:
+            failed.append({"filename": filename, "code": inspection_error})
+            continue
         out.append(
             {
                 "filename": filename,
@@ -1803,7 +1852,7 @@ async def upload_demos(
                 "match_meta": match_meta,
             },
         )
-    return {"uploads": out}
+    return {"uploads": out, "failed": failed}
 
 
 class OpenLocalDemosBody(BaseModel):
@@ -1815,15 +1864,19 @@ async def open_local_demos(body: OpenLocalDemosBody):
     """Open Electron-selected demos by absolute path and repair each source once."""
 
     opened: list[tuple[Path, Any]] = []
+    failed: list[dict] = []
     for raw_path in body.paths:
         try:
             path = Path(raw_path).resolve(strict=True)
-        except OSError as exc:
-            raise HTTPException(404, f"Demo file not found: {raw_path}") from exc
-        if not path.is_file() or path.suffix.lower() != ".dem":
-            raise HTTPException(400, f"Only .dem files are accepted: {raw_path}")
-        compat = await asyncio.to_thread(ensure_demo_compatible, path)
-        opened.append((path, compat))
+            if not path.is_file() or path.suffix.lower() != ".dem":
+                raise ValueError("not a .dem file")
+            compat = await asyncio.to_thread(ensure_demo_compatible, path)
+            opened.append((path, compat))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Could not prepare local Demo: %s", raw_path)
+            failed.append(
+                _demo_failure_item(Path(str(raw_path)).name or str(raw_path), exc, "prepare")
+            )
 
     inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
 
@@ -1833,7 +1886,10 @@ async def open_local_demos(body: OpenLocalDemosBody):
 
     inspected = await asyncio.gather(*(_inspect_local(path) for path, _ in opened))
     uploads: list[dict] = []
-    for (path, compat), (players, match_meta) in zip(opened, inspected):
+    for (path, compat), (players, match_meta, inspection_error) in zip(opened, inspected):
+        if inspection_error:
+            failed.append({"filename": path.name, "code": inspection_error})
+            continue
         uploads.append(
             {
                 "filename": path.name,
@@ -1845,7 +1901,7 @@ async def open_local_demos(body: OpenLocalDemosBody):
                 "match_meta": match_meta,
             }
         )
-    return {"uploads": uploads}
+    return {"uploads": uploads, "failed": failed}
 
 
 @app.post("/api/demo/parse")
@@ -1854,7 +1910,7 @@ async def parse_demo(req: ParseRequest, filename: str):
 
     dem_path = UPLOAD_DIR / filename
     if not dem_path.exists():
-        raise HTTPException(404, f"Demo file not found: {filename}")
+        raise HTTPException(404, error_detail("DEMO_FILE_NOT_FOUND"))
 
     try:
         result = await asyncio.to_thread(
@@ -1864,7 +1920,8 @@ async def parse_demo(req: ParseRequest, filename: str):
             req.freeze_to_death_rounds,
         )
     except IsolatedParseError as e:
-        raise HTTPException(500, f"Demo 解析失败：{e}") from e
+        logger.error("Demo parse failed filename=%s: %s", filename, e)
+        raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
 
     cfg = load_config()
     if cfg.ai_mode and cfg.llm.api_key:
@@ -1898,22 +1955,35 @@ async def parse_demo_multi(
     """多玩家解析：共享同一次 Demo 扫描，返回 { players: { name: result } }。"""
     from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
 
-    dem_path = resolve_uploaded_demo_path(path or filename)
-
     try:
+        dem_path = resolve_uploaded_demo_path(path or filename)
         results_by_player = await asyncio.to_thread(
             analyze_multi_isolated,
             str(dem_path),
             req.target_players,
             req.freeze_to_death_rounds,
         )
+    except FileNotFoundError as e:
+        raise HTTPException(404, error_detail("DEMO_FILE_NOT_FOUND")) from e
+    except HTTPException as e:
+        code = "DEMO_FILE_NOT_FOUND" if e.status_code == 404 else "DEMO_PREPARE_FAILED"
+        raise HTTPException(e.status_code, error_detail(code)) from e
     except IsolatedParseError as e:
-        raise HTTPException(500, f"Demo 解析失败：{e}") from e
+        logger.error("Multi-player Demo parse failed filename=%s path=%s: %s", filename, path, e)
+        raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
 
     analysis_workspace = results_by_player.pop("__analysis_workspace__", None)
+    players_out = {
+        player: result
+        for player, result in results_by_player.items()
+        if isinstance(result, dict)
+    }
+    if not players_out:
+        logger.error("Multi-player Demo parse returned no player results filename=%s", filename)
+        raise HTTPException(500, error_detail("DEMO_ANALYSIS_EMPTY"))
 
     return {
-        "players": results_by_player,
+        "players": players_out,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
     }
 
@@ -1952,7 +2022,8 @@ async def parse_demo_batch(req: BatchParseRequest):
         try:
             raw_matches: list[dict] = await asyncio.gather(*tasks)
         except IsolatedParseError as e:
-            raise HTTPException(500, f"Demo 解析失败：{e}") from e
+            logger.error("Batch Demo parse failed: %s", e)
+            raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
 
     cfg = load_config()
     matches_out: list[dict] = []
@@ -2687,21 +2758,25 @@ class BatchSummaryBody(BaseModel):
 @app.post("/api/demos/batch-resolve-players")
 async def batch_resolve_players(body: BatchResolvePlayersBody):
     if body.mode == "none":
-        return {"resolved": {str(i): [] for i in body.demo_ids}}
+        return {"resolved": {str(i): [] for i in body.demo_ids}, "failed": []}
     if body.mode == "config_expected":
         cfg = load_config()
         exp = _normalized_expected_parse_players(cfg)
         if not exp:
-            return {"resolved": {str(i): [] for i in body.demo_ids}}
+            return {"resolved": {str(i): [] for i in body.demo_ids}, "failed": []}
     elif body.mode == "manual":
         exp = [s.strip() for s in (body.manual_lines or []) if isinstance(s, str) and s.strip()]
     else:
         exp = []
     resolved: dict[str, list[str]] = {}
+    failed: list[dict] = []
     for did in body.demo_ids:
         row = await demo_db.get_demo_by_id(int(did))
         if not row:
             resolved[str(did)] = []
+            failed.append(
+                _demo_failure_item(str(did), FileNotFoundError(), "inspection", demo_id=int(did))
+            )
             continue
         dem_path = str(row["path"])
         try:
@@ -2709,18 +2784,26 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
             if roster_lookup.get("error"):
                 raise RuntimeError(str(roster_lookup["error"]))
             matched = _match_expected_players_in_roster(exp, roster_lookup["players"])
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
             logger.exception("batch_resolve roster match failed demo_id=%s", did)
             resolved[str(did)] = []
+            failed.append(
+                _demo_failure_item(
+                    str(row.get("display_name") or row.get("filename") or did),
+                    exc,
+                    "inspection",
+                    demo_id=int(did),
+                )
+            )
             continue
         names = [str(r.get("name") or "").strip() for r in matched if r.get("name")]
         resolved[str(did)] = names
-    return {"resolved": resolved}
+    return {"resolved": resolved, "failed": failed}
 
 
 @app.post("/api/demos/batch-summary")
 async def batch_demo_summary(body: BatchSummaryBody):
-    """批量加载 Demo 元数据 + 玩家列表，并发数上限 5。任一失败返回 400。"""
+    """批量加载 Demo 元数据 + 玩家列表；坏文件作为逐项失败返回。"""
     sem = asyncio.Semaphore(5)
     rows_by_id = {
         int(row["id"]): row
@@ -2730,7 +2813,7 @@ async def batch_demo_summary(body: BatchSummaryBody):
     async def fetch_one(demo_id: int) -> dict:
         row = rows_by_id.get(int(demo_id))
         if not row:
-            raise ValueError(f"Demo {demo_id} 不存在")
+            raise FileNotFoundError(f"Demo {demo_id} does not exist")
         row = dict(row)
         if row.get("result_error"):
             raise ValueError(str(row["result_error"]))
@@ -2773,17 +2856,19 @@ async def batch_demo_summary(body: BatchSummaryBody):
                 )
             else:
                 fname = str(did)
-            errors.append({"id": did, "filename": fname, "reason": str(res)})
+            logger.warning("Batch Demo summary skipped id=%s filename=%s: %s", did, fname, res)
+            errors.append(
+                _demo_failure_item(
+                    fname,
+                    res,
+                    "inspection",
+                    demo_id=int(did),
+                )
+            )
         else:
             items.append(res)
 
-    if errors:
-        raise HTTPException(
-            status_code=400,
-            detail={"message": "部分 Demo 加载失败", "failed": errors},
-        )
-
-    return {"items": items}
+    return {"items": items, "failed": errors}
 
 
 class DemoDisplayNamePatch(BaseModel):

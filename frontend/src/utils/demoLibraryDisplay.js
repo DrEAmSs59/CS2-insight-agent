@@ -1,4 +1,5 @@
 import { demoLibraryStatusI18nKey } from "../constants/demoLibraryFilters";
+import { API_ERROR_I18N_KEYS } from "./apiErrorMessages.js";
 
 export function formatFileSize(bytes) {
   const n = Number(bytes);
@@ -125,13 +126,19 @@ export function deriveTags(it) {
  *   labelKey: string;
  *   labelParams?: Record<string, unknown>;
  *   tooltip?: string;
+ *   tooltipKey?: string;
  * }}
  */
 export function classifyDemoStatus(it) {
   const st = String(it.status ?? "").toLowerCase();
   const err = it.error_msg ? String(it.error_msg) : "";
-  if (st === "error")
-    return { kind: "error", labelKey: "status.error", tooltip: err || undefined };
+  if (st === "error") {
+    return {
+      kind: "error",
+      labelKey: "status.error",
+      tooltipKey: API_ERROR_I18N_KEYS[err] || "api.err.demoAnalysisFailed",
+    };
+  }
   if (st === "parsing" || st === "running" || st === "processing")
     return { kind: "parsing", labelKey: "status.parsing" };
   if (st === "pending") return { kind: "pending", labelKey: "status.pending" };

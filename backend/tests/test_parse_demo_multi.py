@@ -2,6 +2,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import demo_parse_isolation, main
@@ -96,3 +98,45 @@ def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_pa
 
     assert response["analysis_workspace"] == workspace
     assert "__analysis_workspace__" not in response["players"]
+
+
+def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):
+    demo_path = tmp_path / "match.dem"
+    demo_path.write_bytes(b"demo")
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+
+    def fake_analyze_multi(*_args):
+        raise demo_parse_isolation.IsolatedParseError(
+            "解析超时，worker stderr contains implementation details"
+        )
+
+    monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        _run_parse_multi(players=["alpha"])
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == {"code": "DEMO_ANALYSIS_TIMEOUT"}
+
+
+def test_parse_demo_multi_returns_stable_missing_file_code(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        _run_parse_multi(players=["alpha"], filename="missing.dem")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == {"code": "DEMO_FILE_NOT_FOUND"}
+
+
+def test_parse_demo_multi_rejects_empty_success(monkeypatch, tmp_path):
+    demo_path = tmp_path / "match.dem"
+    demo_path.write_bytes(b"demo")
+    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", lambda *_args: {})
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        _run_parse_multi(players=["alpha"])
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == {"code": "DEMO_ANALYSIS_EMPTY"}

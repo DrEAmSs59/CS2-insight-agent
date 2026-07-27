@@ -15,17 +15,23 @@ class IsolatedParseError(RuntimeError):
     pass
 
 
-def _timeout_seconds() -> float:
-    raw = (os.environ.get("CS2_INSIGHT_PARSE_WORKER_TIMEOUT_SEC") or "240").strip()
+def _timeout_seconds(action: str) -> float:
+    if action in {"players", "summary", "inspect"}:
+        env_name = "CS2_INSIGHT_DEMO_INSPECT_TIMEOUT_SEC"
+        default = "30"
+    else:
+        env_name = "CS2_INSIGHT_PARSE_WORKER_TIMEOUT_SEC"
+        default = "240"
+    raw = (os.environ.get(env_name) or default).strip()
     try:
         return max(10.0, float(raw))
     except ValueError:
-        return 240.0
+        return float(default)
 
 
 def run_parse_worker(action: str, **payload: Any) -> Any:
     req = {"action": action, **payload}
-    timeout = _timeout_seconds()
+    timeout = _timeout_seconds(action)
     tmp_dir = Path(tempfile.gettempdir()) / "cs2_insight_parse_workers"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", dir=tmp_dir, delete=False) as rf:
@@ -50,6 +56,11 @@ def run_parse_worker(action: str, **payload: Any) -> Any:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
     except subprocess.TimeoutExpired as e:
+        for stale_path in (err_path, out_path):
+            try:
+                stale_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise IsolatedParseError(f"解析超时（>{timeout:.0f}s），worker 已被终止") from e
     finally:
         try:
@@ -69,6 +80,10 @@ def run_parse_worker(action: str, **payload: Any) -> Any:
             pass
 
     if cp.returncode != 0:
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         detail = f"解析 worker 退出码 {cp.returncode}"
         if stderr_tail:
             detail += f": {stderr_tail}"
@@ -166,9 +181,12 @@ def analyze_multi_isolated(
     Returns {player_name: ParseResult.to_dict()} for all players.
     ~10x fewer demo file scans vs calling analyze_demo_isolated per player.
     """
-    return run_parse_worker(
+    result = run_parse_worker(
         "analyze_batch",
         dem_path=dem_path,
         target_players=target_players,
         freeze_to_death_rounds=freeze_to_death_rounds,
     )
+    if not isinstance(result, dict):
+        raise IsolatedParseError("多玩家解析 worker 返回了无效结果")
+    return result

@@ -222,12 +222,11 @@ def test_batch_summary_reports_corrupt_result_as_item_error(monkeypatch):
         ),
     )
 
-    with pytest.raises(main.HTTPException) as exc_info:
-        _run(main.batch_demo_summary(main.BatchSummaryBody(ids=[7])))
+    response = _run(main.batch_demo_summary(main.BatchSummaryBody(ids=[7])))
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["failed"] == [{
+    assert response["items"] == []
+    assert response["failed"] == [{
         "id": 7,
         "filename": "broken.dem",
-        "reason": "损坏的解析结果",
+        "code": "DEMO_INSPECTION_FAILED",
     }]
