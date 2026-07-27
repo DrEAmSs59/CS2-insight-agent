@@ -87,13 +87,18 @@ class TestProbeVideoSummary(unittest.TestCase):
                     "width": 1920,
                     "height": 1080,
                     "r_frame_rate": "60/1",
-                }
+                },
+                {
+                    "codec_type": "audio",
+                    "codec_name": "aac",
+                },
             ],
         }
         with patch("app.video_composer.ffprobe_streams", return_value=payload):
             info = probe_video_audio_summary(Path("alpha.mov"), Path("ffprobe.exe"))
         self.assertTrue(info["has_alpha"])
         self.assertEqual(info["pixel_format"], "yuva444p12le")
+        self.assertEqual(info["audio_codec_name"], "aac")
 
 
 if __name__ == "__main__":

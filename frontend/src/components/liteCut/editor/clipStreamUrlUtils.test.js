@@ -17,6 +17,13 @@ describe("liteCutClipStreamUrl", () => {
     }, { 7: "1783704157165765200" })).toBe("/api/lite-cut/assets/7/stream?preview=1783704157165765200");
   });
 
+  it("prefers the live asset-list version after a proxy is regenerated", () => {
+    expect(liteCutClipStreamUrl({
+      source_type: "file",
+      meta: { asset_id: 7, preview_proxy_version: "old-proxy" },
+    }, { 7: "new-proxy" })).toBe("/api/lite-cut/assets/7/stream?preview=new-proxy");
+  });
+
   it("keeps recorded clip streams unchanged", () => {
     expect(liteCutClipStreamUrl({ source_type: "recorded_clip", source_id: 6 })).toBe("/api/recorded-clips/6/stream");
   });

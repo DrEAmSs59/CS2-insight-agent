@@ -24,7 +24,6 @@ from .runtime import (
     get_lite_cut_db,
     get_montage_db,
     normalize_project_body,
-    preview_proxy_jobs,
 )
 
 router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-assets"])
@@ -149,7 +148,13 @@ async def upload_lite_cut_asset(
     if not item:
         raise HTTPException(500, error_detail("LITECUT_ASSET_SAVE_FAILED"))
     alpha_hint = bool(media_info.get("has_alpha")) if "has_alpha" in media_info else None
-    return _decorate_asset_preview_state(item, has_alpha=alpha_hint)
+    return _decorate_asset_preview_state(
+        item,
+        has_alpha=alpha_hint,
+        video_codec=str(media_info.get("codec_name") or "") or None,
+        audio_codec=str(media_info.get("audio_codec_name") or ""),
+        pixel_format=str(media_info.get("pixel_format") or ""),
+    )
 
 
 @router.get("/assets/{asset_id}/metadata")
@@ -266,19 +271,11 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
     state = _decorate_asset_preview_state(row)
     if state.get("preview_proxy_required") and state.get("preview_proxy_status") != "ready":
         status = str(state.get("preview_proxy_status") or "queued")
-        job = preview_proxy_jobs.get(int(asset_id))
-        if status in {"queued", "running"} and job and job.task:
-            # Existing timeline clips may request the stream before the media
-            # bin has polled the new state. Waiting here keeps that preview
-            # request usable without blocking unrelated API work.
-            await asyncio.shield(job.task)
-            state = _decorate_asset_preview_state(row, schedule=False)
-            status = str(state.get("preview_proxy_status") or "failed")
-            if status == "ready":
-                return await stream_file_with_range(asset_stream_path(path), request)
         if status in {"failed", "missing"}:
             raise HTTPException(422, state.get("preview_proxy_error") or "预览代理生成失败")
-        raise HTTPException(425, "预览代理正在后台生成")
+        # Never pin a video request to a minutes-long FFmpeg job. The editor
+        # polls asset state and replaces the cache-busted URL when ready.
+        raise HTTPException(425, "预览代理正在后台生成", headers={"Retry-After": "1"})
     return await stream_file_with_range(asset_stream_path(path), request)
 
 

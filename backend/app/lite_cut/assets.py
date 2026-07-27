@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import logging
+import os
 import shutil
 import subprocess
 import struct
@@ -11,6 +12,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from fastapi import HTTPException, UploadFile
 
@@ -71,7 +73,6 @@ _KIND_BY_EXT = {
 }
 
 _BROWSER_PROXY_EXTS = frozenset({".avi", ".mkv", ".gif", ".mov"})
-_LARGE_VIDEO_PROXY_BYTES = 256 * 1024 * 1024
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -271,6 +272,8 @@ def relocate_asset_file_bundle(raw_path: str | Path, project_name: str) -> Path:
 
 
 def asset_stream_path(path: Path) -> Path:
+    if not asset_needs_browser_proxy(path):
+        return path
     alpha_proxy = alpha_preview_proxy_path_for_asset(path)
     if alpha_proxy.is_file():
         return alpha_proxy
@@ -279,14 +282,54 @@ def asset_stream_path(path: Path) -> Path:
 
 
 def asset_needs_browser_proxy(path: Path) -> bool:
-    if path.suffix.lower() in _BROWSER_PROXY_EXTS:
-        return True
-    if path.suffix.lower() in {".mp4", ".m4v"}:
-        try:
-            return path.stat().st_size >= _LARGE_VIDEO_PROXY_BYTES
-        except OSError:
-            return False
-    return False
+    # File size does not change browser codec/container support. MP4/M4V can
+    # already be seeked efficiently through the Range endpoint, so eagerly
+    # recompressing a large native file only delays editing and duplicates it.
+    return path.suffix.lower() in _BROWSER_PROXY_EXTS
+
+
+def preview_proxy_remux_command(
+    *,
+    ffmpeg_bin: Path,
+    source: Path,
+    output: Path,
+    duration_sec: float | None = None,
+    copy_audio: bool = False,
+) -> list[str]:
+    """Repackage browser-decodable H.264 without recompressing its video."""
+    command = [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source),
+    ]
+    if duration_sec is not None and duration_sec > 0:
+        command.extend(["-t", f"{float(duration_sec):.6f}"])
+    command.extend([
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "copy",
+        # Normalize arbitrary container audio to the one codec WebView2 can
+        # consistently decode inside an MP4. Video remains bit-for-bit copied.
+        "-c:a",
+        "copy" if copy_audio else "aac",
+    ])
+    if not copy_audio:
+        command.extend(["-b:a", "96k"])
+    command.extend([
+        "-movflags",
+        "+faststart",
+        "-avoid_negative_ts",
+        "make_zero",
+        str(output),
+    ])
+    return command
 
 
 def preview_proxy_command(
@@ -346,7 +389,19 @@ def _run_proxy_process(
     """Run FFmpeg while allowing asset/project deletion to stop it cleanly."""
     if cancel_event is not None and cancel_event.is_set():
         return subprocess.CompletedProcess(command, 130, "", "cancelled")
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    creation_flags = 0
+    if os.name == "nt":
+        creation_flags = (
+            getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags,
+    )
     deadline = time.monotonic() + max(1.0, float(timeout_sec))
     while True:
         try:
@@ -371,10 +426,13 @@ def create_browser_preview_proxy(
     source: Path,
     *,
     ffmpeg_bin: Path,
-    video_encode_quality: list[str],
+    video_encode_quality: list[str] | Callable[[], list[str]],
     duration_sec: float | None = None,
     cancel_event: threading.Event | None = None,
     max_edge: int = 1280,
+    copy_video: bool = False,
+    copy_audio: bool = False,
+    on_mode_change: Callable[[str], None] | None = None,
 ) -> Path | None:
     """Create an MP4 preview for containers that ordinary browser video cannot decode."""
     if not asset_needs_browser_proxy(source):
@@ -385,27 +443,52 @@ def create_browser_preview_proxy(
             return output
         temporary = output.with_name(f"{output.stem}.{uuid.uuid4().hex}.tmp.mp4")
         try:
-            result = _run_proxy_process(
-                preview_proxy_command(
+            commands: list[tuple[str, Callable[[], list[str]]]] = []
+            if copy_video:
+                commands.append((
+                    "remux",
+                    lambda: preview_proxy_remux_command(
+                        ffmpeg_bin=ffmpeg_bin,
+                        source=source,
+                        output=temporary,
+                        duration_sec=duration_sec,
+                        copy_audio=copy_audio,
+                    ),
+                ))
+            commands.append((
+                "transcode",
+                lambda: preview_proxy_command(
                     ffmpeg_bin=ffmpeg_bin,
                     source=source,
                     output=temporary,
-                    video_encode_quality=video_encode_quality,
+                    video_encode_quality=(
+                        video_encode_quality()
+                        if callable(video_encode_quality)
+                        else video_encode_quality
+                    ),
                     duration_sec=duration_sec,
                     max_edge=max_edge,
                 ),
-                cancel_event=cancel_event,
-            )
-            if result.returncode != 0 or not temporary.is_file():
+            ))
+            last_result: subprocess.CompletedProcess[str] | None = None
+            for mode, build_command in commands:
+                if on_mode_change is not None:
+                    on_mode_change(mode)
+                temporary.unlink(missing_ok=True)
+                result = _run_proxy_process(build_command(), cancel_event=cancel_event)
+                last_result = result
+                if result.returncode == 0 and temporary.is_file():
+                    temporary.replace(output)
+                    return output
                 if cancel_event is not None and cancel_event.is_set():
                     temporary.unlink(missing_ok=True)
                     return None
-                tail = (result.stderr or result.stdout or "").strip()[-600:]
-                logger.warning("LiteCut preview proxy failed for %s: %s", source.name, tail)
-                temporary.unlink(missing_ok=True)
-                return None
-            temporary.replace(output)
-            return output
+                if mode == "remux":
+                    logger.info("LiteCut fast remux unavailable for %s; falling back to transcode", source.name)
+            tail = ((last_result.stderr or last_result.stdout) if last_result else "").strip()[-600:]
+            logger.warning("LiteCut preview proxy failed for %s: %s", source.name, tail)
+            temporary.unlink(missing_ok=True)
+            return None
         except Exception:
             logger.warning("LiteCut preview proxy failed for %s", source.name, exc_info=True)
             temporary.unlink(missing_ok=True)
@@ -480,6 +563,7 @@ def ensure_alpha_mov_preview_proxy(
     duration_sec: float | None = None,
     cancel_event: threading.Event | None = None,
     max_edge: int = 1280,
+    has_alpha: bool | None = None,
 ) -> Path | None:
     """Return an alpha-preserving browser proxy when ``source`` is an alpha MOV."""
     if source.suffix.lower() != ".mov":
@@ -487,12 +571,16 @@ def ensure_alpha_mov_preview_proxy(
     existing = alpha_preview_proxy_path_for_asset(source)
     if existing.is_file():
         return existing
+    if has_alpha is False:
+        return None
     try:
         from ..video_composer import probe_video_audio_summary, resolve_ffprobe_binary
 
-        info = probe_video_audio_summary(source, resolve_ffprobe_binary(ffmpeg_bin))
-        if not info.get("has_alpha"):
-            return None
+        info: dict = {}
+        if has_alpha is None:
+            info = probe_video_audio_summary(source, resolve_ffprobe_binary(ffmpeg_bin))
+            if not info.get("has_alpha"):
+                return None
         if cancel_event is not None and cancel_event.is_set():
             return None
         return create_alpha_browser_preview_proxy(

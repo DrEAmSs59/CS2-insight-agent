@@ -2,6 +2,8 @@
 
 import asyncio
 import io
+from pathlib import Path
+import subprocess
 import threading
 from types import SimpleNamespace
 
@@ -17,7 +19,9 @@ from app.lite_cut.assets import (
     asset_needs_browser_proxy,
     asset_stream_path,
     delete_asset_file_bundle,
+    create_browser_preview_proxy,
     preview_proxy_command,
+    preview_proxy_remux_command,
     preview_proxy_path_for_asset,
     project_asset_directory_name,
     relocate_asset_file_bundle,
@@ -326,6 +330,34 @@ def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, m
     preview_proxy_jobs.pop(991, None)
 
 
+@pytest.mark.anyio
+async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
+    from app.lite_cut import assets as assets_mod
+    from app.lite_cut import assets_api as api_mod
+
+    source = tmp_path / "large.mov"
+    source.write_bytes(b"source")
+
+    class FakeDb:
+        async def get_asset(self, asset_id):
+            assert asset_id == 991
+            return {"id": 991, "name": source.name, "kind": "video", "file_path": str(source)}
+
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
+    monkeypatch.setattr(assets_mod, "validate_stored_asset_path", lambda _path: source)
+    monkeypatch.setattr(api_mod, "_decorate_asset_preview_state", lambda row: {
+        **row,
+        "preview_proxy_required": True,
+        "preview_proxy_status": "running",
+    })
+
+    with pytest.raises(HTTPException) as caught:
+        await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
+
+    assert caught.value.status_code == 425
+    assert caught.value.headers == {"Retry-After": "1"}
+
+
 def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path):
     source = tmp_path / "match.avi"
     output = preview_proxy_path_for_asset(source)
@@ -344,14 +376,90 @@ def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path)
     assert command[-1] == str(output)
 
 
-def test_large_mp4_uses_preview_proxy(tmp_path):
+def test_native_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
     small = tmp_path / "small.mp4"
     large = tmp_path / "large.mp4"
     small.write_bytes(b"video")
     with large.open("wb") as output:
         output.truncate(256 * 1024 * 1024)
     assert asset_needs_browser_proxy(small) is False
-    assert asset_needs_browser_proxy(large) is True
+    assert asset_needs_browser_proxy(large) is False
+
+
+def test_native_mp4_ignores_an_old_size_based_proxy(tmp_path):
+    source = tmp_path / "large.mp4"
+    source.write_bytes(b"source")
+    preview_proxy_path_for_asset(source).write_bytes(b"stale proxy")
+
+    assert asset_stream_path(source) == source
+
+
+def test_h264_remux_command_copies_video_without_scale_or_video_encoder(tmp_path):
+    source = tmp_path / "match.mkv"
+    output = preview_proxy_path_for_asset(source)
+    command = preview_proxy_remux_command(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        source=source,
+        output=output,
+        duration_sec=12.5,
+        copy_audio=True,
+    )
+
+    assert command[command.index("-c:v") + 1] == "copy"
+    assert command[command.index("-c:a") + 1] == "copy"
+    assert "-b:a" not in command
+    assert "-vf" not in command
+    assert command[command.index("-t") + 1] == "12.500000"
+    assert command[-1] == str(output)
+
+
+def test_successful_remux_does_not_resolve_a_transcode_encoder(tmp_path, monkeypatch):
+    from app.lite_cut import assets as assets_mod
+
+    source = tmp_path / "match.mkv"
+    source.write_bytes(b"source")
+
+    def fake_run(command, **_kwargs):
+        Path(command[-1]).write_bytes(b"proxy")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(assets_mod, "_run_proxy_process", fake_run)
+    proxy = create_browser_preview_proxy(
+        source,
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        video_encode_quality=lambda: pytest.fail("transcode encoder must stay lazy"),
+        copy_video=True,
+    )
+
+    assert proxy == preview_proxy_path_for_asset(source)
+    assert proxy.read_bytes() == b"proxy"
+
+
+def test_failed_remux_falls_back_to_transcode(tmp_path, monkeypatch):
+    from app.lite_cut import assets as assets_mod
+
+    source = tmp_path / "match.mkv"
+    source.write_bytes(b"source")
+    modes = []
+
+    def fake_run(command, **_kwargs):
+        if command[command.index("-c:v") + 1] == "copy":
+            return subprocess.CompletedProcess(command, 1, "", "unsupported stream copy")
+        Path(command[-1]).write_bytes(b"transcoded proxy")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(assets_mod, "_run_proxy_process", fake_run)
+    proxy = create_browser_preview_proxy(
+        source,
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        video_encode_quality=["-c:v", "libx264"],
+        copy_video=True,
+        on_mode_change=modes.append,
+    )
+
+    assert modes == ["remux", "transcode"]
+    assert proxy == preview_proxy_path_for_asset(source)
+    assert proxy.read_bytes() == b"transcoded proxy"
 
 
 def test_mov_always_uses_an_audio_compatible_browser_proxy(tmp_path):

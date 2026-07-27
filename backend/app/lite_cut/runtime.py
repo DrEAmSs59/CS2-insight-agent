@@ -37,6 +37,10 @@ class LiteCutPreviewProxyJob:
     asset_id: int
     status: str = "queued"
     has_alpha: bool | None = None
+    video_codec: str | None = None
+    audio_codec: str | None = None
+    pixel_format: str | None = None
+    mode: str = "queued"
     error: str = ""
     cancel_event: threading.Event = field(default_factory=threading.Event)
     task: asyncio.Task | None = None

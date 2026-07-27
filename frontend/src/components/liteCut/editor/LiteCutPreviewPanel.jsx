@@ -89,7 +89,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
   const fadeOutFactor = fadeOut > 0 && duration > 0 ? Math.min(1, Math.max(0, (duration - elapsed) / fadeOut)) : 1;
   let opacity = baseOpacity * Math.min(fadeInFactor, fadeOutFactor);
   const aid = ov.meta?.asset_id;
-  const src = aid ? getLiteCutAssetStreamUrl(aid, ov.meta?.preview_proxy_version || assetPreviewVersion) : null;
+  const src = aid ? getLiteCutAssetStreamUrl(aid, assetPreviewVersion || ov.meta?.preview_proxy_version) : null;
   const isVideo = ov.type === "webm" || ov.meta?.kind === "webm" || ov.meta?.kind === "video";
   const isLoopingAnimation = Boolean(ov.meta?.is_looping_animation) || /\.gif$/i.test(String(ov.meta?.name || ov.asset_path || ""));
 

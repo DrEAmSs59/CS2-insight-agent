@@ -12,6 +12,7 @@ describe("assetUtils", () => {
       preview_proxy_required: true,
       preview_proxy_status: "running",
       preview_proxy_version: "running",
+      preview_proxy_mode: "remux",
     })).toMatchObject({
       id: 7,
       name: "clip.mp4",
@@ -21,6 +22,7 @@ describe("assetUtils", () => {
       preview_proxy_required: true,
       preview_proxy_status: "running",
       preview_proxy_version: "running",
+      preview_proxy_mode: "remux",
     });
   });
 
