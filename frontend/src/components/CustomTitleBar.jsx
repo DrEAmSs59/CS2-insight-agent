@@ -8,6 +8,8 @@ import {
 import { desktopBridge, isDesktopApp } from "../desktop/desktopBridge";
 import { useT } from "../i18n/useT.js";
 
+export const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+
 export default function CustomTitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const t = useT();
@@ -30,7 +32,15 @@ export default function CustomTitleBar() {
       data-tauri-drag-region
       data-testid="custom-titlebar"
     >
-      <div className="h-full min-w-0 flex-1" data-tauri-drag-region />
+      <div className="flex h-full min-w-0 flex-1 items-center px-3" data-tauri-drag-region>
+        <span
+          className="select-none font-mono text-[9px] font-medium tracking-[0.08em] text-cs2-text-muted/65"
+          data-tauri-drag-region
+          data-testid="titlebar-version"
+        >
+          v{APP_VERSION}
+        </span>
+      </div>
 
       {isDesktopApp ? (
         <div className="flex h-full shrink-0 border-l border-cs2-border-subtle">
