@@ -109,6 +109,7 @@
 
 <script>
 const PORT = location.port || "19871";
+const SESSION_TOKEN = new URLSearchParams(location.hash.slice(1)).get("session") || "";
 const els = {};
 document.querySelectorAll("[data-k]").forEach(e => els[e.dataset.k] = e);
 const kb = document.getElementById("kb");
@@ -183,7 +184,10 @@ function loop() {
 requestAnimationFrame(loop);
 
 function connect() {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws/kb-overlay`);
+  const wsUrl = `ws://127.0.0.1:${PORT}/ws/kb-overlay`;
+  const ws = SESSION_TOKEN
+    ? new WebSocket(wsUrl, ["cs2-insight", SESSION_TOKEN])
+    : new WebSocket(wsUrl);
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "load") {

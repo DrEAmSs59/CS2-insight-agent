@@ -24,6 +24,7 @@ from ..montage_db import MontageDB
 from ..api_errors import error_detail
 from ..demo_compat_service import ensure_demo_compatible
 from ..runtime_session import runtime_session_dependency
+from ..session_auth import overlay_session_fragment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -686,12 +687,18 @@ async def execute_recording_queue(
                         ),
                         None,
                     ) or load_config().kb_overlay_position or "bottom_center"
-                    _overlay_url = f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
+                    _overlay_url = (
+                        f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
+                        f"{overlay_session_fragment()}"
+                    )
                     ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
                     logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
                 if _kill_fx_requested:
                     # 查询参数用于让已有 OBS Browser Source 刷新到新版布局。
-                    _fx_url = f"http://127.0.0.1:{_port}/overlay/killfx.html?v=overlay-offset-3"
+                    _fx_url = (
+                        f"http://127.0.0.1:{_port}/overlay/killfx.html?v=overlay-offset-3"
+                        f"{overlay_session_fragment()}"
+                    )
                     ok_fx = _pre_obs_client.ensure_kb_overlay_in_scene(
                         _scene,
                         _fx_url,

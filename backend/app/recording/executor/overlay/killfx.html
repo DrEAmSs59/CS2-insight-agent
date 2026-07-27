@@ -151,6 +151,7 @@
 
 <script>
 const PORT = location.port || "19871";
+const SESSION_TOKEN = new URLSearchParams(location.hash.slice(1)).get("session") || "";
 const mainStage = document.getElementById("fx-main-stage");
 const badgeRack = document.getElementById("fx-badge-rack");
 
@@ -402,7 +403,10 @@ function loop() {
 requestAnimationFrame(loop);
 
 function connect() {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws/kb-overlay`);
+  const wsUrl = `ws://127.0.0.1:${PORT}/ws/kb-overlay`;
+  const ws = SESSION_TOKEN
+    ? new WebSocket(wsUrl, ["cs2-insight", SESSION_TOKEN])
+    : new WebSocket(wsUrl);
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.type === "load") {

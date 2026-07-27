@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { Upload, Loader2 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
-import API, { API_BASE_URL } from "../../api/api";
+import API, { API_BASE_URL, withDesktopSessionToken } from "../../api/api";
 import { derivePlayerAssetsFromClips } from "../../utils/montageUtils";
 import { useT } from "../../i18n/useT.js";
 
@@ -40,7 +40,9 @@ export function MontagePlayerAssetsPanel({
       });
       const { path, url } = res?.data ?? {};
       if (path) {
-        const fullUrl = url ? (API_BASE_URL ? `${API_BASE_URL}${url}` : url) : null;
+        const fullUrl = url
+          ? withDesktopSessionToken(API_BASE_URL ? `${API_BASE_URL}${url}` : url)
+          : null;
         onPlayerAvatarChange?.(playerKey, path, fullUrl);
       }
     } catch (err) {
