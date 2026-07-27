@@ -211,7 +211,9 @@ function LocalAssetCard({
           {proxyBusy ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/70 text-[9px] font-semibold text-cs2-text-secondary">
               <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
-              {t("liteCut.media.proxyGenerating")}
+              {t(item.preview_proxy_mode === "remux"
+                ? "liteCut.media.proxyRemuxing"
+                : "liteCut.media.proxyGenerating")}
             </div>
           ) : null}
           {proxyFailed ? (

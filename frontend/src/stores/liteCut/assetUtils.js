@@ -16,6 +16,7 @@ export function mapAssetRow(row) {
     preview_proxy_status: row.preview_proxy_status || "not_needed",
     preview_proxy_error: row.preview_proxy_error || "",
     preview_proxy_version: row.preview_proxy_version || "source",
+    preview_proxy_mode: row.preview_proxy_mode || "direct",
     mime_type: row.mime_type,
     mediaKind: "asset",
   };

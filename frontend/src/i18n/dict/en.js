@@ -2231,6 +2231,7 @@ export default {
   "liteCut.media.cancelUpload": "Cancel upload",
   "liteCut.media.uploadFailed": "Upload failed. Check the file and try again.",
   "liteCut.media.proxyGenerating": "Generating preview proxy…",
+  "liteCut.media.proxyRemuxing": "Preparing a compatible preview…",
   "liteCut.media.proxyFailed": "Preview proxy generation failed",
   "liteCut.media.proxyRetry": "Try again",
   "liteCut.media.proxyRetrying": "Retrying…",

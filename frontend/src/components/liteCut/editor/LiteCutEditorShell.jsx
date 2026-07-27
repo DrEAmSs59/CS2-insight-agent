@@ -252,6 +252,7 @@ export default function LiteCutEditorShell({
   const [fontAssets, setFontAssets] = useState([]);
   const [audioAssets, setAudioAssets] = useState([]);
   const [assetPreviewVersions, setAssetPreviewVersions] = useState({});
+  const [assetProxyBusy, setAssetProxyBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
   const [exportJob, setExportJob] = useState(null);
@@ -379,16 +380,24 @@ export default function LiteCutEditorShell({
       setFontAssets(mapped.filter((a) => a?.kind === "font"));
       setAudioAssets(mapped.filter((a) => a?.kind === "audio"));
       setAssetPreviewVersions(Object.fromEntries(mapped.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
+      setAssetProxyBusy(mapped.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status)));
     } catch {
       setFontAssets([]);
       setAudioAssets([]);
       setAssetPreviewVersions({});
+      setAssetProxyBusy(false);
     }
   }, [projectId]);
 
   useEffect(() => {
     void loadFontAssets();
   }, [loadFontAssets]);
+
+  useEffect(() => {
+    if (!assetProxyBusy) return undefined;
+    const timer = window.setInterval(() => void loadFontAssets(), 1000);
+    return () => window.clearInterval(timer);
+  }, [assetProxyBusy, loadFontAssets]);
 
   const loadExportHistory = useCallback(async () => {
     try {
@@ -548,7 +557,7 @@ export default function LiteCutEditorShell({
         mediaKind: "asset",
         kind: selectedClip.meta?.kind || "image",
         assetStreamUrl: aid
-          ? getLiteCutAssetStreamUrl(aid, selectedClip.meta?.preview_proxy_version || assetPreviewVersions?.[Number(aid)] || "")
+          ? getLiteCutAssetStreamUrl(aid, assetPreviewVersions?.[Number(aid)] || selectedClip.meta?.preview_proxy_version || "")
           : null,
         duration_sec: selectedClip.meta?.duration_sec || selectedClip.duration,
         width: selectedClip.meta?.source_width,
@@ -1265,6 +1274,7 @@ export default function LiteCutEditorShell({
     setFontAssets(allAssets.filter((a) => a?.kind === "font"));
     setAudioAssets(allAssets.filter((a) => a?.kind === "audio"));
     setAssetPreviewVersions(Object.fromEntries(allAssets.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
+    setAssetProxyBusy(allAssets.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status)));
     migrateAlphaMovOverlaysToVideoTracks(allAssets);
 
     // Repair overlays created before image dimensions were persisted. Keep
