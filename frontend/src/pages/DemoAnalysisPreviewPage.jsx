@@ -418,7 +418,7 @@ export default function DemoAnalysisPreviewPage() {
       <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
         <div className="mx-auto w-full max-w-5xl space-y-4">
           <div className="flex items-center justify-between gap-3"><div><h1 className="text-lg font-black text-cs2-text-primary">Demo 分析</h1><p className="mt-1 text-[10px] text-cs2-text-muted">上传单个或多个 Demo，或从 Demo 库勾选本次要分析的文件。</p></div><Link to="/library" className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"><Library className="h-3.5 w-3.5" />前往 Demo 库</Link></div>
-          <DemoUpload onUpload={s.handleUpload} loading={Boolean(s.parsing)} loadingText={s.progressText} />
+          <DemoUpload onUpload={s.handleUpload} loading={Boolean(s.parsing)} loadingText={s.progressText} aiEnabled={Boolean(s.aiMode)} />
         </div>
       </div>
     );
@@ -437,7 +437,7 @@ export default function DemoAnalysisPreviewPage() {
               <RefreshCw className="h-3.5 w-3.5" />重置 Demo
             </Button>
           </div>
-          <DemoUpload onUpload={s.handleUpload} loading loadingText={analysisGateText} />
+          <DemoUpload onUpload={s.handleUpload} loading loadingText={analysisGateText} aiEnabled={Boolean(s.aiMode)} />
         </div>
       </div>
     );

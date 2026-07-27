@@ -51,11 +51,28 @@ pnpm run dev
 ## Tauri 桌面端开发
 
 不需要单独启动后端。Tauri 会自动使用仓库中的 `.venv` 启动后端。
+这是日常桌面调试的默认入口：React/CSS 修改由 Vite 热更新，不会暂存发布
+runtime，也不会生成 NSIS 安装包。
 
 ```powershell
 Set-Location frontend
 pnpm run desktop:dev
 ```
+
+也可以从仓库根目录直接运行：
+
+```powershell
+.\packaging\windows\dev_desktop.bat
+```
+
+提交前若只想检查生产前端与 Tauri Rust 壳能否通过编译，同样无需打安装包：
+
+```powershell
+pnpm --dir frontend run desktop:check
+```
+
+只有需要验证安装、升级、卸载、资源嵌入或正式发布时，才进入下面的 NSIS
+打包流程。
 
 ## Windows 手动打包
 

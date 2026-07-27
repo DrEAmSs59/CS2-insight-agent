@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "desktop:dev": "tauri dev",
+    "desktop:check": "vite build && cargo check --manifest-path src-tauri/Cargo.toml --locked",
     "desktop:stage-python": "node scripts/stage-python-runtime.mjs",
     "desktop:stage-resources": "node scripts/stage-tauri-resources.mjs",
     "desktop:build": "pnpm run desktop:stage-python && pnpm run desktop:stage-resources && tauri build",

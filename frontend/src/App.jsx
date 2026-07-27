@@ -9,6 +9,7 @@ import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
+import DemoLoadingCopy from "./components/DemoLoadingCopy";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
@@ -1304,7 +1305,7 @@ export default function App() {
     const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
     setAnalysisInlineProgress({
       active: true,
-      text: `正在自动解析 ${specs.length} 个 Demo 的全部 ${totalPlayers} 名玩家（0/${specs.length}）…`,
+      text: t("app.autoParseStart", { demos: specs.length, players: totalPlayers }),
     });
     const ctx = {
       demos,
@@ -1318,13 +1319,16 @@ export default function App() {
       setAnalysisInlineProgress({
         active: done < specs.length,
         text: done < specs.length
-          ? `正在自动解析每个 Demo 的全部玩家（${done}/${specs.length}）…`
+          ? t("app.autoParseProgress", { done, total: specs.length })
           : succeeded === specs.length
-            ? `已自动解析 ${specs.length} 个 Demo，共 ${totalPlayers} 名玩家`
-            : `自动解析完成：成功 ${succeeded} 个，失败 ${specs.length - succeeded} 个`,
+            ? t("app.autoParseDone", { demos: specs.length, players: totalPlayers })
+            : t("app.autoParsePartial", {
+                succeeded,
+                failed: specs.length - succeeded,
+              }),
       });
     });
-  }, [handleParseForIndex]);
+  }, [handleParseForIndex, t]);
   autoParseLoadedDemosRef.current = autoParseLoadedDemos;
 
   const ensurePlayerAiReview = useCallback(async (playerName, matchIndex = currentMatchIndex) => {
@@ -3035,8 +3039,8 @@ export default function App() {
           {libraryLoadingOverlay && (
             <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
-                <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
-                <p className="text-sm font-medium text-dynamic-zinc-200">{libraryLoadingText}</p>
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cs2-orange" />
+                <DemoLoadingCopy detail={libraryLoadingText} aiEnabled={aiMode} compact />
               </div>
             </div>
           )}

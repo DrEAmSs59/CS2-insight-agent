@@ -139,9 +139,16 @@ pnpm run dev
 
 # 启动 Tauri 桌面开发模式（自动启动 Python 后端）
 pnpm run desktop:dev
+
+# 提交前快速检查生产前端与 Rust 壳，不生成 NSIS
+pnpm run desktop:check
 ```
 
 前端跑在 `http://localhost:5173`，Vite 已配置代理把 `/api/*` 转发到后端 `http://localhost:8000`。
+日常桌面联调使用 `desktop:dev`：Vite 会热更新 React/CSS，Tauri 直接运行 debug
+桌面壳，不会暂存发布 runtime 或生成安装包。仓库根目录也可直接执行
+`.\packaging\windows\dev_desktop.bat`。只有验证安装、升级、卸载、资源嵌入或
+正式发布时才需要 NSIS。
 
 #### 3. 打包
 
@@ -149,7 +156,7 @@ pnpm run desktop:dev
 # 仅打包前端静态资源
 pnpm run build
 
-# 日常 smoke build：打包 Tauri NSIS 安装包
+# 本地验证完整安装链（较慢，会打包 Tauri NSIS）
 pnpm run desktop:build
 
 # 正式版本构建：统一注入前端、Tauri 与内置后端版本号
