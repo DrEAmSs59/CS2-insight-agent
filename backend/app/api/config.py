@@ -66,6 +66,7 @@ class ConfigPayload(BaseModel):
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
+    steam_cdn_assets_enabled: Optional[bool] = None
     match_mode: Optional[str] = None
     match_count: Optional[int] = None
     update_check_frequency: Optional[str] = None
@@ -432,6 +433,8 @@ async def update_config(payload: ConfigPayload):
         cfg.steam_api_key = payload.steam_api_key.strip()
     if payload.steam_id64 is not None and payload.steam_id64:
         cfg.steam_id64 = payload.steam_id64.strip()
+    if payload.steam_cdn_assets_enabled is not None:
+        cfg.steam_cdn_assets_enabled = bool(payload.steam_cdn_assets_enabled)
     if payload.match_mode is not None and payload.match_mode in ("premier", "competitive"):
         cfg.match_mode = payload.match_mode
     if payload.match_count is not None and payload.match_count in (20, 50, 100):

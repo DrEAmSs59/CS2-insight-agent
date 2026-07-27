@@ -8,7 +8,7 @@ const dictRoot = join(sourceRoot, "i18n", "dict");
 const failures = [];
 const migratedUiFiles = [
   "App.jsx",
-  "components/SidebarNav.jsx",
+  "components/CustomTitleBar.jsx",
   "pages/DemoAnalysisPreviewPage.jsx",
   "pages/SettingsPage.jsx",
   "components/analysis/DemoHeatmapView.jsx",

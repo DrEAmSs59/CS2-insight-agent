@@ -317,6 +317,7 @@ class DemoDB:
                     normalized_name TEXT,
                     team_name TEXT,
                     team_number INTEGER,
+                    player_color TEXT,
                     kills INTEGER DEFAULT 0,
                     deaths INTEGER DEFAULT 0,
                     assists INTEGER DEFAULT 0,
@@ -327,6 +328,8 @@ class DemoDB:
             )
             cur_players = await conn.execute("PRAGMA table_info(demo_player_stats)")
             player_cols = {str(r[1]) for r in await cur_players.fetchall()}
+            if "player_color" not in player_cols:
+                await conn.execute("ALTER TABLE demo_player_stats ADD COLUMN player_color TEXT")
             if "user_id" not in player_cols:
                 await conn.execute("ALTER TABLE demo_player_stats ADD COLUMN user_id TEXT")
                 # Older builds stored parser spectator slots in account_id.
@@ -1093,6 +1096,7 @@ class DemoDB:
                team_number,
                team_number AS team,
                team_name,
+               player_color,
                kills,
                deaths,
                assists,
@@ -1176,6 +1180,9 @@ class DemoDB:
                     team_num = None
             team_name = p.get("team_name")
             team_name_s = str(team_name).strip() if team_name is not None else None
+            player_color = str(p.get("player_color") or "").strip().lower() or None
+            if player_color not in {None, "blue", "green", "yellow", "orange", "purple"}:
+                player_color = None
             rows.append(
                 (
                     demo_id,
@@ -1188,6 +1195,7 @@ class DemoDB:
                     norm or None,
                     team_name_s,
                     team_num,
+                    player_color,
                     kills,
                     deaths,
                     assists,
@@ -1203,8 +1211,8 @@ class DemoDB:
                     INSERT INTO demo_player_stats(
                         demo_id, demo_path, steam_id64, steam_id, account_id, user_id,
                         player_name, normalized_name, team_name, team_number,
-                        kills, deaths, assists, kd, indexed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        player_color, kills, deaths, assists, kd, indexed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )
@@ -1216,7 +1224,7 @@ class DemoDB:
             cur = await conn.execute(
                 """
                 SELECT id, demo_id, demo_path, steam_id64, steam_id, account_id, user_id, player_name, normalized_name,
-                       team_name, team_number, kills, deaths, assists, kd, indexed_at
+                       team_name, team_number, player_color, kills, deaths, assists, kd, indexed_at
                 FROM demo_player_stats
                 WHERE demo_id = ?
                 ORDER BY kills DESC, player_name ASC

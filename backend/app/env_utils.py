@@ -427,6 +427,9 @@ class AppConfig(BaseModel):
     # 官匹战绩
     steam_api_key: str = ""
     steam_id64: str = ""
+    # 允许把 Demo roster 中的公开 SteamID 发给 Steam Community，并从 Steam CDN 加载头像。
+    # 默认开启以提供自然的增强体验；关闭后不会发起这类请求，并自动回退到本地首字占位。
+    steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
     # 虚拟键盘 overlay（OBS Browser Source 实时合成）

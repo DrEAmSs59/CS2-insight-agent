@@ -25,6 +25,20 @@ from .parse_utils import (
 from .tag_constants import TICK_RATE
 
 
+_PLAYER_COLOR_NAMES = ("blue", "green", "yellow", "orange", "purple")
+
+
+def _player_color_name(value: object) -> str | None:
+    raw = _cell_str(value).lower()
+    if raw in _PLAYER_COLOR_NAMES:
+        return raw
+    try:
+        index = int(float(raw))
+    except (TypeError, ValueError):
+        return None
+    return _PLAYER_COLOR_NAMES[index] if 0 <= index < len(_PLAYER_COLOR_NAMES) else None
+
+
 def _is_real_steamid64(sid: object) -> bool:
     """是否为真实的 64 位 SteamID（剔除 GOTV/bot 等伪 id，如 "17"）。"""
     s = _norm_steam_id(sid)
@@ -338,6 +352,7 @@ def _build_all_players_roster(
     name_to_team_pi: Optional[dict[str, int]] = None,
     player_ticks_df: Optional[pd.DataFrame] = None,
     expected_names: Optional[list[str] | tuple[str, ...] | set[str]] = None,
+    require_player_color: bool = False,
 ) -> list[dict]:
     """全员名单：[{name, steamid64, spec_slot, team_num}, ...]。"""
     desired_tick = max(1, match_start_tick)
@@ -364,12 +379,12 @@ def _build_all_players_roster(
     )
     cache_complete = bool(cached_usable_names) and (
         not expected_name_keys or expected_name_keys.issubset(cached_usable_names)
-    )
+    ) and (not require_player_color or "player_color" in cached_df.columns)
     df = cached_df
     if not cache_complete:
         try:
             fresh_df = coalesce_player_team_num(_to_pandas_df(parser.parse_ticks(
-                ["name", "steamid", *PLAYER_TEAM_PARSE_FIELDS],
+                ["name", "steamid", "player_color", *PLAYER_TEAM_PARSE_FIELDS],
                 ticks=[desired_tick],
             )))
         except BaseException as e:
@@ -406,6 +421,7 @@ def _build_all_players_roster(
             "steamid64": str(sid_int) if sid_int is not None else "",
             "spec_slot": spec_slots.get(name.lower()),
             "team_num": team_num,
+            "player_color": _player_color_name(row.get("player_color")),
         })
 
     # 逐 tick team_num 在部分国服 demo 上几乎全为空，会导致名单残缺/单边。
@@ -741,7 +757,7 @@ def get_player_list(
 
     def _touch(name: str) -> dict:
         if name not in stats:
-            stats[name] = {"kills": 0, "deaths": 0, "assists": 0, "team": None}
+            stats[name] = {"kills": 0, "deaths": 0, "assists": 0, "team": None, "player_color": None}
         return stats[name]
 
     def _set_team_if_missing(name: str, team_val: Optional[int]) -> None:
@@ -791,22 +807,31 @@ def get_player_list(
     if match_start_tick > 0 and stats:
         try:
             fix_df = coalesce_player_team_num(_to_pandas_df(
-                parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name"], ticks=[match_start_tick]),
+                parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name", "player_color"], ticks=[match_start_tick]),
             ))
         except BaseException as e:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
                 raise
-            fix_df = pd.DataFrame()
+            try:
+                fix_df = coalesce_player_team_num(_to_pandas_df(
+                    parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name"], ticks=[match_start_tick]),
+                ))
+            except BaseException as fallback_error:
+                if isinstance(fallback_error, _DEMOPARSER_RE_RAISE):
+                    raise
+                fix_df = pd.DataFrame()
         if not fix_df.empty and "name" in fix_df.columns:
             for _, r in fix_df.iterrows():
                 nm = _cell_str(r.get("name"))
                 tm = _cell_team(r.get("team_num"))
-                if not nm or tm is None:
+                if not nm:
                     continue
                 nl = nm.lower()
                 for key in stats:
                     if key.lower() == nl:
-                        stats[key]["team"] = tm
+                        if tm is not None:
+                            stats[key]["team"] = tm
+                        stats[key]["player_color"] = _player_color_name(r.get("player_color"))
                         break
 
     player_info_team_by_name: dict[str, int] = {}
@@ -900,6 +925,7 @@ def get_player_list(
                 "user_id": _spec_player_slot_from_event_user_id(event_uid, dem_path, tuple(name_to_uid.values()))
                 or lookup_spec_player_slot_for_name(spec_slots, n),
                 "steam_id": str(sid_i) if sid_i is not None else None,
+                "player_color": stats[n].get("player_color"),
             },
         )
     return rows

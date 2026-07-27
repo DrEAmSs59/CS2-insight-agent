@@ -227,6 +227,38 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(shell.setCurrentMatchIndex).toHaveBeenCalledWith(1);
   });
 
+  test("loads optional Steam CDN avatars and keeps the Demo player color", async () => {
+    const shell = buildShell();
+    shell.players = shell.players.map((player, index) => (
+      index === 0
+        ? { ...player, steam_id64: "76561198000000001", player_color: "purple" }
+        : player
+    ));
+    API.get.mockResolvedValueOnce({
+      data: {
+        enabled: true,
+        avatars: {
+          "76561198000000001": "https://avatars.cloudflare.steamstatic.com/abc_full.jpg",
+        },
+      },
+    });
+
+    const view = renderPage(shell);
+
+    await waitFor(() => expect(API.get).toHaveBeenCalledWith("/steam/player-avatars", {
+      params: { steam_ids: "76561198000000001" },
+    }));
+    const avatar = await screen.findByAltText("ZywOo Steam avatar");
+    const avatarFrame = avatar.parentElement;
+    expect(avatar.getAttribute("src")).toContain("avatars.cloudflare.steamstatic.com");
+    expect(avatarFrame?.getAttribute("data-player-color-source")).toBe("demo");
+    expect(avatarFrame?.getAttribute("style")).toContain("--cs2-player-purple");
+
+    fireEvent.error(avatar);
+    expect(view.container.querySelector('img[alt="ZywOo Steam avatar"]')).toBeNull();
+    expect(avatarFrame?.textContent).toContain("Z");
+  });
+
   test("keeps batch parsing inside the upload box until every demo is ready", () => {
     const shell = buildShell({
       parsingByIndex: { 0: true },

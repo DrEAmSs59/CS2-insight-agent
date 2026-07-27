@@ -751,6 +751,7 @@ class DemoAnalyzer:
             self.dem_path,
             player_ticks_df=roster_ticks_df,
             expected_names=expected_roster_names,
+            require_player_color=True,
         )
         all_players_roster = _build_all_players_roster(
             self.parser,

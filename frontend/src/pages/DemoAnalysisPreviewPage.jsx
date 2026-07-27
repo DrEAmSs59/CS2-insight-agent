@@ -25,6 +25,7 @@ import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView
 import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import Demo2DReplayPreview from "../components/analysis/Demo2DReplayPreview";
 import DemoHeatmapView from "../components/analysis/DemoHeatmapView";
+import PlayerIdentityAvatar from "../components/analysis/PlayerIdentityAvatar";
 import { useReplayStore } from "../stores/replayStore";
 import {
   EconomyView,
@@ -36,13 +37,15 @@ import {
 import Button from "../components/ui/Button";
 import { useAppShell } from "../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
+import { useSteamPlayerAvatars } from "../hooks/useSteamPlayerAvatars.js";
 import useSessionState from "../hooks/useSessionState";
 import { useT } from "../i18n/useT.js";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import { labelTag } from "../utils/tagDescriptions.js";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
+import { playerAppearance, steamIdForPlayer } from "../utils/playerAppearance.js";
 
-const PAGE_CONTAINER_CLASS = "mx-auto w-full max-w-[1440px] px-5 sm:px-5";
+const PAGE_CONTAINER_CLASS = "w-full px-3 sm:px-4";
 
 const TABS = [
   { key: "highlights", labelKey: "analysis.workspace.tabHighlights", icon: Film },
@@ -86,23 +89,6 @@ function mapLabel(mapName, t) {
   const raw = String(mapName || "").trim();
   if (!raw) return t("analysis.workspace.unknownMap");
   return raw.replace(/^de_/, "").replace(/^./, (value) => value.toUpperCase());
-}
-
-function Panel({ title, eyebrow, action, children, className = "" }) {
-  return (
-    <section className={`rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm ${className}`}>
-      {(title || eyebrow || action) && (
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
-          <div className="min-w-0">
-            {eyebrow && <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-cs2-accent">{eyebrow}</p>}
-            {title && <h2 className="truncate text-[13px] font-bold text-cs2-text-primary">{title}</h2>}
-          </div>
-          {action}
-        </header>
-      )}
-      {children}
-    </section>
-  );
 }
 
 function DemoSelector({ matches, currentIndex, onChange, disabled }) {
@@ -185,36 +171,45 @@ function DemoSelector({ matches, currentIndex, onChange, disabled }) {
   );
 }
 
-function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers, totalPlayers, parsing, onSelect }) {
+function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers, totalPlayers, parsing, avatars, onSelect }) {
   const t = useT();
   const renderTeam = (players, teamName, tone) => {
     const isBlue = tone === "blue";
     return (
-      <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-2.5">
-        <div className="mb-2 flex items-center gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
-          <span className={`h-2 w-2 rounded-full ${isBlue ? "bg-sky-400" : "bg-amber-400"}`} />
-          {teamName}
+      <div className="border-b border-cs2-border-subtle last:border-b-0">
+        <div className="flex items-center gap-2 px-3 pb-1.5 pt-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
+          <span className="h-2 w-2 rounded-full" style={{ background: isBlue ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
+          <span className="truncate">{teamName}</span>
         </div>
-        <div className="grid gap-1.5 sm:grid-cols-5 md:grid-cols-1 lg:grid-cols-5">
+        <div className="space-y-1 px-2 pb-2">
           {players.map((player) => {
             const name = playerName(player);
             const active = name === activePlayer;
             const clipCount = (parsedPlayers?.[name]?.clips || []).filter((clip) => clip.category !== "meme_death").length;
+            const appearance = playerAppearance(player, isBlue ? "blue" : "amber");
+            const avatarUrl = avatars?.[steamIdForPlayer(player)] || "";
             return (
               <button
                 key={`${name}-${player?.steam_id64 || player?.steam_id || ""}`}
                 type="button"
                 aria-label={t("analysis.workspace.selectPlayerAria", { name })}
                 onClick={() => onSelect(name)}
-                className={`rounded-lg border px-2 py-2 text-left transition-colors ${active ? (isBlue ? "border-sky-400/60 bg-sky-500/10" : "border-amber-400/60 bg-amber-500/10") : "border-cs2-border bg-cs2-bg-card hover:bg-cs2-bg-hover"}`}
+                className={`grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-all ${active ? "border-current shadow-sm" : "border-transparent hover:border-cs2-border hover:bg-cs2-bg-hover"}`}
+                style={active ? {
+                  color: appearance.color,
+                  background: appearance.background,
+                } : undefined}
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-[10px] font-bold text-cs2-text-primary">{name}</span>
-                  {active ? <span className={`h-1.5 w-1.5 rounded-full ${isBlue ? "bg-sky-400" : "bg-amber-400"}`} /> : null}
+                <PlayerIdentityAvatar player={player} avatarUrl={avatarUrl} fallbackTone={isBlue ? "blue" : "amber"} className="h-7 w-7 text-[10px]" />
+                <div className="min-w-0">
+                  <span className="block truncate text-[11px] font-bold text-cs2-text-primary">{name}</span>
+                  <span className="mt-0.5 block font-mono text-[9px] text-cs2-text-muted">
+                    {Number(player?.kills || 0)} / {Number(player?.deaths || 0)}
+                  </span>
                 </div>
-                <p className="mt-1 font-mono text-[10px] text-cs2-text-muted">
-                  {t("analysis.workspace.playerClips", { kills: Number(player?.kills || 0), deaths: Number(player?.deaths || 0), clips: clipCount })}
-                </p>
+                <span className={`min-w-6 rounded-md px-1.5 py-1 text-center font-mono text-[9px] font-bold ${active ? "bg-cs2-bg-card/70" : "bg-cs2-bg-input text-cs2-text-muted"}`}>
+                  {clipCount}
+                </span>
               </button>
             );
           })}
@@ -224,22 +219,161 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
   };
 
   return (
-    <Panel
-      title={t("analysis.workspace.selectPlayer")}
-      action={(
+    <section className="analysis-rail-card flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="flex min-h-11 items-center justify-between gap-2 border-b border-cs2-border-subtle px-3">
+        <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-cs2-text-primary">{t("analysis.workspace.selectPlayer")}</h2>
         <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-cs2-text-muted">
           {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-emerald-400" />}
           {parsing
             ? t("analysis.workspace.parsingFullMatch")
             : t("analysis.workspace.parsedPlayers", { parsed: Object.keys(parsedPlayers || {}).length, total: totalPlayers })}
         </span>
-      )}
-    >
-      <div className="grid gap-3 p-3 md:grid-cols-2">
+      </header>
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
         {renderTeam(teams.a, teamAName, "blue")}
         {renderTeam(teams.b, teamBName, "amber")}
       </div>
-    </Panel>
+    </section>
+  );
+}
+
+function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapName, totalRounds, durationMins }) {
+  const t = useT();
+  return (
+    <section className="analysis-rail-card overflow-hidden">
+      <div className="h-0.5 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
+      <div className="px-3 pb-3 pt-2.5">
+        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.matchSummary")}</p>
+        <div className="my-2.5 flex items-center justify-center gap-2.5">
+          <span className="font-mono text-3xl font-black" style={{ color: "var(--cs2-team-blue)" }}>{teamAScore}</span>
+          <span className="text-base font-black text-cs2-text-muted">:</span>
+          <span className="font-mono text-3xl font-black" style={{ color: "var(--cs2-team-amber)" }}>{teamBScore}</span>
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+            <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-blue)" }}>{teamAName}</span>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-blue)" }} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+            <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-amber)" }}>{teamBName}</span>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-amber)" }} />
+          </div>
+        </div>
+        <p className="mt-2.5 border-t border-cs2-border-subtle pt-2 text-center font-mono text-[9px] uppercase tracking-wider text-cs2-text-muted">
+          {mapLabel(mapName, t)} · {t("analysis.workspace.rounds", { n: totalRounds })}{durationMins > 0 ? ` · ${t("analysis.workspace.minutes", { n: durationMins })}` : ""}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function PlayerContextRail({
+  activeTab,
+  activeHighlightView,
+  setActiveHighlightView,
+  selectedPlayer,
+  activePlayer,
+  regularClips,
+  playerAiReviewing,
+  playerAiReviewed,
+  aiMode,
+  tagCounts,
+  selectedTag,
+  setSelectedTag,
+  locale,
+  currentUpload,
+  onPlayDemo,
+  onSwitchDemo,
+  switchDisabled,
+  avatars,
+}) {
+  const t = useT();
+  const isBlue = playerTeamNumber(selectedPlayer) === 2;
+  const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
+  const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
+  return (
+    <aside className="analysis-workspace-right custom-scrollbar min-h-0 space-y-3 overflow-y-auto">
+      <section className="analysis-rail-card overflow-hidden">
+        <header className="border-b border-cs2-border-subtle px-3 py-2.5">
+          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
+        </header>
+        {selectedPlayer ? (
+          <div className="p-3">
+            <div className="flex items-center gap-2.5">
+              <PlayerIdentityAvatar player={selectedPlayer} avatarUrl={selectedAvatarUrl} fallbackTone={isBlue ? "blue" : "amber"} className="h-9 w-9 text-sm" />
+              <div className="min-w-0">
+                <h2 className="truncate text-[13px] font-black text-cs2-text-primary">{activePlayer}</h2>
+                <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.13em]" style={{ color: selectedAppearance.color }}>
+                  {t("analysis.workspace.focusedPlayer")}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+              {[
+                [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
+                [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
+                [t("analysis.workspace.clips"), regularClips.length],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg bg-cs2-bg-input px-2 py-2 text-center">
+                  <strong className="block font-mono text-sm text-cs2-text-primary">{value}</strong>
+                  <span className="mt-0.5 block text-[9px] text-cs2-text-muted">{label}</span>
+                </div>
+              ))}
+            </div>
+            {aiMode && activeTab === "highlights" && activeHighlightView === "clips" ? (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/8 px-2.5 py-2 text-[10px] text-violet-300">
+                {playerAiReviewing ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="px-3 py-6 text-center">
+            <Users className="mx-auto h-5 w-5 text-cs2-text-muted" />
+            <p className="mt-2 text-[11px] font-bold text-cs2-text-primary">{t("analysis.workspace.noPlayerContext")}</p>
+            <p className="mt-1 text-[9px] leading-relaxed text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p>
+          </div>
+        )}
+      </section>
+
+      {activeTab === "highlights" && selectedPlayer ? (
+        <section className="analysis-rail-card p-2.5">
+          <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.highlightMode")}</p>
+          <div className="grid grid-cols-3 gap-1 rounded-lg bg-cs2-bg-input p-1">
+            {[["clips", "analysis.tabClips"], ["rounds", "analysis.tabTimeline"], ["weapons", "analysis.tabWeaponKills"]].map(([key, labelKey]) => (
+              <button key={key} type="button" onClick={() => setActiveHighlightView(key)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition-colors ${activeHighlightView === key ? "bg-cs2-bg-card text-cs2-text-primary shadow-sm" : "text-cs2-text-muted hover:text-cs2-text-primary"}`}>
+                {t(labelKey)}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "highlights" && selectedPlayer && activeHighlightView === "clips" ? (
+        <section className="analysis-rail-card p-2.5">
+          <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.tags")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {tagCounts.map(([tag, count]) => (
+              <button key={tag} type="button" onClick={() => setSelectedTag(tag)} className={`rounded-md border px-2 py-1 text-[9px] font-semibold transition-colors ${selectedTag === tag ? "border-cs2-accent/45 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border-subtle bg-cs2-bg-input/60 text-cs2-text-muted hover:text-cs2-text-primary"}`}>
+                {tag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(tag, locale)} <span className="ml-0.5 font-mono opacity-70">{count}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="analysis-rail-card p-2.5">
+        <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoActions")}</p>
+        <div className="grid gap-1.5">
+          <Button variant="secondary" size="sm" className="w-full justify-center" disabled={!currentUpload?.id && !currentUpload?.path} onClick={onPlayDemo}>
+            <Play className="h-3 w-3 fill-current" />{t("analysis.workspace.playDemo")}
+          </Button>
+          <Button variant="secondary" size="sm" className="w-full justify-center" onClick={onSwitchDemo} disabled={switchDisabled}>
+            <RefreshCw className="h-3.5 w-3.5" />{t("analysis.workspace.switchDemo")}
+          </Button>
+        </div>
+      </section>
+    </aside>
   );
 }
 
@@ -291,6 +425,7 @@ export default function DemoAnalysisPreviewPage() {
       : t("analysis.workspace.batchPending", { n: Math.max(0, uploadedDemoCount - parsedDemoCount) }));
   const meta = s.matchMeta || currentUpload?.match_meta || matches[s.currentMatchIndex]?.match_meta || {};
   const teams = useMemo(() => splitTeams(s.players), [s.players]);
+  const steamAvatars = useSteamPlayerAvatars(s.players);
   const teamAName = meta.team_a_name || firstTeamName(teams.a, "Team A");
   const teamBName = meta.team_b_name || firstTeamName(teams.b, "Team B");
   const workspaceFallback = useMemo(() => ({
@@ -315,7 +450,6 @@ export default function DemoAnalysisPreviewPage() {
     clip?.ai_score != null || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
   ));
   const playerAiReviewing = Boolean(s.aiReviewingPlayers?.[`${s.currentMatchIndex}:${activePlayer}`]);
-  const totalClips = Object.values(s.currentParsed?.players || {}).reduce((sum, player) => sum + (player?.clips || []).filter((clip) => clip.category !== "meme_death").length, 0);
   const regularClips = (s.clips || []).filter((clip) => clip.category !== "meme_death");
   const tagCounts = useMemo(() => {
     const counts = new Map([[ALL_TAG, regularClips.length]]);
@@ -330,6 +464,7 @@ export default function DemoAnalysisPreviewPage() {
 
   const selectPlayer = (name) => {
     s.setActivePlayerTabs((previous) => ({ ...previous, [s.currentMatchIndex]: name }));
+    setStatsPlayer(name);
     setActiveHighlightView("clips");
     setSelectedTag(ALL_TAG);
     if (s.aiMode) void s.ensurePlayerAiReview?.(name, s.currentMatchIndex);
@@ -391,51 +526,32 @@ export default function DemoAnalysisPreviewPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
-      <header className="relative z-[60] shrink-0 overflow-visible border-b border-cs2-border bg-cs2-bg-page/95 py-3 backdrop-blur-md">
+      <header className="relative z-[60] shrink-0 overflow-visible border-b border-cs2-border-subtle bg-cs2-bg-card/92 py-2 backdrop-blur-md">
         <div className={`${PAGE_CONTAINER_CLASS} flex flex-wrap items-center justify-between gap-3`} data-testid="demo-analysis-header-container">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent"><BarChart3 className="h-4.5 w-4.5" /></div>
-            <div className="min-w-0"><h1 className="text-[15px] font-black tracking-wide">{t("analysis.workspace.title")}</h1><p className="truncate font-mono text-[10px] text-cs2-text-muted">{s.currentFilename} · {s.currentMatchIndex + 1}/{matches.length}</p></div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent"><BarChart3 className="h-4 w-4" /></div>
+            <div className="min-w-0"><h1 className="text-[14px] font-black tracking-wide">{t("analysis.workspace.title")}</h1><p className="truncate font-mono text-[9px] text-cs2-text-muted">{s.currentFilename} · {s.currentMatchIndex + 1}/{matches.length}</p></div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <DemoSelector matches={matches} currentIndex={s.currentMatchIndex} onChange={s.setCurrentMatchIndex} disabled={s.batchRecording} />
-            <Button variant="secondary" size="sm" disabled={!currentUpload?.id && !currentUpload?.path} onClick={playCurrentDemo}><Play className="h-3 w-3 fill-current" />{t("analysis.workspace.playDemo")}</Button>
-            <Button variant="secondary" size="sm" onClick={s.handleResetDemo} disabled={s.anyDemoParsing || s.batchRecording}><RefreshCw className="h-3.5 w-3.5" />{t("analysis.workspace.switchDemo")}</Button>
-          </div>
+          <DemoSelector matches={matches} currentIndex={s.currentMatchIndex} onChange={s.setCurrentMatchIndex} disabled={s.batchRecording} />
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <main className={`${PAGE_CONTAINER_CLASS} space-y-3 py-3`} data-testid="demo-analysis-content-container">
-          <section className="relative overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-md">
-            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
-            <div className="grid h-[72px] items-center gap-2 px-4 md:grid-cols-[1fr_auto_1fr]">
-              <div className={`flex min-w-0 items-center gap-2.5 md:justify-end md:text-right ${teamAScore > teamBScore ? "rounded-md bg-sky-500/8 px-2 py-1" : ""}`}>
-                <div className="order-2 min-w-0 md:order-1">
-                  <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-sky-400">{teamAName}</p>
-                </div>
-                <div className="order-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sm font-black text-sky-400 md:order-2">{teamAName.slice(0, 1).toUpperCase()}</div>
-              </div>
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-2.5">
-                  <span className="font-mono text-3xl font-black text-sky-300">{teamAScore}</span>
-                  <span className="text-lg font-black text-cs2-text-muted">:</span>
-                  <span className="font-mono text-3xl font-black text-amber-300">{teamBScore}</span>
-                </div>
-                <div className="mt-0.5 text-[10px] uppercase tracking-wider text-cs2-text-muted">
-                  {mapLabel(meta.map_name, t)} · {t("analysis.workspace.rounds", { n: totalRounds })}{durationMins > 0 ? ` · ${t("analysis.workspace.minutes", { n: durationMins })}` : ""}
-                </div>
-              </div>
-              <div className={`flex min-w-0 items-center gap-2.5 ${teamBScore > teamAScore ? "rounded-md bg-amber-500/8 px-2 py-1" : ""}`}>
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-sm font-black text-amber-400">{teamBName.slice(0, 1).toUpperCase()}</div>
-                <div className="min-w-0">
-                  <p className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400">{teamBName}</p>
-                </div>
-              </div>
-            </div>
-          </section>
+      <main className={`${PAGE_CONTAINER_CLASS} analysis-workspace-grid min-h-0 flex-1 py-3`} data-testid="demo-analysis-content-container">
+        <aside className="analysis-workspace-left flex min-h-0 flex-col gap-3">
+          <MatchRailSummary
+            teamAName={teamAName}
+            teamBName={teamBName}
+            teamAScore={teamAScore}
+            teamBScore={teamBScore}
+            mapName={meta.map_name}
+            totalRounds={totalRounds}
+            durationMins={durationMins}
+          />
+          <PlayerPicker teams={teams} teamAName={teamAName} teamBName={teamBName} activePlayer={activePlayer} parsedPlayers={parsedPlayers} totalPlayers={s.players.length} parsing={parsingCurrent} avatars={steamAvatars} onSelect={selectPlayer} />
+        </aside>
 
-          <nav className="flex h-10 gap-1 overflow-x-auto rounded-[10px] border border-cs2-border bg-cs2-bg-card p-1" aria-label={t("analysis.workspace.demoViews")}>
+        <section className="analysis-workspace-center flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-sm">
+          <nav className="flex min-h-11 shrink-0 gap-0.5 overflow-x-auto border-b border-cs2-border-subtle p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("analysis.workspace.demoViews")}>
             {TABS.map(({ key, labelKey, icon: Icon }) => (
               <button
                 key={key}
@@ -446,7 +562,7 @@ export default function DemoAnalysisPreviewPage() {
                   }
                 }}
                 onClick={() => setActiveTab(key)}
-                className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/20" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}
+                className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}
               >
                 <Icon className="h-3.5 w-3.5" />
                 {t(labelKey)}
@@ -454,24 +570,23 @@ export default function DemoAnalysisPreviewPage() {
             ))}
           </nav>
 
-          {activeTab === "highlights" && (
-            <div className="space-y-4">
-              <PlayerPicker teams={teams} teamAName={teamAName} teamBName={teamBName} activePlayer={activePlayer} parsedPlayers={parsedPlayers} totalPlayers={s.players.length} parsing={parsingCurrent} onSelect={selectPlayer} />
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+            {activeTab === "highlights" && (
+              <div className="space-y-3">
               {!s.currentParsed ? <EmptyResult parsing={parsingCurrent} onAnalyze={() => void s.handleParse()} disabled={!canAnalyze} /> : !selectedPlayer ? (
-                <div className="flex min-h-[260px] items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-card/45 p-8 text-center"><div><Users className="mx-auto h-7 w-7 text-cs2-text-muted" /><h2 className="mt-3 text-[13px] font-bold">{t("analysis.workspace.pickPlayerFirst")}</h2><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p></div></div>
+                <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-page/45 p-8 text-center"><div><Users className="mx-auto h-7 w-7 text-cs2-text-muted" /><h2 className="mt-3 text-[13px] font-bold">{t("analysis.workspace.pickPlayerFirst")}</h2><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p></div></div>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="inline-flex rounded-lg border border-cs2-border bg-cs2-bg-card p-0.5">
-                      {[["clips", "analysis.tabClips"], ["rounds", "analysis.tabTimeline"], ["weapons", "analysis.tabWeaponKills"]].map(([key, labelKey]) => <button key={key} type="button" onClick={() => setActiveHighlightView(key)} className={`rounded-md px-3 py-1.5 text-[11px] font-semibold ${activeHighlightView === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-primary"}`}>{t(labelKey)}</button>)}
+                  <div className="flex items-center justify-between gap-3 rounded-lg bg-cs2-bg-page/55 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: playerTeamNumber(selectedPlayer) === 2 ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
+                      <b className="truncate text-[11px] text-cs2-text-primary">{activePlayer}</b>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-cs2-text-muted"><span className={`h-2 w-2 rounded-full ${playerTeamNumber(selectedPlayer) === 2 ? "bg-sky-400" : "bg-amber-400"}`} /><b className="text-cs2-text-primary">{activePlayer}</b><span>{t("analysis.workspace.playerClips", { kills: Number(selectedPlayer.kills || 0), deaths: Number(selectedPlayer.deaths || 0), clips: regularClips.length })}</span></div>
+                    <span className="shrink-0 font-mono text-[9px] text-cs2-text-muted">{t("analysis.workspace.playerClips", { kills: Number(selectedPlayer.kills || 0), deaths: Number(selectedPlayer.deaths || 0), clips: regularClips.length })}</span>
                   </div>
 
                   {activeHighlightView === "clips" && (
                     <>
-                      {s.aiMode && <div className="flex items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/10 px-3 py-2.5 text-[11px] text-violet-200">{playerAiReviewing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Bot className="h-4 w-4 shrink-0" />}<span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span></div>}
-                      <Panel><div className="flex flex-wrap items-center gap-1.5 p-3"><span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{t("analysis.workspace.tags")}</span>{tagCounts.map(([tag, count]) => <button key={tag} type="button" onClick={() => setSelectedTag(tag)} className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors ${selectedTag === tag ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/80 bg-cs2-bg-input/35 text-cs2-text-muted hover:text-cs2-text-primary"}`}>{tag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(tag, locale)} <span className="ml-1 font-mono opacity-70">{count}</span></button>)}</div></Panel>
                       <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
                       {regularClips.length > 0 && <ActionBar selectedCount={s.selectedRegularCount} totalCount={s.regularSelectableTotal} hasSelection={s.selectedClientClipUids.size > 0} onSelectAll={s.handleSelectAll} onDeselectAll={s.handleDeselectAll} onAddSelectedToQueue={s.handleAddSelectedToQueue} onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights} currentPlayer={activePlayer} queueLength={s.queue.length} batchRecording={s.batchRecording} canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights} sticky />}
                     </>
@@ -480,10 +595,10 @@ export default function DemoAnalysisPreviewPage() {
                   {activeHighlightView === "weapons" && <WeaponKillsView roundTimeline={s.roundTimeline} focusedPlayer={activePlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAdd={s.handleAddWeaponKillsToQueue} onRemove={s.handleDequeueClip} onAddEvent={s.handleAddTimelineEventToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} suppressSummaryHeader />}
                 </>
               )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {activeTab === "replay" && (
+            {activeTab === "replay" && (
             <Demo2DReplayPreview
               key={currentUpload?.path || currentUpload?.id || s.currentMatchIndex}
               workspace={workspace}
@@ -494,18 +609,18 @@ export default function DemoAnalysisPreviewPage() {
               initialRound={replayRound}
               onRoundChange={setReplayRound}
             />
-          )}
+            )}
 
-          {activeTab === "heatmap" && (
+            {activeTab === "heatmap" && (
             <DemoHeatmapView
               key={currentUpload?.path || currentUpload?.id || s.currentMatchIndex}
               workspace={workspace}
               demoPath={currentUpload?.path}
               players={s.players}
             />
-          )}
+            )}
 
-          {activeTab === "overview" && (
+            {activeTab === "overview" && (
             <OverviewView
               data={workspace}
               onSelectPlayer={openPlayerStats}
@@ -513,31 +628,53 @@ export default function DemoAnalysisPreviewPage() {
               onOpenReplayRound={openReplayRound}
               onOpenHighlights={() => setActiveTab("highlights")}
             />
-          )}
+            )}
 
-          {activeTab === "rounds" && (
+            {activeTab === "rounds" && (
             <RoundsView
               data={workspace}
               selectedRound={selectedRound}
               onSelectRound={setSelectedRound}
               onOpenReplayRound={openReplayRound}
             />
-          )}
+            )}
 
-          {activeTab === "players" && (
+            {activeTab === "players" && (
             <PlayersView
               data={workspace}
               selectedPlayer={statsPlayer || activePlayer}
               onSelectPlayer={setStatsPlayer}
               onBackToOverview={() => setActiveTab("overview")}
             />
-          )}
+            )}
 
-          {activeTab === "economy" && (
+            {activeTab === "economy" && (
             <EconomyView data={workspace} onOpenRound={openRound} />
-          )}
-        </main>
-      </div>
+            )}
+          </div>
+        </section>
+
+        <PlayerContextRail
+          activeTab={activeTab}
+          activeHighlightView={activeHighlightView}
+          setActiveHighlightView={setActiveHighlightView}
+          selectedPlayer={selectedPlayer}
+          activePlayer={activePlayer}
+          regularClips={regularClips}
+          playerAiReviewing={playerAiReviewing}
+          playerAiReviewed={playerAiReviewed}
+          aiMode={s.aiMode}
+          tagCounts={tagCounts}
+          selectedTag={selectedTag}
+          setSelectedTag={setSelectedTag}
+          locale={locale}
+          currentUpload={currentUpload}
+          onPlayDemo={playCurrentDemo}
+          onSwitchDemo={s.handleResetDemo}
+          switchDisabled={s.anyDemoParsing || s.batchRecording}
+          avatars={steamAvatars}
+        />
+      </main>
       <DemoPlaybackUi />
     </div>
   );

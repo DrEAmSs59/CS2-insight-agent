@@ -1,7 +1,6 @@
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
-import SidebarNav from "./components/SidebarNav";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
@@ -3193,7 +3192,7 @@ export default function App() {
   return (
     <AppShellProvider value={shell}>
       <div className="relative flex flex-col h-screen overflow-hidden bg-cs2-bg-dark">
-        <CustomTitleBar />
+        <CustomTitleBar queueLength={queue.length} disabled={batchRecording} />
         <div className="relative flex flex-1 overflow-hidden">
           {libraryLoadingOverlay && (
             <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
@@ -3203,10 +3202,6 @@ export default function App() {
               </div>
             </div>
           )}
-          <SidebarNav
-            queueLength={queue.length}
-            disabled={batchRecording}
-          />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
             {!isStandalonePreview && (!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">

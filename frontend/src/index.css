@@ -1,73 +1,113 @@
+@import "@radix-ui/colors/sand.css";
+@import "@radix-ui/colors/sand-dark.css";
+@import "@radix-ui/colors/orange.css";
+@import "@radix-ui/colors/orange-dark.css";
+@import "@radix-ui/colors/red.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/green.css";
+@import "@radix-ui/colors/green-dark.css";
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/cyan.css";
+@import "@radix-ui/colors/cyan-dark.css";
+@import "@radix-ui/colors/purple.css";
+@import "@radix-ui/colors/purple-dark.css";
+@import "@radix-ui/colors/violet.css";
+@import "@radix-ui/colors/violet-dark.css";
+@import "@radix-ui/colors/yellow.css";
+@import "@radix-ui/colors/yellow-dark.css";
 @import "tailwindcss";
 
-/* ===== 深色主题（默认） ===== */
+/* ===== 语义主题 =====
+ * Radix Colors owns the actual light/dark scales.  Application code consumes
+ * only these semantic aliases so a component never has to guess whether
+ * white, black, or a zinc shade is readable in the active theme.
+ */
 :root {
   /* 背景层次 */
-  --cs2-bg-page: #111111;
-  --cs2-bg-card: #1A1A1A;
-  --cs2-bg-sidebar: #161616;
-  --cs2-bg-input: #222222;
-  --cs2-bg-elevated: #2a2a2a;
+  --cs2-bg-page: var(--sand-1);
+  --cs2-bg-card: var(--sand-2);
+  --cs2-bg-sidebar: var(--sand-2);
+  --cs2-bg-input: var(--sand-3);
+  --cs2-bg-elevated: var(--sand-4);
 
   /* 交互状态 */
-  --cs2-bg-hover: rgba(255,255,255,0.05);
-  --cs2-bg-active: rgba(255,255,255,0.08);
-  --cs2-bg-overlay: rgba(0,0,0,0.60);
-  --cs2-bg-skeleton: rgba(255,255,255,0.04);
+  --cs2-bg-hover: var(--sand-3);
+  --cs2-bg-active: var(--sand-4);
+  --cs2-bg-overlay: color-mix(in srgb, var(--sand-12) 58%, transparent);
+  --cs2-bg-skeleton: var(--sand-4);
 
   /* 边框 */
-  --cs2-border: #2A2A2A;
-  --cs2-border-subtle: rgba(255,255,255,0.06);
+  --cs2-border: var(--sand-7);
+  --cs2-border-subtle: var(--sand-6);
   --cs2-border-focus: var(--cs2-accent);
-  --cs2-border-error: #ef4444;
+  --cs2-border-error: var(--red-9);
 
   /* 文字 */
-  --cs2-text-primary: #ffffff;
-  --cs2-text-secondary: #a1a1aa;
-  --cs2-text-muted: #71717a;
-  --cs2-text-on-accent: #000000;
-  --cs2-text-inverse: #000000;
-  --cs2-text-error: #fca5a5;
-  --cs2-text-success: #86efac;
+  --cs2-text-primary: var(--sand-12);
+  --cs2-text-secondary: var(--sand-11);
+  --cs2-text-muted: var(--sand-10);
+  --cs2-text-on-accent: #ffffff;
+  --cs2-text-inverse: var(--sand-1);
+  --cs2-text-error: var(--red-11);
+  --cs2-text-success: var(--green-11);
 
   /* 品牌色 */
-  --cs2-accent: #FF8C00;
-  --cs2-accent-light: #FFA500;
-  --cs2-accent-soft: rgba(255,140,0,0.10);
+  --cs2-accent: var(--orange-9);
+  --cs2-accent-light: var(--orange-10);
+  --cs2-accent-soft: var(--orange-3);
+  --cs2-team-blue: var(--blue-9);
+  --cs2-team-blue-soft: var(--blue-3);
+  --cs2-team-amber: var(--amber-9);
+  --cs2-team-amber-soft: var(--amber-3);
+
+  /* Demo 原生玩家颜色（blue / green / yellow / orange / purple） */
+  --cs2-player-blue: var(--blue-9);
+  --cs2-player-blue-soft: var(--blue-3);
+  --cs2-player-green: var(--green-9);
+  --cs2-player-green-soft: var(--green-3);
+  --cs2-player-yellow: var(--yellow-9);
+  --cs2-player-yellow-soft: var(--yellow-3);
+  --cs2-player-orange: var(--orange-9);
+  --cs2-player-orange-soft: var(--orange-3);
+  --cs2-player-purple: var(--purple-9);
+  --cs2-player-purple-soft: var(--purple-3);
 
   /* 语义色 */
-  --cs2-highlight: #4ADE80;
-  --cs2-fail: #F87171;
-  --cs2-compilation: #F59E0B;
+  --cs2-highlight: var(--green-9);
+  --cs2-fail: var(--red-9);
+  --cs2-compilation: var(--amber-9);
 
   /* 表面层次 */
   --cs2-surface-0: var(--cs2-bg-page);
   --cs2-surface-1: var(--cs2-bg-card);
   --cs2-surface-2: var(--cs2-bg-elevated);
-  --cs2-surface-3: #333333;
+  --cs2-surface-3: var(--sand-5);
 
   /* 滚动条 */
-  --cs2-scrollbar-track: #1a1a1a;
-  --cs2-scrollbar-thumb: #555555;
-  --cs2-scrollbar-thumb-hover: #777777;
+  --cs2-scrollbar-track: transparent;
+  --cs2-scrollbar-thumb: var(--sand-7);
+  --cs2-scrollbar-thumb-hover: var(--sand-8);
 
   /* 状态色 surface（badge/tag 背景） */
-  --cs2-rose-surface: rgba(248,113,113,0.12);
-  --cs2-emerald-surface: rgba(74,222,128,0.12);
-  --cs2-amber-surface: rgba(245,158,11,0.12);
-  --cs2-cyan-surface: rgba(34,211,238,0.12);
-  --cs2-fuchsia-surface: rgba(232,121,249,0.12);
-  --cs2-violet-surface: rgba(167,139,250,0.12);
-  --cs2-red-surface: rgba(248,113,113,0.12);
+  --cs2-rose-surface: var(--red-3);
+  --cs2-emerald-surface: var(--green-3);
+  --cs2-amber-surface: var(--amber-3);
+  --cs2-cyan-surface: var(--cyan-3);
+  --cs2-fuchsia-surface: var(--purple-3);
+  --cs2-violet-surface: var(--violet-3);
+  --cs2-red-surface: var(--red-3);
 
   /* 状态色 on-surface（badge/tag 文字） */
-  --cs2-rose-on-surface: #fca5a5;
-  --cs2-emerald-on-surface: #86efac;
-  --cs2-amber-on-surface: #fcd34d;
-  --cs2-cyan-on-surface: #a5f3fc;
-  --cs2-fuchsia-on-surface: #f0abfc;
-  --cs2-violet-on-surface: #c4b5fd;
-  --cs2-red-on-surface: #fca5a5;
+  --cs2-rose-on-surface: var(--red-11);
+  --cs2-emerald-on-surface: var(--green-11);
+  --cs2-amber-on-surface: var(--amber-11);
+  --cs2-cyan-on-surface: var(--cyan-11);
+  --cs2-fuchsia-on-surface: var(--purple-11);
+  --cs2-violet-on-surface: var(--violet-11);
+  --cs2-red-on-surface: var(--red-11);
 
   /* 阴影 */
   --cs2-shadow: rgba(0,0,0,0.20);
@@ -77,11 +117,11 @@
   --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,0.20);
 
   /* 动态颜色替换 (白/黑，各种 zinc) */
-  --cs2-dynamic-white: #ffffff;
-  --cs2-dynamic-zinc-400: #a1a1aa;
-  --cs2-dynamic-zinc-300: #d4d4d8;
-  --cs2-dynamic-zinc-200: #e4e4e7;
-  --cs2-dynamic-zinc-100: #f4f4f5;
+  --cs2-dynamic-white: var(--cs2-text-primary);
+  --cs2-dynamic-zinc-400: var(--cs2-text-secondary);
+  --cs2-dynamic-zinc-300: var(--sand-12);
+  --cs2-dynamic-zinc-200: var(--sand-12);
+  --cs2-dynamic-zinc-100: var(--sand-12);
 
   /* 动画 */
   --cs2-transition-fast: 150ms ease;
@@ -310,88 +350,52 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
 }
 
-/* ===== 浅色主题 ===== */
-.light {
-  /* 背景层次 */
-  --cs2-bg-page: #f4f4f5;      /* 页面背景：清爽浅灰 */
-  --cs2-bg-card: #ffffff;      /* 卡片背景：纯白 */
-  --cs2-bg-sidebar: #ffffff;   /* 侧边栏：纯白，提升明亮感 */
-  --cs2-bg-input: #f8fafc;     /* 输入框：极浅冷灰，与纯白背景卡片拉开明显差距 */
-  --cs2-bg-elevated: #ffffff;  /* 悬浮层/弹窗：纯白 */
+.dark { color-scheme: dark; }
+.light { color-scheme: light; }
 
-  /* 交互状态 */
-  --cs2-bg-hover: rgba(0,0,0,0.06);
-  --cs2-bg-active: rgba(0,0,0,0.10);
-  --cs2-bg-overlay: rgba(0,0,0,0.50);
-  --cs2-bg-skeleton: rgba(0,0,0,0.08);
+.app-topbar {
+  height: 50px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
 
-  /* 边框 */
-  --cs2-border: #a1a1aa;       /* 主边框：加深到 a1a1aa，保证分割线、外框十分清晰 */
-  --cs2-border-subtle: #d4d4d8;/* 次级边框：加深到 d4d4d8，保证输入框、内部分割边界可见 */
-  --cs2-border-focus: var(--cs2-accent);
-  --cs2-border-error: #ef4444;
+.analysis-workspace-grid {
+  display: grid;
+  grid-template-columns: 228px minmax(0, 1fr) 250px;
+  gap: 12px;
+}
 
-  /* 文字 */
-  --cs2-text-primary: #000000; /* 主标题/正文：纯黑，极限对比度 */
-  --cs2-text-secondary: #27272a; /* 次要文字：极深灰，保证亮色下绝不发虚 */
-  --cs2-text-muted: #3f3f46;   /* 辅助文字：深灰，保证亮色下清晰易读 */
-  --cs2-text-on-accent: #ffffff;
-  --cs2-text-inverse: #ffffff;
-  --cs2-text-error: #b91c1c;   /* 错误色文字：暗红，极高可读性 */
-  --cs2-text-success: #15803d; /* 成功色文字：深绿，极高可读性 */
+.analysis-rail-card {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: 12px;
+  background: var(--cs2-bg-card);
+  box-shadow: var(--cs2-shadow-sm);
+}
 
-  /* 品牌色 */
-  --cs2-accent: #ea580c;       /* 品牌橙色：更加明快清晰 */
-  --cs2-accent-light: #f97316;
-  --cs2-accent-soft: rgba(234,88,12,0.15);
+@media (min-width: 1680px) {
+  .analysis-workspace-grid {
+    grid-template-columns: 244px minmax(0, 1fr) 272px;
+    gap: 14px;
+  }
+}
 
-  /* 语义色 */
-  --cs2-highlight: #15803d;
-  --cs2-fail: #dc2626;
-  --cs2-compilation: #d97706;
+@media (max-width: 1120px) {
+  .analysis-workspace-grid {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
 
-  /* 表面层次 (例如：没有选中时的按钮/模块底色) */
-  --cs2-surface-0: var(--cs2-bg-page);
-  --cs2-surface-1: var(--cs2-bg-card);
-  --cs2-surface-2: var(--cs2-bg-elevated);
-  --cs2-surface-3: #d4d4d8;    /* 明显加深的浅灰，用于未激活按钮或块级背景填充 */
+  .analysis-workspace-right {
+    display: none;
+  }
+}
 
-  /* 滚动条 */
-  --cs2-scrollbar-track: transparent;
-  --cs2-scrollbar-thumb: #a1a1aa;
-  --cs2-scrollbar-thumb-hover: #71717a;
+@media (max-width: 760px) {
+  .analysis-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-  /* 状态色 surface (背景色：提高透明度使其不再泛白发虚) */
-  --cs2-rose-surface: rgba(225,29,72,0.20);
-  --cs2-emerald-surface: rgba(16,185,129,0.20);
-  --cs2-amber-surface: rgba(245,158,11,0.20);
-  --cs2-cyan-surface: rgba(6,182,212,0.20);
-  --cs2-fuchsia-surface: rgba(217,70,239,0.20);
-  --cs2-violet-surface: rgba(139,92,246,0.20);
-  --cs2-red-surface: rgba(239,68,68,0.20);
-
-  /* 状态色 on-surface (文本色：采用最深的色阶以匹配加深的背景块) */
-  --cs2-rose-on-surface: #9f1239;
-  --cs2-emerald-on-surface: #064e3b;
-  --cs2-amber-on-surface: #78350f;
-  --cs2-cyan-on-surface: #164e63;
-  --cs2-fuchsia-on-surface: #701a75;
-  --cs2-violet-on-surface: #4c1d95;
-  --cs2-red-on-surface: #7f1d1d;
-
-  /* 阴影 */
-  --cs2-shadow: rgba(0,0,0,0.10);
-  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
-  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.12);
-  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.16);
-  --cs2-shadow-glow-accent: 0 0 16px rgba(234,88,12,0.20);
-
-  /* 动态颜色替换 (白/黑，各种 zinc) */
-  --cs2-dynamic-white: #000000;
-  --cs2-dynamic-zinc-400: #3f3f46; /* zinc-700 (之前您让我换成 zinc-100，在亮色下会看不见，我在此自动帮您修正为深灰) */
-  --cs2-dynamic-zinc-300: #27272a; /* zinc-800 */
-  --cs2-dynamic-zinc-200: #52525b; /* zinc-600 */
-  --cs2-dynamic-zinc-100: #18181b; /* zinc-900 */
+  .analysis-workspace-left {
+    display: none;
+  }
 }
 
 /* ===== Tailwind 主题注册 ===== */

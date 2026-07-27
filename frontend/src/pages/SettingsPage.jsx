@@ -150,18 +150,20 @@ function SelectInput({ value, onChange, options, className }) {
   );
 }
 
-function Toggle({ value, onChange, onLabel, offLabel }) {
+function Toggle({ value, onChange, onLabel, offLabel, ariaLabel }) {
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={() => onChange(!value)}
+        aria-label={ariaLabel ?? (value ? (onLabel ?? "On") : (offLabel ?? "Off"))}
+        aria-pressed={value}
         className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
           value ? "bg-cs2-accent" : "bg-cs2-bg-input"
         }`}
       >
         <span
-          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-cs2-text-on-accent shadow transition-transform ${
             value ? "translate-x-4" : "translate-x-0.5"
           }`}
         />
@@ -610,6 +612,7 @@ export default function SettingsPage() {
       payload.expected_parse_players = config.expected_parse_players ?? [];
       payload.steam_api_key = config.steam_api_key ?? "";
       payload.steam_id64 = config.steam_id64 ?? "";
+      payload.steam_cdn_assets_enabled = config.steam_cdn_assets_enabled !== false;
       payload.match_mode = config.match_mode ?? "premier";
       payload.match_count = config.match_count ?? 20;
 
@@ -950,6 +953,18 @@ export default function SettingsPage() {
                       { value: "zh", label: t("settings.localeZh") },
                       { value: "en", label: t("settings.localeEn") },
                     ]}
+                  />
+                </FieldRow>
+              </SectionCard>
+
+              <SectionCard title={t("settings.sectionNetworkAssets")} hint={t("settings.sectionNetworkAssetsHint")} search={search && !matches(t("settings.sectionNetworkAssets") + " Steam CDN avatar")}>
+                <FieldRow label={t("settings.labelSteamCdnAssets")} hint={t("settings.hintSteamCdnAssets")}>
+                  <Toggle
+                    value={config.steam_cdn_assets_enabled !== false}
+                    onChange={(value) => set("steam_cdn_assets_enabled", value)}
+                    ariaLabel={t("settings.labelSteamCdnAssets")}
+                    onLabel={t("settings.networkAssetsEnabled")}
+                    offLabel={t("settings.networkAssetsDisabled")}
                   />
                 </FieldRow>
               </SectionCard>

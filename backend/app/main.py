@@ -94,7 +94,10 @@ from .pov_hud_manager import PovHudError
 import httpx
 
 from .steam_match_history import (
+    _official_steam_avatar_url,
     fetch_match_history,
+    fetch_player_summaries,
+    fetch_public_player_summaries,
     fetch_player_summary,
     parse_match_row,
     download_demo,
@@ -148,7 +151,7 @@ except Exception:
 _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
     weakref.WeakValueDictionary()
 )
-_DEMO_ROSTER_CACHE_VERSION = 1
+_DEMO_ROSTER_CACHE_VERSION = 2
 
 # 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
 _enqueue_striped_locks: list[asyncio.Lock] = []
@@ -1394,6 +1397,7 @@ def _roster_rows_for_api(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "team": team,
                 "team_number": team,
                 "team_name": str(team_name).strip() if team_name not in (None, "") else None,
+                "player_color": str(raw.get("player_color") or "").strip().lower() or None,
                 "steam_id": steam_id,
                 "steam_id64": steam_id64,
                 "steamid64": steam_id64,
@@ -1796,6 +1800,49 @@ async def test_steam_connection(body: dict = Body(...)):
     if not player:
         raise HTTPException(404, "未找到该 SteamID 的玩家信息，请检查 SteamID64")
     return {"ok": True, "name": player.get("personaname", ""), "avatar": player.get("avatarfull", "")}
+
+
+@app.get("/api/steam/player-avatars")
+async def get_steam_player_avatars(
+    steam_ids: str = Query("", max_length=220),
+):
+    """Resolve optional Steam CDN avatars for one Demo roster."""
+    cfg = load_config()
+    if not cfg.steam_cdn_assets_enabled:
+        return {"enabled": False, "avatars": {}}
+
+    unique_ids: list[str] = []
+    for raw in steam_ids.split(","):
+        value = raw.strip()
+        if not value.isdigit() or not 15 <= len(value) <= 20 or value in unique_ids:
+            continue
+        unique_ids.append(value)
+        if len(unique_ids) >= 10:
+            break
+    if not unique_ids:
+        return {"enabled": True, "avatars": {}}
+
+    players: list[dict] = []
+    try:
+        players = await fetch_public_player_summaries(unique_ids)
+    except httpx.HTTPError as exc:
+        logger.info("Public Steam avatar lookup unavailable: %s", exc)
+
+    resolved_ids = {str(player.get("steamid") or "") for player in players}
+    missing_ids = [steam_id for steam_id in unique_ids if steam_id not in resolved_ids]
+    if missing_ids and cfg.steam_api_key:
+        try:
+            players.extend(await fetch_player_summaries(cfg.steam_api_key, missing_ids))
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.info("Steam Web API avatar lookup unavailable: %s", exc)
+
+    avatars: dict[str, str] = {}
+    for player in players:
+        steam_id = str(player.get("steamid") or "")
+        avatar_url = _official_steam_avatar_url(player.get("avatarfull"))
+        if steam_id in unique_ids and avatar_url:
+            avatars[steam_id] = avatar_url
+    return {"enabled": True, "avatars": avatars}
 
 
 @app.post("/api/match-history/download")
