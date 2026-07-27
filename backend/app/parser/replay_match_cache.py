@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,10 @@ from typing import Any
 
 from .. import native_table as pd
 from ..demoparser_runtime import REQUIRED_DEMOPARSER_VERSION
+from .replay_cache_storage import (
+    replay_cache_namespace_root,
+    replay_cache_namespace_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +71,16 @@ _COLOR_SLOTS = {
 
 
 def _cache_root() -> Path:
-    try:
-        from app.env_utils import get_data_dir
+    return replay_cache_namespace_root("matches")
 
-        root = get_data_dir() / "replay-match"
-    except Exception:
-        root = Path.cwd() / "data" / "replay-match"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+
+def _cache_roots() -> tuple[Path, ...]:
+    primary = _cache_root()
+    roots = [primary]
+    for candidate in replay_cache_namespace_roots("matches", create_primary=False):
+        if candidate not in roots:
+            roots.append(candidate)
+    return tuple(roots)
 
 
 def _demo_fingerprint(demo_path: str) -> dict[str, Any] | None:
@@ -110,6 +117,13 @@ def _cache_paths(cache_key: str) -> tuple[Path, Path]:
     root = _cache_root()
     root.mkdir(parents=True, exist_ok=True)
     return root / f"{cache_key}.parquet", root / f"{cache_key}.meta.json"
+
+
+def _cache_path_candidates(cache_key: str) -> tuple[tuple[Path, Path], ...]:
+    return tuple(
+        (root / f"{cache_key}.parquet", root / f"{cache_key}.meta.json")
+        for root in _cache_roots()
+    )
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -520,12 +534,15 @@ def materialize_match_replay_parquet_impl(
         raise FileNotFoundError(demo_path)
     parquet_path, meta_path = _cache_paths(cache_key)
 
-    existing = _load_meta(cache_key)
+    existing_entry = _load_meta_entry(cache_key)
+    existing = existing_entry[0] if existing_entry else None
+    existing_parquet_path = existing_entry[1] if existing_entry else None
     expected_boundaries = _round_boundaries(rounds)
     existing_boundaries = _round_boundaries(existing.get("rounds") or []) if existing else []
     if (
         existing is not None
-        and parquet_path.is_file()
+        and existing_parquet_path is not None
+        and existing_parquet_path.is_file()
         and existing_boundaries == expected_boundaries
     ):
         return {
@@ -533,10 +550,10 @@ def materialize_match_replay_parquet_impl(
             "cache_key": cache_key,
             "rounds": len(existing.get("rounds") or []),
             "frames": sum(_int(item.get("frame_count")) for item in existing.get("rounds") or []),
-            "bytes": parquet_path.stat().st_size,
+            "bytes": existing_parquet_path.stat().st_size,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
         }
-    if existing is not None and parquet_path.is_file():
+    if existing is not None and existing_parquet_path is not None and existing_parquet_path.is_file():
         logger.info(
             "Rebuilding stale replay Parquet round boundaries: key=%s cached=%s expected=%s",
             cache_key,
@@ -650,6 +667,7 @@ def materialize_match_replay_parquet_impl(
         )
         parquet_tmp.replace(parquet_path)
         meta_tmp.replace(meta_path)
+        remove_match_cache_for_demo(demo_path, keep_cache_key=cache_key)
     except Exception:
         parquet_tmp.unlink(missing_ok=True)
         meta_tmp.unlink(missing_ok=True)
@@ -693,22 +711,98 @@ def _load_meta_file(
     return payload if isinstance(payload, dict) else None
 
 
+def _load_meta_entry(cache_key: str) -> tuple[dict[str, Any], Path] | None:
+    for parquet_path, meta_path in _cache_path_candidates(cache_key):
+        if not parquet_path.is_file() or not meta_path.is_file():
+            continue
+        try:
+            stat = meta_path.stat()
+        except OSError:
+            continue
+        payload = _load_meta_file(str(meta_path), int(stat.st_mtime_ns), int(stat.st_size))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != REPLAY_MATCH_CACHE_VERSION
+            or payload.get("cache_key") != cache_key
+        ):
+            continue
+        return payload, parquet_path
+    return None
+
+
 def _load_meta(cache_key: str) -> dict[str, Any] | None:
-    parquet_path, meta_path = _cache_paths(cache_key)
-    if not parquet_path.is_file() or not meta_path.is_file():
-        return None
-    try:
-        stat = meta_path.stat()
-    except OSError:
-        return None
-    payload = _load_meta_file(str(meta_path), int(stat.st_mtime_ns), int(stat.st_size))
-    if (
-        not isinstance(payload, dict)
-        or payload.get("version") != REPLAY_MATCH_CACHE_VERSION
-        or payload.get("cache_key") != cache_key
-    ):
-        return None
-    return payload
+    entry = _load_meta_entry(cache_key)
+    return entry[0] if entry else None
+
+
+def _normalized_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def remove_match_cache_for_demo(
+    demo_path: str,
+    *,
+    keep_cache_key: str | None = None,
+) -> dict[str, int]:
+    """Remove whole-match Parquet entries associated with one Demo path."""
+    wanted = _normalized_path(demo_path)
+    current_fingerprint = _demo_fingerprint(demo_path) if keep_cache_key else None
+    removed_files = 0
+    removed_bytes = 0
+    seen: set[str] = set()
+    for root in _cache_roots():
+        if not root.is_dir():
+            continue
+        for meta_path in root.glob("*.meta.json"):
+            meta_key = _normalized_path(str(meta_path))
+            if meta_key in seen:
+                continue
+            seen.add(meta_key)
+            try:
+                payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001 - cleanup skips unknown files
+                logger.warning("whole-match replay metadata cleanup read failed for %s: %s", meta_path, exc)
+                continue
+            fingerprint = payload.get("demo_fingerprint") if isinstance(payload, dict) else None
+            cached_path = fingerprint.get("path") if isinstance(fingerprint, dict) else None
+            cache_key = str(payload.get("cache_key") or "") if isinstance(payload, dict) else ""
+            if not cached_path or _normalized_path(str(cached_path)) != wanted:
+                continue
+            if keep_cache_key:
+                if cache_key == keep_cache_key:
+                    continue
+                same_source_revision = bool(
+                    current_fingerprint
+                    and int(fingerprint.get("size") or -1) == current_fingerprint["size"]
+                    and int(fingerprint.get("mtime_ns") or -1) == current_fingerprint["mtime_ns"]
+                )
+                if (
+                    same_source_revision
+                    and payload.get("version") == REPLAY_MATCH_CACHE_VERSION
+                    and payload.get("parser_runtime") == REQUIRED_DEMOPARSER_VERSION
+                ):
+                    # A different FPS/tick-rate cache for the same current Demo
+                    # is still valid and must not be evicted by this build.
+                    continue
+            paths = (
+                meta_path,
+                root / f"{cache_key}.parquet",
+                root / f"{cache_key}.meta.json.partial",
+                root / f"{cache_key}.parquet.partial",
+            )
+            for path in paths:
+                if not path.is_file():
+                    continue
+                try:
+                    size = int(path.stat().st_size)
+                    path.unlink(missing_ok=True)
+                    removed_files += 1
+                    removed_bytes += size
+                except OSError as exc:
+                    logger.warning("whole-match replay cache cleanup failed for %s: %s", path, exc)
+    if removed_files:
+        _load_meta_file.cache_clear()
+    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
 
 
 def _attach_shots(frames: list[dict[str, Any]], shots: list[dict[str, Any]]) -> None:
@@ -742,9 +836,10 @@ def load_match_replay_round(
     cache_key = replay_match_cache_key(demo_path, fps=fps, tick_rate=tick_rate)
     if not cache_key:
         return None
-    meta = _load_meta(cache_key)
-    if meta is None:
+    entry = _load_meta_entry(cache_key)
+    if entry is None:
         return None
+    meta, parquet_path = entry
     spec = next(
         (
             item
@@ -756,7 +851,6 @@ def load_match_replay_round(
     )
     if not isinstance(spec, dict):
         return None
-    parquet_path, _ = _cache_paths(cache_key)
     frame = DemoParser.read_replay_parquet_round(
         str(parquet_path),
         _int(spec.get("row_group")),
@@ -799,9 +893,10 @@ def load_match_replay_round_binary(
     cache_key = replay_match_cache_key(demo_path, fps=fps, tick_rate=tick_rate)
     if not cache_key:
         return None
-    meta = _load_meta(cache_key)
-    if meta is None:
+    entry = _load_meta_entry(cache_key)
+    if entry is None:
         return None
+    meta, parquet_path = entry
     spec = next(
         (
             item
@@ -816,7 +911,6 @@ def load_match_replay_round_binary(
     binary_reader = getattr(DemoParser, "read_replay_parquet_round_binary", None)
     if binary_reader is None:
         return None
-    parquet_path, _ = _cache_paths(cache_key)
     metadata = {
         "round_number": _int(spec.get("round_number")),
         "start_tick": int(start_tick),

@@ -364,6 +364,9 @@ export default function SettingsPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState(() => resolveTabFromSearch(searchParams));
   const [dataDirInfo, setDataDirInfo] = useState(null);
+  const [replayCacheInfo, setReplayCacheInfo] = useState(null);
+  const [replayCacheBusy, setReplayCacheBusy] = useState(false);
+  const [replayCacheMsg, setReplayCacheMsg] = useState(null);
   const [liteCutStorage, setLiteCutStorage] = useState(null);
   const [liteCutStorageDraft, setLiteCutStorageDraft] = useState("");
   const [liteCutStorageBusy, setLiteCutStorageBusy] = useState(false);
@@ -421,6 +424,40 @@ export default function SettingsPage() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get("demo/replay/cache")
+      .then(({ data }) => {
+        if (!cancelled) setReplayCacheInfo(data);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error("Failed to load replay cache info:", error);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const clearReplayCache = useCallback(async () => {
+    if (replayCacheBusy || !window.confirm(t("settings.replayCacheConfirm"))) return;
+    setReplayCacheBusy(true);
+    setReplayCacheMsg(null);
+    try {
+      const { data } = await API.delete("demo/replay/cache");
+      setReplayCacheInfo(data?.cache ?? null);
+      setReplayCacheMsg({ tone: "ok", text: t("settings.replayCacheCleared", {
+        size: formatFileSize(Number(data?.removed_bytes) || 0),
+      }) });
+      const { data: nextDataDirInfo } = await API.get("config/data-dir-info");
+      setDataDirInfo(nextDataDirInfo);
+    } catch (error) {
+      setReplayCacheMsg({
+        tone: "error",
+        text: error.response?.data?.detail || error.message || t("settings.replayCacheFailed"),
+      });
+    } finally {
+      setReplayCacheBusy(false);
+    }
+  }, [replayCacheBusy, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1027,6 +1064,35 @@ export default function SettingsPage() {
                     >
                       {t("settings.openDirBtn")}
                     </button>
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelReplayCache")} hint={t("settings.hintReplayCache")} search={search && !matches(t("settings.labelReplayCache") + " " + (replayCacheInfo?.path ?? ""))}>
+                  <div className="space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={replayCacheInfo?.path ?? ""}
+                        readOnly
+                        className="min-w-0 flex-1 cursor-not-allowed rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-muted"
+                      />
+                      <span className="min-w-[108px] text-xs text-cs2-text-muted">
+                        {formatFileSize(Number(replayCacheInfo?.bytes) || 0)} · {t("settings.replayCacheFiles", { count: Number(replayCacheInfo?.files) || 0 })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearReplayCache}
+                        disabled={replayCacheBusy || !(Number(replayCacheInfo?.files) > 0)}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-45"
+                      >
+                        {replayCacheBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {replayCacheBusy ? t("settings.replayCacheClearing") : t("settings.replayCacheClear")}
+                      </button>
+                    </div>
+                    {replayCacheMsg && (
+                      <p className={`text-[11px] ${replayCacheMsg.tone === "error" ? "text-red-400" : "text-emerald-400"}`}>
+                        {replayCacheMsg.text}
+                      </p>
+                    )}
                   </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelLogDirectory")} hint={t("settings.hintLogDirectory")} search={search && !matches(t("settings.labelLogDirectory") + " " + (dataDirInfo?.logs_path ?? ""))}>
