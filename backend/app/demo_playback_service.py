@@ -21,6 +21,8 @@ from .pov_hud_manager import PovHudError, PovHudManager, restore_pov_after_cs2_e
 
 logger = logging.getLogger(__name__)
 
+_DEMO_PLAYBACK_FORCED_ARGS = ("+cl_demo_predict", "0")
+
 
 class DemoPlaybackBusyError(RuntimeError):
     """A playback launch is already active or still being cleaned up."""
@@ -290,7 +292,14 @@ class DemoPlaybackService:
                 if is_cs2_running():
                     raise DemoPlaybackCs2RunningError("CS2 started during playback preparation")
 
-                argv = [str(cs2_bin), "-steam", "-insecure", "-novid", "-console"]
+                argv = [
+                    str(cs2_bin),
+                    "-steam",
+                    "-insecure",
+                    "-novid",
+                    "-console",
+                    *_DEMO_PLAYBACK_FORCED_ARGS,
+                ]
                 if copied_cfg is not None:
                     argv.extend(["+exec", stem])
                 else:
