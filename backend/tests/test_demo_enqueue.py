@@ -31,7 +31,7 @@ def test_enqueue_with_md5_disabled_never_hashes_or_rewrites_pending_row(tmp_path
     monkeypatch.setattr(main, "_demo_ingest_md5_enabled", lambda: False)
     monkeypatch.setattr(main, "file_md5_hex", hash_mock)
     monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=notify))
-    monkeypatch.setattr(main.application_state, "demo_watcher", None)
+    monkeypatch.setattr(main, "demo_watcher", None)
     monkeypatch.setattr(main, "_enqueue_striped_locks", [])
 
     asyncio.run(main._enqueue_demo_path(demo_path))
@@ -52,7 +52,7 @@ def test_existing_row_reuses_the_single_computed_md5(tmp_path: Path, monkeypatch
     monkeypatch.setattr(main, "demo_db", fake_db)
     monkeypatch.setattr(main, "_demo_ingest_md5_enabled", lambda: True)
     monkeypatch.setattr(main, "file_md5_hex", hash_mock)
-    monkeypatch.setattr(main.application_state, "demo_watcher", None)
+    monkeypatch.setattr(main, "demo_watcher", None)
     monkeypatch.setattr(main, "_enqueue_striped_locks", [])
 
     asyncio.run(main._enqueue_demo_path(demo_path, "archive.zip"))

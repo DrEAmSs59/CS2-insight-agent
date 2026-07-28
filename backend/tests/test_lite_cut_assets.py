@@ -332,7 +332,7 @@ def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, m
 @pytest.mark.anyio
 async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
     from app.lite_cut import assets as assets_mod
-    from app.lite_cut import assets_api as api_mod
+    from app.lite_cut import api as api_mod
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
@@ -342,7 +342,7 @@ async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ff
             assert asset_id == 991
             return {"id": 991, "name": source.name, "kind": "video", "file_path": str(source)}
 
-    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
+    monkeypatch.setattr(api_mod, "_get_lite_cut_db", lambda: FakeDb())
     monkeypatch.setattr(assets_mod, "validate_stored_asset_path", lambda _path: source)
     monkeypatch.setattr(api_mod, "_decorate_asset_preview_state", lambda row: {
         **row,
