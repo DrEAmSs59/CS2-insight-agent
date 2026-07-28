@@ -885,27 +885,33 @@ class RecordingExecutor:
                         "[RecordingV3] resume_record segment %d (prepare_elapsed=%.2fs pre_roll=%.2fs remaining_wait=%.2fs)",
                         segment.segment_index, prepare_elapsed_sec, pre_roll_sec, remaining_wait,
                     )
-                    # Pre-warm the OBS connection for fade-in *before* ResumeRecord so
-                    # the scene switch fires with near-zero latency after recording resumes.
-                    # Without this, the WS connection setup (~100-300 ms) is recorded as
-                    # black-screen-with-audio at the start of the clip.
+                    # Pre-warm the OBS connection before ResumeRecord so the
+                    # scene switch adds no connection latency after the brief
+                    # cursor/focus settle below. Without this, another ~100-300 ms
+                    # of black-screen-with-audio would precede the fade.
                     if self._fade is not None:
                         await self._fade.prime_fade_to_game()
                     await self._ctrl.resume_record_safe()
 
-                    # ── 5b. Resume demo / fade-in / kb overlay 三路并发 ─────────
+                    # Resume the demo while OBS is still fully black. CS2 can
+                    # render its in-game cursor for one frame while focus and
+                    # playback settle; revealing the game concurrently with the
+                    # key tap made that cursor flash visible.
                     tasks = [demo_resume_silent_strict()]
-                    if self._fade is not None:
-                        tasks.append(self._fade.execute_primed_fade_to_game())
                     if _bus_resume:
                         tasks.append(_bus_resume.broadcast({"type": "resume"}))
                     results_gather = await asyncio.gather(*tasks, return_exceptions=True)
                     resume_ok = results_gather[0] if not isinstance(results_gather[0], Exception) else False
-                    if self._fade is not None:
-                        fade_ok = results_gather[1] if not isinstance(results_gather[1], Exception) else False
+                    if self._fade is not None and resume_ok:
+                        # The silent resume settles for 50 ms. Start revealing
+                        # the game only after that short cursor/focus window.
+                        fade_ok = await self._fade.execute_primed_fade_to_game()
                         if not fade_ok:
                             logger.warning("[RecordingV3] fade_to_game after ResumeRecord failed; hard-cut")
-                    self._obs_on_black = False
+                    elif self._fade is not None:
+                        await self._fade.cancel_primed_fade_to_game()
+                    if resume_ok:
+                        self._obs_on_black = False
 
                 # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.
