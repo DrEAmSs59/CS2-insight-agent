@@ -272,38 +272,54 @@ function samePoint(a, b, eps = 1e-4) {
   return Math.abs(a[0] - b[0]) <= eps && Math.abs(a[1] - b[1]) <= eps;
 }
 
+function pointKey(point, eps = 1e-4) {
+  return `${Math.round(point[0] / eps)},${Math.round(point[1] / eps)}`;
+}
+
 function segmentsToRings(segments) {
   if (!segments.length) return [];
 
-  const unused = segments.map((seg) => ({ seg, used: false }));
+  const used = new Uint8Array(segments.length);
+  const adjacency = new Map();
+  const addEndpoint = (point, index) => {
+    const key = pointKey(point);
+    const entries = adjacency.get(key);
+    if (entries) entries.push(index);
+    else adjacency.set(key, [index]);
+  };
+  for (let i = 0; i < segments.length; i += 1) {
+    addEndpoint(segments[i][0], i);
+    addEndpoint(segments[i][1], i);
+  }
   const rings = [];
 
-  for (let i = 0; i < unused.length; i += 1) {
-    if (unused[i].used) continue;
+  for (let i = 0; i < segments.length; i += 1) {
+    if (used[i]) continue;
 
-    const ring = [unused[i].seg[0], unused[i].seg[1]];
-    unused[i].used = true;
+    const ring = [segments[i][0], segments[i][1]];
+    used[i] = 1;
     let current = ring[1];
     let guard = 0;
 
-    while (guard < unused.length + 2) {
+    while (guard < segments.length + 2) {
       guard += 1;
       let found = null;
-      for (let j = 0; j < unused.length; j += 1) {
-        if (unused[j].used) continue;
-        const [a, b] = unused[j].seg;
+      const candidates = adjacency.get(pointKey(current)) || [];
+      for (const index of candidates) {
+        if (used[index]) continue;
+        const [a, b] = segments[index];
         if (samePoint(a, current)) {
-          found = { index: j, next: b };
+          found = { index, next: b };
           break;
         }
         if (samePoint(b, current)) {
-          found = { index: j, next: a };
+          found = { index, next: a };
           break;
         }
       }
       if (!found) break;
 
-      unused[found.index].used = true;
+      used[found.index] = 1;
       if (samePoint(found.next, ring[0])) break;
       ring.push(found.next);
       current = found.next;
