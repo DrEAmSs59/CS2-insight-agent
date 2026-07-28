@@ -59,6 +59,22 @@ test("marchingSquares returns a ring for a filled block", () => {
   expect(rings[0].length).toBeGreaterThanOrEqual(3);
 });
 
+test("marchingSquares keeps disconnected smoke islands as separate rings", () => {
+  const mask = buildDensityMask([
+    [0, 0, 0, 1],
+    [20, 0, 0, 1],
+    [0, 20, 0, 1],
+    [20, 20, 0, 1],
+    [120, 120, 0, 1],
+    [140, 120, 0, 1],
+    [120, 140, 0, 1],
+    [140, 140, 0, 1],
+  ], 20);
+  const { rings } = marchingSquares(mask, 0.15);
+  expect(rings).toHaveLength(2);
+  expect(rings.every((ring) => ring.length >= 3)).toBe(true);
+});
+
 test("sampleCrossfadeAlpha midpoints", () => {
   expect(sampleCrossfadeAlpha(100, 200, 150)).toEqual({ prevA: 0.5, nextA: 0.5 });
 });

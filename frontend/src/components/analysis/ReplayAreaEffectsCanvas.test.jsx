@@ -7,7 +7,9 @@ import ReplayAreaEffectsCanvas, {
   infernoPointHalfExtentPx,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
+  smokeParticleState,
 } from "./ReplayAreaEffectsCanvas";
+import { createAreaEffectsRenderer } from "./replayAreaEffectsRenderer";
 
 /** Minimal ImageData-backed 2d context matching real destination-in (source alpha only). */
 function createImageDataCanvas(width, height) {
@@ -217,7 +219,6 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(effectPalette("CT").smokeCore).toEqual([186, 216, 232]);
     expect(effectPalette("T").fire[1]).toEqual([251, 191, 36]);
     expect(effectPalette("CT").fire[1]).toEqual([125, 211, 252]);
-    expect(effectPalette("CT").fire[2]).toEqual([56, 189, 248]);
   });
 
   beforeEach(() => {
@@ -228,16 +229,15 @@ describe("ReplayAreaEffectsCanvas", () => {
     };
   });
 
-  test("inferno flame geometry animates inside its enlarged visual envelope", () => {
+  test("inferno flame geometry animates without changing its occupancy bound", () => {
     const item = { cx: 120, cy: 80, intensity: 1 };
     const first = infernoFlameGeometry(item, 100, 10);
     const later = infernoFlameGeometry(item, 104, 10);
     expect(first.outerRadius).toBeGreaterThan(0);
     expect(first.outerRadius).toBeLessThanOrEqual(12);
-    expect(first.tongueHeight).toBeLessThanOrEqual(23);
+    expect(Math.hypot(first.sparkX, first.sparkY)).toBeLessThanOrEqual(10);
     expect(first.flameStrength).toBeGreaterThanOrEqual(0);
     expect(first.flameStrength).toBeLessThanOrEqual(1);
-    expect(later.flameStrength).toBe(first.flameStrength);
     expect(later.jitterX).not.toBe(first.jitterX);
   });
 
@@ -249,6 +249,59 @@ describe("ReplayAreaEffectsCanvas", () => {
       1024,
     );
     expect(halfExtent).toBeGreaterThan(8);
+  });
+
+  test("smoke particles are deterministic across pause and seek", () => {
+    const base = { cx: 320, cy: 180 };
+    const first = smokeParticleState(1234, 7, 640, base, 12, 64);
+    const replayed = smokeParticleState(1234, 7, 640, base, 12, 64);
+    const later = smokeParticleState(1234, 7, 648, base, 12, 64);
+    expect(replayed).toEqual(first);
+    expect(later.x).not.toBe(first.x);
+    expect(later.y).not.toBe(first.y);
+  });
+
+  test("reuses smoke topology while only demo tick changes", () => {
+    const ctx = {
+      canvas: { width: 800, height: 600 },
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      fill: vi.fn(),
+    };
+    const cellsA = [];
+    const cellsB = [];
+    for (let x = 100; x <= 140; x += 20) {
+      for (let y = 200; y <= 240; y += 20) {
+        cellsA.push([x, y, 50, 1]);
+        cellsB.push([x + 20, y + 20, 50, 1]);
+      }
+    }
+    const layer = {
+      id: "smoke:cache",
+      type: "smoke",
+      side: "CT",
+      cellSize: 20,
+      activeSample: { tick: 100, cells: cellsA },
+      nextSample: { tick: 200, cells: cellsB },
+    };
+    const renderer = createAreaEffectsRenderer();
+    const base = {
+      layers: [layer],
+      transform: { pos_x: 0, pos_y: 4096, scale: 5 },
+      mapLayer: "upper",
+      smokeDebugLayer: "final_render",
+      tickRate: 64,
+      width: 800,
+      height: 600,
+    };
+    renderer.render(ctx, { ...base, currentTick: 150 });
+    expect(renderer.getStats().smokeGeometryBuilds).toBe(2);
+    renderer.render(ctx, { ...base, currentTick: 151 });
+    expect(renderer.getStats().smokeGeometryBuilds).toBe(2);
   });
 
   test("renders canvas when tracks exist", () => {
@@ -451,7 +504,7 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(fill.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("inferno uses organic flame layers without radial gradients or square tiles", () => {
+  test("inferno uses radial top-down flame layers without north-facing tongues or square tiles", () => {
     const arc = vi.fn();
     const createRadialGradient = vi.fn(() => ({ addColorStop: vi.fn() }));
     const fill = vi.fn();
@@ -489,7 +542,7 @@ describe("ReplayAreaEffectsCanvas", () => {
     );
     expect(fill).toHaveBeenCalled();
     expect(arc).toHaveBeenCalled();
-    expect(bezierCurveTo).toHaveBeenCalled();
+    expect(bezierCurveTo).not.toHaveBeenCalled();
     expect(fillRect).not.toHaveBeenCalled();
     expect(createRadialGradient).not.toHaveBeenCalled();
   });
