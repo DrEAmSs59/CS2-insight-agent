@@ -1,6 +1,6 @@
 [project]
 name = "cs2-insight-agent-backend"
-version = "2.4.1"
+version = "2.4.2"
 description = "Python backend runtime for CS2 Insight Agent"
 requires-python = "==3.12.*"
 dependencies = [

@@ -1,7 +1,7 @@
 {
   "name": "cs2-insight-agent",
   "private": true,
-  "version": "2.4.1",
+  "version": "2.4.2",
   "packageManager": "pnpm@11.9.0",
   "type": "module",
   "scripts": {
