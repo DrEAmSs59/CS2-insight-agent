@@ -9,9 +9,16 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .ffmpeg_process import (
+    command_for_log,
+    process_error_tail,
+    remove_partial_file,
+    run_process_capture,
+)
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
 from .env_utils import (
     resolve_name_card_font,
@@ -60,11 +67,55 @@ def resolve_ffprobe_binary(ffmpeg_bin: Path) -> Path:
     raise MontageComposerError("MONTAGE_FFPROBE_NOT_FOUND")
 
 
+def _run_ffmpeg_capture(
+    cmd: list[str],
+    *,
+    timeout: float,
+    stage: str,
+    output_path: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run FFmpeg with actionable logs and one conservative AMF retry."""
+    is_amf = "h264_amf" in cmd
+    attempts = 2 if is_amf else 1
+    result = None
+    for attempt in range(1, attempts + 1):
+        logger.debug(
+            "FFmpeg stage=%s attempt=%d/%d command=%s",
+            stage,
+            attempt,
+            attempts,
+            command_for_log(cmd),
+        )
+        result = run_process_capture(cmd, timeout=timeout)
+        if result.returncode == 0:
+            if attempt > 1:
+                logger.info("FFmpeg AMF retry succeeded stage=%s attempt=%d", stage, attempt)
+            return result
+        if attempt < attempts:
+            logger.warning(
+                "FFmpeg AMF attempt failed; retrying stage=%s returncode=%d command=%s stderr=%s",
+                stage,
+                result.returncode,
+                command_for_log(cmd),
+                process_error_tail(result),
+            )
+            remove_partial_file(output_path)
+            # Some Windows AMF drivers release the previous encoder context
+            # shortly after the FFmpeg process exits.  A bounded delay avoids
+            # immediately racing the next encoder initialization.
+            time.sleep(1.0)
+    return result
+
+
 def _run_json(cmd: list[str]) -> dict[str, Any]:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    proc = run_process_capture(cmd, timeout=120)
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip()[-800:]
-        logger.error("ffprobe failed (exit %s): %s", proc.returncode, tail)
+        logger.error(
+            "ffprobe failed returncode=%s command=%s stderr=%s",
+            proc.returncode,
+            command_for_log(cmd),
+            process_error_tail(proc, 1200),
+        )
         raise MontageComposerError("MONTAGE_FFPROBE_FAILED")
     try:
         return json.loads(proc.stdout)
@@ -240,10 +291,19 @@ def _finalize_mp4_for_common_players(
         "+faststart",
         str(dst),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=7200,
+        stage="montage_finalize",
+        output_path=dst,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-900:]
-        logger.error("montage finalize mp4 failed: %s", tail)
+        logger.error(
+            "montage finalize mp4 failed returncode=%d command=%s stderr=%s",
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
         raise MontageComposerError("MONTAGE_FINALIZE_FAILED")
 
 
@@ -312,10 +372,20 @@ def _image_to_ts_with_fade(
         "-t", str(d),
         str(out_ts),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=120,
+        stage="montage_image_to_video",
+        output_path=out_ts,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-600:]
-        logger.error("image to video failed %s: %s", image_path.name, tail)
+        logger.error(
+            "image to video failed name=%s returncode=%d command=%s stderr=%s",
+            image_path.name,
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
         raise MontageComposerError("MONTAGE_IMAGE_TO_VIDEO_FAILED", name=image_path.name)
 
 
@@ -444,10 +514,19 @@ def _montage_xfade_chain_to_ts(
         "192k",
         str(out_ts),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=7200,
+        stage="montage_transition",
+        output_path=out_ts,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-900:]
-        logger.error("montage xfade chain failed: %s", tail)
+        logger.error(
+            "montage xfade chain failed returncode=%d command=%s stderr=%s",
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
         raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
 
 
@@ -1391,10 +1470,20 @@ def compose_montage(
                 "-shortest",
                 str(out_ts),
             ]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            r = _run_ffmpeg_capture(
+                cmd,
+                timeout=3600,
+                stage="montage_clip_normalize",
+                output_path=out_ts,
+            )
             if r.returncode != 0:
-                tail = (r.stderr or r.stdout or "").strip()[-600:]
-                logger.error("clip normalize failed %s: %s", seg.name, tail)
+                logger.error(
+                    "clip normalize failed name=%s returncode=%d command=%s stderr=%s",
+                    seg.name,
+                    r.returncode,
+                    command_for_log(cmd),
+                    process_error_tail(r),
+                )
                 raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=seg.name)
             normed.append(out_ts)
 
@@ -1475,10 +1564,19 @@ def compose_montage(
             "copy",
             str(mid_mp4),
         ]
-        r2 = subprocess.run(cmd_concat, capture_output=True, text=True, timeout=3600)
+        r2 = _run_ffmpeg_capture(
+            cmd_concat,
+            timeout=3600,
+            stage="montage_concat",
+            output_path=mid_mp4,
+        )
         if r2.returncode != 0:
-            tail = (r2.stderr or r2.stdout or "").strip()[-600:]
-            logger.error("montage concat failed: %s", tail)
+            logger.error(
+                "montage concat failed returncode=%d command=%s stderr=%s",
+                r2.returncode,
+                command_for_log(cmd_concat),
+                process_error_tail(r2),
+            )
             raise MontageComposerError("MONTAGE_CONCAT_FAILED")
 
         mid_playable = Path(tmpdir) / "mid_playable.mp4"
@@ -1530,10 +1628,19 @@ def compose_montage(
             "+faststart",
             str(output_path),
         ]
-        r3 = subprocess.run(cmd_mix, capture_output=True, text=True, timeout=3600)
+        r3 = _run_ffmpeg_capture(
+            cmd_mix,
+            timeout=3600,
+            stage="montage_bgm_mix",
+            output_path=output_path,
+        )
         if r3.returncode != 0:
-            tail = (r3.stderr or r3.stdout or "").strip()[-600:]
-            logger.error("montage bgm mix failed: %s", tail)
+            logger.error(
+                "montage bgm mix failed returncode=%d command=%s stderr=%s",
+                r3.returncode,
+                command_for_log(cmd_mix),
+                process_error_tail(r3),
+            )
             raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
     finally:
         try:
