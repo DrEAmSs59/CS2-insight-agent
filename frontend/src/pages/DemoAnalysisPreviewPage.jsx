@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bot,
   Check,
+  CheckSquare,
   ChevronDown,
   CircleDollarSign,
   Film,
@@ -16,8 +17,10 @@ import {
   PanelsTopLeft,
   Play,
   RefreshCw,
+  Sparkles,
   Swords,
   Users,
+  XSquare,
 } from "lucide-react";
 import ActionBar from "../components/ActionBar";
 import ClipList from "../components/ClipList";
@@ -233,7 +236,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
             : t("analysis.workspace.parsedPlayers", { parsed: Object.keys(parsedPlayers || {}).length, total: totalPlayers })}
         </span>
       </header>
-      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         {renderTeam(teams.a, teamAName, "blue")}
         {renderTeam(teams.b, teamBName, "amber")}
       </div>
@@ -276,8 +279,67 @@ function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapNam
   );
 }
 
+function AnalysisViewNavigation({ activeTab, onSelectTab }) {
+  const t = useT();
+  return (
+    <section className="analysis-side-section">
+      <header className="border-b border-cs2-border-subtle px-3 py-2">
+        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoViews")}</p>
+      </header>
+      <nav className="analysis-view-nav" aria-label={t("analysis.workspace.demoViews")}>
+        {TABS.map(({ key, labelKey, icon: Icon }) => (
+          <button key={key} type="button" data-active={activeTab === key ? "true" : "false"} onClick={() => onSelectTab(key)}>
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{t(labelKey)}</span>
+          </button>
+        ))}
+      </nav>
+    </section>
+  );
+}
+
+function HighlightSelectionRail({
+  currentPlayer,
+  selectedCount,
+  totalCount,
+  onSelectAll,
+  onDeselectAll,
+  onAddCurrentPlayerHighlights,
+  queueLength,
+  batchRecording,
+  canAddCurrentPlayerHighlights,
+}) {
+  const t = useT();
+  return (
+    <section className="analysis-side-section">
+      <header className="flex items-center justify-between gap-2 border-b border-cs2-border-subtle px-3 py-2">
+        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.clipActions")}</p>
+        <span className="font-mono text-[9px] text-cs2-text-muted"><b className="text-cs2-accent">{selectedCount}</b> / {totalCount}</span>
+      </header>
+      <div className="p-3">
+        <div className="grid grid-cols-2 border-y border-cs2-border-subtle">
+          <button type="button" onClick={onSelectAll} className="analysis-rail-action border-r border-cs2-border-subtle">
+            <CheckSquare className="h-3 w-3" />{t("actionbar.selectAll")}
+          </button>
+          <button type="button" onClick={onDeselectAll} className="analysis-rail-action">
+            <XSquare className="h-3 w-3" />{t("actionbar.deselect")}
+          </button>
+        </div>
+        {canAddCurrentPlayerHighlights ? (
+          <Button variant="secondary" size="sm" className="mt-2 w-full justify-center" disabled={batchRecording} onClick={onAddCurrentPlayerHighlights}>
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="truncate">{t("actionbar.addCurrentPlayerHighlights", { player: currentPlayer })}</span>
+          </Button>
+        ) : null}
+        {queueLength > 0 ? <p className="mt-2 font-mono text-[9px] text-cs2-text-muted">{t("actionbar.queueCount", { n: queueLength })}</p> : null}
+      </div>
+    </section>
+  );
+}
+
 function PlayerContextRail({
   activeTab,
+  onSelectTab,
   activeHighlightView,
   setActiveHighlightView,
   selectedPlayer,
@@ -295,58 +357,66 @@ function PlayerContextRail({
   onSwitchDemo,
   switchDisabled,
   avatars,
+  selectedCount,
+  totalCount,
+  onSelectAll,
+  onDeselectAll,
+  onAddCurrentPlayerHighlights,
+  queueLength,
+  batchRecording,
+  canAddCurrentPlayerHighlights,
+  contextRailRef,
 }) {
   const t = useT();
   const isBlue = playerTeamNumber(selectedPlayer) === 2;
   const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
   const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   return (
-    <aside className="analysis-side-rail custom-scrollbar h-full min-h-0 overflow-y-auto">
-      <section className="analysis-side-section overflow-hidden">
-        <header className="border-b border-cs2-border-subtle px-3 py-2.5">
-          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
-        </header>
-        {selectedPlayer ? (
-          <div className="p-3">
-            <div className="flex items-center gap-2.5">
-              <PlayerIdentityAvatar player={selectedPlayer} avatarUrl={selectedAvatarUrl} fallbackTone={isBlue ? "blue" : "amber"} className="h-9 w-9 text-sm" />
-              <div className="min-w-0">
-                <h2 className="truncate text-[13px] font-black text-cs2-text-primary">{activePlayer}</h2>
-                <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.13em]" style={{ color: selectedAppearance.color }}>
-                  {t("analysis.workspace.focusedPlayer")}
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-3 divide-x divide-cs2-border-subtle border-y border-cs2-border-subtle py-2">
-              {[
-                [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
-                [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
-                [t("analysis.workspace.clips"), regularClips.length],
-              ].map(([label, value]) => (
-                <div key={label} className="px-2 text-center">
-                  <strong className="block font-mono text-sm text-cs2-text-primary">{value}</strong>
-                  <span className="mt-0.5 block text-[9px] text-cs2-text-muted">{label}</span>
+    <aside className="analysis-side-rail flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <AnalysisViewNavigation activeTab={activeTab} onSelectTab={onSelectTab} />
+        <section className="analysis-side-section overflow-hidden">
+          <header className="border-b border-cs2-border-subtle px-3 py-2">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
+          </header>
+          {selectedPlayer ? (
+            <div className="px-3 py-2.5">
+              <div className="flex items-center gap-2.5">
+                <PlayerIdentityAvatar player={selectedPlayer} avatarUrl={selectedAvatarUrl} fallbackTone={isBlue ? "blue" : "amber"} className="h-8 w-8 text-xs" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[12px] font-black text-cs2-text-primary">{activePlayer}</h2>
+                  <p className="text-[8px] font-bold uppercase tracking-[0.12em]" style={{ color: selectedAppearance.color }}>
+                    {t("analysis.workspace.focusedPlayer")}
+                  </p>
                 </div>
-              ))}
-            </div>
-            {aiMode && activeTab === "highlights" && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
-              <div className="mt-3 flex items-start gap-2 border-l-2 border-violet-500/45 bg-violet-500/8 px-2.5 py-2 text-[10px] text-violet-300">
-                {playerAiReviewing ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-                <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
               </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="px-3 py-6 text-center">
-            <Users className="mx-auto h-5 w-5 text-cs2-text-muted" />
-            <p className="mt-2 text-[11px] font-bold text-cs2-text-primary">{t("analysis.workspace.noPlayerContext")}</p>
-            <p className="mt-1 text-[9px] leading-relaxed text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p>
-          </div>
-        )}
-      </section>
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-cs2-border-subtle pt-2 text-[9px] text-cs2-text-muted">
+                {[
+                  [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
+                  [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
+                  [t("analysis.workspace.clips"), regularClips.length],
+                ].map(([label, value]) => (
+                  <span key={label} className="min-w-0"><strong className="mr-1 font-mono text-[11px] text-cs2-text-primary">{value}</strong>{label}</span>
+                ))}
+              </div>
+              {aiMode && activeTab === "highlights" && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
+                <div className="mt-2 flex items-start gap-2 border-l-2 border-violet-500/45 bg-violet-500/8 px-2 py-1.5 text-[9px] text-violet-300">
+                  {playerAiReviewing ? <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3 w-3 shrink-0" />}
+                  <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="px-3 py-5 text-center">
+              <Users className="mx-auto h-5 w-5 text-cs2-text-muted" />
+              <p className="mt-2 text-[11px] font-bold text-cs2-text-primary">{t("analysis.workspace.noPlayerContext")}</p>
+              <p className="mt-1 text-[9px] leading-relaxed text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p>
+            </div>
+          )}
+        </section>
 
-      {activeTab === "highlights" && selectedPlayer ? (
-        <section className="analysis-side-section px-3 pt-2.5">
+        {activeTab === "highlights" && selectedPlayer ? (
+        <section className="analysis-side-section px-3 pt-2">
           <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.highlightMode")}</p>
           <div className="analysis-subnav">
             {[["clips", "analysis.tabClips"], ["rounds", "analysis.tabTimeline"], ["weapons", "analysis.tabWeaponKills"]].map(([key, labelKey]) => (
@@ -356,9 +426,9 @@ function PlayerContextRail({
             ))}
           </div>
         </section>
-      ) : null}
+        ) : null}
 
-      {activeTab === "highlights" && selectedPlayer && activeHighlightView === "clips" ? (
+        {activeTab === "highlights" && selectedPlayer && activeHighlightView === "clips" ? (
         <section className="analysis-side-section p-3">
           <p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.tags")}</p>
           <div className="flex flex-wrap gap-1">
@@ -369,16 +439,32 @@ function PlayerContextRail({
             ))}
           </div>
         </section>
-      ) : null}
+        ) : null}
 
-      <section className="analysis-side-section p-3">
-        <p className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoActions")}</p>
-        <div className="grid gap-1.5">
-          <Button variant="secondary" size="sm" className="w-full justify-center" disabled={!currentUpload?.id && !currentUpload?.path} onClick={onPlayDemo}>
+        {activeTab === "highlights" && selectedPlayer && activeHighlightView === "clips" && regularClips.length > 0 ? (
+          <HighlightSelectionRail
+            currentPlayer={activePlayer}
+            selectedCount={selectedCount}
+            totalCount={totalCount}
+            onSelectAll={onSelectAll}
+            onDeselectAll={onDeselectAll}
+            onAddCurrentPlayerHighlights={onAddCurrentPlayerHighlights}
+            queueLength={queueLength}
+            batchRecording={batchRecording}
+            canAddCurrentPlayerHighlights={canAddCurrentPlayerHighlights}
+          />
+        ) : null}
+        <div ref={contextRailRef} />
+      </div>
+
+      <section className="shrink-0 border-t border-cs2-border-subtle p-2.5">
+        <p className="mb-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoActions")}</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button variant="secondary" size="sm" className="min-w-0 justify-center px-2" disabled={!currentUpload?.id && !currentUpload?.path} onClick={onPlayDemo}>
             <Play className="h-3 w-3 fill-current" />{t("analysis.workspace.playDemo")}
           </Button>
-          <Button variant="secondary" size="sm" className="w-full justify-center" onClick={onSwitchDemo} disabled={switchDisabled}>
-            <RefreshCw className="h-3.5 w-3.5" />{t("analysis.workspace.switchDemo")}
+          <Button variant="secondary" size="sm" className="min-w-0 justify-center px-2" onClick={onSwitchDemo} disabled={switchDisabled}>
+            <RefreshCw className="h-3 w-3" />{t("analysis.workspace.switchDemo")}
           </Button>
         </div>
       </section>
@@ -419,6 +505,7 @@ export default function DemoAnalysisPreviewPage() {
   const [statsPlayer, setStatsPlayer] = useSessionState(`${sessionPrefix}:stats-player`, "");
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [layoutResetSignal, setLayoutResetSignal] = useState(0);
+  const [contextRailTarget, setContextRailTarget] = useState(null);
   const uploadedDemoCount = s.uploadedDemos?.length || 0;
   const parsedDemoCount = matches.filter((match) => match?.parsed).length;
   const allDemosParsed = uploadedDemoCount > 0
@@ -472,6 +559,10 @@ export default function DemoAnalysisPreviewPage() {
     : regularClips.filter((clip) => (clip.context_tags || []).includes(selectedTag));
   const weaponSummary = summarizeWeaponKills(s.roundTimeline);
   const canAnalyze = Boolean(s.hasDemos && selectedCount && !parsingCurrent && !s.batchRecording);
+  const showDockedActionBar = activeTab === "highlights"
+    && activeHighlightView === "clips"
+    && Boolean(selectedPlayer)
+    && regularClips.length > 0;
 
   const selectPlayer = (name) => {
     s.setActivePlayerTabs((previous) => ({ ...previous, [s.currentMatchIndex]: name }));
@@ -503,6 +594,13 @@ export default function DemoAnalysisPreviewPage() {
   const openReplayRound = (roundNumber) => {
     setReplayRound(roundNumber);
     setActiveTab("replay");
+  };
+
+  const selectAnalysisTab = (key) => {
+    if (activeTab === "replay" && key !== "replay") {
+      useReplayStore.getState().requestSuspendPlayback();
+    }
+    setActiveTab(key);
   };
 
   const resetWorkspaceLayout = () => {
@@ -608,25 +706,6 @@ export default function DemoAnalysisPreviewPage() {
               content: (
 
         <section className="analysis-center-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-          <nav className="flex min-h-10 shrink-0 overflow-x-auto border-b border-cs2-border-subtle px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("analysis.workspace.demoViews")}>
-            {TABS.map(({ key, labelKey, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                onPointerDown={() => {
-                  if (activeTab === "replay" && key !== "replay") {
-                    useReplayStore.getState().requestSuspendPlayback();
-                  }
-                }}
-                onClick={() => setActiveTab(key)}
-                className={`analysis-tab ${activeTab === key ? "analysis-tab--active" : ""}`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {t(labelKey)}
-              </button>
-            ))}
-          </nav>
-
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
             {activeTab === "highlights" && (
               <div className="space-y-3">
@@ -634,19 +713,8 @@ export default function DemoAnalysisPreviewPage() {
                 <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-page/45 p-8 text-center"><div><Users className="mx-auto h-7 w-7 text-cs2-text-muted" /><h2 className="mt-3 text-[13px] font-bold">{t("analysis.workspace.pickPlayerFirst")}</h2><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p></div></div>
               ) : (
                 <>
-                  <div className="analysis-context-strip">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: playerTeamNumber(selectedPlayer) === 2 ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
-                      <b className="truncate text-[11px] text-cs2-text-primary">{activePlayer}</b>
-                    </div>
-                    <span className="shrink-0 font-mono text-[9px] text-cs2-text-muted">{t("analysis.workspace.playerClips", { kills: Number(selectedPlayer.kills || 0), deaths: Number(selectedPlayer.deaths || 0), clips: regularClips.length })}</span>
-                  </div>
-
                   {activeHighlightView === "clips" && (
-                    <>
-                      <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
-                      {regularClips.length > 0 && <ActionBar selectedCount={s.selectedRegularCount} totalCount={s.regularSelectableTotal} hasSelection={s.selectedClientClipUids.size > 0} onSelectAll={s.handleSelectAll} onDeselectAll={s.handleDeselectAll} onAddSelectedToQueue={s.handleAddSelectedToQueue} onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights} currentPlayer={activePlayer} queueLength={s.queue.length} batchRecording={s.batchRecording} canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights} sticky />}
-                    </>
+                    <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
                   )}
                   {activeHighlightView === "rounds" && <RoundTimelineView roundTimeline={s.roundTimeline} focusedPlayer={activePlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAddEvent={s.handleAddTimelineEventToQueue} onAddRound={s.handleAddTimelineRoundToQueue} onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} onRemoveRound={s.handleRemoveTimelineRoundFromQueue} suppressSummaryHeader />}
                   {activeHighlightView === "weapons" && <WeaponKillsView roundTimeline={s.roundTimeline} focusedPlayer={activePlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAdd={s.handleAddWeaponKillsToQueue} onRemove={s.handleDequeueClip} onAddEvent={s.handleAddTimelineEventToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} suppressSummaryHeader />}
@@ -695,6 +763,7 @@ export default function DemoAnalysisPreviewPage() {
               selectedRound={selectedRound}
               onSelectRound={setSelectedRound}
               onOpenReplayRound={openReplayRound}
+              contextRailTarget={contextRailTarget}
             />
             )}
 
@@ -711,6 +780,20 @@ export default function DemoAnalysisPreviewPage() {
             <EconomyView data={workspace} onOpenRound={openRound} />
             )}
           </div>
+          {showDockedActionBar ? (
+            <ActionBar
+              selectedCount={s.selectedRegularCount}
+              totalCount={s.regularSelectableTotal}
+              hasSelection={s.selectedClientClipUids.size > 0}
+              onSelectAll={s.handleSelectAll}
+              onDeselectAll={s.handleDeselectAll}
+              onAddSelectedToQueue={s.handleAddSelectedToQueue}
+              currentPlayer={activePlayer}
+              queueLength={s.queue.length}
+              batchRecording={s.batchRecording}
+              compact
+            />
+          ) : null}
         </section>
               ),
             },
@@ -724,6 +807,7 @@ export default function DemoAnalysisPreviewPage() {
 
         <PlayerContextRail
           activeTab={activeTab}
+          onSelectTab={selectAnalysisTab}
           activeHighlightView={activeHighlightView}
           setActiveHighlightView={setActiveHighlightView}
           selectedPlayer={selectedPlayer}
@@ -741,6 +825,15 @@ export default function DemoAnalysisPreviewPage() {
           onSwitchDemo={s.handleResetDemo}
           switchDisabled={s.anyDemoParsing || s.batchRecording}
           avatars={steamAvatars}
+          selectedCount={s.selectedRegularCount}
+          totalCount={s.regularSelectableTotal}
+          onSelectAll={s.handleSelectAll}
+          onDeselectAll={s.handleDeselectAll}
+          onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
+          queueLength={s.queue.length}
+          batchRecording={s.batchRecording}
+          canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}
+          contextRailRef={setContextRailTarget}
         />
               ),
             },

@@ -443,56 +443,55 @@
   box-shadow: var(--cs2-shadow-sm);
 }
 
-.analysis-tab {
-  position: relative;
-  display: inline-flex;
-  min-width: max-content;
-  height: 38px;
+.analysis-view-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-left: 1px solid var(--cs2-border-subtle);
+}
+
+.analysis-view-nav > button {
+  display: flex;
+  min-width: 0;
+  min-height: 31px;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
-  border-radius: 0;
+  border-right: 1px solid var(--cs2-border-subtle);
+  border-bottom: 1px solid var(--cs2-border-subtle);
+  padding: 0 9px;
   color: var(--cs2-text-muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  transition: color 140ms ease, background-color 140ms ease;
+  text-align: left;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
-.analysis-tab::after {
-  position: absolute;
-  right: 11px;
-  bottom: -1px;
-  left: 11px;
-  height: 2px;
-  background: var(--cs2-accent);
-  content: "";
-  opacity: 0;
-  transform: scaleX(0.55);
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-
-.analysis-tab:hover {
+.analysis-view-nav > button:hover {
   color: var(--cs2-text-primary);
   background: var(--cs2-bg-hover);
 }
 
-.analysis-tab--active {
+.analysis-view-nav > button[data-active="true"] {
   color: var(--cs2-accent);
+  background: var(--cs2-accent-soft);
+  box-shadow: inset 2px 0 0 var(--cs2-accent);
 }
 
-.analysis-tab--active::after {
-  opacity: 1;
-  transform: scaleX(1);
-}
-
-.analysis-context-strip {
+.analysis-rail-action {
   display: flex;
-  min-height: 34px;
+  min-width: 0;
+  min-height: 29px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 4px 8px;
-  border-bottom: 1px solid var(--cs2-border-subtle);
+  justify-content: center;
+  gap: 5px;
+  color: var(--cs2-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.analysis-rail-action:hover {
+  color: var(--cs2-text-primary);
+  background: var(--cs2-bg-hover);
 }
 
 .analysis-player-row {
@@ -575,6 +574,17 @@
 .analysis-filter-select:focus-visible {
   border-color: color-mix(in srgb, var(--cs2-accent) 55%, var(--cs2-border));
   color: var(--cs2-text-primary);
+}
+
+.analysis-rail-filter-grid .analysis-filter-field {
+  min-width: 0;
+}
+
+.analysis-rail-filter-grid .analysis-filter-select {
+  width: 100%;
+  min-width: 0;
+  padding-left: 7px;
+  font-size: 9px;
 }
 
 .analysis-filter-toggle {

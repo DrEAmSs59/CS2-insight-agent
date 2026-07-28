@@ -48,6 +48,7 @@ export default {
   "analysis.workspace.deaths": "死亡",
   "analysis.workspace.clips": "片段",
   "analysis.workspace.highlightMode": "高光视图",
+  "analysis.workspace.clipActions": "片段操作",
   "analysis.workspace.demoActions": "Demo 操作",
   "analysis.workspace.allTags": "全部",
   "analysis.workspace.aiReviewing": "正在为 {name} 生成 AI 锐评…",

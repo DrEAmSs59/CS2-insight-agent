@@ -353,6 +353,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "高光与录制", "2D 回放", "热力图", "概览", "玩家", "回合", "经济",
     ]);
+    expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
@@ -476,6 +477,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "回合" }));
     expect(screen.getByRole("heading", { name: "回合列表" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "胜方" }).closest('[data-dock-panel="right-rail"]')).toBeTruthy();
     expect(screen.getByText("ZywOo 双杀守住 B 区")).toBeTruthy();
     expect(screen.getByText("全枪全弹")).toBeTruthy();
     expect(screen.getAllByText("CT 胜").length).toBeGreaterThan(0);
@@ -874,6 +876,29 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     expect(screen.getByRole("heading", { name: /第 1 回合/ })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: /第 2 回合/ })).toBeNull();
+  });
+
+  test("docks the compact clip action bar and moves selection controls into the right rail", () => {
+    renderPage(buildShell({
+      clips: [{
+        client_clip_uid: "clip-1",
+        category: "highlight",
+        round: 1,
+        round_won: true,
+        start_tick: 100,
+        end_tick: 400,
+        kill_count: 1,
+        context_tags: [],
+      }],
+      regularSelectableTotal: 1,
+      canAddCurrentPlayerHighlights: true,
+    }));
+
+    const dockedActionBar = screen.getByTestId("clip-selection-action-bar");
+    expect(dockedActionBar.getAttribute("data-compact")).toBe("true");
+    expect(dockedActionBar.className).not.toContain("sticky");
+    expect(dockedActionBar.parentElement?.className).toContain("analysis-center-surface");
+    expect(screen.getByRole("button", { name: "全选" }).closest('[data-dock-panel="right-rail"]')).toBeTruthy();
   });
 
   test("renders the analysis entry and navigation in English", () => {

@@ -48,6 +48,7 @@ export default {
   "analysis.workspace.deaths": "Deaths",
   "analysis.workspace.clips": "Clips",
   "analysis.workspace.highlightMode": "Highlight view",
+  "analysis.workspace.clipActions": "Clip actions",
   "analysis.workspace.demoActions": "Demo actions",
   "analysis.workspace.allTags": "All",
   "analysis.workspace.aiReviewing": "Generating an AI review for {name}…",

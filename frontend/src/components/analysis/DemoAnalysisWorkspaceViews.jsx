@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowLeft,
@@ -425,7 +426,7 @@ function RoundEventBody({ event }) {
   return <div><p className="text-[11px] font-bold text-cs2-text-primary">{actor}</p><RoundEventDetail event={event} /></div>;
 }
 
-export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRound }) {
+export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRound, contextRailTarget = null }) {
   const [winnerFilter, setWinnerFilter] = useState("all");
   const [sideFilter, setSideFilter] = useState("all");
   const [economyFilter, setEconomyFilter] = useState("all");
@@ -454,35 +455,54 @@ export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRou
   const round = visibleRounds.find((item) => Number(item.round_number) === Number(selectedRound)) || visibleRounds[0] || null;
   if (!data.rounds.length) return <Panel title="回合列表"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有正式回合。</div></Panel>;
   const displayEvents = round ? roundEventsForDisplay(round) : [];
+  const filterFields = (
+    <>
+      <FilterField label="胜方" value={winnerFilter} onChange={setWinnerFilter}>
+        <option value="all">全部胜方</option><option value="a">{data.team_a_name} 胜</option><option value="b">{data.team_b_name} 胜</option>
+      </FilterField>
+      <FilterField label="阵营" value={sideFilter} onChange={setSideFilter}>
+        <option value="all">全部阵营</option><option value="CT">CT 胜</option><option value="T">T 胜</option>
+      </FilterField>
+      <FilterField label="经济" value={economyFilter} onChange={setEconomyFilter}>
+        <option value="all">全部经济</option><option value="pistol">手枪</option><option value="eco">纯 ECO</option><option value="force">强起</option><option value="semi">半起</option><option value="full">全枪全弹</option>
+      </FilterField>
+      <FilterField label="包点" value={siteFilter} onChange={setSiteFilter}>
+        <option value="all">全部包点</option><option value="A">A 点</option><option value="B">B 点</option><option value="none">未下包</option>
+      </FilterField>
+      <FilterField label="首杀" value={openingFilter} onChange={setOpeningFilter}>
+        <option value="all">不限</option><option value="a">{data.team_a_name}</option><option value="b">{data.team_b_name}</option>
+      </FilterField>
+      <FilterField label="结束方式" value={endFilter} onChange={setEndFilter}>
+        <option value="all">全部结束方式</option><option value="ct_elimination">CT 歼灭</option><option value="defuse">拆弹</option><option value="t_elimination">T 歼灭</option><option value="explode">爆弹</option>
+      </FilterField>
+    </>
+  );
+  const filters = contextRailTarget ? (
+    <section className="analysis-side-section">
+      <header className="flex items-center justify-between gap-2 border-b border-cs2-border-subtle px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-cs2-text-muted"><Filter className="h-3 w-3" />回合筛选</span>
+        <span className="font-mono text-[9px] text-cs2-text-muted">{visibleRounds.length}/{data.rounds.length}</span>
+      </header>
+      <div className="analysis-rail-filter-grid grid grid-cols-2 gap-2 p-3">
+        {filterFields}
+        <button type="button" data-active={specialOnly ? "true" : "false"} className="analysis-filter-toggle col-span-2" onClick={() => setSpecialOnly((value) => !value)}>关键回合</button>
+      </div>
+    </section>
+  ) : (
+    <Panel>
+      <div className="analysis-filterbar">
+        <div className="flex h-7 items-center gap-1.5 self-end text-[10px] font-bold text-cs2-text-secondary"><Filter className="h-3.5 w-3.5" />回合筛选</div>
+        {filterFields}
+        <button type="button" data-active={specialOnly ? "true" : "false"} className="analysis-filter-toggle self-end" onClick={() => setSpecialOnly((value) => !value)}>关键回合</button>
+        <span className="ml-auto self-center font-mono text-[9px] text-cs2-text-muted">命中 {visibleRounds.length}/{data.rounds.length}</span>
+      </div>
+    </Panel>
+  );
   return (
     <div className="space-y-3">
-      <Panel>
-        <div className="analysis-filterbar">
-          <div className="flex h-7 items-center gap-1.5 self-end text-[10px] font-bold text-cs2-text-secondary"><Filter className="h-3.5 w-3.5" />回合筛选</div>
-          <FilterField label="胜方" value={winnerFilter} onChange={setWinnerFilter}>
-            <option value="all">全部胜方</option><option value="a">{data.team_a_name} 胜</option><option value="b">{data.team_b_name} 胜</option>
-          </FilterField>
-          <FilterField label="阵营" value={sideFilter} onChange={setSideFilter}>
-            <option value="all">全部阵营</option><option value="CT">CT 胜</option><option value="T">T 胜</option>
-          </FilterField>
-          <FilterField label="经济" value={economyFilter} onChange={setEconomyFilter}>
-            <option value="all">全部经济</option><option value="pistol">手枪</option><option value="eco">纯 ECO</option><option value="force">强起</option><option value="semi">半起</option><option value="full">全枪全弹</option>
-          </FilterField>
-          <FilterField label="包点" value={siteFilter} onChange={setSiteFilter}>
-            <option value="all">全部包点</option><option value="A">A 点</option><option value="B">B 点</option><option value="none">未下包</option>
-          </FilterField>
-          <FilterField label="首杀" value={openingFilter} onChange={setOpeningFilter}>
-            <option value="all">不限</option><option value="a">{data.team_a_name}</option><option value="b">{data.team_b_name}</option>
-          </FilterField>
-          <FilterField label="结束方式" value={endFilter} onChange={setEndFilter}>
-            <option value="all">全部结束方式</option><option value="ct_elimination">CT 歼灭</option><option value="defuse">拆弹</option><option value="t_elimination">T 歼灭</option><option value="explode">爆弹</option>
-          </FilterField>
-          <button type="button" data-active={specialOnly ? "true" : "false"} className="analysis-filter-toggle self-end" onClick={() => setSpecialOnly((value) => !value)}>关键回合</button>
-          <span className="ml-auto self-center font-mono text-[9px] text-cs2-text-muted">命中 {visibleRounds.length}/{data.rounds.length}</span>
-        </div>
-      </Panel>
+      {contextRailTarget ? createPortal(filters, contextRailTarget) : filters}
       {round ? (
-        <div className="grid h-[calc(100vh-196px)] min-h-[500px] gap-3 lg:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.5fr)]">
+        <div className="grid h-[calc(100vh-106px)] min-h-[500px] gap-3 lg:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.5fr)]">
           <Panel title="回合列表" eyebrow="Round explorer" className="flex min-h-0 flex-col overflow-hidden">
             <div className="custom-scrollbar min-h-0 flex-1 divide-y divide-cs2-border-subtle overflow-y-auto">
               {visibleRounds.map((item) => {
