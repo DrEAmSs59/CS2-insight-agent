@@ -119,7 +119,7 @@ export default function RoundTimelineItem({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="group/round grid w-full grid-cols-[56px_1fr] items-center gap-x-3 rounded-xl border border-cs2-border bg-cs2-bg-card/95 py-2 pl-0 pr-2 text-left transition-colors hover:border-cs2-accent/35 max-[1279px]:grid-cols-[44px_1fr]"
+        className={`group/round grid w-full grid-cols-[56px_1fr] items-center gap-x-3 border-l-2 bg-cs2-bg-card/95 py-2.5 pl-0 pr-2 text-left transition-colors hover:bg-cs2-bg-hover max-[1279px]:grid-cols-[44px_1fr] ${res === "win" ? "border-l-emerald-500/65" : res === "loss" ? "border-l-rose-500/65" : "border-l-transparent"}`}
       >
         <TimelineNode result={res} targetKills={tk} targetDeaths={td} glow={hovered} />
         <div className="min-w-0">
@@ -135,7 +135,7 @@ export default function RoundTimelineItem({
 
   return (
     <div
-      className="group/round grid w-full grid-cols-[56px_minmax(0,1fr)_280px] gap-x-3 rounded-xl border border-cs2-border bg-cs2-bg-card/95 py-2 pl-0 pr-2 transition-[border-color,box-shadow] duration-150 hover:border-cs2-accent/42 hover:shadow-[0_0_0_1px_rgba(255,140,0,0.12)] max-[1279px]:grid-cols-[44px_minmax(0,1fr)]"
+      className={`group/round grid w-full grid-cols-[56px_minmax(0,1fr)_280px] gap-x-3 border-l-2 bg-cs2-bg-card/95 py-2.5 pl-0 pr-2 transition-colors duration-150 hover:bg-cs2-bg-hover max-[1279px]:grid-cols-[44px_minmax(0,1fr)] ${res === "win" ? "border-l-emerald-500/65" : res === "loss" ? "border-l-rose-500/65" : "border-l-transparent"}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

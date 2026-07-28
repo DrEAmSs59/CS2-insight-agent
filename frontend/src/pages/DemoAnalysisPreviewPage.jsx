@@ -127,7 +127,7 @@ function DemoSelector({ matches, currentIndex, onChange, disabled }) {
         aria-expanded={open}
         disabled={disabled || !matches.length}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-9 w-full items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input px-3 text-left text-[10px] transition-colors hover:border-cs2-accent/45 disabled:opacity-45"
+        className="flex h-9 w-full items-center gap-2 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-left text-[10px] transition-colors hover:border-cs2-accent/45 disabled:opacity-45"
       >
         <ListChecks className="h-3.5 w-3.5 shrink-0 text-cs2-accent" />
         <span className="shrink-0 font-semibold text-cs2-text-muted">Demo {matches.length ? currentIndex + 1 : 0}/{matches.length}</span>
@@ -138,7 +138,7 @@ function DemoSelector({ matches, currentIndex, onChange, disabled }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-[100] w-full min-w-[420px] overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card shadow-2xl shadow-black/60">
+        <div className="absolute right-0 top-[calc(100%+6px)] z-[100] w-full min-w-[420px] overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card shadow-[var(--cs2-shadow-lg)]">
           <div className="border-b border-cs2-border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-cs2-text-muted">
             {t("analysis.workspace.loadedDemos")} · {matches.length}
           </div>
@@ -180,11 +180,11 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
     const isBlue = tone === "blue";
     return (
       <div className="border-b border-cs2-border-subtle last:border-b-0">
-        <div className="flex items-center gap-2 px-3 pb-1.5 pt-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
+        <div className="flex items-center gap-2 px-3 pb-1.5 pt-2.5 text-[9px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
           <span className="h-2 w-2 rounded-full" style={{ background: isBlue ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
           <span className="truncate">{teamName}</span>
         </div>
-        <div className="space-y-1 px-2 pb-2">
+        <div className="pb-1">
           {players.map((player) => {
             const name = playerName(player);
             const active = name === activePlayer;
@@ -197,9 +197,10 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
                 type="button"
                 aria-label={t("analysis.workspace.selectPlayerAria", { name })}
                 onClick={() => onSelect(name)}
-                className={`grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-all ${active ? "border-current shadow-sm" : "border-transparent hover:border-cs2-border hover:bg-cs2-bg-hover"}`}
+                data-active={active ? "true" : "false"}
+                className="analysis-player-row grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left transition-colors"
                 style={active ? {
-                  color: appearance.color,
+                  "--analysis-player-accent": appearance.color,
                   background: appearance.background,
                 } : undefined}
               >
@@ -210,7 +211,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
                     {Number(player?.kills || 0)} / {Number(player?.deaths || 0)}
                   </span>
                 </div>
-                <span className={`min-w-6 rounded-md px-1.5 py-1 text-center font-mono text-[9px] font-bold ${active ? "bg-cs2-bg-card/70" : "bg-cs2-bg-input text-cs2-text-muted"}`}>
+                <span className={`min-w-6 text-right font-mono text-[9px] font-bold ${active ? "text-cs2-text-primary" : "text-cs2-text-muted"}`}>
                   {clipCount}
                 </span>
               </button>
@@ -222,8 +223,8 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
   };
 
   return (
-    <section className="analysis-rail-card flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex min-h-11 items-center justify-between gap-2 border-b border-cs2-border-subtle px-3">
+    <section className="analysis-side-section flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="flex min-h-10 items-center justify-between gap-2 border-b border-cs2-border-subtle px-3">
         <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-cs2-text-primary">{t("analysis.workspace.selectPlayer")}</h2>
         <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-cs2-text-muted">
           {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-emerald-400" />}
@@ -243,28 +244,33 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, parsedPlayers
 function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapName, totalRounds, durationMins }) {
   const t = useT();
   return (
-    <section className="analysis-rail-card overflow-hidden">
+    <section className="analysis-side-section shrink-0 overflow-hidden">
       <div className="h-0.5 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
-      <div className="px-3 pb-3 pt-2.5">
-        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.matchSummary")}</p>
-        <div className="my-2.5 flex items-center justify-center gap-2.5">
-          <span className="font-mono text-3xl font-black" style={{ color: "var(--cs2-team-blue)" }}>{teamAScore}</span>
-          <span className="text-base font-black text-cs2-text-muted">:</span>
-          <span className="font-mono text-3xl font-black" style={{ color: "var(--cs2-team-amber)" }}>{teamBScore}</span>
+      <div className="px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[9px] font-black uppercase tracking-[0.16em] text-cs2-text-muted">{t("analysis.workspace.matchSummary")}</p>
+          <p className="font-mono text-[8px] uppercase tracking-wide text-cs2-text-muted">
+            {mapLabel(mapName, t)} · {t("analysis.workspace.rounds", { n: totalRounds })}
+          </p>
         </div>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
-            <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-blue)" }}>{teamAName}</span>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-blue)" }} />
+        <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2 text-[10px] font-bold">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-blue)" }} />
+              <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-blue)" }}>{teamAName}</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] font-bold">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-amber)" }} />
+              <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-amber)" }}>{teamBName}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
-            <span className="min-w-0 truncate" style={{ color: "var(--cs2-team-amber)" }}>{teamBName}</span>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--cs2-team-amber)" }} />
+          <div className="flex items-baseline gap-1.5 font-mono">
+            <span className="text-2xl font-black" style={{ color: "var(--cs2-team-blue)" }}>{teamAScore}</span>
+            <span className="text-sm font-black text-cs2-text-muted">:</span>
+            <span className="text-2xl font-black" style={{ color: "var(--cs2-team-amber)" }}>{teamBScore}</span>
           </div>
         </div>
-        <p className="mt-2.5 border-t border-cs2-border-subtle pt-2 text-center font-mono text-[9px] uppercase tracking-wider text-cs2-text-muted">
-          {mapLabel(mapName, t)} · {t("analysis.workspace.rounds", { n: totalRounds })}{durationMins > 0 ? ` · ${t("analysis.workspace.minutes", { n: durationMins })}` : ""}
-        </p>
+        {durationMins > 0 ? <p className="mt-1.5 text-right font-mono text-[8px] text-cs2-text-muted">{t("analysis.workspace.minutes", { n: durationMins })}</p> : null}
       </div>
     </section>
   );
@@ -295,8 +301,8 @@ function PlayerContextRail({
   const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
   const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   return (
-    <aside className="custom-scrollbar h-full min-h-0 space-y-3 overflow-y-auto">
-      <section className="analysis-rail-card overflow-hidden">
+    <aside className="analysis-side-rail custom-scrollbar h-full min-h-0 overflow-y-auto">
+      <section className="analysis-side-section overflow-hidden">
         <header className="border-b border-cs2-border-subtle px-3 py-2.5">
           <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
         </header>
@@ -311,20 +317,20 @@ function PlayerContextRail({
                 </p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-1.5">
+            <div className="mt-3 grid grid-cols-3 divide-x divide-cs2-border-subtle border-y border-cs2-border-subtle py-2">
               {[
                 [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
                 [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
                 [t("analysis.workspace.clips"), regularClips.length],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg bg-cs2-bg-input px-2 py-2 text-center">
+                <div key={label} className="px-2 text-center">
                   <strong className="block font-mono text-sm text-cs2-text-primary">{value}</strong>
                   <span className="mt-0.5 block text-[9px] text-cs2-text-muted">{label}</span>
                 </div>
               ))}
             </div>
             {aiMode && activeTab === "highlights" && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
-              <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/8 px-2.5 py-2 text-[10px] text-violet-300">
+              <div className="mt-3 flex items-start gap-2 border-l-2 border-violet-500/45 bg-violet-500/8 px-2.5 py-2 text-[10px] text-violet-300">
                 {playerAiReviewing ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
                 <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
               </div>
@@ -340,11 +346,11 @@ function PlayerContextRail({
       </section>
 
       {activeTab === "highlights" && selectedPlayer ? (
-        <section className="analysis-rail-card p-2.5">
-          <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.highlightMode")}</p>
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-cs2-bg-input p-1">
+        <section className="analysis-side-section px-3 pt-2.5">
+          <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.highlightMode")}</p>
+          <div className="analysis-subnav">
             {[["clips", "analysis.tabClips"], ["rounds", "analysis.tabTimeline"], ["weapons", "analysis.tabWeaponKills"]].map(([key, labelKey]) => (
-              <button key={key} type="button" onClick={() => setActiveHighlightView(key)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition-colors ${activeHighlightView === key ? "bg-cs2-bg-card text-cs2-text-primary shadow-sm" : "text-cs2-text-muted hover:text-cs2-text-primary"}`}>
+              <button key={key} type="button" data-active={activeHighlightView === key ? "true" : "false"} onClick={() => setActiveHighlightView(key)}>
                 {t(labelKey)}
               </button>
             ))}
@@ -353,11 +359,11 @@ function PlayerContextRail({
       ) : null}
 
       {activeTab === "highlights" && selectedPlayer && activeHighlightView === "clips" ? (
-        <section className="analysis-rail-card p-2.5">
-          <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.tags")}</p>
-          <div className="flex flex-wrap gap-1.5">
+        <section className="analysis-side-section p-3">
+          <p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.tags")}</p>
+          <div className="flex flex-wrap gap-1">
             {tagCounts.map(([tag, count]) => (
-              <button key={tag} type="button" onClick={() => setSelectedTag(tag)} className={`rounded-md border px-2 py-1 text-[9px] font-semibold transition-colors ${selectedTag === tag ? "border-cs2-accent/45 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border-subtle bg-cs2-bg-input/60 text-cs2-text-muted hover:text-cs2-text-primary"}`}>
+              <button key={tag} type="button" data-active={selectedTag === tag ? "true" : "false"} onClick={() => setSelectedTag(tag)} className="analysis-filter-toggle">
                 {tag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(tag, locale)} <span className="ml-0.5 font-mono opacity-70">{count}</span>
               </button>
             ))}
@@ -365,8 +371,8 @@ function PlayerContextRail({
         </section>
       ) : null}
 
-      <section className="analysis-rail-card p-2.5">
-        <p className="mb-2 px-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoActions")}</p>
+      <section className="analysis-side-section p-3">
+        <p className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoActions")}</p>
         <div className="grid gap-1.5">
           <Button variant="secondary" size="sm" className="w-full justify-center" disabled={!currentUpload?.id && !currentUpload?.path} onClick={onPlayDemo}>
             <Play className="h-3 w-3 fill-current" />{t("analysis.workspace.playDemo")}
@@ -579,7 +585,7 @@ export default function DemoAnalysisPreviewPage() {
               defaultSize: 228,
               className: "analysis-workspace-left",
               content: (
-        <aside className="flex h-full min-h-0 flex-col gap-3">
+        <aside className="analysis-side-rail flex h-full min-h-0 flex-col overflow-hidden">
           <MatchRailSummary
             teamAName={teamAName}
             teamBName={teamBName}
@@ -601,8 +607,8 @@ export default function DemoAnalysisPreviewPage() {
               className: "analysis-workspace-center",
               content: (
 
-        <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-sm">
-          <nav className="flex min-h-11 shrink-0 gap-0.5 overflow-x-auto border-b border-cs2-border-subtle p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("analysis.workspace.demoViews")}>
+        <section className="analysis-center-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+          <nav className="flex min-h-10 shrink-0 overflow-x-auto border-b border-cs2-border-subtle px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("analysis.workspace.demoViews")}>
             {TABS.map(({ key, labelKey, icon: Icon }) => (
               <button
                 key={key}
@@ -613,7 +619,7 @@ export default function DemoAnalysisPreviewPage() {
                   }
                 }}
                 onClick={() => setActiveTab(key)}
-                className={`flex min-w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold transition-colors ${activeTab === key ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm" : "text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}
+                className={`analysis-tab ${activeTab === key ? "analysis-tab--active" : ""}`}
               >
                 <Icon className="h-3.5 w-3.5" />
                 {t(labelKey)}
@@ -628,7 +634,7 @@ export default function DemoAnalysisPreviewPage() {
                 <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-page/45 p-8 text-center"><div><Users className="mx-auto h-7 w-7 text-cs2-text-muted" /><h2 className="mt-3 text-[13px] font-bold">{t("analysis.workspace.pickPlayerFirst")}</h2><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.pickPlayerHint")}</p></div></div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between gap-3 rounded-lg bg-cs2-bg-page/55 px-3 py-2">
+                  <div className="analysis-context-strip">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: playerTeamNumber(selectedPlayer) === 2 ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
                       <b className="truncate text-[11px] text-cs2-text-primary">{activePlayer}</b>

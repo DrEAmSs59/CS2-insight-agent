@@ -863,6 +863,19 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByText("前往 Demo 库")).toBeTruthy();
   });
 
+  test("keeps round detail aligned with the active filters", () => {
+    renderPage(buildShell());
+
+    fireEvent.click(screen.getByRole("button", { name: "回合" }));
+    fireEvent.click(screen.getByRole("button", { name: /R2/ }));
+    expect(screen.getByRole("heading", { name: /第 2 回合/ })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "胜方" }), { target: { value: "a" } });
+
+    expect(screen.getByRole("heading", { name: /第 1 回合/ })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /第 2 回合/ })).toBeNull();
+  });
+
   test("renders the analysis entry and navigation in English", () => {
     useLocaleStore.getState().hydrate("en");
     renderPage(buildShell());

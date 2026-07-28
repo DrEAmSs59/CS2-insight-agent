@@ -179,6 +179,8 @@ export default {
   "clip.scoreMid": "{n} 分",
   "clip.scoreLow": "🤡 {n} 分",
   "clip.dequeue": "从队列移除",
+  "clip.select": "选择此片段",
+  "clip.deselect": "取消选择此片段",
   "clip.inQueue": "队列",
   "clip.roundWonTitle": "本回合：本方赢",
   "clip.roundLostTitle": "本回合：本方输",

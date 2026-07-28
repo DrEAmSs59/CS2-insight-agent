@@ -176,7 +176,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
               title={collapsed ? text : undefined}
               aria-disabled={guarded && disabled ? true : undefined}
               className={({ isActive }) => [
-                "app-sidebar__nav-item group relative flex h-10 shrink-0 items-center rounded-lg text-[12px] font-semibold transition-colors",
+                "app-sidebar__nav-item group relative flex h-10 shrink-0 items-center text-[12px] font-semibold transition-colors",
                 collapsed ? "justify-center px-0" : "gap-3 px-2.5",
                 isActive
                   ? "app-sidebar__nav-item--active bg-cs2-accent-soft text-cs2-accent"
@@ -208,7 +208,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           aria-label={collapsed ? t("nav.settings") : undefined}
           title={collapsed ? t("nav.settings") : undefined}
           className={({ isActive }) => [
-            "flex h-9 items-center rounded-lg text-[11px] font-medium transition-colors",
+            "flex h-9 items-center text-[11px] font-medium transition-colors",
             collapsed ? "justify-center" : "gap-3 px-2.5",
             isActive ? "bg-cs2-bg-active text-cs2-text-primary" : "text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary",
           ].join(" ")}
@@ -221,7 +221,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           onClick={toggleTheme}
           aria-label={theme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}
           title={collapsed ? (theme === "dark" ? t("nav.themeLight") : t("nav.themeDark")) : undefined}
-          className={`flex h-9 w-full items-center rounded-lg text-[11px] font-medium text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary ${collapsed ? "justify-center" : "gap-3 px-2.5"}`}
+          className={`flex h-9 w-full items-center text-[11px] font-medium text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary ${collapsed ? "justify-center" : "gap-3 px-2.5"}`}
         >
           {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
           {!collapsed ? <span>{theme === "dark" ? t("nav.themeLight") : t("nav.themeDark")}</span> : null}
@@ -231,7 +231,7 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
           aria-label={t("nav.openLogs")}
           title={collapsed ? t("nav.openLogs") : undefined}
           onClick={() => runWindowAction(() => API.post("config/open-logs"))}
-          className={`flex h-9 w-full items-center rounded-lg text-[11px] font-medium text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary ${collapsed ? "justify-center" : "gap-3 px-2.5"}`}
+          className={`flex h-9 w-full items-center text-[11px] font-medium text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary ${collapsed ? "justify-center" : "gap-3 px-2.5"}`}
         >
           <FileText className="h-4 w-4 shrink-0" />
           {!collapsed ? <span>{t("nav.openLogs")}</span> : null}

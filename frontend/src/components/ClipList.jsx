@@ -74,7 +74,7 @@ export default function ClipList({
   const showTabs = playerTabs.length > 1;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {!suppressSummaryHeader && (
         <div className="flex items-center gap-2">
           <Film className="h-4 w-4 text-cs2-accent" />
@@ -88,8 +88,8 @@ export default function ClipList({
 
       {/* ── 玩家 Tab 栏（仅多玩家时显示） ── */}
       {showTabs && (
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-card p-2">
-          <span className="flex items-center gap-1.5 px-2 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
+        <div className="flex flex-wrap items-end border-b border-cs2-border-subtle bg-cs2-bg-card px-1">
+          <span className="flex min-h-8 items-center gap-1.5 px-2.5 text-[9px] font-bold uppercase tracking-wider text-cs2-text-muted">
             <User className="h-3 w-3" />
             {t("clip.fullMatchResults", { n: playerTabs.length })}
           </span>
@@ -103,19 +103,16 @@ export default function ClipList({
                 type="button"
                 onClick={() => onPlayerTabChange?.(name)}
                 className={[
-                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all duration-150",
+                  "relative flex min-h-8 items-center gap-1.5 border-b-2 px-3 text-[11px] font-semibold transition-colors",
                   isActive
-                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-md shadow-cs2-accent/30"
-                    : "bg-cs2-bg-hover text-cs2-text-secondary hover:bg-cs2-bg-active hover:text-cs2-text-primary",
+                    ? "border-cs2-accent text-cs2-accent"
+                    : "border-transparent text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary",
                 ].join(" ")}
               >
                 <User className="h-3 w-3 shrink-0" />
                 <span className="max-w-[120px] truncate">{name}</span>
                 <span
-                  className={[
-                    "rounded px-1 font-mono text-[10px] tabular-nums",
-                    isActive ? "bg-cs2-bg-input/30 text-cs2-text-on-accent/80" : "bg-cs2-bg-active text-cs2-text-muted",
-                  ].join(" ")}
+                  className={`font-mono text-[9px] tabular-nums ${isActive ? "text-cs2-accent" : "text-cs2-text-muted"}`}
                 >
                   {cnt}
                 </span>
@@ -127,7 +124,7 @@ export default function ClipList({
 
       {/* ── 片段卡片列表 ── */}
       {regularClips.length > 0 ? (
-        <div className="grid gap-4">
+        <div className="analysis-list-surface">
           {regularClips.map((clip) => (
             <ClipCard
               key={clip.client_clip_uid || clip.clip_id}

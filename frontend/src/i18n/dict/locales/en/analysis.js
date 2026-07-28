@@ -179,6 +179,8 @@ export default {
   "clip.scoreMid": "{n} pts",
   "clip.scoreLow": "🤡 {n} pts",
   "clip.dequeue": "Remove from queue",
+  "clip.select": "Select this clip",
+  "clip.deselect": "Deselect this clip",
   "clip.inQueue": "Queued",
   "clip.roundWonTitle": "This round: your team won",
   "clip.roundLostTitle": "This round: your team lost",
