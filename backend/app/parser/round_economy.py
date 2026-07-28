@@ -515,7 +515,12 @@ def build_round_winner_side_map(
         if w is None:
             continue
         if trc is not None:
-            rn = _int(row.get(trc)) + 1
+            # round_end is emitted after the round counter advances, so
+            # total_rounds_played already is the number of the round that just
+            # ended. Other in-round events are zero-based and need +1, but
+            # applying that convention here shifts winners across halftime and
+            # drops the final round.
+            rn = _int(row.get(trc))
         else:
             seq += 1
             rn = seq

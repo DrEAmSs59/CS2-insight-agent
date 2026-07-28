@@ -7,13 +7,19 @@ from app import native_table as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.parser import analyzer as analyzer_module
+from app.parser import player_roster as player_roster_module
+from app.parser import round_economy as round_economy_module
 from app.parser.analyzer import DemoAnalyzer, _build_shared_player_indexes
 from app.parser.parse_utils import _max_demo_tick
 from app.parser.player_roster import (
     build_player_name_to_steam_id,
     build_player_name_to_user_id,
 )
-from app.parser.round_economy import build_round_scores
+from app.parser.round_economy import (
+    build_round_scores,
+    build_round_winner_side_map,
+    compute_team_identity_scoreline,
+)
 from app.parser.spatial_analysis import (
     build_equip_timeline,
     build_fire_index,
@@ -63,6 +69,51 @@ def test_precomputed_frames_do_not_reparse_death_or_round_events():
         2: {2: 1, 3: 0},
         3: {2: 1, 3: 1},
     }
+
+
+def test_round_end_winners_keep_completed_round_numbers_across_halftime(monkeypatch):
+    round_ends = pd.DataFrame([
+        {
+            "tick": round_number * 100,
+            "total_rounds_played": round_number,
+            "winner": "T" if round_number <= 12 else "CT",
+        }
+        for round_number in range(1, 14)
+    ])
+    expected_winners = {
+        round_number: 2 if round_number <= 12 else 3
+        for round_number in range(1, 14)
+    }
+
+    assert build_round_winner_side_map(round_ends) == expected_winners
+
+    class Parser:
+        def parse_event(self, event_name, **_kwargs):
+            assert event_name == "round_freeze_end"
+            return pd.DataFrame([
+                {"tick": round_number * 100 - 50}
+                for round_number in range(1, 14)
+            ])
+
+    group_sides = {
+        **{
+            round_number: {2: 2, 3: 3}
+            for round_number in range(1, 13)
+        },
+        13: {2: 3, 3: 2},
+    }
+    monkeypatch.setattr(
+        player_roster_module,
+        "build_steam_to_team_from_player_info",
+        lambda _parser: {"1": 2, "2": 3},
+    )
+    monkeypatch.setattr(
+        round_economy_module,
+        "build_group_side_by_round",
+        lambda *_args, **_kwargs: group_sides,
+    )
+
+    assert compute_team_identity_scoreline(Parser(), 1, round_ends) == (13, 0)
 
 
 def test_empty_precomputed_frames_retry_legacy_event_paths():
