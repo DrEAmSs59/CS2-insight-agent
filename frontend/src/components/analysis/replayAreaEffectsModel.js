@@ -182,22 +182,38 @@ export function smokeParticleState(trackSeed, particleIndex, currentTick, base, 
 
 export function infernoFlameGeometry(item, currentTick, halfExtentPx) {
   const tick = Number(currentTick) || 0;
-  const seed = Number(item?.cx || 0) * 0.071 + Number(item?.cy || 0) * 0.053;
+  const seed = Number.isFinite(Number(item?.seed))
+    ? Number(item.seed)
+    : Number(item?.cx || 0) * 0.071 + Number(item?.cy || 0) * 0.053;
   const slow = tick * 0.09 + seed;
   const quick = tick * 0.17 + seed * 1.73;
   const pulse = 0.92 + 0.08 * Math.sin(slow);
-  const angle = quick * 0.43 + seed;
+  const sway = Math.sin(quick);
+  const flameStrength = 0.5 + 0.5 * Math.sin(seed * 1.37 + 0.4);
   return {
-    jitterX: halfExtentPx * 0.08 * Math.cos(angle),
-    jitterY: halfExtentPx * 0.08 * Math.sin(angle),
-    // Slight overlap joins adjacent authoritative fire cells into one bed.
-    // The extension stays far below one source cell and never changes occupancy.
-    outerRadius: halfExtentPx * (1.04 + 0.12 * Math.sin(slow * 0.71)),
-    middleRadius: halfExtentPx * 0.58 * pulse,
-    coreRadius: halfExtentPx * (0.3 + 0.05 * Math.cos(quick)),
-    sparkX: halfExtentPx * 0.58 * Math.cos(angle * 1.31),
-    sparkY: halfExtentPx * 0.58 * Math.sin(angle * 1.31),
-    sparkRadius: Math.max(0.65, halfExtentPx * 0.1),
+    jitterX: halfExtentPx * 0.1 * sway,
+    jitterY: halfExtentPx * 0.06 * Math.cos(quick * 0.83),
+    outerRadius: halfExtentPx * (1.12 + 0.08 * Math.sin(slow * 0.71)),
+    middleRadius: halfExtentPx * (0.92 + 0.04 * Math.sin(slow * 0.83)),
+    coreRadius: halfExtentPx * (0.28 + 0.04 * Math.cos(quick)),
+    tongueHeight: halfExtentPx * (
+      0.95
+      + 1.05 * flameStrength
+      + 0.2 * Math.sin(slow + 0.8)
+    ),
+    tongueWidth: halfExtentPx * (
+      0.42
+      + 0.12 * flameStrength
+      + 0.05 * Math.cos(quick)
+    ),
+    tongueLean: halfExtentPx * (
+      0.28 * sway
+      + 0.34 * Math.sin(seed * 0.79)
+    ),
+    sparkX: halfExtentPx * 0.62 * Math.sin(quick * 1.31),
+    sparkY: -halfExtentPx * (0.78 + 0.28 * flameStrength),
+    sparkRadius: Math.max(0.8, halfExtentPx * (0.08 + 0.05 * flameStrength)),
+    flameStrength,
     pulse,
   };
 }

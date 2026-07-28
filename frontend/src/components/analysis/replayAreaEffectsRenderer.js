@@ -37,6 +37,24 @@ export {
 } from "./replayAreaEffectsModel";
 export { applyUtilityClip, luminanceMaskToAlphaCanvas } from "./replayAreaEffectsMask";
 
+const INFERNO_POINT_VISUAL_SCALE = 2.25;
+const INFERNO_POINT_MIN_HALF_EXTENT_PX = 5.5;
+
+export function infernoPointHalfExtentPx(cellSize, transform, width, height) {
+  const sizeWorld = Number.isFinite(cellSize) && cellSize > 0
+    ? cellSize
+    : INFERNO_CELL_SIZE_WORLD;
+  const halfExtentPct = worldLengthToRadarPercent(sizeWorld / 2, transform);
+  const occupancyHalfExtentPx = Math.max(
+    1,
+    (halfExtentPct / 100) * Math.min(width, height),
+  );
+  return Math.max(
+    INFERNO_POINT_MIN_HALF_EXTENT_PX,
+    occupancyHalfExtentPx * INFERNO_POINT_VISUAL_SCALE,
+  );
+}
+
 const SMOKE_CONTOUR_THRESHOLD = 0.15;
 const SMOKE_DILATE_CELLS = 1;
 const MAX_GEOMETRY_CACHE_ENTRIES = 256;
@@ -388,8 +406,7 @@ export function createAreaEffectsRenderer() {
   const drawInferno = (ctx, layer, projected, transform, width, height, currentTick) => {
     if (!projected.length) return;
     const sizeWorld = Number(layer.cellSize) > 0 ? Number(layer.cellSize) : INFERNO_CELL_SIZE_WORLD;
-    const halfExtentPct = worldLengthToRadarPercent(sizeWorld / 2, transform);
-    const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+    const halfExtentPx = infernoPointHalfExtentPx(sizeWorld, transform, width, height);
     const palette = effectPalette(layer.side);
     const [hot, bright, middle, outer] = palette.fire;
     const sprite = typeof ctx.drawImage === "function" ? getSprite("fire", layer.side) : null;
