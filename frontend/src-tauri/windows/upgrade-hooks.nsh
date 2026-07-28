@@ -23,6 +23,7 @@
 Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
 Var CS2ElectronDir       ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
+Var CS2ElectronMode      ; "/currentuser" for HKCU or "/allusers" for HKLM
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -202,12 +203,36 @@ Function CS2_ElectronDirMatchesInstDir
 FunctionEnd
 
 Function CS2_RunElectronUninstaller
-  ; Inputs: $R8 = uninstall command. Fully silent by design: electron-builder's
-  ; /S uninstall keeps the %APPDATA% user data in place, and the user asked for
-  ; a no-questions upgrade path.
+  ; Inputs: $CS2ElectronUninsExe, $CS2ElectronDir, $CS2ElectronMode.
+  ;
+  ; Use the same execution strategy as electron-builder's own
+  ; uninstallOldVersion helper. A plain ExecWait on the registered
+  ; UninstallString only waits for the NSIS launcher; the launcher can copy
+  ; itself to %TEMP% and return while the real uninstall is still deleting the
+  ; large bundled runtime. Copying it out first and passing _?= makes this
+  ; process perform the real uninstall, so ExecWait covers registry and
+  ; directory cleanup too. _?= must be the final argument and must not quote
+  ; the directory, even when it contains spaces.
+  ;
+  ; --updated and /KEEP_APP_DATA preserve the Electron profile for migration,
+  ; including builds configured to delete app data on a normal uninstall.
   DetailPrint "正在静默卸载旧版 CS2 Insight Agent (Electron)…"
+  Delete "$PLUGINSDIR\cs2-electron-uninstaller.exe"
   ClearErrors
-  ExecWait '$R8 /S' $R0
+  CopyFiles /SILENT "$CS2ElectronUninsExe" "$PLUGINSDIR\cs2-electron-uninstaller.exe"
+  ${If} ${Errors}
+    StrCpy $R7 "无法准备旧版 Electron 卸载程序。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\cs2-electron-uninstaller.exe" /S /KEEP_APP_DATA $CS2ElectronMode --updated _?=$CS2ElectronDir' $R0
+  ${If} ${Errors}
+    ; Match electron-builder's group-policy fallback: if Windows blocks an
+    ; executable copied to the temp directory, run the original in place.
+    ClearErrors
+    ExecWait '"$CS2ElectronUninsExe" /S /KEEP_APP_DATA $CS2ElectronMode --updated _?=$CS2ElectronDir' $R0
+  ${EndIf}
   ${If} ${Errors}
     StrCpy $R7 "无法启动旧版 Electron 卸载程序。安装已中止，旧程序和用户数据均未删除。"
     Call CS2_AbortMigrationInstall
@@ -265,6 +290,7 @@ Function CS2_RemoveElectronHKCU
     ${EndIf}
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    StrCpy $CS2ElectronMode "/currentuser"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
     cs2_hkcu_wait_removed:
@@ -311,6 +337,7 @@ Function CS2_RemoveElectronHKLM
     ${EndIf}
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    StrCpy $CS2ElectronMode "/allusers"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
     cs2_hklm_wait_removed:

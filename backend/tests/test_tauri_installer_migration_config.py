@@ -38,7 +38,22 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert "SetRegView 64" in hook
     assert "SetRegView 32" in hook
     assert "uninstall cs2 insight agent.exe" in hook.lower()
-    assert "ExecWait '$R8 /S'" in hook
+    # electron-builder's NSIS uninstaller must run from a temporary copy with
+    # _?= as its final argument. Otherwise ExecWait can return after only the
+    # self-copying launcher exits, leaving the old registry entry behind while
+    # the large Electron runtime is still being deleted.
+    assert 'CopyFiles /SILENT "$CS2ElectronUninsExe" "$PLUGINSDIR\\cs2-electron-uninstaller.exe"' in hook
+    assert 'StrCpy $CS2ElectronMode "/currentuser"' in hook
+    assert 'StrCpy $CS2ElectronMode "/allusers"' in hook
+    assert (
+        'ExecWait \'"$PLUGINSDIR\\cs2-electron-uninstaller.exe" /S /KEEP_APP_DATA '
+        '$CS2ElectronMode --updated _?=$CS2ElectronDir\' $R0'
+    ) in hook
+    assert (
+        'ExecWait \'"$CS2ElectronUninsExe" /S /KEEP_APP_DATA '
+        '$CS2ElectronMode --updated _?=$CS2ElectronDir\' $R0'
+    ) in hook
+    assert "ExecWait '$R8 /S'" not in hook
     assert "desktop_data_migration.py" in hook
     assert "--require-desktop-stopped" in hook
     assert "--require-electron-ui-export" in hook
