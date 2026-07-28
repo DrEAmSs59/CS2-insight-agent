@@ -45,6 +45,8 @@ export default {
   "liteCut.project.width": "画布宽度",
   "liteCut.project.height": "画布高度",
   "liteCut.project.frameRate": "视频帧率",
+  "liteCut.project.frameRateHint": "可直接输入工程帧率；较高帧率会显著增加预览和导出负载。",
+  "liteCut.project.frameRateInvalid": "请输入 1–{max} 之间的整数 FPS。",
   "liteCut.project.outputSettings": "工程参数",
   "liteCut.project.createConfirm": "创建工程",
   "liteCut.project.creating": "创建中…",

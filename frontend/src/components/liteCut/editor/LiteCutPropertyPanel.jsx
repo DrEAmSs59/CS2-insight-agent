@@ -11,6 +11,7 @@ import {
   FlipVertical,
   Captions,
   CopyCheck,
+  Check,
   Layers,
   DiamondMinus,
   DiamondPlus,
@@ -1138,6 +1139,10 @@ function ExportPane({
   width = 1920,
   height = 1080,
   fps = 60,
+  frameBlendEnabled = false,
+  frameBlendFrames = 5,
+  highFrameDownsampleEnabled = false,
+  deliveryFps = 60,
   encoder = "auto",
   encoderTier = "quality",
   canvasFit = "contain",
@@ -1165,6 +1170,36 @@ function ExportPane({
   const [encoderDetection, setEncoderDetection] = useState(null);
   const commitSize = (patch) => onOutputSettingsChange?.(patch);
   const setPresetSize = (w, h) => commitSize({ width: w, height: h });
+  const deliveryFpsOptions = [24, 30, 50, 60, 120, 144, 240, 480].filter((value) => value < Number(fps));
+  const canHighFrameDownsample = deliveryFpsOptions.length > 0;
+  const fallbackDeliveryFps = deliveryFpsOptions.includes(60)
+    ? 60
+    : deliveryFpsOptions[deliveryFpsOptions.length - 1] || 60;
+  const activeDeliveryFps = deliveryFpsOptions.includes(Number(deliveryFps))
+    ? Number(deliveryFps)
+    : fallbackDeliveryFps;
+  const commitWorkingFps = (value) => {
+    const nextFps = Math.max(1, Math.min(1000, Math.round(Number(value) || 60)));
+    commitSize({
+      fps: nextFps,
+      ...(highFrameDownsampleEnabled && Number(deliveryFps) >= nextFps
+        ? { high_frame_downsample_enabled: false }
+        : {}),
+    });
+  };
+  const toggleHighFrameDownsample = () => {
+    if (!canHighFrameDownsample) return;
+    if (highFrameDownsampleEnabled) {
+      commitSize({ high_frame_downsample_enabled: false });
+      return;
+    }
+    commitSize({
+      high_frame_downsample_enabled: true,
+      delivery_fps: activeDeliveryFps,
+      frame_blend_enabled: true,
+      frame_blend_frames: [2, 3].includes(Number(frameBlendFrames)) ? Number(frameBlendFrames) : 3,
+    });
+  };
   const maxRangeEnd = Math.max(0.1, Number(timelineTotalSec) || 0.1);
   const clampRangeStart = (value) => Math.max(0, Math.min(maxRangeEnd - 0.1, Number(value) || 0));
   const clampRangeEnd = (value, start = rangeStartSec) =>
@@ -1304,17 +1339,95 @@ function ExportPane({
             />
           </label>
           <label className="block space-y-1">
-            <span className="text-[10px] font-medium text-cs2-text-muted">帧率 (FPS)</span>
-            <select
+            <span className="text-[10px] font-medium text-cs2-text-muted">工程帧率 (FPS)</span>
+            <input
+              type="number"
+              min="1"
+              max="1000"
+              step="1"
               value={fps}
-              onChange={(e) => commitSize({ fps: Number(e.target.value) || 60 })}
+              onChange={(e) => commitWorkingFps(e.target.value)}
               className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
-            >
-              {[24, 30, 50, 60, 120, 144].map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+              aria-label="工程帧率"
+            />
           </label>
+        </div>
+        <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-cs2-text-primary">帧混合（动态模糊）</p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
+                使用 FFmpeg tmix 叠加相邻帧；未开启高帧降采样时保持工程帧率，不进行运动插值。
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-pressed={Boolean(frameBlendEnabled)}
+              aria-label="帧混合（动态模糊）"
+              onClick={() => commitSize({ frame_blend_enabled: !frameBlendEnabled })}
+              className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 ${
+                frameBlendEnabled
+                  ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
+                  : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
+              }`}
+            >
+              <Check size={17} strokeWidth={3} aria-hidden="true" />
+            </button>
+          </div>
+          {frameBlendEnabled ? (
+            <label className="mt-2.5 flex items-center justify-between gap-3">
+              <span className="text-[10px] font-semibold text-cs2-text-secondary">混合帧数</span>
+              <select
+                value={frameBlendFrames}
+                onChange={(e) => commitSize({ frame_blend_frames: Number(e.target.value) || 5 })}
+                className="rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+              >
+                {[2, 3, 5, 7, 9].map((value) => (
+                  <option key={value} value={value}>
+                    {value} 帧{highFrameDownsampleEnabled && value <= 3 ? "（推荐）" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+        <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold text-cs2-text-primary">高帧降采样</p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
+                工程先按 {fps} FPS 合成，最终先混合相邻帧，再降到交付帧率。推荐 120 → 60 FPS 搭配 2～3 帧混合。
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-pressed={Boolean(highFrameDownsampleEnabled)}
+              aria-label="高帧降采样"
+              disabled={!canHighFrameDownsample}
+              onClick={toggleHighFrameDownsample}
+              className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                highFrameDownsampleEnabled
+                  ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
+                  : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
+              }`}
+            >
+              <Check size={17} strokeWidth={3} aria-hidden="true" />
+            </button>
+          </div>
+          {highFrameDownsampleEnabled ? (
+            <label className="mt-2.5 flex items-center justify-between gap-3">
+              <span className="text-[10px] font-semibold text-cs2-text-secondary">交付帧率</span>
+              <select
+                value={activeDeliveryFps}
+                onChange={(e) => commitSize({ delivery_fps: Number(e.target.value) || fallbackDeliveryFps })}
+                className="rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+              >
+                {deliveryFpsOptions.map((value) => (
+                  <option key={value} value={value}>{value} FPS</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           {[
@@ -1658,6 +1771,10 @@ export default function LiteCutPropertyPanel({
   outputWidth = 1920,
   outputHeight = 1080,
   outputFps = 60,
+  outputFrameBlendEnabled = false,
+  outputFrameBlendFrames = 5,
+  outputHighFrameDownsampleEnabled = false,
+  outputDeliveryFps = 60,
   outputEncoder = "auto",
   outputEncoderTier = "quality",
   outputCanvasFit = "contain",
@@ -1931,6 +2048,10 @@ export default function LiteCutPropertyPanel({
               width={outputWidth}
               height={outputHeight}
               fps={outputFps}
+              frameBlendEnabled={outputFrameBlendEnabled}
+              frameBlendFrames={outputFrameBlendFrames}
+              highFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
+              deliveryFps={outputDeliveryFps}
               encoder={outputEncoder}
               encoderTier={outputEncoderTier}
               canvasFit={outputCanvasFit}

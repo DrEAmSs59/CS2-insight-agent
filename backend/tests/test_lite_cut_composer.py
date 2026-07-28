@@ -713,7 +713,7 @@ def test_project_output_settings_use_body_with_bounds():
     ref = {"width": 1280, "height": 720, "fps": 59.94}
     assert _project_output_settings({}, ref) == (1280, 720, 59.94)
     assert _project_output_settings({"output": {"width": 3840, "height": 2160, "fps": 30}}, ref) == (3840, 2160, 30.0)
-    assert _project_output_settings({"output": {"width": 12, "height": 9000, "fps": 999}}, ref) == (320, 4320, 240.0)
+    assert _project_output_settings({"output": {"width": 12, "height": 9000, "fps": 999}}, ref) == (320, 4320, 999.0)
     assert _project_output_settings({"output": {"width": "bad", "height": "bad", "fps": "bad"}}, ref) == (1280, 720, 59.94)
 
 

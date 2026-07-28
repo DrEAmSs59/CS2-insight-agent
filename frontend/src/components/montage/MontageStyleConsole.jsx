@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Copy,
+  Check,
   CheckCircle2,
   FolderOpen,
   Loader2,
@@ -198,6 +199,12 @@ export function MontageStyleConsole({
   nameCardsEnabled,
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
+  frameBlendEnabled,
+  frameBlendFrames,
+  frameBlendDeliveryFps,
+  onFrameBlendEnabledChange,
+  onFrameBlendFramesChange,
+  onFrameBlendDeliveryFpsChange,
 }) {
   const t = useT();
   const dirOk = Boolean(String(outputDir || "").trim()) || Boolean(String(effectiveOutputDirHint || "").trim());
@@ -491,6 +498,70 @@ export function MontageStyleConsole({
                   <span>{t("montage.consoleExportDirTarget")}</span>
                   <span className="break-all font-mono text-cs2-text-secondary select-all">{effectiveOutputDirHint}</span>
                 </p>
+              ) : null}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-cs2-text-primary">
+                    {t("montage.consoleFrameBlendTitle")}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-cs2-text-muted">
+                    {t("montage.consoleFrameBlendHint")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-pressed={Boolean(frameBlendEnabled)}
+                  aria-label={t("montage.consoleFrameBlendTitle")}
+                  onClick={() => onFrameBlendEnabledChange?.(!frameBlendEnabled)}
+                  className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 ${
+                    frameBlendEnabled
+                      ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
+                      : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
+                  }`}
+                >
+                  <Check size={17} strokeWidth={3} aria-hidden="true" />
+                </button>
+              </div>
+              {frameBlendEnabled ? (
+                <>
+                <label className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold text-cs2-text-secondary">
+                    {t("montage.consoleFrameBlendFramesLabel")}
+                  </span>
+                  <select
+                    value={frameBlendFrames}
+                    onChange={(e) => onFrameBlendFramesChange?.(Number(e.target.value) || 5)}
+                    className="rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent"
+                  >
+                    {[2, 3, 5, 7, 9].map((value) => (
+                      <option key={value} value={value}>
+                        {t("montage.consoleFrameBlendFramesValue", { n: value })}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold text-cs2-text-secondary">
+                    {t("montage.consoleFrameBlendDeliveryFpsLabel")}
+                  </span>
+                  <select
+                    value={frameBlendDeliveryFps ?? ""}
+                    onChange={(e) => onFrameBlendDeliveryFpsChange?.(e.target.value ? Number(e.target.value) : null)}
+                    className="rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent"
+                  >
+                    <option value="">{t("montage.consoleFrameBlendDeliveryFpsFollow")}</option>
+                    {[24, 30, 50, 60, 120].map((value) => (
+                      <option key={value} value={value}>{t("montage.consoleFrameBlendDeliveryFpsValue", { n: value })}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-muted">
+                  {t("montage.consoleFrameBlendDeliveryFpsHint")}
+                </p>
+                </>
               ) : null}
             </div>
 

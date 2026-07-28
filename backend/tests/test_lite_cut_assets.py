@@ -376,7 +376,7 @@ def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path)
     assert command[-1] == str(output)
 
 
-def test_native_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
+def test_native_h264_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
     small = tmp_path / "small.mp4"
     large = tmp_path / "large.mp4"
     small.write_bytes(b"video")
@@ -384,6 +384,14 @@ def test_native_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
         output.truncate(256 * 1024 * 1024)
     assert asset_needs_browser_proxy(small) is False
     assert asset_needs_browser_proxy(large) is False
+
+
+def test_hevc_mp4_requires_browser_preview_proxy(tmp_path):
+    source = tmp_path / "high-fps-hevc.mp4"
+    source.write_bytes(b"\x00\x00\x00\x18ftypisom....hvc1....hvcC")
+
+    assert asset_needs_browser_proxy(source) is True
+    assert asset_needs_browser_proxy(source, video_codec="hevc") is True
 
 
 def test_native_mp4_ignores_an_old_size_based_proxy(tmp_path):

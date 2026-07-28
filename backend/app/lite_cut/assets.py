@@ -74,6 +74,9 @@ _KIND_BY_EXT = {
 }
 
 _BROWSER_PROXY_EXTS = frozenset({".avi", ".mkv", ".gif", ".mov"})
+_MP4_LIKE_EXTS = frozenset({".mp4", ".m4v"})
+_HEVC_SAMPLE_ENTRY_TAGS = (b"hvc1", b"hev1", b"dvhe", b"dvh1")
+_MP4_CODEC_SCAN_BYTES = 2 * 1024 * 1024
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -282,11 +285,37 @@ def asset_stream_path(path: Path) -> Path:
     return proxy if proxy.is_file() else path
 
 
-def asset_needs_browser_proxy(path: Path) -> bool:
-    # File size does not change browser codec/container support. MP4/M4V can
-    # already be seeked efficiently through the Range endpoint, so eagerly
-    # recompressing a large native file only delays editing and duplicates it.
-    return path.suffix.lower() in _BROWSER_PROXY_EXTS
+def _mp4_container_mentions_hevc(path: Path) -> bool:
+    """Detect HEVC sample entries without an ffprobe subprocess on every list call."""
+    if path.suffix.lower() not in _MP4_LIKE_EXTS:
+        return False
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as source:
+            head = source.read(_MP4_CODEC_SCAN_BYTES)
+            chunks = [head]
+            # Fast-start MP4 stores the sample entry near the front.  For files
+            # with their moov atom at the end, inspect the tail as well.
+            if size > _MP4_CODEC_SCAN_BYTES:
+                source.seek(max(0, size - _MP4_CODEC_SCAN_BYTES))
+                chunks.append(source.read(_MP4_CODEC_SCAN_BYTES))
+    except OSError:
+        return False
+    return any(tag in chunk for chunk in chunks for tag in _HEVC_SAMPLE_ENTRY_TAGS)
+
+
+def asset_needs_browser_proxy(path: Path, *, video_codec: str | None = None) -> bool:
+    """Whether preview must be converted to a codec WebView2 reliably decodes."""
+    extension = path.suffix.lower()
+    if extension in _BROWSER_PROXY_EXTS:
+        return True
+    if extension not in _MP4_LIKE_EXTS:
+        return False
+    # Do not proxy ordinary browser-native H.264 MP4 just because it is large.
+    # HEVC MP4 is container-valid but frequently black in WebView2 when the OS
+    # codec extension or hardware decoder is unavailable.
+    codec = str(video_codec or "").strip().lower()
+    return codec in {"hevc", "h265", "h.265"} or _mp4_container_mentions_hevc(path)
 
 
 def preview_proxy_remux_command(

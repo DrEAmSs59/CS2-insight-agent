@@ -71,6 +71,11 @@ from ..video_composer import (
     resolve_h264_codec_name,
     validate_output_path,
 )
+from ..frame_blend import (
+    build_frame_blend_command,
+    normalize_frame_blend_frames,
+    resolve_frame_blend_output_fps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -971,6 +976,37 @@ def compose_lite_cut_montage(
                 video_encode_quality=video_encode_quality,
                 cancel_event=cancel_event,
             )
+        output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
+        delivery_fps = resolve_frame_blend_output_fps(
+            fps,
+            high_frame_downsample_enabled=bool(output_settings.get("high_frame_downsample_enabled")),
+            delivery_fps=output_settings.get("delivery_fps"),
+        )
+        high_frame_downsample_active = delivery_fps < fps - 1e-6
+        blend_frames = normalize_frame_blend_frames(
+            bool(output_settings.get("frame_blend_enabled")) or high_frame_downsample_active,
+            output_settings.get("frame_blend_frames", 5),
+        )
+        if blend_frames > 1:
+            _raise_if_cancelled(cancel_event)
+            _emit_progress(progress_callback, 0.99, "frame_blend")
+            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
+            import shutil
+
+            shutil.move(str(output_path), str(frame_blend_base))
+            cmd_blend = build_frame_blend_command(
+                ffmpeg_bin=ffmpeg_bin,
+                source_path=frame_blend_base,
+                output_path=output_path,
+                frames=blend_frames,
+                fps=delivery_fps,
+                video_encode_args=video_encode_quality,
+            )
+            blend_result = _run_ffmpeg_process(cmd_blend, timeout=3600, cancel_event=cancel_event)
+            if blend_result.returncode != 0:
+                tail = (blend_result.stderr or blend_result.stdout or "").strip()[-600:]
+                logger.error("lite_cut frame blend failed: %s", tail)
+                raise MontageComposerError("MONTAGE_EXPORT_FAILED")
         _raise_if_cancelled(cancel_event)
         _emit_progress(progress_callback, 1.0, "done")
     finally:

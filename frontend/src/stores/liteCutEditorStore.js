@@ -63,6 +63,10 @@ export function normalizeLiteCutBody(rawBody) {
       height: 1080,
       fps: 60,
       encoder: "auto",
+      frame_blend_enabled: false,
+      frame_blend_frames: 5,
+      high_frame_downsample_enabled: false,
+      delivery_fps: 60,
       range_mode: "full",
       range_start_sec: 0,
       range_end_sec: null,
@@ -72,13 +76,35 @@ export function normalizeLiteCutBody(rawBody) {
     const outputDefaults = { width: 1920, height: 1080, fps: 60 };
     for (const [key, fallback] of Object.entries(outputDefaults)) {
       const raw = Number(body.output[key]);
-      if (!Number.isFinite(raw) || raw <= 0) {
+      if (!Number.isInteger(raw) || raw < 1 || (key === "fps" && raw > 1000)) {
         body.output[key] = fallback;
         changed = true;
       }
     }
     if (!["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body.output.encoder)) {
       body.output.encoder = "auto";
+      changed = true;
+    }
+    if (typeof body.output.frame_blend_enabled !== "boolean") {
+      body.output.frame_blend_enabled = false;
+      changed = true;
+    }
+    const rawFrameBlendFrames = Number(body.output.frame_blend_frames);
+    if (!Number.isInteger(rawFrameBlendFrames) || rawFrameBlendFrames < 2 || rawFrameBlendFrames > 9) {
+      body.output.frame_blend_frames = 5;
+      changed = true;
+    }
+    if (typeof body.output.high_frame_downsample_enabled !== "boolean") {
+      body.output.high_frame_downsample_enabled = false;
+      changed = true;
+    }
+    const rawDeliveryFps = Number(body.output.delivery_fps);
+    if (!Number.isInteger(rawDeliveryFps) || rawDeliveryFps < 1 || rawDeliveryFps > 1000) {
+      body.output.delivery_fps = 60;
+      changed = true;
+    }
+    if (body.output.high_frame_downsample_enabled && Number(body.output.delivery_fps) >= Number(body.output.fps)) {
+      body.output.high_frame_downsample_enabled = false;
       changed = true;
     }
     if (!["full", "custom"].includes(body.output.range_mode)) {
@@ -562,8 +588,19 @@ export const useLiteCutEditorStore = create((set, get) => ({
   patchOutput: (patch) => {
     const { body } = get();
     if (!body) return;
+    const nextOutput = { ...(body.output || {}), ...patch };
+    const nextWorkingFps = Number(nextOutput.fps);
+    const nextDeliveryFps = Number(nextOutput.delivery_fps);
+    if (
+      nextOutput.high_frame_downsample_enabled === true
+      && Number.isFinite(nextWorkingFps)
+      && Number.isFinite(nextDeliveryFps)
+      && nextDeliveryFps >= nextWorkingFps
+    ) {
+      nextOutput.high_frame_downsample_enabled = false;
+    }
     set({
-      body: { ...body, output: { ...(body.output || {}), ...patch } },
+      body: { ...body, output: nextOutput },
       dirty: true,
     });
   },

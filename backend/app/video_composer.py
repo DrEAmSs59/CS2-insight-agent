@@ -20,6 +20,11 @@ from .ffmpeg_process import (
     run_process_capture,
 )
 from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
+from .frame_blend import (
+    build_frame_blend_command,
+    normalize_frame_blend_frames,
+    resolve_frame_blend_output_fps,
+)
 from .env_utils import (
     resolve_name_card_font,
     resolve_name_card_font_bold,
@@ -1273,6 +1278,9 @@ def compose_montage(
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
+    frame_blend_enabled: bool = False,
+    frame_blend_frames: int = 5,
+    frame_blend_delivery_fps: Optional[float] = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
@@ -1592,56 +1600,87 @@ def compose_montage(
 
         if bgm_path is None:
             shutil.move(str(mid_playable), str(output_path))
-            return
+        else:
+            bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
+            bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
 
-        bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
-        bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
-
-        fc_mix = (
-            f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
-            f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol, start_sec=bgm_start)};"
-            f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-        )
-        cmd_mix = [
-            str(ffmpeg_bin),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(mid_playable),
-            "-i",
-            str(bgm_path),
-            "-filter_complex",
-            fc_mix,
-            "-map",
-            "0:v",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ]
-        r3 = _run_ffmpeg_capture(
-            cmd_mix,
-            timeout=3600,
-            stage="montage_bgm_mix",
-            output_path=output_path,
-        )
-        if r3.returncode != 0:
-            logger.error(
-                "montage bgm mix failed returncode=%d command=%s stderr=%s",
-                r3.returncode,
-                command_for_log(cmd_mix),
-                process_error_tail(r3),
+            fc_mix = (
+                f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
+                f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol, start_sec=bgm_start)};"
+                f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
             )
-            raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
+            cmd_mix = [
+                str(ffmpeg_bin),
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(mid_playable),
+                "-i",
+                str(bgm_path),
+                "-filter_complex",
+                fc_mix,
+                "-map",
+                "0:v",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+            r3 = _run_ffmpeg_capture(
+                cmd_mix,
+                timeout=3600,
+                stage="montage_bgm_mix",
+                output_path=output_path,
+            )
+            if r3.returncode != 0:
+                logger.error(
+                    "montage bgm mix failed returncode=%d command=%s stderr=%s",
+                    r3.returncode,
+                    command_for_log(cmd_mix),
+                    process_error_tail(r3),
+                )
+                raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
+
+        blend_frames = normalize_frame_blend_frames(frame_blend_enabled, frame_blend_frames)
+        if blend_frames > 1:
+            delivery_fps = resolve_frame_blend_output_fps(
+                fps,
+                high_frame_downsample_enabled=frame_blend_delivery_fps is not None,
+                delivery_fps=frame_blend_delivery_fps,
+            )
+            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
+            shutil.move(str(output_path), str(frame_blend_base))
+            cmd_blend = build_frame_blend_command(
+                ffmpeg_bin=ffmpeg_bin,
+                source_path=frame_blend_base,
+                output_path=output_path,
+                frames=blend_frames,
+                fps=delivery_fps,
+                video_encode_args=video_encode_quality,
+            )
+            r4 = _run_ffmpeg_capture(
+                cmd_blend,
+                timeout=3600,
+                stage="montage_frame_blend",
+                output_path=output_path,
+            )
+            if r4.returncode != 0:
+                logger.error(
+                    "montage frame blend failed returncode=%d command=%s stderr=%s",
+                    r4.returncode,
+                    command_for_log(cmd_blend),
+                    process_error_tail(r4),
+                )
+                raise MontageComposerError("MONTAGE_EXPORT_FAILED")
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)

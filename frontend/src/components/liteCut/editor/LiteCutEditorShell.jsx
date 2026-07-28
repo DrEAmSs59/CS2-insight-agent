@@ -436,7 +436,11 @@ export default function LiteCutEditorShell({
   const outputDir = String(body?.output?.dir || "");
   const outputWidth = Math.max(320, Math.min(7680, Number(body?.output?.width) || 1920));
   const outputHeight = Math.max(180, Math.min(4320, Number(body?.output?.height) || 1080));
-  const outputFps = Math.max(1, Math.min(240, Number(body?.output?.fps) || 60));
+  const outputFps = Math.max(1, Math.min(1000, Number(body?.output?.fps) || 60));
+  const outputFrameBlendEnabled = body?.output?.frame_blend_enabled === true;
+  const outputFrameBlendFrames = Math.max(2, Math.min(9, Number(body?.output?.frame_blend_frames) || 5));
+  const outputHighFrameDownsampleEnabled = body?.output?.high_frame_downsample_enabled === true;
+  const outputDeliveryFps = Math.max(1, Math.min(1000, Number(body?.output?.delivery_fps) || 60));
   const outputEncoder = ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body?.output?.encoder)
     ? body.output.encoder
     : "auto";
@@ -1885,6 +1889,10 @@ export default function LiteCutEditorShell({
             outputWidth={outputWidth}
             outputHeight={outputHeight}
             outputFps={outputFps}
+            outputFrameBlendEnabled={outputFrameBlendEnabled}
+            outputFrameBlendFrames={outputFrameBlendFrames}
+            outputHighFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
+            outputDeliveryFps={outputDeliveryFps}
             outputEncoder={outputEncoder}
             outputEncoderTier={outputEncoderTier}
             outputCanvasFit={outputCanvasFit}
