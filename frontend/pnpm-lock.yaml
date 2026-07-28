@@ -33,6 +33,9 @@ importers:
       '@aws-sdk/lib-storage':
         specifier: 3.1047.0
         version: 3.1047.0(@aws-sdk/client-s3@3.1047.0)
+      '@ianlucas/cs2-lib':
+        specifier: 8.4.0
+        version: 8.4.0
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.2.2(vite@6.4.2(jiti@2.6.1)(lightningcss@1.32.0))
@@ -700,6 +703,10 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@ianlucas/cs2-lib@8.4.0':
+    resolution: {integrity: sha512-9S9/FpEd8d8zA7nZQAfie/6bXW9RiNUmHPskCP7h4sscPgCEtZqhQHYqVNWasFBWNHZtgPlpIDAd65LgjpWyYw==}
+    engines: {node: '>=20'}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -2990,6 +2997,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.25.12':
     optional: true
+
+  '@ianlucas/cs2-lib@8.4.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

@@ -957,7 +957,7 @@ export default function SettingsPage() {
                 </FieldRow>
               </SectionCard>
 
-              <SectionCard title={t("settings.sectionNetworkAssets")} hint={t("settings.sectionNetworkAssetsHint")} search={search && !matches(t("settings.sectionNetworkAssets") + " Steam CDN avatar")}>
+              <SectionCard title={t("settings.sectionNetworkAssets")} hint={t("settings.sectionNetworkAssetsHint")} search={search && !matches(t("settings.sectionNetworkAssets") + " Steam CDN avatar cs2-lib finish")}>
                 <FieldRow label={t("settings.labelSteamCdnAssets")} hint={t("settings.hintSteamCdnAssets")}>
                   <Toggle
                     value={config.steam_cdn_assets_enabled !== false}

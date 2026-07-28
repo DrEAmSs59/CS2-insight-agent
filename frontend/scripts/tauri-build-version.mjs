@@ -44,6 +44,12 @@ function run(command, args, env = process.env, shell = process.platform === "win
 
 run(
   process.execPath,
+  [join(frontendRoot, "scripts", "generate-cs2-item-catalog.mjs")],
+  buildEnv,
+  false,
+);
+run(
+  process.execPath,
   [join(frontendRoot, "scripts", "stage-python-runtime.mjs")],
   buildEnv,
   false,

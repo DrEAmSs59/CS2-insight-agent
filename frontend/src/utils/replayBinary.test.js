@@ -27,6 +27,16 @@ function packetFixture() {
     effect_tracks: [{ id: "smoke:1", type: "smoke", start_tick: 100, end_tick: 140, samples: [] }],
     cache: { frames: "parquet_binary_hit", parsed: false },
     effects_pending: false,
+    player_skin_loadouts: {
+      1: {
+        ak47: {
+          model: "ak47",
+          name_en: "AK-47 | Redline",
+          name_zh: "AK-47 | 红线",
+          image_url: "https://cdn.cstrike.app/images/ak47-redline.webp",
+        },
+      },
+    },
   };
   const header = encoder.encode(JSON.stringify(metadata));
   const output = [];
@@ -85,6 +95,8 @@ describe("decodeReplayBinary", () => {
       team: "T",
       inventory: ["AK-47", "Smoke Grenade"],
       weapon: "AK-47",
+      weapon_model: "ak47",
+      weapon_skin: expect.objectContaining({ name_en: "AK-47 | Redline" }),
       has_c4: true,
       is_pov: true,
       is_teammate: true,

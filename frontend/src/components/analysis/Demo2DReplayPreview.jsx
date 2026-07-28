@@ -37,6 +37,7 @@ import {
 } from "../../utils/replayPlayback";
 import { useReplayStore, REPLAY_STORE_CACHE_VERSION } from "../../stores/replayStore";
 import { replayUtilityExposureByName, roundEnemyKillCounts } from "../../utils/replayHudState";
+import { cs2SkinDisplayName } from "../../utils/cs2ItemCatalog.js";
 import {
   MAX_SMOKE_TRAJECTORY_SECONDS,
   grenadeTrajectoryTimingIsValid,
@@ -77,6 +78,25 @@ function writeReplayPosition(sessionIdentity, value) {
 
 function HudEquipmentIcon({ stem, className = "", title = "" }) {
   return <img src={`${HUD_ICON_BASE}/${stem}.svg`} alt="" title={title} draggable={false} className={`block object-contain ${className}`} />;
+}
+
+function ReplayWeaponIcon({ stem, skin, onlineAssetsEnabled, className = "", title = "" }) {
+  const imageUrl = onlineAssetsEnabled ? String(skin?.image_url || "") : "";
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [imageUrl]);
+  if (imageUrl && !failed) {
+    return (
+      <img
+        src={imageUrl}
+        alt=""
+        title={title}
+        draggable={false}
+        onError={() => setFailed(true)}
+        className={`block object-contain ${className}`}
+      />
+    );
+  }
+  return <HudEquipmentIcon stem={stem} title={title} className={className} />;
 }
 
 function safeLabel(value, fallback = "") {
@@ -335,6 +355,8 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   liveStats,
   roundKillStars = 0,
   utilityExposure,
+  locale,
+  onlineAssetsEnabled,
 }) {
   const displayName = safeLabel(player.name, `玩家 ${index + 1}`);
   const alive = state.is_alive !== false;
@@ -357,6 +379,8 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   const number = replayPlayerNumber(teamKey, index);
   const weapon = resolveReplayWeapon(state) || (alive ? "" : "—");
   const weaponStem = resolveHudWeaponStem(weapon, weapon, { fallback: "knife" });
+  const weaponSkin = state?.weapon_skin || null;
+  const weaponLabel = cs2SkinDisplayName(weaponSkin, locale) || weapon;
   const hasC4 = Boolean(exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
   const hasArmor = Number(state.armor || 0) > 0;
   const armorValue = Math.max(0, Number(state.armor) || 0);
@@ -468,8 +492,8 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
         </div>
         {/* Loadout: kill stars above weapon, weapon baseline matches ID */}
         <div
-          title={weapon}
-          aria-label={`${displayName} 当前武器 ${weapon}`}
+          title={weaponLabel}
+          aria-label={`${displayName} 当前武器 ${weaponLabel}`}
           className={`replay-roster-slot-weapon flex min-w-0 flex-col justify-start gap-0.5 overflow-visible ${
             mirrored ? "col-start-2 row-start-1 items-start" : "col-start-2 row-start-1 items-end"
           }`}
@@ -490,8 +514,11 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
               : null}
           </span>
           {weaponStem && (
-            <HudEquipmentIcon
+            <ReplayWeaponIcon
               stem={weaponStem}
+              skin={weaponSkin}
+              onlineAssetsEnabled={onlineAssetsEnabled}
+              title={weaponLabel}
               className={`h-5 w-[60px] max-w-full object-contain drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] ${
                 mirrored ? "object-left" : "object-right"
               } ${alive ? "" : "opacity-40"}`}
@@ -544,6 +571,8 @@ const ReplayRoster = memo(function ReplayRoster({
   liveStatsByName,
   roundKillStarsByName,
   utilityExposureByName,
+  locale,
+  onlineAssetsEnabled,
 }) {
   const byName = new Map((framePlayers || []).map((player) => [safeLabel(player.name).toLowerCase(), player]));
   const sideName = safeLabel(side, teamKey === "a" ? "T" : "CT").toUpperCase();
@@ -577,6 +606,8 @@ const ReplayRoster = memo(function ReplayRoster({
               liveStats={liveStatsByName?.[displayName.toLowerCase()]}
               roundKillStars={roundKillStarsByName?.[displayName.toLowerCase()] || 0}
               utilityExposure={utilityExposureByName?.[displayName.toLowerCase()]}
+              locale={locale}
+              onlineAssetsEnabled={onlineAssetsEnabled}
             />
           );
         })}
@@ -595,6 +626,8 @@ export default function Demo2DReplayPreview({
   onRoundChange,
   layoutEditing = false,
   layoutResetSignal = 0,
+  locale = "zh",
+  onlineAssetsEnabled = false,
 }) {
   const t = useT();
   const rounds = workspace?.rounds || [];
@@ -1182,7 +1215,7 @@ export default function Demo2DReplayPreview({
             defaultSize: 300,
             className: "replay-roster-panel",
             content: (
-              <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+              <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} />
             ),
           },
           {
@@ -1250,7 +1283,7 @@ export default function Demo2DReplayPreview({
             defaultSize: 300,
             className: "replay-roster-panel",
             content: (
-              <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+              <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} />
             ),
           },
         ]}

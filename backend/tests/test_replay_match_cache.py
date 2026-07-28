@@ -113,6 +113,16 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
                 "parquet_rows": len(ticks),
             }
 
+        def parse_skins(self):
+            return {
+                "steamid": [2],
+                "def_index": [60],
+                "paint_index": [984],
+                "paint_seed": [7],
+                "paint_wear": [0.02],
+                "custom_name": [""],
+            }
+
         @staticmethod
         def read_replay_parquet_round(_path, row_group):
             round_number = sorted(row_groups)[row_group]
@@ -242,6 +252,8 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
     assert round_one["frames"][0]["players"][0]["inventory"] == ["AK-47", "Smoke Grenade"]
     assert round_one["frames"][0]["players"][0]["is_teammate"] is True
     assert round_one["frames"][0]["players"][1]["is_teammate"] is False
+    assert round_one["frames"][0]["players"][1]["weapon_model"] == "m4a1_silencer"
+    assert round_one["frames"][0]["players"][1]["weapon_skin"]["name_en"] == "M4A1-S | Printstream"
     assert [shot for frame in round_one["frames"] for shot in frame.get("shots", [])] == [
         {"tick": 132, "actor": "Alpha", "weapon": "ak47"}
     ]
@@ -273,6 +285,7 @@ def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_
     ]
     assert binary_calls[0]["metadata"]["cache"]["frames"] == "parquet_binary_hit"
     assert binary_calls[0]["metadata"]["effects_pending"] is False
+    assert binary_calls[0]["metadata"]["player_skin_loadouts"]["2"]["m4a1_silencer"]["paint_index"] == 984
     assert binary_calls[0]["metadata"]["cache"]["effects"] == "parquet_hit"
     assert [track["type"] for track in binary_calls[0]["metadata"]["effect_tracks"]] == ["smoke"]
 

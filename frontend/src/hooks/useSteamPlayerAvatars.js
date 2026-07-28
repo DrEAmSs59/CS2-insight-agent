@@ -4,8 +4,11 @@ import { steamIdForPlayer } from "../utils/playerAppearance.js";
 
 function requestAvatars(requestKey) {
   return API.get("/steam/player-avatars", { params: { steam_ids: requestKey } })
-    .then((response) => response?.data?.avatars || {})
-    .catch(() => ({}));
+    .then((response) => ({
+      avatars: response?.data?.avatars || {},
+      onlineAssetsEnabled: response?.data?.enabled === true,
+    }))
+    .catch(() => ({ avatars: {}, onlineAssetsEnabled: false }));
 }
 
 export function useSteamPlayerAvatars(players) {
@@ -14,19 +17,19 @@ export function useSteamPlayerAvatars(players) {
       .map(steamIdForPlayer)
       .filter(Boolean),
   )].slice(0, 10).join(","), [players]);
-  const [avatars, setAvatars] = useState({});
+  const [result, setResult] = useState({ avatars: {}, onlineAssetsEnabled: false });
 
   useEffect(() => {
     if (!requestKey) {
-      setAvatars({});
+      setResult({ avatars: {}, onlineAssetsEnabled: false });
       return undefined;
     }
     let cancelled = false;
     requestAvatars(requestKey).then((next) => {
-      if (!cancelled) setAvatars(next);
+      if (!cancelled) setResult(next);
     });
     return () => { cancelled = true; };
   }, [requestKey]);
 
-  return avatars;
+  return result;
 }

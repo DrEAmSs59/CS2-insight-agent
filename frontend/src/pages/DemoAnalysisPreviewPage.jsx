@@ -519,7 +519,10 @@ export default function DemoAnalysisPreviewPage() {
       : t("analysis.workspace.batchPending", { n: Math.max(0, uploadedDemoCount - parsedDemoCount) }));
   const meta = s.matchMeta || currentUpload?.match_meta || matches[s.currentMatchIndex]?.match_meta || {};
   const teams = useMemo(() => splitTeams(s.players), [s.players]);
-  const steamAvatars = useSteamPlayerAvatars(s.players);
+  const {
+    avatars: steamAvatars,
+    onlineAssetsEnabled,
+  } = useSteamPlayerAvatars(s.players);
   const teamAName = meta.team_a_name || firstTeamName(teams.a, "Team A");
   const teamBName = meta.team_b_name || firstTeamName(teams.b, "Team B");
   const workspaceFallback = useMemo(() => ({
@@ -732,6 +735,8 @@ export default function DemoAnalysisPreviewPage() {
               onRoundChange={setReplayRound}
               layoutEditing={layoutEditing}
               layoutResetSignal={layoutResetSignal}
+              locale={locale}
+              onlineAssetsEnabled={onlineAssetsEnabled}
             />
             )}
 

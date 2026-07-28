@@ -1,17 +1,12 @@
-/**
- * Locale-aware weapon name display.
- *
- * The backend (backend/app/parser/weapons.py WEAPON_TRANSLATION_MAP) emits
- * Chinese display names for many weapons.  Under the English UI we reverse-map
- * those Chinese strings back to standard CS2 English names.
- *
- * Names that are already pure ASCII/English in the map (AUG, MP7, P90, Nova,
- * M249, TEC-9, P250, XM1014, MAG-7, MP5-SD, P2000, CZ-75, AK-47, M4A4,
- * SG 553) do NOT need an entry here — the fallback returns them unchanged.
- */
+import { CS2_ITEM_CATALOG } from "../generated/cs2ItemCatalog.js";
+
+/** Locale-aware weapon names generated from cs2-lib, plus legacy cache aliases. */
 
 /** @type {Record<string, string>} */
 export const WEAPON_NAME_ZH_TO_EN = {
+  ...CS2_ITEM_CATALOG.zhToEn,
+  // Workspaces parsed before the cs2-lib catalog migration can still contain
+  // the project's former colloquial labels. Keep them readable in English.
   // 步枪
   "消音 M4A1-S":        "M4A1-S",
   "法玛斯 (FAMAS)":     "FAMAS",
