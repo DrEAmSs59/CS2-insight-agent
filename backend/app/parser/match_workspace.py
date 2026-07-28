@@ -1195,7 +1195,7 @@ def build_match_workspace(
     # round's tracks in the binary replay packet.
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.07.4",
+        "algorithm_version": "match-workspace-2026.07.5",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
