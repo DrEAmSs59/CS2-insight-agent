@@ -1,5 +1,8 @@
 """LiteCut composer helper tests."""
 
+import json
+import shutil
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -76,6 +79,7 @@ from app.lite_cut.composer import (
 from app.video_composer import MontageComposerError
 from app.video_composer import _xfade_transition_name
 from app.lite_cut.models import empty_project
+from app.lite_cut.render_pipeline import _concat_timeline_command
 
 
 def test_map_transition_types():
@@ -369,6 +373,11 @@ def test_boundary_transition_preserves_clip_timeline_length_and_supplies_silence
         previous_has_audio=False,
         next_has_audio=True,
     )
+    assert (
+        "[holdsrc]trim=start=5.750000:end=6.000000,setpts=PTS-STARTPTS,"
+        "reverse,trim=end_frame=1,setpts=PTS-STARTPTS,"
+        "loop=loop=-1:size=1:start=0"
+    ) in graph
     assert "loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=0.500000[hold]" in graph
     assert "[0:v]split=2[pvsrc][holdsrc]" in graph
     assert "[1:v]split=2[nintrosrc][ntailsrc]" in graph
@@ -376,6 +385,24 @@ def test_boundary_transition_preserves_clip_timeline_length_and_supplies_silence
     assert "[pv][xf][ntail]concat=n=3:v=1:a=0[vout]" in graph
     assert "anullsrc=r=48000:cl=stereo,atrim=0:6.000000" in graph
     assert "[pa][na]concat=n=2:v=0:a=1[aout]" in graph
+
+
+def test_boundary_transition_finds_last_real_frame_when_container_duration_extends_past_video():
+    graph = _boundary_transition_filter_complex(
+        transition_type="fade",
+        duration=0.5,
+        previous_duration=6.468,
+        next_duration=4,
+        fps=60,
+        previous_has_audio=True,
+        next_has_audio=True,
+    )
+
+    assert (
+        "[holdsrc]trim=start=6.218000:end=6.468000,setpts=PTS-STARTPTS,"
+        "reverse,trim=end_frame=1,setpts=PTS-STARTPTS"
+    ) in graph
+    assert "trim=start=6.451333:end=6.468000" not in graph
 
 
 def test_boundary_transition_keeps_requested_one_point_five_seconds_when_next_clip_allows_it():
@@ -453,8 +480,91 @@ def test_clip_normalizer_keeps_slow_silent_clips_dual_stream_and_untruncated(mon
     source_input = cmd.index(str(src))
     assert cmd[source_input - 3 : source_input] == ["-t", "6.000000", "-i"]
     assert "anullsrc=r=48000:cl=stereo" in cmd
+    assert "-shortest" not in cmd
+    assert cmd[cmd.index("-c:a") + 1] == "pcm_s16le"
+    output_duration_index = [index for index, value in enumerate(cmd) if value == "-t"][-1]
+    assert cmd[output_duration_index + 1] == "14.000000"
     assert ["-map", "0:v:0", "-map", "1:a:0"] == cmd[cmd.index("-map") : cmd.index("-map") + 4]
     assert "14.100000" in cmd
+
+
+def test_timeline_concat_encodes_pcm_audio_to_aac_once(tmp_path):
+    cmd = _concat_timeline_command(
+        ffmpeg_bin=Path("ffmpeg"),
+        concat_list=tmp_path / "concat.txt",
+        output_path=tmp_path / "output.mp4",
+    )
+
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert cmd[cmd.index("-af") + 1] == "aresample=48000:async=1:first_pts=0"
+    assert "-c" not in cmd
+
+
+def test_real_multicut_timeline_does_not_accumulate_aac_padding(tmp_path):
+    ffmpeg_name = shutil.which("ffmpeg")
+    ffprobe_name = shutil.which("ffprobe")
+    if not ffmpeg_name or not ffprobe_name:
+        pytest.skip("FFmpeg tools are not available on PATH")
+
+    ffmpeg = Path(ffmpeg_name)
+    ffprobe = Path(ffprobe_name)
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60:duration=0.4",
+            "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=0.4",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-shortest", str(source),
+        ],
+        check=True,
+    )
+
+    segments = []
+    for index in range(12):
+        segment = tmp_path / f"segment_{index:02d}.mkv"
+        _lite_cut_clip_to_ts(
+            ffmpeg_bin=ffmpeg,
+            src=source,
+            out_ts=segment,
+            clip={"trim_in": 0, "trim_out": 0.4},
+            width=320,
+            height=180,
+            fps=60,
+            canvas_fit="contain",
+            background_color="black",
+            blur_amount=24,
+            video_encode_quality=["-c:v", "libx264", "-preset", "ultrafast"],
+        )
+        segments.append(segment)
+
+    concat_list = tmp_path / "concat.txt"
+    concat_list.write_text("\n".join(f"file '{path.as_posix()}'" for path in segments) + "\n", encoding="utf-8")
+    output = tmp_path / "output.mp4"
+    subprocess.run(
+        _concat_timeline_command(ffmpeg_bin=ffmpeg, concat_list=concat_list, output_path=output),
+        check=True,
+    )
+    probe = subprocess.run(
+        [
+            str(ffprobe), "-v", "error", "-show_entries",
+            "stream=codec_type,start_time,duration", "-of", "json", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    streams = {item["codec_type"]: item for item in json.loads(probe.stdout)["streams"]}
+    video_start = float(streams["video"]["start_time"])
+    audio_start = float(streams["audio"]["start_time"])
+    video_duration = float(streams["video"]["duration"])
+    audio_duration = float(streams["audio"]["duration"])
+
+    assert abs(video_start - audio_start) <= 0.025
+    assert abs(video_duration - audio_duration) <= 0.025
+    assert video_duration == pytest.approx(4.8, abs=0.025)
 
 
 def test_speed_ramp_uses_timeline_duration_for_video_fade_out():

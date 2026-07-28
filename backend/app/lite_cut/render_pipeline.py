@@ -517,14 +517,11 @@ def _lite_cut_gap_to_ts(
         f"{safe_duration:.6f}",
         *video_encode_quality,
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        "pcm_s16le",
         "-ar",
         "48000",
         "-ac",
         "2",
-        "-shortest",
         str(out_ts),
     ]
     result = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
@@ -579,9 +576,7 @@ def _lite_cut_boundary_transition_to_ts(
         "[aout]",
         *video_encode_quality,
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        "pcm_s16le",
         "-ar",
         "48000",
         "-ac",
@@ -639,6 +634,10 @@ def _lite_cut_clip_to_ts(
         volume_filter=_clip_volume_filter(clip),
         freeze_frame_sec=_clip_freeze_frame_sec(clip),
     )
+    # Every normalized segment must have matching A/V duration. ``-shortest``
+    # silently picks the shorter stream (often audio by a few packets), which
+    # loses time once per clip and turns into a visible drift after concat.
+    audio_duration_filter = f"apad=pad_dur={timeline_duration:.6f},atrim=end={timeline_duration:.6f},asetpts=PTS-STARTPTS"
     has_canvas_transform = isinstance(clip.get("transform"), dict) or transition_in_background or transition_out_background
 
     cmd = [
@@ -681,10 +680,7 @@ def _lite_cut_clip_to_ts(
                 ]
                 graph_parts.append(f"[0:a]{','.join(chain)}{label}")
             graph_parts.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[rampa]")
-            if af:
-                graph_parts.append(f"[rampa]{af}[aout]")
-            else:
-                graph_parts.append("[rampa]anull[aout]")
+            graph_parts.append(f"[rampa]{','.join(part for part in (af, audio_duration_filter) if part)}[aout]")
         else:
             graph_parts.append(
                 f"anullsrc=r=48000:cl=stereo,atrim=0:{timeline_duration:.6f},asetpts=PTS-STARTPTS[aout]"
@@ -694,7 +690,7 @@ def _lite_cut_clip_to_ts(
     else:
         has_audio = bool(probe_video_audio_summary(src, resolve_ffprobe_binary(ffmpeg_bin)).get("has_audio"))
         if not has_audio:
-            # Keep every normalized TS dual-stream so concat and cut-boundary
+            # Keep every normalized segment dual-stream so concat and cut-boundary
             # transitions work for recordings or uploads with no audio track.
             cmd.extend([
                 "-f",
@@ -708,14 +704,60 @@ def _lite_cut_clip_to_ts(
             cmd.extend(["-filter_complex", _clip_canvas_transform_graph("[0:v]", "[vout]", clip=clip, fitted_filter=vf, width=width, height=height, fps=fps, duration=timeline_duration, background_color=background_color, transition_in_background=transition_in_background, transition_out_background=transition_out_background), "-map", "[vout]"])
         else:
             cmd.extend(["-vf", vf])
-        if af and has_audio:
-            cmd.extend(["-af", af])
+        if has_audio:
+            cmd.extend(["-af", ",".join(part for part in (af, audio_duration_filter) if part)])
         if has_canvas_transform and has_audio:
             cmd.extend(["-map", "0:a:0"])
         if not has_audio:
             cmd.extend([*([] if has_canvas_transform else ["-map", "0:v:0"]), "-map", "1:a:0"])
     cmd.extend([
         *video_encode_quality,
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-t",
+        f"{timeline_duration:.6f}",
+        str(out_ts),
+    ])
+    r = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip()[-600:]
+        logger.error("lite_cut clip normalize failed %s: %s", src.name, tail)
+        raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=src.name)
+
+
+def _concat_timeline_command(
+    *,
+    ffmpeg_bin: Path,
+    concat_list: Path,
+    output_path: Path,
+) -> list[str]:
+    """Join PCM timeline segments and perform the base track's sole AAC encode."""
+    return [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_list),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "copy",
+        "-af",
+        "aresample=48000:async=1:first_pts=0",
         "-c:a",
         "aac",
         "-b:a",
@@ -724,14 +766,12 @@ def _lite_cut_clip_to_ts(
         "48000",
         "-ac",
         "2",
-        "-shortest",
-        str(out_ts),
-    ])
-    r = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
-    if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-600:]
-        logger.error("lite_cut clip normalize failed %s: %s", src.name, tail)
-        raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=src.name)
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
 
 
 def compose_lite_cut_montage(
@@ -794,7 +834,7 @@ def compose_lite_cut_montage(
         normed: list[Path] = []
         for i, (clip, src) in enumerate(zip(clips, paths)):
             _raise_if_cancelled(cancel_event)
-            out_ts = Path(tmpdir) / f"clip_{i:03d}.ts"
+            out_ts = Path(tmpdir) / f"clip_{i:03d}.mkv"
             _lite_cut_clip_to_ts(
                 ffmpeg_bin=ffmpeg_bin,
                 src=src,
@@ -821,7 +861,7 @@ def compose_lite_cut_montage(
             for index, clip_path in enumerate(normed):
                 gap_duration = gap_by_index.get(index)
                 if gap_duration is not None:
-                    gap_ts = Path(tmpdir) / f"gap_{index:03d}.ts"
+                    gap_ts = Path(tmpdir) / f"gap_{index:03d}.mkv"
                     _lite_cut_gap_to_ts(
                         ffmpeg_bin=ffmpeg_bin,
                         out_ts=gap_ts,
@@ -857,7 +897,7 @@ def compose_lite_cut_montage(
                     processed.append(current)
                     current = normed[index]
                 else:
-                    transition_ts = Path(tmpdir) / f"transition_{index:03d}.ts"
+                    transition_ts = Path(tmpdir) / f"transition_{index:03d}.mkv"
                     _lite_cut_boundary_transition_to_ts(
                         ffmpeg_bin=ffmpeg_bin,
                         ffprobe=ffprobe,
@@ -884,22 +924,11 @@ def compose_lite_cut_montage(
         concat_list.write_text("\n".join(_concat_file_line(p) for p in concat_paths) + "\n", encoding="utf-8")
         _emit_progress(progress_callback, 0.62, "concat")
 
-        cmd_concat = [
-            str(ffmpeg_bin),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_list),
-            "-c",
-            "copy",
-            str(output_path),
-        ]
+        cmd_concat = _concat_timeline_command(
+            ffmpeg_bin=ffmpeg_bin,
+            concat_list=concat_list,
+            output_path=output_path,
+        )
         r = _run_ffmpeg_process(cmd_concat, timeout=3600, cancel_event=cancel_event)
         if r.returncode != 0:
             tail = (r.stderr or r.stdout or "").strip()[-600:]

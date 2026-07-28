@@ -627,6 +627,7 @@ export default function LiteCutPreviewPanel({
         expectedMediaTime: promotedPlaybackTime(frameAnchorRef.current.sourceTime),
         awaitingHandoff: hasPromotedLayer || presentedStreamRef.current !== mediaIdentity,
         hasPromotedLayer,
+        keepPromotedFrameUntilCaughtUp: Boolean(retainedPromotionLayerRef.current?.prewarm),
         handoffStartedAt: handoffStartedAtRef.current,
         lastCorrectiveSeekAt: handoffSeekAtRef.current,
         seeking: Boolean(el.seeking),
@@ -1101,17 +1102,18 @@ export default function LiteCutPreviewPanel({
   }, [isPlaying, hasStream, onTogglePlay, fitMode, mainReverse, freezePlayback, mediaIdentity]);
 
   useEffect(() => {
-    for (const layer of resolvedUnderlayLayers) {
+    for (const layer of renderedUnderlayLayers) {
       const el = underlayVideoRefs.current.get(String(layer.id));
       if (!el) continue;
-      if (layer.freezePlayback) {
+      const isPromotedPrewarm = Boolean(layer.prewarm && retainedPromotionLayerRef.current && String(layer.id) === String(retainedPromotionLayerRef.current.id));
+      if (layer.freezePlayback || (layer.prewarm && !isPromotedPrewarm)) {
         el.pause();
       } else if (isPlaying && !layer.reversePlayback) {
         void el.play().catch(() => {});
       }
       else el.pause();
     }
-  }, [isPlaying, underlayLayerSignature]);
+  }, [hasPromotedUnderlay, isPlaying, underlayLayerSignature]);
 
   const handleVideoTimeUpdate = useCallback(() => {
     const el = videoRef.current;

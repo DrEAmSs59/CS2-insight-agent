@@ -990,9 +990,17 @@ def _boundary_transition_filter_complex(
             f"setpts=PTS-STARTPTS,fade=t=out:st=0:d={half:.6f}:color={phase_color}[{phase_prefix}out]"
         )
     else:
+        # Container duration is often determined by audio and can extend past
+        # the final video frame. A one-frame trim at ``duration - frame`` can
+        # therefore be empty, making xfade fall through to an apparent hard
+        # cut. Search a small tail window and reverse it so trim selects the
+        # last video frame that actually exists, then hold that frame.
+        hold_window = max(0.25, frame * 4.0)
+        hold_start = max(0.0, previous_duration - hold_window)
         hold_filter = (
-            f"[holdsrc]trim=start={max(0.0, previous_duration - frame):.6f}:end={previous_duration:.6f},"
-            f"setpts=PTS-STARTPTS,loop=loop=-1:size=1:start=0,setpts=N/{fps_s}/TB,trim=duration={td:.6f}[hold]"
+            f"[holdsrc]trim=start={hold_start:.6f}:end={previous_duration:.6f},"
+            f"setpts=PTS-STARTPTS,reverse,trim=end_frame=1,setpts=PTS-STARTPTS,"
+            f"loop=loop=-1:size=1:start=0,setpts=N/{fps_s}/TB,trim=duration={td:.6f}[hold]"
         )
     parts = [
         "[0:v]split=2[pvsrc][holdsrc]",

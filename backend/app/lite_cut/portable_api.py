@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from ..api_errors import error_detail
 from ..env_utils import get_data_dir
+from .assets import asset_kind_for_path
 from .projects_api import _delete_project_asset_files
 from .runtime import (
     LiteCutPortablePackageJob,
@@ -31,19 +32,26 @@ router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-portable"])
 logger = logging.getLogger(__name__)
 
 
-def _body_file_paths(value: Any) -> set[Path]:
-    """Find real file references in a project without guessing at directory fields."""
+_PORTABLE_BODY_PATH_KEYS = frozenset({"file_path", "asset_path", "font_file", "font_file_path", "path"})
+
+
+def _body_file_paths(value: Any, *, key: str = "") -> set[Path]:
+    """Find supported media references without treating arbitrary project metadata as assets."""
     paths: set[Path] = set()
     if isinstance(value, dict):
-        for item in value.values():
-            paths.update(_body_file_paths(item))
+        for child_key, item in value.items():
+            paths.update(_body_file_paths(item, key=str(child_key)))
     elif isinstance(value, list):
         for item in value:
-            paths.update(_body_file_paths(item))
-    elif isinstance(value, str) and value.strip():
+            paths.update(_body_file_paths(item, key=key))
+    elif key in _PORTABLE_BODY_PATH_KEYS and isinstance(value, str) and value.strip():
         try:
             path = Path(value).expanduser()
-            if path.is_file():
+            # A portable project can only restore files that LiteCut itself can
+            # register as an asset.  In particular, demo source paths are
+            # project metadata, not editable media, and must never enter the
+            # archive as .dem files.
+            if path.is_file() and asset_kind_for_path(path) != "file":
                 paths.add(path.resolve())
         except OSError:
             pass
@@ -64,6 +72,42 @@ def _replace_portable_references(value: Any, path_map: dict[str, str], asset_id_
     return value
 
 
+def _link_portable_clip_assets(body: dict[str, Any], imported_asset_ids: dict[str, int]) -> int:
+    """Link bundled recordings and file clips to the newly imported assets.
+
+    Recording IDs belong to the exporting computer's montage database.  A
+    portable package carries the rendered MP4s instead, so retaining
+    ``recorded_clip`` would make the imported project look up unavailable IDs.
+    """
+    linked = 0
+    for track in body.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips") or []:
+            if not isinstance(clip, dict) or clip.get("source_type") not in {"recorded_clip", "file"}:
+                continue
+            meta = clip.get("meta") if isinstance(clip.get("meta"), dict) else {}
+            source_path = str(
+                clip.get("file_path")
+                or meta.get("output_path")
+                or meta.get("file_path")
+                or meta.get("video_path")
+                or meta.get("clip_path")
+                or ""
+            ).strip()
+            asset_id = imported_asset_ids.get(source_path)
+            if asset_id is None:
+                continue
+            if clip.get("source_type") == "recorded_clip":
+                clip["source_type"] = "file"
+                clip["source_id"] = None
+            clip["file_path"] = source_path
+            meta["asset_id"] = asset_id
+            clip["meta"] = meta
+            linked += 1
+    return linked
+
+
 def _portable_package_path(
     project: dict[str, Any],
     assets: list[dict[str, Any]],
@@ -79,7 +123,12 @@ def _portable_package_path(
     output = package_dir / f"{safe_name}-{uuid.uuid4().hex[:8]}.litecut.zip"
     if on_output:
         on_output(output)
-    source_rows = {str(Path(str(row.get("file_path") or "")).resolve()): row for row in assets if row.get("file_path")}
+    source_rows = {
+        str(path.resolve()): row
+        for row in assets
+        if (path := Path(str(row.get("file_path") or ""))).is_file()
+        and asset_kind_for_path(path) != "file"
+    }
     paths = set(source_rows)
     paths.update(str(path) for path in _body_file_paths(project.get("body") or {}))
     source_paths = [Path(raw_path) for raw_path in sorted(paths) if Path(raw_path).is_file()]
@@ -317,6 +366,7 @@ async def import_lite_cut_portable_package(file: UploadFile = File(...)):
             destination = stable_project_asset_directory(project_id, str(project.get("name") or name))
             path_map: dict[str, str] = {}
             asset_id_map: dict[int, int] = {}
+            imported_asset_ids: dict[str, int] = {}
             for item in raw_project.get("files") or []:
                 if not isinstance(item, dict):
                     continue
@@ -345,9 +395,11 @@ async def import_lite_cut_portable_package(file: UploadFile = File(...)):
                     duration_sec=item.get("duration_sec"),
                     width=item.get("width"), height=item.get("height"), project_id=project_id,
                 )
+                imported_asset_ids[str(destination_file)] = new_asset_id
                 if isinstance(old_asset_id, int):
                     asset_id_map[old_asset_id] = new_asset_id
             imported_body = _replace_portable_references(raw_project["body"], path_map, asset_id_map)
+            _link_portable_clip_assets(imported_body, imported_asset_ids)
             await get_lite_cut_db().update_project(project_id, body=normalize_project_body(imported_body))
         item = await get_lite_cut_db().get_project(project_id)
         return item
