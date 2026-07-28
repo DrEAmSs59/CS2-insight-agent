@@ -282,13 +282,11 @@ function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapNam
 function AnalysisViewNavigation({ activeTab, onSelectTab }) {
   const t = useT();
   return (
-    <section className="analysis-side-section">
-      <header className="border-b border-cs2-border-subtle px-3 py-2">
-        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.demoViews")}</p>
-      </header>
+    <section className="analysis-view-switcher shrink-0">
+      <p className="analysis-view-switcher-label">{t("analysis.workspace.demoViews")}</p>
       <nav className="analysis-view-nav" aria-label={t("analysis.workspace.demoViews")}>
         {TABS.map(({ key, labelKey, icon: Icon }) => (
-          <button key={key} type="button" data-active={activeTab === key ? "true" : "false"} onClick={() => onSelectTab(key)}>
+          <button key={key} type="button" data-active={activeTab === key ? "true" : "false"} aria-current={activeTab === key ? "page" : undefined} onClick={() => onSelectTab(key)}>
             <Icon className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{t(labelKey)}</span>
           </button>
@@ -318,15 +316,15 @@ function HighlightSelectionRail({
       </header>
       <div className="p-3">
         <div className="grid grid-cols-2 border-y border-cs2-border-subtle">
-          <button type="button" onClick={onSelectAll} className="analysis-rail-action border-r border-cs2-border-subtle">
+          <button type="button" data-tone="select" onClick={onSelectAll} className="analysis-rail-action border-r border-cs2-border-subtle">
             <CheckSquare className="h-3 w-3" />{t("actionbar.selectAll")}
           </button>
-          <button type="button" onClick={onDeselectAll} className="analysis-rail-action">
+          <button type="button" data-tone="clear" onClick={onDeselectAll} className="analysis-rail-action">
             <XSquare className="h-3 w-3" />{t("actionbar.deselect")}
           </button>
         </div>
         {canAddCurrentPlayerHighlights ? (
-          <Button variant="secondary" size="sm" className="mt-2 w-full justify-center" disabled={batchRecording} onClick={onAddCurrentPlayerHighlights}>
+          <Button variant="primary" size="sm" className="mt-2 w-full justify-center shadow-sm" disabled={batchRecording} onClick={onAddCurrentPlayerHighlights}>
             <Sparkles className="h-3.5 w-3.5" />
             <span className="truncate">{t("actionbar.addCurrentPlayerHighlights", { player: currentPlayer })}</span>
           </Button>
@@ -339,7 +337,6 @@ function HighlightSelectionRail({
 
 function PlayerContextRail({
   activeTab,
-  onSelectTab,
   activeHighlightView,
   setActiveHighlightView,
   selectedPlayer,
@@ -374,7 +371,6 @@ function PlayerContextRail({
   return (
     <aside className="analysis-side-rail flex h-full min-h-0 flex-col overflow-hidden">
       <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-        <AnalysisViewNavigation activeTab={activeTab} onSelectTab={onSelectTab} />
         <section className="analysis-side-section overflow-hidden">
           <header className="border-b border-cs2-border-subtle px-3 py-2">
             <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cs2-text-muted">{t("analysis.workspace.playerContext")}</p>
@@ -706,6 +702,7 @@ export default function DemoAnalysisPreviewPage() {
               content: (
 
         <section className="analysis-center-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+          <AnalysisViewNavigation activeTab={activeTab} onSelectTab={selectAnalysisTab} />
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
             {activeTab === "highlights" && (
               <div className="space-y-3">
@@ -807,7 +804,6 @@ export default function DemoAnalysisPreviewPage() {
 
         <PlayerContextRail
           activeTab={activeTab}
-          onSelectTab={selectAnalysisTab}
           activeHighlightView={activeHighlightView}
           setActiveHighlightView={setActiveHighlightView}
           selectedPlayer={selectedPlayer}

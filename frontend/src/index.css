@@ -443,25 +443,47 @@
   box-shadow: var(--cs2-shadow-sm);
 }
 
+.analysis-view-switcher {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: stretch;
+  border-bottom: 1px solid var(--cs2-border-subtle);
+  background: color-mix(in srgb, var(--cs2-bg-card) 92%, var(--cs2-bg-page));
+}
+
+.analysis-view-switcher-label {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-right: 1px solid var(--cs2-border-subtle);
+  padding: 0 12px;
+  color: var(--cs2-text-muted);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 .analysis-view-nav {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-left: 1px solid var(--cs2-border-subtle);
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
 }
 
 .analysis-view-nav > button {
+  position: relative;
   display: flex;
-  min-width: 0;
-  min-height: 31px;
+  min-width: 78px;
+  flex: 1 0 auto;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  border-right: 1px solid var(--cs2-border-subtle);
-  border-bottom: 1px solid var(--cs2-border-subtle);
-  padding: 0 9px;
+  padding: 0 10px;
   color: var(--cs2-text-muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  text-align: left;
   transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -472,8 +494,17 @@
 
 .analysis-view-nav > button[data-active="true"] {
   color: var(--cs2-accent);
-  background: var(--cs2-accent-soft);
-  box-shadow: inset 2px 0 0 var(--cs2-accent);
+  background: linear-gradient(to bottom, transparent 15%, var(--cs2-accent-soft));
+}
+
+.analysis-view-nav > button[data-active="true"]::after {
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  left: 10px;
+  height: 2px;
+  background: var(--cs2-accent);
+  content: "";
 }
 
 .analysis-rail-action {
@@ -492,6 +523,22 @@
 .analysis-rail-action:hover {
   color: var(--cs2-text-primary);
   background: var(--cs2-bg-hover);
+}
+
+.analysis-rail-action[data-tone="select"] {
+  color: var(--cs2-team-blue);
+}
+
+.analysis-rail-action[data-tone="select"]:hover {
+  background: color-mix(in srgb, var(--cs2-team-blue) 10%, transparent);
+}
+
+.analysis-rail-action[data-tone="clear"] {
+  color: var(--cs2-rose-on-surface);
+}
+
+.analysis-rail-action[data-tone="clear"]:hover {
+  background: var(--cs2-rose-surface);
 }
 
 .analysis-player-row {

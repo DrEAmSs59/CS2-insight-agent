@@ -353,7 +353,8 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "高光与录制", "2D 回放", "热力图", "概览", "玩家", "回合", "经济",
     ]);
-    expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeTruthy();
+    expect(analysisNavigation.closest(".analysis-center-surface")).toBeTruthy();
+    expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
@@ -898,7 +899,13 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(dockedActionBar.getAttribute("data-compact")).toBe("true");
     expect(dockedActionBar.className).not.toContain("sticky");
     expect(dockedActionBar.parentElement?.className).toContain("analysis-center-surface");
-    expect(screen.getByRole("button", { name: "全选" }).closest('[data-dock-panel="right-rail"]')).toBeTruthy();
+    const selectAll = screen.getByRole("button", { name: "全选" });
+    const deselectAll = screen.getByRole("button", { name: "取消" });
+    const addPlayerHighlights = screen.getByRole("button", { name: "ZywOo 的全部高光入队" });
+    expect(selectAll.closest('[data-dock-panel="right-rail"]')).toBeTruthy();
+    expect(selectAll.getAttribute("data-tone")).toBe("select");
+    expect(deselectAll.getAttribute("data-tone")).toBe("clear");
+    expect(addPlayerHighlights.className).toContain("bg-cs2-accent");
   });
 
   test("renders the analysis entry and navigation in English", () => {
