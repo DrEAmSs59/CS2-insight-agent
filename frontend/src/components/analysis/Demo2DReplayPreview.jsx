@@ -240,15 +240,19 @@ export function replayEndTickForRound(round, rounds, workspace, tickRate = 64) {
   const storedEnd = Number(round?.record_end_tick ?? round?.end_tick ?? round?.round_end_tick ?? 0);
   const roundEnd = Number(round?.round_end_tick ?? round?.end_tick ?? 0);
   const roundNumber = Number(round?.round_number || 0);
-  const isFinalRound = !rounds.some((candidate) => Number(candidate?.round_number || 0) > roundNumber);
-  if (!isFinalRound || !(roundEnd > 0)) return storedEnd;
+  if (!(roundEnd > 0)) return storedEnd;
+  const nextRound = [...(rounds || [])]
+    .filter((candidate) => Number(candidate?.round_number || 0) > roundNumber)
+    .sort((left, right) => Number(left?.round_number || 0) - Number(right?.round_number || 0))[0];
+  const nextRoundStart = Number(nextRound?.start_tick || 0);
   const demoEndTick = Number(workspace?.demo_end_tick || 0);
-  if (!(demoEndTick > roundEnd)) return storedEnd;
+  const availableEnd = nextRoundStart > 0 ? nextRoundStart - 1 : demoEndTick;
+  if (!(availableEnd > roundEnd)) return storedEnd;
   const desiredEnd = Math.min(
     roundEnd + Math.max(1, Math.round((Number(tickRate) || 64) * 3)),
-    demoEndTick,
+    availableEnd,
   );
-  return Math.max(storedEnd, desiredEnd);
+  return Math.min(Math.max(storedEnd, desiredEnd), availableEnd);
 }
 
 function eventFrameRatio(event, frames, selectedRound) {
@@ -1000,6 +1004,13 @@ export default function Demo2DReplayPreview({
   const fallbackTick = selectedRound?.freeze_end_tick || selectedRound?.start_tick || 0;
   const uiFrame = frames[uiSampleIndex] || frames[0] || { players: [], tick: fallbackTick, time_sec: 0 };
   const uiTick = Number(uiFrame.tick || fallbackTick || 0);
+  const replayEndTick = Number(
+    frames.at(-1)?.tick
+    || selectedRound?.record_end_tick
+    || selectedRound?.end_tick
+    || selectedRound?.round_end_tick
+    || 0,
+  );
   const liveStatsByName = useMemo(() => {
     const result = {};
     const seenKills = new Set();
@@ -1036,14 +1047,13 @@ export default function Demo2DReplayPreview({
       uiFrame.players,
       effectTracks,
       uiTick,
-      selectedRound?.round_end_tick || selectedRound?.end_tick,
+      replayEndTick > 0 ? replayEndTick : null,
     ),
     [
       uiFrame.players,
       effectTracks,
       uiTick,
-      selectedRound?.round_end_tick,
-      selectedRound?.end_tick,
+      replayEndTick,
     ],
   );
   const uiBombState = useMemo(
