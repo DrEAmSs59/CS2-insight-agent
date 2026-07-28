@@ -4,6 +4,7 @@ import ReplayAreaEffectsCanvas, {
   applyUtilityClip,
   effectPalette,
   infernoFlameGeometry,
+  infernoPointHalfExtentPx,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
   smokeParticleState,
@@ -235,7 +236,19 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(first.outerRadius).toBeGreaterThan(0);
     expect(first.outerRadius).toBeLessThanOrEqual(12);
     expect(Math.hypot(first.sparkX, first.sparkY)).toBeLessThanOrEqual(10);
+    expect(first.flameStrength).toBeGreaterThanOrEqual(0);
+    expect(first.flameStrength).toBeLessThanOrEqual(1);
     expect(later.jitterX).not.toBe(first.jitterX);
+  });
+
+  test("inferno fire points are visually enlarged beyond their raw occupancy cells", () => {
+    const halfExtent = infernoPointHalfExtentPx(
+      36,
+      { pos_x: 0, pos_y: 4096, scale: 5 },
+      1024,
+      1024,
+    );
+    expect(halfExtent).toBeGreaterThan(8);
   });
 
   test("smoke particles are deterministic across pause and seek", () => {

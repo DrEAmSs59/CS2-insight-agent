@@ -10,6 +10,7 @@ export {
   applyUtilityClip,
   effectPalette,
   infernoFlameGeometry,
+  infernoPointHalfExtentPx,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
   selectSamplePair,
