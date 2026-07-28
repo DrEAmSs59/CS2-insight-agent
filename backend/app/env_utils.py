@@ -13,6 +13,8 @@ import os
 import re
 import shutil
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -494,12 +496,52 @@ def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = N
     return changed
 
 
+def _write_text_atomically(path: Path, text: str) -> None:
+    """Write *text* beside the destination, then atomically replace it."""
+    temporary_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _quarantine_invalid_config(path: Path, exc: BaseException) -> Path:
+    """Preserve an unreadable user config before rebuilding the live file."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    quarantined = path.with_name(
+        f"{path.stem}.invalid-{timestamp}{path.suffix}"
+    )
+    os.replace(path, quarantined)
+    logger.error(
+        "Invalid config at %s was preserved as %s; rebuilding defaults: %s",
+        path,
+        quarantined,
+        exc,
+    )
+    return quarantined
+
+
 def _parse_config_json_file(path: Path) -> dict:
     """
     读取单对象 JSON 配置。若文件在首个 `}` 之后被意外拼接了多余内容（常见误粘贴），
     `json.loads` 会报 Extra data；此处用 raw_decode 只取第一个顶层对象。
     """
-    text = path.read_text(encoding="utf-8").strip()
+    text = path.read_text(encoding="utf-8-sig").strip()
     if not text:
         return {}
     decoder = json.JSONDecoder()
@@ -507,7 +549,7 @@ def _parse_config_json_file(path: Path) -> dict:
     trailing = text[end:].strip()
     if trailing:
         try:
-            path.write_text(text[:end].rstrip() + "\n", encoding="utf-8")
+            _write_text_atomically(path, text[:end].rstrip() + "\n")
         except OSError:
             pass
     if not isinstance(raw, dict):
@@ -518,9 +560,19 @@ def _parse_config_json_file(path: Path) -> dict:
 def load_config() -> AppConfig:
     path = resolve_config_path()
     if path.is_file():
-        raw = _parse_config_json_file(path)
+        recovered = False
+        try:
+            raw = _parse_config_json_file(path)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            _quarantine_invalid_config(path, exc)
+            recovered = True
+            example_path = resolve_example_config_path()
+            if example_path.is_file():
+                raw = _parse_config_json_file(example_path)
+            else:
+                raw = {}
         cfg = AppConfig(**raw)
-        if _normalize_config_defaults(cfg, raw):
+        if recovered or _normalize_config_defaults(cfg, raw):
             save_config(cfg)
         return cfg
     if _LEGACY_CONFIG_PATH.is_file():
@@ -543,7 +595,7 @@ def save_config(cfg: AppConfig) -> None:
     _normalize_config_defaults(cfg)
     path = resolve_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    _write_text_atomically(path, cfg.model_dump_json(indent=2))
 
 
 def detect_cs2_path() -> Optional[str]:
