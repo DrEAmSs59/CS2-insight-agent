@@ -17,6 +17,7 @@ from typing import Callable
 from fastapi import HTTPException, UploadFile
 
 from ..env_utils import get_data_dir, load_config
+from ..ffmpeg_process import decode_process_output
 
 _ASSET_MAX_BYTES = 20 * 1024 * 1024 * 1024
 _ASSET_UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -399,14 +400,19 @@ def _run_proxy_process(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=False,
         creationflags=creation_flags,
     )
     deadline = time.monotonic() + max(1.0, float(timeout_sec))
     while True:
         try:
             stdout, stderr = process.communicate(timeout=0.2)
-            return subprocess.CompletedProcess(command, int(process.returncode or 0), stdout, stderr)
+            return subprocess.CompletedProcess(
+                command,
+                int(process.returncode or 0),
+                decode_process_output(stdout),
+                decode_process_output(stderr),
+            )
         except subprocess.TimeoutExpired:
             cancelled = cancel_event is not None and cancel_event.is_set()
             timed_out = time.monotonic() >= deadline
@@ -419,7 +425,12 @@ def _run_proxy_process(
                 process.kill()
                 stdout, stderr = process.communicate()
             reason = "cancelled" if cancelled else "preview proxy timed out"
-            return subprocess.CompletedProcess(command, 130 if cancelled else 124, stdout, stderr or reason)
+            return subprocess.CompletedProcess(
+                command,
+                130 if cancelled else 124,
+                decode_process_output(stdout),
+                decode_process_output(stderr) or reason,
+            )
 
 
 def create_browser_preview_proxy(

@@ -79,7 +79,7 @@ export default {
   "settings.encoderAutoSelected": "自动选择：",
   "settings.encoderNotCompiled": "— FFmpeg 未编译",
   "settings.encoderProbeFailed": "— 探测失败",
-  "settings.encoderNoHwWarning": "未检测到可用硬件编码器。若 FFmpeg 为 essentials 构建，请替换为 full 构建（含 NVENC/QSV/AMF）。",
+  "settings.encoderNoHwWarning": "未检测到可用硬件编码器。请更新显卡驱动，并使用包含 NVENC/QSV/AMF 的新版 FFmpeg 构建。",
   "settings.encoderClickHint": "点击「检测」查看当前 FFmpeg 支持的编码器。",
   "settings.cardLlm": "大模型（AI）",
   "settings.cardLlmSidebarTitle": "大模型配置",

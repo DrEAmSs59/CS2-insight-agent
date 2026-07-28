@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
+from .ffmpeg_process import command_for_log, decoded_completed_process, process_error_tail
+
 logger = logging.getLogger(__name__)
 
 MontageEncoderTier = Literal["quality", "fast"]
@@ -23,10 +25,11 @@ _HW_ORDER = ("h264_nvenc", "h264_qsv", "h264_amf")
 _encoder_check_cache: dict[str, frozenset[str]] = {}
 # FFmpeg 常把 NVENC/QSV/AMF 编进列表，但无对应硬件时打开编码器会失败；auto 需实测。
 _hw_probe_cache: dict[tuple[str, str], bool] = {}
+_ffmpeg_version_cache: dict[str, str] = {}
 
 
 def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
-    """单帧 lavfi 探测用参数——只求编码器能打开，不指定 preset 以兼容新旧版 FFmpeg。"""
+    """短时 lavfi 探测参数——只求编码器可靠打开并完成基础编码。"""
     if codec == "libx264":
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "35", "-pix_fmt", "yuv420p"]
     if codec == "h264_nvenc":
@@ -39,6 +42,8 @@ def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
         return [
             "-c:v",
             "h264_amf",
+            "-usage",
+            "transcoding",
             "-quality",
             "speed",
             "-rc",
@@ -47,6 +52,8 @@ def _minimal_h264_probe_encode_args(codec: str) -> list[str]:
             "28",
             "-qp_p",
             "30",
+            "-vbaq",
+            "false",
             "-pix_fmt",
             "yuv420p",
         ]
@@ -63,6 +70,14 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
     if not extra:
         _hw_probe_cache[key] = False
         return False
+    # AMF's one-frame initialization can pass while a real 1080p/60 encode
+    # fails.  Exercise enough frames to create the production encoder queues.
+    source = (
+        "testsrc2=s=1920x1080:r=60:d=1,format=yuv420p"
+        if codec == "h264_amf"
+        else "testsrc2=s=320x240:r=1:d=0.05,format=yuv420p"
+    )
+    frame_count = "60" if codec == "h264_amf" else "1"
     cmd = [
         str(ffmpeg_bin),
         "-y",
@@ -72,9 +87,9 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
         "-f",
         "lavfi",
         "-i",
-        "testsrc2=s=320x240:r=1:d=0.05,format=yuv420p",
+        source,
         "-frames:v",
-        "1",
+        frame_count,
         "-an",
         *extra,
         "-f",
@@ -82,14 +97,22 @@ def _hw_encoder_runtime_ok(ffmpeg_bin: Path, codec: str) -> bool:
         "-",
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        raw_proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=False,
+            timeout=45,
+            check=False,
+        )
+        proc = decoded_completed_process(raw_proc, args=cmd)
         ok = proc.returncode == 0
         if not ok:
             logger.warning(
-                "硬件编码器探测失败 codec=%s returncode=%d\nstderr: %s",
+                "硬件编码器探测失败 codec=%s returncode=%d command=%s stderr=%s",
                 codec,
                 proc.returncode,
-                (proc.stderr or "").strip()[:500],
+                command_for_log(cmd),
+                process_error_tail(proc, 1200),
             )
     except subprocess.TimeoutExpired:
         logger.warning("硬件编码器探测超时 codec=%s", codec)
@@ -105,12 +128,15 @@ def _ffmpeg_encoder_names(ffmpeg_bin: Path) -> frozenset[str]:
     key = str(ffmpeg_bin.resolve())
     if key in _encoder_check_cache:
         return _encoder_check_cache[key]
-    proc = subprocess.run(
-        [str(ffmpeg_bin), "-hide_banner", "-encoders"],
+    cmd = [str(ffmpeg_bin), "-hide_banner", "-encoders"]
+    raw_proc = subprocess.run(
+        cmd,
         capture_output=True,
-        text=True,
+        text=False,
         timeout=90,
+        check=False,
     )
+    proc = decoded_completed_process(raw_proc, args=cmd)
     text = (proc.stdout or "") + (proc.stderr or "")
     found: set[str] = set()
     for line in text.splitlines():
@@ -121,9 +147,41 @@ def _ffmpeg_encoder_names(ffmpeg_bin: Path) -> frozenset[str]:
     return _encoder_check_cache[key]
 
 
+def _ffmpeg_version_line(ffmpeg_bin: Path) -> str:
+    key = str(ffmpeg_bin.resolve())
+    if key in _ffmpeg_version_cache:
+        return _ffmpeg_version_cache[key]
+    cmd = [str(ffmpeg_bin), "-version"]
+    try:
+        raw_proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=False,
+            timeout=15,
+            check=False,
+        )
+        proc = decoded_completed_process(raw_proc, args=cmd)
+        line = next((item.strip() for item in proc.stdout.splitlines() if item.strip()), "")
+    except (OSError, subprocess.SubprocessError):
+        line = ""
+    _ffmpeg_version_cache[key] = line or "unknown"
+    return _ffmpeg_version_cache[key]
+
+
+def _selected_codec(ffmpeg_bin: Path, requested: str, selected: str) -> str:
+    logger.info(
+        "FFmpeg H.264 encoder selected requested=%s selected=%s ffmpeg=%s version=%s",
+        requested,
+        selected,
+        ffmpeg_bin,
+        _ffmpeg_version_line(ffmpeg_bin),
+    )
+    return selected
+
+
 def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
     """
-    user_mode: auto（NVENC→QSV→AMF→libx264；硬件项除 -encoders 外再做单帧实测）或明确编码器名。
+    user_mode: auto（NVENC→QSV→AMF→libx264；硬件项除 -encoders 外再做运行时实测）或明确编码器名。
     """
     raw = (user_mode or "auto").strip().lower()
     if raw not in _VALID_USER_MODES:
@@ -133,9 +191,9 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
     if raw == "auto":
         for name in _HW_ORDER:
             if name in avail and _hw_encoder_runtime_ok(ffmpeg_bin, name):
-                return name
+                return _selected_codec(ffmpeg_bin, raw, name)
         if "libx264" in avail:
-            return "libx264"
+            return _selected_codec(ffmpeg_bin, raw, "libx264")
         _composer_err(
             "当前 FFmpeg 未包含可用的 H.264 编码器（需要 libx264 或硬件编码器）。",
         )
@@ -143,7 +201,11 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
     if raw not in avail:
         if raw in _HW_ORDER:
             if "libx264" in avail:
-                return "libx264"
+                logger.warning(
+                    "requested hardware encoder is not compiled in; falling back requested=%s fallback=libx264",
+                    raw,
+                )
+                return _selected_codec(ffmpeg_bin, raw, "libx264")
             _composer_err(
                 f"当前 FFmpeg 未编译 {raw}，请在配置中将「合辑视频编码」改为「自动」或 libx264，"
                 "或安装带对应编码器的 FFmpeg 构建。",
@@ -154,10 +216,14 @@ def resolve_h264_codec_name(ffmpeg_bin: Path, user_mode: str) -> str:
 
     if raw in _HW_ORDER and not _hw_encoder_runtime_ok(ffmpeg_bin, raw):
         if "libx264" in avail:
-            return "libx264"
+            logger.warning(
+                "requested hardware encoder failed runtime probe; falling back requested=%s fallback=libx264",
+                raw,
+            )
+            return _selected_codec(ffmpeg_bin, raw, "libx264")
         _composer_err(f"{raw} 当前不可用，且 FFmpeg 未包含可回退的 libx264 编码器。")
 
-    return raw
+    return _selected_codec(ffmpeg_bin, raw, raw)
 
 
 def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
@@ -214,6 +280,8 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
             return [
                 "-c:v",
                 "h264_amf",
+                "-usage",
+                "transcoding",
                 "-quality",
                 "balanced",
                 "-rc",
@@ -222,6 +290,8 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
                 "20",
                 "-qp_p",
                 "22",
+                "-vbaq",
+                "false",
                 "-pix_fmt",
                 "yuv420p",
             ]
@@ -275,6 +345,8 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
             return [
                 "-c:v",
                 "h264_amf",
+                "-usage",
+                "transcoding",
                 "-quality",
                 "speed",
                 "-rc",
@@ -283,6 +355,8 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
                 "22",
                 "-qp_p",
                 "24",
+                "-vbaq",
+                "false",
                 "-pix_fmt",
                 "yuv420p",
             ]
@@ -307,7 +381,7 @@ def diagnose_encoders(ffmpeg_bin: Path) -> dict:
             _hw_probe_cache.pop(key, None)
             probe_ok = _hw_encoder_runtime_ok(ffmpeg_bin, name)
             if not probe_ok:
-                probe_err = "单帧编码测试失败（驱动不支持或 FFmpeg 未编译对应 SDK）"
+                probe_err = "短时编码测试失败（驱动不支持或 FFmpeg 未编译对应 SDK）"
         else:
             probe_err = "FFmpeg 未编译此编码器（essentials 构建不含硬件编码器，请换用 full 构建）"
         hw_results.append({

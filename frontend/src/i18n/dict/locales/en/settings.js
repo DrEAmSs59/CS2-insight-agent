@@ -79,7 +79,7 @@ export default {
   "settings.encoderAutoSelected": "Auto-selected:",
   "settings.encoderNotCompiled": "— not compiled in FFmpeg",
   "settings.encoderProbeFailed": "— probe failed",
-  "settings.encoderNoHwWarning": "No hardware encoder detected. If FFmpeg is an essentials build, replace it with a full build (includes NVENC/QSV/AMF).",
+  "settings.encoderNoHwWarning": "No hardware encoder detected. Update the GPU driver and use a recent FFmpeg build that includes NVENC/QSV/AMF.",
   "settings.encoderClickHint": "Click Detect to see which encoders your FFmpeg supports.",
   "settings.cardLlm": "LLM (AI)",
   "settings.cardLlmSidebarTitle": "LLM Config",
