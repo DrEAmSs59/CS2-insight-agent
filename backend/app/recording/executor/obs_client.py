@@ -17,6 +17,12 @@ from ...env_utils import OBSConfig
 
 logger = logging.getLogger(__name__)
 
+_TRANSITION_KIND_BY_ALIAS = {
+    "cut": "cut_transition",
+    "fade": "fade_transition",
+    "swipe": "swipe_transition",
+}
+
 
 class OBSConnectionError(Exception):
     pass
@@ -227,13 +233,18 @@ class OBSClient:
             raise OBSRecordError(f"SetCurrentProgramScene({scene_name!r}) failed: {exc}") from exc
 
     def set_current_scene_transition(self, name: str, duration_ms: int) -> None:
-        """SetCurrentSceneTransition — sets the global OBS transition."""
+        """Select the global OBS transition and configure its duration.
+
+        OBS WebSocket v5 exposes transition selection and duration as separate
+        requests. Sending ``transitionDuration`` as an extra selection field is
+        not portable across OBS versions.
+        """
         self._require_connected()
         try:
             req = getattr(obs_requests, "SetCurrentSceneTransition", None)
             if req is None:
                 raise OBSRecordError("SetCurrentSceneTransition not available in obs-websocket-py")
-            self._ws.call(req(transitionName=name, transitionDuration=duration_ms))
+            self._ws.call(req(transitionName=name))
         except OBSRecordError:
             raise
         except Exception as exc:
@@ -241,8 +252,29 @@ class OBSClient:
                 f"SetCurrentSceneTransition({name!r}, {duration_ms}ms) failed: {exc}"
             ) from exc
 
-    def get_scene_transition_list(self) -> list[str]:
-        """GetSceneTransitionList → list of available transition names."""
+        duration_req = getattr(obs_requests, "SetCurrentSceneTransitionDuration", None)
+        if duration_req is None:
+            logger.warning(
+                "SetCurrentSceneTransitionDuration is unavailable; "
+                "OBS will keep its existing transition duration"
+            )
+            return
+        try:
+            self._ws.call(
+                duration_req(transitionDuration=max(0, int(duration_ms)))
+            )
+        except Exception as exc:
+            # Fixed-duration transitions such as Cut can reject this request.
+            # The transition itself is already selected, so this is non-fatal.
+            logger.warning(
+                "SetCurrentSceneTransitionDuration(%dms) failed; "
+                "using the OBS duration: %s",
+                duration_ms,
+                exc,
+            )
+
+    def get_scene_transitions(self) -> list[dict[str, str]]:
+        """Return transition display names and their locale-stable kinds."""
         self._require_connected()
         try:
             req = getattr(obs_requests, "GetSceneTransitionList", None)
@@ -250,10 +282,55 @@ class OBSClient:
                 return []
             resp = self._ws.call(req())
             transitions = (getattr(resp, "datain", None) or {}).get("transitions") or []
-            return [str(t.get("transitionName") or "") for t in transitions if isinstance(t, dict)]
+            result: list[dict[str, str]] = []
+            for item in transitions:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("transitionName") or "").strip()
+                if not name:
+                    continue
+                result.append(
+                    {
+                        "name": name,
+                        "kind": str(item.get("transitionKind") or "").strip(),
+                    }
+                )
+            return result
         except Exception as exc:
             logger.warning("GetSceneTransitionList failed: %s", exc)
             return []
+
+    def get_scene_transition_list(self) -> list[str]:
+        """GetSceneTransitionList → list of available transition names."""
+        return [item["name"] for item in self.get_scene_transitions()]
+
+    def resolve_scene_transition_name(self, preferred_name: str) -> Optional[str]:
+        """Resolve a saved value to the actual transition name in this OBS locale.
+
+        OBS addresses transitions by localized display name (for example,
+        ``Fade`` is ``淡入淡出`` in Chinese OBS). Built-in transition kinds are
+        locale-stable, so known defaults are matched by kind when needed.
+        """
+        preferred = str(preferred_name or "").strip()
+        if not preferred:
+            return None
+
+        transitions = self.get_scene_transitions()
+        preferred_folded = preferred.casefold()
+        for item in transitions:
+            if item["name"].casefold() == preferred_folded:
+                return item["name"]
+
+        wanted_kind = _TRANSITION_KIND_BY_ALIAS.get(
+            preferred_folded,
+            preferred_folded if preferred_folded.endswith("_transition") else "",
+        )
+        if wanted_kind:
+            for item in transitions:
+                if item["kind"] == wanted_kind:
+                    return item["name"]
+
+        return None
 
     def scene_has_source(self, scene_name: str, source_name: str) -> bool:
         """Return True if scene already contains a source with source_name."""
