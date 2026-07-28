@@ -4,6 +4,7 @@ import ReplayAreaEffectsCanvas, {
   applyUtilityClip,
   effectPalette,
   infernoFlameGeometry,
+  infernoPointHalfExtentPx,
   luminanceMaskToAlphaCanvas,
   selectActiveSample,
 } from "./ReplayAreaEffectsCanvas";
@@ -216,6 +217,7 @@ describe("ReplayAreaEffectsCanvas", () => {
     expect(effectPalette("CT").smokeCore).toEqual([186, 216, 232]);
     expect(effectPalette("T").fire[1]).toEqual([251, 191, 36]);
     expect(effectPalette("CT").fire[1]).toEqual([125, 211, 252]);
+    expect(effectPalette("CT").fire[2]).toEqual([56, 189, 248]);
   });
 
   beforeEach(() => {
@@ -226,14 +228,27 @@ describe("ReplayAreaEffectsCanvas", () => {
     };
   });
 
-  test("inferno flame geometry animates without changing its occupancy bound", () => {
+  test("inferno flame geometry animates inside its enlarged visual envelope", () => {
     const item = { cx: 120, cy: 80, intensity: 1 };
     const first = infernoFlameGeometry(item, 100, 10);
     const later = infernoFlameGeometry(item, 104, 10);
     expect(first.outerRadius).toBeGreaterThan(0);
-    expect(first.outerRadius).toBeLessThanOrEqual(10);
-    expect(first.tongueHeight).toBeLessThanOrEqual(10);
+    expect(first.outerRadius).toBeLessThanOrEqual(12);
+    expect(first.tongueHeight).toBeLessThanOrEqual(23);
+    expect(first.flameStrength).toBeGreaterThanOrEqual(0);
+    expect(first.flameStrength).toBeLessThanOrEqual(1);
+    expect(later.flameStrength).toBe(first.flameStrength);
     expect(later.jitterX).not.toBe(first.jitterX);
+  });
+
+  test("inferno fire points are visually enlarged beyond their raw occupancy cells", () => {
+    const halfExtent = infernoPointHalfExtentPx(
+      36,
+      { pos_x: 0, pos_y: 4096, scale: 5 },
+      1024,
+      1024,
+    );
+    expect(halfExtent).toBeGreaterThan(8);
   });
 
   test("renders canvas when tracks exist", () => {

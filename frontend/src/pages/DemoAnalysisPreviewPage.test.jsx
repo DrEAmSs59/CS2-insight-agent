@@ -458,6 +458,9 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.getAttribute("data-player-label-mode")).toBe("id");
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("Z");
     expect(view.container.querySelector(".demo-player-id-label")?.textContent).toBe("ZywOo");
+    expect(view.container.querySelector(".demo-player-marker-anchor")?.className).toContain("-translate-y-1/2");
+    expect(view.container.querySelector(".demo-player-id-label")?.className).toContain("absolute");
+    expect(view.container.querySelector(".demo-player-id-label")?.className).toContain("top-full");
     fireEvent.click(screen.getByRole("button", { name: "序号" }));
     expect(view.container.querySelector('.demo-player-marker[data-player-number="0"]')?.textContent).toBe("0");
     expect(view.container.querySelector(".demo-player-id-label")).toBeNull();

@@ -521,7 +521,13 @@ export default function ReplaySceneCanvas({
   // Event/effect layers intentionally remain stepped at the 32Hz source boundary.
   // Only player positions and yaw consume the display-rate interpolation.
   const currentTick = Number(eventFrame.tick || fallbackTick || 0);
-  const roundEndTick = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
+  const replayEndTick = Number(
+    frames.at(-1)?.tick
+    || selectedRound?.record_end_tick
+    || selectedRound?.end_tick
+    || selectedRound?.round_end_tick
+    || 0,
+  );
 
   const hasSmokeAreaTracks = Boolean(
     effectCapabilities?.smoke_voxels
@@ -631,7 +637,6 @@ export default function ReplaySceneCanvas({
         ? next
         : previous;
     };
-    const roundEndForEffects = Number(selectedRound?.round_end_tick || selectedRound?.end_tick || 0);
     const kills = [];
     const grenades = [];
     for (const event of events) {
@@ -678,8 +683,8 @@ export default function ReplaySceneCanvas({
           ? parsedThrowTick
           : Math.max(0, eventTick - fallbackFlightTicks);
         const effectDuration = grenadeDurationSeconds(event.kind) * tickRate;
-        const effectEndTick = Number.isFinite(roundEndForEffects) && roundEndForEffects > 0
-          ? Math.min(eventTick + effectDuration, roundEndForEffects)
+        const effectEndTick = Number.isFinite(replayEndTick) && replayEndTick > 0
+          ? Math.min(eventTick + effectDuration, replayEndTick)
           : eventTick + effectDuration;
         if (currentTick < throwTick || currentTick > effectEndTick) continue;
         let trajectory = trajectoryValid ? rawTrajectory : [];
@@ -758,7 +763,7 @@ export default function ReplaySceneCanvas({
       }
     }
     return { kills, grenades };
-  }, [currentTick, frames, layers.grenades, layers.kills, mapLayer, roundEvents, selectedRound, teamKeyByName, tickRate, transform]);
+  }, [currentTick, frames, layers.grenades, layers.kills, mapLayer, replayEndTick, roundEvents, selectedRound, teamKeyByName, tickRate, transform]);
 
   const recentShots = useMemo(() => {
     if (!layers.shots) return [];
@@ -842,7 +847,7 @@ export default function ReplaySceneCanvas({
           <ReplayAreaEffectsCanvas
             tracks={effectTracks}
             currentTick={currentTick}
-            hideAfterTick={roundEndTick > 0 ? roundEndTick : null}
+            hideAfterTick={replayEndTick > 0 ? replayEndTick : null}
             tickRate={tickRate}
             transform={transform}
             mapName={mapName}
@@ -893,50 +898,55 @@ export default function ReplaySceneCanvas({
             return (
               <div
                 key={player.steamid64 || displayName}
-                className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-[left,top] ease-linear ${alive ? "z-[12]" : "z-[4]"}`}
+                className={`absolute transition-[left,top] ease-linear ${alive ? "z-[12]" : "z-[4]"}`}
                 style={{ left: `${player.position.x}%`, top: `${player.position.y}%`, transitionDuration: MOTION_DURATION }}
                 title={markerTitle}
               >
                 <div
-                  data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
-                  data-player-label-mode={playerLabelMode}
-                  className={`demo-player-marker relative flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${alive ? "" : "opacity-35 grayscale"}`}
-                  style={{ width: playerMarkerSizePx, height: playerMarkerSizePx, fontSize: Math.max(7, playerMarkerSizePx * 0.46) }}
+                  className="demo-player-marker-anchor relative -translate-x-1/2 -translate-y-1/2"
+                  style={{ width: playerMarkerSizePx, height: playerMarkerSizePx }}
                 >
-                  <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
-                    <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
-                  </span>
-                  <span>{circleLabel}</span>
-                  {player.has_c4 && (
-                    <span
-                      className="demo-player-c4-badge absolute -right-1 -top-1 flex items-center justify-center rounded-[2px] bg-amber-400"
-                      style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
-                    >
-                      <HudEquipmentIcon stem="c4" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                  <div
+                    data-player-number={Number.isInteger(playerNumber) ? playerNumber : undefined}
+                    data-player-label-mode={playerLabelMode}
+                    className={`demo-player-marker absolute inset-0 flex items-center justify-center rounded-full border border-white/80 font-mono font-black leading-none text-white ${isBlue ? "bg-sky-500" : "bg-amber-500"} ${alive ? "" : "opacity-35 grayscale"}`}
+                    style={{ fontSize: Math.max(7, playerMarkerSizePx * 0.46) }}
+                  >
+                    <span className="demo-player-direction-arrow pointer-events-none absolute inset-0" style={{ transform: `rotate(${yawToCssRotation(yaw)}deg)` }}>
+                      <i className={`absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 -translate-y-[calc(100%-0.5px)] border-x-[2.5px] border-b-[4.5px] border-x-transparent ${isBlue ? "border-b-sky-100" : "border-b-amber-100"}`} />
                     </span>
-                  )}
-                  {player.has_defuser && (
+                    <span>{circleLabel}</span>
+                    {player.has_c4 && (
+                      <span
+                        className="demo-player-c4-badge absolute -right-1 -top-1 flex items-center justify-center rounded-[2px] bg-amber-400"
+                        style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
+                      >
+                        <HudEquipmentIcon stem="c4" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                      </span>
+                    )}
+                    {player.has_defuser && (
+                      <span
+                        className="demo-player-kit-badge absolute -bottom-1 -right-1 flex items-center justify-center rounded-[2px] bg-sky-300"
+                        style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
+                      >
+                        <HudEquipmentIcon stem="defuser" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                      </span>
+                    )}
+                  </div>
+                  {playerLabelMode === "id" && (
                     <span
-                      className="demo-player-kit-badge absolute -bottom-1 -right-1 flex items-center justify-center rounded-[2px] bg-sky-300"
-                      style={{ width: Math.max(8, playerMarkerSizePx * 0.45), height: Math.max(8, playerMarkerSizePx * 0.45) }}
+                      className={`demo-player-id-label absolute left-1/2 top-full mt-0.5 max-w-none -translate-x-1/2 whitespace-nowrap text-center font-bold leading-tight drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] ${
+                        alive ? "text-white" : "text-white/40"
+                      }`}
+                      style={{
+                        // Same fitScale compensation as markers; ~10px on-screen at Fit.
+                        fontSize: Math.max(9, 10 / Math.max(Number(camera.fitScale) || 1, 0.05)),
+                      }}
                     >
-                      <HudEquipmentIcon stem="defuser" className="brightness-0" style={{ width: "75%", height: "75%" }} />
+                      {displayName}
                     </span>
                   )}
                 </div>
-                {playerLabelMode === "id" && (
-                  <span
-                    className={`demo-player-id-label mt-0.5 max-w-none text-center font-bold leading-tight drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] ${
-                      alive ? "text-white" : "text-white/40"
-                    }`}
-                    style={{
-                      // Same fitScale compensation as markers; ~10px on-screen at Fit.
-                      fontSize: Math.max(9, 10 / Math.max(Number(camera.fitScale) || 1, 0.05)),
-                    }}
-                  >
-                    {displayName}
-                  </span>
-                )}
               </div>
             );
           })}

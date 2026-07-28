@@ -12,6 +12,9 @@ import { worldLengthToRadarPercent, worldToRadarPercent } from "../../utils/repl
 
 /** World grid size for fire occupancy squares (mask write), not a painted bloom radius. */
 const INFERNO_CELL_SIZE_WORLD = 36;
+/** Keep real fire-cell centres, but make every point legible over detailed radar art. */
+const INFERNO_POINT_VISUAL_SCALE = 2.25;
+const INFERNO_POINT_MIN_HALF_EXTENT_PX = 5.5;
 const DEFAULT_SMOKE_CELL_SIZE = 20;
 const SMOKE_CONTOUR_THRESHOLD = 0.15;
 const SMOKE_DILATE_CELLS = 1;
@@ -34,7 +37,7 @@ const EFFECT_PALETTES = {
     fire: [
       [239, 246, 255],
       [125, 211, 252],
-      [251, 146, 60],
+      [56, 189, 248],
       [30, 64, 175],
     ],
   },
@@ -224,6 +227,7 @@ function projectLayerCells(layer, transform, mapLayer, width, height) {
       cx: (percent.x / 100) * width,
       cy: (percent.y / 100) * height,
       intensity: Number(cell[3]),
+      seed: Number(cell[0]) * 0.017 + Number(cell[1]) * 0.013,
     });
   }
   return projected;
@@ -361,25 +365,50 @@ function drawDetonationCrosshair(ctx, detonation, transform, mapLayer, width, he
 
 export function infernoFlameGeometry(item, currentTick, halfExtentPx) {
   const tick = Number(currentTick) || 0;
-  const seed = Number(item?.cx || 0) * 0.071 + Number(item?.cy || 0) * 0.053;
+  const seed = Number.isFinite(Number(item?.seed))
+    ? Number(item.seed)
+    : Number(item?.cx || 0) * 0.071 + Number(item?.cy || 0) * 0.053;
   const slow = tick * 0.09 + seed;
   const quick = tick * 0.17 + seed * 1.73;
   const pulse = 0.92 + 0.08 * Math.sin(slow);
   const sway = Math.sin(quick);
+  const flameStrength = 0.5 + 0.5 * Math.sin(seed * 1.37 + 0.4);
   return {
     jitterX: halfExtentPx * 0.1 * sway,
     jitterY: halfExtentPx * 0.06 * Math.cos(quick * 0.83),
-    outerRadius: halfExtentPx * (0.82 + 0.1 * Math.sin(slow * 0.71)),
-    middleRadius: halfExtentPx * 0.58 * pulse,
-    coreRadius: halfExtentPx * (0.3 + 0.05 * Math.cos(quick)),
-    tongueHeight: halfExtentPx * (0.78 + 0.16 * Math.sin(slow + 0.8)),
-    tongueWidth: halfExtentPx * (0.42 + 0.05 * Math.cos(quick)),
-    tongueLean: halfExtentPx * 0.22 * sway,
-    sparkX: halfExtentPx * 0.5 * Math.sin(quick * 1.31),
-    sparkY: -halfExtentPx * (0.55 + 0.2 * Math.cos(slow)),
-    sparkRadius: Math.max(0.65, halfExtentPx * 0.1),
+    outerRadius: halfExtentPx * (1.12 + 0.08 * Math.sin(slow * 0.71)),
+    middleRadius: halfExtentPx * (0.92 + 0.04 * Math.sin(slow * 0.83)),
+    coreRadius: halfExtentPx * (0.28 + 0.04 * Math.cos(quick)),
+    tongueHeight: halfExtentPx * (
+      0.95
+      + 1.05 * flameStrength
+      + 0.2 * Math.sin(slow + 0.8)
+    ),
+    tongueWidth: halfExtentPx * (
+      0.42
+      + 0.12 * flameStrength
+      + 0.05 * Math.cos(quick)
+    ),
+    tongueLean: halfExtentPx * (
+      0.28 * sway
+      + 0.34 * Math.sin(seed * 0.79)
+    ),
+    sparkX: halfExtentPx * 0.62 * Math.sin(quick * 1.31),
+    sparkY: -halfExtentPx * (0.78 + 0.28 * flameStrength),
+    sparkRadius: Math.max(0.8, halfExtentPx * (0.08 + 0.05 * flameStrength)),
+    flameStrength,
     pulse,
   };
+}
+
+export function infernoPointHalfExtentPx(cellSize, transform, width, height) {
+  const sizeWorld = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : INFERNO_CELL_SIZE_WORLD;
+  const halfExtentPct = worldRadiusToPercent(sizeWorld / 2, transform);
+  const occupancyHalfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+  return Math.max(
+    INFERNO_POINT_MIN_HALF_EXTENT_PX,
+    occupancyHalfExtentPx * INFERNO_POINT_VISUAL_SCALE,
+  );
 }
 
 function fillCircle(ctx, x, y, radius, color) {
@@ -425,10 +454,9 @@ function fillFlameTongue(ctx, x, y, geometry, color) {
 
 /** Organic flames constrained to the real inferno occupancy cells. */
 function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height, currentTick, palette) {
-  const sizeWorld = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : INFERNO_CELL_SIZE_WORLD;
-  const halfExtentPct = worldRadiusToPercent(sizeWorld / 2, transform);
-  const halfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
-  const geometry = projected.map((item) => ({
+  const halfExtentPx = infernoPointHalfExtentPx(cellSize, transform, width, height);
+  const geometry = projected.map((item, index) => ({
+    index,
     item,
     shape: infernoFlameGeometry(item, currentTick, halfExtentPx),
     intensity: Number.isFinite(item.intensity) ? clamp(item.intensity, 0.45, 1) : 0.95,
@@ -443,43 +471,82 @@ function drawInfernoOccupancy(ctx, projected, cellSize, transform, width, height
       ctx,
       item.cx + shape.jitterX,
       item.cy + shape.jitterY,
+      shape.outerRadius * 1.24,
+      `rgba(${outer.join(", ")}, ${0.18 + 0.12 * intensity})`,
+    );
+    fillCircle(
+      ctx,
+      item.cx + shape.jitterX,
+      item.cy + shape.jitterY,
       shape.outerRadius,
-      `rgba(${outer.join(", ")}, ${0.34 + 0.2 * intensity})`,
+      `rgba(${outer.join(", ")}, ${0.5 + 0.26 * intensity})`,
     );
   }
 
-  for (const { item, shape, intensity } of geometry) {
+  for (const { item, shape } of geometry) {
     fillCircle(
       ctx,
       item.cx - shape.jitterX * 0.35,
       item.cy,
       shape.middleRadius,
-      `rgba(${middle.join(", ")}, ${(0.48 + 0.25 * intensity) * shape.pulse})`,
+      `rgba(${middle.join(", ")}, 0.96)`,
     );
+  }
+
+  // Only some cells grow a visible tongue, with deterministic variation in
+  // height and lean. Their bases sink into the merged middle layer, avoiding
+  // rows of identical standalone droplets while keeping the fire animation.
+  for (const { index, item, shape, intensity } of geometry) {
+    if (index % 3 !== 0) continue;
+    fillFlameTongue(
+      ctx,
+      item.cx + shape.jitterX * 0.65,
+      item.cy + halfExtentPx * 0.12,
+      shape,
+      `rgba(${bright.join(", ")}, ${0.68 + 0.28 * intensity})`,
+    );
+  }
+
+  // Bright centres are intentionally sparse. A core on every occupancy point
+  // reads as beads / eggs once the cells are enlarged.
+  for (const { index, item, shape, intensity } of geometry) {
+    if (index % 3 !== 0) continue;
     fillCircle(
       ctx,
       item.cx + shape.jitterX * 0.2,
       item.cy + shape.jitterY * 0.2,
-      shape.coreRadius,
-      `rgba(${bright.join(", ")}, ${0.68 + 0.2 * intensity})`,
+      shape.coreRadius * 1.22,
+      `rgba(${bright.join(", ")}, ${0.72 + 0.22 * intensity})`,
     );
   }
 
-  for (const item of projected) {
-    const shape = infernoFlameGeometry(item, currentTick, halfExtentPx);
+  // A sparse inner flame and spark layer gives the bed movement without
+  // turning every occupancy point into the same repeated symbol.
+  for (const { index, item, shape } of geometry) {
+    if (index % 6 !== 0) continue;
+    const innerShape = {
+      ...shape,
+      tongueHeight: shape.tongueHeight * 0.62,
+      tongueWidth: shape.tongueWidth * 0.48,
+      tongueLean: shape.tongueLean * 0.7,
+    };
     fillFlameTongue(
       ctx,
-      item.cx,
-      item.cy,
-      shape,
-      `rgba(${bright.join(", ")}, ${0.52 + 0.22 * shape.pulse})`,
+      item.cx - shape.jitterX * 0.2,
+      item.cy + halfExtentPx * 0.12,
+      innerShape,
+      `rgba(${hot.join(", ")}, ${0.72 + 0.24 * shape.pulse})`,
     );
+  }
+
+  for (const { index, item, shape } of geometry) {
+    if (index % 5 !== 2) continue;
     fillCircle(
       ctx,
       item.cx + shape.sparkX,
       item.cy + shape.sparkY,
       shape.sparkRadius,
-      `rgba(${hot.join(", ")}, ${0.5 + 0.28 * shape.pulse})`,
+      `rgba(${hot.join(", ")}, ${0.76 + 0.2 * shape.pulse})`,
     );
   }
 }
