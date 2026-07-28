@@ -68,6 +68,9 @@ class OBSFadeController:
     def __init__(self, obs_config: OBSConfig, fade_config: FadeConfig) -> None:
         self._obs_config = obs_config
         self._cfg = fade_config
+        # OBS addresses transitions by localized display name. setup() resolves
+        # the saved/default value (for example "Fade") for the connected locale.
+        self._transition_name = fade_config.transition_name
         self._ready = False
         # Pre-warmed client held between prime_fade_to_game() and execute_primed_fade_to_game()
         # so the scene switch fires with near-zero connection latency after StartRecord/ResumeRecord.
@@ -226,12 +229,26 @@ class OBSFadeController:
         # across the transition while the visuals remain fully black.
         self._ensure_game_capture_hidden_in_black(client, black)
 
-        # ── Validate transition (warning only) ───────────────────────────
-        available = client.get_scene_transition_list()
-        if available and self._cfg.transition_name not in available:
+        # OBS transition names are localized. Resolve the saved value by the
+        # locale-stable transition kind and only enable fades when the selected
+        # transition can actually be addressed.
+        resolved_transition = client.resolve_scene_transition_name(
+            self._cfg.transition_name
+        )
+        if not resolved_transition:
+            available = client.get_scene_transition_list()
             logger.warning(
-                "[OBSFade] transition %r not in OBS list %s; will attempt anyway",
+                "[OBSFade] transition %r cannot be resolved from OBS list %s; "
+                "disabling fades",
                 self._cfg.transition_name, available,
+            )
+            return False
+        self._transition_name = resolved_transition
+        if resolved_transition != self._cfg.transition_name:
+            logger.info(
+                "[OBSFade] resolved transition %r to localized OBS name %r",
+                self._cfg.transition_name,
+                resolved_transition,
             )
 
         return True
@@ -339,7 +356,7 @@ class OBSFadeController:
             await asyncio.to_thread(client.connect)
             await asyncio.to_thread(
                 client.set_current_scene_transition,
-                self._cfg.transition_name,
+                self._transition_name,
                 self._cfg.duration_ms,
             )
             self._primed_client = client
@@ -385,13 +402,24 @@ class OBSFadeController:
             except Exception:
                 pass
 
+    async def cancel_primed_fade_to_game(self) -> None:
+        """Discard a primed connection without revealing the game scene."""
+        client = self._primed_client
+        self._primed_client = None
+        if client is None:
+            return
+        try:
+            await asyncio.to_thread(client.disconnect)
+        except Exception:
+            pass
+
     async def _do_fade(self, target_scene: str, direction: str) -> bool:
         client = self._new_client()
         try:
             await asyncio.to_thread(client.connect)
             await asyncio.to_thread(
                 client.set_current_scene_transition,
-                self._cfg.transition_name,
+                self._transition_name,
                 self._cfg.duration_ms,
             )
             await asyncio.to_thread(client.set_current_program_scene, target_scene)

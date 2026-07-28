@@ -49,6 +49,7 @@ def test_setup_creates_scenes_when_missing():
     mock_client = MagicMock()
     mock_client.get_scene_names.return_value = []          # no scenes exist
     mock_client.get_scene_transition_list.return_value = ["Fade", "Cut"]
+    mock_client.resolve_scene_transition_name.return_value = "Fade"
     mock_client.scene_has_source.return_value = False
 
     with patch.object(ctrl, "_new_client", return_value=mock_client):
@@ -69,6 +70,7 @@ def test_setup_skips_create_for_existing_scenes():
     mock_client = MagicMock()
     mock_client.get_scene_names.return_value = ["CS2 Insight Recording", "CS2 Insight Black"]
     mock_client.get_scene_transition_list.return_value = ["Fade"]
+    mock_client.resolve_scene_transition_name.return_value = "Fade"
     mock_client.scene_has_source.return_value = True  # game capture already in scene
 
     with patch.object(ctrl, "_new_client", return_value=mock_client):
@@ -89,6 +91,50 @@ def test_setup_fallback_on_exception():
         result = _run(ctrl.setup())
 
     assert result is False
+    assert ctrl.is_ready is False
+
+
+def test_setup_resolves_localized_fade_name():
+    cfg = _make_config(name="Fade")
+    ctrl = OBSFadeController(_make_obs_config(), cfg)
+
+    mock_client = MagicMock()
+    mock_client.get_scene_names.return_value = [
+        "CS2 Insight Recording",
+        "CS2 Insight Black",
+    ]
+    mock_client.resolve_scene_transition_name.return_value = "淡入淡出"
+    mock_client.scene_has_source.return_value = True
+
+    async def run():
+        with patch.object(ctrl, "_new_client", return_value=mock_client):
+            with patch("app.recording.executor.obs_fade_controller.asyncio.sleep"):
+                assert await ctrl.setup() is True
+                assert await ctrl.fade_to_black() is True
+
+    _run(run())
+
+    assert ctrl.is_ready is True
+    assert ctrl._transition_name == "淡入淡出"
+    mock_client.set_current_scene_transition.assert_called_once_with("淡入淡出", 200)
+
+
+def test_setup_disables_fade_when_transition_cannot_be_resolved():
+    cfg = _make_config(name="Fade")
+    ctrl = OBSFadeController(_make_obs_config(), cfg)
+
+    mock_client = MagicMock()
+    mock_client.get_scene_names.return_value = [
+        "CS2 Insight Recording",
+        "CS2 Insight Black",
+    ]
+    mock_client.get_scene_transition_list.return_value = ["淡入淡出", "剪切"]
+    mock_client.resolve_scene_transition_name.return_value = None
+    mock_client.scene_has_source.return_value = True
+
+    with patch.object(ctrl, "_new_client", return_value=mock_client):
+        assert _run(ctrl.setup()) is False
+
     assert ctrl.is_ready is False
 
 
@@ -162,3 +208,9 @@ def test_fade_to_black_returns_false_on_exception():
 
     result = _run(run())
     assert result is False  # fallback, not exception
+
+
+def test_game_capture_settings_always_disable_cursor():
+    from app.recording.executor.obs_fade_controller import _game_capture_settings
+
+    assert _game_capture_settings()["capture_cursor"] is False
