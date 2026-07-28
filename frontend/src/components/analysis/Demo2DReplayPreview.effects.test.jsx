@@ -26,14 +26,23 @@ describe("ReplayRosterAmbientEffect", () => {
 });
 
 describe("replayEndTickForRound", () => {
-  test("keeps the final round alive for its post-kill result tail", () => {
+  test("keeps every round alive for its post-kill result tail", () => {
     const rounds = [
       { round_number: 1, end_tick: 1_000, round_end_tick: 900 },
       { round_number: 2, end_tick: 2_000, round_end_tick: 2_000 },
     ];
 
-    expect(replayEndTickForRound(rounds[0], rounds, { demo_end_tick: 2_500 }, 64)).toBe(1_000);
+    expect(replayEndTickForRound(rounds[0], rounds, { demo_end_tick: 2_500 }, 64)).toBe(1_092);
     expect(replayEndTickForRound(rounds[1], rounds, { demo_end_tick: 2_500 }, 64)).toBe(2_192);
+  });
+
+  test("caps a post-kill tail at the next round start", () => {
+    const rounds = [
+      { round_number: 1, end_tick: 1_000, round_end_tick: 1_000 },
+      { round_number: 2, start_tick: 1_100, end_tick: 2_000, round_end_tick: 2_000 },
+    ];
+
+    expect(replayEndTickForRound(rounds[0], rounds, { demo_end_tick: 2_500 }, 64)).toBe(1_099);
   });
 
   test("caps the final tail at the real demo end", () => {
