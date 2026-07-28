@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.video_composer import (
     MontageComposerError,
+    _run_ffmpeg_capture,
     build_bgm_filter,
     probe_video_audio_summary,
     resolve_ffmpeg_binary,
@@ -99,6 +101,42 @@ class TestProbeVideoSummary(unittest.TestCase):
         self.assertTrue(info["has_alpha"])
         self.assertEqual(info["pixel_format"], "yuva444p12le")
         self.assertEqual(info["audio_codec_name"], "aac")
+
+
+class TestFfmpegCapture(unittest.TestCase):
+    def test_amf_failure_is_retried_once_after_partial_output_cleanup(self):
+        with tempfile.TemporaryDirectory() as td:
+            output = Path(td) / "partial.mp4"
+            output.write_bytes(b"partial")
+            failed = subprocess.CompletedProcess(["ffmpeg"], 1, "", "AMF \u00ae failed")
+            succeeded = subprocess.CompletedProcess(["ffmpeg"], 0, "", "")
+            command = ["ffmpeg", "-c:v", "h264_amf", str(output)]
+            with patch(
+                "app.video_composer.run_process_capture",
+                side_effect=[failed, succeeded],
+            ) as runner:
+                with patch("app.video_composer.time.sleep") as sleeper:
+                    result = _run_ffmpeg_capture(
+                        command,
+                        timeout=10,
+                        stage="test_amf",
+                        output_path=output,
+                    )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(runner.call_count, 2)
+            sleeper.assert_called_once_with(1.0)
+            self.assertFalse(output.exists())
+
+    def test_software_encoder_failure_is_not_retried(self):
+        failed = subprocess.CompletedProcess(["ffmpeg"], 1, "", "x264 failed")
+        with patch("app.video_composer.run_process_capture", return_value=failed) as runner:
+            result = _run_ffmpeg_capture(
+                ["ffmpeg", "-c:v", "libx264", "output.mp4"],
+                timeout=10,
+                stage="test_x264",
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(runner.call_count, 1)
 
 
 if __name__ == "__main__":
