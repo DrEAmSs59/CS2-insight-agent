@@ -26,7 +26,7 @@ import faulthandler
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -84,13 +84,7 @@ from .obs_tuning_executor import apply_video_tuning_plan
 from .obs_tuning_agent import review_tuning_plan
 from .runtime_session import runtime_session_dependency, runtime_session_state
 from .obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
-from .session_auth import (
-    authorize_websocket_protocols,
-    request_session_token,
-    session_auth_enabled,
-    session_token_matches,
-    strip_session_token_query,
-)
+from .session_auth import authorize_websocket_protocols
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .lite_cut.db import LiteCutDB
@@ -339,28 +333,6 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
-
-
-@app.middleware("http")
-async def require_desktop_session(request: Request, call_next):
-    """Reject localhost API calls not owned by this Tauri process."""
-    if (
-        session_auth_enabled()
-        and request.url.path.startswith("/api/")
-        and request.method.upper() != "OPTIONS"
-    ):
-        if not session_token_matches(request_session_token(request)):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": {
-                        "code": "DESKTOP_SESSION_REQUIRED",
-                        "message": "A valid desktop session token is required.",
-                    }
-                },
-            )
-        strip_session_token_query(request.scope)
-    return await call_next(request)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)

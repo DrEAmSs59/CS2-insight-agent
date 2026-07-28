@@ -102,7 +102,7 @@ wheels = [
 
 [[package]]
 name = "cs2-insight-agent-backend"
-version = "2.4.0"
+version = "2.4.2"
 source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },

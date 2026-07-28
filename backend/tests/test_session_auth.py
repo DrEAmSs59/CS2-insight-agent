@@ -1,76 +1,17 @@
-import asyncio
-
-from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
 from app import main, session_auth
 
 
-def _request(*, token: str = "", query: bytes = b"") -> Request:
-    headers = []
-    if token:
-        headers.append((b"x-cs2-insight-token", token.encode("ascii")))
-    return Request(
-        {
-            "type": "http",
-            "http_version": "1.1",
-            "method": "GET",
-            "scheme": "http",
-            "path": "/api/app/runtime-state",
-            "raw_path": b"/api/app/runtime-state",
-            "query_string": query,
-            "headers": headers,
-            "client": ("127.0.0.1", 50000),
-            "server": ("127.0.0.1", 19871),
-        }
-    )
-
-
-def test_http_api_rejects_missing_desktop_token(monkeypatch):
+def test_gsi_http_api_does_not_require_desktop_token(monkeypatch):
     monkeypatch.setattr(session_auth, "_SESSION_TOKEN", "expected-token")
-    called = False
+    monkeypatch.setattr(main, "notify_gsi_payload", lambda _payload: True)
 
-    async def call_next(_request):
-        nonlocal called
-        called = True
-        return JSONResponse({"ok": True})
-
-    response = asyncio.run(main.require_desktop_session(_request(), call_next))
-
-    assert response.status_code == 401
-    assert not called
-
-
-def test_http_api_accepts_header_credential(monkeypatch):
-    monkeypatch.setattr(session_auth, "_SESSION_TOKEN", "expected-token")
-
-    async def call_next(_request):
-        return JSONResponse({"ok": True})
-
-    response = asyncio.run(
-        main.require_desktop_session(
-            _request(token="expected-token"),
-            call_next,
-        )
-    )
+    response = TestClient(main.app).post("/api/gsi/cs2", json={"map": {"name": "de_dust2"}})
 
     assert response.status_code == 200
-
-
-def test_http_api_accepts_and_strips_query_credential(monkeypatch):
-    monkeypatch.setattr(session_auth, "_SESSION_TOKEN", "expected-token")
-    request = _request(
-        query=b"layer=lower&_session=expected-token",
-    )
-
-    async def call_next(authorized_request):
-        assert authorized_request.scope["query_string"] == b"layer=lower"
-        return JSONResponse({"ok": True})
-
-    response = asyncio.run(main.require_desktop_session(request, call_next))
-
-    assert response.status_code == 200
+    assert response.json() == {"ok": True, "ready": True}
 
 
 def test_websocket_requires_marker_and_matching_token(monkeypatch):
