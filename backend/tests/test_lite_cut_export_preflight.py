@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from app.lite_cut.export_preflight import (
     estimate_required_space,
     project_file_paths,
     unique_output_path,
+    validate_export_output,
 )
 from app.video_composer import MontageComposerError
 
@@ -65,12 +67,64 @@ def test_ffmpeg_preflight_rejects_nonzero_exit(tmp_path: Path):
     assert caught.value.code == "MONTAGE_FFMPEG_NOT_RUNNABLE"
 
 
-def test_stale_cleanup_removes_partial_output_and_temp_directory(tmp_path: Path):
-    partial = tmp_path / "partial.mp4"
-    partial.write_bytes(b"partial")
+def test_stale_cleanup_preserves_published_output_and_removes_private_artifacts(tmp_path: Path):
+    published = tmp_path / "published.mp4"
+    published.write_bytes(b"validated-complete-export")
+    attempt = tmp_path / ".published.encoder-attempt-deadbeef.mp4"
+    attempt.write_bytes(b"partial")
     work = tmp_path / "cs2_lite_cut_stale"
     work.mkdir()
     (work / "clip.ts").write_bytes(b"temp")
-    cleanup_stale_export_artifacts([str(partial)])
-    assert not partial.exists()
+    cleanup_stale_export_artifacts([str(published)])
+    assert published.read_bytes() == b"validated-complete-export"
+    assert not attempt.exists()
     assert not work.exists()
+
+
+def test_validate_export_output_decodes_the_video_stream(tmp_path: Path):
+    output = tmp_path / "complete.mp4"
+    output.write_bytes(b"media")
+    completed = subprocess.CompletedProcess([], 0, "", "")
+    with (
+        patch(
+            "app.lite_cut.export_preflight.ffprobe_streams",
+            return_value={"streams": [{"codec_type": "video"}]},
+        ),
+        patch(
+            "app.lite_cut.export_preflight.resolve_ffprobe_binary",
+            return_value=tmp_path / "ffprobe.exe",
+        ),
+        patch(
+            "app.lite_cut.export_preflight.run_process_capture",
+            return_value=completed,
+        ) as run,
+    ):
+        validate_export_output(tmp_path / "ffmpeg.exe", output)
+
+    command = run.call_args.args[0]
+    assert command[-3:] == ["-f", "null", "-"]
+    assert ["-map", "0:v:0"] == command[command.index("-map") : command.index("-map") + 2]
+
+
+def test_validate_export_output_rejects_an_undecodable_video(tmp_path: Path):
+    output = tmp_path / "broken.mp4"
+    output.write_bytes(b"media")
+    failed = subprocess.CompletedProcess([], 1, "", "invalid frame")
+    with (
+        patch(
+            "app.lite_cut.export_preflight.ffprobe_streams",
+            return_value={"streams": [{"codec_type": "video"}]},
+        ),
+        patch(
+            "app.lite_cut.export_preflight.resolve_ffprobe_binary",
+            return_value=tmp_path / "ffprobe.exe",
+        ),
+        patch(
+            "app.lite_cut.export_preflight.run_process_capture",
+            return_value=failed,
+        ),
+        pytest.raises(MontageComposerError) as caught,
+    ):
+        validate_export_output(tmp_path / "ffmpeg.exe", output)
+
+    assert caught.value.code == "MONTAGE_OUTPUT_NOT_PLAYABLE"

@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from "react";
 import { ConfigProvider } from "antd";
 import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
 import { useT } from "../../../i18n/useT.js";
+import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import API from "../../../api/api.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
@@ -1165,6 +1166,7 @@ function ExportPane({
   onRefreshExportHistory,
   clipCount,
 }) {
+  const t = useT();
   const canExport = clipCount > 0 && (outputDir.trim() || outputDirHint) && filename.trim() && rangeValid;
   const [encoderDetecting, setEncoderDetecting] = useState(false);
   const [encoderDetection, setEncoderDetection] = useState(null);
@@ -1456,7 +1458,7 @@ function ExportPane({
             onChange={(event) => commitSize({ encoder: event.target.value })}
             className="min-w-0 flex-1 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-[11px] text-cs2-text-primary focus:border-amber-500/70 focus:outline-none"
           >
-            <option value="auto">自动（NVENC → QSV → AMF → x264）</option>
+            <option value="auto">自动（主显卡硬编 → x264 保底）</option>
             <option value="h264_nvenc">NVIDIA NVENC</option>
             <option value="h264_qsv">Intel Quick Sync (QSV)</option>
             <option value="h264_amf">AMD AMF</option>
@@ -1672,6 +1674,9 @@ function ExportPane({
               const done = status === "done";
               const failed = status === "error";
               const file = basenameFromPath(item.output_path) || `export-${item.export_id}`;
+              const failureMessage = failed
+                ? messageFromApiCode(item.error, t) || item.error || "-"
+                : "";
               return (
                 <div key={item.export_id} className="rounded-lg border border-cs2-border/60 bg-cs2-surface-1/60 px-2 py-2">
                   <div className="flex items-center gap-2">
@@ -1684,8 +1689,10 @@ function ExportPane({
                     <span className="text-[9px] font-semibold text-cs2-text-muted">{exportStatusLabel(status)}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate font-mono text-[9px] text-cs2-text-muted">{item.output_path || item.error || "-"}</span>
-                    {item.output_path ? (
+                    <span className="min-w-0 truncate font-mono text-[9px] text-cs2-text-muted">
+                      {failed ? failureMessage : item.output_path || "-"}
+                    </span>
+                    {done && item.output_path ? (
                       <div className="flex shrink-0 items-center gap-0.5">
                         <button
                           type="button"

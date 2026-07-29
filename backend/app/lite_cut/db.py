@@ -145,7 +145,7 @@ class LiteCutDB:
             await conn.commit()
 
     async def recover_interrupted_exports(self) -> list[str]:
-        """Mark jobs left active by a process exit and return their partial outputs."""
+        """Mark jobs left active and return paths used to locate private artifacts."""
         active = ("queued", "running", "cancelling", "pending")
         placeholders = ",".join("?" for _ in active)
         now = utc_now_iso()

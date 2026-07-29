@@ -119,7 +119,7 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError
     from .render_pipeline import export_lite_cut_project
-    from .export_preflight import remove_partial_output, validate_export_output
+    from .export_preflight import remove_partial_output
 
     db = get_lite_cut_db()
     job.status = "running"
@@ -128,8 +128,15 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
     await db.update_export(job.export_id, status="running", output_path=job.output_path)
 
     def on_progress(progress: float, stage: str) -> None:
-        job.progress = max(job.progress, max(0.0, min(1.0, float(progress or 0.0))))
-        job.stage = str(stage or job.stage or "running")
+        next_progress = max(0.0, min(1.0, float(progress or 0.0)))
+        next_stage = str(stage or job.stage or "running")
+        # A full encoder retry starts the render from the beginning. Reflect
+        # that reset instead of leaving the UI stuck at 99–100% while x264 runs.
+        if next_stage.startswith("fallback_"):
+            job.progress = next_progress
+        else:
+            job.progress = max(job.progress, next_progress)
+        job.stage = next_stage
 
     try:
         out = await asyncio.to_thread(
@@ -142,7 +149,6 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
             progress_callback=on_progress,
             cancel_event=job.cancel_event,
         )
-        await asyncio.to_thread(validate_export_output, prepared["ffmpeg_bin"], out)
     except MontageComposerError as e:
         await asyncio.to_thread(remove_partial_output, job.output_path)
         if e.code == "MONTAGE_EXPORT_CANCELLED" or job.cancel_event.is_set():
@@ -181,7 +187,7 @@ async def lite_cut_export(body: LiteCutExportBody):
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError
     from .render_pipeline import export_lite_cut_project
-    from .export_preflight import remove_partial_output, validate_export_output
+    from .export_preflight import remove_partial_output
 
     prepared = await _prepare_lite_cut_export(body)
     if body.project_id is not None:
@@ -206,7 +212,6 @@ async def lite_cut_export(body: LiteCutExportBody):
             output_path_str=prepared["output_path"],
             montage_encoder=prepared["montage_encoder"],
         )
-        await asyncio.to_thread(validate_export_output, prepared["ffmpeg_bin"], out)
     except MontageComposerError as e:
         await asyncio.to_thread(remove_partial_output, prepared["output_path"])
         detail = montage_detail_from_exception(e)

@@ -384,7 +384,7 @@ class AppConfig(BaseModel):
     spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
-    # 合辑 H.264：auto=按 NVENC→QSV→AMF→libx264 顺序，对硬件编码器做单帧实测后再选用；亦可指定编码器名
+    # 合辑 H.264：auto=独显优先选择主 GPU 对应硬编，按实际输出规格实测，失败时回退 libx264；亦可指定编码器名
     montage_encoder: str = "auto"
     # LiteCut 导入素材、预览代理和工程导出的独立存储根目录；留空时沿用应用 data/lite_cut_assets。
     lite_cut_assets_dir: str = ""

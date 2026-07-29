@@ -122,6 +122,36 @@ class TestMontageEncoder(unittest.TestCase):
             self.assertEqual(args[args.index("-usage") + 1], "transcoding")
             self.assertEqual(args[args.index("-vbaq") + 1], "false")
 
+    def test_diagnostics_selected_encoder_follows_primary_gpu_not_legacy_codec_order(self):
+        import app.encoder_planner as planner
+        import app.montage_encoder as me
+
+        adapters = [
+            planner.GpuAdapter(
+                name="AMD Radeon RX Test",
+                vendor="amd",
+                kind="discrete",
+                performance_rank=0,
+            ),
+            planner.GpuAdapter(
+                name="NVIDIA RTX Test",
+                vendor="nvidia",
+                kind="discrete",
+                performance_rank=1,
+            ),
+        ]
+        available = {"h264_nvenc", "h264_amf", "libx264"}
+        with (
+            patch.object(planner, "enumerate_windows_gpus", return_value=adapters),
+            patch.object(planner, "map_nvenc_device_indices", return_value=adapters),
+            patch.object(me, "_ffmpeg_encoder_names", return_value=available),
+            patch.object(me, "_hw_encoder_runtime_ok", return_value=True),
+        ):
+            result = me.diagnose_encoders(Path("C:/fake/ffmpeg.exe"))
+
+        self.assertEqual(result["selected"], "h264_amf")
+        self.assertEqual(result["primary_gpu"]["name"], "AMD Radeon RX Test")
+
 
 if __name__ == "__main__":
     unittest.main()
