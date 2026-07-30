@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from .onset_probe import (
+    _DEFAULT_BASELINE_FRAMES,
+    _DEFAULT_SKIP_FRAMES,
     CropRect,
     OnsetProbeError,
     calibration_marker_crop,
@@ -37,6 +39,10 @@ MIN_SAMPLES_PER_GROUP = 30
 MIN_JITTER_EFFECT_SEC = 0.001
 _SIGNIFICANCE_SIGMAS = 2.0
 _MAX_REPORTED_OFFSETS = 400
+# 噪声窗末尾与首次闪白之间留的余量，吸收闪白起始边沿的抖动。
+_BASELINE_MARGIN_SEC = 0.2
+# 少于这么多帧就算不出可信的噪声底，宁可报错也不给一个假阈值。
+_MIN_BASELINE_FRAMES = 8
 
 
 def _expected_flash_times(result: dict[str, Any]) -> list[float]:
@@ -50,6 +56,29 @@ def _expected_flash_times(result: dict[str, Any]) -> list[float]:
         except (KeyError, TypeError, ValueError):
             continue
     return sorted(out)
+
+
+def _baseline_frames_before_first_flash(
+    trace: Sequence[Any],
+    expected_flash_sec: Sequence[float],
+    *,
+    skip_frames: int = _DEFAULT_SKIP_FRAMES,
+    default: int = _DEFAULT_BASELINE_FRAMES,
+) -> tuple[int, bool]:
+    """噪声窗要用的帧数，以及它是否够长。
+
+    噪声底必须完全取在首次闪白之前，否则闪白自己会被算进噪声里、把阈值抬到检不出任何
+    东西。默认窗口按**帧数**给（40 帧），在 60fps 下是 0.68 秒、够用；但 30fps 下就是
+    1.33 秒，会盖住 1.27 秒处的第一次闪白。所以这里按时间反推帧数，而不是信帧数默认值。
+    """
+    flashes = sorted(float(value) for value in expected_flash_sec)
+    if not flashes:
+        return default, True
+    limit = flashes[0] - _BASELINE_MARGIN_SEC
+    usable = sum(1 for frame in trace if float(frame.pts_sec) < limit) - max(0, int(skip_frames))
+    if usable >= default:
+        return default, True
+    return max(_MIN_BASELINE_FRAMES, usable), usable >= _MIN_BASELINE_FRAMES
 
 
 def measure_clip_latency(
@@ -70,7 +99,10 @@ def measure_clip_latency(
         crop=crop,
         timeout_sec=timeout_sec,
     )
-    flashes = find_flashes(trace)
+    baseline_frames, baseline_long_enough = _baseline_frames_before_first_flash(
+        trace, expected_flash_sec
+    )
+    flashes = find_flashes(trace, baseline_frames=baseline_frames)
     measured = [frame.pts_sec for frame in flashes]
     pairs, unmatched = match_flashes(expected_flash_sec, measured)
 
@@ -86,8 +118,11 @@ def measure_clip_latency(
         # 噪声窗内就已经有跳变，说明标记区域在开头不是静止的，量出来的时刻不可信。
         "baseline_static": onset.baseline_static,
         "threshold": round(onset.threshold, 4),
+        "baseline_frames": int(baseline_frames),
     }
-    if not pairs:
+    if not baseline_long_enough:
+        report["problem"] = "baseline_window_too_short"
+    elif not pairs:
         report["problem"] = "no_flash_matched"
     elif unmatched:
         report["problem"] = "some_flashes_missing"

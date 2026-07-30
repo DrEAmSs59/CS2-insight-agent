@@ -152,6 +152,68 @@ class TestMeasureClipLatency:
         assert report["offsets"] == {"count": 0.0}
 
 
+class TestBaselineWindow:
+    """噪声窗必须结束在首次闪白之前，否则闪白自己会把阈值抬到检不出任何东西。"""
+
+    def test_full_window_at_60fps(self):
+        trace = _trace([0.1] * 600, fps=60.0)
+
+        frames, ok = latency_report._baseline_frames_before_first_flash(trace, [1.27])
+
+        assert (frames, ok) == (40, True)
+
+    def test_window_shrinks_at_30fps_instead_of_swallowing_the_flash(self):
+        """30fps 下默认的 40 帧是 1.33 秒，会盖住 1.27 秒处的第一次闪白。"""
+        trace = _trace([0.1] * 300, fps=30.0)
+
+        frames, ok = latency_report._baseline_frames_before_first_flash(trace, [1.27])
+
+        assert ok is True
+        assert frames < 40
+        # 窗口末帧必须落在 首次闪白 - 余量 之前。
+        assert trace[frames].pts_sec < 1.27 - latency_report._BASELINE_MARGIN_SEC
+
+    def test_a_very_early_flash_is_reported_not_papered_over(self):
+        trace = _trace([0.1] * 300, fps=60.0)
+
+        frames, ok = latency_report._baseline_frames_before_first_flash(trace, [0.15])
+
+        assert ok is False
+        assert frames == latency_report._MIN_BASELINE_FRAMES
+
+    def test_no_expected_flashes_keeps_the_default(self):
+        trace = _trace([0.1] * 300)
+
+        assert latency_report._baseline_frames_before_first_flash(trace, []) == (40, True)
+
+    def test_measure_passes_the_bounded_window_to_find_flashes(self, tmp_path, monkeypatch):
+        trace = _trace([0.1] * 300, fps=30.0)
+        onset = OnsetResult(
+            pts_sec=1.0, frame_index=30, value=9.0, baseline=0.1,
+            noise_sigma=0.01, threshold=0.75, frame_count=len(trace), baseline_static=True,
+        )
+        monkeypatch.setattr(
+            latency_report, "probe_motion_onset", lambda **_kwargs: (onset, trace)
+        )
+        seen = {}
+
+        def _fake_find_flashes(_trace, **kwargs):
+            seen.update(kwargs)
+            return []
+
+        monkeypatch.setattr(latency_report, "find_flashes", _fake_find_flashes)
+
+        report = latency_report.measure_clip_latency(
+            ffmpeg_bin=tmp_path / "ffmpeg.exe",
+            source=tmp_path / "clip.mp4",
+            expected_flash_sec=[1.27],
+            crop=CropRect(x=0, y=0, width=144, height=144),
+        )
+
+        assert seen["baseline_frames"] < 40
+        assert report["baseline_frames"] == seen["baseline_frames"]
+
+
 class TestMeasureResultFile:
     def _write(self, tmp_path, payload) -> Path:
         path = tmp_path / "result.json"
