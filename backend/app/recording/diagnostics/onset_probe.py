@@ -140,9 +140,18 @@ class OnsetResult:
         return self.pts_sec is not None
 
 
+METADATA_FILENAME = "diff.txt"
+
+
 def _filter_path(path: Path) -> str:
-    """把 Windows 路径转成 ffmpeg 滤镜参数能接受的形式。"""
-    return str(path).replace("\\", "/").replace(":", "\\:")
+    """滤镜参数里的输出文件名。
+
+    只返回**文件名**，由调用方把进程 cwd 设成它所在目录。Windows 绝对路径写进滤镜图
+    需要 ``C\\\\:/...`` 这种双重转义（滤镜图和选项解析各吃一层），单层会报
+    ``No option name near`` 而整条命令失败；盘符、空格、中文都是雷。用相对文件名就
+    彻底不碰这套转义规则。
+    """
+    return path.name
 
 
 def build_diff_trace_command(
@@ -159,6 +168,9 @@ def build_diff_trace_command(
     ``metadata`` 滤镜把数值写进 ``metadata_path``，不与 ffmpeg 自身日志混在一条流里，
     省掉 Windows 上的编码与交错问题。带 ``start_sec`` 时加 ``-copyts``，让曲线里的
     ``pts_time`` 仍然是源文件时间轴上的绝对秒数。
+
+    滤镜里写的是相对文件名，**执行时必须把 cwd 设成 ``metadata_path.parent``**，
+    否则曲线会落在别处。原因见 ``_filter_path``。
     """
     chain: list[str] = []
     if crop is not None:
@@ -291,7 +303,7 @@ def probe_motion_onset(
         raise OnsetProbeError(f"source not found: {source}")
 
     with tempfile.TemporaryDirectory(prefix="cs2ia-onset-") as tmp_dir:
-        metadata_path = Path(tmp_dir) / "diff.txt"
+        metadata_path = Path(tmp_dir) / METADATA_FILENAME
         command = build_diff_trace_command(
             ffmpeg_bin=Path(ffmpeg_bin),
             source=Path(source),
@@ -300,7 +312,8 @@ def probe_motion_onset(
             start_sec=start_sec,
             duration_sec=duration_sec,
         )
-        result = run_process_capture(command, timeout=timeout_sec)
+        # cwd 决定曲线落在哪：滤镜里是相对文件名，见 _filter_path。
+        result = run_process_capture(command, timeout=timeout_sec, cwd=str(tmp_dir))
         if result.returncode != 0:
             logger.error(
                 "onset probe ffmpeg failed rc=%s command=%s stderr=%s",

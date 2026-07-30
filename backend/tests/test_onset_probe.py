@@ -161,9 +161,46 @@ class TestBuildDiffTraceCommand:
         assert chain.startswith("format=gray,")
         assert "crop=" not in chain
 
-    def test_metadata_path_is_escaped_for_filter_syntax(self):
-        chain = self._command(metadata_path=Path(r"C:\tmp\diff.txt"))[-4]
-        assert "file=C\\:/tmp/diff.txt" in chain
+    def test_metadata_path_is_a_bare_filename(self):
+        """滤镜里只能写文件名，绝对路径会让整条命令解析失败。
+
+        Windows 绝对路径写进滤镜图要 ``C\\\\:/...`` 双重转义（滤镜图与选项解析各吃一层），
+        单层写法 ffmpeg 直接报 ``No option name near`` 并且整个命令失败——这是实测踩到的。
+        改用相对文件名 + cwd 就完全绕开这套规则，盘符、空格、中文都不再是雷。
+        """
+        chain = self._command(metadata_path=Path(r"C:\Users\a b\diff.txt"))[-4]
+
+        assert "file=diff.txt" in chain
+        assert ":/" not in chain
+        assert "\\" not in chain
+
+    def test_probe_runs_ffmpeg_in_the_metadata_directory(self, tmp_path, monkeypatch):
+        """相对文件名只有配上 cwd 才能落在预期位置。"""
+        import subprocess
+
+        clip = tmp_path / "clip.mp4"
+        clip.write_bytes(b"")
+        ffmpeg = tmp_path / "ffmpeg.exe"
+        ffmpeg.write_bytes(b"MZ")
+        seen: dict = {}
+
+        def _fake_run(command, **kwargs):
+            seen["cwd"] = kwargs.get("cwd")
+            seen["filter"] = command[-4]
+            # 装作 ffmpeg 把曲线写在 cwd 下的相对文件名里。
+            (Path(kwargs["cwd"]) / "diff.txt").write_text(
+                "frame:0 pts:0 pts_time:0\nlavfi.signalstats.YAVG=0.1\n", encoding="utf-8"
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr("app.recording.diagnostics.onset_probe.run_process_capture", _fake_run)
+
+        _onset, trace = probe_motion_onset(ffmpeg_bin=ffmpeg, source=clip)
+
+        assert seen["filter"].endswith("file=diff.txt")
+        assert seen["cwd"], "必须显式传 cwd，否则相对文件名会落到进程当前目录"
+        # 曲线解析成功，说明确实是从 cwd 下那个相对文件名读回来的。
+        assert len(trace) == 1
 
     def test_no_seek_arguments_when_starting_at_zero(self):
         command = self._command()
