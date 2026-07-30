@@ -3632,6 +3632,7 @@ class OBSDirector:
         from .recording.plan_builder import build_plan
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
+        from .recording.services.result_writer import write_result
         from .recording.normalizer import NormalizationError
         from .pov_hud_manager import (
             PovHudError,
@@ -4133,6 +4134,14 @@ class OBSDirector:
                             for s in plan.segments
                         ],
                     })
+
+                    # 产物 JSON 是时序自检唯一的落盘出口：calibration_markers 只存在于
+                    # ExecutionResult 里，不进 clip_meta。传最终路径而不是
+                    # result.output_path，后者在上面的重命名之后已经指向不存在的文件。
+                    try:
+                        write_result(result, output_path=final_output_path)
+                    except Exception as exc:  # noqa: BLE001 - 诊断产物不该影响录制
+                        logger.warning("[RecordingV3] failed to write result JSON: %s", exc)
 
                 # ── Kill CS2 after this demo group ────────────────────────────
                 # Always kill CS2 and restore user configs, even when aborted;
