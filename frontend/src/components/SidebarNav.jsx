@@ -23,6 +23,8 @@ const MIN_WIDTH = 184;
 const MAX_WIDTH = 340;
 const COLLAPSED_WIDTH = 56;
 
+export const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+
 const NAV_ITEMS = [
   { to: "/", end: true, labelKey: "nav.guide", icon: BookOpen },
   { to: "/library", labelKey: "nav.demoLibrary", icon: Library },
@@ -203,6 +205,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
       </nav>
 
       <div className="shrink-0 space-y-1 border-t border-cs2-border-subtle p-2">
+        <div
+          className={`flex h-5 items-center font-mono text-[9px] font-medium tracking-[0.08em] text-cs2-text-muted/65 ${
+            collapsed ? "justify-center" : "justify-start px-2.5"
+          }`}
+          data-testid="sidebar-version"
+          title={`v${APP_VERSION}`}
+        >
+          v{APP_VERSION}
+        </div>
         <NavLink
           to="/settings"
           aria-label={collapsed ? t("nav.settings") : undefined}

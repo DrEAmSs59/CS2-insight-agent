@@ -51,13 +51,13 @@ const PAGE_CONTAINER_CLASS = "w-full px-3 sm:px-4";
 
 const TABS = [
   { key: "highlights", labelKey: "analysis.workspace.tabHighlights", icon: Film },
+  { key: "overview", labelKey: "analysis.workspace.tabOverview", icon: Activity },
   { key: "replay", labelKey: "analysis.workspace.tabReplay", icon: MapPin },
   { key: "heatmap", labelKey: "analysis.workspace.tabHeatmap", icon: Flame },
-  { key: "overview", labelKey: "analysis.workspace.tabOverview", icon: Activity },
-  { key: "players", labelKey: "analysis.workspace.tabPlayers", icon: Users },
-  { key: "cosmetics", labelKey: "analysis.workspace.tabCosmetics", icon: Gem },
   { key: "rounds", labelKey: "analysis.workspace.tabRounds", icon: ListChecks },
   { key: "economy", labelKey: "analysis.workspace.tabEconomy", icon: CircleDollarSign },
+  { key: "players", labelKey: "analysis.workspace.tabPlayers", icon: Users },
+  { key: "cosmetics", labelKey: "analysis.workspace.tabCosmetics", icon: Gem },
 ];
 
 const ALL_TAG = "__all__";

@@ -89,7 +89,7 @@ frontend/public/__litecut_visual_tmp/
 /artifacts/
 
 # Legacy Electron distribution (local artifacts may still exist after migration)
-frontend/dist_electron/
+frontend/dist_electron*/
 frontend/build/
 
 # Tauri build output and staged runtime resources

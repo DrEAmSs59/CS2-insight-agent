@@ -350,7 +350,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "高光与录制", "2D 回放", "热力图", "概览", "玩家", "饰品", "回合", "经济",
+      "高光与录制", "概览", "2D 回放", "热力图", "回合", "经济", "玩家", "饰品",
     ]);
     expect(analysisNavigation.closest(".analysis-center-surface")).toBeTruthy();
     expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeNull();
@@ -527,6 +527,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.20");
     fireEvent.click(zoomButtons[2]);
     expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.00");
+    fireEvent.click(zoomButtons[0]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("0.83");
+    fireEvent.click(zoomButtons[2]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.00");
     const wheelEvent = new WheelEvent("wheel", {
       bubbles: true,
       cancelable: true,
@@ -537,6 +541,41 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     fireEvent(screen.getByTestId("heatmap-map-surface"), wheelEvent);
     expect(wheelEvent.defaultPrevented).toBe(true);
     expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.20");
+    fireEvent.click(zoomButtons[2]);
+    const wheelOutEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 120,
+      clientY: 120,
+      deltaY: 100,
+    });
+    fireEvent(screen.getByTestId("heatmap-map-surface"), wheelOutEvent);
+    expect(wheelOutEvent.defaultPrevented).toBe(true);
+    const mapSurface = screen.getByTestId("heatmap-map-surface");
+    expect(mapSurface.getAttribute("data-zoom")).toBe("0.83");
+    vi.spyOn(mapSurface, "getBoundingClientRect").mockReturnValue({
+      width: 600,
+      height: 600,
+      top: 0,
+      right: 600,
+      bottom: 600,
+      left: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const firePointer = (type, properties) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.entries(properties).forEach(([key, value]) => {
+        Object.defineProperty(event, key, { configurable: true, value });
+      });
+      fireEvent(mapSurface, event);
+    };
+    firePointer("pointerdown", { button: 0, pointerId: 7, clientX: 200, clientY: 200 });
+    firePointer("pointermove", { pointerId: 7, clientX: 240, clientY: 225 });
+    firePointer("pointerup", { pointerId: 7, clientX: 240, clientY: 225 });
+    await waitFor(() => expect(mapSurface.getAttribute("data-offset-x")).toBe("40"));
+    expect(mapSurface.getAttribute("data-offset-y")).toBe("25");
     expect(screen.getByRole("button", { name: "选择 ZywOo" }).getAttribute("data-active")).toBe("true");
     expect(screen.getByText("统计回合")).toBeTruthy();
     expect(screen.queryByText("轨迹采样点")).toBeNull();

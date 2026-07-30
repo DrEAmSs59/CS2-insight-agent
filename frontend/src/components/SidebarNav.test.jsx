@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import API from "../api/api";
-import SidebarNav from "./SidebarNav";
+import SidebarNav, { APP_VERSION } from "./SidebarNav";
 
 vi.mock("../api/api", () => ({
   default: { post: vi.fn().mockResolvedValue({ data: { ok: true } }) },
@@ -54,6 +54,11 @@ describe("SidebarNav", () => {
 
   test("keeps utility actions in the sidebar", async () => {
     renderSidebar();
+    const version = screen.getByTestId("sidebar-version");
+    const settings = screen.getByRole("link", { name: /设置|Settings/ });
+    expect(version.textContent).toBe(`v${APP_VERSION}`);
+    expect(version.className).toContain("justify-start");
+    expect(version.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /打开日志目录|Open log folder/ }));
     await waitFor(() => expect(API.post).toHaveBeenCalledWith("config/open-logs"));
   });
