@@ -309,6 +309,7 @@ async def update_config(payload: ConfigPayload):
     cfg = load_config()
     if payload.obs:
         obs = payload.obs
+        obs_fields = getattr(obs, "model_fields_set", set()) or set()
         cfg.obs.host = obs.host
         try:
             cfg.obs.port = int(obs.port)
@@ -319,7 +320,9 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.password = raw_password
         if obs.obs_path is not None:
             cfg.obs.obs_path = str(obs.obs_path).strip()
-        cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
+        # 设置页已下线该开关；未显式传入时保留配置文件/API 调试值。
+        if "browser_begin_frame_scheduling" in obs_fields:
+            cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm

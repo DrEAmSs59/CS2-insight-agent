@@ -308,7 +308,7 @@ class OBSConfig(BaseModel):
     obs_config_verified: bool = False
     # 让 OBS 驱动浏览器源出帧（--enable-begin-frame-scheduling），把叠加层的时序抖动
     # 收成固定偏置。是进程级开关，只在冷启动时生效；KillFX 的 webm 播放可能受影响，
-    # 因此默认关闭，由对照实测决定是否打开。
+    # 因此默认关闭；诊断时改配置文件或 PUT /api/config 打开。
     browser_begin_frame_scheduling: bool = False
 
 
@@ -448,7 +448,7 @@ class AppConfig(BaseModel):
     # 兼容标记：旧配置中 kill_fx_tick_offset 是叠加在键盘偏移上的额外微调。
     overlay_offsets_independent: bool = True
     # 时序自检：录制时让键盘 overlay 在角落打一串校准闪白，用来回读叠加层的真实延迟。
-    # 成片里会多出一块不透明方块，只在诊断时开。
+    # 成片里会多出一块不透明方块，只在诊断时开（配置文件 / API，设置页已下线）。
     latency_calibration_enabled: bool = False
 
 
