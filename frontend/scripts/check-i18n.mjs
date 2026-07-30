@@ -12,6 +12,10 @@ const migratedUiFiles = [
   "pages/DemoAnalysisPreviewPage.jsx",
   "pages/SettingsPage.jsx",
   "components/analysis/DemoHeatmapView.jsx",
+  "components/liteCut/editor/OpenCutTrackTimeline.jsx",
+  "components/liteCut/editor/TimelineClip.jsx",
+  "components/liteCut/editor/TimelineTrackHeader.jsx",
+  "components/liteCut/editor/LiteCutMarkerManager.jsx",
 ];
 
 function fail(message) {

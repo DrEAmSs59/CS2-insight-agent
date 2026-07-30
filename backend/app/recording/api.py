@@ -18,6 +18,7 @@ from .planners.ai_directed_planner import plan_from_ai_outline
 from ..env_utils import OBSConfig, AppConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
+from .executor.kill_markers import enrich_markers_with_events
 from .executor.obs_fade_controller import OBSFadeController, FadeConfig
 from .services.result_writer import write_result
 from ..montage_db import MontageDB
@@ -178,6 +179,10 @@ def build_v3_recorded_clip_meta(
     else:
         planned_segments = result.get("planned_segments") or []
 
+    # Kill axis: video-time offsets computed by the executor, labelled with the kill
+    # metadata that already travelled in with the request.
+    kill_markers = enrich_markers_with_events(result.get("kill_markers") or [], events)
+
     meta: dict = {
         "recording_origin": "recording_v3",
         "recording_request_type": request_type,
@@ -190,6 +195,7 @@ def build_v3_recorded_clip_meta(
         "source_rounds": source_rounds,
         "kill_count": kill_count,
         "kill_ticks": kill_ticks,
+        "kill_markers": kill_markers,
         "context_tags": list(source_ref.context_tags) if (source_ref and source_ref.context_tags) else (result.get("context_tags") or []),
         "victims": victims,
         "killers": killers,
@@ -546,6 +552,7 @@ async def execute_recording(
         "output_path": result.output_path,
         "warnings": result.warnings,
         "error": result.error,
+        "kill_markers": enrich_markers_with_events(result.kill_markers, dto.events),
         "segments": [
             {
                 "segment_index": s.segment_index,

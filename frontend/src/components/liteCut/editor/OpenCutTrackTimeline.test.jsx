@@ -6,6 +6,7 @@ import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
 import { useLiteCutHistoryStore } from "../../../stores/liteCut/historyStore.js";
 import { liteCutMediaDragSource } from "../../../stores/liteCut/mediaDragSource.js";
 import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 
 const body = {
   tracks: [
@@ -23,6 +24,7 @@ describe("OpenCutTrackTimeline", () => {
   });
 
   beforeEach(() => {
+    useLocaleStore.getState().hydrate("zh");
     useLiteCutEditorStore.setState({ body: structuredClone(body), dirty: false });
     useLiteCutHistoryStore.setState({ past: [], future: [] });
     useLiteCutTimelineStore.setState({
@@ -73,6 +75,90 @@ describe("OpenCutTrackTimeline", () => {
     expect(clip.querySelector("[data-transition-marker='in']").hasAttribute("data-transition-annotation")).toBe(true);
     expect(clip.textContent).toContain("0.50x");
     expect(clip.textContent).toContain("2.00x");
+  });
+
+  describe("kill axis", () => {
+    const killClip = {
+      id: "clip-kills",
+      timeline_start: 10,
+      trim_in: 0,
+      trim_out: 20,
+      meta: {
+        name: "highlight",
+        duration_sec: 20,
+        kill_markers: [
+          { video_sec: 4, tick: 1192, kind: "kill", perspective: "killer", victim: "enemy1", weapon: "ak47", headshot: true, round: 7 },
+          { video_sec: 9, tick: 1192, kind: "kill", perspective: "victim" },
+        ],
+      },
+    };
+
+    function renderWithKills(clip = killClip) {
+      const nextBody = structuredClone(body);
+      nextBody.tracks[1].clips = [clip];
+      useLiteCutEditorStore.setState({ body: nextBody });
+      render(<OpenCutTrackTimeline body={nextBody} />);
+      return nextBody;
+    }
+
+    it("renders a read-only kill row for markers carried by the recorded clip", () => {
+      renderWithKills();
+
+      expect(document.querySelector("[data-oc-kill-axis]")).toBeTruthy();
+      expect(document.querySelectorAll("[data-timeline-kill-marker]")).toHaveLength(2);
+      expect(screen.getByTitle(/击杀 · R7 · enemy1 · ak47 · 爆头 · 00:14/)).toBeTruthy();
+    });
+
+    it("moves the playhead to the kill when its marker is clicked", () => {
+      renderWithKills();
+
+      fireEvent.click(screen.getByTitle(/击杀 · R7 · enemy1 · ak47 · 爆头 · 00:14/));
+
+      expect(useLiteCutTimelineStore.getState().playheadSec).toBeCloseTo(14, 3);
+    });
+
+    it("keeps markers aligned with the clip after it is trimmed and moved", () => {
+      renderWithKills({ ...killClip, timeline_start: 30, trim_in: 3 });
+
+      // Kill at source 4 s sits 1 s into the trimmed clip, which now starts at 30 s.
+      expect(screen.getByTitle(/00:31/)).toBeTruthy();
+    });
+
+    it("hides the row when the project has no kill data", () => {
+      render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
+
+      expect(document.querySelector("[data-oc-kill-axis]")).toBeNull();
+      expect(document.querySelectorAll("[data-timeline-kill-marker]")).toHaveLength(0);
+      expect(screen.getByTitle("当前素材没有击杀数据（仅录制成片自带）").disabled).toBe(true);
+    });
+
+    it("toggles the row from the toolbar", () => {
+      renderWithKills();
+
+      fireEvent.click(screen.getByTitle("显示 / 隐藏击杀轴"));
+      expect(document.querySelector("[data-oc-kill-axis]")).toBeNull();
+
+      fireEvent.click(screen.getByTitle("显示 / 隐藏击杀轴"));
+      expect(document.querySelectorAll("[data-timeline-kill-marker]")).toHaveLength(2);
+    });
+
+    it("localizes the row and its markers with the active language", () => {
+      useLocaleStore.getState().hydrate("en");
+      renderWithKills();
+
+      expect(document.querySelector("[data-oc-kill-axis]").textContent).toContain("Kill axis");
+      expect(screen.getByTitle(/Kill · R7 · enemy1 · ak47 · Headshot · 00:14/)).toBeTruthy();
+    });
+  });
+
+  it("localizes the track headers and the toolbar", () => {
+    useLocaleStore.getState().hydrate("en");
+    render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
+
+    expect(screen.getByText("Video · V1")).toBeTruthy();
+    expect(screen.getByText("Audio (A) · A1")).toBeTruthy();
+    expect(screen.getByText("Text 1")).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "Timeline zoom" })).toBeTruthy();
   });
 
   it("renders fixed track headers and a separate time ruler", () => {

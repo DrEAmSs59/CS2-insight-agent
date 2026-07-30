@@ -4097,6 +4097,7 @@ class OBSDirector:
                         "rename_error": rename_meta.get("rename_error"),
                         "recording_started_at": _started_at,
                         "recording_stopped_at": _stopped_at,
+                        "kill_markers": result.kill_markers,
                         "obs_record_directory": result.obs_record_directory,
                         "error": result.error,
                         "warnings": result.warnings,
