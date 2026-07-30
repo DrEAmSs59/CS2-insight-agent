@@ -31,7 +31,7 @@
 
 <p align="center">
   <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/PLAYER_GUIDE_EN.md">User Guide</a> •
-  <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/CONTRIBUTING.md">Contributing</a> •
+  <a href="https://github.com/DrEAmSs59/CS2-insight-agent/blob/main/CONTRIBUTING_EN.md">Contributing</a> •
   <a href="https://www.bilibili.com/video/BV1PcVj69ExZ/">Video Tutorial</a> •
   <a href="#key-features">Key Features</a> •
   <a href="#installation">Installation</a> •
