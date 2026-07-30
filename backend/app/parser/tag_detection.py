@@ -544,7 +544,12 @@ def build_highlight_tags(
             # 残局打到 1v1，且目标亲手击杀最后一名敌人
             won_1v1_duel = True
         if total_friendly == 1 and n_enems >= 2:
-            if kills_from_here >= n_enems and n_enems > best_epic_1v:
+            # The 1vN label describes the largest disadvantage after the
+            # target became the final survivor.  Kills made earlier in the
+            # same round still belong to the highlight, so using only the
+            # suffix from this snapshot can incorrectly downgrade a real
+            # 1v4 to a later 1v2.
+            if n >= n_enems and n_enems > best_epic_1v:
                 best_epic_1v = n_enems
             need_nt = max(1, n_enems - 1)
             if kills_from_here >= need_nt and n_enems > best_nt_1v:
@@ -572,8 +577,8 @@ def build_highlight_tags(
     if any_3v5:
         tags.append("🔥 3v5 绝地反击")
 
-    # 🐂 1v1 斗牛：打到 1v1 且亲手赢下（仅胜局）
-    if won_1v1_duel and round_won is True:
+    # 🐂 1v1 斗牛：纯 1v1 胜局；与 1vN 史诗残局互斥。
+    if won_1v1_duel and round_won is True and best_epic_1v < 2:
         tags.append("🐂 1v1 斗牛")
 
     # 🪖 一人成军：孤身被围歼下完成多杀（不要求胜负）
