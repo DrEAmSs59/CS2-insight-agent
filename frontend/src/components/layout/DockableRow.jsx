@@ -51,7 +51,10 @@ export function normalizeDockLayout(candidate, panels) {
       id,
       positiveSize(candidate.sizes?.[id], defaults.sizes[id]),
     ])),
-    collapsed: Object.fromEntries(defaults.order.map((id) => [id, candidate.collapsed?.[id] === true])),
+    collapsed: Object.fromEntries(defaults.order.map((id) => {
+      const panel = panels.find((item) => item.id === id);
+      return [id, panel?.collapsible !== false && candidate.collapsed?.[id] === true];
+    })),
   };
 }
 
@@ -109,7 +112,7 @@ export default function DockableRow({
   collapsedSize = DOCK_COLLAPSED_SIZE,
 }) {
   const t = useT();
-  const panelSignature = panels.map((panel) => `${panel.id}:${panel.defaultSize}:${panel.minSize}`).join("|");
+  const panelSignature = panels.map((panel) => `${panel.id}:${panel.defaultSize}:${panel.minSize}:${panel.collapsible !== false}`).join("|");
   const panelMap = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
   const [layout, setLayout] = useState(() => readStoredLayout(storageKey, panels));
   const [resizing, setResizing] = useState(false);
@@ -149,6 +152,7 @@ export default function DockableRow({
   const orderedPanels = layout.order.map((id) => panelMap.get(id)).filter(Boolean);
 
   const toggleCollapsed = (id) => {
+    if (panelMap.get(id)?.collapsible === false) return;
     setLayout((current) => ({
       ...current,
       collapsed: { ...current.collapsed, [id]: !current.collapsed[id] },
@@ -254,7 +258,7 @@ export default function DockableRow({
       aria-label={ariaLabel}
     >
       {orderedPanels.map((panel, index) => {
-        const collapsed = layout.collapsed[panel.id];
+        const collapsed = panel.collapsible !== false && layout.collapsed[panel.id];
         const previousPanel = orderedPanels[index - 1];
         const showDivider = index > 0
           && !collapsed

@@ -363,7 +363,6 @@ export default function DemoLibraryPage() {
       <DemoBatchActionBar
         count={s.selectedLibraryDemoIds.size}
         onLoadSelected={() => void s.handleLoadSelectedLibraryDemos()}
-        onOpenBatchModal={() => s.setLibraryBatchModalOpen(true)}
         onBatchDelete={handleBatchDelete}
         onClearSelection={s.clearLibrarySelection}
       />
