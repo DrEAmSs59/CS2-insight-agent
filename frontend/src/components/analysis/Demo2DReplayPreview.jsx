@@ -1182,6 +1182,7 @@ export default function Demo2DReplayPreview({
             label: t("analysis.layout.teamHud", { team: teamAName }),
             minSize: 120,
             defaultSize: 300,
+            collapsible: false,
             className: "replay-roster-panel",
             content: (
               <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
@@ -1192,6 +1193,7 @@ export default function Demo2DReplayPreview({
             label: t("analysis.layout.radar"),
             minSize: 210,
             defaultSize: 680,
+            collapsible: false,
             className: "replay-radar-panel",
             content: (
         <section className="relative h-full min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
@@ -1250,6 +1252,7 @@ export default function Demo2DReplayPreview({
             label: t("analysis.layout.teamHud", { team: teamBName }),
             minSize: 120,
             defaultSize: 300,
+            collapsible: false,
             className: "replay-roster-panel",
             content: (
               <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />

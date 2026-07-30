@@ -34,6 +34,21 @@ describe("DockableRow", () => {
     expect(normalized.collapsed.right).toBe(true);
   });
 
+  test("forces non-collapsible panels open when restoring an older layout", () => {
+    const normalized = normalizeDockLayout({
+      version: 1,
+      order: ["left", "center", "right"],
+      sizes: { left: 300, center: 700, right: 300 },
+      collapsed: { left: true, center: true, right: true },
+    }, panels.map((panel) => (
+      panel.id === "center" ? { ...panel, collapsible: false } : panel
+    )));
+
+    expect(normalized.collapsed.left).toBe(true);
+    expect(normalized.collapsed.center).toBe(false);
+    expect(normalized.collapsed.right).toBe(true);
+  });
+
   test("resizes a neighboring pair with minimum widths and preserves its total weight", () => {
     const initial = createDockLayout(panels);
     const resized = resizeDockPair(initial, {

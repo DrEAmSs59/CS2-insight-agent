@@ -237,7 +237,6 @@ function sortScoreboardPlayers(players) {
 
 export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound, onOpenHighlights }) {
   const overview = useMemo(() => buildOverviewModel(data), [data]);
-  const [scoreboardOpen, setScoreboardOpen] = useState(true);
   const [mobileScoreTeam, setMobileScoreTeam] = useState("a");
   const teamAName = data.team_a_name || "Team A";
   const teamBName = data.team_b_name || "Team B";
@@ -304,62 +303,53 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
         onOpenReplayRound={onOpenReplayRound}
       />
 
-      <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
-        <header className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+      <section data-testid="overview-full-scoreboard" className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
+        <header className="flex items-center justify-between gap-3 border-b border-cs2-border px-3.5 py-2.5">
           <h2 className="text-[12px] font-bold text-cs2-text-primary">全场数据</h2>
-          <button
-            type="button"
-            className="text-[10px] font-semibold text-cs2-accent hover:underline"
-            onClick={() => setScoreboardOpen((open) => !open)}
-          >
-            {scoreboardOpen ? "收起数据" : "展开数据"}
-          </button>
         </header>
-        {scoreboardOpen ? (
-          <div className="border-t border-cs2-border p-2.5">
-            <div className="mb-2 flex gap-1 md:hidden">
-              {[
-                ["a", teamAName],
-                ["b", teamBName],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setMobileScoreTeam(key)}
-                  className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${
-                    mobileScoreTeam === key
-                      ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent"
-                      : "border-cs2-border text-cs2-text-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+        <div className="p-2.5">
+          <div className="mb-2 flex gap-1 md:hidden">
+            {[
+              ["a", teamAName],
+              ["b", teamBName],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMobileScoreTeam(key)}
+                className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${
+                  mobileScoreTeam === key
+                    ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent"
+                    : "border-cs2-border text-cs2-text-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-2.5 md:grid-cols-2">
+            <div className={mobileScoreTeam === "a" ? "block" : "hidden md:block"}>
+              <TeamScoreboard
+                teamKey="a"
+                name={teamAName}
+                score={scoreA}
+                players={playersA}
+                onSelectPlayer={onSelectPlayer}
+                winner={winnerA}
+              />
             </div>
-            <div className="grid gap-2.5 md:grid-cols-2">
-              <div className={mobileScoreTeam === "a" ? "block" : "hidden md:block"}>
-                <TeamScoreboard
-                  teamKey="a"
-                  name={teamAName}
-                  score={scoreA}
-                  players={playersA}
-                  onSelectPlayer={onSelectPlayer}
-                  winner={winnerA}
-                />
-              </div>
-              <div className={mobileScoreTeam === "b" ? "block" : "hidden md:block"}>
-                <TeamScoreboard
-                  teamKey="b"
-                  name={teamBName}
-                  score={scoreB}
-                  players={playersB}
-                  onSelectPlayer={onSelectPlayer}
-                  winner={winnerB}
-                />
-              </div>
+            <div className={mobileScoreTeam === "b" ? "block" : "hidden md:block"}>
+              <TeamScoreboard
+                teamKey="b"
+                name={teamBName}
+                score={scoreB}
+                players={playersB}
+                onSelectPlayer={onSelectPlayer}
+                winner={winnerB}
+              />
             </div>
           </div>
-        ) : null}
+        </div>
       </section>
     </div>
   );
@@ -545,7 +535,7 @@ function StatGroup({ title, rows }) {
   return <section className="border-l-2 border-cs2-border-subtle bg-cs2-bg-input/20 p-3"><h3 className="mb-3 text-[9px] font-black uppercase tracking-wider text-cs2-text-secondary">{title}</h3><div className="space-y-2.5">{rows.map((row) => <StatBar key={row.label} {...row} />)}</div></section>;
 }
 
-export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOverview }) {
+export function PlayersView({ data, selectedPlayer, onBackToOverview }) {
   const player = data.players.find((item) => item.name === selectedPlayer) || data.players[0];
   if (!player) return <Panel title="全部玩家"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有玩家统计。</div></Panel>;
   const groups = [
@@ -555,13 +545,10 @@ export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOver
     { title: "Utility / Economy", rows: [{ label: "道具伤害", value: player.utility_damage, max: 500 }, { label: "每回合道伤", value: player.utility_damage_per_round, display: Number(player.utility_damage_per_round || 0).toFixed(1), max: 25 }, { label: "平均装备价值", value: player.average_equipment_value, display: money(player.average_equipment_value), max: 6000 }] },
   ];
   return (
-    <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <Panel title="全部玩家" eyebrow={`${data.players.length} / ${data.players.length} 已分析`}><div className="divide-y divide-cs2-border">{data.players.map((item) => <button key={item.name} type="button" onClick={() => onSelectPlayer(item.name)} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${player.name === item.name ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}><span className={`h-2 w-2 rounded-full ${teamDot(item.team_key)}`} /><div className="min-w-0 flex-1"><p className={`truncate text-[11px] font-bold ${player.name === item.name ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{item.name}</p><p className="font-mono text-[9px] text-cs2-text-muted">{item.kills}–{item.deaths} · {Number(item.adr || 0).toFixed(1)} ADR</p></div></button>)}</div></Panel>
-      <div className="space-y-4">
-        <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-md text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-baseline gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><span className="text-[9px] font-bold uppercase tracking-wider text-cs2-accent">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</span></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>
-        <Panel title="详细数据" eyebrow="全场表现拆分 · 原始统计"><div className="grid gap-3 p-4 xl:grid-cols-2">{groups.map((group) => <StatGroup key={group.title} {...group} />)}</div></Panel>
-      </div>
+    <div className="space-y-4">
+      <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-md text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-baseline gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><span className="text-[9px] font-bold uppercase tracking-wider text-cs2-accent">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</span></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>
+      <Panel title="详细数据" eyebrow="全场表现拆分 · 原始统计"><div className="grid gap-3 p-4 xl:grid-cols-2">{groups.map((group) => <StatGroup key={group.title} {...group} />)}</div></Panel>
     </div>
   );
 }

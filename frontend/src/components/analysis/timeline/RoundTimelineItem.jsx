@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import KillfeedEventRow from "./KillfeedEventRow";
 import TimelineNode from "./TimelineNode";
 import RoundSummaryPanel from "./RoundSummaryPanel";
@@ -58,16 +57,6 @@ export default function RoundTimelineItem({
     () => events.filter((e) => e?.record_type === "death" || e?.type === "death"),
     [events],
   );
-  const assistOnlyCount = useMemo(
-    () => events.filter((e) => String(e?.type || "") === "assist_only").length,
-    [events],
-  );
-
-  const hasKillOrDeath = killsOnly.length > 0 || deathsOnly.length > 0;
-  const onlyAssists = events.length > 0 && !hasKillOrDeath && assistOnlyCount > 0;
-  const noEvents = events.length === 0;
-  const defaultCollapsed = noEvents || onlyAssists;
-  const [expanded, setExpanded] = useState(!defaultCollapsed);
   const [hovered, setHovered] = useState(false);
 
   const isQueued = (ev) => {
@@ -106,35 +95,11 @@ export default function RoundTimelineItem({
   if (res === "win") outcomeLabel = t("analysis.roundWin");
   else if (res === "loss") outcomeLabel = t("analysis.roundLoss");
 
-  const collapsedSummary = noEvents
-    ? t("analysis.summaryNoEvents")
-    : onlyAssists
-      ? t("analysis.summaryAssistsOnly", { ta })
-      : t("analysis.summaryKDA", { tk, td, ta });
-
   const roundLabelText = t("analysis.roundLabel", { n: Number.isFinite(rn) ? rn : "?" });
-
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className={`group/round grid w-full grid-cols-[56px_1fr] items-center gap-x-3 border-l-2 bg-cs2-bg-card/95 py-2.5 pl-0 pr-2 text-left transition-colors hover:bg-cs2-bg-hover max-[1279px]:grid-cols-[44px_1fr] ${res === "win" ? "border-l-emerald-500/65" : res === "loss" ? "border-l-rose-500/65" : "border-l-transparent"}`}
-      >
-        <TimelineNode result={res} targetKills={tk} targetDeaths={td} glow={hovered} />
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-cs2-text-primary">
-            {roundLabelText}
-            <span className="ml-2 text-[12px] font-normal text-cs2-text-muted">{collapsedSummary}</span>
-          </p>
-          <p className="mt-0.5 text-[12px] text-cs2-text-muted">{t("analysis.clickToExpand")}</p>
-        </div>
-      </button>
-    );
-  }
 
   return (
     <div
+      data-testid="round-timeline-item"
       className={`group/round grid w-full grid-cols-[56px_minmax(0,1fr)_280px] gap-x-3 border-l-2 bg-cs2-bg-card/95 py-2.5 pl-0 pr-2 transition-colors duration-150 hover:bg-cs2-bg-hover max-[1279px]:grid-cols-[44px_minmax(0,1fr)] ${res === "win" ? "border-l-emerald-500/65" : res === "loss" ? "border-l-rose-500/65" : "border-l-transparent"}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -193,15 +158,6 @@ export default function RoundTimelineItem({
             </div>
           ))}
         </div>
-
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-cs2-text-muted hover:text-cs2-text-secondary"
-        >
-          <ChevronDown className="h-3.5 w-3.5 rotate-180" />
-          {t("analysis.collapseRound")}
-        </button>
       </div>
 
       <div className="min-w-0 max-[1279px]:col-span-2 max-[1279px]:mt-3 max-[1279px]:border-t max-[1279px]:border-cs2-border max-[1279px]:pt-3">

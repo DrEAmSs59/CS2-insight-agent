@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Crosshair,
   Flame,
@@ -22,11 +22,15 @@ import {
   replayHeatmapPlayerKey,
 } from "../../utils/replayHeatmap";
 import { resolveReplayTransform } from "../../utils/replayRadarTransform";
+import ReplayCameraControls from "./ReplayCameraControls";
 import ReplayHeatmapCanvas from "./ReplayHeatmapCanvas";
 
 const HEATMAP_FPS = 32;
 const REQUEST_CONCURRENCY = 4;
 const MAX_HEATMAP_CACHE_ENTRIES = 6;
+const HEATMAP_MIN_ZOOM = 1;
+const HEATMAP_MAX_ZOOM = 4;
+const HEATMAP_ZOOM_STEP = 1.2;
 const heatmapCache = new Map();
 const HEATMAP_MODES = [
   { key: "movement", labelKey: "analysis.heatmap.modeMovement", mapLabelKey: "analysis.heatmap.modeMovementMap", icon: Footprints },
@@ -73,8 +77,8 @@ function playerTeamKey(player, index, total) {
   return index < Math.ceil(total / 2) ? "a" : "b";
 }
 
-function teamDot(teamKey) {
-  return teamKey === "a" ? "bg-violet-400" : "bg-emerald-400";
+function clampHeatmapZoom(value) {
+  return Math.max(HEATMAP_MIN_ZOOM, Math.min(HEATMAP_MAX_ZOOM, Number(value) || HEATMAP_MIN_ZOOM));
 }
 
 function heatmapRequest(round, { demoPath, mapName, tickRate, povPlayer }) {
@@ -128,7 +132,12 @@ function StatCard({ label, value, detail }) {
   );
 }
 
-export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
+export default function DemoHeatmapView({
+  workspace,
+  demoPath,
+  players = [],
+  selectedPlayer = "",
+}) {
   const t = useT();
   const rounds = workspace?.rounds || [];
   const mapName = mapKey(workspace?.map_name);
@@ -156,11 +165,13 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
   const [mode, setMode] = useSessionState(`demo-heatmap:${sessionIdentity}:mode`, "movement");
   const [mapLayer, setMapLayer] = useSessionState(`demo-heatmap:${sessionIdentity}:layer`, "upper");
   const [selectedSide, setSelectedSide] = useSessionState(`demo-heatmap:${sessionIdentity}:side`, "all");
-  const [selectedPlayer, setSelectedPlayer] = useSessionState(
-    `demo-heatmap:${sessionIdentity}:player`,
-    playerOptions[0]?.name || "",
-  );
+  const focusedPlayer = playerOptions.some((player) => player.name === selectedPlayer)
+    ? selectedPlayer
+    : playerOptions[0]?.name || "";
   const [reloadEpoch, setReloadEpoch] = useState(0);
+  const [mapCamera, setMapCamera] = useState({ zoom: 1, offsetX: 0, offsetY: 0 });
+  const mapSurfaceRef = useRef(null);
+  const mapDragRef = useRef(null);
   const [loadState, setLoadState] = useState({
     status: "idle",
     completed: 0,
@@ -187,12 +198,6 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
     `teams:${playerTeamSignature}`,
     ...jobs.map((job) => `${job.requestBody.start_tick}-${job.requestBody.end_tick}:${job.round?.team_a_side || ""}-${job.round?.team_b_side || ""}`),
   ].join("|"), [demoPath, jobs, mapName, playerTeamSignature, workspace?.demo_fingerprint]);
-
-  useEffect(() => {
-    if (!playerOptions.some((player) => player.name === selectedPlayer)) {
-      setSelectedPlayer(playerOptions[0]?.name || "");
-    }
-  }, [playerOptions, selectedPlayer, setSelectedPlayer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -301,7 +306,7 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
   useEffect(() => {
     if (!hasMapLayers) setMapLayer("upper");
   }, [hasMapLayers]);
-  const selectedPlayerData = loadState.data?.players?.[replayHeatmapPlayerKey(selectedPlayer)] || null;
+  const selectedPlayerData = loadState.data?.players?.[replayHeatmapPlayerKey(focusedPlayer)] || null;
   const selectedSideData = selectedSide === "all"
     ? selectedPlayerData
     : selectedPlayerData?.sides?.[selectedSide] || null;
@@ -313,13 +318,88 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
   const deathEvents = activeLayer?.deaths?.eventCount || 0;
   const activeMode = HEATMAP_MODES.find((item) => item.key === mode) || HEATMAP_MODES[0];
   const activeEventCount = mode === "movement" ? movementSamples : activeHeatmap?.eventCount || 0;
-  const selectedPlayerOption = playerOptions.find((player) => player.name === selectedPlayer) || null;
+  const selectedPlayerOption = playerOptions.find((player) => player.name === focusedPlayer) || null;
   const activeRoundCount = selectedSide === "all"
     ? loadState.data?.roundCount || jobs.length || 0
     : rounds.filter((round) => {
       const roundSide = selectedPlayerOption?.team_key === "a" ? round?.team_a_side : round?.team_b_side;
       return String(roundSide || "").toUpperCase() === selectedSide;
     }).length;
+
+  const clampOffset = (value, zoom, axis) => {
+    const rect = mapSurfaceRef.current?.getBoundingClientRect();
+    const size = axis === "x" ? Number(rect?.width || 0) : Number(rect?.height || 0);
+    const limit = Math.max(0, size * (zoom - 1) / 2);
+    return Math.max(-limit, Math.min(limit, Number(value) || 0));
+  };
+
+  const changeMapZoom = (nextZoom, pointer = null) => {
+    setMapCamera((current) => {
+      const zoom = clampHeatmapZoom(nextZoom);
+      if (zoom === HEATMAP_MIN_ZOOM) return { zoom, offsetX: 0, offsetY: 0 };
+      const ratio = zoom / current.zoom;
+      const nextOffsetX = pointer
+        ? pointer.x - ratio * (pointer.x - current.offsetX)
+        : current.offsetX;
+      const nextOffsetY = pointer
+        ? pointer.y - ratio * (pointer.y - current.offsetY)
+        : current.offsetY;
+      return {
+        zoom,
+        offsetX: clampOffset(nextOffsetX, zoom, "x"),
+        offsetY: clampOffset(nextOffsetY, zoom, "y"),
+      };
+    });
+  };
+
+  useEffect(() => {
+    const surface = mapSurfaceRef.current;
+    if (!surface) return undefined;
+    const handleWheel = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.target instanceof Element && event.target.closest("button")) return;
+      const rect = surface.getBoundingClientRect();
+      const pointer = {
+        x: event.clientX - rect.left - rect.width / 2,
+        y: event.clientY - rect.top - rect.height / 2,
+      };
+      changeMapZoom(
+        mapCamera.zoom * (event.deltaY < 0 ? HEATMAP_ZOOM_STEP : 1 / HEATMAP_ZOOM_STEP),
+        pointer,
+      );
+    };
+    surface.addEventListener("wheel", handleWheel, { passive: false });
+    return () => surface.removeEventListener("wheel", handleWheel);
+  }, [mapCamera.zoom]);
+
+  const handleMapPointerDown = (event) => {
+    if (event.button !== 0 || mapCamera.zoom <= HEATMAP_MIN_ZOOM || event.target.closest("button")) return;
+    mapDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: mapCamera.offsetX,
+      offsetY: mapCamera.offsetY,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleMapPointerMove = (event) => {
+    const drag = mapDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setMapCamera((current) => ({
+      ...current,
+      offsetX: clampOffset(drag.offsetX + event.clientX - drag.startX, current.zoom, "x"),
+      offsetY: clampOffset(drag.offsetY + event.clientY - drag.startY, current.zoom, "y"),
+    }));
+  };
+
+  const finishMapDrag = (event) => {
+    if (mapDragRef.current?.pointerId !== event.pointerId) return;
+    mapDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
 
   return (
     <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm">
@@ -368,54 +448,42 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
         </div>
       </header>
 
-      <div className="grid gap-4 p-4 xl:grid-cols-[240px_minmax(0,1fr)_240px]">
-        <aside className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/20">
-          <div className="border-b border-cs2-border px-4 py-3">
-            <h3 className="text-[11px] font-black text-cs2-text-primary">{t("analysis.heatmap.allPlayers")}</h3>
-            <p className="mt-0.5 font-mono text-[10px] text-cs2-text-muted">{t("analysis.heatmap.analyzedPlayers", { done: playerOptions.length, total: playerOptions.length })}</p>
+      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_240px]">
+        <div
+          ref={mapSurfaceRef}
+          data-testid="heatmap-map-surface"
+          data-zoom={mapCamera.zoom.toFixed(2)}
+          onPointerDown={handleMapPointerDown}
+          onPointerMove={handleMapPointerMove}
+          onPointerUp={finishMapDrag}
+          onPointerCancel={finishMapDrag}
+          className={`relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner ${
+            mapCamera.zoom > HEATMAP_MIN_ZOOM ? "cursor-grab active:cursor-grabbing" : ""
+          }`}
+          style={{ touchAction: "none" }}
+        >
+          <div
+            className="pointer-events-none absolute inset-0 will-change-transform"
+            style={{
+              transform: `translate3d(${mapCamera.offsetX}px, ${mapCamera.offsetY}px, 0) scale(${mapCamera.zoom})`,
+              transformOrigin: "50% 50%",
+            }}
+          >
+            <img
+              src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
+              alt={t("analysis.heatmap.imageAlt", { map: mapName, side: selectedSide === "all" ? "" : `${selectedSide} `, mode: t(activeMode.mapLabelKey) })}
+              draggable={false}
+              className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
+            />
+            {activeHeatmap && <ReplayHeatmapCanvas heatmap={activeHeatmap} mode={mode} />}
           </div>
-          <div role="group" aria-label={t("analysis.heatmap.playerList")} className="divide-y divide-cs2-border">
-            {playerOptions.map((player) => {
-              const active = player.name === selectedPlayer;
-              const playerTeamName = String(
-                player.team_name
-                || (player.team_key === "a" ? workspace?.team_a_name : workspace?.team_b_name)
-                || t(player.team_key === "a" ? "analysis.heatmap.teamA" : "analysis.heatmap.teamB"),
-              ).trim();
-              return (
-                <button
-                  key={`${player.name}-${player.steam_id64 || player.steam_id || ""}`}
-                  type="button"
-                  aria-label={t("analysis.heatmap.viewPlayer", { name: player.name })}
-                  aria-pressed={active}
-                  onClick={() => setSelectedPlayer(player.name)}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${active ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-[11px] font-bold ${active ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{player.name}</span>
-                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-cs2-text-muted">
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${teamDot(player.team_key)}`} />
-                      <span className="max-w-[78px] truncate font-semibold" title={playerTeamName}>{playerTeamName}</span>
-                      <span aria-hidden="true">·</span>
-                      <span className="shrink-0 font-mono">
-                        {Number(player.kills || 0)}–{Number(player.deaths || 0)} · {Number(player.adr || 0).toFixed(1)} ADR
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-
-        <div className="relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner">
-          <img
-            src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
-            alt={t("analysis.heatmap.imageAlt", { map: mapName, side: selectedSide === "all" ? "" : `${selectedSide} `, mode: t(activeMode.mapLabelKey) })}
-            draggable={false}
-            className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
+          <ReplayCameraControls
+            userZoom={mapCamera.zoom}
+            onZoomIn={() => changeMapZoom(mapCamera.zoom * HEATMAP_ZOOM_STEP)}
+            onZoomOut={() => changeMapZoom(mapCamera.zoom / HEATMAP_ZOOM_STEP)}
+            onFit={() => setMapCamera({ zoom: 1, offsetX: 0, offsetY: 0 })}
+            className="right-3 top-3"
           />
-          {activeHeatmap && <ReplayHeatmapCanvas heatmap={activeHeatmap} mode={mode} />}
           {hasMapLayers && (
             <div role="group" aria-label={t("analysis.heatmap.floorGroup")} className="absolute left-3 top-3 z-10 flex rounded-md border border-white/15 bg-black/75 p-0.5 backdrop-blur-sm">
               {[
@@ -465,7 +533,7 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20 p-8 text-center">
               <p className="rounded-md border border-white/10 bg-black/65 px-4 py-2 text-[10px] font-semibold text-white/70">
                 {t("analysis.heatmap.noModeData", {
-                  player: selectedPlayer || t("analysis.heatmap.selectedPlayerFallback"),
+                  player: focusedPlayer || t("analysis.heatmap.selectedPlayerFallback"),
                   side: selectedSide === "all" ? "" : t("analysis.heatmap.sideContext", { side: selectedSide }),
                   mode: t(activeMode.labelKey),
                 })}
@@ -478,7 +546,7 @@ export default function DemoHeatmapView({ workspace, demoPath, players = [] }) {
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{t("analysis.heatmap.currentPlayer")}</p>
             <div className="mt-1 flex items-center gap-2">
-              <p className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{selectedPlayer || t("analysis.heatmap.notSelected")}</p>
+              <p data-testid="heatmap-focused-player" className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{focusedPlayer || t("analysis.heatmap.notSelected")}</p>
               <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-black ${
                 selectedSide === "CT"
                   ? "bg-sky-400/15 text-sky-400"
