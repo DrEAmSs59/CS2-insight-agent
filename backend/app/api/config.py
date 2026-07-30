@@ -71,6 +71,7 @@ class ConfigPayload(BaseModel):
     match_count: Optional[int] = None
     update_check_frequency: Optional[str] = None
     last_update_check_at: Optional[str] = None
+    latency_calibration_enabled: Optional[bool] = None
 
 
 @router.get("/api/config")
@@ -318,6 +319,7 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.password = raw_password
         if obs.obs_path is not None:
             cfg.obs.obs_path = str(obs.obs_path).strip()
+        cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm
@@ -340,6 +342,8 @@ async def update_config(payload: ConfigPayload):
         cfg.ai_mode = payload.ai_mode
     if payload.obs_agent_auto_prepare is not None:
         cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
+    if payload.latency_calibration_enabled is not None:
+        cfg.latency_calibration_enabled = bool(payload.latency_calibration_enabled)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:

@@ -621,7 +621,9 @@ export default function SettingsPage() {
         port: obs.port ?? 4455,
         password: obs.password ?? "",
         obs_path: obs.obs_path ?? "",
+        browser_begin_frame_scheduling: !!obs.browser_begin_frame_scheduling,
       };
+      payload.latency_calibration_enabled = !!config.latency_calibration_enabled;
 
       payload.llm = {
         base_url: llm.base_url ?? null,
@@ -1312,6 +1314,32 @@ export default function SettingsPage() {
                 </FieldRow>
                 <FieldRow label={t("settings.labelObsPassword")} search={search && !matches(t("settings.labelObsPassword"))}>
                   <TextInput type="password" value={obs.password ?? ""} onChange={(v) => set("obs.password", v)} placeholder="OBS WebSocket password" />
+                </FieldRow>
+                <FieldRow
+                  label={t("settings.labelBeginFrameScheduling")}
+                  hint={t("settings.hintBeginFrameScheduling")}
+                  search={search && !matches(t("settings.labelBeginFrameScheduling") + " begin-frame-scheduling overlay")}
+                >
+                  <Toggle
+                    value={!!obs.browser_begin_frame_scheduling}
+                    onChange={(value) => set("obs.browser_begin_frame_scheduling", value)}
+                    ariaLabel={t("settings.labelBeginFrameScheduling")}
+                    onLabel={t("settings.beginFrameSchedulingOn")}
+                    offLabel={t("settings.beginFrameSchedulingOff")}
+                  />
+                </FieldRow>
+                <FieldRow
+                  label={t("settings.labelLatencyCalibration")}
+                  hint={t("settings.hintLatencyCalibration")}
+                  search={search && !matches(t("settings.labelLatencyCalibration") + " calibration latency overlay")}
+                >
+                  <Toggle
+                    value={!!config.latency_calibration_enabled}
+                    onChange={(value) => set("latency_calibration_enabled", value)}
+                    ariaLabel={t("settings.labelLatencyCalibration")}
+                    onLabel={t("settings.latencyCalibrationOn")}
+                    offLabel={t("settings.latencyCalibrationOff")}
+                  />
                 </FieldRow>
               </SectionCard>
 

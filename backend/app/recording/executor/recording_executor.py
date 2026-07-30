@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
 from ..platform_utils import voice_listen_mask_console_commands
@@ -92,6 +92,29 @@ def _kb_bus(segment=None):
     except Exception:
         pass
     return None, 0, 0
+
+def _calibration_ticks_for(segment: Any, tick_rate: float) -> list[int]:
+    """时序自检开启时，本段要打的校准闪白 tick；关闭时返回空列表。
+
+    默认关闭：闪白会在成片角落留下一块不透明方块，不能出现在正常录制里。
+    """
+    try:
+        from ...env_utils import load_config
+
+        cfg = load_config()
+        if not bool(getattr(cfg, "latency_calibration_enabled", False)):
+            return []
+        from ..diagnostics.onset_probe import plan_calibration_ticks
+
+        return plan_calibration_ticks(
+            start_tick=int(segment.start_tick),
+            end_tick=int(segment.end_tick),
+            tick_rate=float(tick_rate),
+        )
+    except Exception:  # noqa: BLE001 - 自检不该影响录制
+        logger.debug("calibration tick planning failed", exc_info=True)
+        return []
+
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
@@ -410,6 +433,10 @@ class ExecutionResult:
     obs_record_directory: Optional[str] = None     # OBS output directory (from GetRecordDirectory)
     # Kill anchors converted to seconds inside the finished file (LiteCut kill axis)
     kill_markers: list[dict] = field(default_factory=list)
+    # Timing self-check: where the overlay meant to flash its calibration marker.
+    # Subtracting these from the flashes measured in the file gives the overlay's
+    # net latency, which is what decides whether an offset needs tuning at all.
+    calibration_markers: list[dict] = field(default_factory=list)
 
 
 # Max additional slot offsets to try after the demo-parsed base slot fails GSI verify.
@@ -849,6 +876,12 @@ class RecordingExecutor:
                     "[overlay] seg=%d bus=%s kb_tick_off=%s kill_fx_tick_off=%s",
                     segment.segment_index, _bus, _kb_tick_off, _fx_tick_off,
                 )
+                _calibration_ticks = _calibration_ticks_for(segment, plan.tick_rate)
+                if _calibration_ticks:
+                    logger.warning(
+                        "[overlay] seg=%d latency calibration ON: %d flash(es) will appear in the recording",
+                        segment.segment_index, len(_calibration_ticks),
+                    )
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -860,6 +893,7 @@ class RecordingExecutor:
                         "kill_fx_offset_ticks": _fx_tick_off,
                         "frames": _kb_frames or [],
                         "kills": segment.metadata.get("kill_track") or [],
+                        "calibration_ticks": _calibration_ticks,
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
@@ -931,6 +965,8 @@ class RecordingExecutor:
                 segment_record_t0 = obs_record_mono if obs_record_mono is not None else time.monotonic()
                 kill_timeline.open_segment(
                     segment,
+                    calibration_ticks=_calibration_ticks,
+                    overlay_offset_ticks=_kb_tick_off,
                     overhead_sec=record_overhead_sec,
                     lead_in_sec=(
                         demo_resume_mono - obs_record_mono
@@ -1146,6 +1182,7 @@ class RecordingExecutor:
 
         result.output_path = final_output_path
         result.kill_markers = kill_timeline.markers
+        result.calibration_markers = kill_timeline.calibration_markers
         logger.info(
             "[RecordingV3] kill axis: %d marker(s) across %.2fs of recorded video",
             len(result.kill_markers), kill_timeline.accumulated_sec,
