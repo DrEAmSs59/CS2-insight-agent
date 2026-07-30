@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "players": [
+    {
+      "id": "zont1x",
+      "account_id": 1035615149,
+      "steam_id64": "76561198995880877",
+      "name_hint": "zont1x"
+    },
+    {
+      "id": "rain",
+      "account_id": 37085479,
+      "steam_id64": "76561197997351207",
+      "name_hint": "rain"
+    }
+  ],
+  "rewrites": [
+    {
+      "id": "zont1x-t-gloves",
+      "player": "zont1x",
+      "team": "T",
+      "entity": {
+        "kind": "glove",
+        "class": "CCSPlayerPawn",
+        "item_id": { "high": 10, "low": 1196148613 }
+      },
+      "replacement": {
+        "definition_index": 5034,
+        "paint_kit": 10033,
+        "pattern_seed": 560,
+        "wear": 0.06000001
+      }
+    },
+    {
+      "id": "zont1x-t-butterfly-emerald",
+      "player": "zont1x",
+      "team": "T",
+      "entity": {
+        "kind": "knife",
+        "class": "CKnife",
+        "item_id": { "high": 11, "low": 449587261 }
+      },
+      "replacement": {
+        "item_id": { "high": 11, "low": 449587261 },
+        "definition_index": 515,
+        "paint_kit": 568,
+        "pattern_seed": 602,
+        "wear": 0.000001,
+        "knife_variant": {
+          "subclass_token": 1353709123,
+          "model_resource_handle": "13478092056631755737",
+          "mapping_source": { "kind": "observed_in_input" }
+        },
+        "custom_name": "CS2-INSIGHT-AGENT",
+        "visual_state": {
+          "mesh_group_mask": "18446744073709551615",
+          "body_group": 0
+        }
+      },
+      "missing_fields": { "econ": "materialize" }
+    },
+    {
+      "id": "zont1x-glock-finish",
+      "player": "zont1x",
+      "team": "ANY",
+      "entity": {
+        "kind": "weapon",
+        "class": "CWeaponGlock",
+        "item_id": { "high": 11, "low": 3108497555 }
+      },
+      "replacement": {
+        "paint_kit": 38,
+        "pattern_seed": 123,
+        "wear": 0.01
+      }
+    },
+    {
+      "id": "rain-glock-sticker-slot-0",
+      "player": "rain",
+      "team": "ANY",
+      "entity": {
+        "kind": "weapon",
+        "class": "CWeaponGlock",
+        "item_id": { "high": 9, "low": 2090132412 }
+      },
+      "replacement": {
+        "stickers": [
+          { "slot": 0, "sticker_id": 73, "expected_current_id": 368 }
+        ]
+      }
+    },
+    {
+      "id": "rain-m4a1s-charm",
+      "player": "rain",
+      "team": "ANY",
+      "entity": {
+        "kind": "weapon",
+        "class": "CWeaponM4A1",
+        "item_id": { "high": 9, "low": 1554916076 }
+      },
+      "replacement": {
+        "charm": { "charm_id": 10, "expected_current_id": 29 }
+      }
+    }
+  ]
+}

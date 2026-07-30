@@ -1,0 +1,25 @@
+[package]
+name = "demo-cosmetic-rewriter"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+publish = false
+license-file = "../../LICENSE"
+description = "Offline, identity-scoped CS2 demo cosmetic rewriter"
+
+[[bin]]
+name = "demo-cosmetic-rewriter"
+path = "src/main.rs"
+
+[[bin]]
+name = "demo-cosmetic-verifier"
+path = "src/bin/demo-cosmetic-verifier.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+snap = "1.1"
+source2-demo = { path = "vendor/source2-demo-0.5.8", default-features = false, features = ["cs2"] }
