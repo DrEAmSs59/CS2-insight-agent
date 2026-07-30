@@ -10,6 +10,7 @@ import {
   CircleDollarSign,
   Film,
   Flame,
+  Gem,
   Library,
   ListChecks,
   Loader2,
@@ -29,6 +30,7 @@ import RoundTimelineView from "../components/analysis/timeline/RoundTimelineView
 import WeaponKillsView from "../components/analysis/WeaponKillsView";
 import Demo2DReplayPreview from "../components/analysis/Demo2DReplayPreview";
 import DemoHeatmapView from "../components/analysis/DemoHeatmapView";
+import CosmeticsView from "../components/analysis/CosmeticsView";
 import PlayerIdentityAvatar from "../components/analysis/PlayerIdentityAvatar";
 import DockableRow, { clearDockLayout } from "../components/layout/DockableRow";
 import { useReplayStore } from "../stores/replayStore";
@@ -58,6 +60,7 @@ const TABS = [
   { key: "heatmap", labelKey: "analysis.workspace.tabHeatmap", icon: Flame },
   { key: "overview", labelKey: "analysis.workspace.tabOverview", icon: Activity },
   { key: "players", labelKey: "analysis.workspace.tabPlayers", icon: Users },
+  { key: "cosmetics", labelKey: "analysis.workspace.tabCosmetics", icon: Gem },
   { key: "rounds", labelKey: "analysis.workspace.tabRounds", icon: ListChecks },
   { key: "economy", labelKey: "analysis.workspace.tabEconomy", icon: CircleDollarSign },
 ];
@@ -735,8 +738,6 @@ export default function DemoAnalysisPreviewPage() {
               onRoundChange={setReplayRound}
               layoutEditing={layoutEditing}
               layoutResetSignal={layoutResetSignal}
-              locale={locale}
-              onlineAssetsEnabled={onlineAssetsEnabled}
             />
             )}
 
@@ -775,6 +776,15 @@ export default function DemoAnalysisPreviewPage() {
               selectedPlayer={statsPlayer || activePlayer}
               onSelectPlayer={setStatsPlayer}
               onBackToOverview={() => setActiveTab("overview")}
+            />
+            )}
+
+            {activeTab === "cosmetics" && (
+            <CosmeticsView
+              workspace={workspace}
+              selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerName(player) === activePlayer)}
+              locale={locale}
+              onlineAssetsEnabled={onlineAssetsEnabled}
             />
             )}
 

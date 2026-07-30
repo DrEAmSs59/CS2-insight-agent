@@ -12,6 +12,10 @@
     "core:window:allow-toggle-maximize",
     "dialog:allow-open",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "steam://rungame/730/*" }]
+    },
     "updater:default",
     "process:allow-restart"
   ]

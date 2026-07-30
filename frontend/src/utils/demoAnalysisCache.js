@@ -10,7 +10,7 @@ function normalizedName(value) {
   return String(value || "").trim().toLocaleLowerCase();
 }
 
-export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.07.5";
+export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.07.7";
 
 export function demoAnalysisRoster(demo) {
   const seen = new Set();

@@ -346,12 +346,12 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText(/DAK|analysis-kit|数据包/i)).toBeNull();
   });
 
-  test("keeps all seven analysis workspaces backed by parsed match data", async () => {
+  test("keeps all eight analysis workspaces backed by parsed match data", async () => {
     const view = renderPage(buildShell());
 
     const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "高光与录制", "2D 回放", "热力图", "概览", "玩家", "回合", "经济",
+      "高光与录制", "2D 回放", "热力图", "概览", "玩家", "饰品", "回合", "经济",
     ]);
     expect(analysisNavigation.closest(".analysis-center-surface")).toBeTruthy();
     expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeNull();
