@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _CATALOG_PATH = Path(__file__).with_name("cs2_item_catalog.generated.json")
 _ALIAS_SEPARATORS = re.compile(r"[\s-]+")
 _ALIAS_PUNCTUATION = re.compile(r"[^\w]+", flags=re.UNICODE)
+_STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
 
 
 @lru_cache(maxsize=1)
@@ -205,6 +206,13 @@ def _compose_item_id(high_value: object, low_value: object) -> int | None:
     return item_id if item_id > 0 else None
 
 
+def _steamid64_from_account_id(value: object) -> str:
+    account_id = _safe_int(value)
+    if account_id is None or account_id <= 0 or account_id > 0xFFFFFFFF:
+        return ""
+    return str(_STEAM_ID64_INDIVIDUAL_BASE + account_id)
+
+
 def _skin_entry(row: Mapping[str, Any]) -> dict[str, Any] | None:
     item = resolve_cs2_item(row.get("def_index"), row.get("paint_index"))
     if not item:
@@ -259,10 +267,12 @@ def _skin_entry(row: Mapping[str, Any]) -> dict[str, Any] | None:
 def _sample_player_context(
     parser: object,
     ticks: Sequence[int] | None,
+    known_steamids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Return cosmetic evidence sampled from weapon, pawn and controller entities."""
     empty = {
         "item_teams": {},
+        "item_accounts": {},
         "player_teams": {},
         "music_kits": {},
         "item_stickers": {},
@@ -278,12 +288,12 @@ def _sample_player_context(
     wanted = [
         "item_id_high",
         "item_id_low",
-        "active_weapon_original_owner",
         "weapon_stickers",
         "item_def_idx",
         "weapon_skin_id",
         "weapon_paint_seed",
         "weapon_float",
+        "Weapon.m_iAccountID",
         "team_num",
         "m_iMusicKitID",
         "m_unMusicID",
@@ -304,15 +314,25 @@ def _sample_player_context(
         return empty
 
     item_teams: dict[tuple[str, int], set[str]] = {}
+    item_account_candidates: dict[int, set[str]] = {}
     player_teams: dict[str, set[str]] = {}
     music_kits: dict[str, set[int]] = {}
     item_stickers: dict[tuple[str, int], list[dict[str, Any]]] = {}
     observed_items: dict[tuple[str, int], dict[str, Any]] = {}
     pawn_gloves: dict[tuple[str, int], dict[str, Any]] = {}
     agents: dict[tuple[str, int], dict[str, Any]] = {}
+    roster_steamids = {
+        steamid
+        for row in rows
+        if re.fullmatch(r"\d{15,20}", steamid := _safe_text(row.get("steamid")))
+    }
+    roster_steamids.update(
+        steamid
+        for value in known_steamids or []
+        if re.fullmatch(r"\d{15,20}", steamid := _safe_text(value))
+    )
     for row in rows:
         steamid = _safe_text(row.get("steamid"))
-        original_owner = _safe_text(row.get("active_weapon_original_owner"))
         team_number = _safe_int(row.get("team_num"))
         team = "t" if team_number == 2 else "ct" if team_number == 3 else ""
         tick = _safe_int(row.get("tick"))
@@ -322,9 +342,11 @@ def _sample_player_context(
             player_teams.setdefault(steamid, set()).add(team)
         item_id = _compose_item_id(row.get("item_id_high"), row.get("item_id_low"))
         if item_id is not None:
-            if original_owner and original_owner != "0":
-                if team and original_owner == steamid:
-                    item_teams.setdefault((original_owner, item_id), set()).add(team)
+            account_owner = _steamid64_from_account_id(row.get("Weapon.m_iAccountID"))
+            if account_owner in roster_steamids:
+                item_account_candidates.setdefault(item_id, set()).add(account_owner)
+                if team and account_owner == steamid:
+                    item_teams.setdefault((account_owner, item_id), set()).add(team)
                 resolved_stickers = []
                 for slot, sticker in enumerate(row.get("weapon_stickers") or []):
                     if not isinstance(sticker, Mapping):
@@ -337,44 +359,43 @@ def _sample_player_context(
                         resolved["wear"] = 0.0 if wear < 0.000001 else wear
                     resolved["slot"] = slot
                     resolved_stickers.append(resolved)
-                key = (original_owner, item_id)
+                key = (account_owner, item_id)
                 if len(resolved_stickers) > len(item_stickers.get(key, [])):
                     item_stickers[key] = resolved_stickers
-                if re.fullmatch(r"\d{15,20}", original_owner):
-                    observed_entry = _skin_entry({
-                        "def_index": row.get("item_def_idx"),
-                        "paint_index": row.get("weapon_skin_id"),
-                        "paint_seed": row.get("weapon_paint_seed"),
-                        "paint_wear": row.get("weapon_float"),
-                        "item_id": item_id,
-                        "custom_name": None,
+                observed_entry = _skin_entry({
+                    "def_index": row.get("item_def_idx"),
+                    "paint_index": row.get("weapon_skin_id"),
+                    "paint_seed": row.get("weapon_paint_seed"),
+                    "paint_wear": row.get("weapon_float"),
+                    "item_id": item_id,
+                    "custom_name": None,
+                })
+                if (
+                    observed_entry
+                    and observed_entry.get("catalog_exact")
+                    and int(observed_entry.get("paint_index") or 0) > 0
+                ):
+                    observed_entry.update({
+                        "owner_steamid64": account_owner,
+                        "ownership_evidence": "weapon_account_id",
+                        "observed_teams": [team] if team and account_owner == steamid else [],
+                        "stickers": resolved_stickers,
+                        "evidence_observations": 0,
+                        "_owner_observation_ticks": set(),
                     })
-                    if (
-                        observed_entry
-                        and observed_entry.get("catalog_exact")
-                        and int(observed_entry.get("paint_index") or 0) > 0
-                    ):
-                        observed_entry.update({
-                            "owner_steamid64": original_owner,
-                            "ownership_evidence": "active_weapon_original_owner",
-                            "observed_teams": [team] if team and original_owner == steamid else [],
-                            "stickers": resolved_stickers,
-                            "evidence_observations": 0,
-                            "_owner_observation_ticks": set(),
-                        })
-                        previous = observed_items.get(key)
-                        if previous is None:
-                            observed_items[key] = observed_entry
-                            previous = observed_entry
-                        elif len(resolved_stickers) > len(previous.get("stickers") or []):
-                            previous["stickers"] = resolved_stickers
-                        if team and original_owner == steamid:
-                            previous["observed_teams"] = sorted(
-                                set(previous.get("observed_teams") or []) | {team},
-                                key=("t", "ct").index,
-                            )
-                            if tick is not None:
-                                previous.setdefault("_owner_observation_ticks", set()).add(tick)
+                    previous = observed_items.get(key)
+                    if previous is None:
+                        observed_items[key] = observed_entry
+                        previous = observed_entry
+                    elif len(resolved_stickers) > len(previous.get("stickers") or []):
+                        previous["stickers"] = resolved_stickers
+                    if team and account_owner == steamid:
+                        previous["observed_teams"] = sorted(
+                            set(previous.get("observed_teams") or []) | {team},
+                            key=("t", "ct").index,
+                        )
+                        if tick is not None:
+                            previous.setdefault("_owner_observation_ticks", set()).add(tick)
 
         pawn_item_id = _compose_item_id(
             row.get("CCSPlayerPawn.m_iItemIDHigh"),
@@ -470,6 +491,29 @@ def _sample_player_context(
         if music_id is not None and music_id > 0:
             music_kits.setdefault(steamid, set()).add(music_id)
 
+    # A single asset observed under multiple participant accounts is ambiguous
+    # demo state. Fail closed instead of assigning it to whichever row happened
+    # to be parsed last.
+    item_accounts = {
+        item_id: next(iter(accounts))
+        for item_id, accounts in item_account_candidates.items()
+        if len(accounts) == 1
+    }
+    item_teams = {
+        key: teams
+        for key, teams in item_teams.items()
+        if item_accounts.get(key[1]) == key[0]
+    }
+    item_stickers = {
+        key: stickers
+        for key, stickers in item_stickers.items()
+        if item_accounts.get(key[1]) == key[0]
+    }
+    observed_items = {
+        key: entry
+        for key, entry in observed_items.items()
+        if item_accounts.get(key[1]) == key[0]
+    }
     for entry in observed_items.values():
         entry["evidence_observations"] = len(entry.pop("_owner_observation_ticks", set()))
     for collection in (pawn_gloves, agents):
@@ -477,6 +521,7 @@ def _sample_player_context(
             entry["evidence_observations"] = len(entry.pop("_observation_ticks", set()))
     return {
         "item_teams": item_teams,
+        "item_accounts": item_accounts,
         "player_teams": player_teams,
         "music_kits": music_kits,
         "item_stickers": item_stickers,
@@ -493,8 +538,8 @@ def build_player_cosmetic_inventory(
 ) -> dict[str, list[dict[str, Any]]]:
     """Build evidence-only owned cosmetics keyed by their owner SteamID.
 
-    Ownership comes from SteamID-bearing demo economy entities. A stable active
-    melee item additionally requires repeated OriginalOwnerXuid observations.
+    Ownership comes from SteamID-bearing demo economy entities. Weapon entities
+    are attributed through their economy account ID, never OriginalOwnerXuid.
     """
     parse_skins = getattr(parser, "parse_skins", None)
     rows: list[dict[str, Any]] = []
@@ -504,8 +549,13 @@ def build_player_cosmetic_inventory(
         except Exception as exc:  # noqa: BLE001 - cosmetics never block analysis
             logger.info("CS2 owned cosmetic metadata unavailable: %s", exc)
 
-    context = _sample_player_context(parser, sample_ticks)
+    context = _sample_player_context(
+        parser,
+        sample_ticks,
+        known_steamids=[_safe_text(row.get("steamid")) for row in rows],
+    )
     item_teams = context["item_teams"]
+    item_accounts = context["item_accounts"]
     player_teams = context["player_teams"]
     music_kits = context["music_kits"]
     item_stickers = context["item_stickers"]
@@ -514,11 +564,19 @@ def build_player_cosmetic_inventory(
     agents = context["agents"]
     grouped: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
-        steamid = _safe_text(row.get("steamid"))
         entry = _skin_entry(row)
-        if not steamid or not entry:
+        if not entry:
             continue
         item_id = _safe_int(row.get("item_id"))
+        skin_table_steamid = _safe_text(row.get("steamid"))
+        steamid = item_accounts.get(item_id or 0, skin_table_steamid)
+        if not steamid:
+            continue
+        # Knife rows are especially prone to entity-owner drift. Require the
+        # weapon economy account to resolve back to a participant before the
+        # item can be shown under a player.
+        if entry.get("type") == "melee" and item_accounts.get(item_id or 0) != steamid:
+            continue
         signature: tuple[Any, ...] = (
             ("item", item_id)
             if item_id is not None and item_id > 0
@@ -564,8 +622,8 @@ def build_player_cosmetic_inventory(
             if len(observed_entry.get("stickers") or []) > len(matching.get("stickers") or []):
                 matching["stickers"] = observed_entry["stickers"]
             continue
-        # A real asset ID plus OriginalOwnerXuid is sufficient for weapons.
-        # Melee additionally needs the owner to hold the same asset at two
+        # A real asset ID plus its economy account is sufficient for weapons.
+        # Melee additionally needs that account's player to hold the asset at two
         # sampled ticks, filtering one-off pickups and transient server state.
         item_type = str(observed_entry.get("type") or "")
         observations = int(observed_entry.get("evidence_observations") or 0)

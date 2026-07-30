@@ -64,13 +64,18 @@ describe("CosmeticsView", () => {
 
     const card = screen.getByRole("button", { name: "Lᵒᵛᵉᵧₒᵤ 玫瑰の吻" });
     fireEvent.contextMenu(card, { clientX: 30, clientY: 40 });
-    expect(within(screen.getByRole("menu")).getAllByRole("menuitem")).toHaveLength(2);
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+    expect(menu.className).toContain("bg-white");
+    expect(menu.className).toContain("rounded-md");
+    expect(menu.parentElement).toBe(document.body);
 
     fireEvent.pointerDown(document.body);
     fireEvent.click(card);
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getAllByText("Lᵒᵛᵉᵧₒᵤ 玫瑰の吻").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("53009600926")).toBeTruthy();
+    expect(dialog.textContent).not.toContain("OriginalOwner");
   });
 
   test("opens the hosted viewer without its light backdrop", () => {
@@ -95,7 +100,7 @@ describe("CosmeticsView", () => {
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
-        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ custom_name: "玫瑰の吻" })] } } }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ custom_name: "玫瑰の吻", ownership_evidence: "active_weapon_original_owner" })] } } }}
       />,
     );
 
@@ -105,6 +110,28 @@ describe("CosmeticsView", () => {
     expect(within(tooltip).getByText("80")).toBeTruthy();
     expect(within(tooltip).getByText("0.016897")).toBeTruthy();
     expect(within(tooltip).getByText("53009600926")).toBeTruthy();
+    expect(tooltip.textContent).not.toContain("OriginalOwner");
+  });
+
+  test("resolves the selected player against the workspace roster before reading cosmetics", () => {
+    const currentSteamId = "76561198000000002";
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "magixx", steamid64: STEAM_ID }}
+        workspace={{
+          players: [{ name: "magixx", steam_id64: currentSteamId }],
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [cosmetic({ name_zh: "错误归属的刀", item_id: 1 })],
+              [currentSteamId]: [cosmetic({ name_zh: "正确归属的刀", item_id: 2 })],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("正确归属的刀")).toBeTruthy();
+    expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
   test("renders agent and music-kit evidence alongside equipment", () => {

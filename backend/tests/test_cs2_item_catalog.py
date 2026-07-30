@@ -8,6 +8,12 @@ from app.parser.cs2_item_catalog import (
     skin_for_player_weapon,
 )
 
+STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
+
+
+def account_id(steamid: str) -> int:
+    return int(steamid) - STEAM_ID64_INDIVIDUAL_BASE
+
 
 def test_catalog_resolves_models_and_exact_finishes():
     assert resolve_weapon_model("M9 Bayonet") == "knife_m9_bayonet"
@@ -67,6 +73,11 @@ def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits():
                     "76561198000000001",
                     "76561198000000002",
                 ],
+                "Weapon.m_iAccountID": [
+                    account_id("76561198000000001"),
+                    account_id("76561198000000001"),
+                    account_id("76561198000000002"),
+                ],
                 "weapon_stickers": [[], [], []],
                 "team_num": [2, 3, 2],
                 "m_iMusicKitID": [0, 0, 0],
@@ -106,6 +117,7 @@ def test_cosmetic_inventory_attaches_only_catalogued_stickers_to_the_exact_owned
                 "item_id_high": [item_id >> 32],
                 "item_id_low": [item_id & 0xFFFFFFFF],
                 "active_weapon_original_owner": ["76561198000000001"],
+                "Weapon.m_iAccountID": [account_id("76561198000000001")],
                 "weapon_stickers": [[
                     {"id": 37, "name": "std_crown_foil", "wear": 0.01},
                     {"id": 99999999, "name": "unknown", "wear": 0.0},
@@ -133,7 +145,7 @@ def test_cosmetic_inventory_attaches_only_catalogued_stickers_to_the_exact_owned
     }]
 
 
-def test_original_owner_adds_weapons_but_requires_repeated_owner_held_knife_evidence():
+def test_weapon_account_adds_weapons_but_requires_repeated_owner_held_knife_evidence():
     owner = "76561198000000001"
     weapon_id = 53009600926
     issued_knife_id = 53009600927
@@ -161,6 +173,7 @@ def test_original_owner_adds_weapons_but_requires_repeated_owner_held_knife_evid
                     owned_knife_id & 0xFFFFFFFF,
                 ],
                 "active_weapon_original_owner": [owner, owner, owner, owner],
+                "Weapon.m_iAccountID": [account_id(owner)] * 4,
                 "weapon_stickers": [[], [], [], []],
                 "item_def_idx": [7, 507, 507, 507],
                 "weapon_skin_id": [724, 421, 421, 421],
@@ -178,7 +191,84 @@ def test_original_owner_adds_weapons_but_requires_repeated_owner_held_knife_evid
     assert knife["type"] == "melee"
     assert knife["paint_seed"] == 960
     assert knife["evidence_observations"] == 2
-    assert knife["ownership_evidence"] == "active_weapon_original_owner"
+    assert knife["ownership_evidence"] == "weapon_account_id"
+
+
+def test_weapon_account_rehomes_a_skin_table_knife_instead_of_trusting_the_wrong_row_owner():
+    wrong_owner = "76561198000000001"
+    actual_owner = "76561198000000002"
+    knife_id = 53009600926
+
+    class FakeParser:
+        def parse_skins(self):
+            return {
+                "steamid": [wrong_owner],
+                "def_index": [508],
+                "item_id": [knife_id],
+                "paint_index": [415],
+                "paint_seed": [80],
+                "paint_wear": [0.016897],
+                "custom_name": [None],
+            }
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [42, 84]
+            return {
+                "steamid": [actual_owner, actual_owner],
+                "tick": [42, 84],
+                "item_id_high": [knife_id >> 32] * 2,
+                "item_id_low": [knife_id & 0xFFFFFFFF] * 2,
+                # Deliberately wrong: this transient field must not override
+                # the economy account attached to the asset.
+                "active_weapon_original_owner": [wrong_owner, wrong_owner],
+                "Weapon.m_iAccountID": [account_id(actual_owner)] * 2,
+                "weapon_stickers": [[], []],
+                "item_def_idx": [508, 508],
+                "weapon_skin_id": [415, 415],
+                "weapon_paint_seed": [80, 80],
+                "weapon_float": [0.016897, 0.016897],
+                "team_num": [2, 2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42, 84])
+
+    assert wrong_owner not in inventory
+    assert [item["item_id"] for item in inventory[actual_owner]] == [knife_id]
+
+
+def test_conflicting_weapon_accounts_drop_the_ambiguous_knife_instead_of_guessing():
+    first_owner = "76561198000000001"
+    second_owner = "76561198000000002"
+    knife_id = 53009600926
+
+    class FakeParser:
+        def parse_skins(self):
+            return {
+                "steamid": [first_owner],
+                "def_index": [508],
+                "item_id": [knife_id],
+                "paint_index": [415],
+                "paint_seed": [80],
+                "paint_wear": [0.016897],
+                "custom_name": [None],
+            }
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [first_owner, second_owner],
+                "tick": ticks,
+                "item_id_high": [knife_id >> 32] * 2,
+                "item_id_low": [knife_id & 0xFFFFFFFF] * 2,
+                "Weapon.m_iAccountID": [account_id(first_owner), account_id(second_owner)],
+                "weapon_stickers": [[], []],
+                "item_def_idx": [508, 508],
+                "weapon_skin_id": [415, 415],
+                "weapon_paint_seed": [80, 80],
+                "weapon_float": [0.016897, 0.016897],
+                "team_num": [2, 3],
+            }
+
+    assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42, 84]) == {}
 
 
 def test_player_pawn_econ_fields_recover_a_second_glove_even_without_finish_attributes():

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Box,
   Check,
@@ -10,7 +11,6 @@ import {
   Info,
   PackageOpen,
   Rotate3D,
-  ShieldCheck,
   Sticker,
   WifiOff,
 } from "lucide-react";
@@ -89,15 +89,6 @@ function canInspectInGame(item) {
       && item?.finish_known !== false
       && Number.isInteger(Number(item?.catalog_id)),
   );
-}
-
-function evidenceKey(item) {
-  const source = String(item?.ownership_evidence || "");
-  if (source === "active_weapon_original_owner") return "activeOwner";
-  if (source === "player_pawn_econ_item_id") return "pawnEcon";
-  if (source === "demo_player_controller_agent") return "agentController";
-  if (source === "demo_player_controller_music_kit") return "musicController";
-  return "skinTable";
 }
 
 function viewerUrl(item) {
@@ -263,7 +254,6 @@ function HoverDetails({ item, locale, position }) {
           <WearBar wear={wear} wearMin={item?.wear_min} wearMax={item?.wear_max} compact />
         </div>
       ) : null}
-      <div className="mt-2 flex items-center gap-1 border-t border-cs2-border pt-2 text-[8px] text-emerald-400"><ShieldCheck className="h-3 w-3" />{t(`analysis.cosmetics.evidence.${evidenceKey(item)}`)}</div>
     </div>
   );
 }
@@ -336,7 +326,6 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGa
           {finishKnown && Number(item?.paint_index) > 0 ? <DetailRow label={t("analysis.cosmetics.paintIndex")}>{Number(item.paint_index)}</DetailRow> : null}
           {seed !== null ? <DetailRow label={t("analysis.cosmetics.seed")}>{Math.trunc(seed)}</DetailRow> : null}
           <DetailRow label={t("analysis.cosmetics.assetId")}><span className="font-mono">{item?.item_id}</span></DetailRow>
-          <DetailRow label={t("analysis.cosmetics.evidence")}><span className="inline-flex items-center gap-1 text-emerald-400"><ShieldCheck className="h-3.5 w-3.5" />{t(`analysis.cosmetics.evidence.${evidenceKey(item)}`)}</span></DetailRow>
         </dl>
         {!finishKnown ? <div className="mt-3 border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[10px] leading-relaxed text-amber-200">{t("analysis.cosmetics.finishUnavailable")}</div> : null}
         <WearBar wear={wear} wearMin={item?.wear_min} wearMax={item?.wear_max} />
@@ -353,8 +342,12 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGa
 
 export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh", onlineAssetsEnabled = false }) {
   const t = useT();
-  const steamid = steamIdForPlayer(selectedPlayer);
   const name = playerName(selectedPlayer);
+  const workspacePlayer = useMemo(() => {
+    const target = name.toLocaleLowerCase();
+    return (workspace?.players || []).find((player) => playerName(player).toLocaleLowerCase() === target) || null;
+  }, [name, workspace?.players]);
+  const steamid = steamIdForPlayer(workspacePlayer) || steamIdForPlayer(selectedPlayer);
   const [detail, setDetail] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [hoverCard, setHoverCard] = useState(null);
@@ -415,7 +408,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setContextMenu({
       item,
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - 224)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 104)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 100)),
     });
   };
 
@@ -503,7 +496,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           <div className="flex items-center gap-2"><Gem className="h-4 w-4 text-cs2-accent" /><h2 className="truncate text-[13px] font-black text-cs2-text-primary">{t("analysis.cosmetics.title", { name })}</h2></div>
           <p className="mt-1 text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.ownershipHint")} · {t("analysis.cosmetics.interactionHint")}</p>
         </div>
-        <div className="inline-flex items-center gap-2 font-mono text-[10px] text-cs2-text-muted"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />{t("analysis.cosmetics.evidenceCount", { count: inventory.length })}</div>
+        <div className="inline-flex items-center gap-2 font-mono text-[10px] text-cs2-text-muted"><PackageOpen className="h-3.5 w-3.5" />{t("analysis.cosmetics.evidenceCount", { count: inventory.length })}</div>
       </div>
 
       {notice ? (
@@ -539,11 +532,17 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
       {hoverCard ? <HoverDetails item={hoverCard.item} locale={locale} position={hoverCard.position} /> : null}
 
-      {contextMenu ? (
-        <div data-cosmetic-context-menu role="menu" className="fixed z-[130] w-52 border border-cs2-border bg-cs2-bg-card py-1 shadow-2xl" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void inspectInGame(contextMenu.item)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[11px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><ExternalLink className="h-3.5 w-3.5" />{t("analysis.cosmetics.inspectInGame")}</button>
-          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void copyInspectUrl(contextMenu.item)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[11px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Copy className="h-3.5 w-3.5" />{t("analysis.cosmetics.copyInspectUrl")}</button>
-        </div>
+      {contextMenu ? createPortal(
+        <div
+          data-cosmetic-context-menu
+          role="menu"
+          className="fixed z-[1000] w-[216px] rounded-md border border-slate-200 bg-white p-1.5 shadow-[0_8px_28px_rgba(15,23,42,0.22)]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void inspectInGame(contextMenu.item)} className="flex h-9 w-full items-center gap-3 rounded px-3 text-left text-[13px] font-semibold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"><ExternalLink className="h-[18px] w-[18px] text-slate-500" strokeWidth={1.8} />{t("analysis.cosmetics.inspectInGame")}</button>
+          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void copyInspectUrl(contextMenu.item)} className="flex h-9 w-full items-center gap-3 rounded px-3 text-left text-[13px] font-semibold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"><Copy className="h-[18px] w-[18px] text-slate-500" strokeWidth={1.8} />{t("analysis.cosmetics.copyInspectUrl")}</button>
+        </div>,
+        document.body,
       ) : null}
 
       <Modal
