@@ -47,6 +47,72 @@ describe("normalizeLiteCutBody", () => {
     expect(body.audio).toMatchObject({ master_volume: 1.5, bgm: { path: "C:/music/theme.mp3", volume: 0.4 } });
     expect(body.overlays).toEqual([]);
     expect(body.output.encoder).toBe("auto");
+    expect(body.output.frame_blend_enabled).toBe(false);
+    expect(body.output.frame_blend_frames).toBe(5);
+    expect(body.output.high_frame_downsample_enabled).toBe(false);
+    expect(body.output.delivery_fps).toBe(60);
+  });
+
+  it("preserves valid frame blending settings and repairs invalid values", () => {
+    const valid = normalizeLiteCutBody({
+      tracks: [{ id: "v1", type: "video", clips: [] }],
+      output: {
+        width: 1920,
+        height: 1080,
+        fps: 120,
+        encoder: "auto",
+        frame_blend_enabled: true,
+        frame_blend_frames: 7,
+        high_frame_downsample_enabled: true,
+        delivery_fps: 60,
+      },
+    });
+    expect(valid.body.output).toMatchObject({
+      frame_blend_enabled: true,
+      frame_blend_frames: 7,
+      high_frame_downsample_enabled: true,
+      delivery_fps: 60,
+    });
+
+    const repaired = normalizeLiteCutBody({
+      tracks: [{ id: "v1", type: "video", clips: [] }],
+      output: {
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        encoder: "auto",
+        frame_blend_enabled: "yes",
+        frame_blend_frames: 99,
+        high_frame_downsample_enabled: "yes",
+        delivery_fps: 1001,
+      },
+    });
+    expect(repaired.body.output).toMatchObject({
+      frame_blend_enabled: false,
+      frame_blend_frames: 5,
+      high_frame_downsample_enabled: false,
+      delivery_fps: 60,
+    });
+    expect(repaired.changed).toBe(true);
+  });
+
+  it("turns off high-frame downsampling when the working fps is no longer higher", () => {
+    useLiteCutEditorStore.setState({
+      body: {
+        tracks: [{ id: "v1", type: "video", clips: [] }],
+        output: {
+          width: 1920,
+          height: 1080,
+          fps: 120,
+          delivery_fps: 60,
+          high_frame_downsample_enabled: true,
+        },
+      },
+    });
+
+    useLiteCutEditorStore.getState().patchOutput({ fps: 60 });
+
+    expect(useLiteCutEditorStore.getState().body.output.high_frame_downsample_enabled).toBe(false);
   });
 
   it("keeps a supported per-project export encoder", () => {

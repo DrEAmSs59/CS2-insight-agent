@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from .ffmpeg_runtime import (
     ProgressCallback,
@@ -65,11 +66,22 @@ from ..video_composer import (
     _is_hard_cut,
     _parse_transition_for_edge,
     ffprobe_streams,
-    h264_encode_cli_args,
     probe_video_audio_summary,
     resolve_ffprobe_binary,
-    resolve_h264_codec_name,
     validate_output_path,
+)
+from ..montage_encoder import (
+    apply_encoder_device_args,
+    available_h264_encoders,
+    ffmpeg_encoder_identity,
+    h264_encode_cli_args,
+    raise_hardware_encoder_failure,
+)
+from ..montage_exceptions import HardwareEncoderFailure
+from ..frame_blend import (
+    build_frame_blend_command,
+    normalize_frame_blend_frames,
+    resolve_frame_blend_output_fps,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +91,12 @@ def _webm_has_alpha(path: Path, ffprobe: Path) -> bool:
     if path.suffix.lower() != ".webm":
         return False
     try:
-        data = ffprobe_streams(path, ffprobe)
+        data = ffprobe_streams(
+            path,
+            ffprobe,
+            "lite_cut_overlay_source_probe",
+            "source",
+        )
     except Exception:
         return False
     for stream in data.get("streams") or []:
@@ -139,7 +156,12 @@ def _composite_overlays_on_base(
         is_last = i == len(overlay_clips) - 1
         step_out = out_mp4 if is_last else work_dir / f"ov_step_{i:03d}.mp4"
 
-        base_info = probe_video_audio_summary(current, ffprobe)
+        base_info = probe_video_audio_summary(
+            current,
+            ffprobe,
+            "lite_cut_overlay_base_probe",
+            "intermediate",
+        )
         total = max(float(base_info.get("duration") or 0), end, 0.1)
 
         if clip.get("type") == "text":
@@ -312,6 +334,13 @@ def _composite_overlays_on_base(
         if r.returncode != 0:
             tail = (r.stderr or r.stdout or "").strip()[-600:]
             logger.error("lite_cut overlay composite failed %s: %s", overlay_label, tail)
+            raise_hardware_encoder_failure(
+                cmd,
+                r,
+                stage="lite_cut_overlay",
+                artifact_path=step_out,
+                public_code="MONTAGE_EXPORT_FAILED",
+            )
             raise MontageComposerError("MONTAGE_EXPORT_FAILED")
         current = step_out
         if previous != base_mp4 and previous.parent == work_dir and previous.name.startswith("ov_step_"):
@@ -339,7 +368,12 @@ def _mix_audio_tracks_on_base(
 ) -> None:
     _raise_if_cancelled(cancel_event)
     master_volume = max(0.0, min(2.0, float(master_volume)))
-    base_info = probe_video_audio_summary(base_mp4, ffprobe)
+    base_info = probe_video_audio_summary(
+        base_mp4,
+        ffprobe,
+        "lite_cut_audio_base_probe",
+        "intermediate",
+    )
     try:
         base_duration = max(0.0, float(base_info.get("duration") or 0.0))
     except (TypeError, ValueError):
@@ -476,6 +510,13 @@ def _trim_final_export_range(
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "").strip()[-600:]
         logger.error("lite_cut range trim failed: %s", tail)
+        raise_hardware_encoder_failure(
+            cmd,
+            r,
+            stage="lite_cut_range",
+            artifact_path=out_mp4,
+            public_code="MONTAGE_EXPORT_FAILED",
+        )
         raise MontageComposerError("MONTAGE_EXPORT_FAILED")
 
 
@@ -512,20 +553,24 @@ def _lite_cut_gap_to_ts(
         f"{safe_duration:.6f}",
         *video_encode_quality,
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        "pcm_s16le",
         "-ar",
         "48000",
         "-ac",
         "2",
-        "-shortest",
         str(out_ts),
     ]
     result = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
     if result.returncode != 0:
         tail = (result.stderr or result.stdout or "").strip()[-600:]
         logger.error("lite_cut gap render failed: %s", tail)
+        raise_hardware_encoder_failure(
+            cmd,
+            result,
+            stage="lite_cut_gap",
+            artifact_path=out_ts,
+            public_code="MONTAGE_EXPORT_FAILED",
+        )
         raise MontageComposerError("MONTAGE_EXPORT_FAILED")
 
 
@@ -543,8 +588,18 @@ def _lite_cut_boundary_transition_to_ts(
     cancel_event: Any | None = None,
 ) -> None:
     _raise_if_cancelled(cancel_event)
-    previous_info = probe_video_audio_summary(previous_ts, ffprobe)
-    next_info = probe_video_audio_summary(next_ts, ffprobe)
+    previous_info = probe_video_audio_summary(
+        previous_ts,
+        ffprobe,
+        "lite_cut_transition_input_probe",
+        "intermediate",
+    )
+    next_info = probe_video_audio_summary(
+        next_ts,
+        ffprobe,
+        "lite_cut_transition_input_probe",
+        "intermediate",
+    )
     previous_duration = max(0.1, float(previous_info.get("duration") or 0.1))
     next_duration = max(0.1, float(next_info.get("duration") or 0.1))
     filter_complex = _boundary_transition_filter_complex(
@@ -574,9 +629,7 @@ def _lite_cut_boundary_transition_to_ts(
         "[aout]",
         *video_encode_quality,
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        "pcm_s16le",
         "-ar",
         "48000",
         "-ac",
@@ -587,6 +640,13 @@ def _lite_cut_boundary_transition_to_ts(
     if result.returncode != 0:
         tail = (result.stderr or result.stdout or "").strip()[-900:]
         logger.error("lite_cut boundary transition failed: %s", tail)
+        raise_hardware_encoder_failure(
+            cmd,
+            result,
+            stage="lite_cut_transition",
+            artifact_path=out_ts,
+            public_code="MONTAGE_TRANSITION_FAILED",
+        )
         raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
 
 
@@ -634,6 +694,10 @@ def _lite_cut_clip_to_ts(
         volume_filter=_clip_volume_filter(clip),
         freeze_frame_sec=_clip_freeze_frame_sec(clip),
     )
+    # Every normalized segment must have matching A/V duration. ``-shortest``
+    # silently picks the shorter stream (often audio by a few packets), which
+    # loses time once per clip and turns into a visible drift after concat.
+    audio_duration_filter = f"apad=pad_dur={timeline_duration:.6f},atrim=end={timeline_duration:.6f},asetpts=PTS-STARTPTS"
     has_canvas_transform = isinstance(clip.get("transform"), dict) or transition_in_background or transition_out_background
 
     cmd = [
@@ -676,10 +740,7 @@ def _lite_cut_clip_to_ts(
                 ]
                 graph_parts.append(f"[0:a]{','.join(chain)}{label}")
             graph_parts.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[rampa]")
-            if af:
-                graph_parts.append(f"[rampa]{af}[aout]")
-            else:
-                graph_parts.append("[rampa]anull[aout]")
+            graph_parts.append(f"[rampa]{','.join(part for part in (af, audio_duration_filter) if part)}[aout]")
         else:
             graph_parts.append(
                 f"anullsrc=r=48000:cl=stereo,atrim=0:{timeline_duration:.6f},asetpts=PTS-STARTPTS[aout]"
@@ -689,7 +750,7 @@ def _lite_cut_clip_to_ts(
     else:
         has_audio = bool(probe_video_audio_summary(src, resolve_ffprobe_binary(ffmpeg_bin)).get("has_audio"))
         if not has_audio:
-            # Keep every normalized TS dual-stream so concat and cut-boundary
+            # Keep every normalized segment dual-stream so concat and cut-boundary
             # transitions work for recordings or uploads with no audio track.
             cmd.extend([
                 "-f",
@@ -703,14 +764,68 @@ def _lite_cut_clip_to_ts(
             cmd.extend(["-filter_complex", _clip_canvas_transform_graph("[0:v]", "[vout]", clip=clip, fitted_filter=vf, width=width, height=height, fps=fps, duration=timeline_duration, background_color=background_color, transition_in_background=transition_in_background, transition_out_background=transition_out_background), "-map", "[vout]"])
         else:
             cmd.extend(["-vf", vf])
-        if af and has_audio:
-            cmd.extend(["-af", af])
+        if has_audio:
+            cmd.extend(["-af", ",".join(part for part in (af, audio_duration_filter) if part)])
         if has_canvas_transform and has_audio:
             cmd.extend(["-map", "0:a:0"])
         if not has_audio:
             cmd.extend([*([] if has_canvas_transform else ["-map", "0:v:0"]), "-map", "1:a:0"])
     cmd.extend([
         *video_encode_quality,
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-t",
+        f"{timeline_duration:.6f}",
+        str(out_ts),
+    ])
+    r = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip()[-600:]
+        logger.error("lite_cut clip normalize failed %s: %s", src.name, tail)
+        raise_hardware_encoder_failure(
+            cmd,
+            r,
+            stage="lite_cut_clip_normalize",
+            artifact_path=out_ts,
+            public_code="MONTAGE_CLIP_NORMALIZE_FAILED",
+            public_params={"name": src.name},
+        )
+        raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=src.name)
+
+
+def _concat_timeline_command(
+    *,
+    ffmpeg_bin: Path,
+    concat_list: Path,
+    output_path: Path,
+) -> list[str]:
+    """Join PCM timeline segments and perform the base track's sole AAC encode."""
+    return [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_list),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "copy",
+        "-af",
+        "aresample=48000:async=1:first_pts=0",
         "-c:a",
         "aac",
         "-b:a",
@@ -719,17 +834,15 @@ def _lite_cut_clip_to_ts(
         "48000",
         "-ac",
         "2",
-        "-shortest",
-        str(out_ts),
-    ])
-    r = _run_ffmpeg_process(cmd, timeout=3600, cancel_event=cancel_event)
-    if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-600:]
-        logger.error("lite_cut clip normalize failed %s: %s", src.name, tail)
-        raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=src.name)
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
 
 
-def compose_lite_cut_montage(
+def _compose_lite_cut_montage_once(
     *,
     ffmpeg_bin: Path,
     project_body: dict[str, Any],
@@ -738,6 +851,7 @@ def compose_lite_cut_montage(
     montage_encoder: str = "auto",
     progress_callback: ProgressCallback | None = None,
     cancel_event: Any | None = None,
+    encoder_device_args: Sequence[str] | None = None,
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
     _emit_progress(progress_callback, 0.02, "checking")
@@ -772,8 +886,11 @@ def compose_lite_cut_montage(
         raise MontageComposerError("LITECUT_TIMELINE_OVERLAP")
 
     transitions = _build_positional_transitions(clips)
-    _codec = resolve_h264_codec_name(ffmpeg_bin, montage_encoder)
-    video_encode_quality = h264_encode_cli_args(_codec, _project_encoder_tier(project_body))
+    _codec = str(montage_encoder or "libx264").strip().lower()
+    video_encode_quality = apply_encoder_device_args(
+        h264_encode_cli_args(_codec, _project_encoder_tier(project_body)),
+        encoder_device_args,
+    )
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
     ref = probe_video_audio_summary(paths[0], ffprobe)
@@ -789,7 +906,7 @@ def compose_lite_cut_montage(
         normed: list[Path] = []
         for i, (clip, src) in enumerate(zip(clips, paths)):
             _raise_if_cancelled(cancel_event)
-            out_ts = Path(tmpdir) / f"clip_{i:03d}.ts"
+            out_ts = Path(tmpdir) / f"clip_{i:03d}.mkv"
             _lite_cut_clip_to_ts(
                 ffmpeg_bin=ffmpeg_bin,
                 src=src,
@@ -816,7 +933,7 @@ def compose_lite_cut_montage(
             for index, clip_path in enumerate(normed):
                 gap_duration = gap_by_index.get(index)
                 if gap_duration is not None:
-                    gap_ts = Path(tmpdir) / f"gap_{index:03d}.ts"
+                    gap_ts = Path(tmpdir) / f"gap_{index:03d}.mkv"
                     _lite_cut_gap_to_ts(
                         ffmpeg_bin=ffmpeg_bin,
                         out_ts=gap_ts,
@@ -852,7 +969,7 @@ def compose_lite_cut_montage(
                     processed.append(current)
                     current = normed[index]
                 else:
-                    transition_ts = Path(tmpdir) / f"transition_{index:03d}.ts"
+                    transition_ts = Path(tmpdir) / f"transition_{index:03d}.mkv"
                     _lite_cut_boundary_transition_to_ts(
                         ffmpeg_bin=ffmpeg_bin,
                         ffprobe=ffprobe,
@@ -879,22 +996,11 @@ def compose_lite_cut_montage(
         concat_list.write_text("\n".join(_concat_file_line(p) for p in concat_paths) + "\n", encoding="utf-8")
         _emit_progress(progress_callback, 0.62, "concat")
 
-        cmd_concat = [
-            str(ffmpeg_bin),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_list),
-            "-c",
-            "copy",
-            str(output_path),
-        ]
+        cmd_concat = _concat_timeline_command(
+            ffmpeg_bin=ffmpeg_bin,
+            concat_list=concat_list,
+            output_path=output_path,
+        )
         r = _run_ffmpeg_process(cmd_concat, timeout=3600, cancel_event=cancel_event)
         if r.returncode != 0:
             tail = (r.stderr or r.stdout or "").strip()[-600:]
@@ -971,12 +1077,226 @@ def compose_lite_cut_montage(
                 video_encode_quality=video_encode_quality,
                 cancel_event=cancel_event,
             )
+        output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
+        delivery_fps = resolve_frame_blend_output_fps(
+            fps,
+            high_frame_downsample_enabled=bool(output_settings.get("high_frame_downsample_enabled")),
+            delivery_fps=output_settings.get("delivery_fps"),
+        )
+        high_frame_downsample_active = delivery_fps < fps - 1e-6
+        blend_frames = normalize_frame_blend_frames(
+            bool(output_settings.get("frame_blend_enabled")) or high_frame_downsample_active,
+            output_settings.get("frame_blend_frames", 5),
+        )
+        if blend_frames > 1:
+            _raise_if_cancelled(cancel_event)
+            _emit_progress(progress_callback, 0.99, "frame_blend")
+            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
+            import shutil
+
+            shutil.move(str(output_path), str(frame_blend_base))
+            cmd_blend = build_frame_blend_command(
+                ffmpeg_bin=ffmpeg_bin,
+                source_path=frame_blend_base,
+                output_path=output_path,
+                frames=blend_frames,
+                fps=delivery_fps,
+                video_encode_args=video_encode_quality,
+            )
+            blend_result = _run_ffmpeg_process(cmd_blend, timeout=3600, cancel_event=cancel_event)
+            if blend_result.returncode != 0:
+                tail = (blend_result.stderr or blend_result.stdout or "").strip()[-600:]
+                logger.error("lite_cut frame blend failed: %s", tail)
+                raise_hardware_encoder_failure(
+                    cmd_blend,
+                    blend_result,
+                    stage="lite_cut_frame_blend",
+                    artifact_path=output_path,
+                    public_code="MONTAGE_EXPORT_FAILED",
+                )
+                raise MontageComposerError("MONTAGE_EXPORT_FAILED")
         _raise_if_cancelled(cancel_event)
         _emit_progress(progress_callback, 1.0, "done")
     finally:
         import shutil
 
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def compose_lite_cut_montage(
+    *,
+    ffmpeg_bin: Path,
+    project_body: dict[str, Any],
+    clip_path_by_id: dict[int, Path],
+    output_path: Path,
+    montage_encoder: str = "auto",
+    progress_callback: ProgressCallback | None = None,
+    cancel_event: Any | None = None,
+) -> Any:
+    """Export LiteCut with the shared GPU plan and x264 safety fallback."""
+
+    from ..encoder_planner import (
+        EncoderCandidate,
+        EncoderTargetSpec,
+        build_encoder_candidates,
+        enumerate_windows_gpus,
+        map_nvenc_device_indices,
+        probe_ffmpeg_encoder,
+        run_encoder_attempts,
+    )
+    from .export_preflight import validate_export_output
+
+    _raise_if_cancelled(cancel_event)
+    base_track_id, clips = _base_video_track_for_export(project_body)
+    if not clips:
+        raise MontageComposerError("MONTAGE_NO_CLIPS")
+    paths: list[Path] = []
+    for clip in clips:
+        if _is_main_file_clip(clip):
+            source = Path(str(clip.get("file_path") or "")).expanduser().resolve()
+            name = source.name or str(clip.get("file_path") or "uploaded")
+        else:
+            source_id = clip.get("source_id")
+            if source_id is None:
+                raise MontageComposerError("MONTAGE_CLIP_NOT_FOUND", id="?")
+            source = clip_path_by_id.get(int(source_id))
+            name = str(source_id)
+        if source is None or not source.is_file():
+            raise MontageComposerError("MONTAGE_CLIP_FILE_MISSING", name=name)
+        paths.append(source)
+
+    ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
+    source_info: dict[Path, dict[str, Any]] = {}
+    for source in paths:
+        source_info[source] = probe_video_audio_summary(
+            source,
+            ffprobe,
+            "lite_cut_source_preflight",
+            "source",
+        )
+    ref = source_info[paths[0]]
+    width, height, fps = _project_output_settings(project_body, ref)
+    if width <= 0 or height <= 0 or fps <= 0:
+        raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
+
+    available = available_h264_encoders(ffmpeg_bin)
+    adapters = enumerate_windows_gpus()
+    if "h264_nvenc" in available:
+        adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
+    candidates = build_encoder_candidates(
+        montage_encoder,
+        adapters,
+        available_encoders=available,
+    )
+    if not candidates:
+        raise MontageComposerError("MONTAGE_ENCODER_ALL_FAILED", last_encoder="none")
+    tier = _project_encoder_tier(project_body)
+    spec = EncoderTargetSpec(
+        width=int(width),
+        height=int(height),
+        frame_rate=float(fps),
+        pixel_format="yuv420p",
+        profile="high",
+        tier=tier,
+    )
+    attempt_handle, attempt_name = tempfile.mkstemp(
+        prefix=f".{output_path.stem}.encoder-attempt-",
+        suffix=".mp4",
+        dir=str(output_path.parent),
+    )
+    os.close(attempt_handle)
+    attempt_output = Path(attempt_name)
+    attempt_output.unlink(missing_ok=True)
+
+    def _cleanup_attempt() -> None:
+        try:
+            attempt_output.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _convert_generated_failure(
+        candidate: EncoderCandidate,
+        exc: MontageComposerError,
+    ) -> None:
+        generated_probe = (
+            exc.code == "MONTAGE_FFPROBE_FAILED"
+            and exc.params.get("file_role") in {"intermediate", "final"}
+        )
+        invalid_output = exc.code == "MONTAGE_OUTPUT_NOT_PLAYABLE"
+        if not (generated_probe or invalid_output):
+            return
+        if not candidate.is_software:
+            raise HardwareEncoderFailure(
+                codec=candidate.codec,
+                stage=str(exc.params.get("stage") or "lite_cut_output_validation"),
+                artifact_path=str(exc.params.get("name") or attempt_output.name),
+                public_code=exc.code,
+                public_params=exc.params,
+            ) from exc
+        if generated_probe:
+            raise MontageComposerError(
+                "MONTAGE_OUTPUT_NOT_PLAYABLE",
+                stage=str(exc.params.get("stage") or "lite_cut_generated_probe"),
+                name=str(exc.params.get("name") or attempt_output.name),
+            ) from exc
+
+    def _run_candidate(candidate: EncoderCandidate) -> None:
+        _raise_if_cancelled(cancel_event)
+        _cleanup_attempt()
+        try:
+            _compose_lite_cut_montage_once(
+                ffmpeg_bin=ffmpeg_bin,
+                project_body=project_body,
+                clip_path_by_id=clip_path_by_id,
+                output_path=attempt_output,
+                montage_encoder=candidate.codec,
+                progress_callback=progress_callback,
+                cancel_event=cancel_event,
+                encoder_device_args=candidate.ffmpeg_device_args,
+            )
+            validate_export_output(ffmpeg_bin, attempt_output)
+        except MontageComposerError as exc:
+            _convert_generated_failure(candidate, exc)
+            raise
+        _raise_if_cancelled(cancel_event)
+        try:
+            os.replace(attempt_output, output_path)
+        except OSError as exc:
+            raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID") from exc
+
+    def _on_attempt(attempt: Any) -> None:
+        logger.info(
+            "LiteCut encoder attempt candidate=%s status=%s stage=%s detail=%s",
+            attempt.candidate.display_name,
+            attempt.status,
+            attempt.stage,
+            attempt.detail[-600:],
+        )
+        if attempt.status == "export_failed" and progress_callback is not None:
+            _emit_progress(
+                progress_callback,
+                0.01,
+                f"fallback_{attempt.candidate.codec}",
+            )
+
+    try:
+        return run_encoder_attempts(
+            candidates,
+            spec,
+            lambda candidate, target: probe_ffmpeg_encoder(
+                ffmpeg_bin,
+                ffprobe,
+                candidate,
+                target,
+            ),
+            _run_candidate,
+            ffmpeg_identity=ffmpeg_encoder_identity(ffmpeg_bin),
+            cleanup=_cleanup_attempt,
+            cancellation_check=lambda: _raise_if_cancelled(cancel_event),
+            on_attempt=_on_attempt,
+        )
+    finally:
+        _cleanup_attempt()
 
 
 def export_lite_cut_project(
@@ -990,20 +1310,13 @@ def export_lite_cut_project(
     cancel_event: Any | None = None,
 ) -> Path:
     out = validate_output_path(output_path_str)
-    try:
-        compose_lite_cut_montage(
-            ffmpeg_bin=ffmpeg_bin,
-            project_body=project_body,
-            clip_path_by_id=clip_path_by_id,
-            output_path=out,
-            montage_encoder=montage_encoder,
-            progress_callback=progress_callback,
-            cancel_event=cancel_event,
-        )
-    except BaseException:
-        try:
-            out.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+    compose_lite_cut_montage(
+        ffmpeg_bin=ffmpeg_bin,
+        project_body=project_body,
+        clip_path_by_id=clip_path_by_id,
+        output_path=out,
+        montage_encoder=montage_encoder,
+        progress_callback=progress_callback,
+        cancel_event=cancel_event,
+    )
     return out

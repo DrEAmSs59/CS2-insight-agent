@@ -50,6 +50,9 @@ class MontageProjectBody(BaseModel):
     theme_id: Optional[str] = Field(default=None, max_length=64)
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
+    frame_blend_enabled: bool = False
+    frame_blend_frames: int = Field(default=5, ge=2, le=9)
+    frame_blend_delivery_fps: Optional[int] = Field(default=None, ge=1, le=240)
 
 
 
@@ -67,6 +70,9 @@ async def save_montage_project(body: MontageProjectBody):
         proj_body["transitions"] = body.transitions
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
+    proj_body["frame_blend_enabled"] = body.frame_blend_enabled
+    proj_body["frame_blend_frames"] = body.frame_blend_frames
+    proj_body["frame_blend_delivery_fps"] = body.frame_blend_delivery_fps
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -123,6 +129,9 @@ class MontageExportBody(BaseModel):
     transitions: Optional[dict[str, Any]] = None
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
+    frame_blend_enabled: Optional[bool] = None
+    frame_blend_frames: Optional[int] = Field(default=None, ge=2, le=9)
+    frame_blend_delivery_fps: Optional[int] = Field(default=None, ge=1, le=240)
 
 
 @router.post("/api/montage/export")
@@ -218,6 +227,34 @@ async def montage_export(body: MontageExportBody):
     else:
         name_cards_enabled_eff = bool(extras.get("name_cards_enabled")) if isinstance(extras, dict) else False
 
+    frame_blend_enabled_eff = (
+        bool(body.frame_blend_enabled)
+        if body.frame_blend_enabled is not None
+        else bool(extras.get("frame_blend_enabled")) if isinstance(extras, dict) else False
+    )
+    raw_frame_blend_frames = (
+        body.frame_blend_frames
+        if body.frame_blend_frames is not None
+        else extras.get("frame_blend_frames", 5) if isinstance(extras, dict) else 5
+    )
+    try:
+        frame_blend_frames_eff = max(2, min(9, int(raw_frame_blend_frames)))
+    except (TypeError, ValueError):
+        frame_blend_frames_eff = 5
+    raw_frame_blend_delivery_fps = (
+        body.frame_blend_delivery_fps
+        if "frame_blend_delivery_fps" in body.model_fields_set
+        else extras.get("frame_blend_delivery_fps") if isinstance(extras, dict) else None
+    )
+    try:
+        frame_blend_delivery_fps_eff = (
+            max(1, min(240, int(raw_frame_blend_delivery_fps)))
+            if raw_frame_blend_delivery_fps is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        frame_blend_delivery_fps_eff = None
+
     try:
         from ..video_composer import MontageComposerError, validate_output_path
 
@@ -309,6 +346,9 @@ async def montage_export(body: MontageExportBody):
         snap["outro_image_duration"] = outro_img_dur_eff
     snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
     snap["name_cards_enabled"] = name_cards_enabled_eff
+    snap["frame_blend_enabled"] = frame_blend_enabled_eff
+    snap["frame_blend_frames"] = frame_blend_frames_eff
+    snap["frame_blend_delivery_fps"] = frame_blend_delivery_fps_eff
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -334,6 +374,9 @@ async def montage_export(body: MontageExportBody):
             outro_image_duration=outro_img_dur_eff,
             montage_encoder=cfg.montage_encoder or "auto",
             name_cards=name_cards_arg,
+            frame_blend_enabled=frame_blend_enabled_eff,
+            frame_blend_frames=frame_blend_frames_eff,
+            frame_blend_delivery_fps=frame_blend_delivery_fps_eff,
         )
     except MontageComposerError as e:
         from ..montage_errors import montage_detail_from_exception

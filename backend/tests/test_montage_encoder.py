@@ -18,6 +18,7 @@ class TestMontageEncoder(unittest.TestCase):
 
         me._encoder_check_cache.clear()
         me._hw_probe_cache.clear()
+        me._ffmpeg_version_cache.clear()
 
     def test_auto_prefers_nvenc(self):
         import app.montage_encoder as me
@@ -86,6 +87,70 @@ class TestMontageEncoder(unittest.TestCase):
         q = h264_encode_cli_args("h264_nvenc", "quality")
         self.assertIn("h264_nvenc", q)
         self.assertIn("-cq", q)
+
+    def test_amf_probe_is_production_sized_and_output_is_byte_captured(self):
+        import app.montage_encoder as me
+
+        fake = " V..... h264_amf\n V..... libx264\n"
+        calls: list[tuple[list[str], dict]] = []
+
+        def side_effect(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if "-encoders" in cmd:
+                return MagicMock(stdout=fake, stderr="", returncode=0)
+            if "-version" in cmd:
+                return MagicMock(stdout="ffmpeg version test", stderr="", returncode=0)
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with patch.object(me.subprocess, "run", side_effect=side_effect):
+            codec = me.resolve_h264_codec_name(Path("C:/fake/ffmpeg.exe"), "h264_amf")
+
+        self.assertEqual(codec, "h264_amf")
+        probe_cmd, probe_kwargs = next(item for item in calls if "testsrc2=s=1920x1080:r=60:d=1,format=yuv420p" in item[0])
+        self.assertIn("60", probe_cmd)
+        self.assertIs(probe_kwargs["text"], False)
+        self.assertIn("-usage", probe_cmd)
+        self.assertIn("transcoding", probe_cmd)
+        self.assertIn("-vbaq", probe_cmd)
+        self.assertIn("false", probe_cmd)
+
+    def test_h264_encode_cli_args_amf_use_compatible_transcoding_defaults(self):
+        from app.montage_encoder import h264_encode_cli_args
+
+        for tier in ("quality", "fast"):
+            args = h264_encode_cli_args("h264_amf", tier)
+            self.assertEqual(args[args.index("-usage") + 1], "transcoding")
+            self.assertEqual(args[args.index("-vbaq") + 1], "false")
+
+    def test_diagnostics_selected_encoder_follows_primary_gpu_not_legacy_codec_order(self):
+        import app.encoder_planner as planner
+        import app.montage_encoder as me
+
+        adapters = [
+            planner.GpuAdapter(
+                name="AMD Radeon RX Test",
+                vendor="amd",
+                kind="discrete",
+                performance_rank=0,
+            ),
+            planner.GpuAdapter(
+                name="NVIDIA RTX Test",
+                vendor="nvidia",
+                kind="discrete",
+                performance_rank=1,
+            ),
+        ]
+        available = {"h264_nvenc", "h264_amf", "libx264"}
+        with (
+            patch.object(planner, "enumerate_windows_gpus", return_value=adapters),
+            patch.object(planner, "map_nvenc_device_indices", return_value=adapters),
+            patch.object(me, "_ffmpeg_encoder_names", return_value=available),
+            patch.object(me, "_hw_encoder_runtime_ok", return_value=True),
+        ):
+            result = me.diagnose_encoders(Path("C:/fake/ffmpeg.exe"))
+
+        self.assertEqual(result["selected"], "h264_amf")
+        self.assertEqual(result["primary_gpu"]["name"], "AMD Radeon RX Test")
 
 
 if __name__ == "__main__":

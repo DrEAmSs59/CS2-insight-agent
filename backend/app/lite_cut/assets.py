@@ -17,6 +17,7 @@ from typing import Callable
 from fastapi import HTTPException, UploadFile
 
 from ..env_utils import get_data_dir, load_config
+from ..ffmpeg_process import decode_process_output
 
 _ASSET_MAX_BYTES = 20 * 1024 * 1024 * 1024
 _ASSET_UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -73,6 +74,9 @@ _KIND_BY_EXT = {
 }
 
 _BROWSER_PROXY_EXTS = frozenset({".avi", ".mkv", ".gif", ".mov"})
+_MP4_LIKE_EXTS = frozenset({".mp4", ".m4v"})
+_HEVC_SAMPLE_ENTRY_TAGS = (b"hvc1", b"hev1", b"dvhe", b"dvh1")
+_MP4_CODEC_SCAN_BYTES = 2 * 1024 * 1024
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -281,11 +285,37 @@ def asset_stream_path(path: Path) -> Path:
     return proxy if proxy.is_file() else path
 
 
-def asset_needs_browser_proxy(path: Path) -> bool:
-    # File size does not change browser codec/container support. MP4/M4V can
-    # already be seeked efficiently through the Range endpoint, so eagerly
-    # recompressing a large native file only delays editing and duplicates it.
-    return path.suffix.lower() in _BROWSER_PROXY_EXTS
+def _mp4_container_mentions_hevc(path: Path) -> bool:
+    """Detect HEVC sample entries without an ffprobe subprocess on every list call."""
+    if path.suffix.lower() not in _MP4_LIKE_EXTS:
+        return False
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as source:
+            head = source.read(_MP4_CODEC_SCAN_BYTES)
+            chunks = [head]
+            # Fast-start MP4 stores the sample entry near the front.  For files
+            # with their moov atom at the end, inspect the tail as well.
+            if size > _MP4_CODEC_SCAN_BYTES:
+                source.seek(max(0, size - _MP4_CODEC_SCAN_BYTES))
+                chunks.append(source.read(_MP4_CODEC_SCAN_BYTES))
+    except OSError:
+        return False
+    return any(tag in chunk for chunk in chunks for tag in _HEVC_SAMPLE_ENTRY_TAGS)
+
+
+def asset_needs_browser_proxy(path: Path, *, video_codec: str | None = None) -> bool:
+    """Whether preview must be converted to a codec WebView2 reliably decodes."""
+    extension = path.suffix.lower()
+    if extension in _BROWSER_PROXY_EXTS:
+        return True
+    if extension not in _MP4_LIKE_EXTS:
+        return False
+    # Do not proxy ordinary browser-native H.264 MP4 just because it is large.
+    # HEVC MP4 is container-valid but frequently black in WebView2 when the OS
+    # codec extension or hardware decoder is unavailable.
+    codec = str(video_codec or "").strip().lower()
+    return codec in {"hevc", "h265", "h.265"} or _mp4_container_mentions_hevc(path)
 
 
 def preview_proxy_remux_command(
@@ -399,14 +429,19 @@ def _run_proxy_process(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=False,
         creationflags=creation_flags,
     )
     deadline = time.monotonic() + max(1.0, float(timeout_sec))
     while True:
         try:
             stdout, stderr = process.communicate(timeout=0.2)
-            return subprocess.CompletedProcess(command, int(process.returncode or 0), stdout, stderr)
+            return subprocess.CompletedProcess(
+                command,
+                int(process.returncode or 0),
+                decode_process_output(stdout),
+                decode_process_output(stderr),
+            )
         except subprocess.TimeoutExpired:
             cancelled = cancel_event is not None and cancel_event.is_set()
             timed_out = time.monotonic() >= deadline
@@ -419,7 +454,12 @@ def _run_proxy_process(
                 process.kill()
                 stdout, stderr = process.communicate()
             reason = "cancelled" if cancelled else "preview proxy timed out"
-            return subprocess.CompletedProcess(command, 130 if cancelled else 124, stdout, stderr or reason)
+            return subprocess.CompletedProcess(
+                command,
+                130 if cancelled else 124,
+                decode_process_output(stdout),
+                decode_process_output(stderr) or reason,
+            )
 
 
 def create_browser_preview_proxy(

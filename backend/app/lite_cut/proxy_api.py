@@ -165,7 +165,7 @@ def _decorate_asset_preview_state(
     from .assets import alpha_preview_proxy_path_for_asset, asset_needs_browser_proxy, preview_proxy_path_for_asset
 
     source = Path(str(row.get("file_path") or ""))
-    if not asset_needs_browser_proxy(source):
+    if not asset_needs_browser_proxy(source, video_codec=video_codec):
         row.update({
             "preview_proxy_required": False,
             "preview_proxy_status": "not_needed",

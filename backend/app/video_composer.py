@@ -9,10 +9,30 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
-from .montage_encoder import h264_encode_cli_args, resolve_h264_codec_name
+from .ffmpeg_process import (
+    command_for_log,
+    process_error_tail,
+    remove_partial_file,
+    run_process_capture,
+)
+from .montage_encoder import (
+    apply_encoder_device_args,
+    available_h264_encoders,
+    ffmpeg_encoder_identity,
+    h264_encode_cli_args,
+    raise_hardware_encoder_failure,
+    resolve_h264_codec_name,  # compatibility re-export for existing callers
+)
+from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
+from .frame_blend import (
+    build_frame_blend_command,
+    normalize_frame_blend_frames,
+    resolve_frame_blend_output_fps,
+)
 from .env_utils import (
     resolve_name_card_font,
     resolve_name_card_font_bold,
@@ -20,15 +40,6 @@ from .env_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MontageComposerError(Exception):
-    """可映射为 HTTP 400/500 的合成错误（code 由前端 i18n 展示）。"""
-
-    def __init__(self, code: str, **params: Any):
-        self.code = code
-        self.params = params
-        super().__init__(code)
 
 
 def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
@@ -60,20 +71,123 @@ def resolve_ffprobe_binary(ffmpeg_bin: Path) -> Path:
     raise MontageComposerError("MONTAGE_FFPROBE_NOT_FOUND")
 
 
-def _run_json(cmd: list[str]) -> dict[str, Any]:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+def _run_ffmpeg_capture(
+    cmd: list[str],
+    *,
+    timeout: float,
+    stage: str,
+    output_path: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run FFmpeg with actionable logs and one conservative AMF retry."""
+    is_amf = "h264_amf" in cmd
+    attempts = 2 if is_amf else 1
+    result = None
+    for attempt in range(1, attempts + 1):
+        logger.debug(
+            "FFmpeg stage=%s attempt=%d/%d command=%s",
+            stage,
+            attempt,
+            attempts,
+            command_for_log(cmd),
+        )
+        try:
+            result = run_process_capture(cmd, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            remove_partial_file(output_path)
+            timeout_result = subprocess.CompletedProcess(
+                cmd,
+                124,
+                "",
+                f"FFmpeg timed out after {timeout:g} seconds",
+            )
+            logger.error(
+                "FFmpeg timed out stage=%s command=%s",
+                stage,
+                command_for_log(cmd),
+            )
+            try:
+                raise_hardware_encoder_failure(
+                    cmd,
+                    timeout_result,
+                    stage=stage,
+                    artifact_path=output_path,
+                    public_code="MONTAGE_EXPORT_FAILED",
+                )
+            except HardwareEncoderFailure as hardware_exc:
+                raise hardware_exc from exc
+            raise MontageComposerError("MONTAGE_EXPORT_FAILED") from exc
+        if result.returncode == 0:
+            if attempt > 1:
+                logger.info("FFmpeg AMF retry succeeded stage=%s attempt=%d", stage, attempt)
+            return result
+        if attempt < attempts:
+            logger.warning(
+                "FFmpeg AMF attempt failed; retrying stage=%s returncode=%d command=%s stderr=%s",
+                stage,
+                result.returncode,
+                command_for_log(cmd),
+                process_error_tail(result),
+            )
+            remove_partial_file(output_path)
+            # Some Windows AMF drivers release the previous encoder context
+            # shortly after the FFmpeg process exits.  A bounded delay avoids
+            # immediately racing the next encoder initialization.
+            time.sleep(1.0)
+    return result
+
+
+def _run_json(
+    cmd: list[str],
+    *,
+    probe_stage: str = "unknown",
+    file_role: str = "unknown",
+    media_path: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        proc = run_process_capture(cmd, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.error(
+            "ffprobe could not complete command=%s error=%s",
+            command_for_log(cmd),
+            exc,
+        )
+        raise MontageComposerError(
+            "MONTAGE_FFPROBE_FAILED",
+            stage=probe_stage,
+            file_role=file_role,
+            name=media_path.name if media_path is not None else "",
+        ) from exc
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip()[-800:]
-        logger.error("ffprobe failed (exit %s): %s", proc.returncode, tail)
-        raise MontageComposerError("MONTAGE_FFPROBE_FAILED")
+        logger.error(
+            "ffprobe failed returncode=%s command=%s stderr=%s",
+            proc.returncode,
+            command_for_log(cmd),
+            process_error_tail(proc, 1200),
+        )
+        raise MontageComposerError(
+            "MONTAGE_FFPROBE_FAILED",
+            stage=probe_stage,
+            file_role=file_role,
+            name=media_path.name if media_path is not None else "",
+        )
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as e:
         logger.error("ffprobe JSON parse failed: %s", e)
-        raise MontageComposerError("MONTAGE_FFPROBE_FAILED") from e
+        raise MontageComposerError(
+            "MONTAGE_FFPROBE_FAILED",
+            stage=probe_stage,
+            file_role=file_role,
+            name=media_path.name if media_path is not None else "",
+        ) from e
 
 
-def ffprobe_streams(path: Path, ffprobe: Path) -> dict[str, Any]:
+def ffprobe_streams(
+    path: Path,
+    ffprobe: Path,
+    probe_stage: str = "unknown",
+    file_role: str = "unknown",
+) -> dict[str, Any]:
     return _run_json(
         [
             str(ffprobe),
@@ -85,6 +199,9 @@ def ffprobe_streams(path: Path, ffprobe: Path) -> dict[str, Any]:
             "json",
             str(path),
         ],
+        probe_stage=probe_stage,
+        file_role=file_role,
+        media_path=path,
     )
 
 
@@ -105,8 +222,18 @@ def parse_r_frame_rate(s: str) -> float:
         return 60.0
 
 
-def probe_video_audio_summary(path: Path, ffprobe: Path) -> dict[str, Any]:
-    data = ffprobe_streams(path, ffprobe)
+def probe_video_audio_summary(
+    path: Path,
+    ffprobe: Path,
+    probe_stage: str = "source_probe",
+    file_role: str = "source",
+) -> dict[str, Any]:
+    data = ffprobe_streams(
+        path,
+        ffprobe,
+        probe_stage=probe_stage,
+        file_role=file_role,
+    )
     fmt = data.get("format") or {}
     dur_s: Optional[float] = None
     try:
@@ -240,10 +367,26 @@ def _finalize_mp4_for_common_players(
         "+faststart",
         str(dst),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=7200,
+        stage="montage_finalize",
+        output_path=dst,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-900:]
-        logger.error("montage finalize mp4 failed: %s", tail)
+        logger.error(
+            "montage finalize mp4 failed returncode=%d command=%s stderr=%s",
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
+        raise_hardware_encoder_failure(
+            cmd,
+            r,
+            stage="montage_finalize",
+            artifact_path=dst,
+            public_code="MONTAGE_FINALIZE_FAILED",
+        )
         raise MontageComposerError("MONTAGE_FINALIZE_FAILED")
 
 
@@ -312,10 +455,28 @@ def _image_to_ts_with_fade(
         "-t", str(d),
         str(out_ts),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=120,
+        stage="montage_image_to_video",
+        output_path=out_ts,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-600:]
-        logger.error("image to video failed %s: %s", image_path.name, tail)
+        logger.error(
+            "image to video failed name=%s returncode=%d command=%s stderr=%s",
+            image_path.name,
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
+        raise_hardware_encoder_failure(
+            cmd,
+            r,
+            stage="montage_image_to_video",
+            artifact_path=out_ts,
+            public_code="MONTAGE_IMAGE_TO_VIDEO_FAILED",
+            public_params={"name": image_path.name},
+        )
         raise MontageComposerError("MONTAGE_IMAGE_TO_VIDEO_FAILED", name=image_path.name)
 
 
@@ -396,7 +557,12 @@ def _montage_xfade_chain_to_ts(
 
     durs: list[float] = []
     for p in clip_ts_paths:
-        info = probe_video_audio_summary(p, ffprobe)
+        info = probe_video_audio_summary(
+            p,
+            ffprobe,
+            "montage_transition_probe",
+            "intermediate",
+        )
         d = info.get("duration")
         if d is None or float(d) <= 0:
             d = 0.1
@@ -444,10 +610,26 @@ def _montage_xfade_chain_to_ts(
         "192k",
         str(out_ts),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    r = _run_ffmpeg_capture(
+        cmd,
+        timeout=7200,
+        stage="montage_transition",
+        output_path=out_ts,
+    )
     if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "").strip()[-900:]
-        logger.error("montage xfade chain failed: %s", tail)
+        logger.error(
+            "montage xfade chain failed returncode=%d command=%s stderr=%s",
+            r.returncode,
+            command_for_log(cmd),
+            process_error_tail(r),
+        )
+        raise_hardware_encoder_failure(
+            cmd,
+            r,
+            stage="montage_transition",
+            artifact_path=out_ts,
+            public_code="MONTAGE_TRANSITION_FAILED",
+        )
         raise MontageComposerError("MONTAGE_TRANSITION_FAILED")
 
 
@@ -1178,7 +1360,7 @@ def _fg_escape_text(s: str) -> str:
     return s.replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'").replace('\n', ' ')
 
 
-def compose_montage(
+def _compose_montage_once(
     *,
     ffmpeg_bin: Path,
     clip_paths: list[Path],
@@ -1194,6 +1376,10 @@ def compose_montage(
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
+    frame_blend_enabled: bool = False,
+    frame_blend_frames: int = 5,
+    frame_blend_delivery_fps: Optional[float] = None,
+    encoder_device_args: Sequence[str] | None = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
@@ -1207,9 +1393,15 @@ def compose_montage(
     if bgm_path is not None and not bgm_path.is_file():
         raise MontageComposerError("MONTAGE_BGM_MISSING")
 
-    _codec = resolve_h264_codec_name(ffmpeg_bin, montage_encoder)
-    video_encode_quality = h264_encode_cli_args(_codec, "quality")
-    video_encode_fast = h264_encode_cli_args(_codec, "fast")
+    _codec = str(montage_encoder or "libx264").strip().lower()
+    video_encode_quality = apply_encoder_device_args(
+        h264_encode_cli_args(_codec, "quality"),
+        encoder_device_args,
+    )
+    video_encode_fast = apply_encoder_device_args(
+        h264_encode_cli_args(_codec, "fast"),
+        encoder_device_args,
+    )
 
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
@@ -1391,10 +1583,28 @@ def compose_montage(
                 "-shortest",
                 str(out_ts),
             ]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            r = _run_ffmpeg_capture(
+                cmd,
+                timeout=3600,
+                stage="montage_clip_normalize",
+                output_path=out_ts,
+            )
             if r.returncode != 0:
-                tail = (r.stderr or r.stdout or "").strip()[-600:]
-                logger.error("clip normalize failed %s: %s", seg.name, tail)
+                logger.error(
+                    "clip normalize failed name=%s returncode=%d command=%s stderr=%s",
+                    seg.name,
+                    r.returncode,
+                    command_for_log(cmd),
+                    process_error_tail(r),
+                )
+                raise_hardware_encoder_failure(
+                    cmd,
+                    r,
+                    stage="montage_clip_normalize",
+                    artifact_path=out_ts,
+                    public_code="MONTAGE_CLIP_NORMALIZE_FAILED",
+                    public_params={"name": seg.name},
+                )
                 raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=seg.name)
             normed.append(out_ts)
 
@@ -1475,16 +1685,30 @@ def compose_montage(
             "copy",
             str(mid_mp4),
         ]
-        r2 = subprocess.run(cmd_concat, capture_output=True, text=True, timeout=3600)
+        r2 = _run_ffmpeg_capture(
+            cmd_concat,
+            timeout=3600,
+            stage="montage_concat",
+            output_path=mid_mp4,
+        )
         if r2.returncode != 0:
-            tail = (r2.stderr or r2.stdout or "").strip()[-600:]
-            logger.error("montage concat failed: %s", tail)
+            logger.error(
+                "montage concat failed returncode=%d command=%s stderr=%s",
+                r2.returncode,
+                command_for_log(cmd_concat),
+                process_error_tail(r2),
+            )
             raise MontageComposerError("MONTAGE_CONCAT_FAILED")
 
         mid_playable = Path(tmpdir) / "mid_playable.mp4"
         _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable, video_encode_fast)
 
-        mid_info = ffprobe_streams(mid_playable, ffprobe)
+        mid_info = ffprobe_streams(
+            mid_playable,
+            ffprobe,
+            "montage_finalize_probe",
+            "intermediate",
+        )
         try:
             vdur = float((mid_info.get("format") or {}).get("duration") or 0)
         except (TypeError, ValueError):
@@ -1494,49 +1718,344 @@ def compose_montage(
 
         if bgm_path is None:
             shutil.move(str(mid_playable), str(output_path))
-            return
+        else:
+            bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
+            bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
 
-        bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
-        bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
+            fc_mix = (
+                f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
+                f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol, start_sec=bgm_start)};"
+                f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            )
+            cmd_mix = [
+                str(ffmpeg_bin),
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(mid_playable),
+                "-i",
+                str(bgm_path),
+                "-filter_complex",
+                fc_mix,
+                "-map",
+                "0:v",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+            r3 = _run_ffmpeg_capture(
+                cmd_mix,
+                timeout=3600,
+                stage="montage_bgm_mix",
+                output_path=output_path,
+            )
+            if r3.returncode != 0:
+                logger.error(
+                    "montage bgm mix failed returncode=%d command=%s stderr=%s",
+                    r3.returncode,
+                    command_for_log(cmd_mix),
+                    process_error_tail(r3),
+                )
+                raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
 
-        fc_mix = (
-            f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[ga];"
-            f"{build_bgm_filter(vdur, '[1:a]', volume=bgm_vol, start_sec=bgm_start)};"
-            f"[ga][bgmtrim]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-        )
-        cmd_mix = [
-            str(ffmpeg_bin),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(mid_playable),
-            "-i",
-            str(bgm_path),
-            "-filter_complex",
-            fc_mix,
-            "-map",
-            "0:v",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ]
-        r3 = subprocess.run(cmd_mix, capture_output=True, text=True, timeout=3600)
-        if r3.returncode != 0:
-            tail = (r3.stderr or r3.stdout or "").strip()[-600:]
-            logger.error("montage bgm mix failed: %s", tail)
-            raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
+        blend_frames = normalize_frame_blend_frames(frame_blend_enabled, frame_blend_frames)
+        if blend_frames > 1:
+            delivery_fps = resolve_frame_blend_output_fps(
+                fps,
+                high_frame_downsample_enabled=frame_blend_delivery_fps is not None,
+                delivery_fps=frame_blend_delivery_fps,
+            )
+            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
+            shutil.move(str(output_path), str(frame_blend_base))
+            cmd_blend = build_frame_blend_command(
+                ffmpeg_bin=ffmpeg_bin,
+                source_path=frame_blend_base,
+                output_path=output_path,
+                frames=blend_frames,
+                fps=delivery_fps,
+                video_encode_args=video_encode_quality,
+            )
+            r4 = _run_ffmpeg_capture(
+                cmd_blend,
+                timeout=3600,
+                stage="montage_frame_blend",
+                output_path=output_path,
+            )
+            if r4.returncode != 0:
+                logger.error(
+                    "montage frame blend failed returncode=%d command=%s stderr=%s",
+                    r4.returncode,
+                    command_for_log(cmd_blend),
+                    process_error_tail(r4),
+                )
+                raise_hardware_encoder_failure(
+                    cmd_blend,
+                    r4,
+                    stage="montage_frame_blend",
+                    artifact_path=output_path,
+                    public_code="MONTAGE_EXPORT_FAILED",
+                )
+                raise MontageComposerError("MONTAGE_EXPORT_FAILED")
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
         except Exception:
             logger.debug("montage temp cleanup failed", exc_info=True)
+
+
+def compose_montage(
+    *,
+    ffmpeg_bin: Path,
+    clip_paths: list[Path],
+    intro_path: Optional[Path],
+    outro_path: Optional[Path],
+    bgm_path: Optional[Path],
+    output_path: Path,
+    transitions: Optional[dict[str, Any]] = None,
+    clip_row_ids: Optional[list[int]] = None,
+    bgm_volume: Optional[float] = None,
+    bgm_start_sec: Optional[float] = None,
+    intro_image_duration: Optional[float] = None,
+    outro_image_duration: Optional[float] = None,
+    montage_encoder: str = "auto",
+    name_cards: Optional[list[dict | None]] = None,
+    frame_blend_enabled: bool = False,
+    frame_blend_frames: int = 5,
+    frame_blend_delivery_fps: Optional[float] = None,
+) -> Any:
+    """Export with GPU-aware target probing and an x264 safety fallback."""
+
+    from .encoder_planner import (
+        EncoderCandidate,
+        EncoderTargetSpec,
+        build_encoder_candidates,
+        enumerate_windows_gpus,
+        map_nvenc_device_indices,
+        probe_ffmpeg_encoder,
+        run_encoder_attempts,
+    )
+
+    if not clip_paths:
+        raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
+    for source in clip_paths:
+        if not source.is_file():
+            raise MontageComposerError("MONTAGE_CLIP_FILE_MISSING", name=source.name)
+    if intro_path is not None and not intro_path.is_file():
+        raise MontageComposerError("MONTAGE_INTRO_MISSING")
+    if outro_path is not None and not outro_path.is_file():
+        raise MontageComposerError("MONTAGE_OUTRO_MISSING")
+    if bgm_path is not None and not bgm_path.is_file():
+        raise MontageComposerError("MONTAGE_BGM_MISSING")
+
+    ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
+    # Probe every original video before selecting an encoder.  Any failure here
+    # is a source problem and must not trigger a hardware fallback.
+    source_videos = [
+        *clip_paths,
+        *(
+            [intro_path]
+            if intro_path is not None and not _is_image_path(intro_path)
+            else []
+        ),
+        *(
+            [outro_path]
+            if outro_path is not None and not _is_image_path(outro_path)
+            else []
+        ),
+    ]
+    source_info: dict[Path, dict[str, Any]] = {}
+    for source in source_videos:
+        source_info[source] = probe_video_audio_summary(
+            source,
+            ffprobe,
+            "montage_source_preflight",
+            "source",
+        )
+    ref = source_info[clip_paths[0]]
+    width = int(ref.get("width") or 0)
+    height = int(ref.get("height") or 0)
+    fps = float(ref.get("fps") or 0)
+    if width <= 0 or height <= 0 or fps <= 0:
+        raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
+
+    available = available_h264_encoders(ffmpeg_bin)
+    adapters = enumerate_windows_gpus()
+    if "h264_nvenc" in available:
+        adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
+    candidates = build_encoder_candidates(
+        montage_encoder,
+        adapters,
+        available_encoders=available,
+    )
+    if not candidates:
+        raise MontageComposerError("MONTAGE_ENCODER_ALL_FAILED", last_encoder="none")
+    spec = EncoderTargetSpec(
+        width=width,
+        height=height,
+        frame_rate=fps,
+        pixel_format="yuv420p",
+        profile="high",
+        tier="quality",
+    )
+    attempt_handle, attempt_name = tempfile.mkstemp(
+        prefix=f".{output_path.stem}.encoder-attempt-",
+        suffix=".mp4",
+        dir=str(output_path.parent),
+    )
+    os.close(attempt_handle)
+    attempt_output = Path(attempt_name)
+    attempt_output.unlink(missing_ok=True)
+
+    def _cleanup_attempt() -> None:
+        remove_partial_file(attempt_output)
+
+    def _convert_generated_probe_failure(
+        candidate: EncoderCandidate,
+        exc: MontageComposerError,
+    ) -> None:
+        generated_probe_failure = (
+            exc.code == "MONTAGE_FFPROBE_FAILED"
+            and exc.params.get("file_role") in {"intermediate", "final"}
+        )
+        if not generated_probe_failure:
+            return
+        if not candidate.is_software:
+            raise HardwareEncoderFailure(
+                codec=candidate.codec,
+                stage=str(exc.params.get("stage") or "montage_generated_probe"),
+                artifact_path=str(exc.params.get("name") or attempt_output.name),
+                public_code=exc.code,
+                public_params=exc.params,
+            ) from exc
+        raise MontageComposerError(
+            "MONTAGE_OUTPUT_NOT_PLAYABLE",
+            stage=str(exc.params.get("stage") or "montage_generated_probe"),
+            name=str(exc.params.get("name") or attempt_output.name),
+        ) from exc
+
+    def _run_candidate(candidate: EncoderCandidate) -> None:
+        _cleanup_attempt()
+        try:
+            _compose_montage_once(
+                ffmpeg_bin=ffmpeg_bin,
+                clip_paths=clip_paths,
+                intro_path=intro_path,
+                outro_path=outro_path,
+                bgm_path=bgm_path,
+                output_path=attempt_output,
+                transitions=transitions,
+                clip_row_ids=clip_row_ids,
+                bgm_volume=bgm_volume,
+                bgm_start_sec=bgm_start_sec,
+                intro_image_duration=intro_image_duration,
+                outro_image_duration=outro_image_duration,
+                montage_encoder=candidate.codec,
+                name_cards=name_cards,
+                frame_blend_enabled=frame_blend_enabled,
+                frame_blend_frames=frame_blend_frames,
+                frame_blend_delivery_fps=frame_blend_delivery_fps,
+                encoder_device_args=candidate.ffmpeg_device_args,
+            )
+            final_info = ffprobe_streams(
+                attempt_output,
+                ffprobe,
+                "montage_output_validation",
+                "final",
+            )
+        except MontageComposerError as exc:
+            _convert_generated_probe_failure(candidate, exc)
+            raise
+        streams = final_info.get("streams") or []
+        if not any(
+            isinstance(stream, dict) and stream.get("codec_type") == "video"
+            for stream in streams
+        ):
+            if not candidate.is_software:
+                raise HardwareEncoderFailure(
+                    codec=candidate.codec,
+                    stage="montage_output_validation",
+                    artifact_path=attempt_output,
+                    public_code="MONTAGE_OUTPUT_NOT_PLAYABLE",
+                )
+            raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE")
+        decode_command = [
+            str(ffmpeg_bin),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(attempt_output),
+            "-map",
+            "0:v:0",
+            "-t",
+            "3",
+            "-f",
+            "null",
+            "-",
+        ]
+        try:
+            decoded = run_process_capture(decode_command, timeout=3600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            if not candidate.is_software:
+                raise HardwareEncoderFailure(
+                    codec=candidate.codec,
+                    stage="montage_output_decode",
+                    stderr=str(exc),
+                    artifact_path=attempt_output,
+                    public_code="MONTAGE_OUTPUT_NOT_PLAYABLE",
+                    command=decode_command,
+                ) from exc
+            raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE") from exc
+        if decoded.returncode != 0:
+            if not candidate.is_software:
+                raise HardwareEncoderFailure(
+                    codec=candidate.codec,
+                    stage="montage_output_decode",
+                    returncode=decoded.returncode,
+                    stderr=process_error_tail(decoded),
+                    artifact_path=attempt_output,
+                    public_code="MONTAGE_OUTPUT_NOT_PLAYABLE",
+                    command=decode_command,
+                )
+            raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE")
+        try:
+            os.replace(attempt_output, output_path)
+        except OSError as exc:
+            raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID") from exc
+
+    def _on_attempt(attempt: Any) -> None:
+        logger.info(
+            "Montage encoder attempt candidate=%s status=%s stage=%s detail=%s",
+            attempt.candidate.display_name,
+            attempt.status,
+            attempt.stage,
+            attempt.detail[-600:],
+        )
+
+    try:
+        return run_encoder_attempts(
+            candidates,
+            spec,
+            lambda candidate, target: probe_ffmpeg_encoder(
+                ffmpeg_bin,
+                ffprobe,
+                candidate,
+                target,
+            ),
+            _run_candidate,
+            ffmpeg_identity=ffmpeg_encoder_identity(ffmpeg_bin),
+            cleanup=_cleanup_attempt,
+            on_attempt=_on_attempt,
+        )
+    finally:
+        _cleanup_attempt()

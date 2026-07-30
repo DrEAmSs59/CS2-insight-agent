@@ -109,6 +109,17 @@ describe("handoffFrameAction", () => {
     expect(action).toEqual({ type: "present" });
   });
 
+  it("keeps a prewarmed cut frame visible after the deadline until the new player catches up", () => {
+    const action = handoffFrameAction({
+      ...base,
+      mediaTime: 5,
+      expectedMediaTime: 6,
+      keepPromotedFrameUntilCaughtUp: true,
+      handoffStartedAt: 1000 - HANDOFF_MAX_WAIT_MS - 1,
+    });
+    expect(action).toEqual({ type: "seek", target: 6.6, startedAt: 299 });
+  });
+
   it("anchors the handoff start time on the first gated frame", () => {
     const action = handoffFrameAction({ ...base, mediaTime: 5, expectedMediaTime: 6, seeking: true });
     expect(action).toEqual({ type: "wait", startedAt: 1000 });

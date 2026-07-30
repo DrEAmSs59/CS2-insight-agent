@@ -272,6 +272,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [introDuration, setIntroDuration] = useState(3);
   const [outroPath, setOutroPath] = useState("");
   const [outroDuration, setOutroDuration] = useState(3);
+  const [frameBlendEnabled, setFrameBlendEnabled] = useState(false);
+  const [frameBlendFrames, setFrameBlendFrames] = useState(5);
+  const [frameBlendDeliveryFps, setFrameBlendDeliveryFps] = useState(null);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
   const exporting = useMontageStore((s) => s.exporting);
@@ -454,6 +457,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
+    frameBlendEnabled,
+    frameBlendFrames,
+    frameBlendDeliveryFps,
   ]);
 
   const byId = useMemo(() => {
@@ -796,6 +802,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         bgm_volume: bgmVolume / 100,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
+        frame_blend_enabled: frameBlendEnabled,
+        frame_blend_frames: frameBlendFrames,
+        frame_blend_delivery_fps: frameBlendDeliveryFps,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -829,6 +838,17 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       if (typeof data?.body?.name_cards_enabled === "boolean") {
         setNameCardsEnabled(data.body.name_cards_enabled);
       }
+      if (typeof data?.body?.frame_blend_enabled === "boolean") {
+        setFrameBlendEnabled(data.body.frame_blend_enabled);
+      }
+      if (Number.isFinite(Number(data?.body?.frame_blend_frames))) {
+        setFrameBlendFrames(Math.max(2, Math.min(9, Number(data.body.frame_blend_frames))));
+      }
+      if (data?.body?.frame_blend_delivery_fps == null) {
+        setFrameBlendDeliveryFps(null);
+      } else if (Number.isFinite(Number(data.body.frame_blend_delivery_fps))) {
+        setFrameBlendDeliveryFps(Math.max(1, Math.min(240, Number(data.body.frame_blend_delivery_fps))));
+      }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
       showToast(t("montage.toastDraftSaved"));
@@ -855,6 +875,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
+    frameBlendEnabled,
+    frameBlendFrames,
+    frameBlendDeliveryFps,
     t,
   ]);
 
@@ -895,6 +918,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         theme_id: selectedThemeId,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
+        frame_blend_enabled: frameBlendEnabled,
+        frame_blend_frames: frameBlendFrames,
+        frame_blend_delivery_fps: frameBlendDeliveryFps,
       });
       setLastExport({ ok: true, ...data });
       showToast(t("montage.toastExportComplete"));
@@ -924,6 +950,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
+    frameBlendEnabled,
+    frameBlendFrames,
+    frameBlendDeliveryFps,
     showToast,
     t,
   ]);
@@ -1431,6 +1460,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 nameCardsEnabled={nameCardsEnabled}
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
+                frameBlendEnabled={frameBlendEnabled}
+                frameBlendFrames={frameBlendFrames}
+                frameBlendDeliveryFps={frameBlendDeliveryFps}
+                onFrameBlendEnabledChange={setFrameBlendEnabled}
+                onFrameBlendFramesChange={setFrameBlendFrames}
+                onFrameBlendDeliveryFpsChange={setFrameBlendDeliveryFps}
               />
             </div>
 

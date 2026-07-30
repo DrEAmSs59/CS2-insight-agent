@@ -4,6 +4,7 @@ import {
   nextTopVideoPlaybackAfter,
   previewAudioState,
   projectBgmPreviewClip,
+  resolveAudioPreviewPreloadItems,
   resolveAudioPreviewItems,
   resolveBaseVideoTrackId,
   resolveTopVideoPlaybackAt,
@@ -329,6 +330,29 @@ describe("playbackUtils", () => {
     expect(items[0].sourceTime).toBeCloseTo(12);
     expect(items[0].playbackRate).toBe(2);
     expect(items[0].volume).toBeCloseTo(0.1);
+  });
+
+  it("preloads the timeline-facing first frame of imminent audio clips", () => {
+    const upcoming = {
+      id: "next-audio",
+      source_type: "file",
+      file_path: "C:/x/next.mp3",
+      timeline_start: 4,
+      trim_in: 3,
+      trim_out: 9,
+      speed: 2,
+      meta: { kind: "audio", asset_id: 11, duration_sec: 12 },
+    };
+    const body = { tracks: [{ id: "a1", type: "audio", clips: [upcoming] }] };
+
+    expect(resolveAudioPreviewPreloadItems(body, 2.6, 1, 1.3)).toEqual([]);
+    expect(resolveAudioPreviewPreloadItems(body, 2.6, 1, 1.5)).toMatchObject([{
+      id: "next-audio",
+      trackId: "a1",
+      sourceTime: 3,
+      playbackRate: 2,
+      preloadOnly: true,
+    }]);
   });
 
   it("marks reversed clip audio so preview never plays it forwards", () => {

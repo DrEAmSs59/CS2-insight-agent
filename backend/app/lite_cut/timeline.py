@@ -219,7 +219,7 @@ def _project_output_settings(body: dict[str, Any], ref: dict[str, Any]) -> tuple
             value = float(output.get("fps") if output.get("fps") is not None else fallback)
         except (TypeError, ValueError):
             value = fallback
-        return max(1.0, min(240.0, value))
+        return max(1.0, min(1000.0, value))
 
     fallback_w = int(ref.get("width") or 1920)
     fallback_h = int(ref.get("height") or 1080)

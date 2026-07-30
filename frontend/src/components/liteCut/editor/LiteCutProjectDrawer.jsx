@@ -164,9 +164,10 @@ export default function LiteCutProjectDrawer({
                 <span className="text-cs2-text-muted">×</span>
                 <input type="number" min="180" max="4320" value={height} onChange={(event) => onProjectSettingsChange?.({ height: Number(event.target.value) })} className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs outline-none focus:border-cs2-accent" aria-label={t("liteCut.project.height")} />
               </div>
-              <select value={fps} onChange={(event) => onProjectSettingsChange?.({ fps: Number(event.target.value) })} className="mt-2 w-full rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs outline-none focus:border-cs2-accent" aria-label={t("liteCut.project.frameRate")}>
-                {[24, 25, 30, 60, 120].map((value) => <option key={value} value={value}>{value} FPS</option>)}
-              </select>
+              <label className="relative mt-2 block">
+                <input type="number" min="1" max="1000" step="1" value={fps} onChange={(event) => onProjectSettingsChange?.({ fps: Math.max(1, Math.min(1000, Math.round(Number(event.target.value) || 60))) })} className="w-full rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 pr-10 font-mono text-xs outline-none focus:border-cs2-accent" aria-label={t("liteCut.project.frameRate")} />
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-cs2-text-muted">FPS</span>
+              </label>
             </div>
           </section>
 

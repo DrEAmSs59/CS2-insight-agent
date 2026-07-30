@@ -28,4 +28,18 @@ describe("LiteCutProjectStartPage", () => {
     expect(screen.getByRole("dialog", { name: "新建 LiteCut 工程" })).toBeTruthy();
     expect(onNewProject).not.toHaveBeenCalled();
   });
+
+  it("creates a project with a custom high frame rate", async () => {
+    const onNewProject = vi.fn().mockResolvedValue({ ok: true });
+    render(<LiteCutProjectStartPage projects={[]} onNewProject={onNewProject} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /新建工程/ }));
+    fireEvent.change(screen.getByLabelText("视频帧率"), { target: { value: "480" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "创建工程" })));
+
+    expect(onNewProject).toHaveBeenCalledWith(expect.objectContaining({
+      isCustomProject: true,
+      fps: 480,
+    }));
+  });
 });

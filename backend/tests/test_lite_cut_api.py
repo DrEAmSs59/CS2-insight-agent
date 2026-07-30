@@ -19,6 +19,56 @@ def test_lite_cut_export_falls_back_to_valid_configured_encoder():
     assert _resolve_lite_cut_encoder({"output": {"encoder": "bad"}}, "bad") == "auto"
 
 
+def test_portable_package_excludes_demo_paths_from_project_metadata(monkeypatch, tmp_path):
+    clip = tmp_path / "clip.mp4"
+    demo = tmp_path / "match.dem"
+    clip.write_bytes(b"video")
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(portable_api, "get_data_dir", lambda: tmp_path)
+
+    package = portable_api._portable_package_path(
+        {
+            "name": "demo-safe",
+            "body": {
+                "tracks": [{"clips": [{"file_path": str(clip)}]}],
+                "source_demo_path": str(demo),
+                "metadata": {"original_demo": str(demo)},
+            },
+        },
+        [{"id": 7, "name": clip.name, "kind": "video", "file_path": str(clip)}],
+    )
+
+    with zipfile.ZipFile(package) as archive:
+        manifest = json.loads(archive.read("project.json"))
+        packaged_names = archive.namelist()
+
+    assert len(manifest["files"]) == 1
+    assert manifest["files"][0]["original_path"] == str(clip.resolve())
+    assert all(not name.endswith(".dem") for name in packaged_names)
+
+
+def test_portable_import_links_bundled_recordings_and_file_clips():
+    bundled = "C:/LiteCut/recording.mp4"
+    body = {
+        "tracks": [{
+            "clips": [
+                {"source_type": "recorded_clip", "source_id": 80, "meta": {"output_path": bundled}},
+                {"source_type": "file", "file_path": bundled, "meta": {"output_path": bundled}},
+            ],
+        }],
+    }
+
+    linked = portable_api._link_portable_clip_assets(body, {bundled: 412})
+    recorded, file_clip = body["tracks"][0]["clips"]
+
+    assert linked == 2
+    assert recorded["source_type"] == "file"
+    assert recorded["source_id"] is None
+    assert recorded["file_path"] == bundled
+    assert recorded["meta"]["asset_id"] == 412
+    assert file_clip["meta"]["asset_id"] == 412
+
+
 @pytest.mark.anyio
 async def test_portable_import_rolls_back_project_and_directory_on_invalid_asset(monkeypatch, tmp_path):
     class FakeDb:

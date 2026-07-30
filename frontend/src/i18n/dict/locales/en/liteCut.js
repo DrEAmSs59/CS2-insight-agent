@@ -45,6 +45,8 @@ export default {
   "liteCut.project.width": "Canvas width",
   "liteCut.project.height": "Canvas height",
   "liteCut.project.frameRate": "Frame rate",
+  "liteCut.project.frameRateHint": "Enter a project frame rate directly; higher rates increase preview and export load.",
+  "liteCut.project.frameRateInvalid": "Enter an integer FPS from 1 to {max}.",
   "liteCut.project.outputSettings": "Project settings",
   "liteCut.project.createConfirm": "Create project",
   "liteCut.project.creating": "Creating…",
