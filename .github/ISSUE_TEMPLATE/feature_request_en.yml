@@ -1,0 +1,68 @@
+name: Feature request
+description: Suggest a new capability or an improvement to existing behavior
+title: "[Feature]: "
+labels:
+  - type: feature
+  - status: planned
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the motivation and use case. This helps us prioritize and split work on the roadmap.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Search
+      options:
+        - label: I searched existing issues and discussions and did not find a duplicate request.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the user scenario, pain point, and current workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired interaction, API, configuration, or acceptance criteria. A rough outline is welcome.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related area (optional)
+      multiple: true
+      options:
+        - OBS
+        - demo-parser
+        - recorder
+        - radar
+        - UI
+        - settings
+        - release
+        - installer
+        - Not sure
+    validations:
+      required: false
+  - type: dropdown
+    id: priority_hint
+    attributes:
+      label: Priority (for reference only)
+      options:
+        - P3 — Nice to have
+        - P2 — General improvement
+        - P1 — Noticeable impact on experience
+        - P0 — Blocks a release or core workflow
+      default: 1
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Add reference designs, alternatives, screenshots, or demos.
+    validations:
+      required: false
