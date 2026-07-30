@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a reproducible defect or unexpected behavior
+title: "[Bug]: "
+labels:
+  - type: bug
+  - status: needs-repro
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include enough detail to reproduce the issue; maintainers will follow up with labels such as `status: needs-repro` and `status: confirmed`.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Search
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Briefly describe the actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide numbered steps, including the relevant workflow or API.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your OS, app version, and relevant configuration. Please redact sensitive information.
+      value: |
+        - OS:
+        - App version / branch:
+        - Is this related only to Windows recording?
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant `data/logs` excerpts, screenshots, or demo filenames. Plain text is fine.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area (optional)
+      multiple: true
+      options:
+        - OBS
+        - demo-parser
+        - recorder
+        - radar
+        - UI
+        - settings
+        - release
+        - installer
+        - Not sure
+    validations:
+      required: false
