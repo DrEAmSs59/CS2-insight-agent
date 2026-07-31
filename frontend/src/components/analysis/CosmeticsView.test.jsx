@@ -26,7 +26,7 @@ function cosmetic(overrides = {}) {
 }
 
 describe("CosmeticsView", () => {
-  test("shows only the selected player's evidence-owned inventory in the six-column grid", () => {
+  test("shows only the selected player's evidence-owned inventory in CT/T team rows", () => {
     const { container } = render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
@@ -44,13 +44,63 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("“全角，测试！”")).toBeTruthy();
-    expect(screen.getByText("AWP | 九头金蛇")).toBeTruthy();
+    expect(screen.getAllByText("“全角，测试！”").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AWP | 九头金蛇").length).toBeGreaterThan(0);
     expect(screen.queryByText("“不属于 JW”")).toBeNull();
-    expect(container.querySelector(".xl\\:grid-cols-6")).toBeTruthy();
-    expect(container.querySelector(".items-start")).toBeTruthy();
-    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(2);
-    expect(container.querySelectorAll("[data-cosmetic-card-label].h-8")).toHaveLength(2);
+    expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
+    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(4);
+    expect(container.querySelectorAll("[data-cosmetic-card-label].h-8")).toHaveLength(4);
+  });
+
+  test("renders CT then T rows from observed_teams and dual-team items appear in both", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 1, observed_teams: ["ct"], name_zh: "CT 刀" }),
+                cosmetic({ item_id: 2, observed_teams: ["t"], type: "weapon", model: "ak47", name_zh: "T AK" }),
+                cosmetic({ item_id: 3, observed_teams: ["ct", "t"], catalog_id: 2003, name_zh: "双阵营刀" }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    const ctRow = screen.getByTestId("cosmetics-row-ct");
+    const tRow = screen.getByTestId("cosmetics-row-t");
+    expect(ctRow.compareDocumentPosition(tRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(ctRow).getByText("CT 刀")).toBeTruthy();
+    expect(within(ctRow).getByText("双阵营刀")).toBeTruthy();
+    expect(within(ctRow).queryByText("T AK")).toBeNull();
+    expect(within(tRow).getByText("T AK")).toBeTruthy();
+    expect(within(tRow).getByText("双阵营刀")).toBeTruthy();
+    expect(within(tRow).queryByText("CT 刀")).toBeNull();
+    expect(screen.getAllByTestId("cosmetics-row-ct").length).toBe(1);
+    expect(document.querySelectorAll("[data-cosmetic-card]")).toHaveLength(4);
+  });
+
+  test("replaces evidence count with customize entry and removes card team dots", () => {
+    const { container } = render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic()] } } }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.queryByText(/2 items|2 件饰品/)).toBeNull();
+    for (const card of container.querySelectorAll("[data-cosmetic-card]")) {
+      expect(within(card).queryByLabelText(/Equipped-team|装备阵营/)).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^取消$|^Cancel$/ })).toBeTruthy();
   });
 
   test("opens item details on click and inspect actions on right click", () => {
@@ -62,7 +112,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "Lᵒᵛᵉᵧₒᵤ 玫瑰の吻" });
+    const card = screen.getAllByRole("button", { name: "Lᵒᵛᵉᵧₒᵤ 玫瑰の吻" })[0];
     fireEvent.contextMenu(card, { clientX: 30, clientY: 40 });
     const menu = screen.getByRole("menu");
     expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
@@ -87,7 +137,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "M9 刺刀 | 多普勒" });
+    const card = screen.getAllByRole("button", { name: "M9 刺刀 | 多普勒" })[0];
     fireEvent.click(card);
     fireEvent.click(container.querySelector("[data-cosmetic-open-3d]"));
 
@@ -104,7 +154,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.pointerEnter(screen.getByRole("button", { name: "玫瑰の吻" }));
+    fireEvent.pointerEnter(screen.getAllByRole("button", { name: "玫瑰の吻" })[0]);
     const tooltip = screen.getByRole("tooltip");
     expect(within(tooltip).getByText("“玫瑰の吻”")).toBeTruthy();
     expect(within(tooltip).getByText("80")).toBeTruthy();
@@ -130,7 +180,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("正确归属的刀")).toBeTruthy();
+    expect(screen.getAllByText("正确归属的刀").length).toBeGreaterThan(0);
     expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
@@ -151,9 +201,9 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("探员 | 血腥达里尔爵士（沉默）")).toBeTruthy();
-    expect(screen.getByText("音乐盒 | Under Bright Lights")).toBeTruthy();
-    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(2);
+    expect(screen.getAllByText("探员 | 血腥达里尔爵士（沉默）").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("音乐盒 | Under Bright Lights").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(4);
   });
 
   test("keeps inspect actions disabled when a glove finish was not retained", () => {
@@ -164,7 +214,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "裹手" });
+    const card = screen.getAllByRole("button", { name: "裹手" })[0];
     fireEvent.pointerEnter(card);
     expect(screen.getByRole("tooltip").textContent).toContain("No finish is guessed");
     fireEvent.pointerLeave(card);

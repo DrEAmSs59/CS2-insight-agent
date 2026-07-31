@@ -23,8 +23,8 @@ import { desktopBridge } from "../../desktop/desktopBridge.js";
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
+import { itemsForTeam, sortCosmeticsForRow } from "./cosmeticsLayout.js";
 
-const TYPE_PRIORITY = { melee: 0, glove: 1, weapon: 2, agent: 3, musickit: 4, utility: 5 };
 const RARITY_NAMES = {
   "#ded6cc": "consumer",
   "#b0c3d9": "consumer",
@@ -182,7 +182,6 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, onOpen, onContextMenu
     >
       <span className="relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
         <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
-        <span className="absolute right-2 top-2"><TeamIndicators item={item} compact /></span>
         {onlineAssetsEnabled && stickers.length ? (
           <span className="absolute bottom-1.5 left-1.5 flex max-w-[80%] items-end gap-0.5">
             {stickers.slice(0, 5).map((sticker, index) => (
@@ -199,6 +198,34 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, onOpen, onContextMenu
         {rename ? <span className="mt-0.5 block truncate text-[10px] text-cs2-text-muted">{name}</span> : null}
       </span>
     </button>
+  );
+}
+
+function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
+  const t = useT();
+  const teamKey = team === "ct" ? "ct" : "t";
+  return (
+    <section data-testid={`cosmetics-row-${teamKey}`} className="space-y-2">
+      <h3 className="text-[11px] font-black uppercase tracking-wide text-cs2-text-muted">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
+      {items.length ? (
+        <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {items.map((item, index) => (
+            <CosmeticCard
+              key={`${teamKey}-${item?.item_id || item?.catalog_id || "item"}-${index}`}
+              item={item}
+              locale={locale}
+              onlineAssetsEnabled={onlineAssetsEnabled}
+              onOpen={() => onOpen(item)}
+              onContextMenu={(event) => onContextMenu(event, item)}
+              onHoverStart={(event) => onHoverStart(event, item)}
+              onHoverEnd={onHoverEnd}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="border border-dashed border-cs2-border-subtle px-3 py-4 text-center text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.noEvidence")}</p>
+      )}
+    </section>
   );
 }
 
@@ -358,21 +385,27 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [hoverCard, setHoverCard] = useState(null);
   const [notice, setNotice] = useState(null);
   const [inspectBusy, setInspectBusy] = useState(false);
+  const [viewMode, setViewMode] = useState("browse");
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
-    if (!Array.isArray(rows)) return [];
-    return [...rows].sort((left, right) => (
-      (TYPE_PRIORITY[left?.type] ?? 99) - (TYPE_PRIORITY[right?.type] ?? 99)
-      || displayName(left, locale).localeCompare(displayName(right, locale), locale)
-      || Number(left?.item_id || 0) - Number(right?.item_id || 0)
-    ));
-  }, [locale, steamid, workspace?.cosmetics?.players]);
+    return Array.isArray(rows) ? rows : [];
+  }, [steamid, workspace?.cosmetics?.players]);
+  const ctItems = useMemo(
+    () => sortCosmeticsForRow(itemsForTeam(inventory, "ct"), locale),
+    [inventory, locale],
+  );
+  const tItems = useMemo(
+    () => sortCosmeticsForRow(itemsForTeam(inventory, "t"), locale),
+    [inventory, locale],
+  );
+  const browseMode = viewMode === "browse";
 
   useEffect(() => {
     setDetail(null);
     setContextMenu(null);
     setHoverCard(null);
     setNotice(null);
+    setViewMode("browse");
   }, [steamid]);
 
   useEffect(() => {
@@ -408,6 +441,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   }, [hoverCard]);
 
   const openContext = (event, item) => {
+    if (!browseMode) return;
     event.preventDefault();
     setHoverCard(null);
     setContextMenu({
@@ -418,7 +452,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const openHover = (event, item) => {
-    if (contextMenu || detail) return;
+    if (!browseMode || contextMenu || detail) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const width = 288;
     const estimatedHeight = 230;
@@ -480,6 +514,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     }
   };
 
+  const openItemDetail = (item) => {
+    if (!browseMode) return;
+    setHoverCard(null);
+    setDetail({ item, mode: "info" });
+  };
+
   const open3d = (item) => {
     setContextMenu(null);
     setHoverCard(null);
@@ -501,7 +541,36 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           <div className="flex items-center gap-2"><Gem className="h-4 w-4 text-cs2-accent" /><h2 className="truncate text-[13px] font-black text-cs2-text-primary">{t("analysis.cosmetics.title", { name })}</h2></div>
           <p className="mt-1 text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.ownershipHint")} · {t("analysis.cosmetics.interactionHint")}</p>
         </div>
-        <div className="inline-flex items-center gap-2 font-mono text-[10px] text-cs2-text-muted"><PackageOpen className="h-3.5 w-3.5" />{t("analysis.cosmetics.evidenceCount", { count: inventory.length })}</div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {browseMode ? (
+            <button
+              type="button"
+              data-testid="cosmetics-customize"
+              onClick={() => setViewMode("custom")}
+              className="inline-flex h-8 items-center gap-1.5 border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-secondary hover:border-cs2-text-muted hover:text-cs2-text-primary"
+            >
+              {t("analysis.cosmetics.customize")}
+            </button>
+          ) : (
+            <>
+              <p className="text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.customizingHint")}</p>
+              <button
+                type="button"
+                onClick={() => setViewMode("browse")}
+                className="inline-flex h-8 items-center border border-cs2-border px-3 text-[10px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+              >
+                {t("analysis.cosmetics.cancelCustomize")}
+              </button>
+              <button
+                type="button"
+                disabled
+                className="inline-flex h-8 items-center border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("analysis.cosmetics.savePlan")}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {notice ? (
@@ -515,19 +584,27 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       ) : null}
 
       {inventory.length ? (
-        <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
-          {inventory.map((item, index) => (
-            <CosmeticCard
-              key={`${item?.item_id || item?.catalog_id || "item"}-${index}`}
-              item={item}
-              locale={locale}
-              onlineAssetsEnabled={onlineAssetsEnabled}
-              onOpen={() => { setHoverCard(null); setDetail({ item, mode: "info" }); }}
-              onContextMenu={(event) => openContext(event, item)}
-              onHoverStart={(event) => openHover(event, item)}
-              onHoverEnd={() => setHoverCard(null)}
-            />
-          ))}
+        <div className="space-y-6">
+          <CosmeticsTeamRow
+            team="ct"
+            items={ctItems}
+            locale={locale}
+            onlineAssetsEnabled={onlineAssetsEnabled}
+            onOpen={openItemDetail}
+            onContextMenu={openContext}
+            onHoverStart={openHover}
+            onHoverEnd={() => setHoverCard(null)}
+          />
+          <CosmeticsTeamRow
+            team="t"
+            items={tItems}
+            locale={locale}
+            onlineAssetsEnabled={onlineAssetsEnabled}
+            onOpen={openItemDetail}
+            onContextMenu={openContext}
+            onHoverStart={openHover}
+            onHoverEnd={() => setHoverCard(null)}
+          />
         </div>
       ) : (
         <div className="flex min-h-[300px] items-center justify-center border border-dashed border-cs2-border bg-cs2-bg-page/25 p-8 text-center">
