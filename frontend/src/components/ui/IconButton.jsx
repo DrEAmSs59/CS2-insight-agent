@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 const variants = {
   default: "border-cs2-border bg-cs2-bg-input text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary",
   ghost: "border-transparent bg-transparent text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary",

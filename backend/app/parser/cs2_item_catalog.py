@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------------------------
+# Copyright (c) unicbm. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+# ---------------------------------------------------------------------------------------------
+
 """Compact CS2 weapon/finish catalog generated from ianlucas/cs2-lib."""
 
 from __future__ import annotations

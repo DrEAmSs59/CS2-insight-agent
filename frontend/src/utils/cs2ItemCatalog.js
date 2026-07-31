@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import { CS2_ITEM_CATALOG } from "../generated/cs2ItemCatalog.js";
 
 const aliasesLongestFirst = Object.entries(CS2_ITEM_CATALOG.aliases)

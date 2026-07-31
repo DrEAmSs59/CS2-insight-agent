@@ -38,15 +38,6 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 | Tauri                   | MIT / Apache-2.0 | https://github.com/tauri-apps/tauri            |
 | Tauri Plugins           | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 
-## Rust tooling
-
-| Package | License | Source |
-| ------- | ------- | ------ |
-| source2-demo 0.5.8 (vendored, locally patched) | MIT OR Apache-2.0 | https://github.com/Rupas1k/source2-demo |
-
-`tools/demo-cosmetic-rewriter/vendor/source2-demo-0.5.8/` retains both complete license texts. The exact provenance and four-file local patch scope are documented in `tools/demo-cosmetic-rewriter/THIRD_PARTY.md`.
-
-
 ## Trademark Notices
 
 - *Counter-Strike 2*, *CS2*, *Steam*, and *Valve* are trademarks of Valve Corporation. This project is **not affiliated with, endorsed by, or sponsored by Valve Corporation**.

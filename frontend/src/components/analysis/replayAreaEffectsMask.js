@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 export function makeCanvas(width, height) {
   const w = Math.max(1, Math.floor(Number(width) || 1));
   const h = Math.max(1, Math.floor(Number(height) || 1));
