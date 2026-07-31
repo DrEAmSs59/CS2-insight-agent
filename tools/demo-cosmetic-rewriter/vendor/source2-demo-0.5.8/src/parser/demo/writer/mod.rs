@@ -7,6 +7,7 @@ mod packet;
 mod packet_state;
 mod rewriter;
 mod runner;
+mod snapshot;
 mod string_table;
 
 use crate::entity::field::{FieldPath, FieldValue, Serializer};
@@ -23,6 +24,7 @@ pub(crate) use input::RawDemoMessage;
 pub use rewriter::{
     rewrite_protobuf_message, DemoRewriter, MessageRewrite, PacketMessage, RewriteInterests,
 };
+pub use snapshot::materialize_full_packet_entities;
 
 const INSTANCE_BASELINE_TABLE: &str = "instancebaseline";
 const ENTITY_REWRITE_BUFFER_CAPACITY: usize = 8192;
@@ -210,6 +212,9 @@ where
     }
 
     fn should_rewrite_entity(&mut self, event: EntityEvents, entity: &Entity) -> bool {
+        if !self.rewrites_entity_fields() {
+            return false;
+        }
         let ctx = &self.parser.context;
         self.rewriters
             .iter_mut()
@@ -278,12 +283,17 @@ where
         self.has_rewriters(RewriteInterests::ENTITY_FIELDS)
     }
 
+    fn tracks_entity_state(&self) -> bool {
+        self.rewrites_entity_fields()
+            || self.has_rewriters(RewriteInterests::PACKET_ENTITIES_POST_STATE)
+    }
+
     fn rewrites_string_table_entries(&self) -> bool {
         self.has_rewriters(RewriteInterests::STRING_TABLE_ENTRIES)
     }
 
     fn needs_string_table_context(&self) -> bool {
-        self.rewrites_entity_fields() || self.rewrites_string_table_entries()
+        self.tracks_entity_state() || self.rewrites_string_table_entries()
     }
 
     fn needs_packet_scan(&self) -> bool {
@@ -309,7 +319,7 @@ where
     }
 
     fn needs_class_metadata(&self) -> bool {
-        self.rewrites_entity_fields()
+        self.tracks_entity_state()
     }
 
     fn needs_demo_string_table_scan(&self) -> bool {

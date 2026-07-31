@@ -38,8 +38,8 @@ pub mod reader {
 pub mod writer {
     pub use crate::error::ParserError;
     pub use crate::parser::{
-        rewrite_protobuf_message, DemoRewriter, DemoWriter, MessageRewrite, PacketMessage,
-        RewriteInterests,
+        materialize_full_packet_entities, rewrite_protobuf_message, DemoRewriter, DemoWriter,
+        MessageRewrite, PacketMessage, RewriteInterests,
     };
     pub use crate::stream::writer::{
         write_demo_message, write_demo_message_with_compression, write_var_u32_to_buf,

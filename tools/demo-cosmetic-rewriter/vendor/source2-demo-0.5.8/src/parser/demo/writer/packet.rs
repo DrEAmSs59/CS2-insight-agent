@@ -94,9 +94,9 @@ where
 
                 if let Ok(svc_msg) = SvcMessages::try_from(msg_type) {
                     match svc_msg {
-                        SvcMessages::SvcPacketEntities if self.rewrites_entity_fields() => {
+                        SvcMessages::SvcPacketEntities if self.tracks_entity_state() => {
                             if let Some(rewritten) =
-                                self.rewrite_svc_packet_entities(msg_payload.as_slice())?
+                                self.rewrite_svc_packet_entities(tick, msg_payload.as_slice())?
                             {
                                 msg_payload = rewritten;
                                 changed = true;

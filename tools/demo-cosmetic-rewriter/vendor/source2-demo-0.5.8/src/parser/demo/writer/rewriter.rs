@@ -3,7 +3,8 @@ use crate::entity::{Entity, EntityEvents};
 use crate::error::ParserError;
 use crate::parser::Context;
 use crate::proto::{
-    CDemoStringTables, CSvcMsgCreateStringTable, CSvcMsgUpdateStringTable, EDemoCommands, Message,
+    CDemoStringTables, CSvcMsgCreateStringTable, CSvcMsgPacketEntities,
+    CSvcMsgUpdateStringTable, EDemoCommands, Message,
 };
 use crate::string_table::StringTableEntryUpdate;
 use std::cell::RefCell;
@@ -34,6 +35,9 @@ bitflags::bitflags! {
         const SVC_UPDATE_STRING_TABLE = 1 << 6;
         /// Interest in entity field replacement and entity rewrite filtering.
         const ENTITY_FIELDS = 1 << 7;
+        /// Interest in mutating `svc_PacketEntities` after its entity delta
+        /// has been applied to the writer's tracked state.
+        const PACKET_ENTITIES_POST_STATE = 1 << 8;
     }
 }
 
@@ -151,6 +155,21 @@ pub trait DemoRewriter {
         ctx: &Context,
         tick: u32,
         message: &mut CSvcMsgUpdateStringTable,
+    ) -> Result<MessageRewrite, ParserError> {
+        Ok(MessageRewrite::Keep)
+    }
+
+    /// Rewrites a decoded `svc_PacketEntities` message after its entity delta
+    /// has been applied to the writer's tracked entity state.
+    ///
+    /// This callback is intended for diagnostics that must materialize a
+    /// complete snapshot from the post-delta state. Returning
+    /// [`MessageRewrite::Rewrite`] emits the mutated protobuf message.
+    fn rewrite_packet_entities_post_state(
+        &mut self,
+        ctx: &Context,
+        tick: u32,
+        message: &mut CSvcMsgPacketEntities,
     ) -> Result<MessageRewrite, ParserError> {
         Ok(MessageRewrite::Keep)
     }
@@ -286,6 +305,16 @@ where
     ) -> Result<MessageRewrite, ParserError> {
         self.borrow_mut()
             .rewrite_svc_update_string_table(ctx, tick, message)
+    }
+
+    fn rewrite_packet_entities_post_state(
+        &mut self,
+        ctx: &Context,
+        tick: u32,
+        message: &mut CSvcMsgPacketEntities,
+    ) -> Result<MessageRewrite, ParserError> {
+        self.borrow_mut()
+            .rewrite_packet_entities_post_state(ctx, tick, message)
     }
 
     fn replace_entity_field(

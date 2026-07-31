@@ -2,7 +2,8 @@ use crate::entity::field::{Decode, Encode, FieldPath, FieldState, Serializer, Sk
 use crate::entity::{Entity, EntityEvents};
 use crate::error::ParserError;
 use crate::parser::demo::writer::{
-    DecodedEntityField, DemoWriter, FieldReplacement, OriginalEntityField,
+    DecodedEntityField, DemoWriter, FieldReplacement, MessageRewrite, OriginalEntityField,
+    RewriteInterests,
 };
 use crate::proto::{CSvcMsgPacketEntities, Message};
 use crate::reader::{BitsReader, FieldPathCodec, MessageReader, SliceReader};
@@ -18,6 +19,7 @@ where
 {
     pub(crate) fn rewrite_svc_packet_entities(
         &mut self,
+        tick: u32,
         msg: &[u8],
     ) -> Result<Option<Vec<u8>>, ParserError> {
         let mut packet_entities = CSvcMsgPacketEntities::decode(msg)?;
@@ -27,13 +29,38 @@ where
 
         let (rewritten, changed) =
             self.rewrite_entity_data(entity_data, packet_entities.updated_entries())?;
+        let mut changed = changed;
         if changed {
             packet_entities.entity_data = Some(rewritten);
             packet_entities.serialized_entities = None;
-            Ok(Some(packet_entities.encode_to_vec()))
-        } else {
-            Ok(None)
         }
+
+        for rewriter in self.rewriters.iter_mut().filter(|rewriter| {
+            rewriter
+                .interests()
+                .contains(RewriteInterests::PACKET_ENTITIES_POST_STATE)
+        }) {
+            let ctx = &self.parser.context;
+            match rewriter.rewrite_packet_entities_post_state(
+                ctx,
+                tick,
+                &mut packet_entities,
+            )? {
+                MessageRewrite::Keep => {}
+                MessageRewrite::Rewrite => changed = true,
+                MessageRewrite::Replace(bytes) => {
+                    packet_entities = CSvcMsgPacketEntities::decode(bytes.as_slice())?;
+                    changed = true;
+                }
+                MessageRewrite::Drop => {
+                    return Err(ParserError::IoError(
+                        "post-state PacketEntities rewriters cannot drop the message".to_owned(),
+                    ));
+                }
+            }
+        }
+
+        Ok(changed.then(|| packet_entities.encode_to_vec()))
     }
 
     fn rewrite_entity_data(
@@ -218,6 +245,12 @@ where
         let class = self.parser.context.entities.entities_vec[index]
             .class
             .clone();
+        if class.serializer.fields.is_empty() {
+            return Err(ParserError::IoError(format!(
+                "cannot decode update for uninitialized entity index {index} at demo tick {}",
+                self.parser.context.tick
+            )));
+        }
         let placeholder = Entity {
             index: u32::MAX,
             serial: 0,

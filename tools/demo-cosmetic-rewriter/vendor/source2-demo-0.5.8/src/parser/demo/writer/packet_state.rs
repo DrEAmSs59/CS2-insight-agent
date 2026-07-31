@@ -22,7 +22,7 @@ where
         };
 
         match msg {
-            SvcMessages::SvcServerInfo if self.rewrites_entity_fields() => {
+            SvcMessages::SvcServerInfo if self.tracks_entity_state() => {
                 self.process_server_info(CSvcMsgServerInfo::decode(msg_buf)?);
             }
             SvcMessages::SvcCreateStringTable if self.needs_string_table_context() => {
