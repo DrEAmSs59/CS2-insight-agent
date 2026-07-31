@@ -143,11 +143,102 @@ def test_batch_demo_summary_uses_roster_cache(monkeypatch):
         },
     )
     monkeypatch.setattr(main, "get_or_index_demo_roster", lookup_mock)
+    monkeypatch.setattr(
+        main,
+        "_library_working_demo_path",
+        AsyncMock(return_value=Path("match.dem")),
+    )
 
     response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[21])))
 
     assert response["items"][0]["players"] == roster
     lookup_mock.assert_awaited_once()
+
+
+def test_batch_demo_summary_materializes_working_cache_for_legacy_rows(monkeypatch, tmp_path):
+    """Pre-cache-era done rows get cached_path when load-selected hits batch-summary."""
+    original = tmp_path / "legacy.dem"
+    original.write_bytes(b"legacy-demo-bytes")
+    working = tmp_path / "demo-cache" / "aabb.dem"
+    working.parent.mkdir(parents=True)
+    working.write_bytes(original.read_bytes())
+    row = {
+        "id": 99,
+        "path": str(original),
+        "filename": "legacy.dem",
+        "status": "done",
+        "cached_path": None,
+        "map_name": "de_dust2",
+        "players": [{"name": "alpha", "team": 2}],
+        "result": None,
+    }
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_list_items",
+        AsyncMock(return_value=[dict(row)]),
+    )
+    ensure_calls: list[dict] = []
+
+    async def fake_working(row_arg):
+        ensure_calls.append(dict(row_arg))
+        row_arg["cached_path"] = str(working)
+        return working
+
+    roster_paths: list[object] = []
+
+    async def fake_roster(demo_id, dem_path, **_kwargs):
+        roster_paths.append(dem_path)
+        return {
+            "players": [{"name": "alpha", "team": 2}],
+            "cache_hit": True,
+            "indexed": True,
+            "error": None,
+        }
+
+    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
+    monkeypatch.setattr(main, "get_or_index_demo_roster", fake_roster)
+
+    response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[99])))
+
+    assert len(ensure_calls) == 1
+    assert response["failed"] == []
+    assert response["items"][0]["cached_path"] == str(working)
+    assert response["items"][0]["path"] == str(original)
+    assert roster_paths == [str(original)]
+
+
+def test_batch_demo_summary_reports_missing_original_as_item_failure(monkeypatch):
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_list_items",
+        AsyncMock(
+            return_value=[{
+                "id": 44,
+                "path": "C:/missing/gone.dem",
+                "filename": "gone.dem",
+                "status": "done",
+                "cached_path": None,
+                "players": [],
+                "result": None,
+            }],
+        ),
+    )
+
+    async def fake_working(_row):
+        raise FileNotFoundError("Demo original missing: C:/missing/gone.dem")
+
+    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
+    monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock())
+
+    response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[44])))
+
+    assert response["items"] == []
+    assert response["failed"] == [{
+        "id": 44,
+        "filename": "gone.dem",
+        "code": "DEMO_FILE_NOT_FOUND",
+    }]
+    main.get_or_index_demo_roster.assert_not_awaited()
 
 
 def test_batch_resolve_players_reports_roster_failure_without_raw_error(monkeypatch):
@@ -470,6 +561,11 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
 
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
     monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_by_id",
+        AsyncMock(return_value={"id": 7, "path": "match.dem"}),
+    )
     monkeypatch.setattr(main, "load_config", AppConfig)
     clear_result = AsyncMock(side_effect=AssertionError("last-known-good result must not be cleared before parse"))
     monkeypatch.setattr(main.demo_db, "clear_result", clear_result)
@@ -492,6 +588,67 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     assert composite["auto_target_player"] == "alpha"
     assert composite["analyzed_target_players"] == ["alpha"]
     clear_result.assert_not_awaited()
+
+
+def test_library_analyze_persists_status_on_original_path(monkeypatch, tmp_path):
+    """Working cache path is for I/O; DB status/result must key on demo_files.path."""
+    original = tmp_path / "originals" / "legacy.dem"
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b"demo")
+    working = tmp_path / "demo-cache" / "aabb.dem"
+    working.parent.mkdir(parents=True)
+    working.write_bytes(original.read_bytes())
+    parsed = {
+        "alpha": {
+            "clips": [{"id": "a"}],
+            "match_meta": {"target_player": "alpha"},
+            "timeline": [],
+            "round_timeline": [],
+        }
+    }
+    roster_paths: list[object] = []
+    status_calls: list[tuple[object, str]] = []
+    worker_paths: list[object] = []
+    save_paths: list[object] = []
+
+    async def fake_roster(demo_id, path, **_kwargs):
+        roster_paths.append(path)
+        return {"error": None}
+
+    async def fake_update_status(path, status, **_kwargs):
+        status_calls.append((path, status))
+
+    async def fake_save_result(path, result, **_kwargs):
+        save_paths.append(path)
+
+    def fake_analyze_multi(path, target_players, freeze_rounds):
+        worker_paths.append(path)
+        return parsed
+
+    monkeypatch.setattr(
+        main.demo_db,
+        "get_demo_by_id",
+        AsyncMock(return_value={"id": 11746, "path": str(original), "cached_path": str(working)}),
+    )
+    monkeypatch.setattr(main, "get_or_index_demo_roster", fake_roster)
+    monkeypatch.setattr(main.demo_db, "update_status", fake_update_status)
+    monkeypatch.setattr(main.demo_db, "save_result", fake_save_result)
+    monkeypatch.setattr(main.demo_db, "replace_timeline_events", AsyncMock())
+    monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
+    monkeypatch.setattr(main, "load_config", AppConfig)
+    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
+
+    response = asyncio.run(
+        main._run_library_demo_analyze(11746, Path(working), ["alpha"])
+    )
+
+    assert roster_paths == [str(original)]
+    assert worker_paths == [str(working)]
+    assert save_paths == [str(original)]
+    assert status_calls[0] == (str(original), "parsing")
+    assert status_calls[-1][0] == str(original)
+    assert status_calls[-1][1] == "done"
+    assert response["demo_path"] == str(original)
 
 
 def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
@@ -609,6 +766,11 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
 
     monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
     monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
+
+    async def fake_working(row):
+        return Path(str(row["path"]))
+
+    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
     compat_calls: list[str] = []
 
     def fake_ensure(path):

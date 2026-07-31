@@ -24,6 +24,8 @@ from .services.result_writer import write_result
 from ..montage_db import MontageDB
 from ..api_errors import error_detail
 from ..demo_compat_service import ensure_demo_compatible
+from ..demo_paths import resolve_working_demo_path
+from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
 from ..session_auth import overlay_session_fragment
 
@@ -594,23 +596,9 @@ async def execute_recording_queue(
     CS2 via OBSDirector infrastructure, then records each plan segment using
     the new RecordingExecutor.
     """
-    import tempfile
     from pathlib import Path
     from ..obs_director import OBSDirector, CS2AlreadyRunningError, CS2NotReadyError, RecordingWarmupExtras
     from ..cs2_config_backup import is_cs2_running, is_restore_required
-
-    def _resolve_demo_path(p: str) -> Path:
-        raw = (p or "").strip()
-        if not raw:
-            raise HTTPException(400, error_detail("RECORDING_DEMO_PATH_EMPTY"))
-        cand = Path(raw)
-        if cand.is_file():
-            return cand.resolve()
-        upload_dir = Path(tempfile.gettempdir()) / "cs2_insight_demos"
-        dest = (upload_dir / cand.name).resolve()
-        if dest.is_file():
-            return dest
-        raise HTTPException(404, error_detail("RECORDING_DEMO_NOT_FOUND", path=raw))
 
     def _merge_obs(payload: Optional[OBSConfig], saved: OBSConfig) -> OBSConfig:
         if payload is None:
@@ -729,11 +717,14 @@ async def execute_recording_queue(
             error_detail("RECORDING_OBS_CONNECT_FAIL", err=str(e)),
         )
 
-    # Resolve demo paths: replace filename/relative refs with absolute paths.
+    # Resolve demo paths: library rows prefer cached working copies.
     resolved_requests = []
     for dto in req.requests:
         try:
-            abs_path = _resolve_demo_path(dto.demo.demo_path or dto.demo.demo_filename)
+            abs_path = await resolve_working_demo_path(
+                dto.demo.demo_path or dto.demo.demo_filename,
+                demo_db=demo_db,
+            )
         except HTTPException as e:
             logger.warning("[RecordingV3] demo not found for request %s: %s", dto.request_id, e.detail)
             resolved_requests.append(dto)  # keep as-is; executor will fail gracefully

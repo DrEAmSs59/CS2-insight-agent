@@ -262,6 +262,8 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN content_md5 TEXT")
             if "origin_zip" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN origin_zip TEXT")
+            if "cached_path" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN cached_path TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
             cur_summary = await conn.execute("PRAGMA table_info(demo_result_summaries)")
@@ -285,6 +287,9 @@ class DemoDB:
             await self._backfill_result_summaries(conn)
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_content_md5 ON demo_files(content_md5)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_cached_path ON demo_files(cached_path)",
             )
             # The pending-ingest picker compares candidate rows by path,
             # filename and content hash.  The default UNIQUE(path) index uses
@@ -1067,14 +1072,14 @@ class DemoDB:
     _LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip,
+               d.content_md5, d.origin_zip, d.cached_path,
                r.result_json, r.created_at AS result_created_at
         """
 
     _COMPACT_LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip,
+               d.content_md5, d.origin_zip, d.cached_path,
                CASE WHEN rs.demo_path IS NULL THEN 0 ELSE 1 END AS has_result,
                COALESCE(rs.clip_count, 0) AS clip_count,
                rs.primary_target,
@@ -1620,6 +1625,112 @@ class DemoDB:
                 return None
             return dict(row)
 
+    async def get_demo_by_cached_path(self, cached_path: str) -> Optional[dict[str, Any]]:
+        raw = (cached_path or "").strip()
+        if not raw:
+            return None
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT * FROM demo_files WHERE cached_path = ? LIMIT 1",
+                (raw,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            return dict(row)
+
+    async def update_cached_path(
+        self,
+        demo_path: str,
+        cached_path: str,
+        *,
+        content_md5: str | None = None,
+    ) -> bool:
+        """Persist working-copy path for a library demo (keyed by original ``path``)."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            if content_md5:
+                cur = await conn.execute(
+                    """
+                    UPDATE demo_files
+                    SET cached_path = ?,
+                        content_md5 = COALESCE(NULLIF(trim(content_md5), ''), ?)
+                    WHERE path = ?
+                    """,
+                    (cached_path, content_md5, demo_path),
+                )
+            else:
+                cur = await conn.execute(
+                    "UPDATE demo_files SET cached_path = ? WHERE path = ?",
+                    (cached_path, demo_path),
+                )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    async def remap_cached_paths(self, old_root: str, new_root: str) -> int:
+        """Rewrite cached_path values that live under ``old_root`` to ``new_root``."""
+        from .demo_cache import rewrite_path_under_root
+
+        old = Path(old_root)
+        new = Path(new_root)
+        updated = 0
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, cached_path FROM demo_files WHERE cached_path IS NOT NULL AND trim(cached_path) != ''"
+            )
+            rows = await cur.fetchall()
+            for row in rows:
+                rewritten = rewrite_path_under_root(str(row["cached_path"]), old, new)
+                if not rewritten:
+                    continue
+                await conn.execute(
+                    "UPDATE demo_files SET cached_path = ? WHERE id = ?",
+                    (rewritten, int(row["id"])),
+                )
+                updated += 1
+            await conn.commit()
+        return updated
+
+    async def invalidate_all_demo_caches(self) -> int:
+        """Clear cached_path and force analyzed demos back to ``loaded`` for re-parse."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute("SELECT path, status FROM demo_files")
+            rows = await cur.fetchall()
+            for demo_path, status in rows:
+                await conn.execute(
+                    "UPDATE demo_files SET cached_path = NULL WHERE path = ?",
+                    (demo_path,),
+                )
+                status_l = str(status or "").lower()
+                if status_l in {"done", "parsing", "error"}:
+                    await conn.execute(
+                        """
+                        UPDATE demo_files
+                        SET status = 'loaded', error_msg = NULL, parsed_at = NULL
+                        WHERE path = ?
+                        """,
+                        (demo_path,),
+                    )
+                    await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
+                    await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
+                    await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
+            await conn.commit()
+        return len(rows)
+
+    async def demo_cache_coverage(self) -> dict[str, int]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            total_cur = await conn.execute("SELECT COUNT(*) FROM demo_files")
+            total = int((await total_cur.fetchone())[0] or 0)
+            cached_cur = await conn.execute(
+                """
+                SELECT COUNT(*) FROM demo_files
+                WHERE cached_path IS NOT NULL AND trim(cached_path) != ''
+                """
+            )
+            cached = int((await cached_cur.fetchone())[0] or 0)
+        return {"demo_total": total, "demo_cached": cached, "demo_uncached": max(0, total - cached)}
+
     async def is_path_scan_blocked(self, path: str) -> bool:
         async with aiosqlite.connect(self.db_path) as conn:
             cur = await conn.execute(
@@ -1640,6 +1751,7 @@ class DemoDB:
         if not demo:
             return False
         disk_path = str(demo["path"])
+        cached_path = str(demo.get("cached_path") or "").strip()
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (disk_path,))
@@ -1659,6 +1771,11 @@ class DemoDB:
             else:
                 await conn.execute("DELETE FROM demo_scan_blocklist WHERE path = ?", (disk_path,))
             await conn.commit()
+        if cached_path:
+            try:
+                Path(cached_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to delete cached demo file: %s", cached_path)
         return True
 
     async def update_display_name(self, demo_id: int, display_name: str | None) -> bool:

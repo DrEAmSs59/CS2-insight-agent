@@ -397,6 +397,8 @@ class AppConfig(BaseModel):
     lite_cut_proxy_resolution: int = 720
     cs2_path: str = ""
     demo_directory: str = ""
+    # Demo 工作副本缓存根目录；留空则使用 data/demo-cache。入库/上传后复制到此，解析播放录制走缓存。
+    demo_cache_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
     # Demo 库扫描深度：0=仅所选目录，1=再含一级子目录，依此类推。
     demo_watch_scan_depth: int = Field(default=2, ge=0, le=32)

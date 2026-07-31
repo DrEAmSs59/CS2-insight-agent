@@ -79,7 +79,6 @@ export default {
   "library.durationUnit": "分",
   "library.batchSelected": "已选择 {count} 个",
   "library.batchLoad": "载入选中",
-  "library.batchLoadParse": "载入并解析…",
   "library.batchDelete": "批量删除",
   "library.batchClear": "清空选择",
   "library.paginationPage": "第 {page} 页",

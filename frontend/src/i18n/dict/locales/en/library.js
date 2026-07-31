@@ -79,7 +79,6 @@ export default {
   "library.durationUnit": "min",
   "library.batchSelected": "{count} selected",
   "library.batchLoad": "Load selected",
-  "library.batchLoadParse": "Load & parse…",
   "library.batchDelete": "Delete selected",
   "library.batchClear": "Clear selection",
   "library.paginationPage": "Page {page}",

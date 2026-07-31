@@ -37,7 +37,7 @@ from .env_utils import (
 from .demo_db import DemoListFilters, utc_now_iso
 from .databases import demo_db, lite_cut_db, montage_db
 from .demo_library_hub import demo_library_hub
-from .demo_paths import UPLOAD_DIR, resolve_demo_path
+from .demo_paths import UPLOAD_DIR, resolve_demo_path, resolve_working_demo_path
 from .demo_compat_service import ensure_demo_compatible
 from .demo_playback_service import (
     DemoPlaybackBusyError,
@@ -563,6 +563,20 @@ def resolve_uploaded_demo_path(p: str) -> Path:
     return resolve_demo_path(p, upload_dir=UPLOAD_DIR)
 
 
+async def resolve_uploaded_demo_path_async(p: str) -> Path:
+    """Library-aware resolve: use demo cache when the path belongs to demo_files."""
+    return await resolve_working_demo_path(p, demo_db=demo_db, upload_dir=UPLOAD_DIR)
+
+
+async def _library_working_demo_path(row: dict[str, Any]) -> Path:
+    from .demo_cache import ensure_row_cached
+
+    try:
+        return await ensure_row_cached(demo_db, row)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 def _analyze_demo_sync(
     dem_path: str,
     target_player: str,
@@ -807,11 +821,17 @@ def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -
 
 async def _run_library_demo_analyze(
     demo_id: int,
-    dem_path: str,
+    dem_path: str | Path,
     target_players: list[str],
     freeze_to_death_rounds: Optional[list[int]] = None,
     locale: str = "zh",
 ) -> dict:
+    # Working-cache path is for file I/O; demo_files.path remains the DB join key.
+    working_path = os.fspath(dem_path)
+    row = await demo_db.get_demo_by_id(demo_id)
+    library_path = str(row.get("path") or "").strip() if row else ""
+    if not library_path:
+        library_path = working_path
     target_players = list(
         dict.fromkeys(
             str(player).strip()
@@ -822,21 +842,22 @@ async def _run_library_demo_analyze(
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
     # 列表筛选 / PlayerSelect 依赖 demo_player_stats；缓存命中时不再重复扫描 Demo。
-    idx = await get_or_index_demo_roster(demo_id, dem_path)
+    idx = await get_or_index_demo_roster(demo_id, library_path)
     if idx.get("error"):
         logger.warning(
             "index_demo_player_stats before library analyze demo_id=%s: %s",
             demo_id,
             idx.get("error"),
         )
-    await demo_db.update_status(dem_path, "parsing", error_msg=None, parsed_at=None)
+    await demo_db.update_status(library_path, "parsing", error_msg=None, parsed_at=None)
     players_out: dict = {}
+    analysis_workspace = None
     try:
         from .demo_parse_isolation import analyze_multi_isolated
 
         batch_result = await asyncio.to_thread(
             analyze_multi_isolated,
-            dem_path,
+            working_path,
             target_players,
             freeze_to_death_rounds,
         )
@@ -850,14 +871,14 @@ async def _run_library_demo_analyze(
             )
     except Exception as e:
         code = _demo_failure_code(e, "analysis")
-        logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, dem_path, e)
-        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
+        logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, working_path, e)
+        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, error_detail(code)) from e
 
     if not players_out:
         code = "DEMO_ANALYSIS_EMPTY"
-        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
+        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, error_detail(code))
 
@@ -882,22 +903,22 @@ async def _run_library_demo_analyze(
         # save_result replaces the previous snapshot transactionally; the old
         # result remains readable until the new parse is complete.
         await demo_db.save_result(
-            dem_path,
+            library_path,
             composite,
             timeline_results=players_out,
         )
-        await demo_db.update_status(dem_path, "done", error_msg=None, parsed_at=utc_now_iso())
+        await demo_db.update_status(library_path, "done", error_msg=None, parsed_at=utc_now_iso())
     except Exception as e:
         code = _demo_failure_code(e, "save")
-        logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, dem_path)
-        await demo_db.update_status(dem_path, "error", error_msg=code, parsed_at=None)
+        logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, library_path)
+        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
         await demo_library_hub.notify("parse_error")
         raise HTTPException(500, error_detail(code)) from e
     await demo_library_hub.notify("analyzed")
     return {
         "players": players_out,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
-        "demo_path": dem_path,
+        "demo_path": library_path,
     }
 
 
@@ -1107,7 +1128,7 @@ async def parse_demo_multi(
     from .demo_parse_isolation import IsolatedParseError, analyze_multi_isolated
 
     try:
-        dem_path = resolve_uploaded_demo_path(path or filename)
+        dem_path = await resolve_uploaded_demo_path_async(path or filename)
         results_by_player = await asyncio.to_thread(
             analyze_multi_isolated,
             str(dem_path),
@@ -1156,7 +1177,7 @@ async def parse_demo_batch(req: BatchParseRequest):
 
     resolved: list[Path] = []
     for p in req.paths:
-        resolved.append(resolve_uploaded_demo_path(p))
+        resolved.append(await resolve_uploaded_demo_path_async(p))
 
     target = (req.target_player or "").strip()
     if not target:
@@ -2012,7 +2033,9 @@ async def batch_demo_summary(body: BatchSummaryBody):
         row = dict(row)
         if row.get("result_error"):
             raise ValueError(str(row["result_error"]))
-        dem_path = row.get("path", "")
+        # Materialize working cache for legacy rows (no / stale cached_path).
+        await _library_working_demo_path(row)
+        dem_path = str(row.get("path") or "")
         roster_lookup = await get_or_index_demo_roster(
             demo_id,
             dem_path,
@@ -2221,7 +2244,7 @@ async def get_demo_players(demo_id: int):
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    dem_path = row["path"]
+    dem_path = await _library_working_demo_path(row)
     await asyncio.to_thread(ensure_demo_compatible, dem_path)
     match_meta = {
         "map_name": row.get("map_name"),
@@ -2231,7 +2254,7 @@ async def get_demo_players(demo_id: int):
         "duration_mins": row.get("duration_mins"),
         "match_date": row.get("match_date"),
     }
-    roster_lookup = await get_or_index_demo_roster(demo_id, str(dem_path))
+    roster_lookup = await get_or_index_demo_roster(demo_id, str(row["path"]))
     if roster_lookup.get("error"):
         raise HTTPException(500, f"Demo 玩家名单解析失败：{roster_lookup['error']}")
     return {
@@ -2245,7 +2268,7 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    dem_path = row["path"]
+    dem_path = await _library_working_demo_path(row)
     await asyncio.to_thread(ensure_demo_compatible, dem_path)
     out = await _run_library_demo_analyze(
         demo_id,
@@ -2346,7 +2369,7 @@ async def play_demo_by_path(
     _runtime_session: None = Depends(runtime_session_dependency),
 ):
     """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
-    dem_path = resolve_uploaded_demo_path(body.path)
+    dem_path = await resolve_uploaded_demo_path_async(body.path)
     return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
 
 
@@ -2361,11 +2384,11 @@ async def play_demo_in_cs2(
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
 
-    dem_path = row.get("path") or ""
-    if not dem_path or not Path(dem_path).is_file():
+    dem_path = await _library_working_demo_path(row)
+    if not dem_path.is_file():
         raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
 
-    return await asyncio.to_thread(_launch_cs2_play_demo, Path(dem_path), body)
+    return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
 
 
 @app.post("/api/demos/{demo_id}/delete-file")
@@ -2375,9 +2398,12 @@ async def delete_demo_file(demo_id: int):
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     disk_path = str(demo["path"])
+    cached_path = str(demo.get("cached_path") or "").strip()
     from .file_quarantine import quarantine_files
 
     targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
+    if cached_path:
+        targets.append(Path(cached_path))
     from .parser.replay_cache_storage import remove_demo_replay_cache
 
     # Generated replay assets are disposable. Reclaim them while the source
@@ -2443,10 +2469,11 @@ async def batch_ingest_demos(body: BatchIngestBody):
     ) -> tuple[int, dict[str, Any], str, Optional[list[dict]], Optional[dict], Optional[Exception]]:
         demo_id, row, dem_path = candidate
         try:
+            working = await _library_working_demo_path(row)
             async with inspect_sem:
                 # Compat repair is deferred to play/analyze/record — ingest only
                 # needs lightweight inspect metadata for library cards.
-                players, meta = await _inspect_demo_meta(Path(dem_path))
+                players, meta = await _inspect_demo_meta(working)
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
             return demo_id, row, dem_path, None, None, exc
