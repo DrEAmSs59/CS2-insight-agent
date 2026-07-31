@@ -23,7 +23,9 @@ import { desktopBridge } from "../../desktop/desktopBridge.js";
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
-import { itemsForTeam, sortCosmeticsForRow } from "./cosmeticsLayout.js";
+import { isCustomizable, itemsForTeam, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
+import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
+import { saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
 const RARITY_NAMES = {
   "#ded6cc": "consumer",
@@ -163,10 +165,11 @@ function CosmeticImage({ item, onlineAssetsEnabled, className = "" }) {
   );
 }
 
-function CosmeticCard({ item, locale, onlineAssetsEnabled, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
+function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customizable, replacementLabel, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const rename = customName(item);
   const name = displayName(item, locale);
+  const disabled = customMode && !customizable;
   return (
     <button
       type="button"
@@ -177,7 +180,9 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, onOpen, onContextMenu
       onFocus={onHoverStart}
       onBlur={onHoverEnd}
       data-cosmetic-card
-      className="group grid w-full min-w-0 self-start grid-rows-[auto_2rem] text-left outline-none"
+      className={`group grid w-full min-w-0 self-start grid-rows-[auto_2rem] text-left outline-none${
+        disabled ? " cursor-not-allowed opacity-50 grayscale" : ""
+      }`}
       aria-label={rename || name}
     >
       <span className="relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
@@ -196,12 +201,13 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, onOpen, onContextMenu
           {rename ? `“${rename}”` : name}
         </span>
         {rename ? <span className="mt-0.5 block truncate text-[10px] text-cs2-text-muted">{name}</span> : null}
+        {replacementLabel ? <span className="mt-0.5 block truncate text-[10px] font-semibold text-cs2-accent">{replacementLabel}</span> : null}
       </span>
     </button>
   );
 }
 
-function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
+function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode, localReplacements, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
   const t = useT();
   const teamKey = team === "ct" ? "ct" : "t";
   return (
@@ -209,18 +215,25 @@ function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, onOpen, on
       <h3 className="text-[11px] font-black uppercase tracking-wide text-cs2-text-muted">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
       {items.length ? (
         <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {items.map((item, index) => (
+          {items.map((item, index) => {
+            const key = slotKey(item);
+            const replacement = localReplacements?.[key] || null;
+            return (
             <CosmeticCard
               key={`${teamKey}-${item?.item_id || item?.catalog_id || "item"}-${index}`}
               item={item}
               locale={locale}
               onlineAssetsEnabled={onlineAssetsEnabled}
+              customMode={customMode}
+              customizable={isCustomizable(item)}
+              replacementLabel={replacement ? t("analysis.cosmetics.replacementPreview", { name: displayName(replacement, locale) }) : null}
               onOpen={() => onOpen(item)}
               onContextMenu={(event) => onContextMenu(event, item)}
               onHoverStart={(event) => onHoverStart(event, item)}
               onHoverEnd={onHoverEnd}
             />
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="border border-dashed border-cs2-border-subtle px-3 py-4 text-center text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.noEvidence")}</p>
@@ -386,6 +399,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [notice, setNotice] = useState(null);
   const [inspectBusy, setInspectBusy] = useState(false);
   const [viewMode, setViewMode] = useState("browse");
+  const [localReplacements, setLocalReplacements] = useState({});
+  const [pickerItem, setPickerItem] = useState(null);
+  const [saving, setSaving] = useState(false);
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
     return Array.isArray(rows) ? rows : [];
@@ -399,6 +415,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     [inventory, locale],
   );
   const browseMode = viewMode === "browse";
+  const hasReplacements = Object.keys(localReplacements).length > 0;
 
   useEffect(() => {
     setDetail(null);
@@ -406,6 +423,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setHoverCard(null);
     setNotice(null);
     setViewMode("browse");
+    setLocalReplacements({});
+    setPickerItem(null);
+    setSaving(false);
   }, [steamid]);
 
   useEffect(() => {
@@ -520,6 +540,47 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setDetail({ item, mode: "info" });
   };
 
+  const openCard = (item) => {
+    if (browseMode) {
+      openItemDetail(item);
+      return;
+    }
+    if (isCustomizable(item)) {
+      setPickerItem(item);
+    }
+  };
+
+  const cancelCustomize = () => {
+    setLocalReplacements({});
+    setPickerItem(null);
+    setViewMode("browse");
+  };
+
+  const confirmReplacement = (replacement) => {
+    if (!pickerItem) return;
+    setLocalReplacements((prev) => ({ ...prev, [slotKey(pickerItem)]: replacement }));
+    setPickerItem(null);
+  };
+
+  const savePlan = async () => {
+    if (!hasReplacements || saving) return;
+    setSaving(true);
+    try {
+      const result = await saveCustomSkinPlan({ steamid, replacements: localReplacements });
+      if (result?.ok) {
+        setNotice({ tone: "success", text: t("analysis.cosmetics.saveStubSuccess") });
+        setViewMode("browse");
+        setPickerItem(null);
+      } else {
+        setNotice({ tone: "error", text: t("analysis.cosmetics.saveFailed") });
+      }
+    } catch {
+      setNotice({ tone: "error", text: t("analysis.cosmetics.saveFailed") });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const open3d = (item) => {
     setContextMenu(null);
     setHoverCard(null);
@@ -556,14 +617,15 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
               <p className="text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.customizingHint")}</p>
               <button
                 type="button"
-                onClick={() => setViewMode("browse")}
+                onClick={cancelCustomize}
                 className="inline-flex h-8 items-center border border-cs2-border px-3 text-[10px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
               >
                 {t("analysis.cosmetics.cancelCustomize")}
               </button>
               <button
                 type="button"
-                disabled
+                disabled={!hasReplacements || saving}
+                onClick={() => void savePlan()}
                 className="inline-flex h-8 items-center border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t("analysis.cosmetics.savePlan")}
@@ -590,7 +652,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             items={ctItems}
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
-            onOpen={openItemDetail}
+            customMode={!browseMode}
+            localReplacements={localReplacements}
+            onOpen={openCard}
             onContextMenu={openContext}
             onHoverStart={openHover}
             onHoverEnd={() => setHoverCard(null)}
@@ -600,7 +664,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             items={tItems}
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
-            onOpen={openItemDetail}
+            customMode={!browseMode}
+            localReplacements={localReplacements}
+            onOpen={openCard}
             onContextMenu={openContext}
             onHoverStart={openHover}
             onHoverEnd={() => setHoverCard(null)}
@@ -648,6 +714,15 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onInspectInGame={() => void inspectInGame(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} />
         ) : null}
       </Modal>
+
+      <SkinReplacementPicker
+        open={Boolean(pickerItem)}
+        sourceItem={pickerItem}
+        locale={locale}
+        onlineAssetsEnabled={onlineAssetsEnabled}
+        onClose={() => setPickerItem(null)}
+        onConfirm={confirmReplacement}
+      />
     </div>
   );
 }

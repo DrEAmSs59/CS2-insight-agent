@@ -1,6 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, test, vi } from "vitest";
 import CosmeticsView from "./CosmeticsView";
+import { saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
+
+vi.mock("./saveCustomSkinPlan.js", () => ({
+  saveCustomSkinPlan: vi.fn(async () => ({ ok: true, stub: true })),
+}));
 
 const STEAM_ID = "76561198000000001";
 
@@ -204,6 +209,87 @@ describe("CosmeticsView", () => {
     expect(screen.getAllByText("探员 | 血腥达里尔爵士（沉默）").length).toBeGreaterThan(0);
     expect(screen.getAllByText("音乐盒 | Under Bright Lights").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(4);
+  });
+
+  test("custom mode grays non-swappable items and opens picker for weapons", async () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 10, type: "weapon", model: "ak47", def_index: 7, observed_teams: ["t"], name_zh: "AK原皮" }),
+                cosmetic({ item_id: 11, type: "agent", observed_teams: ["t"], name_zh: "探员甲", paint_wear: undefined, paint_seed: undefined }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+
+    const agent = screen.getByRole("button", { name: "探员甲" });
+    expect(agent.className).toMatch(/opacity|grayscale|cursor-not-allowed/);
+    fireEvent.click(agent);
+    expect(screen.queryByPlaceholderText(/搜索皮肤|Search skins/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    expect(screen.getByPlaceholderText(/搜索皮肤|Search skins/i)).toBeTruthy();
+  });
+
+  test("cancel discards local replacements; save calls stub and returns to browse", async () => {
+    vi.mocked(saveCustomSkinPlan).mockClear();
+
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 10, type: "weapon", model: "ak47", def_index: 7, observed_teams: ["t"], name_zh: "AK原皮", paint_wear: 0.1, paint_seed: 1 }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+
+    const candidates = screen.getByTestId("skin-candidate-list");
+    const first = within(candidates).getAllByRole("button")[0];
+    const replacementName = first.textContent.trim();
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    expect(screen.getByText(new RegExp(`→\\s*${replacementName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^取消$|^Cancel$/ }));
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.queryByText(new RegExp(`→\\s*${replacementName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`))).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i }));
+
+    await waitFor(() => {
+      expect(saveCustomSkinPlan).toHaveBeenCalledWith({
+        steamid: STEAM_ID,
+        replacements: expect.objectContaining({
+          "id:10": expect.objectContaining({ catalog_id: expect.any(Number) }),
+        }),
+      });
+    });
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.getByText(/已记录自定义方案|Custom plan recorded/i)).toBeTruthy();
   });
 
   test("keeps inspect actions disabled when a glove finish was not retained", () => {
