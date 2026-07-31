@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------------------------
+# Copyright (c) unicbm. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+# ---------------------------------------------------------------------------------------------
+
 """Managed on-disk storage for Demo 2D replay assets.
 
 New cache writes live under one application-data subtree so they can be

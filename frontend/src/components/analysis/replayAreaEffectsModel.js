@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 /** World grid size for fire occupancy, not a painted bloom radius. */
 export const INFERNO_CELL_SIZE_WORLD = 36;
 export const DEFAULT_SMOKE_CELL_SIZE = 20;
