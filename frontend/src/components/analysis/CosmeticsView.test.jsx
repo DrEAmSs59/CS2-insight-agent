@@ -309,4 +309,55 @@ describe("CosmeticsView", () => {
       expect(action.disabled).toBe(true);
     }
   });
+
+  test("entering customize closes an open detail dialog", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ name_zh: "CT 刀", observed_teams: ["ct"] })] } } }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "CT 刀" })[0]);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+  });
+
+  test("empty team row shows header only; global noEvidence only when inventory is empty", () => {
+    const noEvidence = /这个 Demo 没有留下可用的饰品记录|This demo contains no usable cosmetic records/;
+
+    const { rerender } = render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 1, observed_teams: ["ct"], name_zh: "CT 刀" }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-ct")).getByText("CT 刀")).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-t")).queryByText(noEvidence)).toBeNull();
+    expect(screen.queryByText(noEvidence)).toBeNull();
+
+    rerender(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [] } } }}
+      />,
+    );
+
+    expect(screen.getByText(noEvidence)).toBeTruthy();
+    expect(screen.queryByTestId("cosmetics-row-ct")).toBeNull();
+  });
 });

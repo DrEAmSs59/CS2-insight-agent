@@ -235,9 +235,7 @@ function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode
             );
           })}
         </div>
-      ) : (
-        <p className="border border-dashed border-cs2-border-subtle px-3 py-4 text-center text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.noEvidence")}</p>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -417,6 +415,13 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
 
+  const clearOverlays = () => {
+    setDetail(null);
+    setHoverCard(null);
+    setContextMenu(null);
+    setPickerItem(null);
+  };
+
   useEffect(() => {
     setDetail(null);
     setContextMenu(null);
@@ -552,7 +557,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
   const cancelCustomize = () => {
     setLocalReplacements({});
-    setPickerItem(null);
+    clearOverlays();
     setViewMode("browse");
   };
 
@@ -569,8 +574,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       const result = await saveCustomSkinPlan({ steamid, replacements: localReplacements });
       if (result?.ok) {
         setNotice({ tone: "success", text: t("analysis.cosmetics.saveStubSuccess") });
+        clearOverlays();
         setViewMode("browse");
-        setPickerItem(null);
       } else {
         setNotice({ tone: "error", text: t("analysis.cosmetics.saveFailed") });
       }
@@ -607,7 +612,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             <button
               type="button"
               data-testid="cosmetics-customize"
-              onClick={() => setViewMode("custom")}
+              onClick={() => {
+                clearOverlays();
+                setViewMode("custom");
+              }}
               className="inline-flex h-8 items-center gap-1.5 border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-secondary hover:border-cs2-text-muted hover:text-cs2-text-primary"
             >
               {t("analysis.cosmetics.customize")}
