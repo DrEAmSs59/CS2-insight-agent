@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import { CS2EconomyInstance, CS2Inventory } from "@ianlucas/cs2-lib";
 import { generateInspectLink } from "@ianlucas/cs2-lib-inspect";
 

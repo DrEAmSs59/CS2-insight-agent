@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 const INFERNO_CELL_SIZE_WORLD = 36;
 const DEFAULT_SMOKE_CELL_SIZE_WORLD = 20;
 
