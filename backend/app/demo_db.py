@@ -1756,7 +1756,7 @@ class DemoDB:
             cached = int((await cached_cur.fetchone())[0] or 0)
         return {"demo_total": total, "demo_cached": cached, "demo_uncached": max(0, total - cached)}
 
-async def delete_demo(self, demo_id: int) -> bool:
+    async def delete_demo(self, demo_id: int) -> bool:
         """删除库内记录。磁盘文件保留时，下次扫描可重新进入待入库。"""
         demo = await self.get_demo_by_id(demo_id)
         if not demo:
@@ -1777,6 +1777,7 @@ async def delete_demo(self, demo_id: int) -> bool:
             except OSError:
                 logger.warning("Failed to delete cached demo file: %s", cached_path)
         return True
+
 
     async def update_display_name(self, demo_id: int, display_name: str | None) -> bool:
         """仅更新库中展示名；``None`` 或空串会清空 ``display_name``（列表仍用磁盘 ``filename``）。"""
