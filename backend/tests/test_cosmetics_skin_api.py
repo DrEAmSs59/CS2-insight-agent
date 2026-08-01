@@ -359,6 +359,8 @@ def test_post_partial_success_writes_cache_and_returns_item_results(api_env, mon
     assert len(body["plan"]["items"]) == 1
     assert body["plan"]["items"][0]["slot_key"] == "id:10"
     assert body["succeeded"][0]["slot_key"] == "id:10"
+    assert body["succeeded"][0]["original_name_zh"] == "AK原皮"
+    assert body["succeeded"][0]["replacement_name_zh"] == "AK-47 | 红线"
     assert body["failed"][0]["slot_key"] == "id:11"
     assert "donor" in body["failed"][0]["error"]
 

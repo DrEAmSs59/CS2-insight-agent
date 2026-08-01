@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowRight,
   Check,
   ChevronLeft,
   Copy,
@@ -62,6 +63,49 @@ function localized(item, field, locale) {
 
 function displayName(item, locale) {
   return localized(item, "name", locale) || String(item?.model || "CS2");
+}
+
+function saveResultOriginalName(row, locale) {
+  const zh = String(row?.original_name_zh || "").trim();
+  const en = String(row?.original_name_en || "").trim();
+  if (String(locale || "").toLowerCase().startsWith("zh")) {
+    return zh || en || "";
+  }
+  return en || zh || "";
+}
+
+function saveResultReplacementName(row, locale) {
+  const zh = String(row?.replacement_name_zh || row?.name_zh || "").trim();
+  const en = String(row?.replacement_name_en || row?.name_en || "").trim();
+  if (String(locale || "").toLowerCase().startsWith("zh")) {
+    return zh || en || String(row?.item_id64 || "");
+  }
+  return en || zh || String(row?.item_id64 || "");
+}
+
+/** Fill original/replacement names from local inventory when API omits them. */
+function enrichSaveResultRows(rows, inventoryRows, replacements) {
+  const bySlot = new Map();
+  const byItemId = new Map();
+  for (const item of inventoryRows || []) {
+    const key = slotKey(item);
+    if (key) bySlot.set(key, item);
+    const id = String(item?.item_id ?? "").trim();
+    if (id && id !== "0") byItemId.set(id, item);
+  }
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const slot = String(row?.slot_key || "").trim();
+    const itemId = String(row?.item_id64 || "").trim();
+    const original = (slot && bySlot.get(slot)) || (itemId && byItemId.get(itemId)) || null;
+    const replacement = (slot && replacements?.[slot]) || null;
+    return {
+      ...row,
+      original_name_zh: row?.original_name_zh || original?.name_zh || "",
+      original_name_en: row?.original_name_en || original?.name_en || "",
+      replacement_name_zh: row?.replacement_name_zh || row?.name_zh || replacement?.name_zh || "",
+      replacement_name_en: row?.replacement_name_en || row?.name_en || replacement?.name_en || "",
+    };
+  });
 }
 
 function customName(item) {
@@ -629,8 +673,16 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
     try {
       const result = await saveCustomSkinPlan({ demoId, steamid, replacements: localReplacements });
-      const succeeded = Array.isArray(result?.succeeded) ? result.succeeded : [];
-      const failed = Array.isArray(result?.failed) ? result.failed : [];
+      const succeeded = enrichSaveResultRows(
+        Array.isArray(result?.succeeded) ? result.succeeded : [],
+        inventory,
+        localReplacements,
+      );
+      const failed = enrichSaveResultRows(
+        Array.isArray(result?.failed) ? result.failed : [],
+        inventory,
+        localReplacements,
+      );
       const hasItemResults = succeeded.length > 0 || failed.length > 0;
 
       if (hasItemResults) {
@@ -876,13 +928,23 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
               </p>
               {saveResult.succeeded.length ? (
                 <ul className="max-h-48 space-y-2 overflow-y-auto">
-                  {saveResult.succeeded.map((row) => (
-                    <li key={`ok-${row.slot_key || row.item_id64}`} className="text-[12px]">
-                      <span className="font-medium text-cs2-text-primary">
-                        {(locale === "zh" ? row.name_zh : row.name_en) || row.name_zh || row.name_en || row.item_id64}
-                      </span>
-                    </li>
-                  ))}
+                  {saveResult.succeeded.map((row) => {
+                    const from = saveResultOriginalName(row, locale);
+                    const to = saveResultReplacementName(row, locale);
+                    return (
+                      <li key={`ok-${row.slot_key || row.item_id64}`} className="text-[12px] leading-snug">
+                        {from ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <span className="text-cs2-text-muted">{from}</span>
+                            <ArrowRight className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
+                            <span className="font-medium text-cs2-text-primary">{to}</span>
+                          </span>
+                        ) : (
+                          <span className="font-medium text-cs2-text-primary">{to}</span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="text-[12px] text-cs2-text-muted">{t("analysis.cosmetics.saveResultEmpty")}</p>
@@ -894,16 +956,26 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
               </p>
               {saveResult.failed.length ? (
                 <ul className="max-h-48 space-y-2 overflow-y-auto">
-                  {saveResult.failed.map((row) => (
-                    <li key={`fail-${row.slot_key || row.item_id64}`} className="text-[12px]">
-                      <span className="font-medium text-cs2-text-primary">
-                        {(locale === "zh" ? row.name_zh : row.name_en) || row.name_zh || row.name_en || row.item_id64}
-                      </span>
-                      {row.error ? (
-                        <span className="ml-2 text-cs2-text-muted">— {row.error}</span>
-                      ) : null}
-                    </li>
-                  ))}
+                  {saveResult.failed.map((row) => {
+                    const from = saveResultOriginalName(row, locale);
+                    const to = saveResultReplacementName(row, locale);
+                    return (
+                      <li key={`fail-${row.slot_key || row.item_id64}`} className="text-[12px] leading-snug">
+                        {from ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <span className="text-cs2-text-muted">{from}</span>
+                            <ArrowRight className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
+                            <span className="font-medium text-cs2-text-primary">{to}</span>
+                          </span>
+                        ) : (
+                          <span className="font-medium text-cs2-text-primary">{to}</span>
+                        )}
+                        {row.error ? (
+                          <span className="mt-0.5 block text-cs2-text-muted">— {row.error}</span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="text-[12px] text-cs2-text-muted">{t("analysis.cosmetics.saveResultEmpty")}</p>

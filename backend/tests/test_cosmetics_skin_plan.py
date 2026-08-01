@@ -205,3 +205,35 @@ def test_build_batch_multiple_slots():
     assert len(batch_items) == 2
     assert {row["item_id64"] for row in batch_items} == {"10", "11"}
     assert len(plan["items"]) == 2
+
+
+def test_map_item_statuses_includes_original_and_replacement_names():
+    from app.cosmetics_skin_plan import map_item_statuses
+
+    inv = [
+        inventory_row(
+            item_id=10,
+            type="weapon",
+            def_index=7,
+            paint_index=0,
+            model="ak47",
+            name_zh="AK原皮",
+            name_en="AK Stock",
+        )
+    ]
+    replacements = {
+        "id:10": replacement(
+            type="weapon",
+            def_index=7,
+            paint_index=340,
+            name_zh="AK-47 | 红线",
+            name_en="AK-47 | Redline",
+        )
+    }
+    _, plan = build_batch_and_plan(STEAM_ID, inv, replacements)
+    mapped = map_item_statuses(plan, [{"item_id64": "10", "definition_index": 7}])
+    assert mapped[0]["original_name_zh"] == "AK原皮"
+    assert mapped[0]["original_name_en"] == "AK Stock"
+    assert mapped[0]["replacement_name_zh"] == "AK-47 | 红线"
+    assert mapped[0]["replacement_name_en"] == "AK-47 | Redline"
+    assert mapped[0]["name_zh"] == "AK-47 | 红线"

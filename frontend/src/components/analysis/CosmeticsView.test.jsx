@@ -392,7 +392,16 @@ describe("CosmeticsView", () => {
           },
         }],
       },
-      succeeded: [{ item_id64: "10", slot_key: "id:10", name_zh: "AK新皮", name_en: "AK New" }],
+      succeeded: [{
+        item_id64: "10",
+        slot_key: "id:10",
+        original_name_zh: "AK原皮",
+        original_name_en: "AK Stock",
+        replacement_name_zh: "AK新皮",
+        replacement_name_en: "AK New",
+        name_zh: "AK新皮",
+        name_en: "AK New",
+      }],
       failed: [],
     });
 
@@ -424,10 +433,23 @@ describe("CosmeticsView", () => {
           },
         }],
       },
-      succeeded: [{ item_id64: "10", slot_key: "id:10", name_zh: "AK新皮", name_en: "AK New" }],
+      succeeded: [{
+        item_id64: "10",
+        slot_key: "id:10",
+        original_name_zh: "AK原皮",
+        original_name_en: "AK Stock",
+        replacement_name_zh: "AK新皮",
+        replacement_name_en: "AK New",
+        name_zh: "AK新皮",
+        name_en: "AK New",
+      }],
       failed: [{
         item_id64: "11",
         slot_key: "id:11",
+        original_name_zh: "默认刀",
+        original_name_en: "Default Knife",
+        replacement_name_zh: "刺刀 | 多普勒",
+        replacement_name_en: "Bayonet | Doppler",
         name_zh: "刺刀 | 多普勒",
         name_en: "Bayonet | Doppler",
         error: "need a donor knife",
@@ -469,9 +491,80 @@ describe("CosmeticsView", () => {
       expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
     });
     expect(screen.getByText(/部分饰品已保存|Some skins were saved/i)).toBeTruthy();
-    expect(screen.getByText("AK新皮")).toBeTruthy();
-    expect(screen.getByText("刺刀 | 多普勒")).toBeTruthy();
-    expect(screen.getByText(/need a donor knife/i)).toBeTruthy();
+    const result = screen.getByTestId("cosmetics-save-result");
+    expect(within(result).getByText("AK原皮")).toBeTruthy();
+    expect(within(result).getByText("AK新皮")).toBeTruthy();
+    expect(within(result).getByText("默认刀")).toBeTruthy();
+    expect(within(result).getByText("刺刀 | 多普勒")).toBeTruthy();
+    expect(within(result).getByText(/need a donor knife/i)).toBeTruthy();
+  });
+
+  test("save result dialog enriches original names from inventory when API omits them", async () => {
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      partial: false,
+      plan: {
+        steamid: STEAM_ID,
+        items: [{
+          slot_key: "id:10",
+          original: { name_zh: "AK原皮", name_en: "AK Stock", item_id: 10 },
+          replacement: {
+            catalog_id: 1,
+            def_index: 7,
+            paint_index: 1,
+            paint_wear: 0.1,
+            paint_seed: 1,
+            name_zh: "AK新皮",
+            name_en: "AK New",
+            image_url: "",
+            type: "weapon",
+            model: "ak47",
+          },
+        }],
+      },
+      // Legacy API shape: only replacement-ish name_zh, no original_name_*.
+      succeeded: [{ item_id64: "10", slot_key: "id:10", name_zh: "AK新皮", name_en: "AK New" }],
+      failed: [],
+    });
+
+    render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                  name_en: "AK Stock",
+                }),
+              ],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
+    });
+    const result = screen.getByTestId("cosmetics-save-result");
+    expect(within(result).getByText("AK原皮")).toBeTruthy();
+    expect(within(result).getByText("AK新皮")).toBeTruthy();
   });
 
   test("seeds local replacements from persisted custom-plan on mount", async () => {

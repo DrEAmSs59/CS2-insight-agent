@@ -224,7 +224,7 @@ def map_item_statuses(
     plan_json: dict[str, Any],
     statuses: list[Any] | None,
 ) -> list[dict[str, Any]]:
-    """Attach slot_key / display names from plan to skin-core item status rows."""
+    """Attach slot_key / original→replacement names from plan to status rows."""
     by_id: dict[str, dict[str, Any]] = {}
     for entry in plan_json.get("items") or []:
         if not isinstance(entry, dict):
@@ -236,6 +236,11 @@ def map_item_statuses(
             continue
         by_id[str(item_id)] = {
             "slot_key": str(entry.get("slot_key") or ""),
+            "original_name_zh": original.get("name_zh"),
+            "original_name_en": original.get("name_en"),
+            "replacement_name_zh": replacement.get("name_zh"),
+            "replacement_name_en": replacement.get("name_en"),
+            # Legacy single-name fields: prefer replacement (what was applied).
             "name_zh": replacement.get("name_zh") or original.get("name_zh"),
             "name_en": replacement.get("name_en") or original.get("name_en"),
             "type": original.get("type") or replacement.get("type"),
@@ -251,6 +256,10 @@ def map_item_statuses(
             "item_id64": item_id64,
             "definition_index": row.get("definition_index"),
             "slot_key": meta.get("slot_key"),
+            "original_name_zh": meta.get("original_name_zh"),
+            "original_name_en": meta.get("original_name_en"),
+            "replacement_name_zh": meta.get("replacement_name_zh"),
+            "replacement_name_en": meta.get("replacement_name_en"),
             "name_zh": meta.get("name_zh"),
             "name_en": meta.get("name_en"),
             "type": meta.get("type"),
