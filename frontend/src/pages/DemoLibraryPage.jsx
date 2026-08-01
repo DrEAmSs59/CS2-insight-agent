@@ -414,21 +414,11 @@ export default function DemoLibraryPage() {
               <button
                 type="button"
                 className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-cs2-emerald-on-surface hover:bg-emerald-500/20"
-                onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "reimport")}
+                onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id)}
               >
-                {t("library.deleteReimport")}
+                {t("library.deleteFromLibrary")}
                 <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
-                  {t("library.deleteReimportHint")}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="rounded border border-cs2-border px-3 py-2 text-left text-[11px] leading-snug text-cs2-text-secondary hover:bg-cs2-bg-input/50"
-                onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id, "skip")}
-              >
-                {t("library.deleteSkip")}
-                <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
-                  {t("library.deleteSkipHint")}
+                  {t("library.deleteFromLibraryHint")}
                 </span>
               </button>
               <button

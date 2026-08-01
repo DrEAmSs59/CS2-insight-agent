@@ -217,9 +217,6 @@ async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
         if not _enqueue_striped_locks:
             _enqueue_striped_locks = [asyncio.Lock() for _ in range(_ENQUEUE_STRIPE_COUNT)]
     demo_path = str(path.resolve())
-    if await demo_db.is_path_scan_blocked(demo_path):
-        logger.debug("Skip enqueue (scan blocklist): %s", demo_path)
-        return
     stripe = (hash(demo_path) & 0x7FFFFFFF) % _ENQUEUE_STRIPE_COUNT
     async with _enqueue_striped_locks[stripe]:
         size: int | None = None
@@ -2281,14 +2278,11 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
 
 
 @app.delete("/api/demos/{demo_id}")
-async def delete_demo(
-    demo_id: int,
-    rescan: Annotated[Literal["reimport", "skip"], Query(description="reimport=再次扫描可入库; skip=扫描不再入库")] = "reimport",
-):
+async def delete_demo(demo_id: int):
     demo = await demo_db.get_demo_by_id(demo_id)
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    ok = await demo_db.delete_demo(demo_id, rescan=rescan)
+    ok = await demo_db.delete_demo(demo_id)
     if not ok:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     from .parser.replay_cache_storage import remove_demo_replay_cache
@@ -2415,7 +2409,7 @@ async def delete_demo_file(demo_id: int):
         raise HTTPException(409, f"Demo 文件无法安全移入回收区，数据库记录未删除：{exc}") from exc
     # Only commit the database deletion after every owned file is recoverable.
     try:
-        deleted = await demo_db.delete_demo(demo_id, rescan="reimport")
+        deleted = await demo_db.delete_demo(demo_id)
         if not deleted:
             raise HTTPException(404, f"Demo not found: {demo_id}")
     except Exception:

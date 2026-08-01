@@ -224,13 +224,38 @@ class DemoDB:
             )
             await conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS demo_scan_blocklist (
-                    path       TEXT PRIMARY KEY NOT NULL,
-                    created_at TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    applied_at TEXT NOT NULL
                 )
                 """
             )
-            # 兼容旧库：补齐新增列
+            # Scan blocklist is retired: delete-from-library always allows
+            # rediscovery on the next scan; stale pending rows are purged by
+            # purge_stale_pending_demos instead.
+            cur_drop = await conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1",
+                ("drop_scan_blocklist_v1",),
+            )
+            if await cur_drop.fetchone() is None:
+                await conn.execute("DROP TABLE IF EXISTS demo_scan_blocklist")
+                await conn.execute(
+                    "INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)",
+                    ("drop_scan_blocklist_v1", utc_now_iso()),
+                )
+                logger.info("Dropped demo_scan_blocklist (migration drop_scan_blocklist_v1)")
+            # Legacy one-shot clear; keep the marker so older DBs stay marked.
+            cur_mig = await conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1",
+                ("clear_scan_blocklist_v1",),
+            )
+            if await cur_mig.fetchone() is None:
+                await conn.execute(
+                    "INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)",
+                    ("clear_scan_blocklist_v1", utc_now_iso()),
+                )
+            await conn.commit()
+
             cur = await conn.execute("PRAGMA table_info(demo_files)")
             cols = {str(r[1]) for r in await cur.fetchall()}
             alter_stmts: list[str] = []
@@ -1731,22 +1756,8 @@ class DemoDB:
             cached = int((await cached_cur.fetchone())[0] or 0)
         return {"demo_total": total, "demo_cached": cached, "demo_uncached": max(0, total - cached)}
 
-    async def is_path_scan_blocked(self, path: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as conn:
-            cur = await conn.execute(
-                "SELECT 1 FROM demo_scan_blocklist WHERE path = ? LIMIT 1",
-                (path,),
-            )
-            row = await cur.fetchone()
-        return row is not None
-
-    async def delete_demo(
-        self,
-        demo_id: int,
-        *,
-        rescan: Literal["reimport", "skip"] = "reimport",
-    ) -> bool:
-        """删除库内记录。``rescan=skip`` 时把磁盘路径加入阻止表，后续扫描/监听不再入库。"""
+async def delete_demo(self, demo_id: int) -> bool:
+        """删除库内记录。磁盘文件保留时，下次扫描可重新进入待入库。"""
         demo = await self.get_demo_by_id(demo_id)
         if not demo:
             return False
@@ -1759,17 +1770,6 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
-            if rescan == "skip":
-                await conn.execute(
-                    """
-                    INSERT INTO demo_scan_blocklist(path, created_at)
-                    VALUES (?, ?)
-                    ON CONFLICT(path) DO UPDATE SET created_at = excluded.created_at
-                    """,
-                    (disk_path, utc_now_iso()),
-                )
-            else:
-                await conn.execute("DELETE FROM demo_scan_blocklist WHERE path = ?", (disk_path,))
             await conn.commit()
         if cached_path:
             try:
@@ -1937,6 +1937,89 @@ class DemoDB:
             total = cur.rowcount
             if total:
                 logger.info("purge_deleted_demo_files: root=%s removed=%d", watch_root, total)
+            return total
+
+    @staticmethod
+    def _path_under_watch_roots(path: str, active_watch_roots: Iterable[str]) -> bool:
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except OSError:
+            return False
+        for root in active_watch_roots:
+            try:
+                resolved.relative_to(Path(root).expanduser().resolve())
+            except (OSError, ValueError):
+                continue
+            return True
+        return False
+
+    async def purge_stale_pending_demos(self, active_watch_roots: Iterable[str]) -> int:
+        """Delete pending-ingest rows whose file is missing or outside current watch roots.
+
+        Only ``status='pending'`` rows are removed; ingested library demos are untouched.
+        """
+        roots = [str(Path(root).expanduser().resolve()) for root in active_watch_roots if str(root or "").strip()]
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, path FROM demo_files WHERE status = 'pending'"
+            )
+            rows = await cur.fetchall()
+
+        stale_ids: list[int] = []
+        stale_paths: list[str] = []
+        for row in rows:
+            path = str(row["path"] or "")
+            if not path:
+                stale_ids.append(int(row["id"]))
+                continue
+            try:
+                exists = Path(path).is_file()
+            except OSError:
+                exists = False
+            if not exists or not self._path_under_watch_roots(path, roots):
+                stale_ids.append(int(row["id"]))
+                stale_paths.append(path)
+
+        if not stale_ids:
+            return 0
+
+        async with aiosqlite.connect(self.db_path) as conn:
+            placeholders = ",".join("?" * len(stale_ids))
+            path_placeholders = ",".join("?" * len(stale_paths)) if stale_paths else ""
+            if stale_paths:
+                await conn.execute(
+                    f"DELETE FROM match_results WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+                await conn.execute(
+                    f"DELETE FROM demo_result_summaries WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+                await conn.execute(
+                    f"DELETE FROM demo_timeline_events WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+            await conn.execute(
+                f"DELETE FROM demo_roster_cache WHERE demo_id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            await conn.execute(
+                f"DELETE FROM demo_player_stats WHERE demo_id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            cur = await conn.execute(
+                f"DELETE FROM demo_files WHERE id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            await conn.commit()
+            total = cur.rowcount
+            if total:
+                logger.info(
+                    "purge_stale_pending_demos: removed=%d active_roots=%d",
+                    total,
+                    len(roots),
+                )
             return total
 
     async def all_content_md5_hexes(self) -> set[str]:
