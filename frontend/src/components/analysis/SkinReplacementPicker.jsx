@@ -1,39 +1,107 @@
 import { useEffect, useMemo, useState } from "react";
-import { PackageOpen, WifiOff } from "lucide-react";
+import { PackageOpen, Shuffle, WifiOff } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import Modal from "../ui/Modal.jsx";
-import { filterCandidates, listSkinCandidates } from "./cosmeticsCatalog.js";
+import { craftNameParts, filterCandidates, imageUrlForWear, listSkinCandidates } from "./cosmeticsCatalog.js";
+
+const WEAR_MIN = 0;
+const WEAR_MAX = 1;
+const SEED_MIN = 0;
+const SEED_MAX = 1000;
 
 function displayName(item, locale) {
-  const chinese = String(item?.name_zh || "").trim();
-  const english = String(item?.name_en || "").trim();
-  return String(locale || "").toLowerCase().startsWith("zh")
-    ? chinese || english
-    : english || chinese;
+  return craftNameParts(item, locale).full;
+}
+
+function finishNameColor(item) {
+  return String(item?.rarity || "").trim() || "#ded6cc";
+}
+
+function ItemCaption({ item, locale, compact = false, inline = false }) {
+  if (!item) {
+    return <span className="text-sm text-cs2-text-muted">—</span>;
+  }
+  const { model, finish, alt, full } = craftNameParts(item, locale);
+  const color = finishNameColor(item);
+
+  if (inline) {
+    const parts = [];
+    if (model) parts.push({ text: model, className: "text-cs2-text-primary" });
+    if (finish) parts.push({ text: finish, className: "font-semibold", style: { color } });
+    if (!model && !finish && full) parts.push({ text: full, className: "text-cs2-text-primary" });
+    if (alt) parts.push({ text: alt, className: "text-cs2-text-secondary" });
+    return (
+      <span className="block min-w-0 truncate text-[11px] leading-tight" title={parts.map((p) => p.text).join(" | ")}>
+        {parts.map((part, index) => (
+          <span key={`${part.text}-${index}`}>
+            {index > 0 ? <span className="text-cs2-text-muted"> | </span> : null}
+            <span className={part.className} style={part.style}>{part.text}</span>
+          </span>
+        ))}
+      </span>
+    );
+  }
+
+  const modelClass = compact
+    ? "truncate text-[11px] text-cs2-text-primary"
+    : "break-words text-sm text-cs2-text-primary";
+  const finishClass = compact
+    ? "truncate text-[11px] font-semibold"
+    : "break-words text-sm font-semibold";
+  const altClass = compact
+    ? "truncate text-[10px] text-cs2-text-secondary"
+    : "break-words text-[11px] text-cs2-text-secondary";
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5 leading-snug">
+      {model ? <span className={modelClass}>{model}</span> : null}
+      {finish ? <span className={finishClass} style={{ color }}>{finish}</span> : null}
+      {!finish && !model ? <span className={modelClass}>{full}</span> : null}
+      {alt ? <span className={altClass}>{alt}</span> : null}
+    </span>
+  );
+}
+
+function formatWear(value) {
+  const wear = Number(value);
+  if (!Number.isFinite(wear)) return "";
+  return wear.toFixed(6);
 }
 
 function isValidWear(value) {
   const wear = Number(value);
-  return Number.isFinite(wear) && wear >= 0 && wear <= 1;
+  return Number.isFinite(wear) && wear >= WEAR_MIN && wear <= WEAR_MAX;
 }
 
 function isValidSeed(value) {
-  if (value === "" || value === null || value === undefined) return true;
+  if (value === "" || value === null || value === undefined) return false;
   const seed = Number(value);
-  return Number.isInteger(seed);
+  return Number.isInteger(seed) && seed >= SEED_MIN && seed <= SEED_MAX;
 }
 
 function parseSeed(value) {
-  if (value === "" || value === null || value === undefined) return null;
   const seed = Number(value);
-  return Number.isInteger(seed) ? seed : null;
+  return Number.isInteger(seed) && seed >= SEED_MIN && seed <= SEED_MAX ? seed : null;
 }
 
-function TileImage({ item, onlineAssetsEnabled, className = "" }) {
-  const [failed, setFailed] = useState(false);
-  const src = onlineAssetsEnabled && !failed ? String(item?.image_url || "") : "";
+function randomWear() {
+  return formatWear(Math.random() * (WEAR_MAX - WEAR_MIN) + WEAR_MIN);
+}
 
-  useEffect(() => setFailed(false), [item?.image_url, onlineAssetsEnabled]);
+function randomSeed() {
+  return String(SEED_MIN + Math.floor(Math.random() * (SEED_MAX - SEED_MIN + 1)));
+}
+
+function TileImage({ item, onlineAssetsEnabled, locale = "zh", wear, className = "" }) {
+  const [failed, setFailed] = useState(false);
+  const base = onlineAssetsEnabled ? String(item?.image_url || "") : "";
+  const wearNum = wear === "" || wear === null || wear === undefined
+    ? undefined
+    : Number(wear);
+  const src = onlineAssetsEnabled && !failed
+    ? imageUrlForWear(base, Number.isFinite(wearNum) ? wearNum : undefined, item)
+    : "";
+
+  useEffect(() => setFailed(false), [item?.image_url, item?.paint_index, item?.is_placeholder, onlineAssetsEnabled, wear]);
 
   if (!src) {
     return (
@@ -46,7 +114,7 @@ function TileImage({ item, onlineAssetsEnabled, className = "" }) {
   return (
     <img
       src={src}
-      alt={displayName(item, "zh")}
+      alt={displayName(item, locale)}
       draggable={false}
       loading="lazy"
       onError={() => setFailed(true)}
@@ -55,23 +123,114 @@ function TileImage({ item, onlineAssetsEnabled, className = "" }) {
   );
 }
 
-function SkinTile({ item, locale, onlineAssetsEnabled, label }) {
+function ParamRow({
+  label,
+  value,
+  onChange,
+  onRandom,
+  readOnly,
+  kind,
+  invalidText,
+}) {
+  const t = useT();
+  const isWear = kind === "wear";
+  const numeric = Number(value);
+  const sliderValue = Number.isFinite(numeric)
+    ? Math.min(isWear ? WEAR_MAX : SEED_MAX, Math.max(isWear ? WEAR_MIN : SEED_MIN, numeric))
+    : (isWear ? WEAR_MIN : SEED_MIN);
+
   return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-cs2-text-muted">{label}</span>
+    <label className="flex max-w-[256px] shrink-0 flex-col gap-0.5 text-[11px]">
+      <span className="text-cs2-text-muted">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          inputMode={isWear ? "decimal" : "numeric"}
+          readOnly={readOnly}
+          disabled={readOnly}
+          value={value}
+          onChange={(event) => onChange?.(event.target.value)}
+          className="w-[84px] shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <input
+          type="range"
+          min={isWear ? WEAR_MIN : SEED_MIN}
+          max={isWear ? WEAR_MAX : SEED_MAX}
+          step={isWear ? 0.000001 : 1}
+          disabled={readOnly}
+          value={sliderValue}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            onChange?.(isWear ? formatWear(next) : String(Math.round(next)));
+          }}
+          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={onRandom}
+          title={t("analysis.cosmetics.picker.random")}
+          aria-label={t("analysis.cosmetics.picker.random")}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-cs2-border bg-cs2-bg-input text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Shuffle className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {invalidText ? <span className="text-[10px] text-red-400">{invalidText}</span> : null}
+    </label>
+  );
+}
+
+function SkinColumn({
+  item,
+  locale,
+  onlineAssetsEnabled,
+  label,
+  wear,
+  seed,
+  wearEditable,
+  seedEditable,
+  onWearChange,
+  onSeedChange,
+  wearInvalid,
+  seedInvalid,
+}) {
+  const t = useT();
+  return (
+    <div className="flex w-[256px] shrink-0 flex-col gap-1">
+      <span className="shrink-0 text-xs font-medium text-cs2-text-muted">{label}</span>
       <div
         data-skin-tile
-        className="flex w-[256px] h-[192px] items-center justify-center overflow-hidden rounded border border-cs2-border bg-cs2-bg-input"
+        className="flex h-[192px] w-[256px] shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border bg-cs2-bg-input"
       >
-        <TileImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} />
+        <TileImage
+          item={item}
+          locale={locale}
+          onlineAssetsEnabled={onlineAssetsEnabled}
+          wear={wear === "" || wear === null || wear === undefined
+            ? undefined
+            : (Number.isFinite(Number(wear)) ? Number(wear) : undefined)}
+        />
       </div>
-      {item ? (
-        <span className="max-w-[256px] truncate text-sm text-cs2-text-primary">
-          {displayName(item, locale)}
-        </span>
-      ) : (
-        <span className="max-w-[256px] text-sm text-cs2-text-muted">—</span>
-      )}
+      <ItemCaption item={item} locale={locale} inline />
+      <ParamRow
+        label={t("analysis.cosmetics.picker.wear")}
+        kind="wear"
+        value={wear}
+        readOnly={!wearEditable}
+        onChange={onWearChange}
+        onRandom={() => onWearChange?.(randomWear())}
+        invalidText={wearInvalid}
+      />
+      <ParamRow
+        label={t("analysis.cosmetics.picker.seed")}
+        kind="seed"
+        value={seed}
+        readOnly={!seedEditable}
+        onChange={onSeedChange}
+        onRandom={() => onSeedChange?.(randomSeed())}
+        invalidText={seedInvalid}
+      />
     </div>
   );
 }
@@ -91,12 +250,17 @@ export default function SkinReplacementPicker({
   const [wear, setWear] = useState("");
   const [seed, setSeed] = useState("");
 
+  const currentWear = formatWear(sourceItem?.paint_wear) || String(sourceItem?.paint_wear ?? "");
+  const currentSeed = sourceItem?.paint_seed === undefined || sourceItem?.paint_seed === null
+    ? ""
+    : String(Math.trunc(Number(sourceItem.paint_seed)));
+
   useEffect(() => {
     if (!open) return;
     setQuery("");
     setSelected(null);
-    setWear(sourceItem?.paint_wear ?? "");
-    setSeed(sourceItem?.paint_seed ?? "");
+    setWear(formatWear(WEAR_MIN));
+    setSeed(String(SEED_MIN));
   }, [open, sourceItem]);
 
   const filtered = useMemo(
@@ -122,6 +286,7 @@ export default function SkinReplacementPicker({
       type: selected.type,
       name_en: selected.name_en,
       name_zh: selected.name_zh,
+      alt_name: selected.alt_name,
       image_url: selected.image_url,
       rarity: selected.rarity,
       paint_wear: Number(wear),
@@ -134,7 +299,10 @@ export default function SkinReplacementPicker({
       open={open}
       onClose={onClose}
       title={t("analysis.cosmetics.picker.title", { name: displayName(sourceItem, locale) })}
-      maxWidth="max-w-5xl"
+      maxWidth="max-w-[1180px]"
+      maxHeight="max-h-[90vh]"
+      className="!h-auto"
+      contentClassName="min-h-0 overflow-hidden"
       footer={(
         <div className="flex justify-end gap-2">
           <button
@@ -155,96 +323,75 @@ export default function SkinReplacementPicker({
         </div>
       )}
     >
-      <div className="flex gap-6 p-5">
-        <div className="flex shrink-0 flex-col gap-5">
-          <SkinTile
+      <div className="grid h-[min(720px,calc(90vh-8.5rem))] grid-cols-[256px_minmax(0,1fr)] gap-5 overflow-hidden p-4">
+        <div className="flex min-h-0 flex-col justify-between gap-3 overflow-hidden pr-0.5">
+          <SkinColumn
             item={sourceItem}
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
             label={t("analysis.cosmetics.picker.current")}
+            wear={currentWear}
+            seed={currentSeed}
+            wearEditable={false}
+            seedEditable={false}
           />
-          <SkinTile
+          <SkinColumn
             item={replacementPreview}
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
             label={t("analysis.cosmetics.picker.replacement")}
+            wear={wear}
+            seed={seed}
+            wearEditable
+            seedEditable
+            onWearChange={setWear}
+            onSeedChange={setSeed}
+            wearInvalid={wearValid ? null : t("analysis.cosmetics.picker.wearInvalid")}
+            seedInvalid={seedValid ? null : t("analysis.cosmetics.picker.seedInvalid")}
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden">
+          <div className="shrink-0 text-xs font-medium text-cs2-text-muted">
+            {t("analysis.cosmetics.picker.candidates")}
+          </div>
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("analysis.cosmetics.picker.search")}
-            className="w-full rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
+            className="w-full shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
           />
-
-          <div className="min-h-0 flex-1">
-            <div className="mb-2 text-xs font-medium text-cs2-text-muted">
-              {t("analysis.cosmetics.picker.candidates")}
-            </div>
-            <div
-              data-testid="skin-candidate-list"
-              className="grid max-h-[360px] grid-cols-2 gap-3 overflow-y-auto pr-1"
-            >
-              {filtered.map((candidate) => {
-                const active = selected?.catalog_id === candidate.catalog_id
-                  && selected?.paint_index === candidate.paint_index;
-                return (
-                  <button
-                    key={`${candidate.catalog_id}-${candidate.paint_index}`}
-                    type="button"
-                    onClick={() => setSelected(candidate)}
-                    aria-pressed={active}
-                    className={`rounded border p-1 text-left transition-colors ${
-                      active
-                        ? "border-cs2-accent bg-cs2-bg-hover"
-                        : "border-cs2-border bg-cs2-bg-input hover:border-cs2-text-muted"
-                    }`}
-                  >
-                    <div
-                      data-skin-tile
-                      className="flex w-[256px] h-[192px] items-center justify-center overflow-hidden"
-                    >
-                      <TileImage item={candidate} onlineAssetsEnabled={onlineAssetsEnabled} />
-                    </div>
-                    <span className="mt-1 block truncate px-1 text-xs text-cs2-text-primary">
-                      {displayName(candidate, locale)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-cs2-text-muted">{t("analysis.cosmetics.picker.wear")}</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={wear}
-                onChange={(event) => setWear(event.target.value)}
-                className="rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-cs2-text-primary outline-none focus:border-cs2-accent"
-              />
-              {!wearValid ? (
-                <span className="text-xs text-red-400">{t("analysis.cosmetics.picker.wearInvalid")}</span>
-              ) : null}
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-cs2-text-muted">{t("analysis.cosmetics.picker.seed")}</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={seed}
-                onChange={(event) => setSeed(event.target.value)}
-                className="rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-cs2-text-primary outline-none focus:border-cs2-accent"
-              />
-              {!seedValid ? (
-                <span className="text-xs text-red-400">{t("analysis.cosmetics.picker.seedInvalid")}</span>
-              ) : null}
-            </label>
+          <div
+            data-testid="skin-candidate-list"
+            className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-3 content-start gap-3 overflow-y-auto overflow-x-hidden pr-1"
+          >
+            {filtered.map((candidate) => {
+              const active = selected?.catalog_id === candidate.catalog_id
+                && selected?.paint_index === candidate.paint_index;
+              return (
+                <button
+                  key={`${candidate.catalog_id}-${candidate.paint_index}`}
+                  type="button"
+                  onClick={() => setSelected(candidate)}
+                  aria-pressed={active}
+                  aria-label={[displayName(candidate, locale), craftNameParts(candidate, locale).alt].filter(Boolean).join(" ")}
+                  data-skin-tile
+                  className={`relative box-border flex h-[192px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
+                    active
+                      ? "border-cs2-accent bg-cs2-bg-hover"
+                      : "border-cs2-border bg-cs2-bg-input hover:border-cs2-text-muted"
+                  }`}
+                >
+                  <div className="min-h-0 flex-1">
+                    <TileImage item={candidate} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} />
+                  </div>
+                  <span className="absolute inset-x-0 bottom-0 bg-black/65 px-2 py-1">
+                    <ItemCaption item={candidate} locale={locale} compact />
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
