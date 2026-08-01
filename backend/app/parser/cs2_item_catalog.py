@@ -375,11 +375,7 @@ def _sample_player_context(
                     "item_id": item_id,
                     "custom_name": None,
                 })
-                if (
-                    observed_entry
-                    and observed_entry.get("catalog_exact")
-                    and int(observed_entry.get("paint_index") or 0) > 0
-                ):
+                if observed_entry and observed_entry.get("catalog_exact"):
                     observed_entry.update({
                         "owner_steamid64": account_owner,
                         "ownership_evidence": "weapon_account_id",

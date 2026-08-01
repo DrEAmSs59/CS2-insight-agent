@@ -380,3 +380,73 @@ def test_live_music_field_minus_one_does_not_fall_back_to_default_inventory_musi
             }
 
     assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42]) == {}
+
+
+def test_vanilla_owned_weapon_appears_with_observed_team():
+    owner = "76561198000000001"
+    item_id = 41090984122
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [owner],
+                "tick": [42],
+                "item_id_high": [item_id >> 32],
+                "item_id_low": [item_id & 0xFFFFFFFF],
+                "Weapon.m_iAccountID": [account_id(owner)],
+                "weapon_stickers": [[]],
+                "item_def_idx": [4],  # glock
+                "weapon_skin_id": [0],
+                "weapon_paint_seed": [0],
+                "weapon_float": [0.0],
+                "team_num": [2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    weapons = [row for row in inventory[owner] if row["type"] == "weapon"]
+    assert len(weapons) == 1
+    assert weapons[0]["def_index"] == 4
+    assert weapons[0]["paint_index"] == 0
+    assert weapons[0]["item_id"] == item_id
+    assert weapons[0]["observed_teams"] == ["t"]
+    assert weapons[0]["ownership_evidence"] == "weapon_account_id"
+
+
+def test_vanilla_weapon_held_by_non_owner_has_no_observed_team_for_holder():
+    owner = "76561198000000001"
+    holder = "76561198000000002"
+    item_id = 41090984122
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            # Owner must appear in the sampled roster (existing account-in-roster
+            # gate). Holder carries the asset; owner does not hold it this tick.
+            return {
+                "steamid": [holder, owner],
+                "tick": [42, 42],
+                "item_id_high": [item_id >> 32, 0],
+                "item_id_low": [item_id & 0xFFFFFFFF, 0],
+                "Weapon.m_iAccountID": [account_id(owner), 0],
+                "weapon_stickers": [[], []],
+                "item_def_idx": [4, None],
+                "weapon_skin_id": [0, None],
+                "weapon_paint_seed": [0, None],
+                "weapon_float": [0.0, None],
+                "team_num": [3, 2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    # Attributed to economy owner, but observed_teams empty (owner never held).
+    assert holder not in inventory or not any(
+        row.get("item_id") == item_id for row in inventory.get(holder, [])
+    )
+    owned = inventory.get(owner) or []
+    match = next((row for row in owned if row.get("item_id") == item_id), None)
+    assert match is not None
+    assert match["observed_teams"] == []
