@@ -25,7 +25,7 @@ from ..cosmetics_skin_plan import (
     map_item_statuses,
 )
 from ..databases import demo_db
-from ..demo_cache import file_md5, refresh_row_cache_from_original
+from ..demo_cache import copy_original_to_temp_input, ensure_row_cached, file_md5
 from ..demo_compat_service import ensure_demo_compatible
 from ..skin_core_client import SkinCoreError, SkinCoreNotFound, run_rewrite_owned_batch
 
@@ -118,11 +118,10 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         raise HTTPException(400, "steamid is required")
 
     try:
-        cached_path = await refresh_row_cache_from_original(demo_db, row)
+        # Preserve any prior successful rewrite in cached_path until this POST succeeds.
+        cached_path = await ensure_row_cached(demo_db, row)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-
-    await asyncio.to_thread(ensure_demo_compatible, cached_path)
 
     result = await demo_db.get_result(original_path)
     inventory = _inventory_for_steamid(result, steamid)
@@ -131,13 +130,26 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     except CosmeticsSkinPlanError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    original = Path(original_path)
+    temp_in: Path | None = None
     temp_out = _temp_output_path(cached_path)
     replaced = False
     try:
         try:
+            temp_in = await asyncio.to_thread(
+                copy_original_to_temp_input,
+                original,
+                cached_path.parent,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+        await asyncio.to_thread(ensure_demo_compatible, temp_in)
+
+        try:
             skin_result = await asyncio.to_thread(
                 run_rewrite_owned_batch,
-                input_dem=str(cached_path),
+                input_dem=str(temp_in),
                 output_dem=str(temp_out),
                 steam_id64=steamid,
                 items=batch_items,
@@ -244,5 +256,7 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
             "failed": failed_mapped,
         }
     finally:
+        if temp_in is not None:
+            _cleanup_temp(temp_in)
         if not replaced:
             _cleanup_temp(temp_out)

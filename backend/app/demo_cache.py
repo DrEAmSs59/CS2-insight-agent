@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -150,31 +151,27 @@ async def ensure_row_cached(demo_db: Any, row: dict[str, Any]) -> Path:
     return result.cached_path.resolve()
 
 
-async def refresh_row_cache_from_original(demo_db: Any, row: dict[str, Any]) -> Path:
-    """Overwrite the working cache with a fresh copy of the library original.
+def copy_original_to_temp_input(original: Path, cache_dir: Path) -> Path:
+    """Copy the library original into a unique temp dem under ``cache_dir``.
 
-    Custom skin saves must never feed a previously rewritten cache into skin-core.
+    Used as skin-core ``--input`` so a prior rewritten ``cached_path`` is never
+    overwritten until rewrite succeeds.
     """
-    original = Path(str(row.get("path") or ""))
-    if not original.is_file():
-        raise FileNotFoundError(f"Demo original missing: {original}")
-
-    cached_path = await ensure_row_cached(demo_db, row)
-
-    def _overwrite() -> None:
-        tmp = cached_path.with_suffix(cached_path.suffix + f".restore-{os.getpid()}.tmp")
+    src = Path(original)
+    if not src.is_file():
+        raise FileNotFoundError(f"Demo original missing: {src}")
+    dest_dir = Path(cache_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f".{src.stem}.skin-input-{uuid.uuid4().hex}.dem"
+    try:
+        shutil.copy2(src, dest)
+    except Exception:
         try:
-            shutil.copy2(original, tmp)
-            os.replace(tmp, cached_path)
-        except Exception:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
-
-    await asyncio.to_thread(_overwrite)
-    return cached_path.resolve()
+            dest.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return dest.resolve()
 
 
 def migrate_cache_files(old_root: Path, new_root: Path) -> dict[str, int]:

@@ -9,6 +9,7 @@ import pytest
 
 from app.demo_cache import (
     copy_demo_into_cache,
+    copy_original_to_temp_input,
     default_demo_cache_root,
     ensure_row_cached,
     migrate_cache_files,
@@ -48,6 +49,23 @@ def test_rewrite_and_migrate_cache_files(tmp_path: Path, demo_file: Path):
     rewritten = rewrite_path_under_root(str(materialize.cached_path), old_root, new_root)
     assert rewritten is not None
     assert Path(rewritten).is_file()
+
+
+def test_copy_original_to_temp_input_is_independent_of_cache(tmp_path: Path, demo_file: Path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    cached = cache_dir / "working.dem"
+    cached.write_bytes(b"POLLUTED-CACHE")
+
+    temp_in = copy_original_to_temp_input(demo_file, cache_dir)
+    try:
+        assert temp_in.is_file()
+        assert temp_in.resolve() != cached.resolve()
+        assert temp_in.parent == cache_dir.resolve()
+        assert temp_in.read_bytes() == demo_file.read_bytes()
+        assert cached.read_bytes() == b"POLLUTED-CACHE"
+    finally:
+        temp_in.unlink(missing_ok=True)
 
 
 def test_ensure_row_cached_persists_path(tmp_path: Path, demo_file: Path, monkeypatch):
