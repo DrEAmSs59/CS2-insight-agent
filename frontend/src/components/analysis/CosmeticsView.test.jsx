@@ -422,6 +422,72 @@ describe("CosmeticsView", () => {
     expect(saveCustomSkinPlan).not.toHaveBeenCalled();
   });
 
+  test("clears seeded replacements when demoId changes", async () => {
+    const workspace = {
+      cosmetics: {
+        players: {
+          [STEAM_ID]: [
+            cosmetic({
+              item_id: 10,
+              type: "weapon",
+              model: "ak47",
+              def_index: 7,
+              observed_teams: ["t"],
+              name_zh: "AK原皮",
+            }),
+          ],
+        },
+      },
+    };
+    const seededPlan = {
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "id:10",
+            replacement: {
+              catalog_id: 4797,
+              def_index: 7,
+              paint_index: 340,
+              paint_wear: 0.01,
+              paint_seed: 12,
+              name_zh: "AK-47 | 红线",
+              name_en: "AK-47 | Redline",
+              image_url: "https://cdn.example/redline.webp",
+            },
+          },
+        ],
+      },
+    };
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce(seededPlan);
+
+    const { rerender } = render(
+      <CosmeticsView demoId={7} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
+    });
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    await waitFor(() => {
+      expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    });
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+    rerender(
+      <CosmeticsView demoId={8} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 8, steamid: STEAM_ID });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    });
+  });
+
   test("keeps hover notice when a glove finish was not retained", () => {
     render(
       <CosmeticsView

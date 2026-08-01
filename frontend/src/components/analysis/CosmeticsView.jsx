@@ -513,7 +513,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setSavedReplacements({});
     setPickerItem(null);
     setSaving(false);
-  }, [steamid]);
+  }, [demoId, steamid]);
 
   useEffect(() => {
     setTeamTab("ct");
