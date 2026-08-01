@@ -225,6 +225,58 @@ def test_post_leaves_cache_untouched_on_skin_core_failure(api_env, monkeypatch):
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
+def test_post_missing_ok_does_not_replace_cache(api_env, monkeypatch):
+    """Fail-closed: response without explicit ok:true must not os.replace the cache."""
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    before = cached.read_bytes()
+
+    def missing_ok(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        Path(output_dem).write_bytes(b"SHOULD-NOT-REPLACE")
+        return {"sha256": "nope", "items_rewritten": 1}
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", missing_ok)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    assert cached.read_bytes() == before
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
+def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    before = cached.read_bytes()
+
+    def ok_false(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        Path(output_dem).write_bytes(b"PARTIAL-OUTPUT")
+        return {
+            "ok": False,
+            "error_code": "OWNERSHIP_MISMATCH",
+            "error_message": "item not owned by steamid",
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", ok_false)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    detail = str(response.json()["detail"])
+    assert "item not owned by steamid" in detail
+    assert "OWNERSHIP_MISMATCH" in detail
+    assert cached.read_bytes() == before
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
 def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]

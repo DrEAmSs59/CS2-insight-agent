@@ -61,6 +61,23 @@ def _cleanup_temp(path: Path) -> None:
         logger.warning("Failed to remove skin rewrite temp: %s", path)
 
 
+def _skin_core_failure_message(skin_result: Any) -> str:
+    """Build a 502 detail from skin-core response fields (fail-closed messaging)."""
+    if not isinstance(skin_result, dict):
+        return "skin-core rewrite failed"
+    message = (
+        skin_result.get("error_message")
+        or skin_result.get("error")
+        or skin_result.get("message")
+        or "skin-core rewrite failed"
+    )
+    text = str(message).strip() or "skin-core rewrite failed"
+    error_code = skin_result.get("error_code")
+    if error_code is not None and str(error_code).strip():
+        return f"{error_code}: {text}"
+    return text
+
+
 @router.get("/api/demos/{demo_id}/cosmetics/custom-plan")
 async def get_custom_skin_plan(
     demo_id: int,
@@ -128,13 +145,8 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         except Exception as exc:  # noqa: BLE001 - surface unexpected launcher failures
             raise HTTPException(502, f"skin-core failed: {exc}") from exc
 
-        if not isinstance(skin_result, dict) or not skin_result.get("ok", True):
-            message = (
-                str(skin_result.get("error") or skin_result.get("message") or "skin-core rewrite failed")
-                if isinstance(skin_result, dict)
-                else "skin-core rewrite failed"
-            )
-            raise HTTPException(502, message)
+        if not isinstance(skin_result, dict) or skin_result.get("ok") is not True:
+            raise HTTPException(502, _skin_core_failure_message(skin_result))
 
         if not temp_out.is_file():
             raise HTTPException(502, "skin-core produced no output demo")
