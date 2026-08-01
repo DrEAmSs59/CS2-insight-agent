@@ -55,7 +55,7 @@ def replacement(**overrides):
     return row
 
 
-def test_slot_key_prefers_item_id_then_def_fallback():
+def test_slot_key_prefers_item_id_then_placeholder_then_def():
     assert slot_key({"item_id": 99, "def_index": 7}) == "id:99"
     assert slot_key(
         {"def_index": 7, "paint_index": 282, "paint_seed": 1, "paint_wear": 0.2}
@@ -64,8 +64,11 @@ def test_slot_key_prefers_item_id_then_def_fallback():
         "def:9:0:0:0"
     )
     assert slot_key({"item_id": "53009600926"}) == "id:53009600926"
-    # Placeholders without positive item_id use def: form (no placeholder: prefix).
-    assert slot_key({"is_placeholder": True, "def_index": 7}) == "def:7:0:0:0"
+    # Placeholders without positive item_id use placeholder:{def_index} (mirrors frontend).
+    assert slot_key({"is_placeholder": True, "def_index": 7}) == "placeholder:7"
+    assert slot_key({"is_placeholder": True}) == "placeholder:0"
+    # Positive item_id still wins over is_placeholder.
+    assert slot_key({"item_id": 4, "is_placeholder": True, "def_index": 7}) == "id:4"
 
 
 def test_build_batch_and_plan_maps_weapon_fields_without_custom_name_or_stickers():

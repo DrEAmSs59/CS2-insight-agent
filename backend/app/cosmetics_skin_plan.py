@@ -46,16 +46,18 @@ def _finite_item_id(item: Any) -> int | None:
 
 
 def slot_key(item: Any) -> str:
-    """Mirror frontend cosmeticsLayout.slotKey (id: / def: forms).
+    """Mirror frontend cosmeticsLayout.slotKey (id: / placeholder: / def:).
 
-    Resolved rule: ``id:{item_id}`` when finite item_id > 0, else
+    Resolved rule: ``id:{item_id}`` when finite item_id > 0; else
+    ``placeholder:{def_index}`` when ``is_placeholder``; else
     ``def:{def_index}:{paint_index}:{paint_seed}:{paint_wear}``.
-    Placeholders without a positive item_id use the def: form (no ``placeholder:`` prefix).
     """
     item_id = _finite_item_id(item if isinstance(item, dict) else None)
     if item_id is not None:
         return f"id:{item_id}"
     data = item if isinstance(item, dict) else {}
+    if data.get("is_placeholder"):
+        return f"placeholder:{_js_number(data.get('def_index'))}"
     return (
         f"def:{_js_number(data.get('def_index'))}"
         f":{_js_number(data.get('paint_index'))}"
