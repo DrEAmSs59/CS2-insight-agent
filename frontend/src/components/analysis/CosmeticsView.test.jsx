@@ -66,7 +66,8 @@ describe("CosmeticsView", () => {
     expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
     expect(screen.getByTestId("cosmetics-team-tab-ct")).toBeTruthy();
     expect(screen.getByTestId("cosmetics-team-tab-t")).toBeTruthy();
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(4);
+    // Evidence knife + AWP + natural glove placeholder (no default weapon rows).
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(3);
   });
 
   test("renders CT then T rows from observed_teams and dual-team items appear in both", () => {
@@ -218,7 +219,8 @@ describe("CosmeticsView", () => {
     expect(screen.getAllByText("血腥达里尔爵士（沉默）").length).toBeGreaterThan(0);
     expect(screen.getAllByText("音乐盒").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Under Bright Lights").length).toBeGreaterThan(0);
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(4);
+    // Agent + music kit + natural knife/glove placeholders (no default guns).
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(4);
   });
 
   test("custom mode grays non-swappable items and opens picker for weapons", async () => {
@@ -770,12 +772,14 @@ describe("CosmeticsView", () => {
 
     expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
     expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
-    expect(within(screen.getByTestId("cosmetics-row-ct")).getAllByText(/M4A4|P2000|USP/).length).toBeGreaterThan(0);
     expect(within(screen.getByTestId("cosmetics-row-ct")).getByText("★ 匕首")).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-ct")).getByText(/手套/)).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-ct")).queryByText(/M4A4|P2000|USP|AK-47/)).toBeNull();
 
     fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
-    expect(within(screen.getByTestId("cosmetics-row-t")).getAllByText("AK-47").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("cosmetics-row-t")).getByText(/手套/)).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-t")).queryByText("AK-47")).toBeNull();
     expect(screen.queryByText(/这个 Demo 没有留下可用的饰品记录|This demo contains no usable cosmetic records/)).toBeNull();
   });
 

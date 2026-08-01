@@ -93,4 +93,43 @@ describe("cosmeticsLayout", () => {
     expect(hasSkinFinish(merged[1])).toBe(true);
     expect(merged.findIndex((row) => row.is_placeholder)).toBeGreaterThan(1);
   });
+
+  test("mergeLoadoutWithEvidence skips default weapon placeholders when no evidence", () => {
+    const defaults = listDefaultLoadout("t");
+    const merged = mergeLoadoutWithEvidence(defaults, [], "zh");
+    expect(merged.some((item) => item.type === "weapon")).toBe(false);
+    expect(merged.some((item) => item.type === "melee" && item.is_placeholder)).toBe(true);
+    expect(merged.some((item) => item.type === "glove" && item.is_placeholder)).toBe(true);
+  });
+
+  test("mergeLoadoutWithEvidence keeps evidenced vanilla weapons and replaces knife/gloves", () => {
+    const defaults = listDefaultLoadout("ct");
+    const evidence = [
+      {
+        type: "weapon",
+        def_index: 61,
+        paint_index: 0,
+        model: "usp_silencer",
+        name_zh: "USP 消音器",
+        name_en: "USP-S",
+        item_id: 111,
+        observed_teams: ["ct"],
+      },
+      {
+        type: "melee",
+        def_index: 42,
+        paint_index: 0,
+        model: "knife_ct",
+        name_zh: "默认刀",
+        name_en: "Knife",
+        item_id: 222,
+        observed_teams: ["ct"],
+      },
+    ];
+    const merged = mergeLoadoutWithEvidence(defaults, evidence, "zh");
+    const weapons = merged.filter((item) => item.type === "weapon");
+    expect(weapons).toHaveLength(1);
+    expect(weapons[0].item_id).toBe(111);
+    expect(merged.find((item) => item.type === "melee")?.item_id).toBe(222);
+  });
 });

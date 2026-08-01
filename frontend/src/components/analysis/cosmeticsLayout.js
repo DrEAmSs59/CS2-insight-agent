@@ -77,8 +77,8 @@ export function sortCosmeticsForRow(items, locale = "zh", resolveItem = null) {
 
 /**
  * Merge demo evidence onto default CT/T loadout placeholders.
- * Same def_index weapons replace the placeholder; any melee/glove evidence
- * replaces the default knife/gloves slot.
+ * Weapons appear only from evidence (no default gun placeholders).
+ * Melee/glove fall back to a single natural placeholder when no evidence.
  */
 export function mergeLoadoutWithEvidence(defaults, evidenceItems, locale = "zh") {
   const evidence = Array.isArray(evidenceItems) ? evidenceItems : [];
@@ -119,9 +119,8 @@ export function mergeLoadoutWithEvidence(defaults, evidenceItems, locale = "zh")
       if (matches?.length) {
         merged.push(...matches);
         consumedWeaponDefs.add(def);
-      } else {
-        merged.push(placeholder);
       }
+      // No evidence → skip placeholder (never-bought / never-held guns stay hidden).
       continue;
     }
     merged.push(placeholder);
