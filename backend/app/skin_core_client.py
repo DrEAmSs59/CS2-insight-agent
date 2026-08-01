@@ -59,19 +59,21 @@ def _candidate_paths() -> list[Path]:
         # Tauri: CS2_INSIGHT_BUNDLE_DATA_DIR -> <resource_dir>/data; tools sit beside data/.
         candidates.append(Path(bundle_data).expanduser().resolve().parent / "tools" / "skin-core.exe")
 
-    candidates.append(
-        _REPO_ROOT / "frontend" / "src-tauri" / "bundle-resources" / "tools" / "skin-core.exe"
-    )
-
+    # Prefer sibling closed-repo builds over staged bundle-resources so local
+    # `release-skin-core` updates are picked up without re-staging.
     for root in _DEV_ANYSKIN_ROOTS:
         candidates.append(root / "dist" / "skin-core.exe")
         candidates.append(root / "target" / "release" / "skin-core.exe")
+
+    candidates.append(
+        _REPO_ROOT / "frontend" / "src-tauri" / "bundle-resources" / "tools" / "skin-core.exe"
+    )
 
     return candidates
 
 
 def resolve_skin_core_exe() -> Path:
-    """Locate skin-core.exe: env → bundled tools → closed-repo dist/release."""
+    """Locate skin-core.exe: env → packaged tools → closed-repo dist → staged tools."""
     seen: set[str] = set()
     for raw in _candidate_paths():
         try:

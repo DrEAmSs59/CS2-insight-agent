@@ -328,6 +328,152 @@ describe("CosmeticsView", () => {
     expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(0);
   });
 
+  test("shows saving loading state while save is in flight", async () => {
+    let resolveSave;
+    vi.mocked(saveCustomSkinPlan).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+
+    render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+
+    expect(screen.getAllByText(/正在保存自定义饰品方案|Saving custom skin plan/i).length).toBeGreaterThanOrEqual(1);
+    const saveButton = screen.getByTestId("cosmetics-save-plan");
+    expect(saveButton.disabled).toBe(true);
+    expect(saveButton.getAttribute("aria-busy")).toBe("true");
+
+    resolveSave({
+      ok: true,
+      plan: {
+        items: [{
+          slot_key: "id:10",
+          replacement: {
+            catalog_id: 1,
+            def_index: 7,
+            paint_index: 1,
+            paint_wear: 0.1,
+            paint_seed: 1,
+            name_zh: "AK新皮",
+            name_en: "AK New",
+            image_url: "",
+            type: "weapon",
+            model: "ak47",
+          },
+        }],
+      },
+      succeeded: [{ item_id64: "10", slot_key: "id:10", name_zh: "AK新皮", name_en: "AK New" }],
+      failed: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/自定义皮肤方案已保存|Custom skin plan saved/i)).toBeTruthy();
+    });
+    expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
+  });
+
+  test("shows save result dialog listing succeeded and failed items", async () => {
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      partial: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [{
+          slot_key: "id:10",
+          replacement: {
+            catalog_id: 1,
+            def_index: 7,
+            paint_index: 1,
+            paint_wear: 0.1,
+            paint_seed: 1,
+            name_zh: "AK新皮",
+            name_en: "AK New",
+            image_url: "",
+            type: "weapon",
+            model: "ak47",
+          },
+        }],
+      },
+      succeeded: [{ item_id64: "10", slot_key: "id:10", name_zh: "AK新皮", name_en: "AK New" }],
+      failed: [{
+        item_id64: "11",
+        slot_key: "id:11",
+        name_zh: "刺刀 | 多普勒",
+        name_en: "Bayonet | Doppler",
+        error: "need a donor knife",
+      }],
+    });
+
+    render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
+    });
+    expect(screen.getByText(/部分饰品已保存|Some skins were saved/i)).toBeTruthy();
+    expect(screen.getByText("AK新皮")).toBeTruthy();
+    expect(screen.getByText("刺刀 | 多普勒")).toBeTruthy();
+    expect(screen.getByText(/need a donor knife/i)).toBeTruthy();
+  });
+
   test("seeds local replacements from persisted custom-plan on mount", async () => {
     vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
       ok: true,

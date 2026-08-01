@@ -192,3 +192,71 @@ def build_batch_and_plan(
         "items": plan_entries,
     }
     return batch_items, plan_json
+
+
+def filter_plan_by_succeeded_item_ids(
+    plan_json: dict[str, Any],
+    succeeded_item_ids: set[str],
+) -> dict[str, Any]:
+    """Keep only plan entries whose original item_id is in succeeded_item_ids."""
+    items = plan_json.get("items") if isinstance(plan_json, dict) else None
+    if not isinstance(items, list):
+        return {"steamid": str((plan_json or {}).get("steamid") or ""), "items": []}
+    kept: list[dict[str, Any]] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        original = entry.get("original")
+        if not isinstance(original, dict):
+            continue
+        item_id = _finite_item_id(original)
+        if item_id is None:
+            continue
+        if str(item_id) in succeeded_item_ids:
+            kept.append(entry)
+    return {
+        "steamid": str(plan_json.get("steamid") or ""),
+        "items": kept,
+    }
+
+
+def map_item_statuses(
+    plan_json: dict[str, Any],
+    statuses: list[Any] | None,
+) -> list[dict[str, Any]]:
+    """Attach slot_key / display names from plan to skin-core item status rows."""
+    by_id: dict[str, dict[str, Any]] = {}
+    for entry in plan_json.get("items") or []:
+        if not isinstance(entry, dict):
+            continue
+        original = entry.get("original") if isinstance(entry.get("original"), dict) else {}
+        replacement = entry.get("replacement") if isinstance(entry.get("replacement"), dict) else {}
+        item_id = _finite_item_id(original)
+        if item_id is None:
+            continue
+        by_id[str(item_id)] = {
+            "slot_key": str(entry.get("slot_key") or ""),
+            "name_zh": replacement.get("name_zh") or original.get("name_zh"),
+            "name_en": replacement.get("name_en") or original.get("name_en"),
+            "type": original.get("type") or replacement.get("type"),
+        }
+
+    out: list[dict[str, Any]] = []
+    for row in statuses or []:
+        if not isinstance(row, dict):
+            continue
+        item_id64 = str(row.get("item_id64") or "").strip()
+        meta = by_id.get(item_id64, {})
+        mapped: dict[str, Any] = {
+            "item_id64": item_id64,
+            "definition_index": row.get("definition_index"),
+            "slot_key": meta.get("slot_key"),
+            "name_zh": meta.get("name_zh"),
+            "name_en": meta.get("name_en"),
+            "type": meta.get("type"),
+        }
+        err = row.get("error")
+        if err is not None and str(err).strip():
+            mapped["error"] = str(err).strip()
+        out.append(mapped)
+    return out

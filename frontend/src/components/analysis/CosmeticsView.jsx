@@ -10,6 +10,7 @@ import {
   Copy,
   Gem,
   Info,
+  Loader2,
   PackageOpen,
   Rotate3D,
   Sticker,
@@ -18,6 +19,7 @@ import {
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
+import Button from "../ui/Button";
 import { craftNameParts, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
@@ -479,6 +481,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [savedReplacements, setSavedReplacements] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState(null);
   const [teamTab, setTeamTab] = useState("ct");
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
@@ -513,6 +516,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setSavedReplacements({});
     setPickerItem(null);
     setSaving(false);
+    setSaveResult(null);
   }, [demoId, steamid]);
 
   useEffect(() => {
@@ -622,20 +626,49 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const savePlan = async () => {
     if (!canSavePlan) return;
     setSaving(true);
+    setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
     try {
       const result = await saveCustomSkinPlan({ demoId, steamid, replacements: localReplacements });
-      if (result?.ok) {
-        const seeded = replacementsFromPlan(result?.plan) || { ...localReplacements };
-        setSavedReplacements(seeded);
-        setLocalReplacements(seeded);
-        setNotice({ tone: "success", text: t("analysis.cosmetics.saveSuccess") });
-        clearOverlays();
-        setViewMode("browse");
-      } else {
-        setNotice({ tone: "error", text: t("analysis.cosmetics.saveFailed") });
+      const succeeded = Array.isArray(result?.succeeded) ? result.succeeded : [];
+      const failed = Array.isArray(result?.failed) ? result.failed : [];
+      const hasItemResults = succeeded.length > 0 || failed.length > 0;
+
+      if (hasItemResults) {
+        setSaveResult({
+          ok: Boolean(result?.ok),
+          partial: Boolean(result?.partial) || (succeeded.length > 0 && failed.length > 0),
+          succeeded,
+          failed,
+          error: result?.error || null,
+        });
       }
-    } catch {
-      setNotice({ tone: "error", text: t("analysis.cosmetics.saveFailed") });
+
+      if (result?.ok) {
+        const seeded = replacementsFromPlan(result?.plan) || {};
+        setSavedReplacements(seeded);
+        if (failed.length > 0) {
+          const failedKeys = new Set(failed.map((row) => row?.slot_key).filter(Boolean));
+          setLocalReplacements((prev) =>
+            Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+          );
+          setNotice({ tone: "info", text: t("analysis.cosmetics.savePartial") });
+        } else {
+          setLocalReplacements(seeded);
+          setNotice({ tone: "success", text: t("analysis.cosmetics.saveSuccess") });
+          clearOverlays();
+          setViewMode("browse");
+        }
+      } else {
+        setNotice({
+          tone: "error",
+          text: result?.error || t("analysis.cosmetics.saveFailed"),
+        });
+      }
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text: error?.message || t("analysis.cosmetics.saveFailed"),
+      });
     } finally {
       setSaving(false);
     }
@@ -677,24 +710,30 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           ) : (
             <>
               <p className="text-[10px] text-cs2-text-muted">
-                {!demoId
-                  ? t("analysis.cosmetics.saveNeedsDemo")
-                  : t("analysis.cosmetics.customizingHint")}
+                {saving
+                  ? t("analysis.cosmetics.savingPlan")
+                  : !demoId
+                    ? t("analysis.cosmetics.saveNeedsDemo")
+                    : t("analysis.cosmetics.customizingHint")}
               </p>
               <button
                 type="button"
+                disabled={saving}
                 onClick={cancelCustomize}
-                className="inline-flex h-8 items-center border border-cs2-border px-3 text-[10px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+                className="inline-flex h-8 items-center border border-cs2-border px-3 text-[10px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t("analysis.cosmetics.cancelCustomize")}
               </button>
               <button
                 type="button"
+                data-testid="cosmetics-save-plan"
                 disabled={!canSavePlan}
+                aria-busy={saving}
                 onClick={() => void savePlan()}
-                className="inline-flex h-8 items-center border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {t("analysis.cosmetics.savePlan")}
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                {saving ? t("analysis.cosmetics.savingPlan") : t("analysis.cosmetics.savePlan")}
               </button>
             </>
           )}
@@ -702,8 +741,19 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       </div>
 
       {notice ? (
-        <div className={`mb-3 flex items-center gap-2 border px-3 py-2 text-[10px] ${notice.tone === "error" ? "border-rose-500/40 bg-rose-500/10 text-rose-300" : "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"}`}>
-          {notice.tone === "error" ? <Info className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}{notice.text}
+        <div className={`mb-3 flex items-center gap-2 border px-3 py-2 text-[10px] ${
+          notice.tone === "error"
+            ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+            : notice.tone === "info"
+              ? "border-sky-500/35 bg-sky-500/10 text-sky-200"
+              : "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"
+        }`}>
+          {notice.tone === "error"
+            ? <Info className="h-3.5 w-3.5" />
+            : notice.tone === "info"
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <Check className="h-3.5 w-3.5" />}
+          {notice.text}
         </div>
       ) : null}
 
@@ -792,6 +842,76 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         onClose={() => setPickerItem(null)}
         onConfirm={confirmReplacement}
       />
+
+      <Modal
+        open={Boolean(saveResult)}
+        onClose={() => setSaveResult(null)}
+        title={t("analysis.cosmetics.saveResultTitle")}
+        icon={<Gem className="h-4 w-4 text-cs2-accent" />}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        className="!h-auto"
+        contentClassName="overflow-y-auto"
+        footer={(
+          <div className="flex justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="cosmetics-save-result-close"
+              onClick={() => setSaveResult(null)}
+            >
+              {t("analysis.cosmetics.saveResultClose")}
+            </Button>
+          </div>
+        )}
+      >
+        {saveResult ? (
+          <div className="space-y-4 px-5 py-4" data-testid="cosmetics-save-result">
+            {saveResult.error ? (
+              <p className="text-[12px] leading-relaxed text-cs2-rose-on-surface">{saveResult.error}</p>
+            ) : null}
+            <div>
+              <p className="mb-2 text-[11px] font-semibold text-cs2-text-muted">
+                {t("analysis.cosmetics.saveResultSucceeded", { count: saveResult.succeeded.length })}
+              </p>
+              {saveResult.succeeded.length ? (
+                <ul className="max-h-48 space-y-2 overflow-y-auto">
+                  {saveResult.succeeded.map((row) => (
+                    <li key={`ok-${row.slot_key || row.item_id64}`} className="text-[12px]">
+                      <span className="font-medium text-cs2-text-primary">
+                        {(locale === "zh" ? row.name_zh : row.name_en) || row.name_zh || row.name_en || row.item_id64}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[12px] text-cs2-text-muted">{t("analysis.cosmetics.saveResultEmpty")}</p>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-[11px] font-semibold text-cs2-text-muted">
+                {t("analysis.cosmetics.saveResultFailed", { count: saveResult.failed.length })}
+              </p>
+              {saveResult.failed.length ? (
+                <ul className="max-h-48 space-y-2 overflow-y-auto">
+                  {saveResult.failed.map((row) => (
+                    <li key={`fail-${row.slot_key || row.item_id64}`} className="text-[12px]">
+                      <span className="font-medium text-cs2-text-primary">
+                        {(locale === "zh" ? row.name_zh : row.name_en) || row.name_zh || row.name_en || row.item_id64}
+                      </span>
+                      {row.error ? (
+                        <span className="ml-2 text-cs2-text-muted">— {row.error}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[12px] text-cs2-text-muted">{t("analysis.cosmetics.saveResultEmpty")}</p>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
