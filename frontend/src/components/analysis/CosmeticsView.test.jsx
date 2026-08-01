@@ -1,6 +1,12 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, test, vi } from "vitest";
 import CosmeticsView from "./CosmeticsView";
+import { loadCustomSkinPlan, saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
+
+vi.mock("./saveCustomSkinPlan.js", () => ({
+  saveCustomSkinPlan: vi.fn(async () => ({ ok: true })),
+  loadCustomSkinPlan: vi.fn(async () => ({ ok: true, plan: null })),
+}));
 
 const STEAM_ID = "76561198000000001";
 
@@ -26,7 +32,7 @@ function cosmetic(overrides = {}) {
 }
 
 describe("CosmeticsView", () => {
-  test("shows only the selected player's evidence-owned inventory in the six-column grid", () => {
+  test("shows only the selected player's evidence-owned inventory in CT/T team rows", () => {
     const { container } = render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
@@ -35,7 +41,15 @@ describe("CosmeticsView", () => {
             players: {
               [STEAM_ID]: [
                 cosmetic({ custom_name: "全角，测试！" }),
-                cosmetic({ catalog_id: 2002, item_id: 53009600927, type: "weapon", name_zh: "AWP | 九头金蛇" }),
+                cosmetic({
+                  catalog_id: 2002,
+                  item_id: 53009600927,
+                  type: "weapon",
+                  model: "awp",
+                  def_index: 9,
+                  name_zh: "AWP | 九头金蛇",
+                  name_en: "AWP | The Empress",
+                }),
               ],
               76561198000000002: [cosmetic({ custom_name: "不属于 JW" })],
             },
@@ -44,16 +58,69 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("“全角，测试！”")).toBeTruthy();
-    expect(screen.getByText("AWP | 九头金蛇")).toBeTruthy();
+    expect(screen.getAllByText("“全角，测试！”").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AWP").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("九头金蛇").length).toBeGreaterThan(0);
     expect(screen.queryByText("“不属于 JW”")).toBeNull();
-    expect(container.querySelector(".xl\\:grid-cols-6")).toBeTruthy();
-    expect(container.querySelector(".items-start")).toBeTruthy();
-    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(2);
-    expect(container.querySelectorAll("[data-cosmetic-card-label].h-8")).toHaveLength(2);
+    expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
+    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
+    expect(screen.getByTestId("cosmetics-team-tab-ct")).toBeTruthy();
+    expect(screen.getByTestId("cosmetics-team-tab-t")).toBeTruthy();
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(4);
   });
 
-  test("opens item details on click and inspect actions on right click", () => {
+  test("renders CT then T rows from observed_teams and dual-team items appear in both", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 1, observed_teams: ["ct"], name_zh: "CT 刀" }),
+                cosmetic({ item_id: 2, observed_teams: ["t"], type: "weapon", model: "ak47", def_index: 7, name_zh: "T AK" }),
+                cosmetic({ item_id: 3, observed_teams: ["ct", "t"], catalog_id: 2003, name_zh: "双阵营刀" }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    const ctRow = screen.getByTestId("cosmetics-row-ct");
+    expect(within(ctRow).getByText("★ CT 刀")).toBeTruthy();
+    expect(within(ctRow).getByText("★ 双阵营刀")).toBeTruthy();
+    expect(within(ctRow).queryByText("T AK")).toBeNull();
+    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    const tRow = screen.getByTestId("cosmetics-row-t");
+    expect(within(tRow).getByText("T AK")).toBeTruthy();
+    expect(within(tRow).getByText("★ 双阵营刀")).toBeTruthy();
+    expect(within(tRow).queryByText("★ CT 刀")).toBeNull();
+    expect(screen.queryByTestId("cosmetics-row-ct")).toBeNull();
+  });
+
+  test("replaces evidence count with customize entry and removes card team dots", () => {
+    const { container } = render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic()] } } }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.queryByText(/2 items|2 件饰品/)).toBeNull();
+    for (const card of container.querySelectorAll("[data-cosmetic-card]")) {
+      expect(within(card).queryByLabelText(/Equipped-team|装备阵营/)).toBeNull();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^取消$|^Cancel$/ })).toBeTruthy();
+  });
+
+  test("opens item details on click", () => {
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -62,15 +129,10 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "Lᵒᵛᵉᵧₒᵤ 玫瑰の吻" });
+    const card = screen.getAllByRole("button", { name: "Lᵒᵛᵉᵧₒᵤ 玫瑰の吻" })[0];
     fireEvent.contextMenu(card, { clientX: 30, clientY: 40 });
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-    expect(menu.className).toContain("bg-white");
-    expect(menu.className).toContain("rounded-md");
-    expect(menu.parentElement).toBe(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
 
-    fireEvent.pointerDown(document.body);
     fireEvent.click(card);
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getAllByText("Lᵒᵛᵉᵧₒᵤ 玫瑰の吻").length).toBeGreaterThan(0);
@@ -87,7 +149,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "M9 刺刀 | 多普勒" });
+    const card = screen.getAllByRole("button", { name: /★ M9 刺刀\s+多普勒/ })[0];
     fireEvent.click(card);
     fireEvent.click(container.querySelector("[data-cosmetic-open-3d]"));
 
@@ -104,7 +166,7 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.pointerEnter(screen.getByRole("button", { name: "玫瑰の吻" }));
+    fireEvent.pointerEnter(screen.getAllByRole("button", { name: "玫瑰の吻" })[0]);
     const tooltip = screen.getByRole("tooltip");
     expect(within(tooltip).getByText("“玫瑰の吻”")).toBeTruthy();
     expect(within(tooltip).getByText("80")).toBeTruthy();
@@ -130,7 +192,8 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("正确归属的刀")).toBeTruthy();
+    expect(screen.getAllByText("★ 正确归属的刀").length).toBeGreaterThan(0);
+    expect(screen.queryByText("★ 错误归属的刀")).toBeNull();
     expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
@@ -151,12 +214,281 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("探员 | 血腥达里尔爵士（沉默）")).toBeTruthy();
-    expect(screen.getByText("音乐盒 | Under Bright Lights")).toBeTruthy();
-    expect(container.querySelectorAll("[data-cosmetic-card]")).toHaveLength(2);
+    expect(screen.getAllByText("探员").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("血腥达里尔爵士（沉默）").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("音乐盒").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Under Bright Lights").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(4);
   });
 
-  test("keeps inspect actions disabled when a glove finish was not retained", () => {
+  test("custom mode grays non-swappable items and opens picker for weapons", async () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 10, type: "weapon", model: "ak47", def_index: 7, observed_teams: ["t"], name_zh: "AK原皮" }),
+                cosmetic({ item_id: 11, type: "agent", observed_teams: ["t"], name_zh: "探员甲", paint_wear: undefined, paint_seed: undefined }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+
+    const agent = screen.getByRole("button", { name: "探员甲" });
+    expect(agent.className).toMatch(/opacity|grayscale|cursor-not-allowed/);
+    fireEvent.click(agent);
+    expect(screen.queryByPlaceholderText(/搜索皮肤|Search skins/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    expect(screen.getByPlaceholderText(/搜索皮肤|Search skins/i)).toBeTruthy();
+  });
+
+  test("cancel discards local replacements; save posts plan with demoId and returns to browse", async () => {
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockClear();
+
+    const { container } = render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                  paint_wear: 0.1,
+                  paint_seed: 1,
+                  image_url: "https://cdn.cstrike.app/images/weapon_ak47_4797ec49.webp",
+                }),
+              ],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+
+    const candidates = screen.getByTestId("skin-candidate-list");
+    const first = within(candidates).getAllByRole("button")[0];
+    const replacementSrc = within(first).getByRole("img").getAttribute("src");
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    const cardImg = within(screen.getByRole("button", { name: "AK原皮" })).getByRole("img");
+    const cardSrc = cardImg.getAttribute("src") || "";
+    expect(cardSrc.replace(/_(light|medium|heavy)\.webp/i, ".webp")).toBe(
+      String(replacementSrc || "").replace(/_(light|medium|heavy)\.webp/i, ".webp"),
+    );
+    expect(cardSrc).not.toContain("weapon_ak47_4797ec49");
+
+    fireEvent.click(screen.getByRole("button", { name: /^取消$|^Cancel$/ }));
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    expect(
+      within(screen.getByRole("button", { name: "AK原皮" })).getByRole("img").getAttribute("src"),
+    ).toContain("weapon_ak47_4797ec49");
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i }));
+
+    await waitFor(() => {
+      expect(saveCustomSkinPlan).toHaveBeenCalledWith({
+        demoId: 42,
+        steamid: STEAM_ID,
+        replacements: expect.objectContaining({
+          "id:10": expect.objectContaining({ catalog_id: expect.any(Number) }),
+        }),
+      });
+    });
+    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    expect(screen.getByText(/自定义皮肤方案已保存|Custom skin plan saved/i)).toBeTruthy();
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(0);
+  });
+
+  test("seeds local replacements from persisted custom-plan on mount", async () => {
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "id:10",
+            replacement: {
+              catalog_id: 4797,
+              def_index: 7,
+              paint_index: 340,
+              paint_wear: 0.01,
+              paint_seed: 12,
+              name_zh: "AK-47 | 红线",
+              name_en: "AK-47 | Redline",
+              image_url: "https://cdn.example/redline.webp",
+            },
+          },
+        ],
+      },
+    });
+
+    render(
+      <CosmeticsView
+        demoId={7}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
+    });
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    await waitFor(() => {
+      expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    });
+  });
+
+  test("disables save when demoId is missing", async () => {
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockClear();
+
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    const saveButton = screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i });
+    expect(saveButton.disabled).toBe(true);
+    expect(screen.getByText(/无法保存.*Demo|Save unavailable.*demo/i)).toBeTruthy();
+    expect(saveCustomSkinPlan).not.toHaveBeenCalled();
+  });
+
+  test("clears seeded replacements when demoId changes", async () => {
+    const workspace = {
+      cosmetics: {
+        players: {
+          [STEAM_ID]: [
+            cosmetic({
+              item_id: 10,
+              type: "weapon",
+              model: "ak47",
+              def_index: 7,
+              observed_teams: ["t"],
+              name_zh: "AK原皮",
+            }),
+          ],
+        },
+      },
+    };
+    const seededPlan = {
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "id:10",
+            replacement: {
+              catalog_id: 4797,
+              def_index: 7,
+              paint_index: 340,
+              paint_wear: 0.01,
+              paint_seed: 12,
+              name_zh: "AK-47 | 红线",
+              name_en: "AK-47 | Redline",
+              image_url: "https://cdn.example/redline.webp",
+            },
+          },
+        ],
+      },
+    };
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce(seededPlan);
+
+    const { rerender } = render(
+      <CosmeticsView demoId={7} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
+    });
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    await waitFor(() => {
+      expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    });
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+    rerender(
+      <CosmeticsView demoId={8} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 8, steamid: STEAM_ID });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    });
+  });
+
+  test("keeps hover notice when a glove finish was not retained", () => {
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -164,13 +496,68 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    const card = screen.getByRole("button", { name: "裹手" });
+    const card = screen.getAllByRole("button", { name: "裹手" })[0];
     fireEvent.pointerEnter(card);
     expect(screen.getByRole("tooltip").textContent).toContain("No finish is guessed");
     fireEvent.pointerLeave(card);
     fireEvent.contextMenu(card, { clientX: 30, clientY: 40 });
-    for (const action of within(screen.getByRole("menu")).getAllByRole("menuitem")) {
-      expect(action.disabled).toBe(true);
-    }
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  test("entering customize closes an open detail dialog", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ name_zh: "CT 刀", observed_teams: ["ct"] })] } } }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "★ CT 刀" })[0]);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
+  });
+
+  test("empty inventory still shows default CT/T loadout placeholders", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [] } } }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
+    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
+    expect(within(screen.getByTestId("cosmetics-row-ct")).getAllByText(/M4A4|P2000|USP/).length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("cosmetics-row-ct")).getByText("★ 匕首")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
+    expect(within(screen.getByTestId("cosmetics-row-t")).getAllByText("AK-47").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/这个 Demo 没有留下可用的饰品记录|This demo contains no usable cosmetic records/)).toBeNull();
+  });
+
+  test("demo evidence overrides matching default placeholders", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({ item_id: 1, observed_teams: ["ct"], name_zh: "CT 刀" }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(within(screen.getByTestId("cosmetics-row-ct")).getByText("★ CT 刀")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
   });
 });

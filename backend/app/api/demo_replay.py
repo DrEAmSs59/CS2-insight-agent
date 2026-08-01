@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from ..databases import demo_db
-from ..demo_paths import resolve_demo_path
+from ..demo_paths import resolve_working_demo_path
 
 router = APIRouter(tags=["demo-replay"])
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ async def get_demo_replay(req: DemoReplayRequest):
     if req.end_tick - req.start_tick > max_span:
         raise HTTPException(422, "Replay range cannot exceed 10 minutes")
 
-    dem_path = resolve_demo_path(req.path)
+    dem_path = await resolve_working_demo_path(req.path, demo_db=demo_db)
     duration_sec = (req.end_tick - req.start_tick) / req.tick_rate
     estimated_frame_count = int(duration_sec * req.fps) + 1
     if estimated_frame_count > 6000:
@@ -333,7 +333,7 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
             f"Binary replay request would generate about {estimated_frame_count} frames; maximum is 40000",
         )
 
-    dem_path = resolve_demo_path(req.path)
+    dem_path = await resolve_working_demo_path(req.path, demo_db=demo_db)
     from ..parser.replay_match_cache import load_match_replay_round_binary
 
     async def _load_packet() -> bytes | None:
@@ -444,7 +444,7 @@ async def get_demo_replay_effects(req: DemoReplayRequest):
     if req.end_tick - req.start_tick > max_span:
         raise HTTPException(422, "Replay range cannot exceed 10 minutes")
 
-    dem_path = resolve_demo_path(req.path)
+    dem_path = await resolve_working_demo_path(req.path, demo_db=demo_db)
     from ..radar.radar_data_extractor import extract_replay_effects
 
     map_key = str(req.map_name or "unknown").strip().lower()

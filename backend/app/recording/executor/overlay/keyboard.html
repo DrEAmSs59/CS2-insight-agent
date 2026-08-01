@@ -76,6 +76,21 @@
   .mbtn.on { background: #E8B23A; color: #1A1A1A; box-shadow: inset 0 0 8px rgba(232,178,58,.5); }
   .mbody { flex: 1; background: #2A2D34; }
   #kb.hidden { display: none; }
+  /* 时序校准标记：只在录制诊断时出现，生产录制里 load 不带 calibration_ticks 就不显示。
+     不透明黑底是关键——叠加层平时压在运动的游戏画面上，"这块区域什么时候变了"根本
+     测不出叠加层；铺一块挡住背景的底之后，该区域在闪白之前是严格静止的，成片里第一
+     次跳变必然来自这个标记本身。因此绝不能加 transition，任何过渡都会把跳变抹平。 */
+  #cal {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 160px;
+    height: 160px;
+    background: #000;
+    display: none;
+  }
+  #cal.active { display: block; }
+  #cal.lit { background: #fff; }
 </style>
 </head>
 <body>
@@ -106,6 +121,7 @@
     <div class="mbody"></div>
   </div>
 </div>
+<div id="cal"></div>
 
 <script>
 const PORT = location.port || "19871";
@@ -121,6 +137,31 @@ kb.classList.add(_posClass);
 let track = [], tickRate = 64, startTick = 0, offset = 0;
 let byTick = new Map(), tickList = [];
 let running = false, resumeAt = 0, activeMs = 0;
+
+// 时序校准：闪白必须撑够几帧才能在成片里被逐帧差分认出来，60fps 下 100ms 是 6 帧；
+// 相邻校准 tick 需要间隔 1 秒以上，否则同一帧跨过两个 tick 只会闪一次。
+const CAL_FLASH_MS = 100;
+const cal = document.getElementById("cal");
+let calTicks = [], calCursor = 0, calFlashUntil = 0;
+
+function loadCalibration(ticks) {
+  calTicks = (ticks || []).map(Number).filter(t => Number.isFinite(t)).sort((a, b) => a - b);
+  calCursor = 0;
+  calFlashUntil = 0;
+  cal.classList.remove("lit");
+  cal.classList.toggle("active", calTicks.length > 0);
+}
+
+function renderCalibration(tick, now) {
+  // running 之前不闪：load 时会先 render(startTick) 一次，那时 demo 还没恢复播放，
+  // 提前闪一下会毁掉成片开头那段静止的噪声底。
+  if (!calTicks.length || !running) return;
+  while (calCursor < calTicks.length && tick >= calTicks[calCursor]) {
+    calFlashUntil = now + CAL_FLASH_MS;
+    calCursor += 1;
+  }
+  cal.classList.toggle("lit", calFlashUntil > now);
+}
 // 新版 demo 的 weapon_fire 是逐发事件：自动步枪按住左键时，相邻子弹间
 // 不能闪灭。右键也需要比单帧更长的可见时间，便于成片观看。
 const STICKY_KEYS = new Set(["jump", "fire", "scope"]);
@@ -141,6 +182,8 @@ function loadTrack(msg) {
   activeMs = 0;
   running = false;
   for (const k in stickyUntil) delete stickyUntil[k];
+  // 校准标记与按键轨道无关：只录 KillFX 时 frames 是空的，标记仍然要工作。
+  loadCalibration(msg.calibration_ticks);
   // 仅击杀特效启用时 load 会携带空 frames：保持键盘隐藏，避免遗留源显示空骨架
   if (!track.length) { kb.classList.add("hidden"); return; }
   kb.classList.remove("hidden");
@@ -164,6 +207,8 @@ function nearest(tick) {
 function render(tick) {
   const f = nearest(tick) || {};
   const now = performance.now();
+  // 与按键同一次 rAF 里落地：校准标记量到的延迟就是按键本身走的那条路径。
+  renderCalibration(tick, now);
   for (const k in els) {
     if (f[k] && STICKY_KEYS.has(k)) {
       const stickyMs = Math.max(STICKY_MS[k] ?? 45, (1000 / tickRate) * 3);
@@ -201,6 +246,8 @@ function connect() {
       if (running) { activeMs += performance.now() - resumeAt; running = false; }
     } else if (m.type === "end") {
       running = false; activeMs = 0; kb.classList.add("hidden");
+      // 不清掉的话，这块不透明黑底会留到下一次录制里。
+      loadCalibration([]);
     }
   };
   ws.onclose = () => setTimeout(connect, 1000);

@@ -305,6 +305,8 @@ export default {
   "montage.err.ffmpegNotRunnable": "FFmpeg could not start. Check file permissions, security software, or configure the path again.",
   "montage.err.ffprobeNotFound": "ffprobe not found (usually installed with FFmpeg).",
   "montage.err.ffprobeFailed": "Could not read video metadata for \"{name}\" — make sure the file is not corrupt and plays normally.",
+  "montage.err.ffmpegSourceCompatibility": "The current FFmpeg could not read \"{name}\" and may be incompatible. Current version: {current_version}. Please use the recommended build: {recommended}.",
+  "montage.err.ffmpegEncoderCompatibility": "All available encoders failed, and the current FFmpeg did not pass the project compatibility check. Current version: {current_version}. Please use the recommended build: {recommended}.",
   "montage.err.hardwareEncoderFailed": "Hardware encoder {encoder} failed on this device; trying another encoder.",
   "montage.err.encoderAllFailed": "No available encoder could complete the export. Update the GPU driver or check the logs.",
   "montage.err.outputPathEmpty": "Please specify an output path.",

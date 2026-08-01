@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import CustomTitleBar, { APP_VERSION } from "./CustomTitleBar";
+import CustomTitleBar from "./CustomTitleBar";
 import { desktopBridge } from "../desktop/desktopBridge";
 
 vi.mock("../desktop/desktopBridge", () => ({
@@ -36,9 +36,9 @@ describe("CustomTitleBar", () => {
     expect(screen.queryByText(/上手指南|Getting Started|Demo 分析|Analysis/)).toBeNull();
   });
 
-  test("shows the build version unobtrusively in the top window chrome", () => {
+  test("floats the window controls without reserving content height or showing a version", () => {
     renderTitleBar();
-    expect(screen.getByTestId("titlebar-version").textContent).toBe(`v${APP_VERSION}`);
-    expect(screen.getByTestId("titlebar-version").className).toContain("text-[9px]");
+    expect(screen.queryByTestId("titlebar-version")).toBeNull();
+    expect(screen.getByTestId("custom-titlebar").className).toContain("absolute");
   });
 });

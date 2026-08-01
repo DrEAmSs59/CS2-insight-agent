@@ -89,8 +89,8 @@ export default function LiteCutToolbar({
           <Sparkles className="h-3.5 w-3.5" />
           {t("liteCut.preset.short")}
         </button>
-        <button type="button" title="标记点管理" onClick={() => setMarkersOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary"><Tags className="h-3.5 w-3.5" />标记</button>
-        <button type="button" title="工程与缓存管理" onClick={() => setManagementOpen(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary"><Settings2 className="h-3.5 w-3.5" /></button>
+        <button type="button" title={t("liteCut.marker.manager")} onClick={() => setMarkersOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary"><Tags className="h-3.5 w-3.5" />{t("liteCut.marker.short")}</button>
+        <button type="button" title={t("liteCut.project.managementTitle")} onClick={() => setManagementOpen(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary"><Settings2 className="h-3.5 w-3.5" /></button>
         <button type="button" title={t("liteCut.project.save")} disabled={saving || !onSave} onClick={() => onSave?.()} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary disabled:opacity-50">
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           {saving ? t("liteCut.project.saving") : dirty ? t("liteCut.project.save") : t("liteCut.project.saved")}

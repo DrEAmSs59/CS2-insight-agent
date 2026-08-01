@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
 from ..platform_utils import voice_listen_mask_console_commands
@@ -14,6 +14,7 @@ from .demo_controller import (
     demo_pause_silent, demo_pause_silent_attempt, demo_pause_silent_strict, demo_resume_silent_strict,
     DemoSeekError, inject_console_sequence,
 )
+from .kill_markers import KillMarkerTimeline
 from .spec_controller import spec_by_slot, spec_player
 from .gsi_verifier import verify_spec_target
 
@@ -91,6 +92,29 @@ def _kb_bus(segment=None):
     except Exception:
         pass
     return None, 0, 0
+
+def _calibration_ticks_for(segment: Any, tick_rate: float) -> list[int]:
+    """时序自检开启时，本段要打的校准闪白 tick；关闭时返回空列表。
+
+    默认关闭：闪白会在成片角落留下一块不透明方块，不能出现在正常录制里。
+    """
+    try:
+        from ...env_utils import load_config
+
+        cfg = load_config()
+        if not bool(getattr(cfg, "latency_calibration_enabled", False)):
+            return []
+        from ..diagnostics.onset_probe import plan_calibration_ticks
+
+        return plan_calibration_ticks(
+            start_tick=int(segment.start_tick),
+            end_tick=int(segment.end_tick),
+            tick_rate=float(tick_rate),
+        )
+    except Exception:  # noqa: BLE001 - 自检不该影响录制
+        logger.debug("calibration tick planning failed", exc_info=True)
+        return []
+
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
@@ -407,6 +431,12 @@ class ExecutionResult:
     recording_started_at: Optional[float] = None   # wall time just before first StartRecord
     recording_stopped_at: Optional[float] = None   # wall time just after last StopRecord
     obs_record_directory: Optional[str] = None     # OBS output directory (from GetRecordDirectory)
+    # Kill anchors converted to seconds inside the finished file (LiteCut kill axis)
+    kill_markers: list[dict] = field(default_factory=list)
+    # Timing self-check: where the overlay meant to flash its calibration marker.
+    # Subtracting these from the flashes measured in the file gives the overlay's
+    # net latency, which is what decides whether an offset needs tuning at all.
+    calibration_markers: list[dict] = field(default_factory=list)
 
 
 # Max additional slot offsets to try after the demo-parsed base slot fails GSI verify.
@@ -615,6 +645,10 @@ class RecordingExecutor:
 
         obs_recording_started = False
         final_output_path: Optional[str] = None
+        # Kill axis: accumulates each segment's real recorded length so kill anchors
+        # can be expressed as seconds inside the single jump-cut output file.
+        kill_timeline = KillMarkerTimeline(plan.tick_rate)
+        segment_record_t0: Optional[float] = None
 
         for i, segment in enumerate(active_segments):
             if self._is_aborted():
@@ -842,6 +876,12 @@ class RecordingExecutor:
                     "[overlay] seg=%d bus=%s kb_tick_off=%s kill_fx_tick_off=%s",
                     segment.segment_index, _bus, _kb_tick_off, _fx_tick_off,
                 )
+                _calibration_ticks = _calibration_ticks_for(segment, plan.tick_rate)
+                if _calibration_ticks:
+                    logger.warning(
+                        "[overlay] seg=%d latency calibration ON: %d flash(es) will appear in the recording",
+                        segment.segment_index, len(_calibration_ticks),
+                    )
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -853,12 +893,17 @@ class RecordingExecutor:
                         "kill_fx_offset_ticks": _fx_tick_off,
                         "frames": _kb_frames or [],
                         "kills": segment.metadata.get("kill_track") or [],
+                        "calibration_ticks": _calibration_ticks,
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
                 _bus_resume, _, _ = _kb_bus(segment)
+                # Kill axis timestamps: obs_record_mono is video t=0 for this segment,
+                # demo_resume_mono is when playback actually resumed inside it.
+                obs_record_mono: Optional[float] = None
+                demo_resume_mono: Optional[float] = None
 
                 if not obs_recording_started:
                     logger.info(
@@ -870,6 +915,7 @@ class RecordingExecutor:
                     # Fade transitions are reserved for mid-clip segment boundaries only,
                     # so the global Desktop Audio track is never cross-faded at clip edges.
                     await self._ctrl.start_record_safe()
+                    obs_record_mono = time.monotonic()
                     obs_recording_started = True
                     # ── kb overlay: resume 与 demo_resume 并发，消除 50ms sleep 带来的偏移 ──
                     if _bus_resume:
@@ -879,6 +925,7 @@ class RecordingExecutor:
                         )
                     else:
                         resume_ok = await demo_resume_silent_strict()
+                    demo_resume_mono = time.monotonic()
                     self._obs_on_black = False
                 else:
                     logger.info(
@@ -892,6 +939,7 @@ class RecordingExecutor:
                     if self._fade is not None:
                         await self._fade.prime_fade_to_game()
                     await self._ctrl.resume_record_safe()
+                    obs_record_mono = time.monotonic()
 
                     # Resume the demo while OBS is still fully black. CS2 can
                     # render its in-game cursor for one frame while focus and
@@ -902,6 +950,7 @@ class RecordingExecutor:
                         tasks.append(_bus_resume.broadcast({"type": "resume"}))
                     results_gather = await asyncio.gather(*tasks, return_exceptions=True)
                     resume_ok = results_gather[0] if not isinstance(results_gather[0], Exception) else False
+                    demo_resume_mono = time.monotonic()
                     if self._fade is not None and resume_ok:
                         # The silent resume settles for 50 ms. Start revealing
                         # the game only after that short cursor/focus window.
@@ -912,6 +961,19 @@ class RecordingExecutor:
                         await self._fade.cancel_primed_fade_to_game()
                     if resume_ok:
                         self._obs_on_black = False
+
+                segment_record_t0 = obs_record_mono if obs_record_mono is not None else time.monotonic()
+                kill_timeline.open_segment(
+                    segment,
+                    calibration_ticks=_calibration_ticks,
+                    overlay_offset_ticks=_kb_tick_off,
+                    overhead_sec=record_overhead_sec,
+                    lead_in_sec=(
+                        demo_resume_mono - obs_record_mono
+                        if demo_resume_mono is not None and obs_record_mono is not None
+                        else 0.0
+                    ),
+                )
 
                 # ── 5. Handle demo_resume_silent_strict failure ───────────────
                 # Strict: no console fallback — OBS is now recording.
@@ -932,6 +994,11 @@ class RecordingExecutor:
                             self._obs_force_stopped = True
                     # After OBS is paused/stopped, console is safe again.
                     await demo_pause()
+                    # The frozen frame reached the file, so the kill axis must still
+                    # advance — but this segment holds no playback and thus no kills.
+                    kill_timeline.close_segment(
+                        time.monotonic() - segment_record_t0, keep_markers=False,
+                    )
                     result.segment_results.append(SegmentResult(
                         segment_index=segment.segment_index,
                         status="silent_resume_failed",
@@ -968,6 +1035,10 @@ class RecordingExecutor:
                     logger.info("[RecordingV3] recording aborted during segment %d", segment.segment_index)
                     logger.info("[RecordingV3][ABORT] abort requested")
 
+                    # Partial footage still reached the file, so keep the kill anchors
+                    # that fall inside what was actually recorded.
+                    kill_timeline.close_segment(time.monotonic() - segment_record_t0)
+
                     # Concurrent: silent pause + OBS stop (OBS is recording — no console).
                     # Console fallback happens after OBS confirms stopped (inside helper).
                     final_output_path = None
@@ -998,6 +1069,9 @@ class RecordingExecutor:
                     segment.segment_index, "stop" if is_last else "pause",
                 )
                 obs_stop_path = await self._stop_obs_and_console_pause(is_last=is_last)
+                # Measured after the boundary completes so the segment length includes
+                # the fade-to-black that precedes a mid-clip PauseRecord.
+                kill_timeline.close_segment(time.monotonic() - segment_record_t0)
                 if is_last:
                     result.recording_stopped_at = time.time()
                     final_output_path = obs_stop_path
@@ -1064,6 +1138,12 @@ class RecordingExecutor:
 
             except Exception as e:
                 logger.error("Segment %d record error: %s", segment.segment_index, e)
+                # OBS state is ambiguous here: keep the kill axis advancing by whatever
+                # was recorded, but drop this segment's anchors as untrustworthy.
+                if segment_record_t0 is not None:
+                    kill_timeline.close_segment(
+                        time.monotonic() - segment_record_t0, keep_markers=False,
+                    )
                 result.segment_results.append(SegmentResult(
                     segment_index=segment.segment_index,
                     status="skipped",
@@ -1101,6 +1181,12 @@ class RecordingExecutor:
             await self._ctrl.force_stop_recording()
 
         result.output_path = final_output_path
+        result.kill_markers = kill_timeline.markers
+        result.calibration_markers = kill_timeline.calibration_markers
+        logger.info(
+            "[RecordingV3] kill axis: %d marker(s) across %.2fs of recorded video",
+            len(result.kill_markers), kill_timeline.accumulated_sec,
+        )
         was_aborted = self._is_aborted() or any(
             str(item.error or "").strip().lower() == "aborted"
             for item in result.segment_results

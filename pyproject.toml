@@ -6,6 +6,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "aiosqlite==0.22.1",
     "cramjam==2.11.0",
+    "cryptography==50.0.0",
     "demoparser2==0.41.4+cs2insight7; sys_platform == 'win32' and platform_machine == 'AMD64'",
     "fastapi==0.136.3",
     "httpx==0.28.1",

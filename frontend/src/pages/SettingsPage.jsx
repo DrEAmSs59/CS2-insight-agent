@@ -376,6 +376,10 @@ export default function SettingsPage() {
   const [liteCutStorageBusy, setLiteCutStorageBusy] = useState(false);
   const [liteCutStorageMsg, setLiteCutStorageMsg] = useState(null);
   const [liteCutStorageJob, setLiteCutStorageJob] = useState(null);
+  const [demoCacheInfo, setDemoCacheInfo] = useState(null);
+  const [demoCacheDraft, setDemoCacheDraft] = useState("");
+  const [demoCacheBusy, setDemoCacheBusy] = useState(false);
+  const [demoCacheMsg, setDemoCacheMsg] = useState(null);
   const recordingSaveRef = useRef(null);
   const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
 
@@ -462,6 +466,96 @@ export default function SettingsPage() {
       setReplayCacheBusy(false);
     }
   }, [replayCacheBusy, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await API.get("demo-cache");
+        if (!cancelled) {
+          setDemoCacheInfo(data);
+          setDemoCacheDraft(data?.path ?? "");
+        }
+      } catch (e) {
+        if (!cancelled) console.error("Failed to load demo cache info:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const browseDemoCache = useCallback(async () => {
+    try {
+      let selected = "";
+      if (desktopBridge) {
+        selected = await desktopBridge.chooseDirectory(demoCacheDraft);
+      } else {
+        const { data } = await API.post("directory-picker");
+        selected = data?.path ?? "";
+      }
+      if (selected) {
+        setDemoCacheDraft(selected);
+        setDemoCacheMsg(null);
+      }
+    } catch (e) {
+      setDemoCacheMsg({ tone: "error", text: e.response?.data?.detail || e.message });
+    }
+  }, [demoCacheDraft]);
+
+  const migrateDemoCache = useCallback(async () => {
+    const destination = demoCacheDraft.trim();
+    if (!destination || demoCacheBusy) return;
+    if (!window.confirm(t("settings.demoCacheMigrateConfirm"))) return;
+    setDemoCacheBusy(true);
+    setDemoCacheMsg(null);
+    try {
+      const { data } = await API.post("demo-cache/migrate", { destination });
+      setDemoCacheInfo((prev) => ({ ...(prev || {}), ...data, custom: true }));
+      setDemoCacheDraft(data.path || destination);
+      setConfig((prev) => (prev ? { ...prev, demo_cache_directory: data.path || destination } : prev));
+      setDemoCacheMsg({
+        tone: "ok",
+        text: data.unchanged
+          ? t("settings.demoCacheUnchanged")
+          : t("settings.demoCacheMigrateSuccess", {
+              moved: data.moved ?? 0,
+              updated: data.db_updated ?? 0,
+            }),
+      });
+    } catch (e) {
+      setDemoCacheMsg({
+        tone: "error",
+        text: e.response?.data?.detail || e.message || t("settings.demoCacheMigrateFailed"),
+      });
+    } finally {
+      setDemoCacheBusy(false);
+    }
+  }, [demoCacheBusy, demoCacheDraft, t]);
+
+  const clearDemoCache = useCallback(async () => {
+    if (demoCacheBusy || !window.confirm(t("settings.demoCacheClearConfirm"))) return;
+    setDemoCacheBusy(true);
+    setDemoCacheMsg(null);
+    try {
+      const { data } = await API.post("demo-cache/clear");
+      const { data: next } = await API.get("demo-cache");
+      setDemoCacheInfo(next);
+      setDemoCacheDraft(next?.path ?? demoCacheDraft);
+      setDemoCacheMsg({
+        tone: "ok",
+        text: t("settings.demoCacheClearSuccess", {
+          files: data.removed_files ?? 0,
+          demos: data.demos_invalidated ?? 0,
+        }),
+      });
+    } catch (e) {
+      setDemoCacheMsg({
+        tone: "error",
+        text: e.response?.data?.detail || e.message || t("settings.demoCacheClearFailed"),
+      });
+    } finally {
+      setDemoCacheBusy(false);
+    }
+  }, [demoCacheBusy, demoCacheDraft, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -608,6 +702,7 @@ export default function SettingsPage() {
       payload.obs_agent_auto_prepare = !!config.obs_agent_auto_prepare;
       payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
+      payload.demo_cache_directory = config.demo_cache_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
       payload.steam_api_key = config.steam_api_key ?? "";
@@ -973,7 +1068,7 @@ export default function SettingsPage() {
 
               {/* Paths (CS2 + application and LiteCut data directories) */}
               {activeTab === "paths" && (
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
+              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDemoCachePath") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}
@@ -1064,6 +1159,63 @@ export default function SettingsPage() {
                         {liteCutStorageMsg.text}
                       </p>
                     )}
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelDemoCachePath")} hint={t("settings.hintDemoCachePath")} search={search && !matches(t("settings.labelDemoCachePath") + " " + (demoCacheDraft || "") + " " + t("settings.sectionDemoCache"))}>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={demoCacheDraft}
+                        onChange={(e) => {
+                          setDemoCacheDraft(e.target.value);
+                          setDemoCacheMsg(null);
+                        }}
+                        placeholder={demoCacheInfo?.default_path || ""}
+                        className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none"
+                      />
+                      <span className="shrink-0 text-xs text-cs2-text-muted">
+                        {formatFileSize(Number(demoCacheInfo?.total_bytes) || 0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={browseDemoCache}
+                        disabled={demoCacheBusy}
+                        className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-50"
+                      >
+                        {t("settings.browseBtn")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={migrateDemoCache}
+                        disabled={demoCacheBusy || !demoCacheDraft.trim()}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-cs2-accent px-3 py-2 text-xs font-bold text-black hover:bg-cs2-accent-light disabled:opacity-45"
+                      >
+                        {demoCacheBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {demoCacheBusy ? t("settings.demoCacheMigrating") : t("settings.demoCacheMigrate")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearDemoCache}
+                        disabled={demoCacheBusy}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-45"
+                      >
+                        {t("settings.demoCacheClear")}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-cs2-text-muted">
+                      {t("settings.demoCacheStats", {
+                        files: demoCacheInfo?.file_count ?? 0,
+                        size: formatFileSize(Number(demoCacheInfo?.total_bytes) || 0),
+                        cached: demoCacheInfo?.demo_cached ?? 0,
+                        total: demoCacheInfo?.demo_total ?? 0,
+                      })}
+                    </p>
+                    {demoCacheMsg ? (
+                      <p className={`text-[11px] ${demoCacheMsg.tone === "ok" ? "text-emerald-400" : "text-red-400"}`}>
+                        {demoCacheMsg.text}
+                      </p>
+                    ) : null}
                   </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>

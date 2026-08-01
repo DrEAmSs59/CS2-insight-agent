@@ -26,7 +26,12 @@ from ..env_utils import (
     minimize_obs_window,
     save_config,
 )
-from ..obs_bootstrap import ObsBootstrapRequest, bootstrap_obs_environment
+from ..obs_bootstrap import (
+    ObsBootstrapRequest,
+    bootstrap_obs_environment,
+    make_obs_launcher,
+    obs_launch_args,
+)
 from ..obs_tuning import (
     ObsTuningApplyRequest,
     ObsTuningPlanRequest,
@@ -181,7 +186,7 @@ def obs_config_check(payload: OBSConfig | None = Body(default=None)):
             if not running:
                 logger.info("[OBS config-check] Launching OBS: %s", obs_path)
                 try:
-                    subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+                    make_obs_launcher(obs_launch_args(cfg))(obs_path)
                     launched_obs = True
                     for _attempt in range(30):
                         if _is_obs_process_running(obs_path):
@@ -261,7 +266,7 @@ def obs_launch():
     if not obs_path or not Path(obs_path).is_file():
         raise HTTPException(400, "OBS 路径未配置或文件不存在")
     try:
-        subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+        make_obs_launcher(obs_launch_args(cfg))(obs_path)
         time.sleep(2)
     except Exception as exc:
         raise HTTPException(400, f"无法启动 OBS: {exc}") from exc

@@ -3,12 +3,15 @@ import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.j
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import { timelineSpeedRampSegments } from "./speedRampUiUtils.js";
+import { useT } from "../../../i18n/useT.js";
 
-const TRANSITION_LABELS = {
-  cut: "硬切", fade: "淡化", flash: "闪白", dip: "黑场", dip_black: "黑场",
-  zoom: "缩放", wipe_l: "左擦", wipe_r: "右擦", slide_up: "上滑",
-  slide_down: "下滑", slide_left: "左滑", slide_right: "右滑", blur: "模糊", glitch: "故障", spin: "旋转",
-};
+const TRANSITION_TYPES = new Set([
+  "cut", "fade", "flash", "dip", "dip_black", "zoom", "wipe_l", "wipe_r",
+  "slide_up", "slide_down", "slide_left", "slide_right", "blur", "glitch", "spin",
+]);
+
+// 工程里可能存着更新的、这个版本还不认识的转场类型，那就原样显示。
+const transitionLabel = (type, t) => (TRANSITION_TYPES.has(type) ? t(`liteCut.transition.${type}`) : type);
 
 export function timelineClipTone(type, source) {
   const kind = String(source?.meta?.kind || "").toLowerCase();
@@ -58,6 +61,7 @@ function TimelineClip({
   onTrimPointer,
   formatTime,
 }) {
+  const t = useT();
   const source = clip._clip || clip._overlay || {};
   const tone = timelineClipTone(rowType, source);
   const speedSegments = useMemo(
@@ -136,8 +140,8 @@ function TimelineClip({
     && Number(nextSourceClip?.transition_in?.duration_sec) > 0
     && String(nextSourceClip?.transition_in?.type || "cut") !== "cut";
   const hasTransitionOut = markerOutDuration > 0 && markerOutType !== "cut" && !nextOwnsBoundary;
-  const transitionInLabel = `入 · ${TRANSITION_LABELS[markerInType] || markerInType} · ${markerInDuration.toFixed(2)}s`;
-  const transitionOutLabel = `出 · ${TRANSITION_LABELS[markerOutType] || markerOutType} · ${markerOutDuration.toFixed(2)}s`;
+  const transitionInLabel = t("liteCut.clip.transitionIn", { type: transitionLabel(markerInType, t), duration: markerInDuration.toFixed(2) });
+  const transitionOutLabel = t("liteCut.clip.transitionOut", { type: transitionLabel(markerOutType, t), duration: markerOutDuration.toFixed(2) });
   const transitionStripBottom = speedSegments.length ? 12 : 0;
   const transitionInWidth = Math.min(renderedClipWidth, Math.max(3, Math.min(width, markerInDuration) * pixelsPerSecond));
   const transitionOutWidth = Math.min(renderedClipWidth, Math.max(3, Math.min(width, markerOutDuration) * pixelsPerSecond));
@@ -175,14 +179,18 @@ function TimelineClip({
             data-speed-ramp-segment
             className={`litecut-speed-ramp-segment ${segment.index % 2 ? "litecut-speed-ramp-segment--odd" : "litecut-speed-ramp-segment--even"} absolute inset-y-0 flex min-w-0 items-center justify-center overflow-hidden border-r`}
             style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
-            title={`${segment.speed.toFixed(2)}x · 素材 ${segment.sourceFrom.toFixed(0)}%–${segment.sourceTo.toFixed(0)}%`}
+            title={t("liteCut.clip.speedSegment", {
+              speed: segment.speed.toFixed(2),
+              from: segment.sourceFrom.toFixed(0),
+              to: segment.sourceTo.toFixed(0),
+            })}
           >
             {segmentPixelWidth >= 28 ? <span className="truncate px-1 font-mono text-[8px] font-bold leading-none text-white/90 drop-shadow">{segment.speed.toFixed(2)}x</span> : null}
           </div>;
         })}
       </div> : null}
-      <div data-oc-trim="left" aria-label="裁切片段开头" onPointerDown={(event) => onTrimPointer(event, "left")} className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize bg-white/0 hover:bg-white/30" />
-      <div data-oc-trim="right" aria-label="裁切片段结尾" onPointerDown={(event) => onTrimPointer(event, "right")} className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize bg-white/0 hover:bg-white/30" />
+      <div data-oc-trim="left" aria-label={t("liteCut.clip.trimStart")} onPointerDown={(event) => onTrimPointer(event, "left")} className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize bg-white/0 hover:bg-white/30" />
+      <div data-oc-trim="right" aria-label={t("liteCut.clip.trimEnd")} onPointerDown={(event) => onTrimPointer(event, "right")} className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize bg-white/0 hover:bg-white/30" />
       {keyframePoints.map((keyframe, index) => {
         const absoluteTime = start + Number(keyframe.time_sec);
         const active = Math.abs(absoluteTime - playheadSec) <= 0.04;
@@ -190,11 +198,14 @@ function TimelineClip({
           key={`${keyframe.kind}-${Number(keyframe.time_sec).toFixed(4)}-${index}`}
           type="button"
           data-timeline-keyframe={keyframe.kind}
-          title={`${keyframe.kind === "audio" ? "音量" : "画面"}关键帧 · ${formatTime(absoluteTime)}（拖动改时间，双击删除）`}
+          title={t("liteCut.clip.keyframeTooltip", {
+            kind: t(keyframe.kind === "audio" ? "liteCut.clip.keyframeKindAudio" : "liteCut.clip.keyframeKindTransform"),
+            time: formatTime(absoluteTime),
+          })}
           onPointerDown={(event) => startKeyframeDrag(event, keyframe, absoluteTime)}
           onDoubleClick={(event) => {
             event.stopPropagation();
-            if (!window.confirm("删除这个关键帧？")) return;
+            if (!window.confirm(t("liteCut.clip.keyframeDeleteConfirm"))) return;
             const actions = useLiteCutTimelineStore.getState();
             if (rowType === "overlay") actions.removeOverlayKeyframe(clip.id, absoluteTime);
             else if (keyframe.kind === "audio") actions.removeClipAudioKeyframe(clip.id, rowId, absoluteTime);
@@ -205,16 +216,16 @@ function TimelineClip({
         />;
       })}
       {hasTransitionIn ? <div data-transition-marker="in" data-transition-annotation data-transition-duration-sec={markerInDuration} title={transitionInLabel} className={`litecut-transition-marker litecut-transition-marker--in ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} pointer-events-none absolute left-0 z-[9] flex h-[15px] min-w-0 items-center overflow-hidden border-r border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionInWidth }}>
-        {transitionInWidth >= 36 ? <span className="truncate">{transitionInWidth >= 86 ? transitionInLabel : `入 ${markerInDuration.toFixed(2)}s`}</span> : null}
+        {transitionInWidth >= 36 ? <span className="truncate">{transitionInWidth >= 86 ? transitionInLabel : t("liteCut.clip.transitionInShort", { duration: markerInDuration.toFixed(2) })}</span> : null}
       </div> : null}
       {hasTransitionOut ? <div data-transition-marker="out" data-transition-annotation data-transition-duration-sec={markerOutDuration} title={transitionOutLabel} className={`litecut-transition-marker litecut-transition-marker--out ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} pointer-events-none absolute right-0 z-[9] flex h-[15px] min-w-0 items-center justify-end overflow-hidden border-l border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionOutWidth }}>
-        {transitionOutWidth >= 36 ? <span className="truncate">{transitionOutWidth >= 86 ? transitionOutLabel : `出 ${markerOutDuration.toFixed(2)}s`}</span> : null}
+        {transitionOutWidth >= 36 ? <span className="truncate">{transitionOutWidth >= 86 ? transitionOutLabel : t("liteCut.clip.transitionOutShort", { duration: markerOutDuration.toFixed(2) })}</span> : null}
       </div> : null}
       {compactTransitionLabels ? <div data-transition-label-layout="compact" className="litecut-transition-label-layout pointer-events-none absolute inset-x-0 z-[11] grid h-[15px] min-w-0 grid-cols-2 items-center font-mono text-[8px] font-semibold" style={{ bottom: transitionStripBottom }}>
-        <span data-transition-compact-label="in" title={transitionInLabel} className="min-w-0 truncate px-1 text-left">入 {markerInDuration.toFixed(2)}s</span>
-        <span data-transition-compact-label="out" title={transitionOutLabel} className="min-w-0 truncate px-1 text-right">出 {markerOutDuration.toFixed(2)}s</span>
+        <span data-transition-compact-label="in" title={transitionInLabel} className="min-w-0 truncate px-1 text-left">{t("liteCut.clip.transitionInShort", { duration: markerInDuration.toFixed(2) })}</span>
+        <span data-transition-compact-label="out" title={transitionOutLabel} className="min-w-0 truncate px-1 text-right">{t("liteCut.clip.transitionOutShort", { duration: markerOutDuration.toFixed(2) })}</span>
       </div> : null}
-      <span className="pointer-events-none relative z-10 block truncate px-1.5 pt-1 text-[9px] font-semibold text-white drop-shadow">{clip.label || source.meta?.name || "片段"}</span>
+      <span className="pointer-events-none relative z-10 block truncate px-1.5 pt-1 text-[9px] font-semibold text-white drop-shadow">{clip.label || source.meta?.name || t("liteCut.clip.untitled")}</span>
     </div>
   );
 }

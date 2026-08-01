@@ -40,6 +40,8 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_FFMPEG_NOT_RUNNABLE: "montage.err.ffmpegNotRunnable",
   MONTAGE_FFPROBE_NOT_FOUND: "montage.err.ffprobeNotFound",
   MONTAGE_FFPROBE_FAILED: "montage.err.ffprobeFailed",
+  MONTAGE_FFMPEG_SOURCE_COMPATIBILITY: "montage.err.ffmpegSourceCompatibility",
+  MONTAGE_FFMPEG_ENCODER_COMPATIBILITY: "montage.err.ffmpegEncoderCompatibility",
   MONTAGE_HARDWARE_ENCODER_FAILED: "montage.err.hardwareEncoderFailed",
   MONTAGE_ENCODER_ALL_FAILED: "montage.err.encoderAllFailed",
   MONTAGE_OUTPUT_PATH_EMPTY: "montage.err.outputPathEmpty",

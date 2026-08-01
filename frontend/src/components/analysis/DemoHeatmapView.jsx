@@ -28,7 +28,7 @@ import ReplayHeatmapCanvas from "./ReplayHeatmapCanvas";
 const HEATMAP_FPS = 32;
 const REQUEST_CONCURRENCY = 4;
 const MAX_HEATMAP_CACHE_ENTRIES = 6;
-const HEATMAP_MIN_ZOOM = 1;
+const HEATMAP_MIN_ZOOM = 0.5;
 const HEATMAP_MAX_ZOOM = 4;
 const HEATMAP_ZOOM_STEP = 1.2;
 const heatmapCache = new Map();
@@ -329,7 +329,7 @@ export default function DemoHeatmapView({
   const clampOffset = (value, zoom, axis) => {
     const rect = mapSurfaceRef.current?.getBoundingClientRect();
     const size = axis === "x" ? Number(rect?.width || 0) : Number(rect?.height || 0);
-    const limit = Math.max(0, size * (zoom - 1) / 2);
+    const limit = Math.max(0, size * Math.abs(zoom - 1) / 2);
     return Math.max(-limit, Math.min(limit, Number(value) || 0));
   };
 
@@ -374,7 +374,7 @@ export default function DemoHeatmapView({
   }, [mapCamera.zoom]);
 
   const handleMapPointerDown = (event) => {
-    if (event.button !== 0 || mapCamera.zoom <= HEATMAP_MIN_ZOOM || event.target.closest("button")) return;
+    if (event.button !== 0 || Math.abs(mapCamera.zoom - 1) < 0.001 || event.target.closest("button")) return;
     mapDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -453,12 +453,14 @@ export default function DemoHeatmapView({
           ref={mapSurfaceRef}
           data-testid="heatmap-map-surface"
           data-zoom={mapCamera.zoom.toFixed(2)}
+          data-offset-x={mapCamera.offsetX.toFixed(0)}
+          data-offset-y={mapCamera.offsetY.toFixed(0)}
           onPointerDown={handleMapPointerDown}
           onPointerMove={handleMapPointerMove}
           onPointerUp={finishMapDrag}
           onPointerCancel={finishMapDrag}
           className={`relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner ${
-            mapCamera.zoom > HEATMAP_MIN_ZOOM ? "cursor-grab active:cursor-grabbing" : ""
+            Math.abs(mapCamera.zoom - 1) >= 0.001 ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           style={{ touchAction: "none" }}
         >

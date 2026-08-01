@@ -43,6 +43,8 @@ class ConfigPayload(BaseModel):
     ffmpeg_path: Optional[str] = None
     montage_encoder: Optional[str] = None
     cs2_path: Optional[str] = None
+    demo_directory: Optional[str] = None
+    demo_cache_directory: Optional[str] = None
     demo_watch_paths: Optional[list[str]] = None
     demo_watch_scan_depth: Optional[int] = Field(default=None, ge=0, le=32)
     ai_mode: Optional[bool] = None
@@ -71,6 +73,7 @@ class ConfigPayload(BaseModel):
     match_count: Optional[int] = None
     update_check_frequency: Optional[str] = None
     last_update_check_at: Optional[str] = None
+    latency_calibration_enabled: Optional[bool] = None
 
 
 @router.get("/api/config")
@@ -308,6 +311,7 @@ async def update_config(payload: ConfigPayload):
     cfg = load_config()
     if payload.obs:
         obs = payload.obs
+        obs_fields = getattr(obs, "model_fields_set", set()) or set()
         cfg.obs.host = obs.host
         try:
             cfg.obs.port = int(obs.port)
@@ -318,6 +322,9 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.password = raw_password
         if obs.obs_path is not None:
             cfg.obs.obs_path = str(obs.obs_path).strip()
+        # 设置页已下线该开关；未显式传入时保留配置文件/API 调试值。
+        if "browser_begin_frame_scheduling" in obs_fields:
+            cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm
@@ -328,6 +335,12 @@ async def update_config(payload: ConfigPayload):
                 cfg.llm.base_url = payload.llm.base_url
     if payload.cs2_path is not None:
         cfg.cs2_path = payload.cs2_path
+    if payload.demo_directory is not None:
+        cfg.demo_directory = str(payload.demo_directory or "").strip()
+    if payload.demo_cache_directory is not None:
+        # Path changes that need file migration go through /api/demo-cache/migrate.
+        # Saving here only updates the setting when empty or already matching.
+        cfg.demo_cache_directory = str(payload.demo_cache_directory or "").strip()
     if payload.demo_watch_paths is not None:
         cfg.demo_watch_paths = [
             str(Path(path).expanduser())
@@ -340,6 +353,8 @@ async def update_config(payload: ConfigPayload):
         cfg.ai_mode = payload.ai_mode
     if payload.obs_agent_auto_prepare is not None:
         cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
+    if payload.latency_calibration_enabled is not None:
+        cfg.latency_calibration_enabled = bool(payload.latency_calibration_enabled)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
@@ -478,3 +493,44 @@ def experimental_pov_restore():
     except PovHudError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": bool(verification.get("verified")), "restore": verification}
+
+
+class DemoCacheMigrateBody(BaseModel):
+    destination: str = Field(..., min_length=1)
+
+
+@router.get("/api/demo-cache")
+async def get_demo_cache_status():
+    from ..databases import demo_db
+    from ..demo_cache import cache_status_payload
+
+    coverage = await demo_db.demo_cache_coverage()
+    return cache_status_payload(coverage)
+
+
+@router.post("/api/demo-cache/migrate")
+async def migrate_demo_cache(body: DemoCacheMigrateBody):
+    from ..databases import demo_db
+    from ..demo_cache import migrate_demo_cache_root
+
+    try:
+        result = await migrate_demo_cache_root(demo_db, body.destination)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"缓存迁移失败：{exc}") from exc
+    return {"ok": True, **result}
+
+
+@router.post("/api/demo-cache/clear")
+async def clear_demo_cache_endpoint():
+    from ..databases import demo_db
+    from ..demo_cache import clear_demo_cache
+
+    try:
+        result = await clear_demo_cache(demo_db)
+    except OSError as exc:
+        raise HTTPException(500, f"清除缓存失败：{exc}") from exc
+    return {"ok": True, **result}

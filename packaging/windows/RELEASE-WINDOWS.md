@@ -131,4 +131,8 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 CI 预算：嵌入 resources 不超过 `160 MiB`，NSIS 安装包不超过 `70 MiB`，预计安装占用不超过 `190 MiB`。超过上限会中止 release。
 
+## skin-core.exe（闭源 sidecar）
+
+`skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时注入。`desktop:stage-resources` 在设置了 `CS2_SKIN_CORE_EXE`，或存在 `../CS2-demo-anyskin/dist/skin-core.exe`（等 well-known 路径）时，会复制到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；缺失时跳过，OSS CI 不失败。正式发布前请把本版主程序 PE SHA-256 写入 skin-core 的父进程 allowlist。
+
 `bootstrap-staging.ps1`、`package_portable.ps1` 与 `CS2InsightAgent.iss` 仍保留为 legacy/manual 工具；Tauri 正式发布仅复用 `package_portable.ps1` 的 Python staging 能力。

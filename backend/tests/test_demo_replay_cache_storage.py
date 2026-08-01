@@ -111,8 +111,8 @@ def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
         calls.append(("get", demo_id))
         return {"id": demo_id, "path": str(demo_path)}
 
-    async def fake_delete_demo(demo_id, *, rescan):
-        calls.append(("delete", demo_id, rescan))
+    async def fake_delete_demo(demo_id):
+        calls.append(("delete", demo_id))
         return True
 
     async def fake_notify(_self, event):
@@ -127,7 +127,7 @@ def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(type(main.demo_library_hub), "notify", fake_notify)
     monkeypatch.setattr(replay_cache_storage, "remove_demo_replay_cache", fake_remove)
 
-    result = asyncio.run(main.delete_demo(17, rescan="skip"))
+    result = asyncio.run(main.delete_demo(17))
 
     assert result["replay_cache"] == {
         "removed_files": 3,
@@ -136,7 +136,7 @@ def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
     }
     assert calls == [
         ("get", 17),
-        ("delete", 17, "skip"),
+        ("delete", 17),
         ("cache", str(demo_path)),
         ("notify", "deleted"),
     ]

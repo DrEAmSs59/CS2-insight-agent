@@ -376,8 +376,7 @@
 }
 
 .app-topbar {
-  height: 50px;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--cs2-border-subtle) 82%, transparent), var(--cs2-shadow-sm);
+  height: 36px;
 }
 
 .app-sidebar {
@@ -460,6 +459,15 @@
   min-width: 0;
   flex: 1;
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.analysis-view-nav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .analysis-view-nav > button {

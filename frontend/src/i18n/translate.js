@@ -1,0 +1,42 @@
+import zh from "./dict/zh.js";
+import en from "./dict/en.js";
+
+// 纯查表 + 插值，不依赖 React 与 localeStore（后者会连带引入 API 客户端），
+// 因此 node 环境下的纯函数测试也能直接用它校验词条。
+const DICTS = { zh, en };
+const pluralRules = new Map();
+const PLURAL_TOKEN = /\{(\w+),\s*plural,\s*one=([^{}]+?),\s*other=([^{}]+?)\}/g;
+
+function pluralCategory(locale, value) {
+  let rules = pluralRules.get(locale);
+  if (!rules) {
+    rules = new Intl.PluralRules(locale === "zh" ? "zh-CN" : "en");
+    pluralRules.set(locale, rules);
+  }
+  return rules.select(Number(value));
+}
+
+function interpolate(str, params, locale) {
+  if (!params) return str;
+  return str
+    .replace(PLURAL_TOKEN, (match, key, one, other) => {
+      if (!Object.prototype.hasOwnProperty.call(params, key)) return match;
+      return (pluralCategory(locale, params[key]) === "one" ? one : other).trim();
+    })
+    .replace(/\{(\w+)\}/g, (match, key) =>
+      Object.prototype.hasOwnProperty.call(params, key) ? String(params[key]) : match,
+    );
+}
+
+export function translate(locale, key, params) {
+  const dict = DICTS[locale] || DICTS.zh;
+  let value = dict[key];
+  if (value === undefined) value = DICTS.zh[key]; // 回退到中文
+  if (value === undefined) {
+    if (import.meta.env?.DEV) {
+      console.warn(`[i18n] missing key: ${key}`);
+    }
+    return key; // 最终回退：原样返回 key
+  }
+  return interpolate(value, params, locale);
+}
