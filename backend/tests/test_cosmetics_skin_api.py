@@ -283,6 +283,128 @@ def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
+def test_post_partial_success_writes_cache_and_returns_item_results(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    db = api_env["db"]
+    original = api_env["original"]
+
+    asyncio.run(
+        db.save_result(
+            str(original),
+            {
+                "analysis_workspace": {
+                    "cosmetics": {
+                        "players": {
+                            STEAM_ID: [
+                                _inventory_row(item_id=10),
+                                _inventory_row(
+                                    item_id=11,
+                                    type="melee",
+                                    def_index=507,
+                                    model="knife_karambit",
+                                    name_zh="爪子刀",
+                                    name_en="Karambit",
+                                ),
+                            ]
+                        }
+                    }
+                }
+            },
+        )
+    )
+
+    def partial_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        Path(output_dem).write_bytes(b"PARTIAL-OK")
+        return {
+            "ok": True,
+            "sha256": "partialsha",
+            "items_rewritten": 1,
+            "succeeded": [{"item_id64": "10", "definition_index": 7}],
+            "failed": [
+                {
+                    "item_id64": "11",
+                    "definition_index": 507,
+                    "error": "need a donor knife",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", partial_rewrite)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": STEAM_ID,
+            "replacements": {
+                "id:10": _replacement(),
+                "id:11": _replacement(
+                    type="melee",
+                    def_index=500,
+                    paint_index=415,
+                    model="bayonet",
+                    name_zh="刺刀 | 多普勒",
+                    name_en="Bayonet | Doppler",
+                ),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["partial"] is True
+    assert cached.read_bytes() == b"PARTIAL-OK"
+    assert len(body["plan"]["items"]) == 1
+    assert body["plan"]["items"][0]["slot_key"] == "id:10"
+    assert body["succeeded"][0]["slot_key"] == "id:10"
+    assert body["failed"][0]["slot_key"] == "id:11"
+    assert "donor" in body["failed"][0]["error"]
+
+    stored = asyncio.run(db.get_custom_skin_plan(str(original), STEAM_ID))
+    assert stored is not None
+    assert len(stored["plan_json"]["items"]) == 1
+
+
+def test_post_all_items_soft_failed_returns_200_without_cache_write(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    before = cached.read_bytes()
+
+    def all_failed(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        return {
+            "ok": False,
+            "items_rewritten": 0,
+            "succeeded": [],
+            "failed": [
+                {
+                    "item_id64": "10",
+                    "definition_index": 7,
+                    "error": "the requested Econ item is not owned",
+                }
+            ],
+            "error_code": "validate",
+            "error_message": "all 1 items failed validation/ownership",
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", all_failed)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["plan"] is None
+    assert body["failed"][0]["slot_key"] == "id:10"
+    assert cached.read_bytes() == before
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
 def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]

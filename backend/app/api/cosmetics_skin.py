@@ -18,7 +18,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..cosmetics_skin_plan import CosmeticsSkinPlanError, build_batch_and_plan
+from ..cosmetics_skin_plan import (
+    CosmeticsSkinPlanError,
+    build_batch_and_plan,
+    filter_plan_by_succeeded_item_ids,
+    map_item_statuses,
+)
 from ..databases import demo_db
 from ..demo_cache import ensure_row_cached, file_md5
 from ..demo_compat_service import ensure_demo_compatible
@@ -145,7 +150,62 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         except Exception as exc:  # noqa: BLE001 - surface unexpected launcher failures
             raise HTTPException(502, f"skin-core failed: {exc}") from exc
 
-        if not isinstance(skin_result, dict) or skin_result.get("ok") is not True:
+        if not isinstance(skin_result, dict):
+            raise HTTPException(502, "skin-core rewrite failed")
+
+        succeeded_raw = skin_result.get("succeeded")
+        failed_raw = skin_result.get("failed")
+        succeeded_mapped = map_item_statuses(
+            plan_json, succeeded_raw if isinstance(succeeded_raw, list) else []
+        )
+        failed_mapped = map_item_statuses(
+            plan_json, failed_raw if isinstance(failed_raw, list) else []
+        )
+        succeeded_ids = {
+            str(row.get("item_id64") or "").strip()
+            for row in (succeeded_raw if isinstance(succeeded_raw, list) else [])
+            if isinstance(row, dict) and str(row.get("item_id64") or "").strip()
+        }
+        # Legacy responses without succeeded[]: treat full plan as succeeded when ok.
+        if not succeeded_ids and skin_result.get("ok") is True:
+            succeeded_ids = {
+                str(item.get("item_id64") or "").strip()
+                for item in batch_items
+                if isinstance(item, dict) and str(item.get("item_id64") or "").strip()
+            }
+            if not succeeded_mapped:
+                succeeded_mapped = map_item_statuses(
+                    plan_json,
+                    [
+                        {
+                            "item_id64": item_id,
+                            "definition_index": next(
+                                (
+                                    b.get("definition_index")
+                                    for b in batch_items
+                                    if str(b.get("item_id64")) == item_id
+                                ),
+                                None,
+                            ),
+                        }
+                        for item_id in succeeded_ids
+                    ],
+                )
+
+        filtered_plan = filter_plan_by_succeeded_item_ids(plan_json, succeeded_ids)
+
+        # Soft all-fail: structured failed[] with ok:false — do not replace cache.
+        if skin_result.get("ok") is not True:
+            if failed_mapped or succeeded_mapped:
+                return {
+                    "ok": False,
+                    "partial": False,
+                    "demo_id": int(demo_id),
+                    "plan": None,
+                    "succeeded": succeeded_mapped,
+                    "failed": failed_mapped,
+                    "error": _skin_core_failure_message(skin_result),
+                }
             raise HTTPException(502, _skin_core_failure_message(skin_result))
 
         if not temp_out.is_file():
@@ -169,16 +229,19 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         await demo_db.upsert_custom_skin_plan(
             original_path,
             steamid,
-            plan_json,
+            filtered_plan,
             output_sha256=output_sha256,
         )
 
         return {
             "ok": True,
+            "partial": bool(failed_mapped),
             "demo_id": int(demo_id),
             "cached_path": str(cached_path),
             "output_sha256": output_sha256,
-            "plan": plan_json,
+            "plan": filtered_plan,
+            "succeeded": succeeded_mapped,
+            "failed": failed_mapped,
         }
     finally:
         if not replaced:
