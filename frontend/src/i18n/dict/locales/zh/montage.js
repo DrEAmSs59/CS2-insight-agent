@@ -305,6 +305,8 @@ export default {
   "montage.err.ffmpegNotRunnable": "FFmpeg 无法启动，请检查文件权限、杀毒软件拦截或重新配置路径。",
   "montage.err.ffprobeNotFound": "未找到 ffprobe（通常与 FFmpeg 一同安装）。",
   "montage.err.ffprobeFailed": "无法读取片段「{name}」的视频信息，请确认该文件未损坏且可正常播放。",
+  "montage.err.ffmpegSourceCompatibility": "当前 FFmpeg 无法读取片段「{name}」，可能存在兼容性问题。当前版本：{current_version}。请更换为推荐版本：{recommended}。",
+  "montage.err.ffmpegEncoderCompatibility": "当前 FFmpeg 的所有可用编码器均未能完成导出，并且未通过项目兼容性检查。当前版本：{current_version}。请更换为推荐版本：{recommended}。",
   "montage.err.hardwareEncoderFailed": "硬件编码器 {encoder} 在当前设备上失败，正在尝试其他编码器。",
   "montage.err.encoderAllFailed": "所有可用编码器均未能完成导出，请更新显卡驱动或查看日志。",
   "montage.err.outputPathEmpty": "请填写输出路径。",

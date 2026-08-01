@@ -78,6 +78,7 @@ from ..montage_encoder import (
     raise_hardware_encoder_failure,
 )
 from ..montage_exceptions import HardwareEncoderFailure
+from ..ffmpeg_compatibility import add_ffmpeg_compatibility_hint
 from ..frame_blend import (
     build_frame_blend_command,
     normalize_frame_blend_frames,
@@ -1168,12 +1169,18 @@ def compose_lite_cut_montage(
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
     source_info: dict[Path, dict[str, Any]] = {}
     for source in paths:
-        source_info[source] = probe_video_audio_summary(
-            source,
-            ffprobe,
-            "lite_cut_source_preflight",
-            "source",
-        )
+        try:
+            source_info[source] = probe_video_audio_summary(
+                source,
+                ffprobe,
+                "lite_cut_source_preflight",
+                "source",
+            )
+        except MontageComposerError as exc:
+            hinted = add_ffmpeg_compatibility_hint(exc, ffmpeg_bin)
+            if hinted is exc:
+                raise
+            raise hinted from exc
     ref = source_info[paths[0]]
     width, height, fps = _project_output_settings(project_body, ref)
     if width <= 0 or height <= 0 or fps <= 0:
@@ -1295,6 +1302,11 @@ def compose_lite_cut_montage(
             cancellation_check=lambda: _raise_if_cancelled(cancel_event),
             on_attempt=_on_attempt,
         )
+    except MontageComposerError as exc:
+        hinted = add_ffmpeg_compatibility_hint(exc, ffmpeg_bin)
+        if hinted is exc:
+            raise
+        raise hinted from exc
     finally:
         _cleanup_attempt()
 
