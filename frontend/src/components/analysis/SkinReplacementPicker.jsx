@@ -140,7 +140,7 @@ function ParamRow({
     : (isWear ? WEAR_MIN : SEED_MIN);
 
   return (
-    <label className="flex max-w-[256px] shrink-0 flex-col gap-0.5 text-[11px]">
+    <label className="flex w-full min-w-0 shrink-0 flex-col gap-0.5 text-[11px]">
       <span className="text-cs2-text-muted">{label}</span>
       <div className="flex items-center gap-1.5">
         <input
@@ -197,11 +197,11 @@ function SkinColumn({
 }) {
   const t = useT();
   return (
-    <div className="flex w-[256px] shrink-0 flex-col gap-1">
+    <div className="flex w-full min-w-0 shrink-0 flex-col gap-1">
       <span className="shrink-0 text-xs font-medium text-cs2-text-muted">{label}</span>
       <div
         data-skin-tile
-        className="flex h-[192px] w-[256px] shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border bg-cs2-bg-input"
+        className="flex h-[192px] w-full shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border bg-cs2-bg-input"
       >
         <TileImage
           item={item}
@@ -324,7 +324,10 @@ export default function SkinReplacementPicker({
       )}
     >
       <div className="grid h-[min(720px,calc(90vh-8.5rem))] grid-cols-[256px_minmax(0,1fr)] gap-5 overflow-hidden p-4">
-        <div className="flex min-h-0 flex-col justify-between gap-3 overflow-hidden pr-0.5">
+        <div
+          data-testid="skin-picker-current-column"
+          className="flex min-h-0 flex-col justify-between gap-3 overflow-y-auto overflow-x-hidden pr-1"
+        >
           <SkinColumn
             item={sourceItem}
             locale={locale}

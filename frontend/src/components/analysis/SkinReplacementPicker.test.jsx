@@ -25,6 +25,8 @@ test("renders candidate search under title, fills grid, defaults replacement wea
   );
 
   const search = screen.getByPlaceholderText(/搜索皮肤|Search skins/i);
+  const currentColumn = screen.getByTestId("skin-picker-current-column");
+  expect(currentColumn.className).toMatch(/overflow-y-auto/);
   const candidates = screen.getByTestId("skin-candidate-list");
   expect(candidates.className).toMatch(/grid-cols-3/);
   expect(candidates.className).toMatch(/flex-1/);
