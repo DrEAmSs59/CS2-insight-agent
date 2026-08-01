@@ -20,6 +20,7 @@ function translated(language, id, field = "name") {
 
 function toCandidate(raw) {
   const image = String(raw.image || "");
+  const altName = String(raw.altName || "").trim();
   return {
     catalog_id: Number(raw.id),
     def_index: Number(raw.def),
@@ -28,6 +29,7 @@ function toCandidate(raw) {
     type: String(raw.type || ""),
     name_en: translated(english, raw.id) || String(raw.model || ""),
     name_zh: translated(schinese, raw.id) || translated(english, raw.id) || String(raw.model || ""),
+    alt_name: altName || undefined,
     image_url: image ? (image.startsWith("http") ? image : `${IMAGE_BASE}${image}`) : "",
     rarity: String(raw.rarity || "#ded6cc"),
     wear_min: Number.isFinite(Number(raw.wearMin)) ? Number(raw.wearMin) : undefined,
@@ -53,6 +55,7 @@ export function sortCandidatesByRarityDesc(candidates) {
     (RARITY_RANK[String(right?.rarity || "").toLowerCase()] ?? -1)
     - (RARITY_RANK[String(left?.rarity || "").toLowerCase()] ?? -1)
     || String(left?.name_en || "").localeCompare(String(right?.name_en || ""))
+    || String(left?.alt_name || "").localeCompare(String(right?.alt_name || ""))
   ));
 }
 
@@ -64,6 +67,74 @@ export function filterCandidates(candidates, query, locale = "zh") {
     const name = zh
       ? String(row?.name_zh || row?.name_en || "")
       : String(row?.name_en || row?.name_zh || "");
-    return name.toLowerCase().includes(q);
+    const alt = String(row?.alt_name || "");
+    return name.toLowerCase().includes(q) || alt.toLowerCase().includes(q);
   });
+}
+
+/** Match @ianlucas/cs2-lib EconomyItem.getImage(wear): CDN light/medium/heavy variants.
+ *  Default/base items only ship a single webp — never append wear suffixes for them. */
+export function imageUrlForWear(imageUrl, wear, item = null) {
+  const url = String(imageUrl || "").trim();
+  if (!url) return "";
+  const base = url.replace(/_(light|medium|heavy)\.webp/i, ".webp");
+  // Vanilla/default art has no wear variants on the CDN.
+  if (item && (item.is_placeholder || item.is_base || !(Number(item.paint_index) > 0))) {
+    return base.includes(".webp") ? base : url;
+  }
+  const wearNum = Number(wear);
+  if (!Number.isFinite(wearNum)) return url;
+  if (!base.includes(".webp")) return url;
+  if (wearNum < 1 / 3) return base.replace(".webp", "_light.webp");
+  if (wearNum < 2 / 3) return base.replace(".webp", "_medium.webp");
+  return base.replace(".webp", "_heavy.webp");
+}
+
+export function splitSkinName(fullName) {
+  const parts = String(fullName || "").split("|").map((part) => part.trim()).filter(Boolean);
+  if (parts.length <= 1) return { model: parts[0] || "", finish: "" };
+  return { model: parts[0], finish: parts.slice(1).join(" | ") };
+}
+
+/** Craft-style: ★ before knife model; finish name separate for red styling. */
+export function craftNameParts(item, locale) {
+  const chinese = String(item?.name_zh || "").trim();
+  const english = String(item?.name_en || "").trim();
+  const full = String(locale || "").toLowerCase().startsWith("zh")
+    ? chinese || english
+    : english || chinese;
+  const { model, finish } = splitSkinName(full);
+  const isMelee = String(item?.type || "") === "melee";
+  const modelClean = model.replace(/^★\s*/, "");
+  return {
+    model: modelClean ? `${isMelee ? "★ " : ""}${modelClean}` : "",
+    finish,
+    alt: String(item?.alt_name || "").trim(),
+    full,
+  };
+}
+
+const LOADOUT_TYPES = new Set(["weapon", "melee", "glove"]);
+
+/** Default free/base weapons for a team row (CT or T), with CDN images. */
+export function listDefaultLoadout(team) {
+  const teamKey = String(team || "").toLowerCase() === "ct" ? "ct" : "t";
+  const teamCode = teamKey === "ct" ? 1 : 0;
+  return CS2_ITEMS
+    .filter((item) => {
+      if (!item.free || !item.base) return false;
+      if (!LOADOUT_TYPES.has(String(item.type || ""))) return false;
+      if (item.category === "c4" || item.category === "equipment") return false;
+      if (Number(item.teams) === 2) return true;
+      return Number(item.teams) === teamCode;
+    })
+    .map((raw) => ({
+      ...toCandidate(raw),
+      paint_index: 0,
+      is_placeholder: true,
+      observed_teams: [teamKey],
+      catalog_exact: true,
+      finish_known: true,
+      ownership_evidence: "default_loadout",
+    }));
 }

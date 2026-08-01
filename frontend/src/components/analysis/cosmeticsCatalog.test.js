@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
+  craftNameParts,
   filterCandidates,
+  imageUrlForWear,
   listSkinCandidates,
   sortCandidatesByRarityDesc,
 } from "./cosmeticsCatalog.js";
@@ -30,5 +32,39 @@ describe("cosmeticsCatalog", () => {
     expect(sortCandidatesByRarityDesc(mixed).map((r) => r.name_en)).toEqual(["Red", "Purple", "Blue"]);
     expect(filterCandidates(mixed, "红", "zh")).toHaveLength(1);
     expect(filterCandidates(mixed, "blue", "en")).toHaveLength(1);
+  });
+
+  test("exposes Doppler phase via alt_name and includes it in search", () => {
+    const rows = listSkinCandidates({ type: "melee", def_index: 500, model: "bayonet" });
+    const dopplers = rows.filter((row) => /多普勒|Doppler/i.test(`${row.name_zh} ${row.name_en}`));
+    expect(dopplers.length).toBeGreaterThan(5);
+    expect(dopplers.some((row) => row.alt_name === "Ruby")).toBe(true);
+    expect(dopplers.some((row) => row.alt_name === "Phase 2")).toBe(true);
+    expect(filterCandidates(dopplers, "ruby", "en").some((row) => row.alt_name === "Ruby")).toBe(true);
+  });
+
+  test("imageUrlForWear maps wear tiers like cs2-lib getImage", () => {
+    const base = "https://cdn.cstrike.app/images/weapon_knife_butterfly_cu_butterfly_lore_8805af1d.webp";
+    expect(imageUrlForWear(base, 0.05, { paint_index: 415 })).toContain("_light.webp");
+    expect(imageUrlForWear(base, 0.4, { paint_index: 415 })).toContain("_medium.webp");
+    expect(imageUrlForWear(base, 0.9, { paint_index: 415 })).toContain("_heavy.webp");
+    expect(imageUrlForWear(base)).toBe(base);
+  });
+
+  test("imageUrlForWear keeps vanilla default art without wear suffixes", () => {
+    const base = "https://cdn.cstrike.app/images/weapon_knife_a6715cc6.webp";
+    expect(imageUrlForWear(base, 0, { is_placeholder: true, paint_index: 0 })).toBe(base);
+    expect(imageUrlForWear(base, 0.9, { paint_index: 0 })).toBe(base);
+    expect(imageUrlForWear(base.replace(".webp", "_light.webp"), 0.1, { is_placeholder: true })).toBe(base);
+  });
+
+  test("craftNameParts prefixes melee with star and splits finish", () => {
+    const parts = craftNameParts(
+      { type: "melee", name_en: "Butterfly Knife | Lore", name_zh: "蝴蝶刀 | 传说" },
+      "en",
+    );
+    expect(parts.model).toBe("★ Butterfly Knife");
+    expect(parts.finish).toBe("Lore");
+    expect(craftNameParts({ type: "weapon", name_en: "AK-47 | Redline" }, "en").model).toBe("AK-47");
   });
 });

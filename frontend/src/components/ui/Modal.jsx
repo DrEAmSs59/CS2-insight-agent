@@ -14,6 +14,7 @@ import { X } from "lucide-react";
  *   children: React.ReactNode;
  *   footer?: React.ReactNode;
  *   className?: string;
+ *   contentClassName?: string;
  *   zIndex?: number;
  * }} props
  */
@@ -29,6 +30,7 @@ export default function Modal({
   children,
   footer,
   className = "",
+  contentClassName = "flex-1 overflow-y-auto",
   zIndex = 90,
 }) {
   if (!open) return null;
@@ -78,7 +80,7 @@ export default function Modal({
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className={contentClassName}>{children}</div>
 
         {/* Footer */}
         {footer && (

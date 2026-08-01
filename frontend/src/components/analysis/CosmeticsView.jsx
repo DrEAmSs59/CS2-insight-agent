@@ -4,14 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  Box,
   Check,
   ChevronLeft,
   Copy,
-  ExternalLink,
-  Gamepad2,
   Gem,
   Info,
   PackageOpen,
@@ -19,11 +15,11 @@ import {
   Sticker,
   WifiOff,
 } from "lucide-react";
-import { desktopBridge } from "../../desktop/desktopBridge.js";
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
-import { isCustomizable, itemsForTeam, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
+import { craftNameParts, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
+import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
@@ -144,8 +140,11 @@ function TeamIndicators({ item, compact = false }) {
 
 function CosmeticImage({ item, onlineAssetsEnabled, className = "" }) {
   const [failed, setFailed] = useState(false);
-  const src = onlineAssetsEnabled && !failed ? String(item?.image_url || "") : "";
-  useEffect(() => setFailed(false), [item?.image_url, onlineAssetsEnabled]);
+  const base = onlineAssetsEnabled ? String(item?.image_url || "") : "";
+  const src = onlineAssetsEnabled && !failed
+    ? imageUrlForWear(base, item?.paint_wear, item)
+    : "";
+  useEffect(() => setFailed(false), [item?.image_url, item?.paint_wear, item?.paint_index, item?.is_placeholder, onlineAssetsEnabled]);
   if (!src) {
     return (
       <span className={`flex items-center justify-center text-cs2-text-muted ${className}`}>
@@ -165,57 +164,116 @@ function CosmeticImage({ item, onlineAssetsEnabled, className = "" }) {
   );
 }
 
-function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customizable, replacementLabel, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
+function CraftNameLines({ item, locale, rename = "", compact = false }) {
+  const parts = craftNameParts(item, locale);
+  const modelClass = compact
+    ? "truncate text-[10px] font-bold text-cs2-text-secondary"
+    : "truncate text-[11px] font-black text-cs2-text-primary";
+  const finishClass = compact
+    ? "truncate text-[10px] font-semibold"
+    : "truncate text-[11px] font-semibold";
+  if (rename) {
+    return (
+      <>
+        <span className="block truncate text-[11px] font-black text-cs2-text-primary">“{rename}”</span>
+        <span className="mt-0.5 block truncate text-[10px] text-cs2-text-muted">{parts.full || displayName(item, locale)}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      {parts.model ? <span className={`block ${modelClass}`}>{parts.model}</span> : null}
+      {parts.finish ? (
+        <span className={`mt-0.5 block ${finishClass}`} style={{ color: String(item?.rarity || "").trim() || "#ded6cc" }}>{parts.finish}</span>
+      ) : null}
+      {!parts.model && !parts.finish ? (
+        <span className={`block ${modelClass}`}>{parts.full || displayName(item, locale)}</span>
+      ) : null}
+      {parts.alt ? <span className="mt-0.5 block truncate text-[9px] text-cs2-text-muted">{parts.alt}</span> : null}
+    </>
+  );
+}
+
+function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customizable, replacement, replacementLabel, onOpen, onHoverStart, onHoverEnd }) {
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const rename = customName(item);
   const name = displayName(item, locale);
+  const craft = craftNameParts(item, locale);
+  const accessibleName = rename || [craft.model, craft.finish, craft.alt].filter(Boolean).join(" ") || name;
   const disabled = customMode && !customizable;
+  const previewItem = replacement
+    ? {
+        ...item,
+        ...replacement,
+        stickers: item?.stickers,
+        custom_name: item?.custom_name,
+        image_url: replacement.image_url || item?.image_url,
+        rarity: replacement.rarity || item?.rarity,
+        paint_wear: Number.isFinite(Number(replacement.paint_wear))
+          ? Number(replacement.paint_wear)
+          : item?.paint_wear,
+        paint_index: Number.isFinite(Number(replacement.paint_index))
+          ? Number(replacement.paint_index)
+          : item?.paint_index,
+        is_placeholder: false,
+        is_base: false,
+      }
+    : item;
   return (
     <button
       type="button"
       onClick={onOpen}
-      onContextMenu={onContextMenu}
       onPointerEnter={onHoverStart}
       onPointerLeave={onHoverEnd}
       onFocus={onHoverStart}
       onBlur={onHoverEnd}
       data-cosmetic-card
-      className={`group grid w-full min-w-0 self-start grid-rows-[auto_2rem] text-left outline-none${
+      className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] text-left outline-none${
         disabled ? " cursor-not-allowed opacity-50 grayscale" : ""
       }`}
-      aria-label={rename || name}
+      aria-label={accessibleName}
     >
       <span className="relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
-        <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
+        <CosmeticImage item={previewItem} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
         {onlineAssetsEnabled && stickers.length ? (
-          <span className="absolute bottom-1.5 left-1.5 flex max-w-[80%] items-end gap-0.5">
+          <span className="absolute bottom-1 left-1 z-[1] flex max-w-[85%] items-end gap-1">
             {stickers.slice(0, 5).map((sticker, index) => (
-              <img key={`${sticker?.catalog_id || "sticker"}-${index}`} src={sticker?.image_url} alt="" className="h-5 w-5 object-contain drop-shadow" />
+              <img key={`${sticker?.catalog_id || "sticker"}-${index}`} src={sticker?.image_url} alt="" className="h-8 w-8 object-contain drop-shadow" />
             ))}
           </span>
         ) : null}
-        <span className="absolute inset-x-0 bottom-0 h-1" style={{ backgroundColor: item?.rarity || "#ded6cc" }} />
+        <span className="absolute inset-x-0 bottom-0 h-1" style={{ backgroundColor: previewItem?.rarity || "#ded6cc" }} />
       </span>
-      <span data-cosmetic-card-label className="mt-1.5 block h-8 min-w-0 overflow-hidden leading-tight">
-        <span className={`block truncate ${rename ? "text-[11px] font-black text-cs2-text-primary" : "text-[10px] font-bold text-cs2-text-secondary"}`}>
-          {rename ? `“${rename}”` : name}
-        </span>
-        {rename ? <span className="mt-0.5 block truncate text-[10px] text-cs2-text-muted">{name}</span> : null}
+      <span data-cosmetic-card-label className="mt-1.5 block min-h-8 min-w-0 overflow-hidden leading-tight">
+        <CraftNameLines item={item} locale={locale} rename={rename} compact />
         {replacementLabel ? <span className="mt-0.5 block truncate text-[10px] font-semibold text-cs2-accent">{replacementLabel}</span> : null}
       </span>
     </button>
   );
 }
 
-function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode, localReplacements, onOpen, onContextMenu, onHoverStart, onHoverEnd }) {
+function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode, localReplacements, onOpen, onHoverStart, onHoverEnd, showHeading = true }) {
   const t = useT();
   const teamKey = team === "ct" ? "ct" : "t";
   return (
     <section data-testid={`cosmetics-row-${teamKey}`} className="space-y-2">
-      <h3 className="text-[11px] font-black uppercase tracking-wide text-cs2-text-muted">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
+      {showHeading ? (
+        <h3 className="text-[11px] font-black uppercase tracking-wide text-cs2-text-muted">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
+      ) : null}
       {items.length ? (
         <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {items.map((item, index) => {
+          {sortCosmeticsForRow(items, locale, (item) => {
+            const replacement = localReplacements?.[slotKey(item)];
+            if (!replacement) return item;
+            return {
+              ...item,
+              ...replacement,
+              is_placeholder: false,
+              paint_index: Number(replacement.paint_index) > 0
+                ? Number(replacement.paint_index)
+                : (Number(item?.paint_index) || 1),
+            };
+          }).map((item, index) => {
             const key = slotKey(item);
             const replacement = localReplacements?.[key] || null;
             return (
@@ -226,9 +284,14 @@ function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode
               onlineAssetsEnabled={onlineAssetsEnabled}
               customMode={customMode}
               customizable={isCustomizable(item)}
-              replacementLabel={replacement ? t("analysis.cosmetics.replacementPreview", { name: displayName(replacement, locale) }) : null}
+              replacement={replacement}
+              replacementLabel={replacement ? (() => {
+                const parts = craftNameParts(replacement, locale);
+                const label = [parts.model, parts.finish, parts.alt].filter(Boolean).join(" · ")
+                  || displayName(replacement, locale);
+                return t("analysis.cosmetics.replacementPreview", { name: label });
+              })() : null}
               onOpen={() => onOpen(item)}
-              onContextMenu={(event) => onContextMenu(event, item)}
               onHoverStart={(event) => onHoverStart(event, item)}
               onHoverEnd={onHoverEnd}
             />
@@ -279,7 +342,9 @@ function HoverDetails({ item, locale, position }) {
       <div className="flex items-start justify-between gap-3 border-b border-cs2-border pb-2">
         <div className="min-w-0">
           {customName(item) ? <p className="truncate text-[12px] font-black text-cs2-text-primary">“{customName(item)}”</p> : null}
-          <p className={`${customName(item) ? "mt-0.5 text-[10px] text-cs2-text-muted" : "text-[11px] font-black text-cs2-text-primary"} truncate`}>{displayName(item, locale)}</p>
+          <div className={customName(item) ? "mt-0.5" : ""}>
+            <CraftNameLines item={item} locale={locale} />
+          </div>
         </div>
         <TeamIndicators item={item} compact />
       </div>
@@ -311,7 +376,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGame, onCopyInspectUrl, inspectBusy }) {
+function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspectUrl, inspectBusy }) {
   const t = useT();
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const observed = Array.isArray(item?.observed_teams) ? item.observed_teams : [];
@@ -324,27 +389,29 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGa
   const finishKnown = item?.finish_known !== false;
   return (
     <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-      <div className="flex min-h-[420px] flex-col items-center justify-center border-b border-cs2-border bg-cs2-bg-page/55 p-6 lg:border-b-0 lg:border-r">
+      <div className="flex flex-col items-center justify-center gap-4 border-b border-cs2-border bg-cs2-bg-page/55 p-5 lg:border-b-0 lg:border-r">
         {onlineAssetsEnabled && collection && item?.collection_image_url ? (
-          <div className="mb-4 flex items-center gap-2 self-start text-[11px] text-cs2-text-secondary">
+          <div className="flex items-center gap-2 self-start text-[11px] text-cs2-text-secondary">
             <img src={item.collection_image_url} alt="" className="h-8 w-8 object-contain" />
             <span>{collection}</span>
           </div>
         ) : null}
-        <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="max-h-[360px] w-full" />
+        <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="max-h-[300px] w-full" />
         {stickers.length && onlineAssetsEnabled ? (
-          <div className="mt-4 flex flex-wrap justify-center gap-3">
+          <div className="flex w-full flex-wrap justify-center gap-4">
             {stickers.map((sticker, index) => (
-              <div key={`${sticker?.catalog_id || "sticker"}-${index}`} className="text-center">
-                <img src={sticker?.image_url} alt="" className="h-14 w-14 object-contain" />
-                <span className="mt-1 block max-w-20 truncate text-[9px] text-cs2-text-muted">{localized(sticker, "name", locale)}</span>
+              <div key={`${sticker?.catalog_id || "sticker"}-${index}`} className="w-[5.5rem] text-center">
+                <img src={sticker?.image_url} alt="" className="mx-auto h-20 w-20 object-contain" />
+                <span className="mt-1.5 block break-words text-[9px] leading-snug text-cs2-text-muted">
+                  {localized(sticker, "name", locale)}
+                </span>
               </div>
             ))}
           </div>
         ) : stickers.length ? (
-          <div className="mt-4 inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
+          <div className="inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
         ) : (
-          <div className="mt-4 inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><Sticker className="h-3.5 w-3.5" />{t("analysis.cosmetics.noStickerEvidence")}</div>
+          <div className="inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><Sticker className="h-3.5 w-3.5" />{t("analysis.cosmetics.noStickerEvidence")}</div>
         )}
       </div>
       <div className="min-w-0 p-5">
@@ -352,8 +419,9 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGa
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               {customName(item) ? <p className="break-words text-base font-black text-cs2-text-primary">“{customName(item)}”</p> : null}
-              <p className={`${customName(item) ? "mt-1 text-[11px] text-cs2-text-muted" : "text-sm font-black text-cs2-text-primary"}`}>{displayName(item, locale)}</p>
-              {item?.alt_name ? <p className="mt-1 font-mono text-[9px] text-cs2-text-muted">{item.alt_name}</p> : null}
+              <div className={customName(item) ? "mt-1" : ""}>
+                <CraftNameLines item={item} locale={locale} />
+              </div>
             </div>
             <TeamIndicators item={item} />
           </div>
@@ -373,9 +441,8 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGa
         {!finishKnown ? <div className="mt-3 border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[10px] leading-relaxed text-amber-200">{t("analysis.cosmetics.finishUnavailable")}</div> : null}
         <WearBar wear={wear} wearMin={item?.wear_min} wearMax={item?.wear_max} />
         {description ? <p className="mt-4 whitespace-pre-line border-t border-cs2-border pt-4 text-[11px] leading-relaxed text-cs2-text-secondary">{description}</p> : null}
-        <div className="mt-5 grid grid-cols-3 border border-cs2-border">
+        <div className="mt-5 grid grid-cols-2 border border-cs2-border">
           <button data-cosmetic-open-3d type="button" disabled={!canInspect3d(item, onlineAssetsEnabled)} onClick={onOpen3d} className="inline-flex h-10 items-center justify-center gap-2 border-r border-cs2-border text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Rotate3D className="h-4 w-4" />{t("analysis.cosmetics.inspect3d")}</button>
-          <button type="button" disabled={!canInspectInGame(item) || inspectBusy} onClick={onInspectInGame} className="inline-flex h-10 items-center justify-center gap-2 border-r border-cs2-border text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Gamepad2 className="h-4 w-4" />{t("analysis.cosmetics.inspectInGame")}</button>
           <button type="button" disabled={!canInspectInGame(item) || inspectBusy} onClick={onCopyInspectUrl} className="inline-flex h-10 items-center justify-center gap-2 text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Copy className="h-4 w-4" />{t("analysis.cosmetics.copyInspectUrl")}</button>
         </div>
       </div>
@@ -392,7 +459,6 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   }, [name, workspace?.players]);
   const steamid = steamIdForPlayer(workspacePlayer) || steamIdForPlayer(selectedPlayer);
   const [detail, setDetail] = useState(null);
-  const [contextMenu, setContextMenu] = useState(null);
   const [hoverCard, setHoverCard] = useState(null);
   const [notice, setNotice] = useState(null);
   const [inspectBusy, setInspectBusy] = useState(false);
@@ -400,31 +466,32 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [localReplacements, setLocalReplacements] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [teamTab, setTeamTab] = useState("ct");
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
     return Array.isArray(rows) ? rows : [];
   }, [steamid, workspace?.cosmetics?.players]);
   const ctItems = useMemo(
-    () => sortCosmeticsForRow(itemsForTeam(inventory, "ct"), locale),
+    () => mergeLoadoutWithEvidence(listDefaultLoadout("ct"), itemsForTeam(inventory, "ct"), locale),
     [inventory, locale],
   );
   const tItems = useMemo(
-    () => sortCosmeticsForRow(itemsForTeam(inventory, "t"), locale),
+    () => mergeLoadoutWithEvidence(listDefaultLoadout("t"), itemsForTeam(inventory, "t"), locale),
     [inventory, locale],
   );
+  const activeTeam = teamTab === "t" ? "t" : "ct";
+  const activeItems = activeTeam === "t" ? tItems : ctItems;
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
 
   const clearOverlays = () => {
     setDetail(null);
     setHoverCard(null);
-    setContextMenu(null);
     setPickerItem(null);
   };
 
   useEffect(() => {
     setDetail(null);
-    setContextMenu(null);
     setHoverCard(null);
     setNotice(null);
     setViewMode("browse");
@@ -434,25 +501,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   }, [steamid]);
 
   useEffect(() => {
-    if (!contextMenu) return undefined;
-    const close = (event) => {
-      if (event?.target?.closest?.("[data-cosmetic-context-menu]")) return;
-      setContextMenu(null);
-    };
-    const onKey = (event) => {
-      if (event.key === "Escape") setContextMenu(null);
-    };
-    document.addEventListener("pointerdown", close);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [contextMenu]);
+    setTeamTab("ct");
+  }, [steamid]);
 
   useEffect(() => {
     if (!hoverCard) return undefined;
@@ -465,19 +515,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     };
   }, [hoverCard]);
 
-  const openContext = (event, item) => {
-    if (!browseMode) return;
-    event.preventDefault();
-    setHoverCard(null);
-    setContextMenu({
-      item,
-      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 224)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 100)),
-    });
-  };
-
   const openHover = (event, item) => {
-    if (!browseMode || contextMenu || detail) return;
+    if (!browseMode || detail) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const width = 288;
     const estimatedHeight = 230;
@@ -505,28 +544,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     if (!copied) throw new Error("Clipboard API unavailable");
   };
 
-  const inspectInGame = async (item) => {
-    setContextMenu(null);
-    setInspectBusy(true);
-    try {
-      const { buildCs2InspectLink } = await import("../../utils/cs2Inspect.js");
-      const link = buildCs2InspectLink(item);
-      if (link.startsWith("steam://") && desktopBridge?.openExternal) {
-        await desktopBridge.openExternal(link);
-        setNotice({ tone: "success", text: t("analysis.cosmetics.inspectLaunched") });
-      } else {
-        await writeClipboard(link);
-        setNotice({ tone: "success", text: t("analysis.cosmetics.inspectCommandCopied") });
-      }
-    } catch {
-      setNotice({ tone: "error", text: t("analysis.cosmetics.inspectFailed") });
-    } finally {
-      setInspectBusy(false);
-    }
-  };
-
   const copyInspectUrl = async (item) => {
-    setContextMenu(null);
     setInspectBusy(true);
     try {
       const { buildCs2InspectLink } = await import("../../utils/cs2Inspect.js");
@@ -587,7 +605,6 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const open3d = (item) => {
-    setContextMenu(null);
     setHoverCard(null);
     setDetail({ item, mode: "3d" });
   };
@@ -653,53 +670,54 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         <div className="mb-3 flex items-center gap-2 border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
       ) : null}
 
-      {inventory.length ? (
-        <div className="space-y-6">
-          <CosmeticsTeamRow
-            team="ct"
-            items={ctItems}
-            locale={locale}
-            onlineAssetsEnabled={onlineAssetsEnabled}
-            customMode={!browseMode}
-            localReplacements={localReplacements}
-            onOpen={openCard}
-            onContextMenu={openContext}
-            onHoverStart={openHover}
-            onHoverEnd={() => setHoverCard(null)}
-          />
-          <CosmeticsTeamRow
-            team="t"
-            items={tItems}
-            locale={locale}
-            onlineAssetsEnabled={onlineAssetsEnabled}
-            customMode={!browseMode}
-            localReplacements={localReplacements}
-            onOpen={openCard}
-            onContextMenu={openContext}
-            onHoverStart={openHover}
-            onHoverEnd={() => setHoverCard(null)}
-          />
-        </div>
-      ) : (
-        <div className="flex min-h-[300px] items-center justify-center border border-dashed border-cs2-border bg-cs2-bg-page/25 p-8 text-center">
-          <div><Box className="mx-auto h-7 w-7 text-cs2-text-muted" /><h3 className="mt-3 text-[12px] font-bold text-cs2-text-primary">{t("analysis.cosmetics.noEvidence")}</h3><p className="mt-1 max-w-md text-[10px] leading-relaxed text-cs2-text-muted">{t("analysis.cosmetics.noEvidenceHint")}</p></div>
-        </div>
-      )}
+      <div
+        role="tablist"
+        aria-label={t("analysis.cosmetics.teamTabs")}
+        className="mb-4 inline-flex rounded border border-cs2-border bg-cs2-bg-input p-0.5"
+      >
+        {["ct", "t"].map((team) => {
+          const active = activeTeam === team;
+          const count = team === "ct" ? ctItems.length : tItems.length;
+          return (
+            <button
+              key={team}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-testid={`cosmetics-team-tab-${team}`}
+              onClick={() => {
+                setHoverCard(null);
+                setTeamTab(team);
+              }}
+              className={`inline-flex h-8 min-w-[4.5rem] items-center justify-center gap-1.5 px-3 text-[11px] font-black uppercase tracking-wide transition-colors ${
+                active
+                  ? team === "ct"
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "bg-amber-500/20 text-amber-200"
+                  : "text-cs2-text-muted hover:text-cs2-text-secondary"
+              }`}
+            >
+              <span>{t(`analysis.cosmetics.team.${team}`)}</span>
+              <span className={`font-mono text-[10px] font-semibold ${active ? "opacity-90" : "opacity-60"}`}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <CosmeticsTeamRow
+        team={activeTeam}
+        items={activeItems}
+        locale={locale}
+        onlineAssetsEnabled={onlineAssetsEnabled}
+        customMode={!browseMode}
+        localReplacements={localReplacements}
+        showHeading={false}
+        onOpen={openCard}
+        onHoverStart={openHover}
+        onHoverEnd={() => setHoverCard(null)}
+      />
 
       {hoverCard ? <HoverDetails item={hoverCard.item} locale={locale} position={hoverCard.position} /> : null}
-
-      {contextMenu ? createPortal(
-        <div
-          data-cosmetic-context-menu
-          role="menu"
-          className="fixed z-[1000] w-[216px] rounded-md border border-slate-200 bg-white p-1.5 shadow-[0_8px_28px_rgba(15,23,42,0.22)]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void inspectInGame(contextMenu.item)} className="flex h-9 w-full items-center gap-3 rounded px-3 text-left text-[13px] font-semibold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"><ExternalLink className="h-[18px] w-[18px] text-slate-500" strokeWidth={1.8} />{t("analysis.cosmetics.inspectInGame")}</button>
-          <button type="button" role="menuitem" disabled={!canInspectInGame(contextMenu.item) || inspectBusy} onClick={() => void copyInspectUrl(contextMenu.item)} className="flex h-9 w-full items-center gap-3 rounded px-3 text-left text-[13px] font-semibold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"><Copy className="h-[18px] w-[18px] text-slate-500" strokeWidth={1.8} />{t("analysis.cosmetics.copyInspectUrl")}</button>
-        </div>,
-        document.body,
-      ) : null}
 
       <Modal
         open={Boolean(detail)}
@@ -709,6 +727,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         icon={detail?.mode === "3d" ? <Rotate3D className="h-4 w-4 text-cs2-accent" /> : <Gem className="h-4 w-4 text-cs2-accent" />}
         maxWidth="max-w-6xl"
         maxHeight="max-h-[90vh]"
+        className={detail?.mode === "3d" ? "" : "!h-auto"}
+        contentClassName={detail?.mode === "3d" ? "flex-1 overflow-y-auto" : "overflow-y-auto"}
         headerRight={detail?.mode === "3d" ? <button type="button" onClick={() => setDetail({ item: detail.item, mode: "info" })} className="inline-flex items-center gap-1 text-[10px] font-semibold text-cs2-text-muted hover:text-cs2-text-primary"><ChevronLeft className="h-3.5 w-3.5" />{t("analysis.cosmetics.backToInfo")}</button> : null}
       >
         {detail?.mode === "3d" ? (
@@ -719,7 +739,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             <iframe title={t("analysis.cosmetics.inspect3d")} src={viewerUrl(detail.item)} className="h-[72vh] w-full border-0 bg-transparent" allow="fullscreen" />
           </div>
         ) : detail ? (
-          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onInspectInGame={() => void inspectInGame(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} />
+          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} />
         ) : null}
       </Modal>
 
