@@ -594,9 +594,9 @@ export default function App() {
   }, [refreshDemoLibrary, libraryPage, t]);
 
   const handleDeleteDemo = useCallback(
-    async (id, rescan) => {
+    async (id) => {
       try {
-        await API.delete(`/demos/${id}`, { params: { rescan } });
+        await API.delete(`/demos/${id}`);
         setLibraryDeletePrompt(null);
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
@@ -621,14 +621,14 @@ export default function App() {
   );
 
   const handleLibraryBatchDelete = useCallback(
-    async (ids, rescan = "skip") => {
+    async (ids) => {
       const list = [...ids];
       if (!list.length) return;
       setProgressText(t("app.batchDeleteProgress", { done: 0, total: list.length }), { loading: true });
       let done = 0;
       for (const id of list) {
         try {
-          await API.delete(`/demos/${id}`, { params: { rescan } });
+          await API.delete(`/demos/${id}`);
           done += 1;
           setProgressText(t("app.batchDeleteProgress", { done, total: list.length }), { loading: true });
         } catch (e) {

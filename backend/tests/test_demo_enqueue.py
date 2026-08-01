@@ -12,7 +12,6 @@ from app import main
 def _fake_db(*, inserted: bool = True):
     return SimpleNamespace(
         ingest_md5_supported=True,
-        is_path_scan_blocked=AsyncMock(return_value=False),
         content_md5_exists=AsyncMock(return_value=False),
         add_demo=AsyncMock(return_value=(1, inserted)),
         update_demo_content_md5_if_absent=AsyncMock(),
