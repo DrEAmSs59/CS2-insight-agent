@@ -25,7 +25,7 @@ from ..cosmetics_skin_plan import (
     map_item_statuses,
 )
 from ..databases import demo_db
-from ..demo_cache import ensure_row_cached, file_md5
+from ..demo_cache import file_md5, refresh_row_cache_from_original
 from ..demo_compat_service import ensure_demo_compatible
 from ..skin_core_client import SkinCoreError, SkinCoreNotFound, run_rewrite_owned_batch
 
@@ -118,7 +118,7 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         raise HTTPException(400, "steamid is required")
 
     try:
-        cached_path = await ensure_row_cached(demo_db, row)
+        cached_path = await refresh_row_cache_from_original(demo_db, row)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
 

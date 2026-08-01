@@ -150,6 +150,33 @@ async def ensure_row_cached(demo_db: Any, row: dict[str, Any]) -> Path:
     return result.cached_path.resolve()
 
 
+async def refresh_row_cache_from_original(demo_db: Any, row: dict[str, Any]) -> Path:
+    """Overwrite the working cache with a fresh copy of the library original.
+
+    Custom skin saves must never feed a previously rewritten cache into skin-core.
+    """
+    original = Path(str(row.get("path") or ""))
+    if not original.is_file():
+        raise FileNotFoundError(f"Demo original missing: {original}")
+
+    cached_path = await ensure_row_cached(demo_db, row)
+
+    def _overwrite() -> None:
+        tmp = cached_path.with_suffix(cached_path.suffix + f".restore-{os.getpid()}.tmp")
+        try:
+            shutil.copy2(original, tmp)
+            os.replace(tmp, cached_path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    await asyncio.to_thread(_overwrite)
+    return cached_path.resolve()
+
+
 def migrate_cache_files(old_root: Path, new_root: Path) -> dict[str, int]:
     """Move files from old_root into new_root (same relative names when possible)."""
     old = old_root.resolve()
