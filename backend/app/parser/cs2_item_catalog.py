@@ -80,8 +80,10 @@ def cs2_weapon_translation_map() -> dict[str, str]:
 def resolve_cs2_item(def_index: object, paint_index: object) -> dict[str, Any] | None:
     try:
         definition = int(float(def_index))
-        paint = int(float(paint_index or 0))
-    except (TypeError, ValueError):
+        # Demoparser emits NaN paint for vanilla finishes; treat non-finite as 0.
+        paint_raw = 0.0 if paint_index is None else float(paint_index)
+        paint = 0 if not math.isfinite(paint_raw) else int(paint_raw)
+    except (TypeError, ValueError, OverflowError):
         return None
     catalog = load_cs2_item_catalog()
     raw = (catalog.get("items") or {}).get(f"{definition}:{paint}")
@@ -122,6 +124,93 @@ def resolve_cs2_sticker(sticker_id: object) -> dict[str, Any] | None:
         "image_url": f"{image_base}{image_path}" if image_base and image_path.startswith("/") else "",
         "rarity": str(item.get("rarity") or ""),
     }
+
+
+def _f32_bit_pattern(value: object) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or number == 0.0:
+        return None
+    return struct.unpack("<I", struct.pack("<f", number))[0]
+
+
+def _looks_like_sticker_id_float(value: object) -> bool:
+    """True when a float is a denormal/bit-packed sticker id, not normal wear/offset."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(number) or number == 0.0:
+        return False
+    # Normal sticker wear / offsets live near [-2, 2]; demoparser packs sticker
+    # ids as f32 bit patterns which decode to tiny denormals (~1e-40).
+    if abs(number) >= 1e-20:
+        return False
+    bits = _f32_bit_pattern(number)
+    return bits is not None and resolve_cs2_sticker(bits) is not None
+
+
+def _resolve_weapon_stickers(raw_stickers: object) -> list[dict[str, Any]]:
+    """Normalize demoparser weapon_stickers.
+
+    Prefer attribute-indexed decode from patched demoparser (id > 0). Keep a
+    collapsed id=0 recovery path only as fallback for older wheels.
+    """
+    if not isinstance(raw_stickers, Sequence) or isinstance(raw_stickers, (str, bytes, bytearray)):
+        return []
+
+    resolved: list[dict[str, Any]] = []
+    for index, sticker in enumerate(raw_stickers):
+        if not isinstance(sticker, Mapping):
+            continue
+        sticker_id = _safe_int(sticker.get("id")) or 0
+        if sticker_id <= 0:
+            continue
+        entry = resolve_cs2_sticker(sticker_id)
+        if not entry:
+            continue
+        wear = _safe_float(sticker.get("wear"))
+        # demotracer filter: keep wear in [0, 1]; missing wear is fine.
+        if wear is not None and not (0.0 <= wear <= 1.0):
+            continue
+        if wear is not None:
+            entry["wear"] = 0.0 if wear < 0.000001 else wear
+        entry["slot"] = index
+        resolved.append(entry)
+    if resolved:
+        return resolved
+
+    # Fallback for older demoparser layouts that leave id=0 and pack sticker
+    # ids into wear/x/y f32 bit patterns. Require ≥2 recovered catalog ids.
+    next_slot = 0
+    for sticker in raw_stickers:
+        if not isinstance(sticker, Mapping):
+            continue
+        if (_safe_int(sticker.get("id")) or 0) > 0:
+            continue
+        recovered_ids: list[int] = []
+        for field in ("wear", "x", "y"):
+            raw = sticker.get(field)
+            if not _looks_like_sticker_id_float(raw):
+                continue
+            bits = _f32_bit_pattern(raw)
+            if bits is None or bits in recovered_ids:
+                continue
+            if resolve_cs2_sticker(bits) is None:
+                continue
+            recovered_ids.append(bits)
+        if len(recovered_ids) < 2:
+            continue
+        for bits in recovered_ids:
+            entry = resolve_cs2_sticker(bits)
+            if not entry:
+                continue
+            entry["slot"] = next_slot
+            resolved.append(entry)
+            next_slot += 1
+    return resolved
 
 
 def _records_from_columns(value: object) -> list[dict[str, Any]]:
@@ -166,7 +255,13 @@ def _safe_float(value: object) -> float | None:
 
 def _safe_int(value: object) -> int | None:
     try:
-        return int(float(value))
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    try:
+        return int(number)
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -282,6 +377,7 @@ def _sample_player_context(
         "music_kits": {},
         "item_stickers": {},
         "observed_items": {},
+        "default_weapons": {},
         "pawn_gloves": {},
         "agents": {},
     }
@@ -324,6 +420,7 @@ def _sample_player_context(
     music_kits: dict[str, set[int]] = {}
     item_stickers: dict[tuple[str, int], list[dict[str, Any]]] = {}
     observed_items: dict[tuple[str, int], dict[str, Any]] = {}
+    default_weapons: dict[tuple[str, int], dict[str, Any]] = {}
     pawn_gloves: dict[tuple[str, int], dict[str, Any]] = {}
     agents: dict[tuple[str, int], dict[str, Any]] = {}
     roster_steamids = {
@@ -346,24 +443,64 @@ def _sample_player_context(
         if team:
             player_teams.setdefault(steamid, set()).add(team)
         item_id = _compose_item_id(row.get("item_id_high"), row.get("item_id_low"))
+        if item_id is None:
+            # Default buys often have item_id=0 and account_id 0/1 with unreliable
+            # paint kits. Attribute a vanilla finish to the holder only when there
+            # is no roster economy owner (never steal real account-owned assets).
+            account_owner = _steamid64_from_account_id(row.get("Weapon.m_iAccountID"))
+            if (
+                steamid in roster_steamids
+                and team
+                and account_owner not in roster_steamids
+            ):
+                default_entry = _skin_entry({
+                    "def_index": row.get("item_def_idx"),
+                    "paint_index": 0,
+                    "paint_seed": None,
+                    "paint_wear": None,
+                    "item_id": None,
+                    "custom_name": None,
+                })
+                if (
+                    default_entry
+                    and default_entry.get("catalog_exact")
+                    and default_entry.get("type") == "weapon"
+                    and str(default_entry.get("category") or "") in {
+                        "secondary",
+                        "rifle",
+                        "smg",
+                        "heavy",
+                        "shotgun",
+                    }
+                ):
+                    def_index = int(default_entry["def_index"])
+                    key = (steamid, def_index)
+                    previous = default_weapons.get(key)
+                    if previous is None:
+                        default_entry.update({
+                            "owner_steamid64": steamid,
+                            "ownership_evidence": "default_weapon_no_econ_id",
+                            "observed_teams": [team],
+                            "stickers": [],
+                            "evidence_observations": 0,
+                            "_owner_observation_ticks": set(),
+                        })
+                        default_weapons[key] = default_entry
+                        previous = default_entry
+                    else:
+                        previous["observed_teams"] = sorted(
+                            set(previous.get("observed_teams") or []) | {team},
+                            key=("t", "ct").index,
+                        )
+                    if tick is not None:
+                        previous.setdefault("_owner_observation_ticks", set()).add(tick)
         if item_id is not None:
             account_owner = _steamid64_from_account_id(row.get("Weapon.m_iAccountID"))
             if account_owner in roster_steamids:
                 item_account_candidates.setdefault(item_id, set()).add(account_owner)
                 if team and account_owner == steamid:
                     item_teams.setdefault((account_owner, item_id), set()).add(team)
-                resolved_stickers = []
-                for slot, sticker in enumerate(row.get("weapon_stickers") or []):
-                    if not isinstance(sticker, Mapping):
-                        continue
-                    resolved = resolve_cs2_sticker(sticker.get("id"))
-                    if not resolved:
-                        continue
-                    wear = _safe_float(sticker.get("wear"))
-                    if wear is not None and 0.0 <= wear <= 1.0:
-                        resolved["wear"] = 0.0 if wear < 0.000001 else wear
-                    resolved["slot"] = slot
-                    resolved_stickers.append(resolved)
+                resolved_stickers = _resolve_weapon_stickers(row.get("weapon_stickers"))
                 key = (account_owner, item_id)
                 if len(resolved_stickers) > len(item_stickers.get(key, [])):
                     item_stickers[key] = resolved_stickers
@@ -517,6 +654,8 @@ def _sample_player_context(
     }
     for entry in observed_items.values():
         entry["evidence_observations"] = len(entry.pop("_owner_observation_ticks", set()))
+    for entry in default_weapons.values():
+        entry["evidence_observations"] = len(entry.pop("_owner_observation_ticks", set()))
     for collection in (pawn_gloves, agents):
         for entry in collection.values():
             entry["evidence_observations"] = len(entry.pop("_observation_ticks", set()))
@@ -527,6 +666,7 @@ def _sample_player_context(
         "music_kits": music_kits,
         "item_stickers": item_stickers,
         "observed_items": observed_items,
+        "default_weapons": default_weapons,
         "pawn_gloves": pawn_gloves,
         "agents": agents,
     }
@@ -561,6 +701,7 @@ def build_player_cosmetic_inventory(
     music_kits = context["music_kits"]
     item_stickers = context["item_stickers"]
     observed_items = context["observed_items"]
+    default_weapons = context["default_weapons"]
     pawn_gloves = context["pawn_gloves"]
     agents = context["agents"]
     grouped: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {}
@@ -630,6 +771,17 @@ def build_player_cosmetic_inventory(
         observations = int(observed_entry.get("evidence_observations") or 0)
         if item_type == "weapon" or (item_type == "melee" and observations >= 2):
             owner_entries.setdefault(("item", item_id), observed_entry)
+
+    for (steamid, def_index), default_entry in default_weapons.items():
+        owner_entries = grouped.setdefault(steamid, {})
+        # Prefer a real economy-backed finish for the same definition when present.
+        if any(
+            int(entry.get("def_index") or 0) == def_index
+            and int(entry.get("item_id") or 0) > 0
+            for entry in owner_entries.values()
+        ):
+            continue
+        owner_entries.setdefault(("default", def_index), default_entry)
 
     for (steamid, item_id), glove_entry in pawn_gloves.items():
         owner_entries = grouped.setdefault(steamid, {})

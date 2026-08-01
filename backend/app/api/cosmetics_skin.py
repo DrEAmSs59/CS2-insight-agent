@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 class CustomSkinPlanBody(BaseModel):
     steamid: str = Field(..., min_length=1)
     replacements: dict[str, Any] = Field(..., min_length=1)
+    # First-seen demo skins per slot (UI snapshots). Optional; used for plan display.
+    originals: dict[str, Any] | None = None
 
 
 def _inventory_for_steamid(result: dict[str, Any] | None, steamid: str) -> list[dict[str, Any]]:
@@ -126,7 +128,12 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     result = await demo_db.get_result(original_path)
     inventory = _inventory_for_steamid(result, steamid)
     try:
-        batch_items, plan_json = build_batch_and_plan(steamid, inventory, body.replacements)
+        batch_items, plan_json = build_batch_and_plan(
+            steamid,
+            inventory,
+            body.replacements,
+            originals=body.originals,
+        )
     except CosmeticsSkinPlanError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -204,7 +211,11 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     ],
                 )
 
-        filtered_plan = filter_plan_by_succeeded_item_ids(plan_json, succeeded_ids)
+        filtered_plan = filter_plan_by_succeeded_item_ids(
+            plan_json,
+            succeeded_ids,
+            succeeded_rows=succeeded_raw if isinstance(succeeded_raw, list) else [],
+        )
 
         # Soft all-fail: structured failed[] with ok:false — do not replace cache.
         if skin_result.get("ok") is not True:

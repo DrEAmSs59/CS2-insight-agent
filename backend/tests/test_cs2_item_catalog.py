@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import struct
+
 from app.parser.cs2_item_catalog import (
     build_player_cosmetic_inventory,
     build_player_skin_loadouts,
@@ -143,6 +145,85 @@ def test_cosmetic_inventory_attaches_only_catalogued_stickers_to_the_exact_owned
         "wear": 0.01,
         "slot": 0,
     }]
+
+
+def test_weapon_stickers_recover_collapsed_demoparser_ids_as_f32_bits():
+    """demoparser sometimes leaves id=0 and packs real sticker IDs into wear/x/y bit patterns."""
+    owner = "76561198000000001"
+    item_id = 48844376331
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [owner],
+                "tick": [42],
+                "item_id_high": [item_id >> 32],
+                "item_id_low": [item_id & 0xFFFFFFFF],
+                "Weapon.m_iAccountID": [account_id(owner)],
+                "weapon_stickers": [[
+                    {
+                        "id": 0,
+                        "name": "default",
+                        # Vox / Reason / iBP Katowice 2014 Holo as f32 bit patterns
+                        "wear": struct.unpack("<f", struct.pack("<I", 80))[0],
+                        "x": struct.unpack("<f", struct.pack("<I", 74))[0],
+                        "y": struct.unpack("<f", struct.pack("<I", 60))[0],
+                    },
+                ]],
+                "item_def_idx": [7],
+                "weapon_skin_id": [282],
+                "weapon_paint_seed": [1],
+                "weapon_float": [0.2],
+                "team_num": [2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    stickers = inventory[owner][0]["stickers"]
+    assert [row["paint_index"] for row in stickers] == [80, 74, 60]
+    assert [row["slot"] for row in stickers] == [0, 1, 2]
+    assert "Katowice 2014" in stickers[0]["name_en"]
+
+
+def test_weapon_stickers_ignore_unreliable_offset_bit_patterns_when_id_missing():
+    """A lone denormal y with normal wear is not a trustworthy sticker id source."""
+    owner = "76561198000000001"
+    item_id = 43287757702
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [owner],
+                "tick": [42],
+                "item_id_high": [item_id >> 32],
+                "item_id_low": [item_id & 0xFFFFFFFF],
+                "Weapon.m_iAccountID": [account_id(owner)],
+                "weapon_stickers": [[
+                    {
+                        "id": 0,
+                        "name": "default",
+                        "wear": 1.0,
+                        "x": 0.0,
+                        "y": struct.unpack("<f", struct.pack("<I", 2507))[0],
+                    },
+                    {"id": 32, "name": "std2_bash_holo", "wear": 0.0, "x": 0.0, "y": 0.0},
+                ]],
+                "item_def_idx": [9],
+                "weapon_skin_id": [344],
+                "weapon_paint_seed": [89],
+                "weapon_float": [0.05],
+                "team_num": [3],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    stickers = inventory[owner][0]["stickers"]
+    assert [row["paint_index"] for row in stickers] == [32]
+    assert stickers[0]["name_en"] == "Sticker | Bash (Holo)"
 
 
 def test_weapon_account_adds_weapons_but_requires_repeated_owner_held_knife_evidence():
@@ -450,3 +531,137 @@ def test_vanilla_weapon_held_by_non_owner_has_no_observed_team_for_holder():
     match = next((row for row in owned if row.get("item_id") == item_id), None)
     assert match is not None
     assert match["observed_teams"] == []
+
+
+def test_resolve_cs2_item_treats_non_finite_paint_as_vanilla():
+    item = resolve_cs2_item(7, float("nan"))
+    assert item is not None
+    assert item["def"] == 7
+    assert item["paint"] == 0
+    assert item["catalog_exact"] is True
+    assert item["name_en"] == "AK-47"
+
+
+def test_vanilla_owned_weapon_survives_nan_paint_from_demoparser():
+    owner = "76561198000000001"
+    item_id = 24996516199
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [owner],
+                "tick": [42],
+                "item_id_high": [item_id >> 32],
+                "item_id_low": [item_id & 0xFFFFFFFF],
+                "Weapon.m_iAccountID": [account_id(owner)],
+                "weapon_stickers": [[]],
+                "item_def_idx": [7],
+                "weapon_skin_id": [float("nan")],
+                "weapon_paint_seed": [0],
+                "weapon_float": [0.0],
+                "team_num": [2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    weapons = [row for row in inventory[owner] if row["type"] == "weapon"]
+    assert len(weapons) == 1
+    assert weapons[0]["def_index"] == 7
+    assert weapons[0]["paint_index"] == 0
+    assert weapons[0]["item_id"] == item_id
+    assert weapons[0]["observed_teams"] == ["t"]
+    assert weapons[0]["ownership_evidence"] == "weapon_account_id"
+
+
+def test_default_buy_weapon_without_econ_id_attributes_to_holder_as_vanilla():
+    """Demoparser often emits item_id=0 + account=1 + garbage paint for default buys."""
+    holder = "76561198000000001"
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [holder],
+                "tick": [42],
+                "item_id_high": [0],
+                "item_id_low": [0],
+                "Weapon.m_iAccountID": [1],
+                "weapon_stickers": [[]],
+                "item_def_idx": [16],  # M4A4
+                "weapon_skin_id": [588],  # unreliable template paint
+                "weapon_paint_seed": [874],
+                "weapon_float": [0.17],
+                "team_num": [3],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    weapons = [row for row in inventory[holder] if row["type"] == "weapon"]
+    assert len(weapons) == 1
+    assert weapons[0]["def_index"] == 16
+    assert weapons[0]["paint_index"] == 0
+    assert "item_id" not in weapons[0] or not weapons[0].get("item_id")
+    assert weapons[0]["observed_teams"] == ["ct"]
+    assert weapons[0]["ownership_evidence"] == "default_weapon_no_econ_id"
+
+
+def test_default_buy_path_skips_c4_even_though_catalog_marks_it_weapon():
+    holder = "76561198000000001"
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [holder],
+                "tick": [42],
+                "item_id_high": [0],
+                "item_id_low": [0],
+                "Weapon.m_iAccountID": [0],
+                "weapon_stickers": [[]],
+                "item_def_idx": [49],
+                "weapon_skin_id": [float("nan")],
+                "weapon_paint_seed": [0],
+                "weapon_float": [0.0],
+                "team_num": [2],
+            }
+
+    assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42]) == {}
+
+
+def test_default_buy_path_skips_grenades_and_does_not_steal_roster_owned_accounts():
+    holder = "76561198000000001"
+    other = "76561198000000002"
+    owned_id = 41090984122
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                # other must appear in roster for account-in-roster gate
+                "steamid": [holder, holder, other],
+                "tick": [42, 42, 42],
+                "item_id_high": [0, owned_id >> 32, 0],
+                "item_id_low": [0, owned_id & 0xFFFFFFFF, 0],
+                "Weapon.m_iAccountID": [0, account_id(other), 0],
+                "weapon_stickers": [[], [], []],
+                "item_def_idx": [43, 7, None],  # flashbang + pickup AK owned by other
+                "weapon_skin_id": [float("nan"), 0, None],
+                "weapon_paint_seed": [0, 0, None],
+                "weapon_float": [0.0, 0.0, None],
+                "team_num": [3, 3, 2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    assert holder not in inventory or not any(
+        row.get("type") == "weapon" for row in inventory.get(holder, [])
+    )
+    # Economy owner still receives the asset (no observed_teams if never held).
+    owned = inventory.get(other) or []
+    assert any(row.get("item_id") == owned_id for row in owned)

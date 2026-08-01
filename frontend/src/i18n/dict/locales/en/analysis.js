@@ -36,6 +36,7 @@ export default {
   "analysis.cosmetics.team.t": "T",
   "analysis.cosmetics.teamTabs": "Team filter",
   "analysis.cosmetics.replacementPreview": "→ {name}",
+  "analysis.cosmetics.clearReplacement": "Clear replacement",
   "analysis.cosmetics.picker.title": "Replace {name} skin",
   "analysis.cosmetics.picker.current": "Current",
   "analysis.cosmetics.picker.replacement": "Replacement",

@@ -9,6 +9,7 @@ export default {
   "app.scanFail": "Scan or refresh failed: {msg}",
   "app.saveConfigFail": "Failed to save configuration: {msg}",
   "app.deleteFail": "Delete failed: {msg}",
+  "app.deletingDemo": "Deleting…",
   "app.deleteFileDone": "Deleted .dem file from disk (and matching .zip if present).",
   "app.deleteFileFail": "File delete failed: {msg}",
   "app.batchDeleteProgress": "Batch deleting ({done} / {total})…",

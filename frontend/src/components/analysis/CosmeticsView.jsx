@@ -16,12 +16,13 @@ import {
   Rotate3D,
   Sticker,
   WifiOff,
+  X,
 } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
 import Button from "../ui/Button";
-import { craftNameParts, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
+import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
@@ -36,6 +37,121 @@ function replacementsFromPlan(plan) {
     next[key] = row.replacement;
   }
   return Object.keys(next).length ? next : null;
+}
+
+/** Original demo skins stored in a custom plan (survives post-apply inventory drift). */
+function originalsFromPlan(plan) {
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  if (!items.length) return {};
+  const next = {};
+  for (const row of items) {
+    const key = String(row?.slot_key || "").trim();
+    if (!key || !row?.original || typeof row.original !== "object") continue;
+    next[key] = row.original;
+  }
+  return next;
+}
+
+function cosmeticPreview(item, replacement) {
+  if (!replacement) return item;
+  return {
+    ...item,
+    ...replacement,
+    // Replaced skins do not keep the original weapon's stickers.
+    // Restoring the original keeps demo sticker evidence.
+    stickers: replacement.restore ? (item?.stickers || []) : [],
+    custom_name: item?.custom_name,
+    image_url: replacement.image_url || item?.image_url,
+    rarity: replacement.rarity || item?.rarity,
+    paint_wear: Number.isFinite(Number(replacement.paint_wear))
+      ? Number(replacement.paint_wear)
+      : item?.paint_wear,
+    paint_index: Number.isFinite(Number(replacement.paint_index))
+      ? Number(replacement.paint_index)
+      : item?.paint_index,
+    is_placeholder: false,
+    is_base: false,
+    finish_known: replacement.finish_known !== false,
+  };
+}
+
+/** Restore demo-original look after clearing a replacement (keeps live stickers). */
+function restoreOriginalVisual(item, snapshot) {
+  if (!snapshot) return item;
+  return {
+    ...item,
+    ...snapshot,
+    image_url: snapshot.image_url || item?.image_url,
+    stickers: item?.stickers,
+    custom_name: item?.custom_name || snapshot.custom_name,
+    item_id: item?.item_id,
+  };
+}
+
+function snapshotOriginalItem(item) {
+  return {
+    item_id: item?.item_id,
+    type: item?.type,
+    def_index: item?.def_index,
+    paint_index: item?.paint_index,
+    paint_seed: item?.paint_seed,
+    paint_wear: item?.paint_wear,
+    name_zh: item?.name_zh,
+    name_en: item?.name_en,
+    alt_name: item?.alt_name,
+    image_url: item?.image_url,
+    rarity: item?.rarity,
+    custom_name: item?.custom_name,
+    finish_known: item?.finish_known,
+    is_base: item?.is_base,
+    is_placeholder: item?.is_placeholder,
+    catalog_id: item?.catalog_id,
+    model: item?.model,
+  };
+}
+
+/** Keep first-seen demo originals; never let a later plan overwrite them with the new skin. */
+function mergeOriginalsPreferExisting(fromPlan, existing) {
+  const next = { ...(fromPlan || {}) };
+  for (const [key, value] of Object.entries(existing || {})) {
+    if (value && typeof value === "object") next[key] = value;
+  }
+  return next;
+}
+
+/** Turn a demo-original snapshot into a saveable replacement that restores that skin. */
+function restoreReplacementFromSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const paintIndex = Number(snapshot.paint_index);
+  const paintSeed = Number(snapshot.paint_seed);
+  const paintWear = Number(snapshot.paint_wear);
+  return {
+    catalog_id: snapshot.catalog_id,
+    def_index: snapshot.def_index,
+    paint_index: Number.isFinite(paintIndex) ? paintIndex : 0,
+    paint_seed: Number.isFinite(paintSeed) ? Math.trunc(paintSeed) : 0,
+    paint_wear: Number.isFinite(paintWear) ? paintWear : 0,
+    model: snapshot.model,
+    type: snapshot.type,
+    name_en: snapshot.name_en,
+    name_zh: snapshot.name_zh,
+    alt_name: snapshot.alt_name,
+    image_url: snapshot.image_url,
+    rarity: snapshot.rarity,
+    finish_known: snapshot.finish_known,
+    restore: true,
+  };
+}
+
+/** Drop UI-only flags before posting replacements to the API. */
+function replacementsForApi(replacements) {
+  const out = {};
+  for (const [key, value] of Object.entries(replacements || {})) {
+    if (!value || typeof value !== "object") continue;
+    const { restore: _restore, ...rest } = value;
+    out[key] = rest;
+  }
+  return out;
 }
 
 const RARITY_NAMES = {
@@ -212,6 +328,7 @@ function CosmeticImage({ item, onlineAssetsEnabled, className = "" }) {
   }
   return (
     <img
+      key={src}
       src={src}
       alt={String(item?.name_zh || item?.name_en || "")}
       draggable={false}
@@ -224,66 +341,74 @@ function CosmeticImage({ item, onlineAssetsEnabled, className = "" }) {
 
 function CraftNameLines({ item, locale, rename = "", compact = false }) {
   const parts = craftNameParts(item, locale);
-  const modelClass = compact
-    ? "truncate text-[10px] font-bold text-cs2-text-secondary"
-    : "truncate text-[11px] font-black text-cs2-text-primary";
-  const finishClass = compact
-    ? "truncate text-[10px] font-semibold"
-    : "truncate text-[11px] font-semibold";
+  const rarityColor = String(item?.rarity || "").trim() || "#ded6cc";
+  const sizeClass = compact ? "text-[10px]" : "text-[11px]";
+  const baseClass = `break-words font-semibold leading-snug ${sizeClass}`;
+  const sep = <span className="text-cs2-text-muted"> | </span>;
+  const hasModel = Boolean(parts.model);
+  const hasFinish = Boolean(parts.finish);
+  const hasAlt = Boolean(parts.alt);
+  const fallback = !hasModel && !hasFinish && !hasAlt ? parts.full : "";
+
+  const pipe = (hasModel || hasFinish || hasAlt || fallback) ? (
+    <span className={`block min-w-0 ${baseClass}`}>
+      {hasModel ? <span className="text-cs2-text-secondary">{parts.model}</span> : null}
+      {hasFinish ? (
+        <>
+          {hasModel ? sep : null}
+          <span style={{ color: rarityColor }}>{parts.finish}</span>
+        </>
+      ) : null}
+      {hasAlt ? (
+        <>
+          {(hasModel || hasFinish) ? sep : null}
+          <span style={{ color: rarityColor }}>{parts.alt}</span>
+        </>
+      ) : null}
+      {fallback ? <span style={{ color: rarityColor }}>{fallback}</span> : null}
+    </span>
+  ) : null;
+
   if (rename) {
     return (
       <>
-        <span className="block truncate text-[11px] font-black text-cs2-text-primary">“{rename}”</span>
-        <span className="mt-0.5 block truncate text-[10px] text-cs2-text-muted">{parts.full || displayName(item, locale)}</span>
+        <span className="block break-words text-[11px] font-black leading-snug text-cs2-text-primary">“{rename}”</span>
+        {pipe ? <span className="mt-0.5 block">{pipe}</span> : null}
       </>
     );
   }
-  return (
-    <>
-      {parts.model ? <span className={`block ${modelClass}`}>{parts.model}</span> : null}
-      {parts.finish ? (
-        <span className={`mt-0.5 block ${finishClass}`} style={{ color: String(item?.rarity || "").trim() || "#ded6cc" }}>{parts.finish}</span>
-      ) : null}
-      {!parts.model && !parts.finish ? (
-        <span className={`block ${modelClass}`}>{parts.full || displayName(item, locale)}</span>
-      ) : null}
-      {parts.alt ? <span className="mt-0.5 block truncate text-[9px] text-cs2-text-muted">{parts.alt}</span> : null}
-    </>
-  );
+  return pipe;
 }
 
-function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customizable, replacement, replacementLabel, onOpen, onHoverStart, onHoverEnd }) {
-  const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
-  const rename = customName(item);
-  const name = displayName(item, locale);
-  const craft = craftNameParts(item, locale);
-  const accessibleName = rename || [craft.model, craft.finish, craft.alt].filter(Boolean).join(" ") || name;
+function CosmeticCard({
+  item,
+  labelItem,
+  locale,
+  onlineAssetsEnabled,
+  customMode,
+  customizable,
+  replacement,
+  replacementLabel,
+  onOpen,
+  onHoverStart,
+  onHoverEnd,
+  onClearReplacement,
+}) {
+  const t = useT();
+  const labelSource = labelItem || item;
+  const rename = customName(labelSource);
+  const name = displayName(labelSource, locale);
+  const accessibleName = rename || formatCraftPipeName(labelSource, locale) || name;
   const disabled = customMode && !customizable;
-  const previewItem = replacement
-    ? {
-        ...item,
-        ...replacement,
-        stickers: item?.stickers,
-        custom_name: item?.custom_name,
-        image_url: replacement.image_url || item?.image_url,
-        rarity: replacement.rarity || item?.rarity,
-        paint_wear: Number.isFinite(Number(replacement.paint_wear))
-          ? Number(replacement.paint_wear)
-          : item?.paint_wear,
-        paint_index: Number.isFinite(Number(replacement.paint_index))
-          ? Number(replacement.paint_index)
-          : item?.paint_index,
-        is_placeholder: false,
-        is_base: false,
-      }
-    : item;
+  const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
+  const showClear = Boolean(customMode && replacement && !replacement.restore && onClearReplacement);
   return (
     <button
       type="button"
-      onClick={onOpen}
-      onPointerEnter={onHoverStart}
+      onClick={() => onOpen?.(item, item)}
+      onPointerEnter={(event) => onHoverStart?.(event, item)}
       onPointerLeave={onHoverEnd}
-      onFocus={onHoverStart}
+      onFocus={(event) => onHoverStart?.(event, item)}
       onBlur={onHoverEnd}
       data-cosmetic-card
       className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] text-left outline-none${
@@ -292,7 +417,31 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customiza
       aria-label={accessibleName}
     >
       <span className="relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
-        <CosmeticImage item={previewItem} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
+        {showClear ? (
+          <span
+            role="button"
+            tabIndex={0}
+            data-testid="cosmetics-clear-replacement"
+            aria-label={t("analysis.cosmetics.clearReplacement")}
+            title={t("analysis.cosmetics.clearReplacement")}
+            className="absolute right-1 top-1 z-[2] inline-flex h-6 w-6 items-center justify-center rounded border border-cs2-border bg-cs2-bg-page/90 text-cs2-text-muted shadow hover:border-rose-400/60 hover:text-rose-300"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClearReplacement();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              onClearReplacement();
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <X className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
+        <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
         {onlineAssetsEnabled && stickers.length ? (
           <span className="absolute bottom-1 left-1 z-[1] flex max-w-[85%] items-end gap-1">
             {stickers.slice(0, 5).map((sticker, index) => (
@@ -300,17 +449,30 @@ function CosmeticCard({ item, locale, onlineAssetsEnabled, customMode, customiza
             ))}
           </span>
         ) : null}
-        <span className="absolute inset-x-0 bottom-0 h-1" style={{ backgroundColor: previewItem?.rarity || "#ded6cc" }} />
+        <span className="absolute inset-x-0 bottom-0 h-1" style={{ backgroundColor: item?.rarity || "#ded6cc" }} />
       </span>
       <span data-cosmetic-card-label className="mt-1.5 block min-h-8 min-w-0 overflow-hidden leading-tight">
-        <CraftNameLines item={item} locale={locale} rename={rename} compact />
-        {replacementLabel ? <span className="mt-0.5 block truncate text-[10px] font-semibold text-cs2-accent">{replacementLabel}</span> : null}
+        <CraftNameLines item={labelSource} locale={locale} rename={rename} compact />
+        {replacementLabel ? <span className="mt-0.5 block break-words text-[10px] font-semibold leading-snug text-cs2-accent">{replacementLabel}</span> : null}
       </span>
     </button>
   );
 }
 
-function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode, localReplacements, onOpen, onHoverStart, onHoverEnd, showHeading = true }) {
+function CosmeticsTeamRow({
+  team,
+  items,
+  locale,
+  onlineAssetsEnabled,
+  customMode,
+  localReplacements,
+  originalBySlot,
+  onOpen,
+  onHoverStart,
+  onHoverEnd,
+  onClearReplacement,
+  showHeading = true,
+}) {
   const t = useT();
   const teamKey = team === "ct" ? "ct" : "t";
   return (
@@ -321,37 +483,44 @@ function CosmeticsTeamRow({ team, items, locale, onlineAssetsEnabled, customMode
       {items.length ? (
         <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {sortCosmeticsForRow(items, locale, (item) => {
-            const replacement = localReplacements?.[slotKey(item)];
-            if (!replacement) return item;
-            return {
-              ...item,
-              ...replacement,
-              is_placeholder: false,
-              paint_index: Number(replacement.paint_index) > 0
-                ? Number(replacement.paint_index)
-                : (Number(item?.paint_index) || 1),
-            };
+            const key = slotKey(item);
+            const replacement = localReplacements?.[key];
+            const snapshot = originalBySlot?.[key];
+            if (replacement) return cosmeticPreview(item, replacement);
+            return restoreOriginalVisual(item, snapshot);
           }).map((item, index) => {
             const key = slotKey(item);
             const replacement = localReplacements?.[key] || null;
+            const snapshot = originalBySlot?.[key] || null;
+            const visualItem = replacement
+              ? cosmeticPreview(item, replacement)
+              : restoreOriginalVisual(item, snapshot);
+            const labelItem = snapshot
+              ? {
+                  ...snapshot,
+                  custom_name: snapshot.custom_name || item?.custom_name,
+                  item_id: item?.item_id,
+                }
+              : item;
             return (
             <CosmeticCard
               key={`${teamKey}-${item?.item_id || item?.catalog_id || "item"}-${index}`}
-              item={item}
+              item={visualItem}
+              labelItem={labelItem}
               locale={locale}
               onlineAssetsEnabled={onlineAssetsEnabled}
               customMode={customMode}
               customizable={isCustomizable(item)}
               replacement={replacement}
-              replacementLabel={replacement ? (() => {
-                const parts = craftNameParts(replacement, locale);
-                const label = [parts.model, parts.finish, parts.alt].filter(Boolean).join(" · ")
-                  || displayName(replacement, locale);
-                return t("analysis.cosmetics.replacementPreview", { name: label });
-              })() : null}
-              onOpen={() => onOpen(item)}
-              onHoverStart={(event) => onHoverStart(event, item)}
+              replacementLabel={replacement && !replacement.restore ? t("analysis.cosmetics.replacementPreview", {
+                name: formatCraftPipeName(replacement, locale) || displayName(replacement, locale),
+              }) : null}
+              onOpen={() => onOpen?.(item, visualItem)}
+              onHoverStart={(event) => onHoverStart?.(event, visualItem)}
               onHoverEnd={onHoverEnd}
+              onClearReplacement={replacement && !replacement.restore && onClearReplacement
+                ? () => onClearReplacement(key)
+                : null}
             />
             );
           })}
@@ -523,6 +692,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [viewMode, setViewMode] = useState("browse");
   const [localReplacements, setLocalReplacements] = useState({});
   const [savedReplacements, setSavedReplacements] = useState({});
+  const [originalBySlot, setOriginalBySlot] = useState({});
+  const [savedOriginals, setSavedOriginals] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
@@ -558,6 +729,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setViewMode("browse");
     setLocalReplacements({});
     setSavedReplacements({});
+    setOriginalBySlot({});
+    setSavedOriginals({});
     setPickerItem(null);
     setSaving(false);
     setSaveResult(null);
@@ -575,8 +748,11 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         const data = await loadCustomSkinPlan({ demoId, steamid });
         if (cancelled) return;
         const seeded = replacementsFromPlan(data?.plan);
+        const originals = originalsFromPlan(data?.plan);
         setSavedReplacements(seeded || {});
         setLocalReplacements(seeded || {});
+        setSavedOriginals(originals);
+        setOriginalBySlot(originals);
       } catch {
         // Keep empty local state when load fails; user can still customize.
       }
@@ -645,9 +821,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setDetail({ item, mode: "info" });
   };
 
-  const openCard = (item) => {
+  const openCard = (item, previewItem) => {
     if (browseMode) {
-      openItemDetail(item);
+      openItemDetail(previewItem || item);
       return;
     }
     if (isCustomizable(item)) {
@@ -657,14 +833,48 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
   const cancelCustomize = () => {
     setLocalReplacements({ ...savedReplacements });
+    setOriginalBySlot({ ...savedOriginals });
     clearOverlays();
     setViewMode("browse");
   };
 
   const confirmReplacement = (replacement) => {
     if (!pickerItem) return;
-    setLocalReplacements((prev) => ({ ...prev, [slotKey(pickerItem)]: replacement }));
+    const key = slotKey(pickerItem);
+    setOriginalBySlot((prev) => {
+      if (prev[key]) return prev;
+      // Row map may already show the preview skin; prefer the live inventory row.
+      const evidence = inventory.find((row) => slotKey(row) === key) || pickerItem;
+      const pending = localReplacements[key];
+      if (pending && !pending.restore) {
+        const paintMatches = Number(evidence?.paint_index) === Number(pending.paint_index)
+          && Number(evidence?.def_index) === Number(pending.def_index);
+        // Inventory already equals the customized skin — do not treat it as the demo original.
+        if (paintMatches) return prev;
+      }
+      return { ...prev, [key]: snapshotOriginalItem(evidence) };
+    });
+    setLocalReplacements((prev) => ({ ...prev, [key]: replacement }));
     setPickerItem(null);
+  };
+
+  const clearReplacement = (key) => {
+    const slot = String(key || "").trim();
+    if (!slot) return;
+    const snapshot = originalBySlot[slot];
+    const restore = restoreReplacementFromSnapshot(snapshot);
+    if (!restore) {
+      // No snapshot — drop the pending replacement only.
+      setLocalReplacements((prev) => {
+        if (!(slot in prev)) return prev;
+        const next = { ...prev };
+        delete next[slot];
+        return next;
+      });
+      return;
+    }
+    // Keep the slot in replacements so save posts the original skin back to skin-core.
+    setLocalReplacements((prev) => ({ ...prev, [slot]: restore }));
   };
 
   const savePlan = async () => {
@@ -672,7 +882,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setSaving(true);
     setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
     try {
-      const result = await saveCustomSkinPlan({ demoId, steamid, replacements: localReplacements });
+      const result = await saveCustomSkinPlan({
+        demoId,
+        steamid,
+        replacements: replacementsForApi(localReplacements),
+        originals: originalBySlot,
+      });
       const succeeded = enrichSaveResultRows(
         Array.isArray(result?.succeeded) ? result.succeeded : [],
         inventory,
@@ -697,15 +912,23 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
       if (result?.ok) {
         const seeded = replacementsFromPlan(result?.plan) || {};
+        const fromPlan = originalsFromPlan(result?.plan);
+        // Prefer in-session first-seen originals over plan rows (inventory may already be the new skin).
+        const originals = mergeOriginalsPreferExisting(fromPlan, originalBySlot);
         setSavedReplacements(seeded);
+        setSavedOriginals(originals);
         if (failed.length > 0) {
           const failedKeys = new Set(failed.map((row) => row?.slot_key).filter(Boolean));
           setLocalReplacements((prev) =>
             Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
           );
+          setOriginalBySlot((prev) =>
+            Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+          );
           setNotice({ tone: "info", text: t("analysis.cosmetics.savePartial") });
         } else {
           setLocalReplacements(seeded);
+          setOriginalBySlot(originals);
           setNotice({ tone: "success", text: t("analysis.cosmetics.saveSuccess") });
           clearOverlays();
           setViewMode("browse");
@@ -854,10 +1077,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         onlineAssetsEnabled={onlineAssetsEnabled}
         customMode={!browseMode}
         localReplacements={localReplacements}
+        originalBySlot={originalBySlot}
         showHeading={false}
         onOpen={openCard}
         onHoverStart={openHover}
         onHoverEnd={() => setHoverCard(null)}
+        onClearReplacement={browseMode ? null : clearReplacement}
       />
 
       {hoverCard ? <HoverDetails item={hoverCard.item} locale={locale} position={hoverCard.position} /> : null}

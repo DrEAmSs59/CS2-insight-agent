@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PackageOpen, Shuffle, WifiOff } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import Modal from "../ui/Modal.jsx";
-import { craftNameParts, filterCandidates, imageUrlForWear, listSkinCandidates } from "./cosmeticsCatalog.js";
+import { craftNameParts, filterCandidates, formatCraftPipeName, imageUrlForWear, listSkinCandidates } from "./cosmeticsCatalog.js";
 
 const WEAR_MIN = 0;
 const WEAR_MAX = 1;
@@ -13,50 +13,35 @@ function displayName(item, locale) {
   return craftNameParts(item, locale).full;
 }
 
-function finishNameColor(item) {
-  return String(item?.rarity || "").trim() || "#ded6cc";
-}
-
-function ItemCaption({ item, locale, compact = false, inline = false }) {
+function ItemCaption({ item, locale, compact = false }) {
   if (!item) {
     return <span className="text-sm text-cs2-text-muted">—</span>;
   }
-  const { model, finish, alt, full } = craftNameParts(item, locale);
-  const color = finishNameColor(item);
-
-  if (inline) {
-    const parts = [];
-    if (model) parts.push({ text: model, className: "text-cs2-text-primary" });
-    if (finish) parts.push({ text: finish, className: "font-semibold", style: { color } });
-    if (!model && !finish && full) parts.push({ text: full, className: "text-cs2-text-primary" });
-    if (alt) parts.push({ text: alt, className: "text-cs2-text-secondary" });
-    return (
-      <span className="block min-w-0 truncate text-[11px] leading-tight" title={parts.map((p) => p.text).join(" | ")}>
-        {parts.map((part, index) => (
-          <span key={`${part.text}-${index}`}>
-            {index > 0 ? <span className="text-cs2-text-muted"> | </span> : null}
-            <span className={part.className} style={part.style}>{part.text}</span>
-          </span>
-        ))}
-      </span>
-    );
-  }
-
-  const modelClass = compact
-    ? "truncate text-[11px] text-cs2-text-primary"
-    : "break-words text-sm text-cs2-text-primary";
-  const finishClass = compact
-    ? "truncate text-[11px] font-semibold"
-    : "break-words text-sm font-semibold";
-  const altClass = compact
-    ? "truncate text-[10px] text-cs2-text-secondary"
-    : "break-words text-[11px] text-cs2-text-secondary";
+  const parts = craftNameParts(item, locale);
+  const rarityColor = String(item?.rarity || "").trim() || "#ded6cc";
+  const sizeClass = compact ? "text-[11px]" : "text-sm";
+  const label = formatCraftPipeName(item, locale) || displayName(item, locale);
+  const sep = <span className="text-cs2-text-muted"> | </span>;
+  const hasModel = Boolean(parts.model);
+  const hasFinish = Boolean(parts.finish);
+  const hasAlt = Boolean(parts.alt);
+  const fallback = !hasModel && !hasFinish && !hasAlt ? parts.full : "";
   return (
-    <span className="flex min-w-0 flex-col gap-0.5 leading-snug">
-      {model ? <span className={modelClass}>{model}</span> : null}
-      {finish ? <span className={finishClass} style={{ color }}>{finish}</span> : null}
-      {!finish && !model ? <span className={modelClass}>{full}</span> : null}
-      {alt ? <span className={altClass}>{alt}</span> : null}
+    <span className={`block min-w-0 break-words font-semibold leading-snug ${sizeClass}`} title={label}>
+      {hasModel ? <span className="text-cs2-text-secondary">{parts.model}</span> : null}
+      {hasFinish ? (
+        <>
+          {hasModel ? sep : null}
+          <span style={{ color: rarityColor }}>{parts.finish}</span>
+        </>
+      ) : null}
+      {hasAlt ? (
+        <>
+          {(hasModel || hasFinish) ? sep : null}
+          <span style={{ color: rarityColor }}>{parts.alt}</span>
+        </>
+      ) : null}
+      {fallback ? <span style={{ color: rarityColor }}>{fallback}</span> : null}
     </span>
   );
 }
@@ -212,7 +197,7 @@ function SkinColumn({
             : (Number.isFinite(Number(wear)) ? Number(wear) : undefined)}
         />
       </div>
-      <ItemCaption item={item} locale={locale} inline />
+      <ItemCaption item={item} locale={locale} />
       <ParamRow
         label={t("analysis.cosmetics.picker.wear")}
         kind="wear"
@@ -378,7 +363,7 @@ export default function SkinReplacementPicker({
                   type="button"
                   onClick={() => setSelected(candidate)}
                   aria-pressed={active}
-                  aria-label={[displayName(candidate, locale), craftNameParts(candidate, locale).alt].filter(Boolean).join(" ")}
+                  aria-label={formatCraftPipeName(candidate, locale) || displayName(candidate, locale)}
                   data-skin-tile
                   className={`relative box-border flex h-[192px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
                     active

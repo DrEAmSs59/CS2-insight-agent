@@ -12,12 +12,13 @@ function detailFromAxios(error) {
 }
 
 /** Persist custom skin plan and rewrite the demo working cache. */
-export async function saveCustomSkinPlan({ demoId, steamid, replacements }) {
+export async function saveCustomSkinPlan({ demoId, steamid, replacements, originals }) {
   try {
-    const { data } = await API.post(`/demos/${demoId}/cosmetics/custom-plan`, {
-      steamid,
-      replacements,
-    });
+    const payload = { steamid, replacements };
+    if (originals && typeof originals === "object") {
+      payload.originals = originals;
+    }
+    const { data } = await API.post(`/demos/${demoId}/cosmetics/custom-plan`, payload);
     return data;
   } catch (error) {
     return {

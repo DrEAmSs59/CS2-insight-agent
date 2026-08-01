@@ -36,6 +36,7 @@ export default {
   "analysis.cosmetics.team.t": "T",
   "analysis.cosmetics.teamTabs": "阵营切换",
   "analysis.cosmetics.replacementPreview": "→ {name}",
+  "analysis.cosmetics.clearReplacement": "取消替换",
   "analysis.cosmetics.picker.title": "替换 {name} 皮肤",
   "analysis.cosmetics.picker.current": "当前使用",
   "analysis.cosmetics.picker.replacement": "替换物",

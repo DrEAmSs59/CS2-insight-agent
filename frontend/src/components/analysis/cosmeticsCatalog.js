@@ -114,6 +114,17 @@ export function craftNameParts(item, locale) {
   };
 }
 
+/** Single-line label: 物品 | 皮肤 | 相位(Ruby/Emerald/…) — wraps when too narrow. */
+export function formatCraftPipeName(item, locale) {
+  const parts = craftNameParts(item, locale);
+  const segments = [];
+  if (parts.model) segments.push(parts.model);
+  if (parts.finish) segments.push(parts.finish);
+  if (parts.alt) segments.push(parts.alt);
+  if (!parts.model && !parts.finish && !parts.alt && parts.full) segments.push(parts.full);
+  return segments.join(" | ");
+}
+
 const LOADOUT_TYPES = new Set(["weapon", "melee", "glove"]);
 
 /** Default free/base weapons for a team row (CT or T), with CDN images. */

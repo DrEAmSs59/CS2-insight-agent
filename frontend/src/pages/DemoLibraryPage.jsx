@@ -391,67 +391,41 @@ export default function DemoLibraryPage() {
         </p>
       </Modal>
 
-      {s.libraryDeletePrompt ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-page/85 px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="library-delete-title"
-          onClick={() => s.setLibraryDeletePrompt(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-lg border border-cs2-border bg-cs2-bg-card p-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 id="library-delete-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
-              {t("library.deleteTitle")}
-            </h4>
-            <p className="mb-3 font-mono text-[12px] text-cs2-text-secondary">{s.libraryDeletePrompt.label}</p>
-            <p className="mb-3 text-[11px] leading-relaxed text-cs2-text-secondary">
-              {t("library.deleteDesc")}
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-left text-[11px] leading-snug text-cs2-emerald-on-surface hover:bg-emerald-500/20"
-                onClick={() => void s.handleDeleteDemo(s.libraryDeletePrompt.id)}
-              >
-                {t("library.deleteFromLibrary")}
-                <span className="mt-0.5 block text-[11px] font-normal text-cs2-text-muted">
-                  {t("library.deleteFromLibraryHint")}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-left text-[11px] leading-snug text-red-400 hover:bg-red-500/20"
-                onClick={() => {
-                  const p = s.libraryDeletePrompt;
-                  const row = s.demoLibraryItems.find((it) => it.id === p.id);
-                  const base = (row?.filename || p.label || "").replace(/\.\w+$/, "");
-                  const files = [`${base}.dem`, `${base}.zip`];
-                  if (window.confirm(t("library.deleteDiskConfirm", { files: files.join("\n") }))) {
-                    void s.handleDeleteDemoFile(p.id);
-                  }
-                }}
-              >
-                {t("library.deleteDisk")}
-                <span className="mt-0.5 block text-[11px] font-normal text-red-300/60">
-                  {t("library.deleteDiskHint")}
-                </span>
-              </button>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
-                onClick={() => s.setLibraryDeletePrompt(null)}
-              >
-                {t("library.deleteCancel")}
-              </button>
-            </div>
+      <Modal
+        open={Boolean(s.libraryDeletePrompt)}
+        onClose={() => s.setLibraryDeletePrompt(null)}
+        title={t("library.deleteTitle")}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        zIndex={110}
+        className="!h-auto"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => s.setLibraryDeletePrompt(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const id = s.libraryDeletePrompt?.id;
+                if (id != null) void s.handleDeleteDemo(id);
+              }}
+            >
+              {t("common.confirm")}
+            </Button>
           </div>
+        )}
+      >
+        <div className="space-y-2 px-5 py-4">
+          {s.libraryDeletePrompt?.label ? (
+            <p className="font-mono text-[12px] text-cs2-text-secondary">{s.libraryDeletePrompt.label}</p>
+          ) : null}
+          <p className="text-[12px] leading-relaxed text-cs2-text-secondary">
+            {t("library.deleteConfirm")}
+          </p>
         </div>
-      ) : null}
+      </Modal>
 
       <DemoWatchPathsModal
         open={watchPathsModalOpen}

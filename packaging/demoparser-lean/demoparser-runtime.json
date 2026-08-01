@@ -2,9 +2,15 @@
   "upstream_url": "https://github.com/LaihoE/demoparser.git",
   "tag": "v0.41.4",
   "commit": "db3ba5f7a1b02b8cb27d0063d52649883a98469c",
-  "distribution_version": "0.41.4+cs2insight7",
+  "distribution_version": "0.41.4+cs2insight8",
   "release_repo": "DrEAmSs59/CS2-insight-agent",
-  "release_tag": "demoparser-runtime-v0.41.4-cs2insight7-r1",
+  "release_tag": "demoparser-runtime-v0.41.4-cs2insight8-r1",
   "checksum_asset": "demoparser2-SHA256SUMS.txt",
-  "patch_sha256": "0d096ea3b5bf1607e45adf4b0b4f65c3d53f92aa7f2b363cd56f28f10dd31746"
+  "patch_sha256": "0d096ea3b5bf1607e45adf4b0b4f65c3d53f92aa7f2b363cd56f28f10dd31746",
+  "overlays": [
+    {
+      "name": "sticker-attrs",
+      "source": "unicbm/demotracer attribute-indexed sticker decode (author permission)"
+    }
+  ]
 }
