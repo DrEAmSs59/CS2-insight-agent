@@ -177,6 +177,12 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     assert stored["plan_json"]["items"][0]["slot_key"] == "id:10"
     assert stored["output_sha256"] == "deadbeef"
 
+    import hashlib
+
+    expected_md5 = hashlib.md5(b"REWRITTEN-DEMO").hexdigest()
+    row = asyncio.run(api_env["db"].get_demo_by_id(demo_id))
+    assert row["content_md5"] == expected_md5
+
 
 def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     client = api_env["client"]

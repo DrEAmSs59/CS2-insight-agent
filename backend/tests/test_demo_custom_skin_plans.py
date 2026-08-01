@@ -118,6 +118,42 @@ def test_delete_custom_skin_plans_for_demo_removes_all_steamids(tmp_path: Path):
     _run(scenario())
 
 
+def test_delete_demo_clears_custom_skin_plans(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "skin_plans.sqlite3")
+        await db.init_db()
+        dem = tmp_path / "match.dem"
+        dem.write_bytes(b"dem")
+        path = str(dem.resolve())
+        demo_id, _ = await db.add_demo(path, status="done")
+        await db.upsert_custom_skin_plan(path, "111", {"a": 1})
+        await db.upsert_custom_skin_plan(path, "222", {"a": 2})
+        assert await db.delete_demo(demo_id) is True
+        assert await db.get_custom_skin_plan(path, "111") is None
+        assert await db.get_custom_skin_plan(path, "222") is None
+
+    _run(scenario())
+
+
+def test_invalidate_all_demo_caches_clears_custom_skin_plans(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "skin_plans.sqlite3")
+        await db.init_db()
+        dem = tmp_path / "match.dem"
+        dem.write_bytes(b"dem")
+        path = str(dem.resolve())
+        await db.add_demo(path, status="done")
+        await db.update_cached_path(path, str(tmp_path / "cache" / "x.dem"))
+        await db.upsert_custom_skin_plan(path, "111", {"a": 1})
+        await db.invalidate_all_demo_caches()
+        assert await db.get_custom_skin_plan(path, "111") is None
+        row = await db.get_demo_by_path(path)
+        assert row is not None
+        assert not (row.get("cached_path") or "").strip()
+
+    _run(scenario())
+
+
 def test_upsert_accepts_plan_json_string(tmp_path: Path):
     async def scenario():
         db = DemoDB(tmp_path / "skin_plans.sqlite3")

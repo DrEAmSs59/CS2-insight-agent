@@ -638,6 +638,25 @@ class DemoDB:
             row = await cur.fetchone()
         return row is not None
 
+    async def update_demo_content_md5(
+        self,
+        demo_path: str,
+        content_md5: str,
+    ) -> bool:
+        """Overwrite ``content_md5`` for ``demo_path`` (working-copy fingerprint)."""
+        if not self.ingest_md5_supported or not content_md5:
+            return False
+        digest = str(content_md5).strip().lower()
+        if not digest:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "UPDATE demo_files SET content_md5 = ? WHERE path = ?",
+                (digest, demo_path),
+            )
+            await conn.commit()
+        return cur.rowcount > 0
+
     async def update_demo_content_md5_if_absent(
         self,
         demo_path: str,
@@ -1752,6 +1771,8 @@ class DemoDB:
                     await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
                     await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
                     await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
+            # Rebuilding caches from originals invalidates any skinned overlays.
+            await conn.execute("DELETE FROM demo_custom_skin_plans")
             await conn.commit()
         return len(rows)
 
@@ -1843,6 +1864,7 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+            await conn.execute("DELETE FROM demo_custom_skin_plans WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
             await conn.commit()
         if cached_path:
@@ -2006,6 +2028,9 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
+            await conn.execute(
+                "DELETE FROM demo_custom_skin_plans WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)"
+            )
             cur = await conn.execute("DELETE FROM demo_files WHERE id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.commit()
             total = cur.rowcount

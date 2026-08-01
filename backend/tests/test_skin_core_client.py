@@ -15,6 +15,7 @@ import pytest
 
 from app.skin_core_client import (
     SkinCoreNotFound,
+    _should_set_dev_env,
     resolve_skin_core_exe,
     run_rewrite_owned_batch,
 )
@@ -96,6 +97,8 @@ def test_run_rewrite_pipes_session_key_and_decrypts_response(
     exe = tmp_path / "skin-core.exe"
     exe.write_bytes(b"MZ")
     monkeypatch.setenv("CS2_SKIN_CORE_EXE", str(exe))
+    monkeypatch.delenv("CS2_SKIN_CORE_DEV", raising=False)
+    monkeypatch.delenv("CS2_INSIGHT_DEV", raising=False)
 
     def fake_urandom(n: int) -> bytes:
         if n == 32:
@@ -186,6 +189,88 @@ def test_run_rewrite_pipes_session_key_and_decrypts_response(
     assert "--demoparser2-python" in cmd
     assert captured["stdin"] is not None  # PIPE
     assert captured["auth_frame"] == build_session_key_frame(FIXED_KEY)
+    # Arbitrary CS2_SKIN_CORE_EXE path is not auto-DEV; PE allowlist applies.
+    assert "CS2_SKIN_CORE_DEV" not in (captured["env"] or {})
+
+
+def test_should_set_dev_env_explicit_and_bundled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("CS2_SKIN_CORE_DEV", raising=False)
+    monkeypatch.delenv("CS2_INSIGHT_DEV", raising=False)
+
+    bundled = tmp_path / "frontend" / "src-tauri" / "bundle-resources" / "tools" / "skin-core.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"MZ")
+    assert _should_set_dev_env(bundled) is False
+
+    monkeypatch.setenv("CS2_SKIN_CORE_DEV", "1")
+    assert _should_set_dev_env(bundled) is True
+    monkeypatch.delenv("CS2_SKIN_CORE_DEV", raising=False)
+
+    monkeypatch.setenv("CS2_INSIGHT_DEV", "1")
+    assert _should_set_dev_env(bundled) is True
+    monkeypatch.delenv("CS2_INSIGHT_DEV", raising=False)
+
+    anyskin = tmp_path / "CS2-demo-anyskin" / "dist" / "skin-core.exe"
+    anyskin.parent.mkdir(parents=True)
+    anyskin.write_bytes(b"MZ")
+    assert _should_set_dev_env(anyskin) is True
+
+    arbitrary = tmp_path / "elsewhere" / "skin-core.exe"
+    arbitrary.parent.mkdir(parents=True)
+    arbitrary.write_bytes(b"MZ")
+    assert _should_set_dev_env(arbitrary) is False
+
+
+def test_run_sets_dev_env_for_anyskin_dist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("CS2_SKIN_CORE_EXE", raising=False)
+    monkeypatch.delenv("CS2_INSIGHT_BUNDLE_DATA_DIR", raising=False)
+    monkeypatch.delenv("CS2_SKIN_CORE_DEV", raising=False)
+    monkeypatch.delenv("CS2_INSIGHT_DEV", raising=False)
+
+    anyskin = tmp_path / "CS2-demo-anyskin"
+    exe = anyskin / "dist" / "skin-core.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+    monkeypatch.setattr("app.skin_core_client._REPO_ROOT", tmp_path / "insight")
+    monkeypatch.setattr("app.skin_core_client._DEV_ANYSKIN_ROOTS", (anyskin,))
+
+    def fake_urandom(n: int) -> bytes:
+        if n == 32:
+            return FIXED_KEY
+        return bytes((i * 17 + 3) % 256 for i in range(n))
+
+    monkeypatch.setattr("app.skin_core_client.os.urandom", fake_urandom)
+    monkeypatch.setattr("app.skin_core_crypto.os.urandom", fake_urandom)
+
+    input_dem = tmp_path / "in.dem"
+    output_dem = tmp_path / "out.dem"
+    input_dem.write_bytes(b"dem")
+    captured: dict = {}
+
+    def fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None, **kwargs):
+        captured["env"] = env
+        input_arg = cmd[cmd.index("--input") + 1]
+        output_arg = cmd[cmd.index("--output") + 1]
+        response_path = Path(cmd[cmd.index("--response") + 1])
+        ok_payload = json.dumps({"schema_version": 1, "ok": True}, separators=(",", ":")).encode("utf-8")
+        response_path.write_bytes(_encrypt_response(FIXED_KEY, input_arg, output_arg, ok_payload))
+        proc = MagicMock()
+
+        def communicate(input=None, timeout=None):
+            return (b"", b"")
+
+        proc.communicate = communicate
+        proc.returncode = 0
+        return proc
+
+    monkeypatch.setattr("app.skin_core_client.subprocess.Popen", fake_popen)
+    run_rewrite_owned_batch(
+        input_dem=str(input_dem),
+        output_dem=str(output_dem),
+        steam_id64="1",
+        items=[{"item_id64": "1", "definition_index": 7, "paint_kit": 1, "pattern_seed": 0, "wear": 0.1}],
+        demoparser2_python="python",
+    )
     assert captured["env"].get("CS2_SKIN_CORE_DEV") == "1"
 
 

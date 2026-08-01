@@ -24,6 +24,8 @@ describe("cosmeticsLayout", () => {
     expect(isCustomizable({ type: "glove" })).toBe(true);
     expect(isCustomizable({ type: "agent" })).toBe(false);
     expect(isCustomizable({ type: "musickit" })).toBe(false);
+    expect(isCustomizable({ type: "weapon", is_placeholder: true })).toBe(false);
+    expect(isCustomizable({ type: "melee", is_placeholder: true, def_index: 42 })).toBe(false);
   });
 
   test("weaponClassRank orders knife glove rifle sniper pistol smg", () => {

@@ -17,6 +17,7 @@ export function slotKey(item) {
 }
 
 export function isCustomizable(item) {
+  if (!item || item.is_placeholder) return false;
   return ["melee", "glove", "weapon"].includes(String(item?.type || ""));
 }
 

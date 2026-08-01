@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_EXE = "CS2_SKIN_CORE_EXE"
 _ENV_DEV = "CS2_SKIN_CORE_DEV"
+_ENV_INSIGHT_DEV = "CS2_INSIGHT_DEV"
 _ENV_BUNDLE_DATA = "CS2_INSIGHT_BUNDLE_DATA_DIR"
 
 # Sibling closed-source repo layouts used for local/dev discovery.
@@ -88,12 +89,54 @@ def resolve_skin_core_exe() -> Path:
     )
 
 
-def _should_set_dev_env() -> bool:
-    """Skip parent PE allowlist until production hashes are injected.
+def _env_flag_enabled(name: str) -> bool:
+    value = (os.environ.get(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
-    Always True for tests/dev and default until an allowlist ships with the binary.
+
+def _path_text(path: Path) -> str:
+    return str(path).replace("\\", "/").casefold()
+
+
+def _is_bundled_tools_exe(exe: Path) -> bool:
+    """True when exe lives under packaged/repo bundle-resources/tools/."""
+    text = _path_text(exe)
+    if "bundle-resources/tools/" in text:
+        return True
+    bundle_data = (os.environ.get(_ENV_BUNDLE_DATA) or "").strip()
+    if not bundle_data:
+        return False
+    try:
+        tools_root = Path(bundle_data).expanduser().resolve().parent / "tools"
+        return exe.resolve() == (tools_root / "skin-core.exe").resolve() or _path_text(
+            exe
+        ).startswith(_path_text(tools_root) + "/")
+    except OSError:
+        return False
+
+
+def _is_dev_anyskin_exe(exe: Path) -> bool:
+    """True when exe was resolved from CS2-demo-anyskin dist/ or target/."""
+    text = _path_text(exe)
+    if "cs2-demo-anyskin" not in text:
+        return False
+    return "/dist/" in text or text.endswith("/dist/skin-core.exe") or "/target/" in text
+
+
+def _should_set_dev_env(exe: Path | None = None) -> bool:
+    """Whether to force ``CS2_SKIN_CORE_DEV=1`` so skin-core skips PE allowlist.
+
+    Production / bundled tools must leave DEV unset so the parent PE gate applies.
+    DEV is set only when explicitly requested, or when the resolved exe is clearly
+    an unpackaged CS2-demo-anyskin build artifact.
     """
-    return True
+    if _env_flag_enabled(_ENV_DEV) or _env_flag_enabled(_ENV_INSIGHT_DEV):
+        return True
+    if exe is None:
+        return False
+    if _is_bundled_tools_exe(exe):
+        return False
+    return _is_dev_anyskin_exe(exe)
 
 
 def _cli_path_str(path: str | Path) -> str:
@@ -152,7 +195,7 @@ def run_rewrite_owned_batch(
         ]
 
         env = os.environ.copy()
-        if _should_set_dev_env():
+        if _should_set_dev_env(exe):
             env[_ENV_DEV] = "1"
 
         proc = subprocess.Popen(

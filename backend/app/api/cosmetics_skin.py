@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..cosmetics_skin_plan import CosmeticsSkinPlanError, build_batch_and_plan
 from ..databases import demo_db
-from ..demo_cache import ensure_row_cached
+from ..demo_cache import ensure_row_cached, file_md5
 from ..demo_compat_service import ensure_demo_compatible
 from ..skin_core_client import SkinCoreError, SkinCoreNotFound, run_rewrite_owned_batch
 
@@ -157,6 +157,14 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         output_sha256 = str(
             skin_result.get("sha256") or skin_result.get("output_sha256") or ""
         ).strip() or None
+
+        try:
+            new_md5 = await asyncio.to_thread(file_md5, cached_path)
+        except Exception:  # noqa: BLE001 - fingerprint update is best-effort
+            logger.warning("Failed to hash rewritten cache for content_md5: %s", cached_path)
+            new_md5 = None
+        if new_md5:
+            await demo_db.update_demo_content_md5(original_path, new_md5)
 
         await demo_db.upsert_custom_skin_plan(
             original_path,
