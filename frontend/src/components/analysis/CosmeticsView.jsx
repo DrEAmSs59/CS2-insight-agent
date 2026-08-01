@@ -21,7 +21,19 @@ import Modal from "../ui/Modal";
 import { craftNameParts, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
-import { saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
+import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
+
+function replacementsFromPlan(plan) {
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  if (!items.length) return null;
+  const next = {};
+  for (const row of items) {
+    const key = String(row?.slot_key || "").trim();
+    if (!key || !row?.replacement || typeof row.replacement !== "object") continue;
+    next[key] = row.replacement;
+  }
+  return Object.keys(next).length ? next : null;
+}
 
 const RARITY_NAMES = {
   "#ded6cc": "consumer",
@@ -450,7 +462,7 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
   );
 }
 
-export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh", onlineAssetsEnabled = false }) {
+export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh", onlineAssetsEnabled = false, demoId = null }) {
   const t = useT();
   const name = playerName(selectedPlayer);
   const workspacePlayer = useMemo(() => {
@@ -464,6 +476,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [inspectBusy, setInspectBusy] = useState(false);
   const [viewMode, setViewMode] = useState("browse");
   const [localReplacements, setLocalReplacements] = useState({});
+  const [savedReplacements, setSavedReplacements] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
   const [saving, setSaving] = useState(false);
   const [teamTab, setTeamTab] = useState("ct");
@@ -483,6 +496,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const activeItems = activeTeam === "t" ? tItems : ctItems;
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
+  const canSavePlan = Boolean(demoId) && hasReplacements && !saving;
 
   const clearOverlays = () => {
     setDetail(null);
@@ -496,6 +510,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setNotice(null);
     setViewMode("browse");
     setLocalReplacements({});
+    setSavedReplacements({});
     setPickerItem(null);
     setSaving(false);
   }, [steamid]);
@@ -503,6 +518,25 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   useEffect(() => {
     setTeamTab("ct");
   }, [steamid]);
+
+  useEffect(() => {
+    if (!demoId || !steamid) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await loadCustomSkinPlan({ demoId, steamid });
+        if (cancelled) return;
+        const seeded = replacementsFromPlan(data?.plan);
+        setSavedReplacements(seeded || {});
+        setLocalReplacements(seeded || {});
+      } catch {
+        // Keep empty local state when load fails; user can still customize.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [demoId, steamid]);
 
   useEffect(() => {
     if (!hoverCard) return undefined;
@@ -574,7 +608,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const cancelCustomize = () => {
-    setLocalReplacements({});
+    setLocalReplacements({ ...savedReplacements });
     clearOverlays();
     setViewMode("browse");
   };
@@ -586,12 +620,15 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const savePlan = async () => {
-    if (!hasReplacements || saving) return;
+    if (!canSavePlan) return;
     setSaving(true);
     try {
-      const result = await saveCustomSkinPlan({ steamid, replacements: localReplacements });
+      const result = await saveCustomSkinPlan({ demoId, steamid, replacements: localReplacements });
       if (result?.ok) {
-        setNotice({ tone: "success", text: t("analysis.cosmetics.saveStubSuccess") });
+        const seeded = replacementsFromPlan(result?.plan) || { ...localReplacements };
+        setSavedReplacements(seeded);
+        setLocalReplacements(seeded);
+        setNotice({ tone: "success", text: t("analysis.cosmetics.saveSuccess") });
         clearOverlays();
         setViewMode("browse");
       } else {
@@ -639,7 +676,11 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             </button>
           ) : (
             <>
-              <p className="text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.customizingHint")}</p>
+              <p className="text-[10px] text-cs2-text-muted">
+                {!demoId
+                  ? t("analysis.cosmetics.saveNeedsDemo")
+                  : t("analysis.cosmetics.customizingHint")}
+              </p>
               <button
                 type="button"
                 onClick={cancelCustomize}
@@ -649,7 +690,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
               </button>
               <button
                 type="button"
-                disabled={!hasReplacements || saving}
+                disabled={!canSavePlan}
                 onClick={() => void savePlan()}
                 className="inline-flex h-8 items-center border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
