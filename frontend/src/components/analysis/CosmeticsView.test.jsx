@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import CosmeticsView from "./CosmeticsView";
-import { saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
+import { loadCustomSkinPlan, saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
 vi.mock("./saveCustomSkinPlan.js", () => ({
-  saveCustomSkinPlan: vi.fn(async () => ({ ok: true, stub: true })),
+  saveCustomSkinPlan: vi.fn(async () => ({ ok: true })),
+  loadCustomSkinPlan: vi.fn(async () => ({ ok: true, plan: null })),
 }));
 
 const STEAM_ID = "76561198000000001";
@@ -250,11 +251,13 @@ describe("CosmeticsView", () => {
     expect(screen.getByPlaceholderText(/搜索皮肤|Search skins/i)).toBeTruthy();
   });
 
-  test("cancel discards local replacements; save calls stub and returns to browse", async () => {
+  test("cancel discards local replacements; save posts plan with demoId and returns to browse", async () => {
     vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockClear();
 
     const { container } = render(
       <CosmeticsView
+        demoId={42}
         selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
         workspace={{
           cosmetics: {
@@ -313,6 +316,7 @@ describe("CosmeticsView", () => {
 
     await waitFor(() => {
       expect(saveCustomSkinPlan).toHaveBeenCalledWith({
+        demoId: 42,
         steamid: STEAM_ID,
         replacements: expect.objectContaining({
           "id:10": expect.objectContaining({ catalog_id: expect.any(Number) }),
@@ -320,8 +324,168 @@ describe("CosmeticsView", () => {
       });
     });
     expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
-    expect(screen.getByText(/已记录自定义方案|Custom plan recorded/i)).toBeTruthy();
+    expect(screen.getByText(/自定义皮肤方案已保存|Custom skin plan saved/i)).toBeTruthy();
     expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(0);
+  });
+
+  test("seeds local replacements from persisted custom-plan on mount", async () => {
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "id:10",
+            replacement: {
+              catalog_id: 4797,
+              def_index: 7,
+              paint_index: 340,
+              paint_wear: 0.01,
+              paint_seed: 12,
+              name_zh: "AK-47 | 红线",
+              name_en: "AK-47 | Redline",
+              image_url: "https://cdn.example/redline.webp",
+            },
+          },
+        ],
+      },
+    });
+
+    render(
+      <CosmeticsView
+        demoId={7}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
+    });
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    await waitFor(() => {
+      expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    });
+  });
+
+  test("disables save when demoId is missing", async () => {
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockClear();
+
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK原皮",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "AK原皮" }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    const saveButton = screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i });
+    expect(saveButton.disabled).toBe(true);
+    expect(screen.getByText(/无法保存.*Demo|Save unavailable.*demo/i)).toBeTruthy();
+    expect(saveCustomSkinPlan).not.toHaveBeenCalled();
+  });
+
+  test("clears seeded replacements when demoId changes", async () => {
+    const workspace = {
+      cosmetics: {
+        players: {
+          [STEAM_ID]: [
+            cosmetic({
+              item_id: 10,
+              type: "weapon",
+              model: "ak47",
+              def_index: 7,
+              observed_teams: ["t"],
+              name_zh: "AK原皮",
+            }),
+          ],
+        },
+      },
+    };
+    const seededPlan = {
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "id:10",
+            replacement: {
+              catalog_id: 4797,
+              def_index: 7,
+              paint_index: 340,
+              paint_wear: 0.01,
+              paint_seed: 12,
+              name_zh: "AK-47 | 红线",
+              name_en: "AK-47 | Redline",
+              image_url: "https://cdn.example/redline.webp",
+            },
+          },
+        ],
+      },
+    };
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce(seededPlan);
+
+    const { rerender } = render(
+      <CosmeticsView demoId={7} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
+    });
+    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
+    await waitFor(() => {
+      expect(screen.getByText(/→\s*.+/)).toBeTruthy();
+    });
+
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+    rerender(
+      <CosmeticsView demoId={8} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} workspace={workspace} />,
+    );
+
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 8, steamid: STEAM_ID });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    });
   });
 
   test("keeps hover notice when a glove finish was not retained", () => {

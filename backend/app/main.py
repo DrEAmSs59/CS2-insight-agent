@@ -80,6 +80,7 @@ from .api.demo_replay import (
     get_demo_replay_binary,
     router as demo_replay_router,
 )
+from .api.cosmetics_skin import router as cosmetics_skin_router
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
 from .cs2_config_backup import (
@@ -361,6 +362,7 @@ app.include_router(montage_exports_router)
 app.include_router(recorded_clips_router)
 app.include_router(desktop_router)
 app.include_router(demo_replay_router)
+app.include_router(cosmetics_skin_router)
 
 app.add_middleware(
     CORSMiddleware,

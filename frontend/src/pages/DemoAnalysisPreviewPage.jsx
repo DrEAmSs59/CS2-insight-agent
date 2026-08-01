@@ -684,6 +684,7 @@ export default function DemoAnalysisPreviewPage() {
                   selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerName(player) === activePlayer)}
                   locale={locale}
                   onlineAssetsEnabled={onlineAssetsEnabled}
+                  demoId={currentUpload?.id}
                 />
               )}
 

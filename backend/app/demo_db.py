@@ -423,6 +423,18 @@ class DemoDB:
                 """
             )
             await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_custom_skin_plans (
+                    demo_path TEXT NOT NULL,
+                    steamid TEXT NOT NULL,
+                    plan_json TEXT NOT NULL,
+                    output_sha256 TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (demo_path, steamid)
+                )
+                """
+            )
+            await conn.execute(
                 "UPDATE demo_files SET status = 'done' WHERE lower(status) = 'parsed'"
             )
             await conn.commit()
@@ -625,6 +637,25 @@ class DemoDB:
             )
             row = await cur.fetchone()
         return row is not None
+
+    async def update_demo_content_md5(
+        self,
+        demo_path: str,
+        content_md5: str,
+    ) -> bool:
+        """Overwrite ``content_md5`` for ``demo_path`` (working-copy fingerprint)."""
+        if not self.ingest_md5_supported or not content_md5:
+            return False
+        digest = str(content_md5).strip().lower()
+        if not digest:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "UPDATE demo_files SET content_md5 = ? WHERE path = ?",
+                (digest, demo_path),
+            )
+            await conn.commit()
+        return cur.rowcount > 0
 
     async def update_demo_content_md5_if_absent(
         self,
@@ -1740,6 +1771,8 @@ class DemoDB:
                     await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
                     await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
                     await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
+            # Rebuilding caches from originals invalidates any skinned overlays.
+            await conn.execute("DELETE FROM demo_custom_skin_plans")
             await conn.commit()
         return len(rows)
 
@@ -1756,6 +1789,68 @@ class DemoDB:
             cached = int((await cached_cur.fetchone())[0] or 0)
         return {"demo_total": total, "demo_cached": cached, "demo_uncached": max(0, total - cached)}
 
+    async def upsert_custom_skin_plan(
+        self,
+        demo_path: str,
+        steamid: str,
+        plan_json: dict[str, Any] | str,
+        *,
+        output_sha256: str | None = None,
+    ) -> None:
+        """Persist a cosmetics rewrite plan keyed by ``(demo_path, steamid)``."""
+        if isinstance(plan_json, str):
+            payload = plan_json
+        else:
+            payload = json.dumps(plan_json, ensure_ascii=False)
+        now = utc_now_iso()
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                INSERT INTO demo_custom_skin_plans(
+                    demo_path, steamid, plan_json, output_sha256, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(demo_path, steamid) DO UPDATE SET
+                    plan_json = excluded.plan_json,
+                    output_sha256 = excluded.output_sha256,
+                    updated_at = excluded.updated_at
+                """,
+                (str(demo_path), str(steamid), payload, output_sha256, now),
+            )
+            await conn.commit()
+
+    async def get_custom_skin_plan(
+        self,
+        demo_path: str,
+        steamid: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return one plan row with ``plan_json`` decoded, or ``None``."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT demo_path, steamid, plan_json, output_sha256, updated_at
+                FROM demo_custom_skin_plans
+                WHERE demo_path = ? AND steamid = ?
+                """,
+                (str(demo_path), str(steamid)),
+            )
+            row = await cur.fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["plan_json"] = json.loads(str(item["plan_json"]))
+        return item
+
+    async def delete_custom_skin_plans_for_demo(self, demo_path: str) -> int:
+        """Delete all custom skin plans for ``demo_path``. Returns rows removed."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "DELETE FROM demo_custom_skin_plans WHERE demo_path = ?",
+                (str(demo_path),),
+            )
+            await conn.commit()
+            return int(cur.rowcount or 0)
+
     async def delete_demo(self, demo_id: int) -> bool:
         """删除库内记录。磁盘文件保留时，下次扫描可重新进入待入库。"""
         demo = await self.get_demo_by_id(demo_id)
@@ -1769,6 +1864,7 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+            await conn.execute("DELETE FROM demo_custom_skin_plans WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
             await conn.commit()
         if cached_path:
@@ -1933,6 +2029,9 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
+            await conn.execute(
+                "DELETE FROM demo_custom_skin_plans WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)"
+            )
             cur = await conn.execute("DELETE FROM demo_files WHERE id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.commit()
             total = cur.rowcount
