@@ -57,4 +57,26 @@ const bundledDataFiles = new Set([
 ]);
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
+/** Optional proprietary sidecar — never fail OSS CI when absent. */
+function maybeStageSkinCore() {
+  const toolsDir = join(destination, "tools");
+  const target = join(toolsDir, "skin-core.exe");
+  const envPath = process.env.CS2_SKIN_CORE_EXE?.trim();
+  const candidates = [];
+  if (envPath) candidates.push(envPath);
+  candidates.push(join(repoRoot, "..", "CS2-demo-anyskin", "dist", "skin-core.exe"));
+  candidates.push(join(repoRoot, "..", "dist", "skin-core.exe"));
+
+  for (const source of candidates) {
+    if (!source || !existsSync(source)) continue;
+    mkdirSync(toolsDir, { recursive: true });
+    cpSync(source, target);
+    console.log(`[desktop] staged skin-core.exe from ${source}`);
+    return;
+  }
+  console.log("[desktop] skin-core.exe not provided; skipping proprietary sidecar");
+}
+
+maybeStageSkinCore();
+
 console.log(`[desktop] staged Tauri resources at ${destination}`);
