@@ -9,7 +9,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 #[cfg(windows)]
@@ -19,15 +19,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct BackendProcess {
     child: Mutex<Option<ManagedBackend>>,
-    session_token: String,
 }
 
 impl BackendProcess {
-    fn new() -> Result<Self, String> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             child: Mutex::new(None),
-            session_token: new_session_token()?,
-        })
+        }
     }
 }
 
@@ -37,13 +35,13 @@ struct ManagedBackend {
     data_root: PathBuf,
 }
 
-fn backend_http(method: &str, path: &str, session_token: &str) -> Option<String> {
+fn backend_http(method: &str, path: &str) -> Option<String> {
     let address = SocketAddr::from(([127, 0, 0, 1], 19871));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\nX-CS2-Insight-Token: {session_token}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).ok()?;
     let mut response = String::new();
@@ -57,17 +55,6 @@ fn new_instance_id() -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("{}-{nanos}", std::process::id())
-}
-
-fn new_session_token() -> Result<String, String> {
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes).map_err(|error| format!("无法生成桌面会话令牌：{error}"))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-#[tauri::command]
-fn backend_session_token(state: State<'_, BackendProcess>) -> String {
-    state.session_token.clone()
 }
 
 #[tauri::command]
@@ -225,14 +212,12 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("无法复制后端日志句柄：{error}"))?;
 
     let instance_id = new_instance_id();
-    let session_token = app.state::<BackendProcess>().session_token.clone();
     let mut command = Command::new(&python);
     command
         .arg(&run_server)
         .current_dir(&backend_dir)
         .env("CS2_INSIGHT_PORT", "19871")
         .env("CS2_INSIGHT_INSTANCE_ID", &instance_id)
-        .env("CS2_INSIGHT_SESSION_TOKEN", &session_token)
         .env("PYTHONNOUSERSITE", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONUNBUFFERED", "1")
@@ -291,7 +276,7 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
                 );
             }
         }
-        if backend_http("GET", "/api/app/runtime-state", &session_token)
+        if backend_http("GET", "/api/app/runtime-state")
             .is_some_and(|response| response.contains(&instance_id))
         {
             verified = true;
@@ -317,7 +302,6 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
 
 fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
-    let session_token = state.session_token.clone();
     let Ok(mut guard) = state.child.lock() else {
         return;
     };
@@ -329,7 +313,7 @@ fn stop_backend(app: &AppHandle) {
         return;
     }
 
-    let response = backend_http("POST", "/api/app/shutdown", &session_token);
+    let response = backend_http("POST", "/api/app/shutdown");
     append_desktop_log(
         &backend.data_root.join("logs"),
         &format!(
@@ -374,10 +358,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(BackendProcess::new().expect("failed to create desktop session token"))
+        .manage(BackendProcess::new())
         .invoke_handler(tauri::generate_handler![
-            read_legacy_ui_state,
-            backend_session_token
+            read_legacy_ui_state
         ])
         .setup(|app| {
             // Start the backend on a worker thread so the window (and its
@@ -436,16 +419,4 @@ pub fn run() {
         RunEvent::Exit => stop_backend(handle),
         _ => {}
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::new_session_token;
-
-    #[test]
-    fn session_token_is_256_bit_hex() {
-        let token = new_session_token().expect("OS random source should be available");
-        assert_eq!(token.len(), 64);
-        assert!(token.bytes().all(|value| value.is_ascii_hexdigit()));
-    }
 }
