@@ -15,6 +15,14 @@ path = "src/main.rs"
 name = "demo-cosmetic-verifier"
 path = "src/bin/demo-cosmetic-verifier.rs"
 
+[[bin]]
+name = "demo-hud-serverinfo-probe"
+path = "src/bin/demo-hud-serverinfo-probe.rs"
+
+[[bin]]
+name = "demo-hud-audit"
+path = "src/bin/demo-hud-audit.rs"
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }

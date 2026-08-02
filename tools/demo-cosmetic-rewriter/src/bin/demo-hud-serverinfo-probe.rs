@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, ClapParser)]
 #[command(name = "demo-hud-serverinfo-probe")]
-#[command(about = "Rewrite CS2 ServerInfo player_slot and is_hltv together")]
+#[command(about = "Rewrite CS2 ServerInfo player_slot, is_hltv, and optional max_clients")]
 struct Cli {
     #[arg(long)]
     input: PathBuf,
@@ -25,12 +25,16 @@ struct Cli {
     player_slot: i32,
     #[arg(long, default_value_t = false)]
     is_hltv: bool,
+    /// When set, also rewrite ServerInfo.max_clients (teammate-color gate needs <= 10).
+    #[arg(long)]
+    max_clients: Option<i32>,
 }
 
 #[derive(Clone, Debug, Default)]
 struct ProbeReport {
     original_player_slots: BTreeSet<i32>,
     original_is_hltv: BTreeSet<bool>,
+    original_max_clients: BTreeSet<i32>,
     ticks: BTreeSet<u32>,
     replacements: usize,
 }
@@ -38,6 +42,7 @@ struct ProbeReport {
 struct ServerInfoProbe {
     player_slot: i32,
     is_hltv: bool,
+    max_clients: Option<i32>,
     report: ProbeReport,
 }
 
@@ -61,10 +66,16 @@ impl DemoRewriter for ServerInfoProbe {
             .original_player_slots
             .insert(message.player_slot());
         self.report.original_is_hltv.insert(message.is_hltv());
+        self.report
+            .original_max_clients
+            .insert(message.max_clients());
         self.report.ticks.insert(tick);
         self.report.replacements += 1;
         message.player_slot = Some(self.player_slot);
         message.is_hltv = Some(self.is_hltv);
+        if let Some(max_clients) = self.max_clients {
+            message.max_clients = Some(max_clients);
+        }
         Ok(MessageRewrite::Replace(message.encode_to_vec()))
     }
 }
@@ -121,6 +132,7 @@ fn run(cli: Cli) -> Result<()> {
     let state = writer.add_rewriter(ServerInfoProbe {
         player_slot: cli.player_slot,
         is_hltv: cli.is_hltv,
+        max_clients: cli.max_clients,
         report: ProbeReport::default(),
     });
     writer.run()?;
@@ -148,8 +160,10 @@ fn run(cli: Cli) -> Result<()> {
     println!("output_sha256={output_sha256}");
     println!("original_player_slots={:?}", report.original_player_slots);
     println!("original_is_hltv={:?}", report.original_is_hltv);
+    println!("original_max_clients={:?}", report.original_max_clients);
     println!("player_slot={}", cli.player_slot);
     println!("is_hltv={}", cli.is_hltv);
+    println!("max_clients={:?}", cli.max_clients);
     println!("replacements={} ticks={:?}", report.replacements, report.ticks);
     println!(
         "header_offsets=file_info:{} spawn_groups:{} eof:{}",
