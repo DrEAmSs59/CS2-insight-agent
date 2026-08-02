@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   craftNameParts,
   filterCandidates,
+  formatCraftPipeName,
   imageUrlForWear,
   listSkinCandidates,
   sortCandidatesByRarityDesc,
@@ -66,5 +67,21 @@ describe("cosmeticsCatalog", () => {
     expect(parts.model).toBe("★ Butterfly Knife");
     expect(parts.finish).toBe("Lore");
     expect(craftNameParts({ type: "weapon", name_en: "AK-47 | Redline" }, "en").model).toBe("AK-47");
+  });
+
+  test("formatCraftPipeName joins model, skin, and phase alt", () => {
+    expect(formatCraftPipeName({
+      type: "weapon",
+      name_zh: "AK-47 | 红线",
+      name_en: "AK-47 | Redline",
+      paint_seed: 80,
+    }, "zh")).toBe("AK-47 | 红线");
+    expect(formatCraftPipeName({
+      type: "melee",
+      name_zh: "M9 刺刀 | 伽玛多普勒",
+      name_en: "M9 Bayonet | Gamma Doppler",
+      alt_name: "Emerald",
+      paint_seed: 568,
+    }, "zh")).toBe("★ M9 刺刀 | 伽玛多普勒 | Emerald");
   });
 });

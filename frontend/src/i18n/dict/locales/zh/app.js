@@ -9,6 +9,7 @@ export default {
   "app.scanFail": "扫描或列表刷新失败: {msg}",
   "app.saveConfigFail": "保存配置失败: {msg}",
   "app.deleteFail": "删除失败: {msg}",
+  "app.deletingDemo": "正在删除…",
   "app.deleteFileDone": "已从磁盘删除 .dem 文件（如有同名 .zip 也一并删除）。",
   "app.deleteFileFail": "删除文件失败: {msg}",
   "app.batchDeleteProgress": "正在批量删除（{done} / {total}）…",

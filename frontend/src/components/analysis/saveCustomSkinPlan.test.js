@@ -35,6 +35,25 @@ describe("saveCustomSkinPlan", () => {
     });
   });
 
+  test("POSTs originals when provided so plan keeps demo-original labels", async () => {
+    API.post.mockResolvedValue({
+      data: { ok: true, plan: { steamid: "1", items: [] } },
+    });
+
+    await saveCustomSkinPlan({
+      demoId: 42,
+      steamid: "1",
+      replacements: { "id:10": { paint_index: 403 } },
+      originals: { "id:10": { name_zh: "AK原皮", paint_index: 282 } },
+    });
+
+    expect(API.post).toHaveBeenCalledWith("/demos/42/cosmetics/custom-plan", {
+      steamid: "1",
+      replacements: { "id:10": { paint_index: 403 } },
+      originals: { "id:10": { name_zh: "AK原皮", paint_index: 282 } },
+    });
+  });
+
   test("GETs custom-plan for demoId and steamid", async () => {
     API.get.mockResolvedValue({ data: { ok: true, plan: null } });
 

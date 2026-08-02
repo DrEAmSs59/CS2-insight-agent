@@ -167,11 +167,16 @@ def test_build_batch_rejects_missing_slot():
         build_batch_and_plan(STEAM_ID, inv, {"id:999": replacement(type="weapon", def_index=7)})
 
 
-def test_build_batch_rejects_inventory_without_item_id():
+def test_build_batch_rejects_inventory_without_item_id_when_not_vanilla_slot():
+    # Non-customizable path still needs a resolvable slot; item_id 0 on a normal
+    # weapon row is now treated as vanilla (item_id64 "0"), not rejected.
     inv = [inventory_row(item_id=0, type="weapon", def_index=7, paint_index=1)]
     key = slot_key(inv[0])
-    with pytest.raises(CosmeticsSkinPlanError, match="item_id"):
-        build_batch_and_plan(STEAM_ID, inv, {key: replacement(type="weapon", def_index=7)})
+    batch, _plan = build_batch_and_plan(
+        STEAM_ID, inv, {key: replacement(type="weapon", def_index=7)}
+    )
+    assert batch[0]["item_id64"] == "0"
+    assert batch[0]["definition_index"] == 7
 
 
 def test_build_batch_rejects_non_customizable_types():
@@ -192,6 +197,85 @@ def test_build_batch_rejects_empty_replacements():
         build_batch_and_plan(STEAM_ID, [inventory_row()], {})
 
 
+def test_build_batch_emits_zero_item_id64_for_vanilla_inventory():
+    inv = [
+        inventory_row(
+            item_id=0,
+            type="weapon",
+            def_index=16,
+            paint_index=0,
+            paint_seed=0,
+            paint_wear=0,
+            model="m4a1",
+            name_zh="M4A4",
+        )
+    ]
+    key = slot_key(inv[0])
+    repl = replacement(
+        type="weapon",
+        def_index=16,
+        paint_index=309,
+        paint_seed=1,
+        paint_wear=0.01,
+        name_zh="M4A4 | 龙王",
+    )
+    batch, plan = build_batch_and_plan(STEAM_ID, inv, {key: repl})
+    assert batch[0]["item_id64"] == "0"
+    assert batch[0]["definition_index"] == 16
+    assert plan["items"][0]["slot_key"] == key
+
+
+def test_build_batch_accepts_placeholder_melee_without_inventory_row():
+    repl = replacement(
+        type="melee",
+        def_index=507,
+        paint_index=418,
+        paint_seed=1,
+        paint_wear=0.01,
+    )
+    originals = {
+        "placeholder:59": {
+            "def_index": 59,
+            "paint_index": 0,
+            "type": "melee",
+            "name_zh": "默认刀",
+            "model": "knife_t",
+        }
+    }
+    batch, plan = build_batch_and_plan(
+        STEAM_ID,
+        [],
+        {"placeholder:59": repl},
+        originals=originals,
+    )
+    assert batch[0]["item_id64"] == "0"
+    assert batch[0]["definition_index"] == 59
+    assert batch[0].get("replacement_definition_index") == 507
+    assert plan["items"][0]["original"]["name_zh"] == "默认刀"
+
+
+def test_map_item_statuses_matches_zero_id_by_definition_index():
+    from app.cosmetics_skin_plan import map_item_statuses
+
+    plan = {
+        "steamid": STEAM_ID,
+        "items": [
+            {
+                "slot_key": "def:16:0:0:0",
+                "original": {"def_index": 16, "name_zh": "M4A4", "item_id": None},
+                "replacement": {
+                    "def_index": 16,
+                    "name_zh": "M4A4 | 龙王",
+                    "paint_index": 309,
+                },
+            }
+        ],
+    }
+    mapped = map_item_statuses(plan, [{"item_id64": "0", "definition_index": 16}])
+    assert mapped[0]["slot_key"] == "def:16:0:0:0"
+    assert mapped[0]["original_name_zh"] == "M4A4"
+
+
 def test_build_batch_multiple_slots():
     inv = [
         inventory_row(item_id=10, type="weapon", def_index=7, paint_index=0, model="ak47"),
@@ -205,3 +289,88 @@ def test_build_batch_multiple_slots():
     assert len(batch_items) == 2
     assert {row["item_id64"] for row in batch_items} == {"10", "11"}
     assert len(plan["items"]) == 2
+
+
+def test_build_batch_prefers_client_originals_for_plan_display():
+    """After a prior rewrite, inventory is already the new skin — keep UI 原皮 from client."""
+    inv = [
+        inventory_row(
+            item_id=10,
+            type="weapon",
+            def_index=7,
+            paint_index=403,
+            paint_seed=661,
+            paint_wear=0.07,
+            model="ak47",
+            name_zh="AK-47 | 野荷",
+            name_en="AK-47 | Wild Lotus",
+            image_url="https://cdn.example/wild-lotus.webp",
+        )
+    ]
+    repl = replacement(
+        type="weapon",
+        def_index=7,
+        paint_index=403,
+        paint_seed=661,
+        paint_wear=0.07,
+        name_zh="AK-47 | 野荷",
+        name_en="AK-47 | Wild Lotus",
+        image_url="https://cdn.example/wild-lotus.webp",
+    )
+    client_original = {
+        "item_id": 10,
+        "def_index": 7,
+        "paint_index": 282,
+        "paint_seed": 1,
+        "paint_wear": 0.1,
+        "name_zh": "AK-47 | 红线",
+        "name_en": "AK-47 | Redline",
+        "image_url": "https://cdn.example/redline.webp",
+        "type": "weapon",
+        "model": "ak47",
+    }
+    batch_items, plan = build_batch_and_plan(
+        STEAM_ID,
+        inv,
+        {"id:10": repl},
+        originals={"id:10": client_original},
+    )
+    assert batch_items[0]["paint_kit"] == 403
+    assert batch_items[0]["item_id64"] == "10"
+    entry = plan["items"][0]
+    assert entry["original"]["name_zh"] == "AK-47 | 红线"
+    assert entry["original"]["paint_index"] == 282
+    assert entry["original"]["item_id"] == 10
+    assert entry["replacement"]["name_zh"] == "AK-47 | 野荷"
+
+
+def test_map_item_statuses_includes_original_and_replacement_names():
+    from app.cosmetics_skin_plan import map_item_statuses
+
+    inv = [
+        inventory_row(
+            item_id=10,
+            type="weapon",
+            def_index=7,
+            paint_index=0,
+            model="ak47",
+            name_zh="AK原皮",
+            name_en="AK Stock",
+        )
+    ]
+    replacements = {
+        "id:10": replacement(
+            type="weapon",
+            def_index=7,
+            paint_index=340,
+            name_zh="AK-47 | 红线",
+            name_en="AK-47 | Redline",
+        )
+    }
+    _, plan = build_batch_and_plan(STEAM_ID, inv, replacements)
+    mapped = map_item_statuses(plan, [{"item_id64": "10", "definition_index": 7}])
+    assert mapped[0]["original_name_zh"] == "AK原皮"
+    assert mapped[0]["original_name_en"] == "AK Stock"
+    assert mapped[0]["replacement_name_zh"] == "AK-47 | 红线"
+    assert mapped[0]["replacement_name_en"] == "AK-47 | Redline"
+    assert mapped[0]["name_zh"] == "AK-47 | 红线"

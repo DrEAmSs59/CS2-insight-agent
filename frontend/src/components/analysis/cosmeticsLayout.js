@@ -8,6 +8,7 @@ const PISTOLS = new Set([
 ]);
 const SMGS = new Set(["mac10", "mp9", "mp7", "mp5sd", "ump45", "p90", "bizon"]);
 const SHOTGUNS = new Set(["nova", "xm1014", "mag7", "sawedoff"]);
+const MACHINE_GUNS = new Set(["m249", "negev"]);
 
 export function slotKey(item) {
   const id = Number(item?.item_id);
@@ -17,23 +18,33 @@ export function slotKey(item) {
 }
 
 export function isCustomizable(item) {
-  if (!item || item.is_placeholder) return false;
-  return ["melee", "glove", "weapon"].includes(String(item?.type || ""));
+  if (!item) return false;
+  const type = String(item?.type || "");
+  if (!["melee", "glove", "weapon"].includes(type)) return false;
+  const def = Number(item?.def_index);
+  if (!Number.isFinite(def) || def <= 0) return false;
+  const id = Number(item?.item_id);
+  if (Number.isFinite(id) && id > 0) return true;
+  // Default knife/glove UI fillers may be rewritten via zero-id materialize.
+  if (item.is_placeholder) return type === "melee" || type === "glove";
+  // Demo evidence vanilla (paint 0 / no durable econ id).
+  return true;
 }
 
-/** 刀 → 手套 → 步枪 → 狙击枪 → 手枪 → 冲锋枪 → 喷子/其他 */
+/** 刀 → 手套 → 狙击 → 步枪 → 冲锋枪 → 霰弹枪 → 机枪 → 手枪 → 其他 */
 export function weaponClassRank(item) {
   const type = String(item?.type || "");
   if (type === "melee") return 0;
   if (type === "glove") return 1;
-  if (type !== "weapon") return 7;
+  if (type !== "weapon") return 8;
   const model = String(item?.model || "").toLowerCase();
-  if (RIFLES.has(model)) return 2;
-  if (SNIPERS.has(model)) return 3;
-  if (PISTOLS.has(model)) return 4;
-  if (SMGS.has(model)) return 5;
-  if (SHOTGUNS.has(model)) return 6;
-  return 7;
+  if (SNIPERS.has(model)) return 2;
+  if (RIFLES.has(model)) return 3;
+  if (SMGS.has(model)) return 4;
+  if (SHOTGUNS.has(model)) return 5;
+  if (MACHINE_GUNS.has(model)) return 6;
+  if (PISTOLS.has(model)) return 7;
+  return 8;
 }
 
 /** True when the item is a painted skin / non-default cosmetic (not a vanilla placeholder). */
@@ -53,8 +64,7 @@ export function itemsForTeam(items, team) {
 }
 
 /**
- * Sort: skinned items first, then defaults; within each group
- * 刀 → 手套 → 步枪 → 狙击 → 手枪 → 冲锋枪.
+ * Sort by weapon class: 刀 → 手套 → 狙击 → 步枪 → 冲锋 → 霰弹 → 机枪 → 手枪 → 其他.
  * `resolveItem` can map to a replacement for sort purposes.
  */
 export function sortCosmeticsForRow(items, locale = "zh", resolveItem = null) {
@@ -67,8 +77,7 @@ export function sortCosmeticsForRow(items, locale = "zh", resolveItem = null) {
   return [...(Array.isArray(items) ? items : [])].sort((left, right) => {
     const leftItem = resolve(left) || left;
     const rightItem = resolve(right) || right;
-    return Number(hasSkinFinish(rightItem)) - Number(hasSkinFinish(leftItem))
-      || weaponClassRank(leftItem) - weaponClassRank(rightItem)
+    return weaponClassRank(leftItem) - weaponClassRank(rightItem)
       || Number(leftItem?.def_index || 0) - Number(rightItem?.def_index || 0)
       || name(leftItem).localeCompare(name(rightItem), locale)
       || Number(left?.item_id || 0) - Number(right?.item_id || 0);
@@ -77,8 +86,8 @@ export function sortCosmeticsForRow(items, locale = "zh", resolveItem = null) {
 
 /**
  * Merge demo evidence onto default CT/T loadout placeholders.
- * Same def_index weapons replace the placeholder; any melee/glove evidence
- * replaces the default knife/gloves slot.
+ * Weapons appear only from evidence (no default gun placeholders).
+ * Melee/glove fall back to a single natural placeholder when no evidence.
  */
 export function mergeLoadoutWithEvidence(defaults, evidenceItems, locale = "zh") {
   const evidence = Array.isArray(evidenceItems) ? evidenceItems : [];
@@ -119,9 +128,8 @@ export function mergeLoadoutWithEvidence(defaults, evidenceItems, locale = "zh")
       if (matches?.length) {
         merged.push(...matches);
         consumedWeaponDefs.add(def);
-      } else {
-        merged.push(placeholder);
       }
+      // No evidence → skip placeholder (never-bought / never-held guns stay hidden).
       continue;
     }
     merged.push(placeholder);

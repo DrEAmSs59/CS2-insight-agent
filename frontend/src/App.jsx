@@ -595,12 +595,17 @@ export default function App() {
 
   const handleDeleteDemo = useCallback(
     async (id) => {
+      setLibraryDeletePrompt(null);
+      setLibraryLoadingOverlay(true);
+      setLibraryLoadingText(t("app.deletingDemo"));
       try {
         await API.delete(`/demos/${id}`);
-        setLibraryDeletePrompt(null);
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
         setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      } finally {
+        setLibraryLoadingOverlay(false);
+        setLibraryLoadingText(t("app.libraryLoadingDemo"));
       }
     },
     [refreshDemoLibrary, libraryPage, t]
@@ -624,22 +629,28 @@ export default function App() {
     async (ids) => {
       const list = [...ids];
       if (!list.length) return;
-      setProgressText(t("app.batchDeleteProgress", { done: 0, total: list.length }), { loading: true });
+      setLibraryLoadingOverlay(true);
+      setLibraryLoadingText(t("app.batchDeleteProgress", { done: 0, total: list.length }));
       let done = 0;
-      for (const id of list) {
-        try {
-          await API.delete(`/demos/${id}`);
-          done += 1;
-          setProgressText(t("app.batchDeleteProgress", { done, total: list.length }), { loading: true });
-        } catch (e) {
-          setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-          await refreshDemoLibrary(libraryPage, { manageLoading: false });
-          return;
+      try {
+        for (const id of list) {
+          try {
+            await API.delete(`/demos/${id}`);
+            done += 1;
+            setLibraryLoadingText(t("app.batchDeleteProgress", { done, total: list.length }));
+          } catch (e) {
+            setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+            await refreshDemoLibrary(libraryPage, { manageLoading: false });
+            return;
+          }
         }
+        setSelectedLibraryDemoIds(new Set());
+        setProgressText(t("app.batchDeleteDone", { n: list.length }));
+        await refreshDemoLibrary(libraryPage, { manageLoading: false });
+      } finally {
+        setLibraryLoadingOverlay(false);
+        setLibraryLoadingText(t("app.libraryLoadingDemo"));
       }
-      setSelectedLibraryDemoIds(new Set());
-      setProgressText(t("app.batchDeleteDone", { n: list.length }));
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
     },
     [refreshDemoLibrary, libraryPage, t]
   );
@@ -3051,7 +3062,7 @@ export default function App() {
           <CustomTitleBar />
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {libraryLoadingOverlay && (
-            <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
+            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
                 <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cs2-orange" />
                 <DemoLoadingCopy detail={libraryLoadingText} aiEnabled={aiMode} compact />

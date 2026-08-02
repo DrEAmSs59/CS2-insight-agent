@@ -104,28 +104,32 @@ def test_legacy_match_cache_remains_readable_and_global_clear_reclaims_it(tmp_pa
 
 def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
     demo_path = tmp_path / "library.dem"
+    cached_path = tmp_path / "demo-cache" / "library.dem"
     demo_path.write_bytes(b"demo")
+    cached_path.parent.mkdir(parents=True)
+    cached_path.write_bytes(b"demo")
     calls: list[object] = []
 
     async def fake_get_demo_by_id(demo_id):
         calls.append(("get", demo_id))
-        return {"id": demo_id, "path": str(demo_path)}
+        return {"id": demo_id, "path": str(demo_path), "cached_path": str(cached_path)}
 
     async def fake_delete_demo(demo_id):
         calls.append(("delete", demo_id))
+        cached_path.unlink(missing_ok=True)
         return True
 
     async def fake_notify(_self, event):
         calls.append(("notify", event))
 
-    def fake_remove(path):
-        calls.append(("cache", path))
+    def fake_remove_row(demo):
+        calls.append(("cache", demo.get("path"), demo.get("cached_path")))
         return {"removed_files": 3, "removed_bytes": 42, "errors": []}
 
     monkeypatch.setattr(main.demo_db, "get_demo_by_id", fake_get_demo_by_id)
     monkeypatch.setattr(main.demo_db, "delete_demo", fake_delete_demo)
     monkeypatch.setattr(type(main.demo_library_hub), "notify", fake_notify)
-    monkeypatch.setattr(replay_cache_storage, "remove_demo_replay_cache", fake_remove)
+    monkeypatch.setattr(replay_cache_storage, "remove_demo_row_caches", fake_remove_row)
 
     result = asyncio.run(main.delete_demo(17))
 
@@ -136,7 +140,29 @@ def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
     }
     assert calls == [
         ("get", 17),
+        ("cache", str(demo_path), str(cached_path)),
         ("delete", 17),
-        ("cache", str(demo_path)),
         ("notify", "deleted"),
     ]
+
+
+def test_remove_demo_row_caches_covers_working_copy(tmp_path, monkeypatch):
+    monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path))
+    original = tmp_path / "original.dem"
+    cached = tmp_path / "demo-cache" / "working.dem"
+    original.write_bytes(b"original")
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"working")
+
+    match_root = replay_cache_storage.replay_cache_namespace_root("matches")
+    _write_match_entry(match_root, "match-working", cached)
+    replay_effects_cache.save_tracks(demo_path=str(cached), tracks=[], capabilities={})
+
+    removed = replay_cache_storage.remove_demo_row_caches(
+        {"path": str(original), "cached_path": str(cached)}
+    )
+
+    assert removed["removed_files"] >= 3
+    assert removed["errors"] == []
+    assert not (match_root / "match-working.parquet").exists()
+    assert cached.is_file()  # working copy unlink is delete_demo's job

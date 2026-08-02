@@ -136,7 +136,10 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     cached_before = cached.read_bytes()
 
     def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
-        assert Path(input_dem).resolve() == cached.resolve()
+        input_path = Path(input_dem).resolve()
+        assert input_path != cached.resolve()
+        assert input_path.parent == cached.parent
+        assert input_path.read_bytes() == original_bytes
         assert Path(output_dem).resolve() != cached.resolve()
         assert Path(output_dem).parent == cached.parent
         assert not Path(output_dem).exists()
@@ -184,6 +187,122 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     assert row["content_md5"] == expected_md5
 
 
+def test_post_custom_plan_restores_cache_from_original_before_rewrite(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    original: Path = api_env["original"]
+    # Pollute cache so a naive reuse would feed rewritten bytes.
+    cached.write_bytes(b"ALREADY-REWRITTEN-CACHE")
+    seen = {}
+
+    def capture_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        input_path = Path(input_dem).resolve()
+        seen["input_bytes"] = input_path.read_bytes()
+        seen["input_path"] = input_path
+        Path(output_dem).write_bytes(b"FRESH-REWRITE")
+        return {
+            "ok": True,
+            "sha256": "abc",
+            "items_rewritten": 1,
+            "succeeded": [{"item_id64": "10", "definition_index": 7}],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", capture_rewrite)
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+    assert response.status_code == 200
+    assert seen["input_bytes"] == original.read_bytes()
+    assert seen["input_bytes"] != b"ALREADY-REWRITTEN-CACHE"
+    assert seen["input_path"] != cached.resolve()
+    assert cached.read_bytes() == b"FRESH-REWRITE"
+    # Temp input must not linger after success.
+    assert not seen["input_path"].exists()
+
+
+def test_post_leaves_cache_untouched_on_skin_core_failure(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
+
+    def boom(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        raise SkinCoreError("auth failed")
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", boom)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    assert "auth failed" in str(response.json()["detail"])
+    # Prior rewritten cache must survive skin-core failure (no pre-rewrite overwrite).
+    assert cached.read_bytes() == prior
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
+def test_post_missing_ok_does_not_replace_cache(api_env, monkeypatch):
+    """Fail-closed: response without explicit ok:true must not os.replace the cache."""
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
+
+    def missing_ok(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        Path(output_dem).write_bytes(b"SHOULD-NOT-REPLACE")
+        return {"sha256": "nope", "items_rewritten": 1}
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", missing_ok)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    assert cached.read_bytes() == prior
+    assert cached.read_bytes() != b"SHOULD-NOT-REPLACE"
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
+def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
+
+    def ok_false(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        Path(output_dem).write_bytes(b"PARTIAL-OUTPUT")
+        return {
+            "ok": False,
+            "error_code": "OWNERSHIP_MISMATCH",
+            "error_message": "item not owned by steamid",
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", ok_false)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    detail = str(response.json()["detail"])
+    assert "item not owned by steamid" in detail
+    assert "OWNERSHIP_MISMATCH" in detail
+    assert cached.read_bytes() == prior
+    assert cached.read_bytes() != b"PARTIAL-OUTPUT"
+    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
+
+
 def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
@@ -207,80 +326,6 @@ def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     assert body["ok"] is True
     assert body["plan"]["items"][0]["replacement"]["name_zh"] == "AK-47 | 红线"
     assert body["output_sha256"] == "abc123"
-
-
-def test_post_leaves_cache_untouched_on_skin_core_failure(api_env, monkeypatch):
-    client = api_env["client"]
-    demo_id = api_env["demo_id"]
-    cached: Path = api_env["cached"]
-    before = cached.read_bytes()
-
-    def boom(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
-        raise SkinCoreError("auth failed")
-
-    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", boom)
-
-    response = client.post(
-        f"/api/demos/{demo_id}/cosmetics/custom-plan",
-        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
-    )
-
-    assert response.status_code == 502
-    assert "auth failed" in str(response.json()["detail"])
-    assert cached.read_bytes() == before
-    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
-
-
-def test_post_missing_ok_does_not_replace_cache(api_env, monkeypatch):
-    """Fail-closed: response without explicit ok:true must not os.replace the cache."""
-    client = api_env["client"]
-    demo_id = api_env["demo_id"]
-    cached: Path = api_env["cached"]
-    before = cached.read_bytes()
-
-    def missing_ok(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
-        Path(output_dem).write_bytes(b"SHOULD-NOT-REPLACE")
-        return {"sha256": "nope", "items_rewritten": 1}
-
-    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", missing_ok)
-
-    response = client.post(
-        f"/api/demos/{demo_id}/cosmetics/custom-plan",
-        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
-    )
-
-    assert response.status_code == 502
-    assert cached.read_bytes() == before
-    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
-
-
-def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
-    client = api_env["client"]
-    demo_id = api_env["demo_id"]
-    cached: Path = api_env["cached"]
-    before = cached.read_bytes()
-
-    def ok_false(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
-        Path(output_dem).write_bytes(b"PARTIAL-OUTPUT")
-        return {
-            "ok": False,
-            "error_code": "OWNERSHIP_MISMATCH",
-            "error_message": "item not owned by steamid",
-        }
-
-    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", ok_false)
-
-    response = client.post(
-        f"/api/demos/{demo_id}/cosmetics/custom-plan",
-        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
-    )
-
-    assert response.status_code == 502
-    detail = str(response.json()["detail"])
-    assert "item not owned by steamid" in detail
-    assert "OWNERSHIP_MISMATCH" in detail
-    assert cached.read_bytes() == before
-    assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
 def test_post_partial_success_writes_cache_and_returns_item_results(api_env, monkeypatch):
@@ -359,6 +404,8 @@ def test_post_partial_success_writes_cache_and_returns_item_results(api_env, mon
     assert len(body["plan"]["items"]) == 1
     assert body["plan"]["items"][0]["slot_key"] == "id:10"
     assert body["succeeded"][0]["slot_key"] == "id:10"
+    assert body["succeeded"][0]["original_name_zh"] == "AK原皮"
+    assert body["succeeded"][0]["replacement_name_zh"] == "AK-47 | 红线"
     assert body["failed"][0]["slot_key"] == "id:11"
     assert "donor" in body["failed"][0]["error"]
 
@@ -371,7 +418,8 @@ def test_post_all_items_soft_failed_returns_200_without_cache_write(api_env, mon
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
-    before = cached.read_bytes()
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
 
     def all_failed(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
         return {
@@ -401,7 +449,8 @@ def test_post_all_items_soft_failed_returns_200_without_cache_write(api_env, mon
     assert body["ok"] is False
     assert body["plan"] is None
     assert body["failed"][0]["slot_key"] == "id:10"
-    assert cached.read_bytes() == before
+    # Soft-fail must leave prior rewritten cache untouched.
+    assert cached.read_bytes() == prior
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
@@ -409,7 +458,8 @@ def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatc
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
-    before = cached.read_bytes()
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
     called = {"n": 0}
 
     def should_not_run(**_kwargs):
@@ -426,7 +476,8 @@ def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatc
     assert response.status_code == 400
     assert "slot" in str(response.json()["detail"]).lower()
     assert called["n"] == 0
-    assert cached.read_bytes() == before
+    # Mapping runs before temp input; prior cache must stay unchanged.
+    assert cached.read_bytes() == prior
 
 
 def test_post_unknown_demo_returns_404(api_env):

@@ -2284,12 +2284,14 @@ async def delete_demo(demo_id: int):
     demo = await demo_db.get_demo_by_id(demo_id)
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
+    from .parser.replay_cache_storage import remove_demo_row_caches
+
+    # Reclaim parse/replay caches for original + working paths before the
+    # demo-cache file is unlinked with the library row.
+    cache_removed = await asyncio.to_thread(remove_demo_row_caches, demo)
     ok = await demo_db.delete_demo(demo_id)
     if not ok:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    from .parser.replay_cache_storage import remove_demo_replay_cache
-
-    cache_removed = await asyncio.to_thread(remove_demo_replay_cache, str(demo["path"]))
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id, "replay_cache": cache_removed}
 
@@ -2400,11 +2402,11 @@ async def delete_demo_file(demo_id: int):
     targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
     if cached_path:
         targets.append(Path(cached_path))
-    from .parser.replay_cache_storage import remove_demo_replay_cache
+    from .parser.replay_cache_storage import remove_demo_row_caches
 
     # Generated replay assets are disposable. Reclaim them while the source
     # Demo still exists so legacy fingerprint-only entries remain attributable.
-    cache_removed = await asyncio.to_thread(remove_demo_replay_cache, disk_path)
+    cache_removed = await asyncio.to_thread(remove_demo_row_caches, demo)
     try:
         quarantined = await asyncio.to_thread(quarantine_files, targets, "demos")
     except OSError as exc:

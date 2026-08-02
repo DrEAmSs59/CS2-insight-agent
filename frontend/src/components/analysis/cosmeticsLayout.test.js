@@ -19,24 +19,29 @@ describe("cosmeticsLayout", () => {
   });
 
   test("isCustomizable allows melee/glove/weapon only", () => {
-    expect(isCustomizable({ type: "weapon" })).toBe(true);
-    expect(isCustomizable({ type: "melee" })).toBe(true);
-    expect(isCustomizable({ type: "glove" })).toBe(true);
-    expect(isCustomizable({ type: "agent" })).toBe(false);
-    expect(isCustomizable({ type: "musickit" })).toBe(false);
-    expect(isCustomizable({ type: "weapon", is_placeholder: true })).toBe(false);
-    expect(isCustomizable({ type: "melee", is_placeholder: true, def_index: 42 })).toBe(false);
+    expect(isCustomizable({ type: "weapon", item_id: 1, def_index: 7 })).toBe(true);
+    expect(isCustomizable({ type: "melee", item_id: 2, def_index: 508 })).toBe(true);
+    expect(isCustomizable({ type: "glove", item_id: 3, def_index: 5027 })).toBe(true);
+    expect(isCustomizable({ type: "agent", item_id: 4 })).toBe(false);
+    expect(isCustomizable({ type: "musickit", item_id: 5 })).toBe(false);
+    expect(isCustomizable({ type: "weapon", is_placeholder: true, def_index: 7 })).toBe(false);
+    expect(isCustomizable({ type: "melee", is_placeholder: true, def_index: 59 })).toBe(true);
+    expect(isCustomizable({ type: "glove", is_placeholder: true, def_index: 5028 })).toBe(true);
+    expect(isCustomizable({ type: "weapon", def_index: 16, paint_index: 0 })).toBe(true);
+    expect(isCustomizable({ type: "weapon", item_id: 0, def_index: 7 })).toBe(true);
+    expect(isCustomizable({ type: "weapon" })).toBe(false);
   });
 
-  test("weaponClassRank orders knife glove rifle sniper pistol smg", () => {
+  test("weaponClassRank orders knife glove sniper rifle smg shotgun mg pistol", () => {
     expect(weaponClassRank({ type: "melee" })).toBe(0);
     expect(weaponClassRank({ type: "glove" })).toBe(1);
-    expect(weaponClassRank({ type: "weapon", model: "ak47" })).toBe(2);
-    expect(weaponClassRank({ type: "weapon", model: "awp" })).toBe(3);
-    expect(weaponClassRank({ type: "weapon", model: "deagle" })).toBe(4);
-    expect(weaponClassRank({ type: "weapon", model: "mac10" })).toBe(5);
-    expect(weaponClassRank({ type: "weapon", model: "nova" })).toBe(6);
-    expect(weaponClassRank({ type: "agent" })).toBe(7);
+    expect(weaponClassRank({ type: "weapon", model: "awp" })).toBe(2);
+    expect(weaponClassRank({ type: "weapon", model: "ak47" })).toBe(3);
+    expect(weaponClassRank({ type: "weapon", model: "mac10" })).toBe(4);
+    expect(weaponClassRank({ type: "weapon", model: "nova" })).toBe(5);
+    expect(weaponClassRank({ type: "weapon", model: "negev" })).toBe(6);
+    expect(weaponClassRank({ type: "weapon", model: "deagle" })).toBe(7);
+    expect(weaponClassRank({ type: "agent" })).toBe(8);
   });
 
   test("hasSkinFinish treats placeholders and paint_index 0 as default", () => {
@@ -46,17 +51,18 @@ describe("cosmeticsLayout", () => {
     expect(hasSkinFinish({ paint_index: 0, type: "melee", name_zh: "爪子刀 | 渐变" })).toBe(true);
   });
 
-  test("itemsForTeam filters observed_teams and sortCosmeticsForRow groups skinned first", () => {
-    const knife = { type: "melee", model: "knife_karambit", observed_teams: ["ct", "t"], item_id: 1, name_zh: "刀", paint_index: 415 };
+  test("itemsForTeam filters observed_teams and sortCosmeticsForRow follows class order", () => {
+    const knife = { type: "melee", model: "knife_karambit", observed_teams: ["ct", "t"], item_id: 1, name_zh: "系绳匕首", paint_index: 0 };
     const ak = { type: "weapon", model: "ak47", observed_teams: ["t"], item_id: 2, name_zh: "AK", paint_index: 282 };
     const awp = { type: "weapon", model: "awp", observed_teams: ["ct"], item_id: 3, name_zh: "AWP", paint_index: 344 };
-    const defaultAk = { type: "weapon", model: "ak47", item_id: 4, name_zh: "AK-47", paint_index: 0, is_placeholder: true };
+    const deagle = { type: "weapon", model: "deagle", observed_teams: ["ct"], item_id: 4, name_zh: "沙鹰", paint_index: 28 };
     expect(itemsForTeam([knife, ak, awp], "ct").map((i) => i.item_id)).toEqual([1, 3]);
     expect(itemsForTeam([knife, ak, awp], "t").map((i) => i.item_id)).toEqual([1, 2]);
-    expect(sortCosmeticsForRow([defaultAk, awp, ak, knife], "zh").map((i) => i.item_id)).toEqual([1, 2, 3, 4]);
+    // Knife stays first even without a painted finish.
+    expect(sortCosmeticsForRow([deagle, awp, ak, knife], "zh").map((i) => i.item_id)).toEqual([1, 3, 2, 4]);
   });
 
-  test("mergeLoadoutWithEvidence overlays demo skins onto defaults and keeps skinned group first", () => {
+  test("mergeLoadoutWithEvidence overlays demo skins onto defaults with class order", () => {
     const defaults = listDefaultLoadout("t");
     expect(defaults.some((row) => row.model === "ak47" && row.is_placeholder)).toBe(true);
     expect(defaults.some((row) => row.model === "knife_t")).toBe(true);
@@ -88,9 +94,48 @@ describe("cosmeticsLayout", () => {
     expect(merged.some((row) => row.model === "knife_t" && row.is_placeholder)).toBe(false);
     expect(merged.some((row) => row.item_id === 100)).toBe(true);
     expect(merged[0].item_id).toBe(100);
-    expect(merged[1].item_id).toBe(99);
-    expect(hasSkinFinish(merged[0])).toBe(true);
-    expect(hasSkinFinish(merged[1])).toBe(true);
-    expect(merged.findIndex((row) => row.is_placeholder)).toBeGreaterThan(1);
+    expect(merged.find((row) => row.item_id === 99)).toBeTruthy();
+    expect(weaponClassRank(merged.find((row) => row.item_id === 100))).toBeLessThan(
+      weaponClassRank(merged.find((row) => row.item_id === 99)),
+    );
+  });
+
+  test("mergeLoadoutWithEvidence skips default weapon placeholders when no evidence", () => {
+    const defaults = listDefaultLoadout("t");
+    const merged = mergeLoadoutWithEvidence(defaults, [], "zh");
+    expect(merged.some((item) => item.type === "weapon")).toBe(false);
+    expect(merged.some((item) => item.type === "melee" && item.is_placeholder)).toBe(true);
+    expect(merged.some((item) => item.type === "glove" && item.is_placeholder)).toBe(true);
+  });
+
+  test("mergeLoadoutWithEvidence keeps evidenced vanilla weapons and replaces knife/gloves", () => {
+    const defaults = listDefaultLoadout("ct");
+    const evidence = [
+      {
+        type: "weapon",
+        def_index: 61,
+        paint_index: 0,
+        model: "usp_silencer",
+        name_zh: "USP 消音器",
+        name_en: "USP-S",
+        item_id: 111,
+        observed_teams: ["ct"],
+      },
+      {
+        type: "melee",
+        def_index: 42,
+        paint_index: 0,
+        model: "knife_ct",
+        name_zh: "默认刀",
+        name_en: "Knife",
+        item_id: 222,
+        observed_teams: ["ct"],
+      },
+    ];
+    const merged = mergeLoadoutWithEvidence(defaults, evidence, "zh");
+    const weapons = merged.filter((item) => item.type === "weapon");
+    expect(weapons).toHaveLength(1);
+    expect(weapons[0].item_id).toBe(111);
+    expect(merged.find((item) => item.type === "melee")?.item_id).toBe(222);
   });
 });
