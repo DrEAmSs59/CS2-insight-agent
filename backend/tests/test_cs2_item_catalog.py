@@ -395,6 +395,49 @@ def test_player_pawn_econ_fields_recover_a_second_glove_even_without_finish_attr
     assert recovered["ownership_evidence"] == "player_pawn_econ_item_id"
 
 
+def test_player_pawn_glove_paint_props_recover_finish_like_demotracer():
+    owner = "76561198000000001"
+    glove_id = 46871901218
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, wanted, *, ticks):
+            assert ticks == [42]
+            assert "glove_paint_id" in wanted
+            assert "glove_paint_seed" in wanted
+            assert "glove_paint_float" in wanted
+            return {
+                "steamid": [owner],
+                "tick": [42],
+                "team_num": [2],
+                "CCSPlayerPawn.m_iItemDefinitionIndex": [5034],
+                "CCSPlayerPawn.m_iItemIDHigh": [glove_id >> 32],
+                "CCSPlayerPawn.m_iItemIDLow": [glove_id & 0xFFFFFFFF],
+                "CCSPlayerPawn.CEconItemAttribute.m_iAttributeDefinitionIndex": [8],
+                "CCSPlayerPawn.CEconItemAttribute.m_flInitialValue": [0.140974],
+                "CCSPlayerPawn.m_szCustomName": [""],
+                "glove_paint_id": [10063],
+                "glove_paint_seed": [893.53857421875],
+                "glove_paint_float": [0.14097395539283752],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+
+    glove = inventory[owner][0]
+    assert glove["type"] == "glove"
+    assert glove["def_index"] == 5034
+    assert glove["paint_index"] == 10063
+    assert glove["name_en"] == "Specialist Gloves | Fade"
+    assert glove["paint_seed"] == 893
+    assert glove["paint_wear"] == 0.140974
+    assert glove["finish_known"] is True
+    assert glove["finish_evidence"] == "glove_paint_props"
+    assert glove["observed_teams"] == ["t"]
+    assert glove["ownership_evidence"] == "player_pawn_econ_item_id"
+
+
 def test_cosmetic_inventory_adds_catalogued_agent_from_controller_evidence():
     owner = "76561198000000001"
 

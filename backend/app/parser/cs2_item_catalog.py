@@ -407,6 +407,11 @@ def _sample_player_context(
         "CCSPlayerPawn.CEconItemAttribute.m_iAttributeDefinitionIndex",
         "CCSPlayerPawn.CEconItemAttribute.m_flInitialValue",
         "CCSPlayerPawn.m_szCustomName",
+        # demoparser synthesizes these from EconGloves attribute cache; the
+        # flattened CEconItemAttribute pair alone often only exposes wear (8).
+        "glove_paint_id",
+        "glove_paint_seed",
+        "glove_paint_float",
     ]
     try:
         rows = _records_from_columns(parse_ticks(wanted, ticks=sorted(set(int(tick) for tick in ticks))))
@@ -541,29 +546,34 @@ def _sample_player_context(
         )
         pawn_def = _safe_int(row.get("CCSPlayerPawn.m_iItemDefinitionIndex"))
         if pawn_item_id is not None and pawn_def is not None:
-            pawn_catalog_item = resolve_cs2_item(pawn_def, 0)
+            glove_paint = _safe_int(row.get("glove_paint_id")) or 0
+            pawn_catalog_item = resolve_cs2_item(pawn_def, glove_paint)
             if pawn_catalog_item and str(pawn_catalog_item.get("type") or "") == "glove":
                 attribute_def = _safe_int(row.get("CCSPlayerPawn.CEconItemAttribute.m_iAttributeDefinitionIndex"))
+                glove_wear = row.get("glove_paint_float")
+                if glove_wear is None and attribute_def == 8:
+                    glove_wear = row.get("CCSPlayerPawn.CEconItemAttribute.m_flInitialValue")
                 glove_entry = _skin_entry({
                     "def_index": pawn_def,
-                    "paint_index": 0,
-                    "paint_seed": None,
-                    "paint_wear": (
-                        row.get("CCSPlayerPawn.CEconItemAttribute.m_flInitialValue")
-                        if attribute_def == 8
-                        else None
-                    ),
+                    "paint_index": glove_paint,
+                    "paint_seed": row.get("glove_paint_seed"),
+                    "paint_wear": glove_wear,
                     "item_id": pawn_item_id,
                     "custom_name": row.get("CCSPlayerPawn.m_szCustomName"),
                 })
                 if glove_entry:
+                    finish_evidence = (
+                        "glove_paint_props"
+                        if glove_paint > 0
+                        else "base_definition_and_wear_only"
+                    )
                     glove_key = (steamid, pawn_item_id)
                     previous_glove = pawn_gloves.get(glove_key)
                     if previous_glove is None:
                         glove_entry.update({
                             "owner_steamid64": steamid,
                             "ownership_evidence": "player_pawn_econ_item_id",
-                            "finish_evidence": "base_definition_and_wear_only",
+                            "finish_evidence": finish_evidence,
                             "observed_teams": [team] if team else [],
                             "stickers": [],
                             "evidence_observations": 0,
@@ -571,13 +581,49 @@ def _sample_player_context(
                         })
                         pawn_gloves[glove_key] = glove_entry
                         previous_glove = glove_entry
-                    elif team:
-                        previous_glove["observed_teams"] = sorted(
-                            set(previous_glove.get("observed_teams") or []) | {team},
-                            key=("t", "ct").index,
-                        )
+                    else:
+                        if team:
+                            previous_glove["observed_teams"] = sorted(
+                                set(previous_glove.get("observed_teams") or []) | {team},
+                                key=("t", "ct").index,
+                            )
+                        # Upgrade vanilla/base pawn rows once demoparser exposes paint.
+                        if (
+                            int(glove_entry.get("paint_index") or 0) > 0
+                            and int(previous_glove.get("paint_index") or 0) == 0
+                        ):
+                            for field in (
+                                "catalog_id",
+                                "base_catalog_id",
+                                "paint_index",
+                                "name_en",
+                                "name_zh",
+                                "alt_name",
+                                "image_url",
+                                "rarity",
+                                "category",
+                                "collection_image_url",
+                                "collection_name_en",
+                                "collection_name_zh",
+                                "desc_en",
+                                "desc_zh",
+                                "wear_min",
+                                "wear_max",
+                                "catalog_exact",
+                                "finish_known",
+                            ):
+                                if field in glove_entry:
+                                    previous_glove[field] = glove_entry[field]
+                            if glove_entry.get("paint_seed") is not None:
+                                previous_glove["paint_seed"] = glove_entry["paint_seed"]
+                            previous_glove["finish_evidence"] = finish_evidence
                     if glove_entry.get("paint_wear") is not None:
                         previous_glove["paint_wear"] = glove_entry["paint_wear"]
+                    if (
+                        glove_entry.get("paint_seed") is not None
+                        and previous_glove.get("paint_seed") is None
+                    ):
+                        previous_glove["paint_seed"] = glove_entry["paint_seed"]
                     if tick is not None:
                         previous_glove.setdefault("_observation_ticks", set()).add(tick)
 
