@@ -36,9 +36,12 @@ describe("CustomTitleBar", () => {
     expect(screen.queryByText(/上手指南|Getting Started|Demo 分析|Analysis/)).toBeNull();
   });
 
-  test("floats the window controls without reserving content height or showing a version", () => {
+  test("reserves layout height in the shell instead of floating over page content", () => {
     renderTitleBar();
     expect(screen.queryByTestId("titlebar-version")).toBeNull();
-    expect(screen.getByTestId("custom-titlebar").className).toContain("absolute");
+    const titlebar = screen.getByTestId("custom-titlebar");
+    expect(titlebar.className).toContain("relative");
+    expect(titlebar.className).toContain("shrink-0");
+    expect(titlebar.className).not.toContain("absolute");
   });
 });

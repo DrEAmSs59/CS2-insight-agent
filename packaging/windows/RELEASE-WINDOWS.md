@@ -36,6 +36,20 @@ pnpm.cmd run desktop:build:ver -- 2.4.0
 
 Windows 端更新流程：下载校验签名 → 应用自动退出 → NSIS 以 passive 模式安装（安装 hook 会等待后端进程退出）→ 自动重启。Authenticode 证书签名（`WINDOWS_PFX_*`）与更新签名互相独立，两者都建议配置。
 
+## 指定版本本地打包（含 skin-core）
+
+若本机把私有仓库 `CS2-demo-anyskin` 放在与 Insight **同级**目录，可用一键脚本做两轮打包：先产出 Agent PE 供 allowlist，再编译/注入 `skin-core.exe`，最后打出带 sidecar 的 NSIS 安装包（**不**把 anyskin 源码打进本仓库）。
+
+```powershell
+# 仓库根目录
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build_desktop_with_skin_core.ps1 -Version 2.4.0
+
+# 或
+.\packaging\windows\build_desktop_with_skin_core.bat 2.4.0
+```
+
+常用参数：`-SkipPack`（跳过 UPX）、`-ReuseExistingAgent`（复用已有 `target\release` Agent）、`-AnyskinRoot <path>`、`-UpxPath <upx.exe>`。详见脚本头注释。
+
 ## 指定版本本地打包
 
 正式包使用版本覆盖入口，不需要手工修改 `package.json`、`Cargo.toml` 和 `tauri.conf.json`：
@@ -133,6 +147,6 @@ CI 预算：嵌入 resources 不超过 `160 MiB`，NSIS 安装包不超过 `70 M
 
 ## skin-core.exe（闭源 sidecar）
 
-`skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时注入。`desktop:stage-resources` 在设置了 `CS2_SKIN_CORE_EXE`，或存在 `../CS2-demo-anyskin/dist/skin-core.exe`（等 well-known 路径）时，会复制到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；缺失时跳过，OSS CI 不失败。正式发布前请把本版主程序 PE SHA-256 写入 skin-core 的父进程 allowlist。
+`skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时注入。`desktop:stage-resources` 在设置了 `CS2_SKIN_CORE_EXE`，或存在 `../CS2-demo-anyskin/dist/skin-core.exe`（等 well-known 路径）时，会复制到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；缺失时跳过，OSS CI 不失败。正式发布前请把本版主程序（及建议包含的 bundled `python.exe`）PE SHA-256 写入 skin-core 的父进程 allowlist，并用 anyskin `release-skin-core.ps1 -ParentPe ... -Pack` 产出 **release-ship + UPX** 的 `dist/skin-core.exe` 再注入（免费加固/加壳；非商业壳替代品）。
 
 `bootstrap-staging.ps1`、`package_portable.ps1` 与 `CS2InsightAgent.iss` 仍保留为 legacy/manual 工具；Tauri 正式发布仅复用 `package_portable.ps1` 的 Python staging 能力。

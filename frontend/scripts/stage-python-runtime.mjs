@@ -44,11 +44,19 @@ if (!existsSync(portablePs1)) {
 
 if (existsSync(pythonExe) && process.env.CS2_INSIGHT_REFRESH_PYTHON !== "1") {
   const backendDir = join(repoRoot, "backend");
+  // demoparser gate + skin-core IPC deps (cryptography). Stale python/ after
+  // pyproject bumps otherwise ships and crashes at backend import.
   const verification = spawnSync(
     pythonExe,
     [
       "-c",
-      "import sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import main; raise SystemExit(main())",
+      [
+        "import sys",
+        "sys.path.insert(0, sys.argv[1])",
+        "import cryptography  # noqa: F401 — skin_core_crypto / cosmetics_skin",
+        "from app.demoparser_runtime import main",
+        "raise SystemExit(main())",
+      ].join("; "),
       backendDir,
     ],
     { cwd: repoRoot, env: process.env, stdio: "inherit", shell: false },

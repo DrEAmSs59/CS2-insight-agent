@@ -7,14 +7,12 @@ export function waveformUrlForMediaStream(sourceUrl, { bars = 72, startSec = 0, 
   const source = String(sourceUrl || "");
   const queryIndex = source.indexOf("?");
   const path = queryIndex >= 0 ? source.slice(0, queryIndex) : source;
-  const sourceParams = new URLSearchParams(queryIndex >= 0 ? source.slice(queryIndex + 1) : "");
   if (!/\/api\/(?:lite-cut\/assets|recorded-clips)\/[^/]+\/stream$/.test(path)) return null;
   const params = new URLSearchParams({
     buckets: String(Math.max(8, Math.min(512, Math.round(Number(bars) || 72)))),
     start_sec: String(Math.max(0, Number(startSec) || 0)),
   });
   if (Number.isFinite(Number(endSec)) && Number(endSec) > Number(startSec)) params.set("end_sec", String(Number(endSec)));
-  if (sourceParams.has("_session")) params.set("_session", sourceParams.get("_session"));
   return `${path.replace(/\/stream$/, "/waveform")}?${params.toString()}`;
 }
 

@@ -26,12 +26,14 @@ export default function CustomTitleBar() {
 
   return (
     <header
-      className="app-topbar pointer-events-none absolute right-0 top-0 z-[100] flex items-center text-cs2-text-primary"
+      className="app-topbar relative z-[90] flex w-full shrink-0 items-center border-b border-cs2-border-subtle bg-cs2-bg-page text-cs2-text-primary"
       data-tauri-drag-region
       data-testid="custom-titlebar"
     >
+      <div className="h-full min-w-0 flex-1" data-tauri-drag-region />
+
       {isDesktopApp ? (
-        <div className="pointer-events-auto flex h-full shrink-0 overflow-hidden rounded-bl-lg border-b border-l border-cs2-border-subtle bg-cs2-bg-page/92 shadow-[var(--cs2-shadow-sm)] backdrop-blur-md">
+        <div className="flex h-full shrink-0 border-l border-cs2-border-subtle">
           <button
             type="button"
             aria-label={t("nav.minimize")}

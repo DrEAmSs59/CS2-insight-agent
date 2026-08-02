@@ -27,30 +27,23 @@ describe("desktop backend asset URLs", () => {
     expect(getDemoUtilityMaskUrl("de_mirage")).toBe("http://127.0.0.1:19871/api/demo/utility-mask/de_mirage");
   });
 
-  test("adds the ephemeral desktop token to browser-owned resource URLs", async () => {
+  test("does not attach a desktop session credential to asset URLs", async () => {
     window.__TAURI_INTERNALS__ = {};
     vi.resetModules();
-    const {
-      getDemoRadarMapUrl,
-      getLiteCutAssetStreamUrl,
-      setDesktopSessionToken,
-    } = await import("./api.js");
-
-    setDesktopSessionToken("session-123");
+    const { getDemoRadarMapUrl, getLiteCutAssetStreamUrl } = await import("./api.js");
 
     expect(getDemoRadarMapUrl("de_nuke", "lower")).toBe(
-      "http://127.0.0.1:19871/api/demo/radar-map/de_nuke?layer=lower&_session=session-123",
+      "http://127.0.0.1:19871/api/demo/radar-map/de_nuke?layer=lower",
     );
     expect(getLiteCutAssetStreamUrl(7, "ready")).toBe(
-      "http://127.0.0.1:19871/api/lite-cut/assets/7/stream?preview=ready&_session=session-123",
+      "http://127.0.0.1:19871/api/lite-cut/assets/7/stream?preview=ready",
     );
   });
 
-  test("adds the ephemeral desktop token to axios headers", async () => {
+  test("does not attach a desktop session credential to axios headers", async () => {
     window.__TAURI_INTERNALS__ = {};
     vi.resetModules();
-    const { default: API, setDesktopSessionToken } = await import("./api.js");
-    setDesktopSessionToken("session-123");
+    const { default: API } = await import("./api.js");
     let requestConfig;
 
     await API.get("/config", {
@@ -67,6 +60,6 @@ describe("desktop backend asset URLs", () => {
       },
     });
 
-    expect(requestConfig.headers.get("X-CS2-Insight-Token")).toBe("session-123");
+    expect(requestConfig.headers.get("X-CS2-Insight-Token")).toBeFalsy();
   });
 });
