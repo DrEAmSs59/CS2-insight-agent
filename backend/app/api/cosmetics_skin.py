@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from ..cosmetics_skin_plan import (
     CosmeticsSkinPlanError,
     build_batch_and_plan,
+    build_batch_from_plan_json,
     filter_plan_by_succeeded_item_ids,
     map_item_statuses,
 )
@@ -85,6 +86,34 @@ def _skin_core_failure_message(skin_result: Any) -> str:
     return text
 
 
+def _run_one_owned_batch(
+    *,
+    input_dem: Path,
+    output_dem: Path,
+    steam_id64: str,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Invoke skin-core once; raise SkinCore* / Exception for the caller to map."""
+    skin_result = run_rewrite_owned_batch(
+        input_dem=str(input_dem),
+        output_dem=str(output_dem),
+        steam_id64=steam_id64,
+        items=items,
+        demoparser2_python=sys.executable,
+    )
+    if not isinstance(skin_result, dict):
+        raise SkinCoreError("skin-core rewrite failed")
+    return skin_result
+
+
+def _map_skin_core_call_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SkinCoreNotFound):
+        return HTTPException(503, str(exc))
+    if isinstance(exc, SkinCoreError):
+        return HTTPException(502, str(exc))
+    return HTTPException(502, f"skin-core failed: {exc}")
+
+
 @router.get("/api/demos/{demo_id}/cosmetics/custom-plan")
 async def get_custom_skin_plan(
     demo_id: int,
@@ -107,6 +136,11 @@ async def get_custom_skin_plan(
 @router.post("/api/demos/{demo_id}/cosmetics/custom-plan")
 async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     """Rewrite the demo working cache for one player and upsert the display plan.
+
+    Always rebuilds from the library original so prior cache pollution cannot
+    compound. Re-applies every other stored plan for this demo first, then the
+    current player's batch — otherwise a second player's save would wipe the
+    first player's demo edits.
 
     Never mutates the library original ``path``. Does not re-analyze.
     """
@@ -137,8 +171,31 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     except CosmeticsSkinPlanError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    # Other players' persisted plans must be re-applied onto the original before
+    # this player's pass; skin-core accepts one steamid per call.
+    prior_passes: list[tuple[str, list[dict[str, Any]]]] = []
+    stored_plans = await demo_db.list_custom_skin_plans_for_demo(original_path)
+    for stored in stored_plans:
+        other_steamid = str(stored.get("steamid") or "").strip()
+        if not other_steamid or other_steamid == steamid:
+            continue
+        other_plan = stored.get("plan_json")
+        if not isinstance(other_plan, dict):
+            continue
+        other_inventory = _inventory_for_steamid(result, other_steamid)
+        try:
+            other_batch = build_batch_from_plan_json(other_plan, other_inventory)
+        except CosmeticsSkinPlanError as exc:
+            raise HTTPException(
+                400,
+                f"cannot re-apply stored plan for {other_steamid}: {exc}",
+            ) from exc
+        if other_batch:
+            prior_passes.append((other_steamid, other_batch))
+
     original = Path(original_path)
     temp_in: Path | None = None
+    intermediate_temps: list[Path] = []
     temp_out = _temp_output_path(cached_path)
     replaced = False
     try:
@@ -153,24 +210,45 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
 
         await asyncio.to_thread(ensure_demo_compatible, temp_in)
 
+        current_input = temp_in
+        for other_steamid, other_batch in prior_passes:
+            prior_out = _temp_output_path(cached_path)
+            intermediate_temps.append(prior_out)
+            try:
+                prior_result = await asyncio.to_thread(
+                    _run_one_owned_batch,
+                    input_dem=current_input,
+                    output_dem=prior_out,
+                    steam_id64=other_steamid,
+                    items=other_batch,
+                )
+            except (SkinCoreNotFound, SkinCoreError, Exception) as exc:
+                raise _map_skin_core_call_error(exc) from exc
+            if prior_result.get("ok") is not True:
+                raise HTTPException(
+                    502,
+                    f"re-apply plan for {other_steamid} failed: "
+                    f"{_skin_core_failure_message(prior_result)}",
+                )
+            if not prior_out.is_file():
+                raise HTTPException(
+                    502,
+                    f"re-apply plan for {other_steamid} produced no output demo",
+                )
+            if current_input is not temp_in:
+                _cleanup_temp(current_input)
+            current_input = prior_out
+
         try:
             skin_result = await asyncio.to_thread(
-                run_rewrite_owned_batch,
-                input_dem=str(temp_in),
-                output_dem=str(temp_out),
+                _run_one_owned_batch,
+                input_dem=current_input,
+                output_dem=temp_out,
                 steam_id64=steamid,
                 items=batch_items,
-                demoparser2_python=sys.executable,
             )
-        except SkinCoreNotFound as exc:
-            raise HTTPException(503, str(exc)) from exc
-        except SkinCoreError as exc:
-            raise HTTPException(502, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 - surface unexpected launcher failures
-            raise HTTPException(502, f"skin-core failed: {exc}") from exc
-
-        if not isinstance(skin_result, dict):
-            raise HTTPException(502, "skin-core rewrite failed")
+        except (SkinCoreNotFound, SkinCoreError, Exception) as exc:
+            raise _map_skin_core_call_error(exc) from exc
 
         succeeded_raw = skin_result.get("succeeded")
         failed_raw = skin_result.get("failed")
@@ -269,5 +347,7 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     finally:
         if temp_in is not None:
             _cleanup_temp(temp_in)
+        for path in intermediate_temps:
+            _cleanup_temp(path)
         if not replaced:
             _cleanup_temp(temp_out)

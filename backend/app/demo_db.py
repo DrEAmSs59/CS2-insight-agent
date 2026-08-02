@@ -1841,6 +1841,33 @@ class DemoDB:
         item["plan_json"] = json.loads(str(item["plan_json"]))
         return item
 
+    async def list_custom_skin_plans_for_demo(
+        self,
+        demo_path: str,
+    ) -> list[dict[str, Any]]:
+        """Return all custom plans for ``demo_path`` (``plan_json`` decoded).
+
+        Ordered by ``steamid`` for stable multi-player rewrite chains.
+        """
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT demo_path, steamid, plan_json, output_sha256, updated_at
+                FROM demo_custom_skin_plans
+                WHERE demo_path = ?
+                ORDER BY steamid ASC
+                """,
+                (str(demo_path),),
+            )
+            rows = await cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["plan_json"] = json.loads(str(item["plan_json"]))
+            out.append(item)
+        return out
+
     async def delete_custom_skin_plans_for_demo(self, demo_path: str) -> int:
         """Delete all custom skin plans for ``demo_path``. Returns rows removed."""
         async with aiosqlite.connect(self.db_path) as conn:
