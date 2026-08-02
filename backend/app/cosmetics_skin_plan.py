@@ -281,6 +281,47 @@ def build_batch_and_plan(
     return batch_items, plan_json
 
 
+def build_batch_from_plan_json(
+    plan_json: dict[str, Any] | None,
+    inventory_rows: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Rebuild skin-core batch items from a persisted display plan.
+
+    Used when re-applying other players' plans onto a fresh original so a
+    later player's save does not wipe earlier rewrites.
+    """
+    if not isinstance(plan_json, dict):
+        raise CosmeticsSkinPlanError("stored plan is invalid")
+    steamid = str(plan_json.get("steamid") or "").strip()
+    items = plan_json.get("items")
+    if not steamid:
+        raise CosmeticsSkinPlanError("stored plan missing steamid")
+    if not isinstance(items, list) or not items:
+        raise CosmeticsSkinPlanError("stored plan has no items")
+
+    replacements: dict[str, Any] = {}
+    originals: dict[str, Any] = {}
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("slot_key") or "").strip()
+        repl = entry.get("replacement")
+        if not key or not isinstance(repl, dict):
+            continue
+        replacements[key] = repl
+        original = entry.get("original")
+        if isinstance(original, dict):
+            originals[key] = original
+
+    batch_items, _ = build_batch_and_plan(
+        steamid,
+        inventory_rows,
+        replacements,
+        originals=originals or None,
+    )
+    return batch_items
+
+
 def filter_plan_by_succeeded_item_ids(
     plan_json: dict[str, Any],
     succeeded_item_ids: set[str] | None = None,

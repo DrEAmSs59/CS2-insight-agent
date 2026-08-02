@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.cosmetics_skin_plan import CosmeticsSkinPlanError, build_batch_and_plan, slot_key
+from app.cosmetics_skin_plan import (
+    CosmeticsSkinPlanError,
+    build_batch_and_plan,
+    build_batch_from_plan_json,
+    slot_key,
+)
 
 STEAM_ID = "76561198000000001"
 
@@ -125,6 +130,12 @@ def test_build_batch_and_plan_maps_weapon_fields_without_custom_name_or_stickers
     assert entry["replacement"]["paint_index"] == 340
     assert entry["replacement"]["name_zh"] == "AK-47 | 红线"
     assert entry["replacement"]["image_url"] == repl["image_url"]
+    assert build_batch_from_plan_json(plan, inv) == batch_items
+
+
+def test_build_batch_from_plan_json_requires_items():
+    with pytest.raises(CosmeticsSkinPlanError, match="no items"):
+        build_batch_from_plan_json({"steamid": STEAM_ID, "items": []}, [])
 
 
 def test_build_batch_sets_replacement_definition_index_for_cross_model_melee():

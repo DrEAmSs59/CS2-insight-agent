@@ -480,6 +480,102 @@ def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatc
     assert cached.read_bytes() == prior
 
 
+def test_post_second_player_reapplies_first_player_plan(api_env, monkeypatch):
+    """Saving player B must chain-rewrite from original through player A's plan."""
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    original: Path = api_env["original"]
+    db = api_env["db"]
+    steam_a = STEAM_ID
+    steam_b = "76561198000000002"
+    original_bytes = original.read_bytes()
+
+    asyncio.run(
+        db.save_result(
+            str(original),
+            {
+                "analysis_workspace": {
+                    "cosmetics": {
+                        "players": {
+                            steam_a: [_inventory_row(item_id=10)],
+                            steam_b: [_inventory_row(item_id=20, catalog_id=3002)],
+                        }
+                    }
+                }
+            },
+        )
+    )
+    asyncio.run(
+        db.upsert_custom_skin_plan(
+            str(original),
+            steam_a,
+            {
+                "steamid": steam_a,
+                "items": [
+                    {
+                        "slot_key": "id:10",
+                        "original": _inventory_row(item_id=10),
+                        "replacement": _replacement(paint_index=340),
+                    }
+                ],
+            },
+            output_sha256="aaa",
+        )
+    )
+
+    calls: list[dict] = []
+
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+        payload = Path(input_dem).read_bytes()
+        calls.append(
+            {
+                "steam_id64": steam_id64,
+                "input_bytes": payload,
+                "item_id64": items[0]["item_id64"],
+                "paint_kit": items[0]["paint_kit"],
+            }
+        )
+        if steam_id64 == steam_a:
+            assert payload == original_bytes
+            Path(output_dem).write_bytes(b"AFTER-A")
+        else:
+            assert payload == b"AFTER-A"
+            Path(output_dem).write_bytes(b"AFTER-A-THEN-B")
+        return {"ok": True, "sha256": f"sha-{steam_id64[-1]}", "items_rewritten": 1}
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": steam_b,
+            "replacements": {"id:20": _replacement(paint_index=455)},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["plan"]["steamid"] == steam_b
+    assert len(calls) == 2
+    assert calls[0]["steam_id64"] == steam_a
+    assert calls[0]["item_id64"] == "10"
+    assert calls[0]["paint_kit"] == 340
+    assert calls[1]["steam_id64"] == steam_b
+    assert calls[1]["item_id64"] == "20"
+    assert calls[1]["paint_kit"] == 455
+    assert cached.read_bytes() == b"AFTER-A-THEN-B"
+    assert original.read_bytes() == original_bytes
+    # Player A's plan must remain stored.
+    stored_a = asyncio.run(db.get_custom_skin_plan(str(original), steam_a))
+    assert stored_a is not None
+    assert stored_a["plan_json"]["items"][0]["slot_key"] == "id:10"
+    stored_b = asyncio.run(db.get_custom_skin_plan(str(original), steam_b))
+    assert stored_b is not None
+    assert stored_b["plan_json"]["items"][0]["slot_key"] == "id:20"
+
+
 def test_post_unknown_demo_returns_404(api_env):
     response = api_env["client"].post(
         "/api/demos/999999/cosmetics/custom-plan",

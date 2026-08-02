@@ -100,6 +100,21 @@ def test_get_custom_skin_plan_returns_none_when_missing(tmp_path: Path):
     _run(scenario())
 
 
+def test_list_custom_skin_plans_for_demo_orders_by_steamid(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "skin_plans.sqlite3")
+        await db.init_db()
+        await db.upsert_custom_skin_plan("/demos/a.dem", "222", {"steamid": "222", "items": []})
+        await db.upsert_custom_skin_plan("/demos/a.dem", "111", {"steamid": "111", "items": [1]})
+        await db.upsert_custom_skin_plan("/demos/b.dem", "111", {"steamid": "111", "items": [9]})
+        rows = await db.list_custom_skin_plans_for_demo("/demos/a.dem")
+        assert [r["steamid"] for r in rows] == ["111", "222"]
+        assert rows[0]["plan_json"]["items"] == [1]
+        assert await db.list_custom_skin_plans_for_demo("/demos/missing.dem") == []
+
+    _run(scenario())
+
+
 def test_delete_custom_skin_plans_for_demo_removes_all_steamids(tmp_path: Path):
     async def scenario():
         db = DemoDB(tmp_path / "skin_plans.sqlite3")
