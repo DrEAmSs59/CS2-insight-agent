@@ -41,7 +41,7 @@ export function MontagePlayerAssetsPanel({
       const { path, url } = res?.data ?? {};
       if (path) {
         const fullUrl = url
-          ? withDesktopSessionToken(API_BASE_URL ? `${API_BASE_URL}${url}` : url)
+          ? (API_BASE_URL ? `${API_BASE_URL}${url}` : url)
           : null;
         onPlayerAvatarChange?.(playerKey, path, fullUrl);
       }

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------------------------
+# Copyright (c) unicbm. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+# ---------------------------------------------------------------------------------------------
+
 """Managed on-disk storage for Demo 2D replay assets.
 
 New cache writes live under one application-data subtree so they can be
@@ -9,6 +14,7 @@ migrate away from them.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -176,6 +182,43 @@ def remove_demo_replay_cache(demo_path: str) -> dict[str, Any]:
             continue
         removed_files += int(result.get("removed_files") or 0)
         removed_bytes += int(result.get("removed_bytes") or 0)
+    return {
+        "removed_files": removed_files,
+        "removed_bytes": removed_bytes,
+        "errors": errors,
+    }
+
+
+def _normalized_demo_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def remove_demo_row_caches(demo: dict[str, Any] | None) -> dict[str, Any]:
+    """Remove parse/replay caches for a library row's original and working paths.
+
+    Analysis uses ``cached_path`` when present, so cleanup must cover both
+    ``path`` and ``cached_path`` before the working copy is unlinked.
+    """
+    removed_files = 0
+    removed_bytes = 0
+    errors: list[str] = []
+    seen: set[str] = set()
+    row = demo if isinstance(demo, dict) else {}
+    for key in ("path", "cached_path"):
+        raw = str(row.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            normalized = _normalized_demo_path(raw)
+        except OSError:
+            normalized = raw.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result = remove_demo_replay_cache(raw)
+        removed_files += int(result.get("removed_files") or 0)
+        removed_bytes += int(result.get("removed_bytes") or 0)
+        errors.extend(list(result.get("errors") or []))
     return {
         "removed_files": removed_files,
         "removed_bytes": removed_bytes,

@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Sequence
+
+from .ffmpeg_process import command_for_log, decoded_completed_process, process_error_tail
+from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
 
 from .ffmpeg_process import command_for_log, decoded_completed_process, process_error_tail
 
@@ -15,12 +18,11 @@ MontageEncoderTier = Literal["quality", "fast"]
 
 
 def _composer_err(msg: str) -> None:
-    from .video_composer import MontageComposerError
-
     raise MontageComposerError(msg)
 
 _VALID_USER_MODES = frozenset({"auto", "libx264", "h264_nvenc", "h264_qsv", "h264_amf"})
 _HW_ORDER = ("h264_nvenc", "h264_qsv", "h264_amf")
+HARDWARE_H264_CODECS = frozenset(_HW_ORDER)
 
 _encoder_check_cache: dict[str, frozenset[str]] = {}
 # FFmpeg 常把 NVENC/QSV/AMF 编进列表，但无对应硬件时打开编码器会失败；auto 需实测。
@@ -166,6 +168,76 @@ def _ffmpeg_version_line(ffmpeg_bin: Path) -> str:
         line = ""
     _ffmpeg_version_cache[key] = line or "unknown"
     return _ffmpeg_version_cache[key]
+
+
+def available_h264_encoders(ffmpeg_bin: Path) -> frozenset[str]:
+    """Return H.264 encoders compiled into the selected FFmpeg binary."""
+
+    return frozenset(
+        name
+        for name in _ffmpeg_encoder_names(ffmpeg_bin)
+        if name in {*HARDWARE_H264_CODECS, "libx264"}
+    )
+
+
+def ffmpeg_encoder_identity(ffmpeg_bin: Path) -> str:
+    """Stable process-local identity used by target-specific probe caches."""
+
+    return f"{ffmpeg_bin.resolve()}|{_ffmpeg_version_line(ffmpeg_bin)}"
+
+
+def apply_encoder_device_args(
+    encode_args: Sequence[str],
+    device_args: Sequence[str] | None,
+) -> list[str]:
+    """Attach encoder-private device options after ``-c:v <codec>``."""
+
+    result = [str(item) for item in encode_args]
+    extra = [str(item) for item in (device_args or ())]
+    if not extra:
+        return result
+    try:
+        codec_flag = result.index("-c:v")
+    except ValueError:
+        return [*result, *extra]
+    insert_at = min(len(result), codec_flag + 2)
+    return [*result[:insert_at], *extra, *result[insert_at:]]
+
+
+def hardware_codec_from_command(command: Sequence[str]) -> str | None:
+    """Return the hardware H.264 encoder explicitly present in a command."""
+
+    for item in command:
+        value = str(item).strip().lower()
+        if value in HARDWARE_H264_CODECS:
+            return value
+    return None
+
+
+def raise_hardware_encoder_failure(
+    command: Sequence[str],
+    result: Any,
+    *,
+    stage: str,
+    artifact_path: str | Path | None,
+    public_code: str,
+    public_params: dict[str, Any] | None = None,
+) -> None:
+    """Raise only when a failed FFmpeg command explicitly used hardware H.264."""
+
+    codec = hardware_codec_from_command(command)
+    if codec is None:
+        return
+    raise HardwareEncoderFailure(
+        codec=codec,
+        stage=stage,
+        returncode=int(getattr(result, "returncode", -1)),
+        stderr=process_error_tail(result),
+        artifact_path=artifact_path,
+        public_code=public_code,
+        public_params=public_params,
+        command=command,
+    )
 
 
 def _selected_codec(ffmpeg_bin: Path, requested: str, selected: str) -> str:
@@ -366,9 +438,27 @@ def h264_encode_cli_args(codec: str, tier: MontageEncoderTier) -> list[str]:
 
 def diagnose_encoders(ffmpeg_bin: Path) -> dict:
     """返回各 H.264 编码器的可用状态，供设置页展示。"""
+    from .encoder_planner import (
+        build_encoder_candidates,
+        enumerate_windows_gpus,
+        map_nvenc_device_indices,
+    )
+
     avail = _ffmpeg_encoder_names(ffmpeg_bin)
+    adapters = enumerate_windows_gpus()
+    if "h264_nvenc" in avail:
+        adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
+    auto_candidates = build_encoder_candidates(
+        "auto",
+        adapters,
+        available_encoders=avail,
+    )
+    auto_hardware_codec = next(
+        (candidate.codec for candidate in auto_candidates if candidate.is_hardware),
+        None,
+    )
     hw_results = []
-    selected = None
+    hardware_probe_ok: dict[str, bool] = {}
 
     for name in _HW_ORDER:
         in_list = name in avail
@@ -390,15 +480,32 @@ def diagnose_encoders(ffmpeg_bin: Path) -> dict:
             "probe_ok": probe_ok,
             "error": probe_err,
         })
-        if selected is None and in_list and probe_ok:
-            selected = name
+        hardware_probe_ok[name] = probe_ok
 
     x264_ok = "libx264" in avail
-    if selected is None and x264_ok:
-        selected = "libx264"
+    selected = (
+        auto_hardware_codec
+        if auto_hardware_codec and hardware_probe_ok.get(auto_hardware_codec)
+        else "libx264" if x264_ok else None
+    )
+    primary_candidate = auto_candidates[0] if auto_candidates else None
+    preferred_adapter = (
+        primary_candidate.adapter
+        if primary_candidate is not None and primary_candidate.is_hardware
+        else None
+    )
 
     return {
         "selected": selected or "none",
         "hw": hw_results,
         "libx264_available": x264_ok,
+        "primary_gpu": (
+            {
+                "name": preferred_adapter.name,
+                "vendor": preferred_adapter.vendor,
+                "kind": preferred_adapter.kind,
+            }
+            if preferred_adapter is not None
+            else None
+        ),
     }

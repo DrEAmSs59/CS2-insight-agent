@@ -147,7 +147,7 @@ export default function ObsAiEntryPreviewPage() {
           </PreviewSection>
 
           <PreviewSection title="FFmpeg 编码" hint="合辑导出使用的硬件编码器；不由 OBS Agent 修改。">
-            <PreviewField label="合辑编码器" value="自动（NVENC → QSV → AMF → x264）" />
+            <PreviewField label="合辑编码器" value="自动（主显卡硬编 → x264 保底）" />
           </PreviewSection>
 
           <div className="flex items-center gap-3 px-1">

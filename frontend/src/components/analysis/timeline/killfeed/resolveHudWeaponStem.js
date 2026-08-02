@@ -1,3 +1,5 @@
+import { cs2BaseItemForModel, resolveCs2WeaponModel } from "../../../../utils/cs2ItemCatalog.js";
+
 /**
  * 将解析器武器 id / 展示名映射为 hud.hlae.site（One Studio CSGO HUD Generator）打包的 SVG 文件名。
  * 资源在 `public/hud-death-notice/`。
@@ -25,28 +27,6 @@ const STEM_ALIASES = {
  * Keep these aliases exact so a player's equipped skin never turns into a
  * blank current-weapon slot.
  */
-const DISPLAY_NAME_ALIASES = {
-  bayonet: "bayonet",
-  bowie_knife: "knife_bowie",
-  butterfly_knife: "knife_butterfly",
-  classic_knife: "knife_css",
-  falchion_knife: "knife_falchion",
-  flip_knife: "knife_flip",
-  gut_knife: "knife_gut",
-  huntsman_knife: "knife_tactical",
-  karambit: "knife_karambit",
-  m9_bayonet: "knife_m9_bayonet",
-  navaja_knife: "knife_gypsy_jackknife",
-  nomad_knife: "knife_outdoor",
-  paracord_knife: "knife_cord",
-  shadow_daggers: "knife_push",
-  skeleton_knife: "knife_skeleton",
-  stiletto_knife: "knife_stiletto",
-  survival_knife: "knife_canis",
-  talon_knife: "knife_widowmaker",
-  ursus_knife: "knife_ursus",
-};
-
 /**
  * 与 `public/hud-death-notice/*.svg` 对应、且会出现在击杀上的武器 / 刀 / 雷 / C4。
  * 按长度降序排列（子串匹配时先匹配长的，避免 m4a1 吃掉 m4a1_silencer）。
@@ -149,17 +129,10 @@ export function resolveHudWeaponStem(rawKey, rawName, options = {}) {
   if (!hay) return fallback;
 
   if (STEM_ALIASES[hay]) return STEM_ALIASES[hay];
-  for (const [displayName, stem] of Object.entries(DISPLAY_NAME_ALIASES).sort(
-    ([left], [right]) => right.length - left.length,
-  )) {
-    if (
-      hay === displayName
-      || hay.startsWith(`${displayName}_`)
-      || hay.endsWith(`_${displayName}`)
-      || hay.includes(`_${displayName}_`)
-    ) {
-      return stem;
-    }
+  const model = resolveCs2WeaponModel(rawKey, rawName);
+  if (model) {
+    const catalogStem = cs2BaseItemForModel(model)?.hud_stem;
+    if (catalogStem) return catalogStem;
   }
 
   // Compact form so "AK-47" / "ak_47" still match stem "ak47".

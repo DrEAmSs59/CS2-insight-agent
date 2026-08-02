@@ -329,6 +329,57 @@ export function resolveAudioPreviewItems(body, timelineSec, masterVolume = 1) {
   return out;
 }
 
+/**
+ * Keep media for clips about to start mounted before the timeline reaches the
+ * cut.  The actual preview item reuses this DOM node at the boundary, which
+ * avoids an audio decoder/network startup in the audible frame.
+ */
+export function resolveAudioPreviewPreloadItems(body, timelineSec, masterVolume = 1, leadSec = 1.5) {
+  const now = Math.max(0, Number(timelineSec) || 0);
+  const horizon = now + Math.max(0, Number(leadSec) || 0);
+  const out = [];
+  const soloActive = hasSoloAudioTracks(body);
+  const pushUpcoming = (clip, trackId, trackVolume = 1) => {
+    const start = Math.max(0, Number(clip?.timeline_start) || 0);
+    if (start <= now + 1e-4 || start > horizon + 1e-4) return;
+    // Use the timeline-facing first frame, including trimmed or reversed clips.
+    const hit = hitClipAtTime(clip, start);
+    if (!hit) return;
+    const audio = previewAudioState({
+      clip,
+      masterVolume,
+      trackVolume,
+      localTime: 0,
+      visibleDuration: clipSourceDuration(clip),
+    });
+    out.push({
+      id: clip.id,
+      trackId,
+      clip,
+      sourceTime: hit.sourceTime,
+      localTime: 0,
+      playbackRate: clipSpeedAtTimeline(clip, 0),
+      reversePlayback: clipReversePlayback(clip),
+      muted: audio.muted,
+      volume: audio.volume,
+      preloadOnly: true,
+    });
+  };
+  for (const track of audioTracks(body)) {
+    if (track.hidden || track.muted || (soloActive && !track.solo)) continue;
+    for (const clip of sortClips(track.clips)) pushUpcoming(clip, track.id, track.volume);
+  }
+  if (!soloActive) {
+    for (const track of videoTracks(body)) {
+      if (track.hidden || track.muted) continue;
+      for (const clip of sortClips(track.clips)) pushUpcoming(clip, track.id, track.volume);
+    }
+    const bgmClip = projectBgmPreviewClip(body);
+    if (bgmClip) pushUpcoming(bgmClip, "bgm");
+  }
+  return out;
+}
+
 export function overlayBlocks(body, totalSec) {
   return (body?.overlays || []).map((ov) => ({
     id: ov.id,

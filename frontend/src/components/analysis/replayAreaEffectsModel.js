@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 /** World grid size for fire occupancy, not a painted bloom radius. */
 export const INFERNO_CELL_SIZE_WORLD = 36;
 export const DEFAULT_SMOKE_CELL_SIZE = 20;
@@ -19,7 +24,7 @@ const EFFECT_PALETTES = {
     fire: [
       [239, 246, 255],
       [125, 211, 252],
-      [251, 146, 60],
+      [56, 189, 248],
       [30, 64, 175],
     ],
   },
@@ -188,30 +193,16 @@ export function infernoFlameGeometry(item, currentTick, halfExtentPx) {
   const slow = tick * 0.09 + seed;
   const quick = tick * 0.17 + seed * 1.73;
   const pulse = 0.92 + 0.08 * Math.sin(slow);
-  const sway = Math.sin(quick);
+  const angle = quick * 0.43 + seed;
   const flameStrength = 0.5 + 0.5 * Math.sin(seed * 1.37 + 0.4);
   return {
-    jitterX: halfExtentPx * 0.1 * sway,
-    jitterY: halfExtentPx * 0.06 * Math.cos(quick * 0.83),
+    jitterX: halfExtentPx * 0.08 * Math.cos(angle),
+    jitterY: halfExtentPx * 0.08 * Math.sin(angle),
     outerRadius: halfExtentPx * (1.12 + 0.08 * Math.sin(slow * 0.71)),
     middleRadius: halfExtentPx * (0.92 + 0.04 * Math.sin(slow * 0.83)),
     coreRadius: halfExtentPx * (0.28 + 0.04 * Math.cos(quick)),
-    tongueHeight: halfExtentPx * (
-      0.95
-      + 1.05 * flameStrength
-      + 0.2 * Math.sin(slow + 0.8)
-    ),
-    tongueWidth: halfExtentPx * (
-      0.42
-      + 0.12 * flameStrength
-      + 0.05 * Math.cos(quick)
-    ),
-    tongueLean: halfExtentPx * (
-      0.28 * sway
-      + 0.34 * Math.sin(seed * 0.79)
-    ),
-    sparkX: halfExtentPx * 0.62 * Math.sin(quick * 1.31),
-    sparkY: -halfExtentPx * (0.78 + 0.28 * flameStrength),
+    sparkX: halfExtentPx * 0.62 * Math.cos(angle * 1.31),
+    sparkY: halfExtentPx * 0.62 * Math.sin(angle * 1.31),
     sparkRadius: Math.max(0.8, halfExtentPx * (0.08 + 0.05 * flameStrength)),
     flameStrength,
     pulse,

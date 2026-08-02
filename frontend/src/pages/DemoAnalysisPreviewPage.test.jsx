@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppShellProvider } from "../context/AppShellContext";
 import DemoAnalysisPreviewPage from "./DemoAnalysisPreviewPage";
 import API from "../api/api";
+import { useLocaleStore } from "../i18n/localeStore.js";
 import { useReplayStore } from "../stores/replayStore";
 
 vi.mock("../api/api", () => ({
@@ -201,9 +202,42 @@ function renderPage(shell) {
 
 describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
   beforeEach(() => {
+    useLocaleStore.setState({ locale: "zh", effectiveLocale: "zh", hydrated: true, persistenceError: null });
     useReplayStore.setState({ entries: {}, activeKey: null });
     sessionStorage.clear();
+    localStorage.clear();
     vi.clearAllMocks();
+  });
+
+  test("defaults highlights to the first roster player without firing an AI request", () => {
+    const shell = buildShell({
+      currentParsed: {
+        players: {
+          ZywOo: { clips: [], round_timeline: [] },
+          flameZ: { clips: [], round_timeline: [] },
+        },
+      },
+      parsedPlayerNames: ["ZywOo", "flameZ"],
+      currentActivePlayer: "",
+    });
+    renderPage(shell);
+
+    expect(screen.queryByText("先选择一名玩家")).toBeNull();
+    expect(screen.getAllByText("ZywOo").length).toBeGreaterThan(0);
+    expect(shell.ensurePlayerAiReview).not.toHaveBeenCalled();
+  });
+
+  test("uses a fixed scoreboard and main analysis layout without a right rail", () => {
+    const view = renderPage(buildShell());
+
+    const workspace = screen.getByTestId("analysis-fixed-workspace");
+    expect(within(workspace).getByTestId("analysis-scoreboard-panel")).toBeTruthy();
+    expect(within(workspace).getByTestId("analysis-main-panel")).toBeTruthy();
+    expect(within(workspace).getByTestId("analysis-scoreboard-panel").className).toContain("analysis-side-rail");
+    expect(view.container.querySelector('[data-testid="dock-row-analysis-workspace"]')).toBeNull();
+    expect(screen.getByTestId("scoreboard-adr-ZywOo").textContent).toBe("ADR96");
+    expect(screen.queryByRole("button", { name: "编辑布局" })).toBeNull();
+    expect(screen.queryByText("玩家与操作")).toBeNull();
   });
 
   test("the selector only contains demos uploaded or selected for this session", () => {
@@ -223,6 +257,41 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     fireEvent.click(options[1]);
     expect(shell.setCurrentMatchIndex).toHaveBeenCalledWith(1);
+  });
+
+  test("loads optional Steam CDN avatars and keeps the Demo player color", async () => {
+    const shell = buildShell();
+    shell.players = shell.players.map((player, index) => (
+      index === 0
+        ? { ...player, steam_id64: "76561198000000001", player_color: "purple" }
+        : player
+    ));
+    API.get.mockResolvedValueOnce({
+      data: {
+        enabled: true,
+        avatars: {
+          "76561198000000001": "https://avatars.cloudflare.steamstatic.com/abc_full.jpg",
+        },
+      },
+    });
+
+    const view = renderPage(shell);
+
+    await waitFor(() => expect(API.get).toHaveBeenCalledWith("/steam/player-avatars", {
+      params: { steam_ids: "76561198000000001" },
+    }));
+    const avatars = await screen.findAllByAltText("ZywOo Steam avatar");
+    const avatar = avatars[0];
+    const avatarFrame = avatar.parentElement;
+    expect(avatar.getAttribute("src")).toContain("avatars.cloudflare.steamstatic.com");
+    avatars.forEach((item) => {
+      expect(item.parentElement?.getAttribute("data-player-color-source")).toBe("demo");
+      expect(item.parentElement?.getAttribute("style")).toContain("--cs2-player-purple");
+    });
+
+    avatars.forEach((item) => fireEvent.error(item));
+    expect(view.container.querySelector('img[alt="ZywOo Steam avatar"]')).toBeNull();
+    expect(avatarFrame?.textContent).toContain("Z");
   });
 
   test("keeps batch parsing inside the upload box until every demo is ready", () => {
@@ -276,13 +345,15 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText(/DAK|analysis-kit|数据包/i)).toBeNull();
   });
 
-  test("keeps all seven analysis workspaces backed by parsed match data", async () => {
+  test("keeps all eight analysis workspaces backed by parsed match data", async () => {
     const view = renderPage(buildShell());
 
     const analysisNavigation = screen.getByRole("navigation", { name: "Demo 分析视图" });
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "高光与录制", "2D 回放", "热力图", "概览", "玩家", "回合", "经济",
+      "高光与录制", "概览", "2D 回放", "热力图", "回合", "经济", "玩家", "饰品",
     ]);
+    expect(analysisNavigation.closest(".analysis-center-surface")).toBeTruthy();
+    expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
     expect(screen.getByRole("slider", { name: "回放时间轴" })).toBeTruthy();
@@ -299,6 +370,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('[data-event-kind="utility"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("rounded-full");
     expect(view.container.querySelector('[data-event-kind="plant"] > span')?.className).toContain("bg-orange-600");
+    expect(view.container.querySelectorAll('[data-testid="dock-row-analysis-replay-board"] .dock-panel__chrome-button')).toHaveLength(0);
     expect(API.post).toHaveBeenCalledWith(
       "/demo/replay/binary",
       expect.objectContaining({ start_tick: 200, end_tick: 4299, fps: 32 }),
@@ -409,6 +481,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "回合" }));
     expect(screen.getByRole("heading", { name: "回合列表" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "胜方" }).closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
     expect(screen.getByText("ZywOo 双杀守住 B 区")).toBeTruthy();
     expect(screen.getByText("全枪全弹")).toBeTruthy();
     expect(screen.getAllByText("CT 胜").length).toBeGreaterThan(0);
@@ -446,10 +519,64 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.getByRole("group", { name: "热力图类型" })).toBeTruthy();
     const sideSelector = screen.getByRole("group", { name: "热力图阵营" });
     expect(within(sideSelector).getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("group", { name: "热力图玩家列表" })).toBeTruthy();
-    const zywooHeatmapButton = screen.getByRole("button", { name: "查看 ZywOo 的热力图" });
-    expect(zywooHeatmapButton.getAttribute("aria-pressed")).toBe("true");
-    expect(zywooHeatmapButton.textContent).toContain("Vitality");
+    expect(screen.queryByRole("group", { name: "热力图玩家列表" })).toBeNull();
+    expect(screen.getByTestId("heatmap-focused-player").textContent).toBe("ZywOo");
+    const zoomGroup = screen.getByTestId("heatmap-map-surface").querySelector('[role="group"]');
+    const zoomButtons = within(zoomGroup).getAllByRole("button");
+    fireEvent.click(zoomButtons[1]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.20");
+    fireEvent.click(zoomButtons[2]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.00");
+    fireEvent.click(zoomButtons[0]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("0.83");
+    fireEvent.click(zoomButtons[2]);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.00");
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 120,
+      clientY: 120,
+      deltaY: -100,
+    });
+    fireEvent(screen.getByTestId("heatmap-map-surface"), wheelEvent);
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.20");
+    fireEvent.click(zoomButtons[2]);
+    const wheelOutEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 120,
+      clientY: 120,
+      deltaY: 100,
+    });
+    fireEvent(screen.getByTestId("heatmap-map-surface"), wheelOutEvent);
+    expect(wheelOutEvent.defaultPrevented).toBe(true);
+    const mapSurface = screen.getByTestId("heatmap-map-surface");
+    expect(mapSurface.getAttribute("data-zoom")).toBe("0.83");
+    vi.spyOn(mapSurface, "getBoundingClientRect").mockReturnValue({
+      width: 600,
+      height: 600,
+      top: 0,
+      right: 600,
+      bottom: 600,
+      left: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const firePointer = (type, properties) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.entries(properties).forEach(([key, value]) => {
+        Object.defineProperty(event, key, { configurable: true, value });
+      });
+      fireEvent(mapSurface, event);
+    };
+    firePointer("pointerdown", { button: 0, pointerId: 7, clientX: 200, clientY: 200 });
+    firePointer("pointermove", { pointerId: 7, clientX: 240, clientY: 225 });
+    firePointer("pointerup", { pointerId: 7, clientX: 240, clientY: 225 });
+    await waitFor(() => expect(mapSurface.getAttribute("data-offset-x")).toBe("40"));
+    expect(mapSurface.getAttribute("data-offset-y")).toBe("25");
+    expect(screen.getByRole("button", { name: "选择 ZywOo" }).getAttribute("data-active")).toBe("true");
     expect(screen.getByText("统计回合")).toBeTruthy();
     expect(screen.queryByText("轨迹采样点")).toBeNull();
     expect(screen.queryByText(/播放期间不会重复计算/)).toBeNull();
@@ -479,8 +606,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector('[data-heatmap-mode="deaths"]')).toBeTruthy();
     expect(screen.getByAltText("de_mirage 死亡热力图")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "查看 b1t 的热力图" }));
-    expect(screen.getByRole("button", { name: "查看 b1t 的热力图" }).getAttribute("aria-pressed")).toBe("true");
+    view.unmount();
+    renderPage(buildShell({ currentActivePlayer: "b1t" }));
+    expect(screen.getByTestId("heatmap-focused-player").textContent).toBe("b1t");
+    expect(screen.getByRole("button", { name: "选择 b1t" }).getAttribute("data-active")).toBe("true");
   });
 
   test("restores the analysis workspace, replay round and playhead within the session", async () => {
@@ -597,7 +726,7 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(view.container.querySelector(".demo-grenade-trajectory")).toBeNull();
   });
 
-  test("keeps every player unselected until the user chooses one, then requests only that player's AI review", () => {
+  test("shows the first player immediately but waits for an explicit click before requesting an AI review", () => {
     const shell = buildShell({
       aiMode: true,
       currentParsed: { players: { ZywOo: { clips: [{ clip_id: "clip-1", category: "highlight" }], match_meta: {} } } },
@@ -605,8 +734,10 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     });
     renderPage(shell);
 
-    expect(screen.getByText("先选择一名玩家")).toBeTruthy();
+    expect(screen.queryByText("先选择一名玩家")).toBeNull();
+    expect(screen.getAllByText("ZywOo").length).toBeGreaterThan(0);
     expect(screen.queryByText(/AI 锐评/)).toBeNull();
+    expect(shell.ensurePlayerAiReview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "选择 ZywOo" }));
     expect(shell.ensurePlayerAiReview).toHaveBeenCalledTimes(1);
     expect(shell.ensurePlayerAiReview).toHaveBeenCalledWith("ZywOo", 0);
@@ -788,9 +919,105 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(screen.queryByText("已按设置中的 AI 洞察模式，为 ZywOo 生成锐评。")).toBeNull();
   });
 
+  test("uses large highlight choices and keeps tags collapsed by default", () => {
+    useLocaleStore.getState().hydrate("en");
+    renderPage(buildShell({
+      currentActivePlayer: "ZywOo",
+      currentParsed: { players: { ZywOo: { clips: [], match_meta: {} } } },
+      parsedPlayerNames: ["ZywOo"],
+    }));
+
+    expect(screen.queryByText("Highlight view")).toBeNull();
+    const tagToggle = screen.getByRole("button", { name: "Expand Tags" });
+    expect(tagToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("highlight-tag-options")).toBeNull();
+    fireEvent.click(tagToggle);
+    expect(screen.getByTestId("highlight-tag-options")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Tags" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Round timeline" }));
+    expect(screen.queryByTestId("highlight-tag-options")).toBeNull();
+  });
+
+  test("keeps analysis content expanded without nested collapse controls", () => {
+    useLocaleStore.getState().hydrate("en");
+    renderPage(buildShell({
+      currentActivePlayer: "ZywOo",
+      currentParsed: { players: { ZywOo: { clips: [], match_meta: {} } } },
+      parsedPlayerNames: ["ZywOo"],
+      roundTimeline: [{
+        round_number: 1,
+        score_text: "1 : 0",
+        events: [],
+        summary: { kills: 0, deaths: 0, assists: 0 },
+      }],
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Round timeline" }));
+    expect(screen.getByTestId("round-timeline-item")).toBeTruthy();
+    expect(screen.queryByText("Click to expand")).toBeNull();
+    expect(screen.queryByText("Collapse round")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByTestId("overview-full-scoreboard").querySelector("header button")).toBeNull();
+  });
+
   test("shows the upload entry when no demo set has been loaded", () => {
     renderPage(buildShell({ hasDemos: false, uploadedDemos: [], matchTabsData: [], players: [], selectedPlayersList: [] }));
     expect(screen.getByText("上传单个或多个 Demo，或从 Demo 库勾选本次要分析的文件。")).toBeTruthy();
     expect(screen.getByText("前往 Demo 库")).toBeTruthy();
+  });
+
+  test("keeps round detail aligned with the active filters", () => {
+    renderPage(buildShell());
+
+    fireEvent.click(screen.getByRole("button", { name: "回合" }));
+    fireEvent.click(screen.getByRole("button", { name: /R2/ }));
+    expect(screen.getByRole("heading", { name: /第 2 回合/ })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "胜方" }), { target: { value: "a" } });
+
+    expect(screen.getByRole("heading", { name: /第 1 回合/ })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /第 2 回合/ })).toBeNull();
+  });
+
+  test("keeps the complete clip action bar inside the main analysis view", () => {
+    renderPage(buildShell({
+      clips: [{
+        client_clip_uid: "clip-1",
+        category: "highlight",
+        round: 1,
+        round_won: true,
+        start_tick: 100,
+        end_tick: 400,
+        kill_count: 1,
+        context_tags: [],
+      }],
+      regularSelectableTotal: 1,
+      canAddCurrentPlayerHighlights: true,
+    }));
+
+    const dockedActionBar = screen.getByTestId("clip-selection-action-bar");
+    expect(dockedActionBar.getAttribute("data-compact")).toBe("false");
+    expect(dockedActionBar.className).not.toContain("sticky");
+    expect(dockedActionBar.parentElement?.className).toContain("analysis-center-surface");
+    const selectAll = screen.getByRole("button", { name: "全选" });
+    const deselectAll = screen.getByRole("button", { name: "取消" });
+    const addPlayerHighlights = screen.getByRole("button", { name: "ZywOo 的全部高光入队" });
+    expect(selectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
+    expect(deselectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
+    expect(screen.queryByTestId("analysis-right-panel")).toBeNull();
+    expect(addPlayerHighlights.className).toContain("bg-cs2-accent");
+  });
+
+  test("renders the analysis entry and navigation in English", () => {
+    useLocaleStore.getState().hydrate("en");
+    renderPage(buildShell());
+
+    expect(screen.getByRole("heading", { name: "Demo Analysis" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Demo analysis views" })).toBeTruthy();
+    expect(screen.queryByText("Demo analysis views")).toBeNull();
+    expect(screen.getByRole("button", { name: "2D Replay" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Switch demo" })).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
   });
 });

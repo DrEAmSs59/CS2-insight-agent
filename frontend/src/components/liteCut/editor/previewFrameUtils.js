@@ -84,6 +84,7 @@ export function handoffFrameAction({
   expectedMediaTime,
   awaitingHandoff,
   hasPromotedLayer,
+  keepPromotedFrameUntilCaughtUp = false,
   handoffStartedAt,
   lastCorrectiveSeekAt,
   seeking,
@@ -93,7 +94,11 @@ export function handoffFrameAction({
   const tolerance = hasPromotedLayer ? 0.1 : 0.2;
   if (Math.abs(mediaTime - expectedMediaTime) <= tolerance) return { type: "present" };
   const startedAt = handoffStartedAt || now;
-  if (now - startedAt > HANDOFF_MAX_WAIT_MS) return { type: "present" };
+  // A prewarmed next clip is the visible frame at a plain cut.  Replacing it
+  // with a newly mounted player that is still behind produces a visible jump
+  // backwards. Keep that prewarm on screen until the new player catches up.
+  // Existing lower-layer/transition handoffs retain the historical deadline.
+  if (!keepPromotedFrameUntilCaughtUp && now - startedAt > HANDOFF_MAX_WAIT_MS) return { type: "present" };
   const behind = expectedMediaTime - mediaTime;
   if (
     hasPromotedLayer

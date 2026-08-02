@@ -43,6 +43,7 @@ import {
 import {
   nextTopVideoPlaybackAfter,
   hasSoloAudioTracks,
+  resolveAudioPreviewPreloadItems,
   resolveAudioPreviewItems,
   resolveBaseVideoTrackId,
   resolveIncomingTransitionPlayback,
@@ -436,7 +437,11 @@ export default function LiteCutEditorShell({
   const outputDir = String(body?.output?.dir || "");
   const outputWidth = Math.max(320, Math.min(7680, Number(body?.output?.width) || 1920));
   const outputHeight = Math.max(180, Math.min(4320, Number(body?.output?.height) || 1080));
-  const outputFps = Math.max(1, Math.min(240, Number(body?.output?.fps) || 60));
+  const outputFps = Math.max(1, Math.min(1000, Number(body?.output?.fps) || 60));
+  const outputFrameBlendEnabled = body?.output?.frame_blend_enabled === true;
+  const outputFrameBlendFrames = Math.max(2, Math.min(9, Number(body?.output?.frame_blend_frames) || 5));
+  const outputHighFrameDownsampleEnabled = body?.output?.high_frame_downsample_enabled === true;
+  const outputDeliveryFps = Math.max(1, Math.min(1000, Number(body?.output?.delivery_fps) || 60));
   const outputEncoder = ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body?.output?.encoder)
     ? body.output.encoder
     : "auto";
@@ -772,9 +777,46 @@ export default function LiteCutEditorShell({
           transform: null,
         });
       }
+      // The next main clip is mounted just before a contiguous cut.  At the
+      // boundary LiteCutPreviewPanel promotes this already-decoded underlay
+      // while the new main player finishes its handoff.
+      const nextIsContiguous = nextPreviewPlayback?.clip
+        && Math.abs((Number(nextPreviewPlayback.clipStart) || 0) - (Number(playback?.clipEnd) || 0)) <= 0.05;
+      const secondsToCut = Math.max(0, (Number(playback?.clipEnd) || 0) - playheadSec);
+      if (
+        isPlaying
+        && !outgoingTransitionPreload
+        && nextIsContiguous
+        && secondsToCut <= 1.5
+        && !clipReversePlayback(nextPreviewPlayback.clip)
+      ) {
+        const clip = nextPreviewPlayback.clip;
+        const id = clip.id;
+        if (!layers.some((layer) => String(layer.id) === String(id))) {
+          layers.push({
+            id,
+            streamUrl: clipStreamUrl(clip),
+            sourceTime: selectedClipPreviewSourceTime(clip, Number(nextPreviewPlayback.clipStart) || 0),
+            playbackRate: clipSpeedAtTimeline(clip, 0),
+            reversePlayback: false,
+            prewarm: true,
+            // This stays behind the current main video until it is promoted.
+            opacity: 1,
+            flipHorizontal: Boolean(clip.flip_horizontal),
+            flipVertical: Boolean(clip.flip_vertical),
+            filter: filterStyleFromColor({
+              brightness: clip.color?.brightness ?? 0,
+              contrast: clip.color?.contrast ?? 0,
+              saturation: clip.color?.saturation ?? 0,
+              preset: clip.color?.filter_preset || "none",
+            }).filter,
+            transform: null,
+          });
+        }
+      }
       return layers.filter((layer) => Boolean(layer.streamUrl));
     },
-    [baseVideoTrackId, clipStreamUrl, incomingTransitionPlayback, outgoingTransitionPreload, playheadSec, underlayPlaybacks],
+    [baseVideoTrackId, clipStreamUrl, incomingTransitionPlayback, isPlaying, nextPreviewPlayback, outgoingTransitionPreload, playback?.clipEnd, playheadSec, selectedClipPreviewSourceTime, underlayPlaybacks],
   );
   const transitionPreview = incomingTransitionPlayback
     ? transitionPreviewVisual(incomingTransitionPlayback.transitionType, incomingTransitionPlayback.progress)
@@ -790,33 +832,42 @@ export default function LiteCutEditorShell({
   const soloAudioActive = useMemo(() => hasSoloAudioTracks(body), [body]);
   const audioPreviewItems = useMemo(
     () => {
+      const toPreviewItem = (item) => {
+        const assetId = item.clip?.meta?.asset_id;
+        const recordedId = Number(item.clip?.source_id);
+        const src = assetId != null
+          ? getLiteCutAssetStreamUrl(assetId)
+          : Number.isFinite(recordedId) && recordedId > 0
+            ? getRecordedClipStreamUrl(recordedId)
+            : null;
+        if (!src) return null;
+        return {
+          id: item.id,
+          trackId: item.trackId,
+          src,
+          sourceTime: item.sourceTime,
+          playbackRate: item.playbackRate,
+          reversePlayback: item.reversePlayback,
+          muted: item.muted,
+          volume: item.volume,
+          preloadOnly: Boolean(item.preloadOnly),
+        };
+      };
       const items = resolveAudioPreviewItems(body, playheadSec, masterVolume)
         .map((item) => {
-          const assetId = item.clip?.meta?.asset_id;
-          const recordedId = Number(item.clip?.source_id);
-          const src = assetId != null
-            ? getLiteCutAssetStreamUrl(assetId)
-            : Number.isFinite(recordedId) && recordedId > 0
-              ? getRecordedClipStreamUrl(recordedId)
-              : null;
-          if (!src) return null;
-          return {
-            id: item.id,
-            trackId: item.trackId,
-            src,
-            sourceTime: item.sourceTime,
-            playbackRate: item.playbackRate,
-            reversePlayback: item.reversePlayback,
-            muted: item.muted,
-            volume: item.volume,
-          };
+          return toPreviewItem(item);
         })
         .filter(Boolean),
+        activeKeys = new Set(items.map((item) => `${item.trackId}:${item.id}`)),
+        preloadItems = resolveAudioPreviewPreloadItems(body, playheadSec, masterVolume)
+          .map((item) => toPreviewItem(item))
+          .filter((item) => item && !activeKeys.has(`${item.trackId}:${item.id}`)),
+        allItems = [...items, ...preloadItems],
         duckingEnabled = Boolean(bgm?.ducking_enabled),
         duckingVolume = Math.max(0.05, Math.min(1, Number(bgm?.ducking_volume) || 0.35)),
         hasForeground = items.some((item) => item.trackId !== "bgm" && !item.muted && item.volume > 0);
-      if (!duckingEnabled || !hasForeground) return items;
-      return items.map((item) => (item.trackId === "bgm" ? { ...item, volume: item.volume * duckingVolume } : item));
+      if (!duckingEnabled || !hasForeground) return allItems;
+      return allItems.map((item) => (item.trackId === "bgm" && !item.preloadOnly ? { ...item, volume: item.volume * duckingVolume } : item));
     },
     [bgm?.ducking_enabled, bgm?.ducking_volume, body, masterVolume, playheadSec],
   );
@@ -1885,6 +1936,10 @@ export default function LiteCutEditorShell({
             outputWidth={outputWidth}
             outputHeight={outputHeight}
             outputFps={outputFps}
+            outputFrameBlendEnabled={outputFrameBlendEnabled}
+            outputFrameBlendFrames={outputFrameBlendFrames}
+            outputHighFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
+            outputDeliveryFps={outputDeliveryFps}
             outputEncoder={outputEncoder}
             outputEncoderTier={outputEncoderTier}
             outputCanvasFit={outputCanvasFit}

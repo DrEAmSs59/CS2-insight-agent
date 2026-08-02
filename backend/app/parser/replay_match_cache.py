@@ -18,10 +18,15 @@ from .replay_cache_storage import (
     replay_cache_namespace_root,
     replay_cache_namespace_roots,
 )
+from .cs2_item_catalog import (
+    build_player_skin_loadouts,
+    resolve_weapon_model,
+    skin_for_player_weapon,
+)
 
 logger = logging.getLogger(__name__)
 
-REPLAY_MATCH_CACHE_VERSION = 5
+REPLAY_MATCH_CACHE_VERSION = 6
 REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (
@@ -430,17 +435,28 @@ def _is_pov(row: Any, pov_sid: str, pov_name: str) -> bool:
     return bool((pov_sid and sid == pov_sid) or (pov_name and name == pov_name))
 
 
-def _player_from_row(row: Any, *, pov_sid: str, pov_name: str, pov_team: int | None) -> dict[str, Any]:
+def _player_from_row(
+    row: Any,
+    *,
+    pov_sid: str,
+    pov_name: str,
+    pov_team: int | None,
+    player_skin_loadouts: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     inventory = _safe_inventory(row.get("inventory"))
     team_num = _int(row.get("team_num"), -1)
+    steamid = _normalize_sid(row.get("steamid"))
+    weapon = _resolved_weapon(row, inventory)
+    weapon_model = resolve_weapon_model(weapon)
+    weapon_skin = skin_for_player_weapon(player_skin_loadouts, steamid, weapon)
     inventory_keys = {
         item.lower().replace("weapon_", "").replace(" ", "_")
         for item in inventory
     }
     raw_color = _safe_text(row.get("player_color")).lower()
     color_slot = _COLOR_SLOTS.get(raw_color, _int(raw_color, -1))
-    return {
-        "steamid64": _normalize_sid(row.get("steamid")) or None,
+    player = {
+        "steamid64": steamid or None,
         "name": _safe_text(row.get("name")),
         "team": _team_side(team_num),
         "x": _safe_number(row.get("X")),
@@ -454,7 +470,7 @@ def _player_from_row(row: Any, *, pov_sid: str, pov_name: str, pov_team: int | N
         "money": max(0, _int(row.get("balance"))),
         "equipment_value": max(0, _int(row.get("current_equip_value"))),
         "inventory": inventory,
-        "weapon": _resolved_weapon(row, inventory),
+        "weapon": weapon,
         "has_defuser": _safe_bool(row.get("has_defuser")),
         "has_c4": _safe_bool(row.get("has_c4")) or bool({"c4", "c4_explosive"} & inventory_keys),
         "flash_duration": max(0.0, _safe_number(row.get("flash_duration"))),
@@ -462,6 +478,11 @@ def _player_from_row(row: Any, *, pov_sid: str, pov_name: str, pov_team: int | N
         "is_teammate": pov_team is not None and team_num == pov_team,
         "slot_color_index": color_slot if 0 <= color_slot <= 4 else -1,
     }
+    if weapon_model:
+        player["weapon_model"] = weapon_model
+    if weapon_skin:
+        player["weapon_skin"] = weapon_skin
+    return player
 
 
 def _frames_from_dataframe(frame: Any, spec: dict[str, Any], meta: dict[str, Any]) -> list[dict[str, Any]]:
@@ -470,6 +491,9 @@ def _frames_from_dataframe(frame: Any, spec: dict[str, Any], meta: dict[str, Any
         return []
     pov_sid = _normalize_sid(meta.get("pov_steamid64"))
     pov_name = _safe_text(meta.get("pov_player_name")).lower()
+    player_skin_loadouts = meta.get("player_skin_loadouts")
+    if not isinstance(player_skin_loadouts, dict):
+        player_skin_loadouts = {}
     try:
         frame = pd.DataFrame(frame)
     except (TypeError, ValueError):
@@ -494,7 +518,13 @@ def _frames_from_dataframe(frame: Any, spec: dict[str, Any], meta: dict[str, Any
             if pov_team == -1:
                 pov_team = None
             players = [
-                _player_from_row(row, pov_sid=pov_sid, pov_name=pov_name, pov_team=pov_team)
+                _player_from_row(
+                    row,
+                    pov_sid=pov_sid,
+                    pov_name=pov_name,
+                    pov_team=pov_team,
+                    player_skin_loadouts=player_skin_loadouts,
+                )
                 for row in records
                 if _int(row.get("team_num"), -1) in {2, 3}
             ]
@@ -592,6 +622,7 @@ def materialize_match_replay_parquet_impl(
     meta_tmp = meta_path.with_suffix(f"{meta_path.suffix}.partial")
     parser = DemoParser(str(demo_path))
     try:
+        player_skin_loadouts = build_player_skin_loadouts(parser)
         native_result = parser.write_replay_parquet(
             str(parquet_tmp),
             list(_RAW_PLAYER_FIELDS),
@@ -642,6 +673,7 @@ def materialize_match_replay_parquet_impl(
             "fps": float(fps),
             "pov_player_name": first_player.get("name"),
             "pov_steamid64": first_player.get("steam_id64") or first_player.get("steamid64"),
+            "player_skin_loadouts": player_skin_loadouts,
             "rounds": [
                 {
                     "round_number": spec["round_number"],
@@ -920,6 +952,7 @@ def load_match_replay_round_binary(
         "map_transform": meta.get("map_transform"),
         "pov_player_name": meta.get("pov_player_name"),
         "pov_steamid64": meta.get("pov_steamid64"),
+        "player_skin_loadouts": meta.get("player_skin_loadouts") or {},
         "shots": [dict(item) for item in spec.get("shots") or [] if isinstance(item, dict)],
         "effect_tracks_version": int(meta.get("effect_tracks_version") or 1),
         "effect_capabilities": meta.get("effect_capabilities") or {},

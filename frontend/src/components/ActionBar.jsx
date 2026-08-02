@@ -14,29 +14,31 @@ export default function ActionBar({
   batchRecording,
   canAddCurrentPlayerHighlights,
   sticky = false,
+  compact = false,
 }) {
   const t = useT();
   return (
     <div
       data-testid="clip-selection-action-bar"
-      className={`border-t border-cs2-border bg-cs2-bg-sidebar px-4 py-3 sm:px-5 ${
+      data-compact={compact ? "true" : "false"}
+      className={`shrink-0 border-t border-cs2-border bg-cs2-bg-sidebar ${compact ? "px-3 py-2" : "px-4 py-3 sm:px-5"} ${
         sticky
           ? "sticky bottom-0 z-40 shadow-[0_-12px_30px_rgba(0,0,0,0.28)]"
           : ""
       }`}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="font-mono text-sm">
+      <div className={compact ? "flex flex-wrap items-center justify-between gap-2" : "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"}>
+        <div className={compact ? "flex items-center gap-2" : "flex flex-wrap items-center gap-4"}>
+          <div className={`font-mono ${compact ? "text-[11px]" : "text-sm"}`}>
             <span className="font-bold text-cs2-accent">{selectedCount}</span>
             <span className="text-cs2-text-secondary"> {t("actionbar.selectedOf", { total: totalCount })}</span>
           </div>
-          {currentPlayer ? (
+          {!compact && currentPlayer ? (
             <span className="rounded border border-cs2-accent/25 bg-cs2-accent/[0.07] px-2 py-1 text-[10px] font-semibold text-cs2-accent">
               {t("actionbar.currentPlayerScope", { player: currentPlayer })}
             </span>
           ) : null}
-          <div className="flex gap-1">
+          {!compact ? <div className="flex gap-1">
             <button
               type="button"
               onClick={onSelectAll}
@@ -53,11 +55,11 @@ export default function ActionBar({
               <XSquare className="h-3 w-3" />
               {t("actionbar.deselect")}
             </button>
-          </div>
+          </div> : null}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {canAddCurrentPlayerHighlights && (
+        <div className={`flex flex-wrap items-center justify-end ${compact ? "gap-1.5" : "gap-2"}`}>
+          {!compact && canAddCurrentPlayerHighlights && (
             <button
               type="button"
               disabled={batchRecording}
@@ -72,18 +74,18 @@ export default function ActionBar({
             type="button"
             disabled={!hasSelection || batchRecording}
             onClick={onAddSelectedToQueue}
-            className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input px-5 py-2.5 text-xs font-extrabold uppercase tracking-wider text-cs2-text-primary transition-colors hover:border-cs2-accent/40 disabled:cursor-not-allowed disabled:opacity-30"
+            className={`flex items-center rounded-md border border-cs2-border bg-cs2-bg-input font-extrabold text-cs2-text-primary transition-colors hover:border-cs2-accent/40 disabled:cursor-not-allowed disabled:opacity-30 ${compact ? "h-7 gap-1.5 px-3 text-[10px]" : "gap-2 px-5 py-2.5 text-xs uppercase tracking-wider"}`}
           >
             {batchRecording ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className={`${compact ? "h-3 w-3" : "h-4 w-4"} animate-spin`} />
             ) : (
-              <ListPlus className="h-4 w-4 text-cs2-accent" />
+              <ListPlus className={`${compact ? "h-3 w-3" : "h-4 w-4"} text-cs2-accent`} />
             )}
             {t("actionbar.addSelected")}
           </button>
         </div>
       </div>
-      {queueLength > 0 && (
+      {!compact && queueLength > 0 && (
         <p className="mt-2 text-center font-mono text-[11px] text-cs2-text-muted sm:text-left">
           {t("actionbar.queueCount", { n: queueLength })}
         </p>

@@ -33,7 +33,7 @@ from app.lite_cut.models import empty_project
 
 
 def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monkeypatch):
-    from app.lite_cut import api as api_mod
+    from app.lite_cut import assets_api as api_mod
     from app import video_composer
     from app import env_utils
 
@@ -54,7 +54,7 @@ def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monk
                 "height": 1080,
             }
 
-    monkeypatch.setattr(api_mod, "_get_lite_cut_db", lambda: FakeDb())
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
     monkeypatch.setattr("app.lite_cut.assets.validate_stored_asset_path", lambda _path: source)
     monkeypatch.setattr(env_utils, "load_config", lambda: SimpleNamespace(ffmpeg_path=None))
     monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
@@ -303,7 +303,8 @@ def test_proxy_process_can_be_cancelled_before_ffmpeg_starts():
 
 
 def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, monkeypatch):
-    from app.lite_cut import api as api_mod
+    from app.lite_cut import proxy_api as api_mod
+    from app.lite_cut.runtime import preview_proxy_jobs
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
@@ -315,18 +316,46 @@ def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, m
         return proxy, False
 
     monkeypatch.setattr(api_mod, "_create_preview_proxy_sync", fake_create)
-    api_mod._preview_proxy_jobs.pop(991, None)
+    preview_proxy_jobs.pop(991, None)
 
     async def _run():
         queued = api_mod._decorate_asset_preview_state(dict(row), has_alpha=False)
         assert queued["preview_proxy_status"] in {"queued", "running"}
-        await api_mod._preview_proxy_jobs[991].task
+        await preview_proxy_jobs[991].task
         ready = api_mod._decorate_asset_preview_state(dict(row), schedule=False)
         assert ready["preview_proxy_status"] == "ready"
         assert ready["preview_proxy_required"] is True
 
     asyncio.run(_run())
-    api_mod._preview_proxy_jobs.pop(991, None)
+    preview_proxy_jobs.pop(991, None)
+
+
+@pytest.mark.anyio
+async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
+    from app.lite_cut import assets as assets_mod
+    from app.lite_cut import assets_api as api_mod
+
+    source = tmp_path / "large.mov"
+    source.write_bytes(b"source")
+
+    class FakeDb:
+        async def get_asset(self, asset_id):
+            assert asset_id == 991
+            return {"id": 991, "name": source.name, "kind": "video", "file_path": str(source)}
+
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
+    monkeypatch.setattr(assets_mod, "validate_stored_asset_path", lambda _path: source)
+    monkeypatch.setattr(api_mod, "_decorate_asset_preview_state", lambda row: {
+        **row,
+        "preview_proxy_required": True,
+        "preview_proxy_status": "running",
+    })
+
+    with pytest.raises(HTTPException) as caught:
+        await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
+
+    assert caught.value.status_code == 425
+    assert caught.value.headers == {"Retry-After": "1"}
 
 
 @pytest.mark.anyio
@@ -375,7 +404,7 @@ def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path)
     assert command[-1] == str(output)
 
 
-def test_native_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
+def test_native_h264_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
     small = tmp_path / "small.mp4"
     large = tmp_path / "large.mp4"
     small.write_bytes(b"video")
@@ -383,6 +412,14 @@ def test_native_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
         output.truncate(256 * 1024 * 1024)
     assert asset_needs_browser_proxy(small) is False
     assert asset_needs_browser_proxy(large) is False
+
+
+def test_hevc_mp4_requires_browser_preview_proxy(tmp_path):
+    source = tmp_path / "high-fps-hevc.mp4"
+    source.write_bytes(b"\x00\x00\x00\x18ftypisom....hvc1....hvcC")
+
+    assert asset_needs_browser_proxy(source) is True
+    assert asset_needs_browser_proxy(source, video_codec="hevc") is True
 
 
 def test_native_mp4_ignores_an_old_size_based_proxy(tmp_path):
@@ -506,14 +543,14 @@ def test_gif_preview_proxy_is_limited_to_one_animation_cycle(tmp_path):
 
 @pytest.mark.anyio
 async def test_asset_validation_lists_missing_uploaded_and_recorded_sources(monkeypatch, tmp_path):
-    from app.lite_cut import api as api_mod
+    from app.lite_cut import assets_api as api_mod
 
     class FakeMontageDB:
         async def get_recorded_clips_by_ids(self, ids):
             assert ids == [42]
             return {42: {"output_path": str(tmp_path / "missing-recording.mp4")}}
 
-    monkeypatch.setattr(api_mod, "_get_montage_db", lambda: FakeMontageDB())
+    monkeypatch.setattr(api_mod, "get_montage_db", lambda: FakeMontageDB())
     body = empty_project().model_dump(mode="json")
     body["tracks"][0]["clips"] = [{"id": "rec", "source_id": 42, "source_type": "recorded_clip"}]
     body["tracks"][1]["clips"] = [

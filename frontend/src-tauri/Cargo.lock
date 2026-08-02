@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "cs2-insight-agent-desktop"
-version = "2.4.2"
+version = "2.6.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",

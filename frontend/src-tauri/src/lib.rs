@@ -19,15 +19,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct BackendProcess {
     child: Mutex<Option<ManagedBackend>>,
-    session_token: String,
 }
 
 impl BackendProcess {
-    fn new() -> Result<Self, String> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             child: Mutex::new(None),
-            session_token: new_session_token()?,
-        })
+        }
     }
 }
 
@@ -317,7 +315,6 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
 
 fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
-    let session_token = state.session_token.clone();
     let Ok(mut guard) = state.child.lock() else {
         return;
     };
@@ -374,10 +371,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(BackendProcess::new().expect("failed to create desktop session token"))
+        .manage(BackendProcess::new())
         .invoke_handler(tauri::generate_handler![
-            read_legacy_ui_state,
-            backend_session_token
+            read_legacy_ui_state
         ])
         .setup(|app| {
             // Start the backend on a worker thread so the window (and its

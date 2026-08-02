@@ -224,13 +224,38 @@ class DemoDB:
             )
             await conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS demo_scan_blocklist (
-                    path       TEXT PRIMARY KEY NOT NULL,
-                    created_at TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    applied_at TEXT NOT NULL
                 )
                 """
             )
-            # 兼容旧库：补齐新增列
+            # Scan blocklist is retired: delete-from-library always allows
+            # rediscovery on the next scan; stale pending rows are purged by
+            # purge_stale_pending_demos instead.
+            cur_drop = await conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1",
+                ("drop_scan_blocklist_v1",),
+            )
+            if await cur_drop.fetchone() is None:
+                await conn.execute("DROP TABLE IF EXISTS demo_scan_blocklist")
+                await conn.execute(
+                    "INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)",
+                    ("drop_scan_blocklist_v1", utc_now_iso()),
+                )
+                logger.info("Dropped demo_scan_blocklist (migration drop_scan_blocklist_v1)")
+            # Legacy one-shot clear; keep the marker so older DBs stay marked.
+            cur_mig = await conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE id = ? LIMIT 1",
+                ("clear_scan_blocklist_v1",),
+            )
+            if await cur_mig.fetchone() is None:
+                await conn.execute(
+                    "INSERT INTO schema_migrations(id, applied_at) VALUES (?, ?)",
+                    ("clear_scan_blocklist_v1", utc_now_iso()),
+                )
+            await conn.commit()
+
             cur = await conn.execute("PRAGMA table_info(demo_files)")
             cols = {str(r[1]) for r in await cur.fetchall()}
             alter_stmts: list[str] = []
@@ -262,6 +287,8 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN content_md5 TEXT")
             if "origin_zip" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN origin_zip TEXT")
+            if "cached_path" not in cols:
+                alter_stmts.append("ALTER TABLE demo_files ADD COLUMN cached_path TEXT")
             for stmt in alter_stmts:
                 await conn.execute(stmt)
             cur_summary = await conn.execute("PRAGMA table_info(demo_result_summaries)")
@@ -285,6 +312,9 @@ class DemoDB:
             await self._backfill_result_summaries(conn)
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_content_md5 ON demo_files(content_md5)",
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_cached_path ON demo_files(cached_path)",
             )
             # The pending-ingest picker compares candidate rows by path,
             # filename and content hash.  The default UNIQUE(path) index uses
@@ -317,6 +347,7 @@ class DemoDB:
                     normalized_name TEXT,
                     team_name TEXT,
                     team_number INTEGER,
+                    player_color TEXT,
                     kills INTEGER DEFAULT 0,
                     deaths INTEGER DEFAULT 0,
                     assists INTEGER DEFAULT 0,
@@ -327,6 +358,8 @@ class DemoDB:
             )
             cur_players = await conn.execute("PRAGMA table_info(demo_player_stats)")
             player_cols = {str(r[1]) for r in await cur_players.fetchall()}
+            if "player_color" not in player_cols:
+                await conn.execute("ALTER TABLE demo_player_stats ADD COLUMN player_color TEXT")
             if "user_id" not in player_cols:
                 await conn.execute("ALTER TABLE demo_player_stats ADD COLUMN user_id TEXT")
                 # Older builds stored parser spectator slots in account_id.
@@ -386,6 +419,18 @@ class DemoDB:
                     row_count INTEGER NOT NULL DEFAULT 0,
                     error_msg TEXT,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demo_custom_skin_plans (
+                    demo_path TEXT NOT NULL,
+                    steamid TEXT NOT NULL,
+                    plan_json TEXT NOT NULL,
+                    output_sha256 TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (demo_path, steamid)
                 )
                 """
             )
@@ -592,6 +637,25 @@ class DemoDB:
             )
             row = await cur.fetchone()
         return row is not None
+
+    async def update_demo_content_md5(
+        self,
+        demo_path: str,
+        content_md5: str,
+    ) -> bool:
+        """Overwrite ``content_md5`` for ``demo_path`` (working-copy fingerprint)."""
+        if not self.ingest_md5_supported or not content_md5:
+            return False
+        digest = str(content_md5).strip().lower()
+        if not digest:
+            return False
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "UPDATE demo_files SET content_md5 = ? WHERE path = ?",
+                (digest, demo_path),
+            )
+            await conn.commit()
+        return cur.rowcount > 0
 
     async def update_demo_content_md5_if_absent(
         self,
@@ -1064,14 +1128,14 @@ class DemoDB:
     _LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip,
+               d.content_md5, d.origin_zip, d.cached_path,
                r.result_json, r.created_at AS result_created_at
         """
 
     _COMPACT_LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip,
+               d.content_md5, d.origin_zip, d.cached_path,
                CASE WHEN rs.demo_path IS NULL THEN 0 ELSE 1 END AS has_result,
                COALESCE(rs.clip_count, 0) AS clip_count,
                rs.primary_target,
@@ -1093,6 +1157,7 @@ class DemoDB:
                team_number,
                team_number AS team,
                team_name,
+               player_color,
                kills,
                deaths,
                assists,
@@ -1176,6 +1241,9 @@ class DemoDB:
                     team_num = None
             team_name = p.get("team_name")
             team_name_s = str(team_name).strip() if team_name is not None else None
+            player_color = str(p.get("player_color") or "").strip().lower() or None
+            if player_color not in {None, "blue", "green", "yellow", "orange", "purple"}:
+                player_color = None
             rows.append(
                 (
                     demo_id,
@@ -1188,6 +1256,7 @@ class DemoDB:
                     norm or None,
                     team_name_s,
                     team_num,
+                    player_color,
                     kills,
                     deaths,
                     assists,
@@ -1203,8 +1272,8 @@ class DemoDB:
                     INSERT INTO demo_player_stats(
                         demo_id, demo_path, steam_id64, steam_id, account_id, user_id,
                         player_name, normalized_name, team_name, team_number,
-                        kills, deaths, assists, kd, indexed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        player_color, kills, deaths, assists, kd, indexed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )
@@ -1216,7 +1285,7 @@ class DemoDB:
             cur = await conn.execute(
                 """
                 SELECT id, demo_id, demo_path, steam_id64, steam_id, account_id, user_id, player_name, normalized_name,
-                       team_name, team_number, kills, deaths, assists, kd, indexed_at
+                       team_name, team_number, player_color, kills, deaths, assists, kd, indexed_at
                 FROM demo_player_stats
                 WHERE demo_id = ?
                 ORDER BY kills DESC, player_name ASC
@@ -1612,46 +1681,199 @@ class DemoDB:
                 return None
             return dict(row)
 
-    async def is_path_scan_blocked(self, path: str) -> bool:
+    async def get_demo_by_cached_path(self, cached_path: str) -> Optional[dict[str, Any]]:
+        raw = (cached_path or "").strip()
+        if not raw:
+            return None
         async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
-                "SELECT 1 FROM demo_scan_blocklist WHERE path = ? LIMIT 1",
-                (path,),
+                "SELECT * FROM demo_files WHERE cached_path = ? LIMIT 1",
+                (raw,),
             )
             row = await cur.fetchone()
-        return row is not None
+            if not row:
+                return None
+            return dict(row)
 
-    async def delete_demo(
+    async def update_cached_path(
         self,
-        demo_id: int,
+        demo_path: str,
+        cached_path: str,
         *,
-        rescan: Literal["reimport", "skip"] = "reimport",
+        content_md5: str | None = None,
     ) -> bool:
-        """删除库内记录。``rescan=skip`` 时把磁盘路径加入阻止表，后续扫描/监听不再入库。"""
+        """Persist working-copy path for a library demo (keyed by original ``path``)."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            if content_md5:
+                cur = await conn.execute(
+                    """
+                    UPDATE demo_files
+                    SET cached_path = ?,
+                        content_md5 = COALESCE(NULLIF(trim(content_md5), ''), ?)
+                    WHERE path = ?
+                    """,
+                    (cached_path, content_md5, demo_path),
+                )
+            else:
+                cur = await conn.execute(
+                    "UPDATE demo_files SET cached_path = ? WHERE path = ?",
+                    (cached_path, demo_path),
+                )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    async def remap_cached_paths(self, old_root: str, new_root: str) -> int:
+        """Rewrite cached_path values that live under ``old_root`` to ``new_root``."""
+        from .demo_cache import rewrite_path_under_root
+
+        old = Path(old_root)
+        new = Path(new_root)
+        updated = 0
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, cached_path FROM demo_files WHERE cached_path IS NOT NULL AND trim(cached_path) != ''"
+            )
+            rows = await cur.fetchall()
+            for row in rows:
+                rewritten = rewrite_path_under_root(str(row["cached_path"]), old, new)
+                if not rewritten:
+                    continue
+                await conn.execute(
+                    "UPDATE demo_files SET cached_path = ? WHERE id = ?",
+                    (rewritten, int(row["id"])),
+                )
+                updated += 1
+            await conn.commit()
+        return updated
+
+    async def invalidate_all_demo_caches(self) -> int:
+        """Clear cached_path and force analyzed demos back to ``loaded`` for re-parse."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute("SELECT path, status FROM demo_files")
+            rows = await cur.fetchall()
+            for demo_path, status in rows:
+                await conn.execute(
+                    "UPDATE demo_files SET cached_path = NULL WHERE path = ?",
+                    (demo_path,),
+                )
+                status_l = str(status or "").lower()
+                if status_l in {"done", "parsing", "error"}:
+                    await conn.execute(
+                        """
+                        UPDATE demo_files
+                        SET status = 'loaded', error_msg = NULL, parsed_at = NULL
+                        WHERE path = ?
+                        """,
+                        (demo_path,),
+                    )
+                    await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
+                    await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
+                    await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
+            # Rebuilding caches from originals invalidates any skinned overlays.
+            await conn.execute("DELETE FROM demo_custom_skin_plans")
+            await conn.commit()
+        return len(rows)
+
+    async def demo_cache_coverage(self) -> dict[str, int]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            total_cur = await conn.execute("SELECT COUNT(*) FROM demo_files")
+            total = int((await total_cur.fetchone())[0] or 0)
+            cached_cur = await conn.execute(
+                """
+                SELECT COUNT(*) FROM demo_files
+                WHERE cached_path IS NOT NULL AND trim(cached_path) != ''
+                """
+            )
+            cached = int((await cached_cur.fetchone())[0] or 0)
+        return {"demo_total": total, "demo_cached": cached, "demo_uncached": max(0, total - cached)}
+
+    async def upsert_custom_skin_plan(
+        self,
+        demo_path: str,
+        steamid: str,
+        plan_json: dict[str, Any] | str,
+        *,
+        output_sha256: str | None = None,
+    ) -> None:
+        """Persist a cosmetics rewrite plan keyed by ``(demo_path, steamid)``."""
+        if isinstance(plan_json, str):
+            payload = plan_json
+        else:
+            payload = json.dumps(plan_json, ensure_ascii=False)
+        now = utc_now_iso()
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                INSERT INTO demo_custom_skin_plans(
+                    demo_path, steamid, plan_json, output_sha256, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(demo_path, steamid) DO UPDATE SET
+                    plan_json = excluded.plan_json,
+                    output_sha256 = excluded.output_sha256,
+                    updated_at = excluded.updated_at
+                """,
+                (str(demo_path), str(steamid), payload, output_sha256, now),
+            )
+            await conn.commit()
+
+    async def get_custom_skin_plan(
+        self,
+        demo_path: str,
+        steamid: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return one plan row with ``plan_json`` decoded, or ``None``."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT demo_path, steamid, plan_json, output_sha256, updated_at
+                FROM demo_custom_skin_plans
+                WHERE demo_path = ? AND steamid = ?
+                """,
+                (str(demo_path), str(steamid)),
+            )
+            row = await cur.fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["plan_json"] = json.loads(str(item["plan_json"]))
+        return item
+
+    async def delete_custom_skin_plans_for_demo(self, demo_path: str) -> int:
+        """Delete all custom skin plans for ``demo_path``. Returns rows removed."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "DELETE FROM demo_custom_skin_plans WHERE demo_path = ?",
+                (str(demo_path),),
+            )
+            await conn.commit()
+            return int(cur.rowcount or 0)
+
+    async def delete_demo(self, demo_id: int) -> bool:
+        """删除库内记录。磁盘文件保留时，下次扫描可重新进入待入库。"""
         demo = await self.get_demo_by_id(demo_id)
         if not demo:
             return False
         disk_path = str(demo["path"])
+        cached_path = str(demo.get("cached_path") or "").strip()
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id = ?", (demo_id,))
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+            await conn.execute("DELETE FROM demo_custom_skin_plans WHERE demo_path = ?", (disk_path,))
             await conn.execute("DELETE FROM demo_files WHERE id = ?", (demo_id,))
-            if rescan == "skip":
-                await conn.execute(
-                    """
-                    INSERT INTO demo_scan_blocklist(path, created_at)
-                    VALUES (?, ?)
-                    ON CONFLICT(path) DO UPDATE SET created_at = excluded.created_at
-                    """,
-                    (disk_path, utc_now_iso()),
-                )
-            else:
-                await conn.execute("DELETE FROM demo_scan_blocklist WHERE path = ?", (disk_path,))
             await conn.commit()
+        if cached_path:
+            try:
+                Path(cached_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to delete cached demo file: %s", cached_path)
         return True
+
 
     async def update_display_name(self, demo_id: int, display_name: str | None) -> bool:
         """仅更新库中展示名；``None`` 或空串会清空 ``display_name``（列表仍用磁盘 ``filename``）。"""
@@ -1807,11 +2029,97 @@ class DemoDB:
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_roster_cache WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_player_stats WHERE demo_id IN (SELECT id FROM _tmp_missing_demo_ids)")
+            await conn.execute(
+                "DELETE FROM demo_custom_skin_plans WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)"
+            )
             cur = await conn.execute("DELETE FROM demo_files WHERE id IN (SELECT id FROM _tmp_missing_demo_ids)")
             await conn.commit()
             total = cur.rowcount
             if total:
                 logger.info("purge_deleted_demo_files: root=%s removed=%d", watch_root, total)
+            return total
+
+    @staticmethod
+    def _path_under_watch_roots(path: str, active_watch_roots: Iterable[str]) -> bool:
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except OSError:
+            return False
+        for root in active_watch_roots:
+            try:
+                resolved.relative_to(Path(root).expanduser().resolve())
+            except (OSError, ValueError):
+                continue
+            return True
+        return False
+
+    async def purge_stale_pending_demos(self, active_watch_roots: Iterable[str]) -> int:
+        """Delete pending-ingest rows whose file is missing or outside current watch roots.
+
+        Only ``status='pending'`` rows are removed; ingested library demos are untouched.
+        """
+        roots = [str(Path(root).expanduser().resolve()) for root in active_watch_roots if str(root or "").strip()]
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT id, path FROM demo_files WHERE status = 'pending'"
+            )
+            rows = await cur.fetchall()
+
+        stale_ids: list[int] = []
+        stale_paths: list[str] = []
+        for row in rows:
+            path = str(row["path"] or "")
+            if not path:
+                stale_ids.append(int(row["id"]))
+                continue
+            try:
+                exists = Path(path).is_file()
+            except OSError:
+                exists = False
+            if not exists or not self._path_under_watch_roots(path, roots):
+                stale_ids.append(int(row["id"]))
+                stale_paths.append(path)
+
+        if not stale_ids:
+            return 0
+
+        async with aiosqlite.connect(self.db_path) as conn:
+            placeholders = ",".join("?" * len(stale_ids))
+            path_placeholders = ",".join("?" * len(stale_paths)) if stale_paths else ""
+            if stale_paths:
+                await conn.execute(
+                    f"DELETE FROM match_results WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+                await conn.execute(
+                    f"DELETE FROM demo_result_summaries WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+                await conn.execute(
+                    f"DELETE FROM demo_timeline_events WHERE demo_path IN ({path_placeholders})",
+                    tuple(stale_paths),
+                )
+            await conn.execute(
+                f"DELETE FROM demo_roster_cache WHERE demo_id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            await conn.execute(
+                f"DELETE FROM demo_player_stats WHERE demo_id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            cur = await conn.execute(
+                f"DELETE FROM demo_files WHERE id IN ({placeholders})",
+                tuple(stale_ids),
+            )
+            await conn.commit()
+            total = cur.rowcount
+            if total:
+                logger.info(
+                    "purge_stale_pending_demos: removed=%d active_roots=%d",
+                    total,
+                    len(roots),
+                )
             return total
 
     async def all_content_md5_hexes(self) -> set[str]:

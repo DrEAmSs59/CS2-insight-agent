@@ -2,7 +2,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.lite_cut import api as api_mod
+from app.lite_cut import runtime as runtime_mod
+from app.lite_cut import storage_api as api_mod
 from app.lite_cut import assets as assets_mod
 from app.lite_cut.db import LiteCutDB
 
@@ -77,18 +78,18 @@ def test_storage_endpoint_copies_files_switches_config_and_removes_old_tree(tmp_
         config = SimpleNamespace(lite_cut_assets_dir="")
         saved = []
 
-        monkeypatch.setattr(api_mod, "_get_lite_cut_db", lambda: db)
+        monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: db)
         monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: source)
         monkeypatch.setattr(api_mod, "load_config", lambda: config)
         monkeypatch.setattr(api_mod, "save_config", lambda value: saved.append(value.lite_cut_assets_dir))
-        api_mod._export_jobs.clear()
-        api_mod._preview_proxy_jobs.clear()
-        api_mod._storage_migration_jobs.clear()
+        runtime_mod.export_jobs.clear()
+        runtime_mod.preview_proxy_jobs.clear()
+        runtime_mod.storage_migration_jobs.clear()
 
         result = await api_mod.migrate_lite_cut_storage(
             api_mod.LiteCutStorageMoveBody(destination=str(target)),
         )
-        await api_mod._storage_migration_jobs[result["job_id"]].task
+        await runtime_mod.storage_migration_jobs[result["job_id"]].task
         result = await api_mod.get_lite_cut_storage_migration(result["job_id"])
 
         assert result["status"] == "done"

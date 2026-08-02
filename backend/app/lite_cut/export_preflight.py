@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..ffmpeg_process import process_error_tail, run_process_capture
 from ..video_composer import MontageComposerError, ffprobe_streams, resolve_ffprobe_binary, validate_output_path
 
 
@@ -114,11 +115,34 @@ def validate_export_output(ffmpeg_bin: Path, output_path: Path) -> None:
     try:
         if not output_path.is_file() or output_path.stat().st_size <= 0:
             raise OSError("empty output")
-        data = ffprobe_streams(output_path, resolve_ffprobe_binary(ffmpeg_bin))
+        data = ffprobe_streams(
+            output_path,
+            resolve_ffprobe_binary(ffmpeg_bin),
+            probe_stage="lite_cut_output_validation",
+            file_role="final",
+        )
         streams = data.get("streams") or []
         has_video = any(str(stream.get("codec_type") or "") == "video" for stream in streams if isinstance(stream, dict))
         if not has_video:
             raise OSError("no video stream")
+        decode_command = [
+            str(ffmpeg_bin),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(output_path),
+            "-map",
+            "0:v:0",
+            "-t",
+            "3",
+            "-f",
+            "null",
+            "-",
+        ]
+        decoded = run_process_capture(decode_command, timeout=120)
+        if decoded.returncode != 0:
+            raise OSError(process_error_tail(decoded) or "video decode failed")
     except Exception as exc:
         raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE") from exc
 
@@ -133,12 +157,22 @@ def remove_partial_output(output_path: str | Path) -> None:
 
 
 def cleanup_stale_export_artifacts(output_paths: Iterable[str]) -> None:
+    """Remove private attempts/workdirs without deleting published user files."""
+
     parents: set[Path] = set()
     for raw in output_paths:
         if not raw:
             continue
         path = Path(raw).expanduser().resolve(strict=False)
-        remove_partial_output(path)
+        # Exports are rendered to a private attempt file and atomically
+        # published only after validation. If the process exits after that
+        # replace but before the DB row is marked done, ``path`` is already a
+        # complete user file and must be preserved. Only private attempt files
+        # and temporary work directories are safe startup-cleanup targets.
+        for attempt_path in path.parent.glob(
+            f".{path.stem}.encoder-attempt-*{path.suffix}",
+        ):
+            remove_partial_output(attempt_path)
         parents.add(path.parent)
     for parent in parents:
         if not parent.is_dir():

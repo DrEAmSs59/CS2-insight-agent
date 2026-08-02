@@ -1,13 +1,16 @@
+import asyncio
 import bz2
 import sys
 import time
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.steam_match_history import (
+    _official_steam_avatar_url,
     _decompress_bz2_atomic,
     is_demo_expired,
     demo_expires_at_iso,
@@ -17,6 +20,69 @@ from app.steam_match_history import (
     build_demo_url,
     parse_match_row,
 )
+from app import main
+from app.env_utils import AppConfig
+
+
+def test_official_steam_avatar_url_accepts_only_https_steam_cdn():
+    avatar = "https://avatars.cloudflare.steamstatic.com/abc_full.jpg"
+    assert _official_steam_avatar_url(avatar) == avatar
+    assert _official_steam_avatar_url("//avatars.steamstatic.com/abc.jpg") == "https://avatars.steamstatic.com/abc.jpg"
+    assert _official_steam_avatar_url("http://avatars.steamstatic.com/abc.jpg") == ""
+    assert _official_steam_avatar_url("https://example.com/abc.jpg") == ""
+
+
+def test_player_avatar_route_is_disabled_without_network_opt_in(monkeypatch):
+    public_lookup = AsyncMock(side_effect=AssertionError("disabled setting must not make a request"))
+    monkeypatch.setattr(main, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=False))
+    monkeypatch.setattr(main, "fetch_public_player_summaries", public_lookup)
+
+    result = asyncio.run(main.get_steam_player_avatars("76561198000000001"))
+
+    assert result == {"enabled": False, "avatars": {}}
+    public_lookup.assert_not_awaited()
+
+
+def test_player_avatar_route_filters_ids_and_non_steam_urls(monkeypatch):
+    steam_id = "76561198000000001"
+    public_lookup = AsyncMock(return_value=[
+        {"steamid": steam_id, "avatarfull": "https://avatars.cloudflare.steamstatic.com/abc_full.jpg"},
+        {"steamid": "76561198000000002", "avatarfull": "https://example.com/not-steam.jpg"},
+    ])
+    monkeypatch.setattr(main, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=True))
+    monkeypatch.setattr(main, "fetch_public_player_summaries", public_lookup)
+
+    result = asyncio.run(main.get_steam_player_avatars(f"bad,{steam_id},{steam_id}"))
+
+    assert result == {
+        "enabled": True,
+        "avatars": {steam_id: "https://avatars.cloudflare.steamstatic.com/abc_full.jpg"},
+    }
+    public_lookup.assert_awaited_once_with([steam_id])
+
+
+def test_decompress_bz2_publishes_complete_demo_atomically(tmp_path: Path):
+    compressed = tmp_path / "match.dem.bz2"
+    compressed.write_bytes(bz2.compress(b"complete-demo"))
+    destination = tmp_path / "match.dem"
+
+    _decompress_bz2_atomic(compressed, destination)
+
+    assert destination.read_bytes() == b"complete-demo"
+    assert not list(tmp_path.glob(".match.dem.*.partial"))
+
+
+def test_decompress_bz2_failure_preserves_existing_demo(tmp_path: Path):
+    compressed = tmp_path / "broken.dem.bz2"
+    compressed.write_bytes(b"not-bzip2")
+    destination = tmp_path / "broken.dem"
+    destination.write_bytes(b"known-good-demo")
+
+    with pytest.raises(OSError):
+        _decompress_bz2_atomic(compressed, destination)
+
+    assert destination.read_bytes() == b"known-good-demo"
+    assert not list(tmp_path.glob(".broken.dem.*.partial"))
 
 
 def test_decompress_bz2_publishes_complete_demo_atomically(tmp_path: Path):

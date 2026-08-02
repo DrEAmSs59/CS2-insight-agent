@@ -23,6 +23,7 @@
 Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
 Var CS2ElectronDir       ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
+Var CS2ElectronMode      ; "/currentuser" for HKCU or "/allusers" for HKLM
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -202,12 +203,36 @@ Function CS2_ElectronDirMatchesInstDir
 FunctionEnd
 
 Function CS2_RunElectronUninstaller
-  ; Inputs: $R8 = uninstall command. Fully silent by design: electron-builder's
-  ; /S uninstall keeps the %APPDATA% user data in place, and the user asked for
-  ; a no-questions upgrade path.
+  ; Inputs: $CS2ElectronUninsExe, $CS2ElectronDir, $CS2ElectronMode.
+  ;
+  ; Use the same execution strategy as electron-builder's own
+  ; uninstallOldVersion helper. A plain ExecWait on the registered
+  ; UninstallString only waits for the NSIS launcher; the launcher can copy
+  ; itself to %TEMP% and return while the real uninstall is still deleting the
+  ; large bundled runtime. Copying it out first and passing _?= makes this
+  ; process perform the real uninstall, so ExecWait covers registry and
+  ; directory cleanup too. _?= must be the final argument and must not quote
+  ; the directory, even when it contains spaces.
+  ;
+  ; --updated and /KEEP_APP_DATA preserve the Electron profile for migration,
+  ; including builds configured to delete app data on a normal uninstall.
   DetailPrint "正在静默卸载旧版 CS2 Insight Agent (Electron)…"
+  Delete "$PLUGINSDIR\cs2-electron-uninstaller.exe"
   ClearErrors
-  ExecWait '$R8 /S' $R0
+  CopyFiles /SILENT "$CS2ElectronUninsExe" "$PLUGINSDIR\cs2-electron-uninstaller.exe"
+  ${If} ${Errors}
+    StrCpy $R7 "无法准备旧版 Electron 卸载程序。安装已中止，旧程序和用户数据均未删除。"
+    Call CS2_AbortMigrationInstall
+  ${EndIf}
+
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\cs2-electron-uninstaller.exe" /S /KEEP_APP_DATA $CS2ElectronMode --updated _?=$CS2ElectronDir' $R0
+  ${If} ${Errors}
+    ; Match electron-builder's group-policy fallback: if Windows blocks an
+    ; executable copied to the temp directory, run the original in place.
+    ClearErrors
+    ExecWait '"$CS2ElectronUninsExe" /S /KEEP_APP_DATA $CS2ElectronMode --updated _?=$CS2ElectronDir' $R0
+  ${EndIf}
   ${If} ${Errors}
     StrCpy $R7 "无法启动旧版 Electron 卸载程序。安装已中止，旧程序和用户数据均未删除。"
     Call CS2_AbortMigrationInstall
@@ -265,6 +290,7 @@ Function CS2_RemoveElectronHKCU
     ${EndIf}
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    StrCpy $CS2ElectronMode "/currentuser"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
     cs2_hkcu_wait_removed:
@@ -311,6 +337,7 @@ Function CS2_RemoveElectronHKLM
     ${EndIf}
 
     StrCpy $R9 "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R5"
+    StrCpy $CS2ElectronMode "/allusers"
     Call CS2_RunElectronUninstaller
     StrCpy $R6 0
     cs2_hklm_wait_removed:
@@ -381,9 +408,12 @@ FunctionEnd
   ; Validate the exact installed runtime before the finish page can launch
   ; Tauri. This catches stale metadata, a missing extension, or an incomplete
   ; file copy at install time instead of surfacing as a backend startup dialog.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"' $R0
-  ${If} ${Errors}
+  ; nsExec captures the console process instead of letting Windows create a
+  ; terminal window over the installer for this short-lived validation.
+  nsExec::ExecToStack '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\demoparser_runtime.py"'
+  Pop $R0
+  Pop $R1
+  ${If} $R0 == "error"
     StrCpy $R7 "Tauri 已安装，但无法执行内置 Rust Demo 解析器校验。安装已停止，请重新运行完整安装包。"
     Call CS2_AbortMigrationInstall
   ${EndIf}
@@ -394,9 +424,12 @@ FunctionEnd
 
   ; Run the same idempotent migration used by the desktop startup before the
   ; finish page can launch Tauri. A failure leaves every legacy source intact.
-  ClearErrors
-  ExecWait '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export' $R0
-  ${If} ${Errors}
+  ; Keep the migration synchronous and exit-code checked, but run it behind
+  ; nsExec so the bundled console Python never flashes a terminal window.
+  nsExec::ExecToStack '"$INSTDIR\python\python.exe" -I "$INSTDIR\backend\app\desktop_data_migration.py" --appdata "$APPDATA" --require-desktop-stopped --require-electron-ui-export'
+  Pop $R0
+  Pop $R1
+  ${If} $R0 == "error"
     StrCpy $R7 "Tauri 已安装，但无法启动用户数据迁移程序。旧数据仍然保留；安装已停止，请查看 %APPDATA%\CS2 Insight Agent\desktop-data-migration-error.log。"
     Call CS2_AbortMigrationInstall
   ${EndIf}

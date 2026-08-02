@@ -1,13 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import CustomTitleBar from "./CustomTitleBar";
-import API from "../api/api";
 import { desktopBridge } from "../desktop/desktopBridge";
-
-
-vi.mock("../api/api", () => ({
-  default: { post: vi.fn().mockResolvedValue({ data: { ok: true } }) },
-}));
 
 vi.mock("../desktop/desktopBridge", () => ({
   isDesktopApp: true,
@@ -23,20 +18,30 @@ vi.mock("../desktop/desktopBridge", () => ({
 describe("CustomTitleBar", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  const renderTitleBar = () => render(<MemoryRouter><CustomTitleBar /></MemoryRouter>);
+
   test("leaves drag-region double-click handling to the native window", async () => {
-    render(<CustomTitleBar />);
+    renderTitleBar();
     await waitFor(() => expect(desktopBridge.isMaximized).toHaveBeenCalled());
 
     fireEvent.doubleClick(screen.getByTestId("custom-titlebar"));
     expect(desktopBridge.toggleMaximize).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle maximize" }));
+    fireEvent.click(screen.getByRole("button", { name: /最大化|Maximize/ }));
     expect(desktopBridge.toggleMaximize).toHaveBeenCalledTimes(1);
   });
 
-  test("opens the desktop log directory from the title bar", () => {
-    render(<CustomTitleBar />);
-    fireEvent.click(screen.getByRole("button", { name: "打开日志目录" }));
-    expect(API.post).toHaveBeenCalledWith("config/open-logs");
+  test("does not repeat the current page title in the window chrome", () => {
+    renderTitleBar();
+    expect(screen.queryByText(/上手指南|Getting Started|Demo 分析|Analysis/)).toBeNull();
+  });
+
+  test("reserves layout height in the shell instead of floating over page content", () => {
+    renderTitleBar();
+    expect(screen.queryByTestId("titlebar-version")).toBeNull();
+    const titlebar = screen.getByTestId("custom-titlebar");
+    expect(titlebar.className).toContain("relative");
+    expect(titlebar.className).toContain("shrink-0");
+    expect(titlebar.className).not.toContain("absolute");
   });
 });

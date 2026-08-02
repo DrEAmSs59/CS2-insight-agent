@@ -6,7 +6,8 @@ export default function PreviewAudioItem({ item, isPlaying }) {
   const sourceTime = Math.max(0, Number(item?.sourceTime) || 0);
   const safeRate = Math.max(0.25, Math.min(4, Number(item?.playbackRate) || 1));
   const safeVolume = Math.max(0, Math.min(1, Number(item?.volume) || 0));
-  const muted = Boolean(item?.muted || safeVolume <= 0);
+  const preloadOnly = Boolean(item?.preloadOnly);
+  const muted = Boolean(preloadOnly || item?.muted || safeVolume <= 0);
   const reversePlayback = Boolean(item?.reversePlayback);
 
   useLayoutEffect(() => {
@@ -18,9 +19,9 @@ export default function PreviewAudioItem({ item, isPlaying }) {
     const element = audioRef.current;
     if (!element || !item?.src) return;
     element.playbackRate = safeRate;
-    element.volume = safeVolume;
+    element.volume = preloadOnly ? 0 : safeVolume;
     element.muted = muted;
-  }, [item?.src, muted, safeRate, safeVolume]);
+  }, [item?.src, muted, preloadOnly, safeRate, safeVolume]);
 
   useEffect(() => {
     const element = audioRef.current;
@@ -43,9 +44,9 @@ export default function PreviewAudioItem({ item, isPlaying }) {
   useEffect(() => {
     const element = audioRef.current;
     if (!element || !item?.src) return;
-    if (isPlaying && !muted && !reversePlayback) void element.play().catch(() => {});
+    if (isPlaying && !preloadOnly && !muted && !reversePlayback) void element.play().catch(() => {});
     else element.pause();
-  }, [isPlaying, item?.src, muted, reversePlayback]);
+  }, [isPlaying, item?.src, muted, preloadOnly, reversePlayback]);
 
   useEffect(() => {
     const element = audioRef.current;

@@ -1,0 +1,11 @@
+{
+  "note": "Deterministic AES-256-GCM SKINREQ1 frame (fixed nonce). Replace/extend with Rust-exported golden vectors when available from CS2-demo-anyskin Task 1.",
+  "magic": "SKINREQ1",
+  "version": 1,
+  "input_path": "in.dem",
+  "output_path": "out.dem",
+  "plaintext": "{\"ok\":true}",
+  "key_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+  "nonce_hex": "000102030405060708090a0b",
+  "blob_hex": "534b494e5245513101000102030405060708090a0b7efcfeb693168679e863393836bd4dfdb184991a9ad6e208e843fa"
+}

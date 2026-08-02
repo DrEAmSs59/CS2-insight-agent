@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import API from "../../api/api";
 import useSessionState from "../../hooks/useSessionState";
+import { useT } from "../../i18n/useT.js";
+import DockableRow from "../layout/DockableRow";
 import { resolveHudWeaponStem } from "./timeline/killfeed/resolveHudWeaponStem";
 import ReplaySceneCanvas, { computeBombState } from "./ReplaySceneCanvas";
 import { isSmokeDebugEnabled } from "./smokeDebugGate";
@@ -355,6 +357,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
   const number = replayPlayerNumber(teamKey, index);
   const weapon = resolveReplayWeapon(state) || (alive ? "" : "—");
   const weaponStem = resolveHudWeaponStem(weapon, weapon, { fallback: "knife" });
+  const weaponLabel = weapon;
   const hasC4 = Boolean(exclusiveCarrier && displayName.toLowerCase() === exclusiveCarrier);
   const hasArmor = Number(state.armor || 0) > 0;
   const armorValue = Math.max(0, Number(state.armor) || 0);
@@ -402,7 +405,8 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
       data-smoked={smoked ? "true" : "false"}
       data-burning={burning ? "true" : "false"}
       data-blinded={blinded ? "true" : "false"}
-      className={`replay-observer-slot relative isolate h-[84px] overflow-hidden rounded-[3px] border shadow-[0_5px_12px_rgba(0,0,0,0.35)] ${
+      data-mirrored={mirrored ? "true" : "false"}
+      className={`replay-observer-slot replay-roster-slot relative isolate h-[84px] overflow-hidden rounded-[3px] border shadow-[0_5px_12px_rgba(0,0,0,0.35)] ${
         isT
           ? "border-amber-200/45 bg-[#1b1707]"
           : "border-sky-300/45 bg-[#07182a]"
@@ -439,13 +443,13 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
         />
       </span>
       {/* Two rows: ID / weapon / HP aligned on top; stats / gear / armor on bottom. */}
-      <div className={`relative z-10 -mt-0.5 grid h-full content-start grid-rows-[auto_auto] gap-x-2 gap-y-1 px-2.5 pb-2 pt-0 ${
+      <div className={`replay-roster-slot-grid relative z-10 -mt-0.5 grid h-full content-start grid-rows-[auto_auto] gap-x-2 gap-y-1 px-2.5 pb-2 pt-0 ${
         mirrored
           ? "grid-cols-[52px_minmax(0,1fr)_110px]"
           : "grid-cols-[110px_minmax(0,1fr)_52px]"
       }`}>
         {/* Identity: name row */}
-        <div className={`flex min-w-0 items-start ${mirrored ? "col-start-3 row-start-1 justify-end text-right" : "col-start-1 row-start-1 justify-start text-left"}`}>
+        <div className={`replay-roster-slot-name flex min-w-0 items-start ${mirrored ? "col-start-3 row-start-1 justify-end text-right" : "col-start-1 row-start-1 justify-start text-left"}`}>
           <span className="inline-flex max-w-full items-center gap-1 pt-3">
             <span title={displayName} className={`min-w-0 truncate text-[12px] font-black tracking-[0.01em] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${alive ? "text-white" : "text-white/40"}`}>
               {displayName}
@@ -454,7 +458,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
           </span>
         </div>
         {/* Identity: stats + money */}
-        <div className={`flex min-w-0 flex-col justify-start gap-0.5 ${mirrored ? "col-start-3 row-start-2 items-end text-right" : "col-start-1 row-start-2 items-start text-left"}`}>
+        <div className={`replay-roster-slot-stats flex min-w-0 flex-col justify-start gap-0.5 ${mirrored ? "col-start-3 row-start-2 items-end text-right" : "col-start-1 row-start-2 items-start text-left"}`}>
           <span className={`flex items-center gap-1.5 text-[9px] font-bold ${alive ? "text-white/80" : "text-white/35"} ${mirrored ? "flex-row-reverse" : ""}`}>
             <span className="inline-flex items-center gap-0.5"><Crosshair className="h-2.5 w-2.5" />{stats.kills}</span>
             <span className="inline-flex items-center gap-0.5"><Skull className="h-2.5 w-2.5" />{stats.deaths}</span>
@@ -465,9 +469,9 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
         </div>
         {/* Loadout: kill stars above weapon, weapon baseline matches ID */}
         <div
-          title={weapon}
-          aria-label={`${displayName} 当前武器 ${weapon}`}
-          className={`flex min-w-0 flex-col justify-start gap-0.5 overflow-visible ${
+          title={weaponLabel}
+          aria-label={`${displayName} 当前武器 ${weaponLabel}`}
+          className={`replay-roster-slot-weapon flex min-w-0 flex-col justify-start gap-0.5 overflow-visible ${
             mirrored ? "col-start-2 row-start-1 items-start" : "col-start-2 row-start-1 items-end"
           }`}
         >
@@ -489,6 +493,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
           {weaponStem && (
             <HudEquipmentIcon
               stem={weaponStem}
+              title={weaponLabel}
               className={`h-5 w-[60px] max-w-full object-contain drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] ${
                 mirrored ? "object-left" : "object-right"
               } ${alive ? "" : "opacity-40"}`}
@@ -496,13 +501,13 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
           )}
         </div>
         {/* Loadout: utilities / C4 / defuser (same row as stats) */}
-        <div className={`flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+        <div className={`replay-roster-slot-gear flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
           mirrored ? "col-start-2 row-start-2 justify-start pl-0.5" : "col-start-2 row-start-2 justify-end pr-0.5"
         }`}>
           {loadoutFromHp}
         </div>
         {/* HP — top-aligned with weapon after star row */}
-        <div className={`flex items-start pt-3 ${
+        <div className={`replay-roster-slot-health flex items-start pt-3 ${
           mirrored ? "col-start-1 row-start-1 justify-start" : "col-start-3 row-start-1 justify-end"
         }`}>
           <span className={`font-mono text-[25px] font-black leading-none tabular-nums tracking-[-0.08em] ${
@@ -512,7 +517,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
           </span>
         </div>
         {/* Armor */}
-        <div className={`flex items-start ${alive ? "" : "opacity-40"} ${
+        <div className={`replay-roster-slot-armor flex items-start ${alive ? "" : "opacity-40"} ${
           mirrored ? "col-start-1 row-start-2 justify-start" : "col-start-3 row-start-2 justify-end"
         }`}>
           {hasArmor ? (
@@ -549,7 +554,7 @@ const ReplayRoster = memo(function ReplayRoster({
   const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
   const aliveCount = players.filter((player) => byName.get(safeLabel(player.name).toLowerCase())?.is_alive !== false).length;
   return (
-    <aside className={`rounded-xl border bg-[#07090c] p-2.5 shadow-xl ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
+    <aside className={`replay-roster h-full rounded-xl border bg-[#07090c] p-2.5 shadow-xl ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
       <div className={`mb-2 flex items-center justify-between border-b pb-2 ${mirrored ? "flex-row-reverse" : ""} ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
         <div className={`flex items-center gap-2 ${mirrored ? "flex-row-reverse" : ""}`}>
           <span className={`h-5 min-w-7 rounded-sm px-1 text-center font-mono text-[11px] font-black leading-5 ${isT ? "bg-amber-300 text-amber-950" : "bg-sky-400 text-sky-950"}`}>{sideName}</span>
@@ -590,7 +595,10 @@ export default function Demo2DReplayPreview({
   teamBName = "Team B",
   initialRound,
   onRoundChange,
+  layoutEditing = false,
+  layoutResetSignal = 0,
 }) {
+  const t = useT();
   const rounds = workspace?.rounds || [];
   const sessionIdentity = encodeURIComponent(String(demoPath || workspace?.demo_fingerprint || workspace?.map_name || "unknown"));
   const sessionPrefix = `demo-replay:${sessionIdentity}`;
@@ -1162,9 +1170,33 @@ export default function Demo2DReplayPreview({
         </div>
       </section>
 
-      <div className="grid gap-3 xl:grid-cols-[300px_minmax(460px,1fr)_300px]">
-        <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
-        <section className="relative min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
+      <DockableRow
+        storageKey="analysis-replay-board"
+        ariaLabel={t("analysis.layout.replay")}
+        editMode={layoutEditing}
+        resetSignal={layoutResetSignal}
+        className="replay-dock-row min-h-[720px]"
+        panels={[
+          {
+            id: "team-a-hud",
+            label: t("analysis.layout.teamHud", { team: teamAName }),
+            minSize: 120,
+            defaultSize: 300,
+            collapsible: false,
+            className: "replay-roster-panel",
+            content: (
+              <ReplayRoster title={teamAName} teamKey="a" side={selectedRound.team_a_side} players={teamAPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+            ),
+          },
+          {
+            id: "radar",
+            label: t("analysis.layout.radar"),
+            minSize: 210,
+            defaultSize: 680,
+            collapsible: false,
+            className: "replay-radar-panel",
+            content: (
+        <section className="relative h-full min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
             {smokeDebugOn && (
@@ -1213,8 +1245,21 @@ export default function Demo2DReplayPreview({
           />
           {!transform && <div className="absolute inset-x-0 bottom-4 text-center text-[9px] text-cs2-text-muted">当前地图缺少坐标变换元数据</div>}
         </section>
-        <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
-      </div>
+            ),
+          },
+          {
+            id: "team-b-hud",
+            label: t("analysis.layout.teamHud", { team: teamBName }),
+            minSize: 120,
+            defaultSize: 300,
+            collapsible: false,
+            className: "replay-roster-panel",
+            content: (
+              <ReplayRoster title={teamBName} teamKey="b" side={selectedRound.team_b_side} players={teamBPlayers} framePlayers={uiFrame.players} bombCarrierName={uiBombState.carrier} liveStatsByName={liveStatsByName} roundKillStarsByName={roundKillStarsByName} utilityExposureByName={utilityExposureByName} />
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

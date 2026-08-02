@@ -1,3 +1,5 @@
+import { resolveCs2WeaponModel } from "./cs2ItemCatalog.js";
+
 const MAGIC = "CS2RPL01";
 const VERSION = 1;
 const PLAYER_CACHE_FRAMES = 160;
@@ -85,6 +87,9 @@ class ReplayBinaryTable {
     this.metadata = metadata;
     this.fps = Math.max(0.001, Number(metadata.fps) || 8);
     this.strings = Array.isArray(metadata.strings) ? metadata.strings : [""];
+    this.playerSkinLoadouts = metadata.player_skin_loadouts && typeof metadata.player_skin_loadouts === "object"
+      ? metadata.player_skin_loadouts
+      : {};
     this.ticks = columns.ticks;
     this.offsets = columns.offsets;
     this.columns = columns;
@@ -126,6 +131,16 @@ class ReplayBinaryTable {
     return value;
   }
 
+  skinForPlayer(steamid, weapon) {
+    const model = resolveCs2WeaponModel(weapon);
+    if (!steamid || !model) return { model, skin: null };
+    const skin = this.playerSkinLoadouts[String(steamid)]?.[model];
+    return {
+      model,
+      skin: skin && typeof skin === "object" ? skin : null,
+    };
+  }
+
   playersAt(frameIndex) {
     if (this.playerCache.has(frameIndex)) {
       const hit = this.playerCache.get(frameIndex);
@@ -161,7 +176,9 @@ class ReplayBinaryTable {
       const flags = this.columns.flags[row];
       const activeWeapon = this.text(this.columns.activeWeaponId[row]);
       const activeWeaponName = this.text(this.columns.activeWeaponNameId[row]);
-      players.push({
+      const weapon = resolveWeapon(activeWeaponName, activeWeapon, inventory);
+      const resolvedItem = this.skinForPlayer(sid, weapon);
+      const player = {
         steamid64: sid,
         name,
         team: teamNum === 3 ? "CT" : "T",
@@ -176,14 +193,17 @@ class ReplayBinaryTable {
         money: Math.max(0, this.columns.balance[row]),
         equipment_value: Math.max(0, this.columns.equipmentValue[row]),
         inventory,
-        weapon: resolveWeapon(activeWeaponName, activeWeapon, inventory),
+        weapon,
         has_defuser: Boolean(flags & 4),
         has_c4: Boolean(flags & 8) || inventoryKeys.has("c4") || inventoryKeys.has("c4_explosive"),
         flash_duration: Math.max(0, this.columns.flashDuration[row]),
         is_pov: Boolean((povSid && sid === povSid) || (povName && name.toLowerCase() === povName)),
         is_teammate: povTeam !== null && teamNum === povTeam,
         slot_color_index: colorSlot(this.text(this.columns.playerColorId[row])),
-      });
+      };
+      if (resolvedItem.model) player.weapon_model = resolvedItem.model;
+      if (resolvedItem.skin) player.weapon_skin = resolvedItem.skin;
+      players.push(player);
     }
     this.playerCache.set(frameIndex, players);
     while (this.playerCache.size > PLAYER_CACHE_FRAMES) {

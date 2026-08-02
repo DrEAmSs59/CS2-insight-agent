@@ -306,6 +306,10 @@ class OBSConfig(BaseModel):
     obs_path: str = ""
     # OBS 配置中心"配置检查"是否通过过（WebSocket 连接成功）
     obs_config_verified: bool = False
+    # 让 OBS 驱动浏览器源出帧（--enable-begin-frame-scheduling），把叠加层的时序抖动
+    # 收成固定偏置。是进程级开关，只在冷启动时生效；KillFX 的 webm 播放可能受影响，
+    # 因此默认关闭；诊断时改配置文件或 PUT /api/config 打开。
+    browser_begin_frame_scheduling: bool = False
 
 
 class LLMConfig(BaseModel):
@@ -384,7 +388,7 @@ class AppConfig(BaseModel):
     spec_player_verify: SpecPlayerVerifyConfig = Field(default_factory=SpecPlayerVerifyConfig)
     # 合辑导出：留空则从 PATH 探测 ffmpeg.exe
     ffmpeg_path: str = ""
-    # 合辑 H.264：auto=按 NVENC→QSV→AMF→libx264 顺序，对硬件编码器做单帧实测后再选用；亦可指定编码器名
+    # 合辑 H.264：auto=独显优先选择主 GPU 对应硬编，按实际输出规格实测，失败时回退 libx264；亦可指定编码器名
     montage_encoder: str = "auto"
     # LiteCut 导入素材、预览代理和工程导出的独立存储根目录；留空时沿用应用 data/lite_cut_assets。
     lite_cut_assets_dir: str = ""
@@ -393,6 +397,8 @@ class AppConfig(BaseModel):
     lite_cut_proxy_resolution: int = 720
     cs2_path: str = ""
     demo_directory: str = ""
+    # Demo 工作副本缓存根目录；留空则使用 data/demo-cache。入库/上传后复制到此，解析播放录制走缓存。
+    demo_cache_directory: str = ""
     demo_watch_paths: list[str] = Field(default_factory=list)
     # Demo 库扫描深度：0=仅所选目录，1=再含一级子目录，依此类推。
     demo_watch_scan_depth: int = Field(default=2, ge=0, le=32)
@@ -429,6 +435,9 @@ class AppConfig(BaseModel):
     # 官匹战绩
     steam_api_key: str = ""
     steam_id64: str = ""
+    # 允许把 Demo roster 中的公开 SteamID 发给 Steam Community，并从 Steam CDN 加载头像。
+    # 默认开启以提供自然的增强体验；关闭后不会发起这类请求，并自动回退到本地首字占位。
+    steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
     # 虚拟键盘 overlay（OBS Browser Source 实时合成）
@@ -440,6 +449,9 @@ class AppConfig(BaseModel):
     kill_fx_tick_offset: int = 6      # KillFX 独立偏移；不再与键盘偏移叠加
     # 兼容标记：旧配置中 kill_fx_tick_offset 是叠加在键盘偏移上的额外微调。
     overlay_offsets_independent: bool = True
+    # 时序自检：录制时让键盘 overlay 在角落打一串校准闪白，用来回读叠加层的真实延迟。
+    # 成片里会多出一块不透明方块，只在诊断时开（配置文件 / API，设置页已下线）。
+    latency_calibration_enabled: bool = False
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:

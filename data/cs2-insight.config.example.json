@@ -12,6 +12,7 @@
   },
   "cs2_path": "",
   "demo_directory": "",
+  "demo_cache_directory": "",
   "ai_mode": false,
   "locale": "zh",
   "recording_global_pacing": {},

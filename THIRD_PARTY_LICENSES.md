@@ -32,9 +32,11 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 | @tailwindcss/vite       | MIT     | https://github.com/tailwindlabs/tailwindcss            |
 | vite                    | MIT     | https://github.com/vitejs/vite                         |
 | @vitejs/plugin-react    | MIT     | https://github.com/vitejs/vite-plugin-react            |
+| @ianlucas/cs2-lib       | MIT     | https://github.com/ianlucas/cs2-lib                    |
+| @ianlucas/cs2-lib-inspect | MIT   | https://github.com/ianlucas/cs2-lib-inspect            |
+| cs2-inventory-simulator (UI / inspect reference) | MIT | https://github.com/ianlucas/cs2-inventory-simulator |
 | Tauri                   | MIT / Apache-2.0 | https://github.com/tauri-apps/tauri            |
 | Tauri Plugins           | MIT / Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
-
 
 ## Trademark Notices
 

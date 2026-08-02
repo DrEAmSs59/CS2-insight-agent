@@ -126,7 +126,7 @@ def build_round_economy_shared(
     economy_fields = PLAYER_TEAM_PARSE_FIELDS + [
         "current_equip_value", "cash_spent_this_round", "start_balance",
         "armor", "has_helmet", "has_defuser", "inventory",
-        "is_alive", "name", "steamid", "user_id",
+        "is_alive", "name", "steamid", "user_id", "player_color",
     ]
     try:
         raw = parser.parse_ticks(economy_fields, ticks=ticks)

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "recommended_name": "ffmpeg-2026-05-06-git-f2e5eff3ff-full_build",
+  "reference_version": "2026-05-06-git-f2e5eff3ff-full_build-www.gyan.dev",
+  "required_build_flags": [
+    "--enable-libx264",
+    "--enable-libdav1d",
+    "--enable-amf",
+    "--enable-libvpl",
+    "--enable-nvenc",
+    "--enable-vulkan",
+    "--enable-opencl"
+  ],
+  "required_encoders": [
+    "libx264",
+    "h264_nvenc",
+    "h264_amf",
+    "h264_qsv"
+  ],
+  "required_decoders": [
+    "h264",
+    "hevc",
+    "av1",
+    "vp9"
+  ],
+  "required_hwaccels": [
+    "cuda",
+    "d3d11va",
+    "d3d12va",
+    "qsv"
+  ],
+  "minimum_libraries": {
+    "libavcodec": "62.30.100",
+    "libavformat": "62.15.100",
+    "libavfilter": "11.17.100"
+  }
+}

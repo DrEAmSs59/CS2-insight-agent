@@ -3,7 +3,6 @@ import { useT } from "../../i18n/useT.js";
 export default function DemoBatchActionBar({
   count,
   onLoadSelected,
-  onOpenBatchModal,
   onBatchDelete,
   onClearSelection,
 }) {
@@ -13,9 +12,6 @@ export default function DemoBatchActionBar({
 
   const btn =
     "rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/40 hover:text-cs2-text-primary";
-
-  const btnPrimary =
-    "rounded-md border border-cs2-accent/45 bg-cs2-accent/10 px-2.5 py-1.5 text-[12px] font-bold text-cs2-accent hover:border-cs2-accent/70";
 
   const btnDanger =
     "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-red-500/55";
@@ -28,9 +24,6 @@ export default function DemoBatchActionBar({
       <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
         <button type="button" className={btn} onClick={() => void onLoadSelected()}>
           {t("library.batchLoad")}
-        </button>
-        <button type="button" className={btnPrimary} onClick={onOpenBatchModal}>
-          {t("library.batchLoadParse")}
         </button>
         <button type="button" className={btnDanger} onClick={() => void onBatchDelete()}>
           {t("library.batchDelete")}

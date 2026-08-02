@@ -166,18 +166,20 @@ function SelectInput({ value, onChange, options, className }) {
   );
 }
 
-function Toggle({ value, onChange, onLabel, offLabel }) {
+function Toggle({ value, onChange, onLabel, offLabel, ariaLabel }) {
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={() => onChange(!value)}
+        aria-label={ariaLabel ?? (value ? (onLabel ?? "On") : (offLabel ?? "Off"))}
+        aria-pressed={value}
         className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
           value ? "bg-cs2-accent" : "bg-cs2-bg-input"
         }`}
       >
         <span
-          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-cs2-text-on-accent shadow transition-transform ${
             value ? "translate-x-4" : "translate-x-0.5"
           }`}
         />
@@ -278,7 +280,7 @@ function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectFi
   );
 }
 
-function TagList({ items, onChange, placeholder, addLabel }) {
+function TagList({ items, onChange, placeholder, addLabel, emptyLabel }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const v = draft.trim();
@@ -290,7 +292,7 @@ function TagList({ items, onChange, placeholder, addLabel }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
-        {items.length === 0 && <span className="text-[11px] text-cs2-text-muted">尚未添加玩家</span>}
+        {items.length === 0 && <span className="text-[11px] text-cs2-text-muted">{emptyLabel}</span>}
         {items.map((name, idx) => (
           <span key={`${name}-${idx}`} className="inline-flex items-center gap-1 rounded-md bg-cs2-bg-input px-2 py-1 text-[11px] text-cs2-text-primary">
             {name}
@@ -320,7 +322,7 @@ function TagList({ items, onChange, placeholder, addLabel }) {
  * ------------------------------------------------------------------------ */
 
 // 格式化上次检查时间（ISO 8601 UTC -> 本地友好显示）
-function formatLastCheckTime(isoUtc) {
+function formatLastCheckTime(isoUtc, t, locale) {
   if (!isoUtc) return "";
   try {
     const d = new Date(isoUtc);
@@ -330,12 +332,13 @@ function formatLastCheckTime(isoUtc) {
     const diffMin = Math.floor(diffMs / 60000);
     const diffHour = Math.floor(diffMs / 3600000);
     const diffDay = Math.floor(diffMs / 86400000);
-    if (diffMin < 1) return "刚刚";
-    if (diffMin < 60) return `${diffMin} 分钟前`;
-    if (diffHour < 24) return `${diffHour} 小时前`;
-    if (diffDay < 7) return `${diffDay} 天前`;
+    if (diffMin < 1) return t("settings.timeJustNow");
+    if (diffMin < 60) return t("settings.timeMinutesAgo", { n: diffMin });
+    if (diffHour < 24) return t("settings.timeHoursAgo", { n: diffHour });
+    if (diffDay < 7) return t("settings.timeDaysAgo", { n: diffDay });
     // 超过一周显示具体日期
-    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const dateLocale = locale === "zh" ? "zh-CN" : "en";
+    return d.toLocaleDateString(dateLocale) + " " + d.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
   } catch {
     return isoUtc;
   }
@@ -372,6 +375,7 @@ function resolveTabFromSearch(searchParams) {
 
 export default function SettingsPage() {
   const t = useT();
+  const effectiveLocale = useLocaleStore((state) => state.effectiveLocale);
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -388,6 +392,10 @@ export default function SettingsPage() {
   const [liteCutStorageBusy, setLiteCutStorageBusy] = useState(false);
   const [liteCutStorageMsg, setLiteCutStorageMsg] = useState(null);
   const [liteCutStorageJob, setLiteCutStorageJob] = useState(null);
+  const [demoCacheInfo, setDemoCacheInfo] = useState(null);
+  const [demoCacheDraft, setDemoCacheDraft] = useState("");
+  const [demoCacheBusy, setDemoCacheBusy] = useState(false);
+  const [demoCacheMsg, setDemoCacheMsg] = useState(null);
   const recordingSaveRef = useRef(null);
   const [recordingSaveUi, setRecordingSaveUi] = useState({ disabled: true, state: "idle" });
 
@@ -474,6 +482,96 @@ export default function SettingsPage() {
       setReplayCacheBusy(false);
     }
   }, [replayCacheBusy, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await API.get("demo-cache");
+        if (!cancelled) {
+          setDemoCacheInfo(data);
+          setDemoCacheDraft(data?.path ?? "");
+        }
+      } catch (e) {
+        if (!cancelled) console.error("Failed to load demo cache info:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const browseDemoCache = useCallback(async () => {
+    try {
+      let selected = "";
+      if (desktopBridge) {
+        selected = await desktopBridge.chooseDirectory(demoCacheDraft);
+      } else {
+        const { data } = await API.post("directory-picker");
+        selected = data?.path ?? "";
+      }
+      if (selected) {
+        setDemoCacheDraft(selected);
+        setDemoCacheMsg(null);
+      }
+    } catch (e) {
+      setDemoCacheMsg({ tone: "error", text: e.response?.data?.detail || e.message });
+    }
+  }, [demoCacheDraft]);
+
+  const migrateDemoCache = useCallback(async () => {
+    const destination = demoCacheDraft.trim();
+    if (!destination || demoCacheBusy) return;
+    if (!window.confirm(t("settings.demoCacheMigrateConfirm"))) return;
+    setDemoCacheBusy(true);
+    setDemoCacheMsg(null);
+    try {
+      const { data } = await API.post("demo-cache/migrate", { destination });
+      setDemoCacheInfo((prev) => ({ ...(prev || {}), ...data, custom: true }));
+      setDemoCacheDraft(data.path || destination);
+      setConfig((prev) => (prev ? { ...prev, demo_cache_directory: data.path || destination } : prev));
+      setDemoCacheMsg({
+        tone: "ok",
+        text: data.unchanged
+          ? t("settings.demoCacheUnchanged")
+          : t("settings.demoCacheMigrateSuccess", {
+              moved: data.moved ?? 0,
+              updated: data.db_updated ?? 0,
+            }),
+      });
+    } catch (e) {
+      setDemoCacheMsg({
+        tone: "error",
+        text: e.response?.data?.detail || e.message || t("settings.demoCacheMigrateFailed"),
+      });
+    } finally {
+      setDemoCacheBusy(false);
+    }
+  }, [demoCacheBusy, demoCacheDraft, t]);
+
+  const clearDemoCache = useCallback(async () => {
+    if (demoCacheBusy || !window.confirm(t("settings.demoCacheClearConfirm"))) return;
+    setDemoCacheBusy(true);
+    setDemoCacheMsg(null);
+    try {
+      const { data } = await API.post("demo-cache/clear");
+      const { data: next } = await API.get("demo-cache");
+      setDemoCacheInfo(next);
+      setDemoCacheDraft(next?.path ?? demoCacheDraft);
+      setDemoCacheMsg({
+        tone: "ok",
+        text: t("settings.demoCacheClearSuccess", {
+          files: data.removed_files ?? 0,
+          demos: data.demos_invalidated ?? 0,
+        }),
+      });
+    } catch (e) {
+      setDemoCacheMsg({
+        tone: "error",
+        text: e.response?.data?.detail || e.message || t("settings.demoCacheClearFailed"),
+      });
+    } finally {
+      setDemoCacheBusy(false);
+    }
+  }, [demoCacheBusy, demoCacheDraft, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -620,10 +718,12 @@ export default function SettingsPage() {
       payload.obs_agent_auto_prepare = !!config.obs_agent_auto_prepare;
       payload.locale = config.locale ?? "auto";
       payload.demo_directory = config.demo_directory ?? "";
+      payload.demo_cache_directory = config.demo_cache_directory ?? "";
       payload.demo_watch_paths = config.demo_watch_paths ?? [];
       payload.expected_parse_players = config.expected_parse_players ?? [];
       payload.steam_api_key = config.steam_api_key ?? "";
       payload.steam_id64 = config.steam_id64 ?? "";
+      payload.steam_cdn_assets_enabled = config.steam_cdn_assets_enabled !== false;
       payload.match_mode = config.match_mode ?? "premier";
       payload.match_count = config.match_count ?? 20;
 
@@ -860,7 +960,7 @@ export default function SettingsPage() {
                     <p className="text-xs text-cs2-text-primary font-mono">{appVersion}</p>
                     {config.last_update_check_at && (
                       <span className="text-xs text-cs2-text-muted">
-                        ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at)})
+                        ({t("settings.lastCheckTime")}: {formatLastCheckTime(config.last_update_check_at, t, effectiveLocale)})
                       </span>
                     )}
                     <button
@@ -928,8 +1028,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const locale = useLocaleStore.getState().locale;
-                      const subject = locale === 'zh' ? 'CS2-Insight-Agent 联系' : 'CS2-Insight-Agent Contact';
+                      const subject = t("settings.contactEmailSubject");
                       openExternalLink(`mailto:dreamss29_@outlook.com?subject=${encodeURIComponent(subject)}`);
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
@@ -949,12 +1048,16 @@ export default function SettingsPage() {
               </SectionCard>
 
               <SectionCard title={t("settings.sectionLanguage")} search={search && !matches(t("settings.sectionLanguage") + " " + t("settings.labelLocale"))}>
-                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? "中文" : "English" }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
+                <FieldRow label={t("settings.labelLocale")} hint={config.locale === "auto" ? t("settings.localeAutoHint", { lang: config.effective_locale === "zh" ? t("settings.localeZh") : t("settings.localeEn") }) : ""} search={search && !matches(t("settings.labelLocale") + " " + t("settings.localeZh"))}>
                   <SelectInput
                     value={config.locale ?? "auto"}
                     onChange={(v) => {
+                      const previousLocale = config.locale ?? "auto";
                       set("locale", v);
-                      useLocaleStore.getState().setLocale(v);
+                      void useLocaleStore.getState().setLocale(v).catch(() => {
+                        set("locale", previousLocale);
+                        setSaveMsg({ text: t("settings.localePersistFailed"), tone: "error" });
+                      });
                     }}
                     options={[
                       { value: "auto", label: t("settings.localeAuto") },
@@ -964,12 +1067,24 @@ export default function SettingsPage() {
                   />
                 </FieldRow>
               </SectionCard>
+
+              <SectionCard title={t("settings.sectionNetworkAssets")} hint={t("settings.sectionNetworkAssetsHint")} search={search && !matches(t("settings.sectionNetworkAssets") + " Steam CDN avatar cs2-lib finish")}>
+                <FieldRow label={t("settings.labelSteamCdnAssets")} hint={t("settings.hintSteamCdnAssets")}>
+                  <Toggle
+                    value={config.steam_cdn_assets_enabled !== false}
+                    onChange={(value) => set("steam_cdn_assets_enabled", value)}
+                    ariaLabel={t("settings.labelSteamCdnAssets")}
+                    onLabel={t("settings.networkAssetsEnabled")}
+                    offLabel={t("settings.networkAssetsDisabled")}
+                  />
+                </FieldRow>
+              </SectionCard>
                 </>
               )}
 
               {/* Paths (CS2 + application and LiteCut data directories) */}
               {activeTab === "paths" && (
-              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
+              <SectionCard title={t("settings.sectionPaths")} hint={t("settings.sectionPathsHint")} search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelCs2Path") + " " + t("settings.labelLiteCutStorage") + " " + t("settings.labelDemoCachePath") + " " + t("settings.labelDataDirectory") + " " + t("settings.labelLogDirectory"))}>
                 <FieldRow label={t("settings.labelCs2Path")} hint={t("settings.hintCs2Path")} search={search && !matches(t("settings.labelCs2Path") + " " + (config.cs2_path ?? ""))}>
                   <PathPicker
                     value={config.cs2_path ?? ""}
@@ -1060,6 +1175,63 @@ export default function SettingsPage() {
                         {liteCutStorageMsg.text}
                       </p>
                     )}
+                  </div>
+                </FieldRow>
+                <FieldRow label={t("settings.labelDemoCachePath")} hint={t("settings.hintDemoCachePath")} search={search && !matches(t("settings.labelDemoCachePath") + " " + (demoCacheDraft || "") + " " + t("settings.sectionDemoCache"))}>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={demoCacheDraft}
+                        onChange={(e) => {
+                          setDemoCacheDraft(e.target.value);
+                          setDemoCacheMsg(null);
+                        }}
+                        placeholder={demoCacheInfo?.default_path || ""}
+                        className="min-w-0 flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none"
+                      />
+                      <span className="shrink-0 text-xs text-cs2-text-muted">
+                        {formatFileSize(Number(demoCacheInfo?.total_bytes) || 0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={browseDemoCache}
+                        disabled={demoCacheBusy}
+                        className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-50"
+                      >
+                        {t("settings.browseBtn")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={migrateDemoCache}
+                        disabled={demoCacheBusy || !demoCacheDraft.trim()}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-cs2-accent px-3 py-2 text-xs font-bold text-black hover:bg-cs2-accent-light disabled:opacity-45"
+                      >
+                        {demoCacheBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {demoCacheBusy ? t("settings.demoCacheMigrating") : t("settings.demoCacheMigrate")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearDemoCache}
+                        disabled={demoCacheBusy}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-45"
+                      >
+                        {t("settings.demoCacheClear")}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-cs2-text-muted">
+                      {t("settings.demoCacheStats", {
+                        files: demoCacheInfo?.file_count ?? 0,
+                        size: formatFileSize(Number(demoCacheInfo?.total_bytes) || 0),
+                        cached: demoCacheInfo?.demo_cached ?? 0,
+                        total: demoCacheInfo?.demo_total ?? 0,
+                      })}
+                    </p>
+                    {demoCacheMsg ? (
+                      <p className={`text-[11px] ${demoCacheMsg.tone === "ok" ? "text-emerald-400" : "text-red-400"}`}>
+                        {demoCacheMsg.text}
+                      </p>
+                    ) : null}
                   </div>
                 </FieldRow>
                 <FieldRow label={t("settings.labelDataDirectory")} hint={t("settings.hintDataDirectory")} search={search && !matches(t("settings.labelDataDirectory") + " " + (dataDirInfo?.path ?? ""))}>
@@ -1222,7 +1394,7 @@ export default function SettingsPage() {
                 {/* Paths: OBS + FFmpeg */}
                 <SectionCard
                   title={t("settings.sectionPaths")}
-                  hint={aiObsRecommendationEnabled ? "FFmpeg 是全局工具；OBS 安装位置改由 Agent 自动识别。" : t("settings.sectionPathsHint")}
+                  hint={aiObsRecommendationEnabled ? t("settings.sectionPathsAgentHint") : t("settings.sectionPathsHint")}
                   search={search && !matches(t("settings.sectionPaths") + " " + t("settings.labelObsPath") + " " + t("settings.labelFfmpegPath"))}
                 >
                   {!aiObsRecommendationEnabled && (
@@ -1409,7 +1581,7 @@ export default function SettingsPage() {
               </SectionCard>
                 </>
               ) : (
-                (!search || matches("AI OBS 调优 FPS 分辨率 推荐程度 安全变更计划")) && (
+                (!search || matches(t("settings.obsAgentSearchTerms"))) && (
                   <ObsAiSettingsPanel
                     obsPath={obs.obs_path ?? ""}
                     obsConnected={Boolean(status?.obs_connected)}
@@ -1481,6 +1653,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("expected_parse_players", v)}
                     placeholder={t("settings.playerInputPlaceholder")}
                     addLabel={t("settings.playerAddBtn")}
+                    emptyLabel={t("settings.playersEmpty")}
                   />
                 </FieldRow>
               </SectionCard>
@@ -1493,6 +1666,7 @@ export default function SettingsPage() {
                     onChange={(v) => set("demo_watch_paths", v)}
                     placeholder="C:\\demos\\auto-watch"
                     addLabel={t("settings.sidebarWatchAdd")}
+                    emptyLabel={t("settings.watchPathsEmpty")}
                   />
                 </FieldRow>
               </SectionCard>

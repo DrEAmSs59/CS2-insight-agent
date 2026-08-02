@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowLeft,
@@ -11,7 +12,6 @@ import {
   Swords,
   Zap,
 } from "lucide-react";
-import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import KillfeedIconStrip from "./timeline/killfeed/KillfeedIconStrip";
 import { buildOverviewModel } from "./overview/buildOverviewModel";
@@ -26,9 +26,9 @@ import KeyRoundsTimeline from "./overview/KeyRoundsTimeline";
 
 export function Panel({ title, eyebrow, action, children, className = "" }) {
   return (
-    <section className={`rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm ${className}`}>
+    <section className={`analysis-panel ${className}`}>
       {(title || eyebrow || action) && (
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
+        <header className="flex min-h-11 items-center justify-between gap-3 border-b border-cs2-border-subtle px-4 py-2.5">
           <div className="min-w-0">
             {eyebrow && <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-cs2-accent">{eyebrow}</p>}
             {title && <h2 className="truncate text-[13px] font-bold text-cs2-text-primary">{title}</h2>}
@@ -43,14 +43,14 @@ export function Panel({ title, eyebrow, action, children, className = "" }) {
 
 export function MetricCard({ icon: Icon, label, value, detail, tone = "accent" }) {
   const tones = {
-    accent: "bg-cs2-accent-soft text-cs2-accent",
-    blue: "bg-sky-500/10 text-sky-400",
-    green: "bg-emerald-500/10 text-emerald-400",
-    violet: "bg-violet-500/10 text-violet-400",
+    accent: "border-cs2-accent/60 bg-cs2-accent-soft/45 text-cs2-accent",
+    blue: "border-sky-500/60 bg-sky-500/8 text-sky-400",
+    green: "border-emerald-500/60 bg-emerald-500/8 text-emerald-400",
+    violet: "border-violet-500/60 bg-violet-500/8 text-violet-400",
   };
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-cs2-border bg-cs2-bg-card px-3.5 py-3">
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tones[tone] || tones.accent}`}><Icon className="h-4 w-4" /></div>
+    <div className={`flex min-w-0 items-center gap-3 border-l-2 px-3.5 py-2.5 ${tones[tone] || tones.accent}`}>
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center"><Icon className="h-4 w-4" /></div>
       <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-wider text-cs2-text-muted">{label}</p><p className="mt-0.5 truncate text-lg font-black tabular-nums text-cs2-text-primary">{value}</p><p className="truncate text-[9px] text-cs2-text-muted">{detail}</p></div>
     </div>
   );
@@ -237,7 +237,6 @@ function sortScoreboardPlayers(players) {
 
 export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRound, onOpenHighlights }) {
   const overview = useMemo(() => buildOverviewModel(data), [data]);
-  const [scoreboardOpen, setScoreboardOpen] = useState(true);
   const [mobileScoreTeam, setMobileScoreTeam] = useState("a");
   const teamAName = data.team_a_name || "Team A";
   const teamBName = data.team_b_name || "Team B";
@@ -304,69 +303,67 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
         onOpenReplayRound={onOpenReplayRound}
       />
 
-      <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
-        <header className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+      <section data-testid="overview-full-scoreboard" className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
+        <header className="flex items-center justify-between gap-3 border-b border-cs2-border px-3.5 py-2.5">
           <h2 className="text-[12px] font-bold text-cs2-text-primary">全场数据</h2>
-          <button
-            type="button"
-            className="text-[10px] font-semibold text-cs2-accent hover:underline"
-            onClick={() => setScoreboardOpen((open) => !open)}
-          >
-            {scoreboardOpen ? "收起数据" : "展开数据"}
-          </button>
         </header>
-        {scoreboardOpen ? (
-          <div className="border-t border-cs2-border p-2.5">
-            <div className="mb-2 flex gap-1 md:hidden">
-              {[
-                ["a", teamAName],
-                ["b", teamBName],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setMobileScoreTeam(key)}
-                  className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${
-                    mobileScoreTeam === key
-                      ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent"
-                      : "border-cs2-border text-cs2-text-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+        <div className="p-2.5">
+          <div className="mb-2 flex gap-1 md:hidden">
+            {[
+              ["a", teamAName],
+              ["b", teamBName],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMobileScoreTeam(key)}
+                className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${
+                  mobileScoreTeam === key
+                    ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent"
+                    : "border-cs2-border text-cs2-text-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-2.5 md:grid-cols-2">
+            <div className={mobileScoreTeam === "a" ? "block" : "hidden md:block"}>
+              <TeamScoreboard
+                teamKey="a"
+                name={teamAName}
+                score={scoreA}
+                players={playersA}
+                onSelectPlayer={onSelectPlayer}
+                winner={winnerA}
+              />
             </div>
-            <div className="grid gap-2.5 md:grid-cols-2">
-              <div className={mobileScoreTeam === "a" ? "block" : "hidden md:block"}>
-                <TeamScoreboard
-                  teamKey="a"
-                  name={teamAName}
-                  score={scoreA}
-                  players={playersA}
-                  onSelectPlayer={onSelectPlayer}
-                  winner={winnerA}
-                />
-              </div>
-              <div className={mobileScoreTeam === "b" ? "block" : "hidden md:block"}>
-                <TeamScoreboard
-                  teamKey="b"
-                  name={teamBName}
-                  score={scoreB}
-                  players={playersB}
-                  onSelectPlayer={onSelectPlayer}
-                  winner={winnerB}
-                />
-              </div>
+            <div className={mobileScoreTeam === "b" ? "block" : "hidden md:block"}>
+              <TeamScoreboard
+                teamKey="b"
+                name={teamBName}
+                score={scoreB}
+                players={playersB}
+                onSelectPlayer={onSelectPlayer}
+                winner={winnerB}
+              />
             </div>
           </div>
-        ) : null}
+        </div>
       </section>
     </div>
   );
 }
 
-function FilterChip({ active, children, onClick }) {
-  return <button type="button" onClick={onClick} className={`rounded-md border px-2.5 py-1 text-[10px] font-semibold ${active ? "border-cs2-accent/50 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border bg-cs2-bg-input/40 text-cs2-text-muted hover:text-cs2-text-primary"}`}>{children}</button>;
+function FilterField({ label, value, onChange, children }) {
+  return (
+    <label className="analysis-filter-field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="analysis-filter-select">
+        {children}
+      </select>
+    </label>
+  );
 }
 
 function EventIcon({ type }) {
@@ -419,7 +416,7 @@ function RoundEventBody({ event }) {
   return <div><p className="text-[11px] font-bold text-cs2-text-primary">{actor}</p><RoundEventDetail event={event} /></div>;
 }
 
-export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRound }) {
+export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRound, contextRailTarget = null }) {
   const [winnerFilter, setWinnerFilter] = useState("all");
   const [sideFilter, setSideFilter] = useState("all");
   const [economyFilter, setEconomyFilter] = useState("all");
@@ -445,24 +442,86 @@ export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRou
       && (endFilter === "all" || finishType(round) === endFilter)
       && (!specialOnly || (round.tags || []).some((tag) => /[2-5]K|翻盘|爆头|下包|残局/.test(tag)));
   });
-  const round = data.rounds.find((item) => Number(item.round_number) === Number(selectedRound)) || visibleRounds[0] || data.rounds[0];
-  if (!round) return <Panel title="回合列表"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有正式回合。</div></Panel>;
-  const displayEvents = roundEventsForDisplay(round);
+  const round = visibleRounds.find((item) => Number(item.round_number) === Number(selectedRound)) || visibleRounds[0] || null;
+  if (!data.rounds.length) return <Panel title="回合列表"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有正式回合。</div></Panel>;
+  const displayEvents = round ? roundEventsForDisplay(round) : [];
+  const filterFields = (
+    <>
+      <FilterField label="胜方" value={winnerFilter} onChange={setWinnerFilter}>
+        <option value="all">全部胜方</option><option value="a">{data.team_a_name} 胜</option><option value="b">{data.team_b_name} 胜</option>
+      </FilterField>
+      <FilterField label="阵营" value={sideFilter} onChange={setSideFilter}>
+        <option value="all">全部阵营</option><option value="CT">CT 胜</option><option value="T">T 胜</option>
+      </FilterField>
+      <FilterField label="经济" value={economyFilter} onChange={setEconomyFilter}>
+        <option value="all">全部经济</option><option value="pistol">手枪</option><option value="eco">纯 ECO</option><option value="force">强起</option><option value="semi">半起</option><option value="full">全枪全弹</option>
+      </FilterField>
+      <FilterField label="包点" value={siteFilter} onChange={setSiteFilter}>
+        <option value="all">全部包点</option><option value="A">A 点</option><option value="B">B 点</option><option value="none">未下包</option>
+      </FilterField>
+      <FilterField label="首杀" value={openingFilter} onChange={setOpeningFilter}>
+        <option value="all">不限</option><option value="a">{data.team_a_name}</option><option value="b">{data.team_b_name}</option>
+      </FilterField>
+      <FilterField label="结束方式" value={endFilter} onChange={setEndFilter}>
+        <option value="all">全部结束方式</option><option value="ct_elimination">CT 歼灭</option><option value="defuse">拆弹</option><option value="t_elimination">T 歼灭</option><option value="explode">爆弹</option>
+      </FilterField>
+    </>
+  );
+  const filters = contextRailTarget ? (
+    <section className="analysis-side-section">
+      <header className="flex items-center justify-between gap-2 border-b border-cs2-border-subtle px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-cs2-text-muted"><Filter className="h-3 w-3" />回合筛选</span>
+        <span className="font-mono text-[9px] text-cs2-text-muted">{visibleRounds.length}/{data.rounds.length}</span>
+      </header>
+      <div className="analysis-rail-filter-grid grid grid-cols-2 gap-2 p-3">
+        {filterFields}
+        <button type="button" data-active={specialOnly ? "true" : "false"} className="analysis-filter-toggle col-span-2" onClick={() => setSpecialOnly((value) => !value)}>关键回合</button>
+      </div>
+    </section>
+  ) : (
+    <Panel>
+      <div className="analysis-filterbar">
+        <div className="flex h-7 items-center gap-1.5 self-end text-[10px] font-bold text-cs2-text-secondary"><Filter className="h-3.5 w-3.5" />回合筛选</div>
+        {filterFields}
+        <button type="button" data-active={specialOnly ? "true" : "false"} className="analysis-filter-toggle self-end" onClick={() => setSpecialOnly((value) => !value)}>关键回合</button>
+        <span className="ml-auto self-center font-mono text-[9px] text-cs2-text-muted">命中 {visibleRounds.length}/{data.rounds.length}</span>
+      </div>
+    </Panel>
+  );
   return (
     <div className="space-y-3">
-      <Panel><div className="space-y-2 p-3">
-        <div className="flex flex-wrap items-center gap-2"><div className="mr-1 flex items-center gap-1.5 text-[10px] font-bold text-cs2-text-secondary"><Filter className="h-3.5 w-3.5" />回合筛选</div><FilterChip active={winnerFilter === "all"} onClick={() => setWinnerFilter("all")}>全部</FilterChip><FilterChip active={winnerFilter === "a"} onClick={() => setWinnerFilter("a")}>{data.team_a_name} 胜</FilterChip><FilterChip active={winnerFilter === "b"} onClick={() => setWinnerFilter("b")}>{data.team_b_name} 胜</FilterChip><span className="mx-1 h-4 w-px bg-cs2-border" /><FilterChip active={sideFilter === "CT"} onClick={() => setSideFilter(sideFilter === "CT" ? "all" : "CT")}>CT 胜</FilterChip><FilterChip active={sideFilter === "T"} onClick={() => setSideFilter(sideFilter === "T" ? "all" : "T")}>T 胜</FilterChip><FilterChip active={specialOnly} onClick={() => setSpecialOnly((value) => !value)}>关键回合</FilterChip><span className="ml-auto font-mono text-[10px] text-cs2-text-muted">命中 {visibleRounds.length}/{data.rounds.length}</span></div>
-        <div className="flex flex-wrap items-center gap-2"><span className="text-[9px] font-bold text-cs2-text-muted">经济</span>{[["all", "全部经济"], ["pistol", "手枪"], ["eco", "纯 ECO"], ["force", "强起"], ["semi", "半起"], ["full", "全枪全弹"]].map(([key, label]) => <FilterChip key={key} active={economyFilter === key} onClick={() => setEconomyFilter(key)}>{label}</FilterChip>)}<span className="ml-2 text-[9px] font-bold text-cs2-text-muted">包点</span>{[["all", "全部包点"], ["A", "A 点"], ["B", "B 点"], ["none", "未下包"]].map(([key, label]) => <FilterChip key={key} active={siteFilter === key} onClick={() => setSiteFilter(key)}>{label}</FilterChip>)}</div>
-        <div className="flex flex-wrap items-center gap-2"><span className="text-[9px] font-bold text-cs2-text-muted">首杀</span><FilterChip active={openingFilter === "all"} onClick={() => setOpeningFilter("all")}>不限</FilterChip><FilterChip active={openingFilter === "a"} onClick={() => setOpeningFilter("a")}>{data.team_a_name}</FilterChip><FilterChip active={openingFilter === "b"} onClick={() => setOpeningFilter("b")}>{data.team_b_name}</FilterChip><label className="ml-2 text-[9px] font-bold text-cs2-text-muted" htmlFor="round-end-filter">结束方式</label><select id="round-end-filter" value={endFilter} onChange={(event) => setEndFilter(event.target.value)} className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1 text-[10px] text-cs2-text-secondary outline-none focus:border-cs2-accent"><option value="all">全部结束方式</option><option value="ct_elimination">CT 歼灭</option><option value="defuse">拆弹</option><option value="t_elimination">T 歼灭</option><option value="explode">爆弹</option></select></div>
-      </div></Panel>
-      <div className="grid gap-4 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.5fr)]">
-        <Panel title="回合列表" eyebrow="Round explorer" className="flex h-[620px] min-h-0 flex-col overflow-hidden"><div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">{visibleRounds.map((item) => { const side = roundWinnerSide(item); return <button key={item.round_number} type="button" onClick={() => onSelectRound(item.round_number)} className={`mb-1 flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left ${Number(round.round_number) === Number(item.round_number) ? "border-cs2-accent/45 bg-cs2-accent-soft" : "border-transparent hover:border-cs2-border hover:bg-cs2-bg-hover"}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-mono text-[11px] font-bold ${item.winner_team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>R{item.round_number}</span><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-cs2-text-primary">{item.headline}</p><p className="mt-0.5 text-[9px] text-cs2-text-muted">{scoreText(item)} · {item.site ? `${item.site} 区 · ` : ""}{durationText(item.duration_seconds)}</p></div><span className={`shrink-0 rounded px-2 py-1 text-[8px] font-black ${side === "CT" ? "bg-sky-500/15 text-sky-300" : "bg-amber-500/15 text-amber-300"}`}>{side || "—"} 胜</span></button>; })}{!visibleRounds.length && <p className="px-4 py-12 text-center text-[10px] text-cs2-text-muted">当前条件没有匹配的回合。</p>}</div></Panel>
-        <Panel title={`第 ${round.round_number} 回合 · ${round.headline}`} eyebrow={`${round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 获胜`} className="flex h-[620px] min-h-0 flex-col overflow-hidden" action={<Button size="sm" onClick={() => onOpenReplayRound(round.round_number)}><MapPin className="h-3 w-3" />跳转至 2D 地图查看当前回合</Button>}>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar"><div className="mb-5 grid grid-cols-3 items-center gap-3 rounded-xl border border-cs2-border bg-cs2-bg-input/35 p-4 text-center"><div><p className="text-[10px] font-bold text-sky-400">{data.team_a_name}</p><p className="mt-1 text-[10px] text-cs2-text-muted">{economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p></div><div><p className="font-mono text-2xl font-black text-cs2-text-primary">{scoreText(round)}</p><p className="text-[9px] uppercase tracking-wider text-cs2-text-muted">Round score</p></div><div><p className="text-[10px] font-bold text-amber-400">{data.team_b_name}</p><p className="mt-1 text-[10px] text-cs2-text-muted">{economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></div></div>
-            <div className="relative ml-2 border-l border-cs2-border pl-5">{displayEvents.map((event, index) => <div key={`${event.type}-${event.tick}-${index}`} className="relative pb-5 last:pb-0"><span className={`absolute -left-[27px] top-0.5 h-3 w-3 rounded-full border-2 border-cs2-bg-card ${event.type === "kill" ? "bg-cs2-accent" : "bg-cs2-text-muted"}`} /><div className="flex items-start gap-3"><span className="w-9 shrink-0 font-mono text-[9px] text-cs2-text-muted">{event.time_text || "--:--"}</span><span className={event.type === "kill" ? "text-cs2-accent" : "text-cs2-text-secondary"}><EventIcon type={event.type} /></span><RoundEventBody event={event} /></div></div>)}{!displayEvents.length && <p className="py-8 text-center text-[10px] text-cs2-text-muted">该回合没有可展示的击杀或目标事件。</p>}</div>
-          </div>
-        </Panel>
-      </div>
+      {contextRailTarget ? createPortal(filters, contextRailTarget) : filters}
+      {round ? (
+        <div className="grid h-[calc(100vh-106px)] min-h-[500px] gap-3 lg:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.5fr)]">
+          <Panel title="回合列表" eyebrow="Round explorer" className="flex min-h-0 flex-col overflow-hidden">
+            <div className="custom-scrollbar min-h-0 flex-1 divide-y divide-cs2-border-subtle overflow-y-auto">
+              {visibleRounds.map((item) => {
+                const side = roundWinnerSide(item);
+                const active = Number(round.round_number) === Number(item.round_number);
+                return (
+                  <button key={item.round_number} type="button" onClick={() => onSelectRound(item.round_number)} className={`flex w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left transition-colors ${active ? "border-cs2-accent bg-cs2-accent-soft/55" : "border-transparent hover:bg-cs2-bg-hover"}`}>
+                    <span className={`w-7 shrink-0 font-mono text-[10px] font-bold ${item.winner_team_key === "a" ? "text-sky-400" : "text-amber-400"}`}>R{item.round_number}</span>
+                    <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-cs2-text-primary">{item.headline}</p><p className="mt-0.5 text-[9px] text-cs2-text-muted">{scoreText(item)} · {item.site ? `${item.site} 区 · ` : ""}{durationText(item.duration_seconds)}</p></div>
+                    <span className={`shrink-0 text-[8px] font-black ${side === "CT" ? "text-sky-300" : "text-amber-300"}`}>{side || "—"} 胜</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Panel>
+          <Panel title={`第 ${round.round_number} 回合 · ${round.headline}`} eyebrow={`${round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 获胜`} className="flex min-h-0 flex-col overflow-hidden" action={<Button size="sm" onClick={() => onOpenReplayRound(round.round_number)}><MapPin className="h-3 w-3" />跳转至 2D 地图查看当前回合</Button>}>
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="mb-5 grid grid-cols-3 items-center gap-3 border-b border-cs2-border-subtle pb-4 text-center">
+                <div><p className="text-[10px] font-bold text-sky-400">{data.team_a_name}</p><p className="mt-1 text-[10px] text-cs2-text-muted">{economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p></div>
+                <div><p className="font-mono text-2xl font-black text-cs2-text-primary">{scoreText(round)}</p><p className="text-[9px] uppercase tracking-wider text-cs2-text-muted">Round score</p></div>
+                <div><p className="text-[10px] font-bold text-amber-400">{data.team_b_name}</p><p className="mt-1 text-[10px] text-cs2-text-muted">{economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></div>
+              </div>
+              <div className="relative ml-2 border-l border-cs2-border pl-5">{displayEvents.map((event, index) => <div key={`${event.type}-${event.tick}-${index}`} className="relative pb-5 last:pb-0"><span className={`absolute -left-[27px] top-0.5 h-3 w-3 rounded-full border-2 border-cs2-bg-card ${event.type === "kill" ? "bg-cs2-accent" : "bg-cs2-text-muted"}`} /><div className="flex items-start gap-3"><span className="w-9 shrink-0 font-mono text-[9px] text-cs2-text-muted">{event.time_text || "--:--"}</span><span className={event.type === "kill" ? "text-cs2-accent" : "text-cs2-text-secondary"}><EventIcon type={event.type} /></span><RoundEventBody event={event} /></div></div>)}{!displayEvents.length && <p className="py-8 text-center text-[10px] text-cs2-text-muted">该回合没有可展示的击杀或目标事件。</p>}</div>
+            </div>
+          </Panel>
+        </div>
+      ) : (
+        <Panel title="回合列表"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前筛选条件没有匹配的回合。</div></Panel>
+      )}
     </div>
   );
 }
@@ -473,10 +532,10 @@ function StatBar({ label, value, display, max = 100 }) {
 }
 
 function StatGroup({ title, rows }) {
-  return <section className="rounded-lg border border-cs2-border bg-cs2-bg-input/20 p-3"><h3 className="mb-3 text-[9px] font-black uppercase tracking-wider text-cs2-text-secondary">{title}</h3><div className="space-y-2.5">{rows.map((row) => <StatBar key={row.label} {...row} />)}</div></section>;
+  return <section className="border-l-2 border-cs2-border-subtle bg-cs2-bg-input/20 p-3"><h3 className="mb-3 text-[9px] font-black uppercase tracking-wider text-cs2-text-secondary">{title}</h3><div className="space-y-2.5">{rows.map((row) => <StatBar key={row.label} {...row} />)}</div></section>;
 }
 
-export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOverview }) {
+export function PlayersView({ data, selectedPlayer, onBackToOverview }) {
   const player = data.players.find((item) => item.name === selectedPlayer) || data.players[0];
   if (!player) return <Panel title="全部玩家"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有玩家统计。</div></Panel>;
   const groups = [
@@ -486,13 +545,10 @@ export function PlayersView({ data, selectedPlayer, onSelectPlayer, onBackToOver
     { title: "Utility / Economy", rows: [{ label: "道具伤害", value: player.utility_damage, max: 500 }, { label: "每回合道伤", value: player.utility_damage_per_round, display: Number(player.utility_damage_per_round || 0).toFixed(1), max: 25 }, { label: "平均装备价值", value: player.average_equipment_value, display: money(player.average_equipment_value), max: 6000 }] },
   ];
   return (
-    <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <Panel title="全部玩家" eyebrow={`${data.players.length} / ${data.players.length} 已分析`}><div className="divide-y divide-cs2-border">{data.players.map((item) => <button key={item.name} type="button" onClick={() => onSelectPlayer(item.name)} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${player.name === item.name ? "bg-cs2-accent-soft" : "hover:bg-cs2-bg-hover"}`}><span className={`h-2 w-2 rounded-full ${teamDot(item.team_key)}`} /><div className="min-w-0 flex-1"><p className={`truncate text-[11px] font-bold ${player.name === item.name ? "text-cs2-accent" : "text-cs2-text-primary"}`}>{item.name}</p><p className="font-mono text-[9px] text-cs2-text-muted">{item.kills}–{item.deaths} · {Number(item.adr || 0).toFixed(1)} ADR</p></div></button>)}</div></Panel>
-      <div className="space-y-4">
-        <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-xl text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><Badge variant="orange">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</Badge></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>
-        <Panel title="详细数据" eyebrow="全场表现拆分 · 原始统计"><div className="grid gap-3 p-4 xl:grid-cols-2">{groups.map((group) => <StatGroup key={group.title} {...group} />)}</div></Panel>
-      </div>
+    <div className="space-y-4">
+      <Panel><div className="flex flex-wrap items-center gap-4 p-5"><div className={`flex h-14 w-14 items-center justify-center rounded-md text-xl font-black ${player.team_key === "a" ? "bg-sky-500/15 text-sky-400" : "bg-amber-500/15 text-amber-400"}`}>{player.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-baseline gap-2"><h2 className="text-xl font-black text-cs2-text-primary">{player.name}</h2><span className="text-[9px] font-bold uppercase tracking-wider text-cs2-accent">{player.team_key === "a" ? data.team_a_name : data.team_b_name}</span></div><p className="mt-1 text-[10px] text-cs2-text-muted">全场表现 · {data.rounds.length} 回合 · 原始 Demo 统计</p></div><Button variant="secondary" onClick={onBackToOverview}><ArrowLeft className="h-3.5 w-3.5" />返回概览</Button></div></Panel>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Swords} label="K / D / A" value={`${player.kills} / ${player.deaths} / ${player.assists}`} detail={`${Number(player.kd || 0).toFixed(2)} K/D`} tone="blue" /><MetricCard icon={Activity} label="ADR" value={Number(player.adr || 0).toFixed(1)} detail={`总伤害约 ${Math.round(Number(player.adr || 0) * Math.max(1, data.rounds.length))}`} /><MetricCard icon={ShieldCheck} label="KAST" value={`${Number(player.kast || 0).toFixed(0)}%`} detail={`${player.trade_kills || 0} 次有效补枪`} tone="green" /><MetricCard icon={Gauge} label="爆头率" value={`${Number(player.hs_percent || 0).toFixed(0)}%`} detail={`${player.first_kills || 0} 次首杀 · ${player.awp_kills || 0} 次 AWP 击杀`} tone="violet" /></div>
+      <Panel title="详细数据" eyebrow="全场表现拆分 · 原始统计"><div className="grid gap-3 p-4 xl:grid-cols-2">{groups.map((group) => <StatGroup key={group.title} {...group} />)}</div></Panel>
     </div>
   );
 }
@@ -508,15 +564,21 @@ function EconomyChart({ rounds, teamAName, teamBName }) {
   const x = (index) => pad.left + (rounds.length <= 1 ? innerW / 2 : index / (rounds.length - 1) * innerW);
   const y = (value) => pad.top + innerH - Number(value || 0) / maxValue * innerH;
   const path = (key) => rounds.map((round, index) => `${index ? "L" : "M"}${x(index)},${y(round[key])}`).join(" ");
-  const bandColors = { pistol: "#7c6b32", eco: "#26303b", semi: "#173747", force: "#4a2d24", full: "#12382b" };
+  const bandColors = {
+    pistol: "var(--cs2-amber-surface)",
+    eco: "var(--cs2-bg-input)",
+    semi: "var(--cs2-cyan-surface)",
+    force: "var(--cs2-rose-surface)",
+    full: "var(--cs2-emerald-surface)",
+  };
   const bandW = innerW / Math.max(1, rounds.length);
   return (
-    <div className="overflow-x-auto"><svg viewBox={`0 0 ${width} ${height}`} className="min-w-[760px] w-full"><line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke="rgba(255,255,255,.12)" /><line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="rgba(255,255,255,.12)" />{[0, 0.5, 1].map((ratio) => <g key={ratio}><line x1={pad.left} y1={pad.top + innerH * ratio} x2={width - pad.right} y2={pad.top + innerH * ratio} stroke="rgba(255,255,255,.07)" /><text x={pad.left - 10} y={pad.top + innerH * ratio + 4} textAnchor="end" fill="#747985" fontSize="11">{money(maxValue * (1 - ratio))}</text></g>)}{rounds.map((round, index) => <g key={round.round_number}><rect x={pad.left + index * bandW} y={pad.top} width={bandW - 1} height={innerH} fill={bandColors[round.team_a_economy] || bandColors.semi} opacity=".55" /><text x={pad.left + index * bandW + bandW / 2} y={height - 18} textAnchor="middle" fill="#747985" fontSize="10">R{round.round_number}</text></g>)}<path d={path("team_a_equipment_value")} fill="none" stroke="#5da9ff" strokeWidth="4" strokeLinejoin="round" /> <path d={path("team_b_equipment_value")} fill="none" stroke="#36d399" strokeWidth="4" strokeLinejoin="round" />{rounds.map((round, index) => <g key={`points-${round.round_number}`}><circle cx={x(index)} cy={y(round.team_a_equipment_value)} r="3.5" fill="#5da9ff" /><circle cx={x(index)} cy={y(round.team_b_equipment_value)} r="3.5" fill="#36d399" /></g>)}</svg><div className="flex items-center gap-5 px-2 text-[9px]"><span className="text-sky-400">━ {teamAName}</span><span className="text-emerald-400">━ {teamBName}</span><span className="ml-auto text-cs2-text-muted">背景：手枪 / ECO / 半起 / 强起 / 长枪</span></div></div>
+    <div className="overflow-x-auto"><svg viewBox={`0 0 ${width} ${height}`} className="min-w-[760px] w-full"><line x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} stroke="var(--cs2-border)" /><line x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} stroke="var(--cs2-border)" />{[0, 0.5, 1].map((ratio) => <g key={ratio}><line x1={pad.left} y1={pad.top + innerH * ratio} x2={width - pad.right} y2={pad.top + innerH * ratio} stroke="var(--cs2-border-subtle)" /><text x={pad.left - 10} y={pad.top + innerH * ratio + 4} textAnchor="end" fill="var(--cs2-text-muted)" fontSize="11">{money(maxValue * (1 - ratio))}</text></g>)}{rounds.map((round, index) => <g key={round.round_number}><rect x={pad.left + index * bandW} y={pad.top} width={bandW - 1} height={innerH} fill={bandColors[round.team_a_economy] || bandColors.semi} opacity=".62" /><text x={pad.left + index * bandW + bandW / 2} y={height - 18} textAnchor="middle" fill="var(--cs2-text-muted)" fontSize="10">R{round.round_number}</text></g>)}<path d={path("team_a_equipment_value")} fill="none" stroke="var(--cs2-team-blue)" strokeWidth="4" strokeLinejoin="round" /> <path d={path("team_b_equipment_value")} fill="none" stroke="var(--cs2-team-amber)" strokeWidth="4" strokeLinejoin="round" />{rounds.map((round, index) => <g key={`points-${round.round_number}`}><circle cx={x(index)} cy={y(round.team_a_equipment_value)} r="3.5" fill="var(--cs2-team-blue)" /><circle cx={x(index)} cy={y(round.team_b_equipment_value)} r="3.5" fill="var(--cs2-team-amber)" /></g>)}</svg><div className="flex items-center gap-5 px-2 text-[9px]"><span className="text-sky-400">━ {teamAName}</span><span className="text-amber-400">━ {teamBName}</span><span className="ml-auto text-cs2-text-muted">背景：手枪 / ECO / 半起 / 强起 / 长枪</span></div></div>
   );
 }
 
 export function EconomyView({ data, onOpenRound }) {
   return (
-    <Panel title="经济走势" eyebrow="双方每回合装备价值 · 背景表示低经济一方购买类型"><div className="p-4"><EconomyChart rounds={data.rounds} teamAName={data.team_a_name} teamBName={data.team_b_name} /><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">{data.rounds.map((round) => <button key={round.round_number} type="button" onClick={() => onOpenRound(round.round_number)} className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-2.5 text-left hover:border-cs2-accent/40"><div className="flex items-center justify-between gap-2"><span className="font-mono text-[9px] font-bold text-cs2-text-primary">R{round.round_number} {Number(round.team_a_score_after || 0)}:{Number(round.team_b_score_after || 0)}</span><span className={`shrink-0 text-[8px] font-bold ${round.winner_team_key === "a" ? "text-sky-400" : "text-emerald-400"}`}>{round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 胜</span></div><p className="mt-1 text-[8px] text-sky-400">{data.team_a_name}: {economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p><p className="mt-0.5 text-[8px] text-emerald-400">{data.team_b_name}: {economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></button>)}</div></div></Panel>
+    <Panel title="经济走势" eyebrow="双方每回合装备价值 · 背景表示低经济一方购买类型"><div className="p-4"><EconomyChart rounds={data.rounds} teamAName={data.team_a_name} teamBName={data.team_b_name} /><div className="mt-4 grid border-l border-t border-cs2-border-subtle sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">{data.rounds.map((round) => <button key={round.round_number} type="button" onClick={() => onOpenRound(round.round_number)} className="border-b border-r border-cs2-border-subtle bg-cs2-bg-input/15 p-2.5 text-left transition-colors hover:bg-cs2-bg-hover"><div className="flex items-center justify-between gap-2"><span className="font-mono text-[9px] font-bold text-cs2-text-primary">R{round.round_number} {Number(round.team_a_score_after || 0)}:{Number(round.team_b_score_after || 0)}</span><span className={`shrink-0 text-[8px] font-bold ${round.winner_team_key === "a" ? "text-sky-400" : "text-emerald-400"}`}>{round.winner_team_key === "a" ? data.team_a_name : data.team_b_name} 胜</span></div><p className="mt-1 text-[8px] text-sky-400">{data.team_a_name}: {economyLabel(round.team_a_economy)} · {money(round.team_a_equipment_value)}</p><p className="mt-0.5 text-[8px] text-emerald-400">{data.team_b_name}: {economyLabel(round.team_b_economy)} · {money(round.team_b_equipment_value)}</p></button>)}</div></div></Panel>
   );
 }

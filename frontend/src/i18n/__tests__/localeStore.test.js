@@ -9,6 +9,8 @@ import { useLocaleStore } from "../localeStore.js";
 describe("localeStore", () => {
   beforeEach(() => {
     putMock.mockClear();
+    putMock.mockResolvedValue({ data: {} });
+    localStorage.clear();
     useLocaleStore.getState().hydrate("zh");
   });
 
@@ -19,6 +21,7 @@ describe("localeStore", () => {
   test("hydrate 从配置注入但不回写后端", () => {
     useLocaleStore.getState().hydrate("en");
     expect(useLocaleStore.getState().locale).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
     expect(putMock).not.toHaveBeenCalled();
   });
 
@@ -28,15 +31,27 @@ describe("localeStore", () => {
     expect(["zh", "en"]).toContain(useLocaleStore.getState().effectiveLocale);
   });
 
-  test("setLocale 更新 state 并持久化到 config", () => {
-    useLocaleStore.getState().setLocale("en");
+  test("setLocale 更新 state 并持久化到 config", async () => {
+    await useLocaleStore.getState().setLocale("en");
     expect(useLocaleStore.getState().locale).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
     expect(putMock).toHaveBeenCalledWith("config", { locale: "en" });
   });
 
-  test("setLocale 非法值回退到 auto", () => {
-    useLocaleStore.getState().setLocale("fr");
+  test("setLocale 非法值回退到 auto", async () => {
+    await useLocaleStore.getState().setLocale("fr");
     expect(useLocaleStore.getState().locale).toBe("auto");
     expect(putMock).toHaveBeenCalledWith("config", { locale: "auto" });
+  });
+
+  test("保存失败时恢复原语言并暴露错误", async () => {
+    const error = new Error("offline");
+    putMock.mockRejectedValueOnce(error);
+
+    await expect(useLocaleStore.getState().setLocale("en")).rejects.toThrow("offline");
+
+    expect(useLocaleStore.getState().locale).toBe("zh");
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(useLocaleStore.getState().persistenceError).toBe(error);
   });
 });

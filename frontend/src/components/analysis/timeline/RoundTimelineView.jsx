@@ -68,7 +68,7 @@ export default function RoundTimelineView({
             className="pointer-events-none absolute bottom-0 left-8 top-2 w-px bg-gradient-to-b from-[rgba(255,140,0,0.5)] to-[rgba(255,140,0,0.15)] opacity-50"
             aria-hidden
           />
-          <div className="space-y-2">
+          <div className="analysis-list-surface">
             {rounds.map((row) => (
               <RoundTimelineItem
                 key={`r-${row?.round_number ?? row?.round}`}

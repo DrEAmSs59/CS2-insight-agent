@@ -28,9 +28,13 @@ class OutputConfig(BaseModel):
     filename: str = "lite_cut_export.mp4"
     width: int = Field(default=1920, ge=16, le=7680)
     height: int = Field(default=1080, ge=16, le=4320)
-    fps: int = Field(default=60, ge=1, le=240)
+    fps: int = Field(default=60, ge=1, le=1000)
     encoder: Literal["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"] = "auto"
     encoder_tier: Literal["quality", "fast"] = "quality"
+    frame_blend_enabled: bool = False
+    frame_blend_frames: int = Field(default=5, ge=2, le=9)
+    high_frame_downsample_enabled: bool = False
+    delivery_fps: int = Field(default=60, ge=1, le=1000)
     canvas_fit: Literal["contain", "cover", "blur"] = "contain"
     background_color: str = "#000000"
     blur_amount: int = Field(default=24, ge=0, le=100)

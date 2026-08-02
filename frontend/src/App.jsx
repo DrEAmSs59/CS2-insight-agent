@@ -1,13 +1,11 @@
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
-import SidebarNav from "./components/SidebarNav";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
-import LibraryLoadModeModal from "./components/LibraryLoadModeModal";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
 import DemoLoadingCopy from "./components/DemoLoadingCopy";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
@@ -52,6 +50,7 @@ import { Loader2 } from "lucide-react";
 import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
+import SidebarNav from "./components/SidebarNav";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
@@ -241,7 +240,6 @@ export default function App() {
   /** Demo 库列表每页条数（与 GET /demos limit 一致） */
   const [libraryPageSize, setLibraryPageSize] = useState(12);
   const libraryPageSizeEffectSkipRef = useRef(false);
-  const [libraryBatchModalOpen, setLibraryBatchModalOpen] = useState(false);
   const [batchLoadError, setBatchLoadError] = useState({
     open: false,
     failed: [],
@@ -267,8 +265,18 @@ export default function App() {
     [currentParsed]
   );
 
-  // ── 当前 Tab 内的活跃玩家（默认不选，避免全员解析后误触发 AI） ──
-  const currentActivePlayer = activePlayerTabs[currentMatchIndex] ?? "";
+  const players = currentUpload?.players ?? [];
+  const rosterPlayerNames = players
+    .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+    .map((name) => String(name).trim())
+    .filter(Boolean);
+  const availablePlayerNames = rosterPlayerNames.length ? rosterPlayerNames : parsedPlayerNames;
+
+  // ── 当前 Tab 内的活跃玩家（无有效记忆时自然落到阵容首位，不触发 AI 请求） ──
+  const requestedActivePlayer = String(activePlayerTabs[currentMatchIndex] ?? "").trim();
+  const currentActivePlayer = availablePlayerNames.includes(requestedActivePlayer)
+    ? requestedActivePlayer
+    : (availablePlayerNames[0] ?? "");
 
   const activePlayerData = currentParsed?.players?.[currentActivePlayer] ?? null;
   const analysisWorkspace = currentParsed?.analysis_workspace ?? null;
@@ -277,7 +285,6 @@ export default function App() {
   const roundTimeline = activePlayerData?.round_timeline ?? null;
   const matchMeta = activePlayerData?.match_meta ?? currentUpload?.match_meta ?? null;
 
-  const players = currentUpload?.players ?? [];
   const selectedPlayersList = selectedPlayers[currentMatchIndex] ?? [];
   const freezeToDeathDraft =
     freezeToDeathRoundsByMatch[currentMatchIndex] ?? { picked: [] };
@@ -299,14 +306,6 @@ export default function App() {
     [matchMeta, currentUpload]
   );
 
-  const expectedPreviewLines = useMemo(
-    () =>
-      expectedParsePlayersText
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-    [expectedParsePlayersText]
-  );
 
   const anyDemoParsing = useMemo(
     () => parsing || Object.values(parsingByIndex).some(Boolean),
@@ -595,13 +594,18 @@ export default function App() {
   }, [refreshDemoLibrary, libraryPage, t]);
 
   const handleDeleteDemo = useCallback(
-    async (id, rescan) => {
+    async (id) => {
+      setLibraryDeletePrompt(null);
+      setLibraryLoadingOverlay(true);
+      setLibraryLoadingText(t("app.deletingDemo"));
       try {
-        await API.delete(`/demos/${id}`, { params: { rescan } });
-        setLibraryDeletePrompt(null);
+        await API.delete(`/demos/${id}`);
         await refreshDemoLibrary(libraryPage, { manageLoading: false });
       } catch (e) {
         setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+      } finally {
+        setLibraryLoadingOverlay(false);
+        setLibraryLoadingText(t("app.libraryLoadingDemo"));
       }
     },
     [refreshDemoLibrary, libraryPage, t]
@@ -622,25 +626,31 @@ export default function App() {
   );
 
   const handleLibraryBatchDelete = useCallback(
-    async (ids, rescan = "skip") => {
+    async (ids) => {
       const list = [...ids];
       if (!list.length) return;
-      setProgressText(t("app.batchDeleteProgress", { done: 0, total: list.length }), { loading: true });
+      setLibraryLoadingOverlay(true);
+      setLibraryLoadingText(t("app.batchDeleteProgress", { done: 0, total: list.length }));
       let done = 0;
-      for (const id of list) {
-        try {
-          await API.delete(`/demos/${id}`, { params: { rescan } });
-          done += 1;
-          setProgressText(t("app.batchDeleteProgress", { done, total: list.length }), { loading: true });
-        } catch (e) {
-          setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-          await refreshDemoLibrary(libraryPage, { manageLoading: false });
-          return;
+      try {
+        for (const id of list) {
+          try {
+            await API.delete(`/demos/${id}`);
+            done += 1;
+            setLibraryLoadingText(t("app.batchDeleteProgress", { done, total: list.length }));
+          } catch (e) {
+            setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
+            await refreshDemoLibrary(libraryPage, { manageLoading: false });
+            return;
+          }
         }
+        setSelectedLibraryDemoIds(new Set());
+        setProgressText(t("app.batchDeleteDone", { n: list.length }));
+        await refreshDemoLibrary(libraryPage, { manageLoading: false });
+      } finally {
+        setLibraryLoadingOverlay(false);
+        setLibraryLoadingText(t("app.libraryLoadingDemo"));
       }
-      setSelectedLibraryDemoIds(new Set());
-      setProgressText(t("app.batchDeleteDone", { n: list.length }));
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
     },
     [refreshDemoLibrary, libraryPage, t]
   );
@@ -1471,7 +1481,7 @@ export default function App() {
       });
       return true;
     } catch (error) {
-      setProgressText(`AI 锐评生成失败：${error.response?.data?.detail || error.message}`, { isError: true });
+      setProgressText(t("app.aiReviewFailed", { message: error.response?.data?.detail || error.message || t("common.requestFail") }), { isError: true });
       return false;
     } finally {
       aiReviewInFlightRef.current.delete(requestKey);
@@ -1481,152 +1491,7 @@ export default function App() {
         return next;
       });
     }
-  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText]);
-
-  const runLibraryBatchLoad = useCallback(
-    async ({ mode, manualLines }) => {
-      const ids = Array.from(selectedLibraryDemoIds);
-      if (!ids.length) return;
-      ids.sort((a, b) => Number(a) - Number(b));
-      const holdOverlayUntilParsed = mode === "expected" || mode === "manual";
-      if (holdOverlayUntilParsed) {
-        setLibraryLoadingOverlay(true);
-        setLibraryLoadingText(t("app.libraryLoadingAndParsing"));
-      }
-      try {
-        const { data: summary } = await API.post("/demos/batch-summary", { ids });
-        const items = Array.isArray(summary.items) ? summary.items : [];
-        const failureItems = Array.isArray(summary.failed) ? [...summary.failed] : [];
-        if (!items.length) {
-          setBatchLoadError({
-            open: true,
-            failed: normalizeDemoBatchFailures(failureItems, t, "library-mode"),
-            mode: "analysis",
-          });
-          return;
-        }
-        let resolvedByDemoId = null;
-        if (mode !== "none") {
-          if (holdOverlayUntilParsed) {
-            setLibraryLoadingText(t("app.libraryMatchingPlayers"));
-          }
-          const apiMode = mode === "expected" ? "config_expected" : "manual";
-          const { data } = await API.post("/demos/batch-resolve-players", {
-            demo_ids: items.map((item) => Number(item.id)),
-            mode: apiMode,
-            manual_lines: mode === "manual" ? manualLines : null,
-          });
-          if (Array.isArray(data.failed)) failureItems.push(...data.failed);
-          const raw = data.resolved || {};
-          resolvedByDemoId = {};
-          for (const it of items) {
-            const key = String(it.id);
-            resolvedByDemoId[it.id] = raw[key] ?? raw[it.id] ?? [];
-          }
-        }
-        if (holdOverlayUntilParsed) {
-          setLibraryLoadingText(t("app.libraryLoadingDemoFiles"));
-        }
-        const loaded = await handleLoadDemoFromLibrary(items, {
-          resolvedByDemoId: mode === "none" ? undefined : resolvedByDemoId,
-          skipLoadingOverlay: holdOverlayUntilParsed,
-        });
-        if (!loaded?.length) return;
-        const failures = normalizeDemoBatchFailures(failureItems, t, "library-mode");
-        if (mode === "none") {
-          if (failures.length) {
-            setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-          }
-          return;
-        }
-        const idMap = {};
-        loaded.forEach((x, i) => {
-          idMap[i] = x.id;
-        });
-        const specs = loaded
-          .map((row, index) => ({
-            index,
-            players: resolvedByDemoId[row.id] ?? [],
-          }))
-          .filter((s) => s.players.length > 0);
-        if (!specs.length) {
-          setProgressText((prev) =>
-            `${prev || ""}\n${t("app.libraryNoPlayersMatched")}`.trim()
-          );
-          if (failures.length) {
-            setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-          }
-          return;
-        }
-        if (holdOverlayUntilParsed) {
-          setLibraryLoadingText(t("app.libraryParsingHighlights", { done: 0, total: specs.length }));
-        }
-        const ctx = {
-          demos: loaded,
-          libraryDemoIdsByIndex: idMap,
-          suppressProgressText: holdOverlayUntilParsed,
-        };
-        let done = 0;
-        let succeeded = 0;
-        const activeNames = new Set();
-        await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
-          const filename = loaded[spec.index]?.filename || `Demo ${spec.index + 1}`;
-          activeNames.add(filename);
-          if (holdOverlayUntilParsed) {
-            setLibraryLoadingText(t("app.libraryParsingHighlightsDetail", {
-              done,
-              total: specs.length,
-              active: Array.from(activeNames).join("、"),
-              failed: failures.length,
-            }));
-          }
-          const result = await handleParseForIndex(spec.index, spec.players, ctx);
-          activeNames.delete(filename);
-          if (result?.ok) {
-            succeeded += 1;
-          } else {
-            failures.push({
-              id: loaded[spec.index]?.id ?? `library-analysis-${spec.index}`,
-              filename,
-              reason: result?.reason || t("api.err.demoAnalysisFailed"),
-            });
-          }
-          done += 1;
-          if (holdOverlayUntilParsed) {
-            setLibraryLoadingText(t("app.libraryParsingHighlightsDetail", {
-              done,
-              total: specs.length,
-              active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
-              failed: failures.length,
-            }));
-          }
-        });
-        setProgressText("");
-        setAnalysisInlineProgress({
-          active: false,
-          text: failures.length
-            ? t("app.autoParsePartial", { succeeded, failed: failures.length })
-            : t("app.autoParseDone", {
-                demos: specs.length,
-                players: specs.reduce((sum, spec) => sum + spec.players.length, 0),
-              }),
-        });
-        if (failures.length) {
-          setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-        }
-      } catch (e) {
-        setProgressText(t("app.libraryLoadAndParseFail", {
-          msg: demoBatchFailureMessage(e, t),
-        }), { isError: true });
-      } finally {
-        if (holdOverlayUntilParsed) {
-          setLibraryLoadingOverlay(false);
-          setLibraryLoadingText(t("app.libraryLoadingDemo"));
-        }
-      }
-    },
-    [selectedLibraryDemoIds, handleLoadDemoFromLibrary, handleParseForIndex, t]
-  );
+  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText, t]);
 
   const handleToggleClip = useCallback(
     (clientClipUid) => {
@@ -3138,7 +3003,6 @@ export default function App() {
     selectAllLibraryDemos,
     clearLibrarySelection,
     handleLoadSelectedLibraryDemos,
-    setLibraryBatchModalOpen,
     selectedLibraryDemoIds,
     setSelectedLibraryDemoIds,
     libraryPage,
@@ -3192,21 +3056,19 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex flex-col h-screen overflow-hidden bg-cs2-bg-dark">
-        <CustomTitleBar />
-        <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-page">
+        <SidebarNav queueLength={queue.length} disabled={batchRecording} />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <CustomTitleBar />
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {libraryLoadingOverlay && (
-            <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
+            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
                 <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cs2-orange" />
                 <DemoLoadingCopy detail={libraryLoadingText} aiEnabled={aiMode} compact />
               </div>
             </div>
           )}
-          <SidebarNav
-            queueLength={queue.length}
-            disabled={batchRecording}
-          />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
             {!isStandalonePreview && (!backendReady ? (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
@@ -3244,7 +3106,7 @@ export default function App() {
             ) : null)}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label="正在加载页面"><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
+              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label={t("app.loadingPage")}><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
@@ -3268,6 +3130,7 @@ export default function App() {
               </Suspense>
             </div>
           </main>
+          </div>
         </div>
 
         {showGlobalNotice ? (
@@ -3317,15 +3180,6 @@ export default function App() {
           initKillFxTickOffset={killFxTickOffset}
         />
 
-        <LibraryLoadModeModal
-          open={libraryBatchModalOpen}
-          onClose={() => setLibraryBatchModalOpen(false)}
-          expectedPreviewLines={expectedPreviewLines}
-          onConfirm={(payload) => {
-            setLibraryBatchModalOpen(false);
-            void runLibraryBatchLoad(payload);
-          }}
-        />
         <BatchLoadErrorModal
           open={batchLoadError.open}
           failed={batchLoadError.failed}

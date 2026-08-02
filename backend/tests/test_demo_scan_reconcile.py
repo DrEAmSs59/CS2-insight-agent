@@ -71,3 +71,75 @@ def test_rediscovery_backfills_watch_root_for_legacy_row(tmp_path: Path):
         assert await db.get_demo_by_id(demo_id) is None
 
     _run(scenario())
+
+
+def test_purge_stale_pending_removes_missing_files(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "demo.sqlite3")
+        await db.init_db()
+        root = tmp_path / "watch"
+        root.mkdir()
+        kept = root / "kept.dem"
+        kept.write_bytes(b"dem")
+        missing = str((root / "gone.dem").resolve())
+        kept_path = str(kept.resolve())
+        root_s = str(root.resolve())
+
+        await db.add_demo(kept_path, watch_root=root_s, status="pending")
+        await db.add_demo(missing, watch_root=root_s, status="pending")
+
+        removed = await db.purge_stale_pending_demos([root_s])
+        assert removed == 1
+        assert await db.get_demo_by_path(kept_path) is not None
+        assert await db.get_demo_by_path(missing) is None
+
+    _run(scenario())
+
+
+def test_purge_stale_pending_removes_outside_active_watch_roots(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "demo.sqlite3")
+        await db.init_db()
+        root_a = tmp_path / "a"
+        root_b = tmp_path / "b"
+        root_a.mkdir()
+        root_b.mkdir()
+        kept = root_a / "kept.dem"
+        orphan = root_b / "orphan.dem"
+        kept.write_bytes(b"dem")
+        orphan.write_bytes(b"dem")
+        kept_path = str(kept.resolve())
+        orphan_path = str(orphan.resolve())
+        root_a_s = str(root_a.resolve())
+        root_b_s = str(root_b.resolve())
+
+        await db.add_demo(kept_path, watch_root=root_a_s, status="pending")
+        await db.add_demo(orphan_path, watch_root=root_b_s, status="pending")
+        # Ingested demos outside active roots must not be touched.
+        await db.add_demo(orphan_path + ".loaded", watch_root=root_b_s, status="loaded")
+
+        removed = await db.purge_stale_pending_demos([root_a_s])
+        assert removed == 1
+        assert await db.get_demo_by_path(kept_path) is not None
+        assert await db.get_demo_by_path(orphan_path) is None
+        assert await db.get_demo_by_path(orphan_path + ".loaded") is not None
+
+    _run(scenario())
+
+
+def test_purge_stale_pending_clears_all_when_no_watch_roots(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "demo.sqlite3")
+        await db.init_db()
+        root = tmp_path / "watch"
+        root.mkdir()
+        dem = root / "x.dem"
+        dem.write_bytes(b"dem")
+        path = str(dem.resolve())
+        await db.add_demo(path, watch_root=str(root.resolve()), status="pending")
+
+        removed = await db.purge_stale_pending_demos([])
+        assert removed == 1
+        assert await db.get_demo_by_path(path) is None
+
+    _run(scenario())

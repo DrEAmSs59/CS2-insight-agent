@@ -1193,9 +1193,32 @@ def build_match_workspace(
     # Smoke/inferno area tracks are intentionally NOT stored in the workspace.
     # The whole-match replay cache extracts them once and embeds the requested
     # round's tracks in the binary replay packet.
+    cosmetic_sample_ticks = {
+        _int(tick)
+        for window in windows
+        for tick in (window.get("freeze_end_tick"), window.get("end_tick"))
+        if _int(tick) > 0
+    }
+    for events in raw_events_by_round.values():
+        cosmetic_sample_ticks.update(
+            _int(event.get("tick"))
+            for event in events
+            if _int(event.get("tick")) > 0
+        )
+    try:
+        from .cs2_item_catalog import build_player_cosmetic_inventory
+
+        player_cosmetics = build_player_cosmetic_inventory(
+            parser,
+            sample_ticks=sorted(cosmetic_sample_ticks),
+        ) if parser is not None else {}
+    except Exception:  # noqa: BLE001 - optional catalog enrichment never blocks analysis
+        logger.exception("build_player_cosmetic_inventory failed")
+        player_cosmetics = {}
+
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.07.5",
+        "algorithm_version": "match-workspace-2026.08.5",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
@@ -1235,6 +1258,11 @@ def build_match_workspace(
         },
         "players": stats,
         "rounds": rounds_out,
+        "cosmetics": {
+            "version": 6,
+            "ownership_source": "demo_economy_entities",
+            "players": player_cosmetics,
+        },
         "effect_tracks_version": 1,
         "effect_capabilities": {
             "inferno_cells": False,

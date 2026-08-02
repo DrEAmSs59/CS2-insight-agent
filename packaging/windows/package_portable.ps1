@@ -155,7 +155,7 @@ function Install-BackendRequirements {
             Remove-Item -LiteralPath $path -Recurse -Force
         }
     }
-    & $PythonExe -c "import demoparser2, fastapi, openai, PIL, uvicorn"
+    & $PythonExe -c "import cryptography, demoparser2, fastapi, openai, PIL, uvicorn"
     if ($LASTEXITCODE -ne 0) { throw "trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     Get-ChildItem -LiteralPath $pythonRoot -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
         Sort-Object { $_.FullName.Length } -Descending |
@@ -175,7 +175,7 @@ function Install-BackendRequirements {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     Get-ChildItem -LiteralPath (Join-Path $sitePackages "PIL") -File -Filter "_avif*.pyd" -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-    & $PythonExe -c "from PIL import Image; import demoparser2, fastapi, openai, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
+    & $PythonExe -c "from PIL import Image; import cryptography, demoparser2, fastapi, openai, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
     if ($LASTEXITCODE -ne 0) { throw "final trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     } finally {
         if ($null -eq $previousNoUserSite) {

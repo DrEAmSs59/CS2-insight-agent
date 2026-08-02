@@ -10,8 +10,8 @@
   <a href="./README.md"><img src="./asset/icon-cn.svg" alt="" width="20" height="20" style="vertical-align: middle;"> 简体中文</a> | <img src="./asset/icon-en.svg" alt="" width="20" height="20" style="vertical-align: middle;"> English
 </p>
 
-<h3 align="center"><b>CS2 Insight Agent: Desktop Intelligent Esports Terminal for CS2 Players</b> </h3>
-<h4 align="center">Demo Management, Highlight Extraction, Auto-Editing, LLM Commentary</h4>
+<h3 align="center"><b>CS2 Insight Agent: All-in-one CS2 Creation Suite</b> </h3>
+<h4 align="center">Demo Analysis · Custom Skins · OBS Auto-Recording · LiteCut · LLM Commentary<br>Zero Injection · Zero Hooks · Zero Game Reverse-Engineering · Low-Risk Local Replay</h4>
 
 <p align="center">
   <a href="https://github.com/DrEAmSs59/CS2-insight-agent/releases">
@@ -69,36 +69,52 @@
 
 - **Local Library Records** — List and thumbnail view showing match source, scoreboard, tracked players, display names, notes, and other key info.
 - **Auto Directory Monitoring** — Supports monitoring demo download directories from 5E, Perfect World, Official Matchmaking, FACEIT, etc., with one-click import.
+- **Analysis Handoff** — Select one or more demos in the library and open Demo Analysis directly, or upload local demos from the analysis page.
 
-### Highlight Parsing & Clip Discovery
+### Demo Analysis
 
-- **Batch Demo Parsing** — Parse highlights from multiple demos simultaneously; highlights from the same player across different matches are organized by match.
-- **Target Player Lock** — Automatically identify all players in a match and locate targets by Steam ID, platform ID, or nickname; compatible with different demo export conventions from 5E, Perfect World, and Official Matchmaking.
-- **Fine-grained Highlight Analysis** — Automatically categorizes **Highlights** (multi-kills, one-taps, clutches, knife kills, jump shots, defuses), **Fails** (taser, Deagle, team kills, "human magnet", "human tracing", "shoulder-to-shoulder" moments), **Cross-round Compilations** (favorite victim, nemesis, kill/death montage, continuous round recording), and **Meme Rounds** (211/o/i/z series with AI round commentary). See [Clip Types & Tags](./docs/highlight_tags.md) for tag descriptions.
-- **Round Timeline** — Beyond auto-extracted clip cards, browse kill/death timelines by round to add specific shots, deaths, or entire rounds to the recording queue.
-- **Continuous Round Recording** — Record from round start to death or round end; select multiple rounds to combine into a longer clip.
+A unified match-analysis workspace: loading a demo auto-parses all players; switch the active demo from the top-right, then pick a player on the left to browse clips and data. Main views include:
+
+- **Highlights & Recording** — Batch-parse highlight moments; lock targets by Steam ID / platform ID / nickname; auto-categorize **Highlights** (multi-kills, one-taps, clutches, knife kills, jump shots, defuses), **Fails** (taser, Deagle, team kills, "human magnet", "human tracing", "shoulder-to-shoulder" moments), **Cross-round Compilations** (favorite victim, nemesis, kill/death montage, continuous round recording), and **Meme Rounds** (211/o/i/z series with optional AI round commentary), then queue them for recording. See [Clip Types & Tags](./docs/highlight_tags.md).
+- **Round Timeline / Weapon Kills** — Browse kill/death timelines by round and add a shot, a death, or an entire round to the queue; continuous round recording from round start to death or round end, with multi-round stitching.
+- **2D Replay** — High-speed local 2D replay for movement, fights, and round flow — no need to launch CS2 first.
+- **Heatmaps** — Full-match movement density, combat hotspots, kill/death hotspots; filter by player, side, and map floor to study defaults, rotates, and failing positions.
+- **Overview / Players / Rounds / Economy** — Match overview, roster and personal stats, round-by-round flow, and economy context to grasp the match structure quickly.
+- **Cosmetics & Custom Skins** — On the Cosmetics tab, inspect weapons, knives, gloves, agents, and more that actually appeared in the demo; support 3D / in-game inspect. Enter Customize skins to pick replacements (wear, seed, etc.) and save a custom skin plan for later replay and recording.  
+  > The skin-rewriting core is closed-source; see [License](#license).
 
 ### Auto Recording
 
-- **Batch Recording Queue** — Queue multiple matches and clips; the program sequentially launches CS2 replay and drives OBS to produce videos; preview the entire plan before recording, with per-clip timing adjustments in the queue.
-- **Pre-recording Spectator Settings** — One-click spectator HUD configuration (death notices only, hide IDs/chat/demo bars), FOV and viewmodel, flash brightness, voice, resolution and aspect ratio, OBS transitions between clips; experimental POV first-person HUD can be enabled per-match.
+- **Batch Recording Queue** — Queue multiple matches and clips; sequentially launch CS2 replay and drive OBS to produce videos; preview the plan before recording, with per-clip timing tweaks in the queue.
+- **Pre-recording Spectator Settings** — One-click spectator HUD (death notices only, hide IDs/chat/demo bars), FOV and viewmodel, flash brightness, voice, resolution and aspect ratio, OBS transitions between clips; experimental POV first-person HUD can be enabled per match.
 - **Diverse Output Styles**:
   - Observer view or POV first-person HUD (toggle radar, adjust top player count display)
   - Clean spectator view, custom FOV, hide grenade trajectories
   - **Victim POV** — After highlight or multi-kill compilations, automatically append victim perspective clips
   - **Keyboard Overlay** — Display WASD, crouch/jump keys in OBS, with manual sync adjustment if needed
+  - **Kill FX Overlay** — OBS auto-composites transparent, audio-synced FX clips for one-taps, revenge, wallbangs, blind snipes, collaterals, multi-kills, and clutches
   - Fade in/out transitions between clips
 - **Safe Recording Solution**:
   - Controls recording via OBS and game state coordination, no injection or game hooking
   - Automatically backs up and restores your keybinds and graphics settings after recording
 
-
 ### Compilation Workbench
 
-- Successfully recorded clips are automatically stored in the library; use the Compilation Workbench to drag-and-drop reorder, add BGM/transition themes, and export MP4; filter by highlight/fail/compilation/timeline types, with intro/outro arrangement.
-- **Player Info Card** — Enable bottom-left corner watermark when exporting: briefly displays player nickname, clip type (highlight/fail/compilation), round and scenario tags (e.g., multi-kill, one-tap) at the start of each clip; upload custom avatars for each player appearing in the timeline, or display first letter of nickname if no avatar. Perfect for Bilibili-style highlight intros without manual PR editing.
-- **FFmpeg Configuration Required**: Download Windows builds from [FFmpeg Official](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), extract and set the full path to `ffmpeg.exe` in the settings page. Export prioritizes GPU hardware encoding (NVENC/QSV/AMF), falling back to software encoding if unavailable.
+- Successfully recorded clips land in the library; drag-and-drop reorder, add BGM/transition themes, export MP4; filter by highlight/fail/compilation/timeline, with intro/outro arrangement.
+- **Player Info Card** — Optional bottom-left nameplate at each clip start: nickname, clip type, round and scenario tags (e.g. multi-kill, one-tap); upload avatars per player, or fall back to the nickname initial.
+- Best for a lightweight “record → reorder → export” montage flow.
+- **FFmpeg Required**: Download a Windows build from [FFmpeg Official](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), then set the full path to `ffmpeg.exe` in Settings. Export prefers GPU encoders (NVENC/QSV/AMF) and falls back to software encoding. Both the Compilation Workbench and LiteCut depend on this setup.
 
+### LiteCut (Multi-track Editor)
+
+Built-in lightweight NLE for multi-track finishing on top of Insight recordings, or with local media (requires FFmpeg as above).
+
+- **Project Management** — Create / open / duplicate projects with custom canvas size and frame rate; templates, portable project JSON import/export, and crash recovery.
+- **Media Bin** — Use **Insight recordings** (filter by highlight/fail/compilation/timeline) or drop in local video, audio, images, and fonts; preview proxies, asset relinking, and mic voiceover.
+- **Multi-track Timeline** — Video, audio, and text/overlay tracks; split, trim, ripple delete, slip, group, A/V link/unlink; markers and snapping; undo/redo and shortcuts.
+- **Packaging & Color** — Titles/text styles, filters/color grade (esports, cool/warm, night, etc.), fixed speed and speed ramps, transform/volume keyframes, in/out transitions (fade, flash, wipe, glitch, and more); save and reuse style presets.
+- **Kill Axis** — Kill timestamps embedded in recorded clips follow trim/move/speed changes for rhythm spotting (read-only; not baked into export).
+- **Export** — Export by project settings and in/out range, preferring hardware encoding.
 
 ### AI Commentary (Optional)
 
@@ -132,8 +148,8 @@ The app does not run a background updater. Download new versions directly from t
    - [X] POV HUD Experimental Feature
    - [X] Round Timeline Browse & Queue Recording
    - [X] Pre-recording Spectator Warm-up / Victim POV / Virtual Keyboard OBS Overlay
+   - [X] Demo Map Analysis (2D Replay / Heatmaps, etc.)
 - **V3**
-   - [ ] Demo Heatmap Analysis
    - [ ] Tactical Coach (Grenade Trajectory Analysis / Route Review)
 
 
@@ -154,6 +170,11 @@ This project is released under the [PolyForm Noncommercial 1.0.0](https://polyfo
 - Without written authorization, commercial use is prohibited, including but not limited to: commercial software, paid services, commercial editing/recording services, commercial platform integration, sales, rental, resale, or distribution as part of commercial products.
   - Commercial licensing inquiries: `dreamss29_@outlook.com`
 - 📦 If you distribute compiled products, installers, or modified versions of this project, please retain this project's license statement and comply with all third-party open source component licenses listed in `THIRD_PARTY_LICENSES.md`.
+- 🔒 **The custom skin (skin rewriting) feature under Demo Analysis → Cosmetics is a closed-source proprietary component** and is **not** covered by the open-source license above:
+  - Scope: Includes, without limitation, the “Customize skins / custom skin plan” UI capabilities, skin replacement and write-back logic, and the underlying closed-source components (such as the `skin-core` binary and related implementations). The open-source repository provides call sites only and **does not** include the skin-rewriting algorithms or core implementation source code.
+  - Rights: All intellectual property in this feature and its closed-source implementations belongs to the rights holder. It is not released as open source, no reverse-engineering permission is granted, and openness of other project parts does not imply any license over this component.
+  - Prohibited acts: Without prior written authorization from the rights holder, no person or organization may reverse engineer, decompile, disassemble, debug/trace, crack, bypass integrity or authorization checks, tamper with, extract algorithms/protocols/keys from, copy, re-package, redistribute, or otherwise obtain, disclose, or exploit the internal implementation of this closed-source component.
+  - Legal consequences: Upon discovery of any such activity, the rights holder reserves the right to pursue all available civil, administrative, and criminal remedies, including but not limited to injunctive relief and damages. Commercial licensing inquiries: `dreamss29_@outlook.com`.
 
 ## Disclaimer
 

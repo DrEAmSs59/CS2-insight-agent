@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import {
   buildDensityMask,
   dilateMask,
@@ -37,29 +42,23 @@ export {
 } from "./replayAreaEffectsModel";
 export { applyUtilityClip, luminanceMaskToAlphaCanvas } from "./replayAreaEffectsMask";
 
-const INFERNO_POINT_VISUAL_SCALE = 2.25;
-const INFERNO_POINT_MIN_HALF_EXTENT_PX = 5.5;
-
-export function infernoPointHalfExtentPx(cellSize, transform, width, height) {
-  const sizeWorld = Number.isFinite(cellSize) && cellSize > 0
-    ? cellSize
-    : INFERNO_CELL_SIZE_WORLD;
-  const halfExtentPct = worldLengthToRadarPercent(sizeWorld / 2, transform);
-  const occupancyHalfExtentPx = Math.max(
-    1,
-    (halfExtentPct / 100) * Math.min(width, height),
-  );
-  return Math.max(
-    INFERNO_POINT_MIN_HALF_EXTENT_PX,
-    occupancyHalfExtentPx * INFERNO_POINT_VISUAL_SCALE,
-  );
-}
-
 const SMOKE_CONTOUR_THRESHOLD = 0.15;
 const SMOKE_DILATE_CELLS = 1;
 const MAX_GEOMETRY_CACHE_ENTRIES = 256;
 const SMOKE_PARTICLE_MIN = 48;
 const SMOKE_PARTICLE_MAX = 128;
+const INFERNO_POINT_VISUAL_SCALE = 2.25;
+const INFERNO_POINT_MIN_HALF_EXTENT_PX = 5.5;
+
+export function infernoPointHalfExtentPx(cellSize, transform, width, height) {
+  const sizeWorld = Number(cellSize) > 0 ? Number(cellSize) : INFERNO_CELL_SIZE_WORLD;
+  const halfExtentPct = worldLengthToRadarPercent(sizeWorld / 2, transform);
+  const occupancyHalfExtentPx = Math.max(1, (halfExtentPct / 100) * Math.min(width, height));
+  return Math.max(
+    INFERNO_POINT_MIN_HALF_EXTENT_PX,
+    occupancyHalfExtentPx * INFERNO_POINT_VISUAL_SCALE,
+  );
+}
 
 function mapLayerThreshold(transform) {
   const value = Number(transform?.lower_level_max_units);
@@ -98,6 +97,7 @@ function projectCells(cells, transform, mapLayer, width, height) {
       cx: (percent.x / 100) * width,
       cy: (percent.y / 100) * height,
       intensity: Number(cell[3]),
+      seed: Number(cell[0]) * 0.017 + Number(cell[1]) * 0.013,
     });
   }
   return projected;

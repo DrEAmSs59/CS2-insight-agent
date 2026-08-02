@@ -22,6 +22,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
@@ -137,6 +138,66 @@ def enable_websocket_server_safely(
     }
 
 
+BEGIN_FRAME_SCHEDULING_FLAG = "--enable-begin-frame-scheduling"
+
+
+def obs_launch_args(app_cfg: AppConfig) -> list[str]:
+    """本次冷启动附加给 obs64.exe 的命令行参数。"""
+    args: list[str] = []
+    if bool(getattr(app_cfg.obs, "browser_begin_frame_scheduling", False)):
+        args.append(BEGIN_FRAME_SCHEDULING_FLAG)
+    return args
+
+
+def make_obs_launcher(extra_args: Sequence[str] = ()) -> Callable[[str], None]:
+    """造一个带固定参数的启动器，保持 ``Callable[[str], None]`` 这个注入点不变。"""
+    frozen = [str(arg) for arg in extra_args]
+
+    def launch(obs_path: str) -> None:
+        subprocess.Popen([obs_path, *frozen], cwd=str(Path(obs_path).parent))
+
+    return launch
+
+
+def read_process_command_lines(exe_name: str) -> list[str]:
+    """读取同名进程的完整命令行（Windows）。
+
+    OBS 32 的日志不记录启动参数，所以"当前跑着的 OBS 带了哪些标志"只能问系统。
+    读不到时返回空列表——包括 OBS 以管理员身份运行而本进程不是的情况，调用方必须把
+    空结果当作"未知"，不能当成"没带标志"。
+    """
+    if sys.platform != "win32":
+        return []
+    query = (
+        f"Get-CimInstance Win32_Process -Filter \"Name='{exe_name}'\""
+        " | ForEach-Object { $_.CommandLine }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", query],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:  # noqa: BLE001 - 探测失败按"未知"处理，不影响启动流程
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def detect_begin_frame_scheduling(exe_name: str = "obs64.exe") -> Optional[bool]:
+    """运行中的 OBS 是否带锁帧标志；``None`` 表示读不到命令行。"""
+    command_lines = read_process_command_lines(exe_name)
+    if not command_lines:
+        return None
+    return any(BEGIN_FRAME_SCHEDULING_FLAG in line for line in command_lines)
+
+
 def _default_process_checker(obs_path: str) -> bool:
     if sys.platform != "win32":
         return False
@@ -155,7 +216,7 @@ def _default_process_checker(obs_path: str) -> bool:
 
 
 def _default_launcher(obs_path: str) -> None:
-    subprocess.Popen([obs_path], cwd=str(Path(obs_path).parent))
+    make_obs_launcher()(obs_path)
 
 
 def _default_connection_tester(app_cfg: AppConfig) -> dict[str, Any]:
@@ -173,7 +234,8 @@ def bootstrap_obs_environment(
     *,
     websocket_config_path: Optional[Path] = None,
     process_checker: Callable[[str], bool] = _default_process_checker,
-    launcher: Callable[[str], None] = _default_launcher,
+    launcher: Optional[Callable[[str], None]] = None,
+    flag_probe: Callable[[], Optional[bool]] = detect_begin_frame_scheduling,
     connection_tester: Callable[[AppConfig], dict[str, Any]] = _default_connection_tester,
     sleep: Callable[[float], None] = time.sleep,
     persist_config: Callable[[AppConfig], None] = save_config,
@@ -193,8 +255,20 @@ def bootstrap_obs_environment(
     if request.password is not None and request.password.strip():
         app_cfg.obs.password = request.password.strip()
 
+    launch_args = obs_launch_args(app_cfg)
     running = bool(process_checker(obs_path))
     events.append(_event("check_process", "ok", "OBS 已运行" if running else "OBS 当前未运行"))
+
+    # 锁帧标志只能在冷启动时给。OBS 已经在跑就意味着这次录制拿不到它，而校准出来的
+    # 偏置在开与不开两种状态下数值不同，所以必须说出来而不是静默降级。
+    if running and launch_args:
+        active = flag_probe()
+        if active is False:
+            events.append(_event("browser_frame_pacing", "warning", "OBS 已在运行且未启用浏览器源锁帧，需重启 OBS 才生效"))
+        elif active is None:
+            events.append(_event("browser_frame_pacing", "warning", "无法读取 OBS 命令行，浏览器源锁帧是否生效未知"))
+        else:
+            events.append(_event("browser_frame_pacing", "ok", "浏览器源锁帧已生效"))
 
     ws_path = websocket_config_path or resolve_websocket_config_path()
     ws_state = inspect_websocket_config(ws_path)
@@ -301,8 +375,11 @@ def bootstrap_obs_environment(
         }
 
     try:
-        launcher(obs_path)
-        events.append(_event("launch_obs", "ok", "已启动 OBS，正在等待 WebSocket"))
+        (launcher or make_obs_launcher(launch_args))(obs_path)
+        if launch_args:
+            events.append(_event("launch_obs", "ok", "已启动 OBS（浏览器源锁帧已开启），正在等待 WebSocket"))
+        else:
+            events.append(_event("launch_obs", "ok", "已启动 OBS，正在等待 WebSocket"))
     except Exception as exc:  # noqa: BLE001
         events.append(_event("launch_obs", "failed", f"OBS 启动失败：{exc}"))
         return {

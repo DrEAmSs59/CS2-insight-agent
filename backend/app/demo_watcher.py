@@ -677,6 +677,13 @@ class DemoWatcher:
             except Exception:
                 logger.exception("purge_deleted_demo_files failed during scan for root %s", p)
 
+        if self._demo_db is not None:
+            active_roots = [str(p.resolve()) for p in self._normalized_paths()]
+            try:
+                await self._demo_db.purge_stale_pending_demos(active_roots)
+            except Exception:
+                logger.exception("purge_stale_pending_demos failed during scan")
+
         async def _enqueue_dem(path: Path) -> None:
             async with sem:
                 try:

@@ -7,7 +7,15 @@ describe("projectBodyFromTemplate", () => {
     expect(projectBodyFromTemplate("highlight-16x9")).toMatchObject({
       template_id: "highlight-16x9",
       created_from_template: true,
-      output: { width: 1920, height: 1080, fps: 60 },
+      output: {
+        width: 1920,
+        height: 1080,
+        fps: 60,
+        frame_blend_enabled: false,
+        frame_blend_frames: 5,
+        high_frame_downsample_enabled: false,
+        delivery_fps: 60,
+      },
     });
     expect(projectBodyFromTemplate("shorts-9x16")).toMatchObject({
       output: { width: 1080, height: 1920, canvas_fit: "cover" },
