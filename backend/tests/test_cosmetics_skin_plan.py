@@ -146,12 +146,106 @@ def test_build_batch_sets_replacement_definition_index_for_cross_model_glove():
             def_index=5027,
             paint_index=10033,
             model="sporty_gloves",
+            observed_teams=["t"],
         )
     ]
     repl = replacement(type="glove", def_index=5030, paint_index=10038, model="specialist_gloves")
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
     assert batch_items[0]["replacement_definition_index"] == 5030
     assert batch_items[0]["definition_index"] == 5027
+    assert batch_items[0]["team"] == "T"
+
+
+def test_build_batch_emits_side_team_for_vanilla_gloves():
+    inv = [
+        inventory_row(
+            item_id=0,
+            type="glove",
+            def_index=5027,
+            paint_index=0,
+            observed_teams=["t"],
+        ),
+        inventory_row(
+            item_id=0,
+            type="glove",
+            def_index=5031,
+            paint_index=0,
+            observed_teams=["ct"],
+        ),
+    ]
+    replacements = {
+        slot_key(inv[0]): replacement(type="glove", def_index=5030, paint_index=10048),
+        slot_key(inv[1]): replacement(type="glove", def_index=5030, paint_index=10038),
+    }
+    batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, replacements)
+    by_def = {row["definition_index"]: row for row in batch_items}
+    assert by_def[5027]["item_id64"] == "0"
+    assert by_def[5027]["team"] == "T"
+    assert by_def[5031]["item_id64"] == "0"
+    assert by_def[5031]["team"] == "CT"
+
+
+def test_build_batch_placeholder_gloves_take_team_from_originals():
+    """UI default gloves are not in workspace inventory; originals carry the side."""
+    replacements = {
+        "placeholder:5028": replacement(type="glove", def_index=5027, paint_index=10006),
+        "placeholder:5029": replacement(type="glove", def_index=5027, paint_index=10007),
+    }
+    originals = {
+        "placeholder:5028": {
+            "type": "glove",
+            "def_index": 5028,
+            "paint_index": 0,
+            "is_placeholder": True,
+            "observed_teams": ["t"],
+            "name_zh": "默认T手套",
+        },
+        "placeholder:5029": {
+            "type": "glove",
+            "def_index": 5029,
+            "paint_index": 0,
+            "is_placeholder": True,
+            "observed_teams": ["ct"],
+            "name_zh": "默认反恐精英手套",
+        },
+    }
+    batch_items, plan = build_batch_and_plan(STEAM_ID, [], replacements, originals=originals)
+    assert len(batch_items) == 2
+    by_source = {row["definition_index"]: row for row in batch_items}
+    assert by_source[5028]["item_id64"] == "0"
+    assert by_source[5028]["team"] == "T"
+    assert by_source[5028]["replacement_definition_index"] == 5027
+    assert by_source[5029]["team"] == "CT"
+    assert {entry["slot_key"] for entry in plan["items"]} == {
+        "placeholder:5028",
+        "placeholder:5029",
+    }
+
+
+def test_build_batch_placeholder_gloves_infer_team_from_default_defs():
+    """Even if the UI snapshot omitted observed_teams, 5028/5029 are side-fixed."""
+    replacements = {
+        "placeholder:5028": replacement(type="glove", def_index=5032, paint_index=10008),
+        "placeholder:5029": replacement(type="glove", def_index=5032, paint_index=10009),
+    }
+    originals = {
+        "placeholder:5028": {
+            "type": "glove",
+            "def_index": 5028,
+            "paint_index": 0,
+            "is_placeholder": True,
+        },
+        "placeholder:5029": {
+            "type": "glove",
+            "def_index": 5029,
+            "paint_index": 0,
+            "is_placeholder": True,
+        },
+    }
+    batch_items, _plan = build_batch_and_plan(STEAM_ID, [], replacements, originals=originals)
+    by_source = {row["definition_index"]: row for row in batch_items}
+    assert by_source[5028]["team"] == "T"
+    assert by_source[5029]["team"] == "CT"
 
 
 def test_build_batch_omits_replacement_definition_index_when_def_unchanged():

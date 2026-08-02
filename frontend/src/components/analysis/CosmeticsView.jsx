@@ -107,6 +107,9 @@ function snapshotOriginalItem(item) {
     is_placeholder: item?.is_placeholder,
     catalog_id: item?.catalog_id,
     model: item?.model,
+    // Required for zero-id glove materialize (T/CT). Default loadout placeholders
+    // set this; dropping it makes both sides land as team ANY and soft-fail.
+    observed_teams: Array.isArray(item?.observed_teams) ? [...item.observed_teams] : item?.observed_teams,
   };
 }
 
