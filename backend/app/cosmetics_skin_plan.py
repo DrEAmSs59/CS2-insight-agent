@@ -86,6 +86,38 @@ def _require_float(value: Any, field: str) -> float:
     return float(num)
 
 
+def _glove_batch_team(inventory_row: dict[str, Any]) -> str | None:
+    """Map inventory observed_teams to skin-core batch team (T/CT).
+
+    Returns None when the side is unknown or mixed so skin-core can keep ANY
+    for a single glove rule. Default glove defs 5028/5029 are side-fixed even
+    when observed_teams was dropped from a UI snapshot.
+    """
+    raw = inventory_row.get("observed_teams")
+    if isinstance(raw, (list, tuple)):
+        teams: set[str] = set()
+        for entry in raw:
+            text = str(entry or "").strip().lower()
+            if text in {"t", "2", "terrorist"}:
+                teams.add("T")
+            elif text in {"ct", "3", "counter-terrorist", "counterterrorist"}:
+                teams.add("CT")
+        if teams == {"T"}:
+            return "T"
+        if teams == {"CT"}:
+            return "CT"
+    try:
+        def_index = int(float(inventory_row.get("def_index")))
+    except (TypeError, ValueError):
+        return None
+    # CS2 default glove economy defs (UI placeholders).
+    if def_index == 5028:
+        return "T"
+    if def_index == 5029:
+        return "CT"
+    return None
+
+
 def _display_fields(row: dict[str, Any]) -> dict[str, Any]:
     """Copy display-relevant fields; omit nothing the UI needs for overlay."""
     out: dict[str, Any] = {}
@@ -156,21 +188,30 @@ def build_batch_and_plan(
         if not isinstance(repl, dict):
             raise CosmeticsSkinPlanError(f"invalid replacement for slot {key!r}")
         inventory_row = by_key.get(str(key))
+        client_original = originals_by_key.get(str(key)) or {}
         if inventory_row is None and str(key).startswith("placeholder:"):
-            client = originals_by_key.get(str(key)) or {}
             try:
                 source_def = int(
-                    float(client.get("def_index") if "def_index" in client else str(key).split(":", 1)[-1])
+                    float(
+                        client_original.get("def_index")
+                        if "def_index" in client_original
+                        else str(key).split(":", 1)[-1]
+                    )
                 )
             except (TypeError, ValueError):
                 source_def = 0
-            item_type = str(client.get("type") or repl.get("type") or "")
+            item_type = str(client_original.get("type") or repl.get("type") or "")
             inventory_row = {
                 "def_index": source_def,
                 "type": item_type,
                 "item_id": None,
                 "is_placeholder": True,
             }
+            # Placeholders are UI-only; carry side from the client snapshot so
+            # zero-id glove materialize can be T/CT scoped.
+            observed = client_original.get("observed_teams")
+            if isinstance(observed, (list, tuple)):
+                inventory_row["observed_teams"] = list(observed)
         if inventory_row is None:
             raise CosmeticsSkinPlanError(f"slot not found in inventory: {key}")
 
@@ -205,9 +246,15 @@ def build_batch_and_plan(
             if repl_def != definition_index:
                 batch_item["replacement_definition_index"] = repl_def
 
+        # Zero-id glove materialize is side-scoped: T and CT may coexist, but two
+        # ANY (or same-side) rules collide on the pawn EconGloves state.
+        if item_type == "glove":
+            team = _glove_batch_team(inventory_row) or _glove_batch_team(client_original)
+            if team:
+                batch_item["team"] = team
+
         batch_items.append(batch_item)
 
-        client_original = originals_by_key.get(str(key))
         if client_original:
             plan_original = {
                 **_display_fields(client_original),
