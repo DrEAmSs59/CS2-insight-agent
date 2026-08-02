@@ -358,34 +358,6 @@ async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ff
     assert caught.value.headers == {"Retry-After": "1"}
 
 
-@pytest.mark.anyio
-async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
-    from app.lite_cut import api as api_mod
-
-    source = tmp_path / "large.mov"
-    source.write_bytes(b"source")
-
-    class FakeDb:
-        async def get_asset(self, asset_id):
-            assert asset_id == 991
-            return {"id": 991, "name": source.name, "kind": "video", "file_path": str(source)}
-
-    monkeypatch.setattr(api_mod, "_get_lite_cut_db", lambda: FakeDb())
-    monkeypatch.setattr(assets_mod, "validate_stored_asset_path", lambda _path: source)
-    monkeypatch.setattr(api_mod, "_decorate_asset_preview_state", lambda row: {
-        **row,
-        "preview_proxy_required": True,
-        "preview_proxy_status": "running",
-    })
-
-    with pytest.raises(HTTPException) as caught:
-        await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
-
-    assert caught.value.status_code == 425
-    assert caught.value.headers == {"Retry-After": "1"}
-
-
 def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path):
     source = tmp_path / "match.avi"
     output = preview_proxy_path_for_asset(source)

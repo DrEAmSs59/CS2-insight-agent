@@ -2295,9 +2295,6 @@ async def delete_demo(demo_id: int):
     ok = await demo_db.delete_demo(demo_id)
     if not ok:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    from .parser.replay_cache_storage import remove_demo_replay_cache
-
-    cache_removed = await asyncio.to_thread(remove_demo_replay_cache, str(demo["path"]))
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id, "replay_cache": cache_removed}
 

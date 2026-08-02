@@ -10,6 +10,17 @@ from app import demo_parse_isolation, main
 from app.parser import replay_match_cache
 
 
+@pytest.fixture(autouse=True)
+def bypass_demo_library_lookup(monkeypatch):
+    """Keep direct-path replay tests independent from the library database."""
+
+    async def not_in_library(_path):
+        return None
+
+    monkeypatch.setattr(main.demo_db, "get_demo_by_path", not_in_library)
+    monkeypatch.setattr(main.demo_db, "get_demo_by_cached_path", not_in_library)
+
+
 def _request(path: str) -> main.DemoReplayRequest:
     return main.DemoReplayRequest(
         path=path,

@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Verify patched demoparser runtime
+        env:
+          PYTHONPATH: backend
+        run: uv run --frozen python -m app.demoparser_runtime
+
+      - name: Run backend tests
+        env:
+          PYTHONPATH: backend
+        run: uv run --frozen python -m pytest backend/tests -q
+
+  frontend:
+    name: Frontend tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.9.0"
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: pnpm test
+
+  rust:
+    name: Rust checks
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run lints
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked

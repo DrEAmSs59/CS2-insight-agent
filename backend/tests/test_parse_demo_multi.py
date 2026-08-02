@@ -10,6 +10,17 @@ from app import demo_parse_isolation, main
 from app.env_utils import AppConfig, LLMConfig
 
 
+@pytest.fixture(autouse=True)
+def bypass_demo_library_lookup(monkeypatch):
+    """Keep direct-path API tests independent from the library database."""
+
+    async def not_in_library(_path):
+        return None
+
+    monkeypatch.setattr(main.demo_db, "get_demo_by_path", not_in_library)
+    monkeypatch.setattr(main.demo_db, "get_demo_by_cached_path", not_in_library)
+
+
 def _run_parse_multi(*, players: list[str], filename: str = "match.dem", locale: str = "zh") -> dict:
     request = main.ParseMultiRequest(target_players=players, locale=locale)
     return asyncio.run(main.parse_demo_multi(request, filename))
