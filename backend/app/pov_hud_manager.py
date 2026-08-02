@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
@@ -269,6 +269,7 @@ class PovHudManager:
         map_name: Optional[str] = None,
         *,
         demo_path: Optional[str | Path] = None,
+        input_track_report: Optional[Mapping[str, Any]] = None,
     ) -> None:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -283,14 +284,20 @@ class PovHudManager:
         voice_template = self.get_voice_hud_template_path()
         if demo_path is not None and voice_template.is_file():
             try:
-                voice_build = build_demo_voice_hud_vpk(demo_path, voice_template)
+                voice_build = build_demo_voice_hud_vpk(
+                    demo_path,
+                    voice_template,
+                    input_track_report=input_track_report,
+                )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
-                    "locations=%d payload=%d bytes",
+                    "locations=%d input_tracks=%d input_changes=%d payload=%d bytes",
                     voice_build.voice_packets,
                     voice_build.speakers,
                     voice_build.intervals,
                     voice_build.location_changes,
+                    voice_build.input_tracks,
+                    voice_build.input_changes,
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
@@ -368,6 +375,11 @@ class PovHudManager:
                     "location_changes": voice_build.location_changes,
                     "payload_bytes": voice_build.payload_bytes,
                     "location_parse_failed": bool(voice_build.location_parse_failed),
+                    "input_tracks": voice_build.input_tracks,
+                    "input_changes": voice_build.input_changes,
+                    "input_commands": voice_build.input_commands,
+                    "input_button_updates": voice_build.input_button_updates,
+                    "input_subtick_steps": voice_build.input_subtick_steps,
                 }
                 if voice_build is not None
                 else None

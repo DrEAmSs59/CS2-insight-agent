@@ -13,6 +13,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 import struct
 from typing import Any, Callable, Iterable, Mapping
 import zlib
@@ -42,6 +43,11 @@ class DemoVoiceHudBuild:
     location_changes: int
     payload_bytes: int
     location_parse_failed: int
+    input_tracks: int = 0
+    input_changes: int = 0
+    input_commands: int = 0
+    input_button_updates: int = 0
+    input_subtick_steps: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -255,6 +261,41 @@ def _as_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _build_team_roster(parser: Any) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
+    """Return compact ``[xuid, slot, team]`` rows keyed by exact Steam ID."""
+    try:
+        player_info = parser.parse_player_info()
+    except Exception as exc:  # noqa: BLE001 - native parser errors are contextualized
+        raise DemoVoiceHudError(f"could not parse demo player teams: {exc}") from exc
+    if not isinstance(player_info, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported player info")
+
+    player_xuids = player_info.get("steamid")
+    player_teams = player_info.get("team_number")
+    if not isinstance(player_xuids, list) or not isinstance(player_teams, list):
+        raise DemoVoiceHudError("demo player info contains no Steam ID/team roster")
+    if len(player_xuids) != len(player_teams):
+        raise DemoVoiceHudError("demo player info Steam ID/team columns are misaligned")
+
+    roster: list[list[Any]] = []
+    by_xuid: dict[int, tuple[int, int]] = {}
+    for slot, (raw_xuid, raw_team) in enumerate(zip(player_xuids, player_teams)):
+        xuid = _as_positive_int(raw_xuid)
+        try:
+            team = int(raw_team)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if xuid is None or team not in (2, 3):
+            continue
+        if xuid in by_xuid:
+            raise DemoVoiceHudError(f"demo player roster repeats Steam ID {xuid}")
+        by_xuid[xuid] = (slot, team)
+        roster.append([str(xuid), slot, team])
+    if not roster:
+        raise DemoVoiceHudError("demo player info contains no team-bound Steam IDs")
+    return roster, by_xuid
+
+
 def build_voice_payload(
     demo_path: str | Path,
     *,
@@ -273,20 +314,26 @@ def build_voice_payload(
     if not isinstance(voice_rows, list):
         raise DemoVoiceHudError("demoparser returned an unsupported voice table")
 
+    encoded_roster, roster_by_xuid = _build_team_roster(parser)
+
     ticks_by_xuid: dict[int, list[int]] = defaultdict(list)
-    voice_packets = 0
     for row in voice_rows:
         if not isinstance(row, Mapping):
             continue
         xuid = _as_positive_int(row.get("steamid"))
         tick = _as_positive_int(row.get("tick"))
         audio = row.get("bytes")
-        if xuid is None or tick is None or not isinstance(audio, (bytes, bytearray)) or not audio:
+        if (
+            xuid not in roster_by_xuid
+            or tick is None
+            or not isinstance(audio, (bytes, bytearray))
+            or not audio
+        ):
             continue
         ticks_by_xuid[xuid].append(tick)
-        voice_packets += 1
     if not ticks_by_xuid:
-        raise DemoVoiceHudError("demo contains no usable voice packets")
+        raise DemoVoiceHudError("demo contains no team-bound voice packets")
+    voice_packets = sum(len(ticks) for ticks in ticks_by_xuid.values())
 
     try:
         location_rows = parser.parse_ticks(["last_place_name"])
@@ -328,13 +375,14 @@ def build_voice_payload(
     interval_count = 0
     location_count = 0
     for xuid in sorted(ticks_by_xuid):
+        slot, _team = roster_by_xuid[xuid]
         intervals = _merge_ticks(ticks_by_xuid[xuid])
         locations = changes_by_xuid[xuid]
         interval_count += len(intervals)
         location_count += len(locations)
         encoded_speakers.append(
             [
-                0,
+                slot,
                 str(xuid),
                 _encode_intervals(intervals),
                 _encode_locations(locations, location_token_index),
@@ -342,7 +390,7 @@ def build_voice_payload(
         )
 
     payload = json.dumps(
-        [location_tokens, encoded_speakers],
+        [location_tokens, encoded_speakers, [], encoded_roster],
         ensure_ascii=True,
         separators=(",", ":"),
     ).encode("ascii")
@@ -355,6 +403,86 @@ def build_voice_payload(
         "location_parse_failed": int(location_error is not None),
     }
     return payload, stats
+
+
+_ENCODED_INPUT_TRACK = re.compile(r"(?:[0-9a-z]+\.[0-9a-z]+)(?:,[0-9a-z]+\.[0-9a-z]+)*\Z")
+
+
+def add_input_tracks_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    input_track_report: Mapping[str, Any],
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, int]]:
+    """Attach exact, slot-keyed UserCmd tracks to the Panorama payload."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    if not isinstance(packed, list) or len(packed) != 4:
+        raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
+
+    slot_to_xuid: dict[int, int] = {}
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) != 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        try:
+            slot = int(row[1])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if xuid is not None and slot >= 0:
+            slot_to_xuid[slot] = xuid
+
+    raw_tracks = input_track_report.get("tracks")
+    if not isinstance(raw_tracks, list):
+        raise DemoVoiceHudError("input-track report contains no track list")
+    encoded_tracks: list[list[str]] = []
+    input_changes = 0
+    seen_xuids: set[str] = set()
+    for raw_track in raw_tracks:
+        if not isinstance(raw_track, Mapping):
+            continue
+        try:
+            slot = int(raw_track.get("slot"))
+            changes = int(raw_track.get("changes"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if slot < 0 or changes <= 0:
+            continue
+        xuid = slot_to_xuid.get(slot)
+        encoded = raw_track.get("encoded")
+        if xuid is None or not isinstance(encoded, str) or not _ENCODED_INPUT_TRACK.fullmatch(encoded):
+            continue
+        xuid_text = str(xuid)
+        if xuid_text in seen_xuids:
+            raise DemoVoiceHudError(f"input-track report repeats Steam ID {xuid_text}")
+        seen_xuids.add(xuid_text)
+        encoded_tracks.append([xuid_text, encoded])
+        input_changes += changes
+    if not encoded_tracks:
+        raise DemoVoiceHudError("input-track report contains no usable player tracks")
+
+    packed[2] = encoded_tracks
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+
+    def report_int(key: str) -> int:
+        try:
+            return max(0, int(input_track_report.get(key, 0)))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    return payload, {
+        "input_tracks": len(encoded_tracks),
+        "input_changes": input_changes,
+        "input_commands": report_int("commands"),
+        "input_button_updates": report_int("button_updates"),
+        "input_subtick_steps": report_int("subtick_steps"),
+    }
 
 
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
@@ -389,8 +517,24 @@ def build_demo_voice_hud_vpk(
     template_vpk_path: str | Path,
     *,
     parser_factory: Callable[[str], Any] | None = None,
+    input_track_report: Mapping[str, Any] | None = None,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
+    input_stats = {
+        "input_tracks": 0,
+        "input_changes": 0,
+        "input_commands": 0,
+        "input_button_updates": 0,
+        "input_subtick_steps": 0,
+    }
+    if input_track_report is not None:
+        payload, input_stats = add_input_tracks_to_payload(
+            payload,
+            demo_path,
+            input_track_report,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = len(payload)
     template = Path(template_vpk_path).read_bytes()
     vpk_bytes = inject_voice_payload(template, payload)
-    return DemoVoiceHudBuild(vpk_bytes=vpk_bytes, **stats)
+    return DemoVoiceHudBuild(vpk_bytes=vpk_bytes, **stats, **input_stats)

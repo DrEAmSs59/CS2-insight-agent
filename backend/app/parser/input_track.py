@@ -17,9 +17,9 @@ PROP_SCOPE = "is_scoped"
 PROP_DUCKING = "ducking"
 PROP_RELOAD = "is_in_reload"
 
-# CS2 demo format compatibility. Older demos expose a live button mask through
-# the player-pawn field below (and demoparser2's ``buttons`` alias). Newer
-# demos can omit that pawn field; demoparser2 then only exposes sparse usercmd
+# CS2 demo data compatibility. Some demos expose a live button mask through
+# the player-pawn field below (and demoparser2's ``buttons`` alias); other
+# demos omit it. In the latter case demoparser2 may only expose sparse usercmd
 # snapshots, which are useful for format detection but not as live key state.
 PROP_USERCMD_BUTTONS = "usercmd_buttonstate_1"
 PROP_DESIRES_DUCK = "CCSPlayerPawn.CCSPlayer_MovementServices.m_bDesiresDuck"
@@ -314,10 +314,10 @@ def _infer_movement_from_motion(
     *,
     min_units_per_tick: float = 0.5,
 ) -> dict[str, list[bool]]:
-    """Infer WASD from motion when new demos no longer expose a live mask.
+    """Infer WASD from motion when a demo does not expose a live pawn mask.
 
     demoparser2 currently repeats usercmd snapshots between full packets in
-    recent demos.  Treating those snapshots as live state makes a key remain
+    affected demos. Treating those snapshots as live state makes a key remain
     lit for up to a minute, so use position delta in the player's view space
     instead.  This is an approximation, but it follows actual movement and
     cannot retain a stale key indefinitely.
@@ -774,7 +774,7 @@ def extract_input_track(
                 )
 
     if uses_usercmd_fallback:
-        # New demos only expose sparse/stale usercmd snapshots through
+        # Demos without the live pawn mask expose sparse/stale snapshots through
         # demoparser2. Game events remain tick-accurate, so use them for the
         # mouse buttons instead of the repeated button mask.
         fire_ticks = _event_ticks_for_player(
