@@ -31,6 +31,17 @@ def _compat_result(*, cached: bool = False):
     )
 
 
+def _stub_analysis_registration(monkeypatch, demo_id: int = 73):
+    registered: list[Path] = []
+
+    async def fake_register(path: Path) -> int:
+        registered.append(Path(path))
+        return demo_id
+
+    monkeypatch.setattr(main, "_ensure_analysis_demo_row", fake_register)
+    return registered
+
+
 def test_decode_upload_source_paths_fails_closed():
     assert main._decode_upload_source_paths(None, 2) == [None, None]
     assert main._decode_upload_source_paths("not-json", 1) == [None]
@@ -66,13 +77,16 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     monkeypatch.setattr(main, "UPLOAD_DIR", upload_dir)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
     monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+    registered = _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([upload], json.dumps([str(original)])))
 
     item = response["uploads"][0]
+    assert item["id"] == 73
     assert item["path"] == str(original.resolve())
     assert item["uploaded_path"] == str(upload_dir / "match.dem")
     assert Path(item["uploaded_path"]).read_bytes() == original.read_bytes()
+    assert registered == [original.resolve()]
 
 
 def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path: Path):
@@ -84,10 +98,12 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
     monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+    _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([upload], json.dumps([""])))
 
     item = response["uploads"][0]
+    assert item["id"] == 73
     assert item["path"] == str(tmp_path / "browser.dem")
     assert item["uploaded_path"] == item["path"]
 
@@ -107,6 +123,7 @@ def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_pat
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([bad, good], json.dumps(["", ""])))
 
@@ -151,9 +168,11 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
     monkeypatch.setattr(main, "_save_uploaded_demo", fake_save)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demo(upload))
 
+    assert response["id"] == 73
     assert response["path"] == str(tmp_path / "threaded.dem")
     assert save_threads and save_threads[0] != caller_thread
     assert ensure_threads and ensure_threads[0] != caller_thread
@@ -175,12 +194,52 @@ def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: P
 
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    registered = _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.open_local_demos(main.OpenLocalDemosBody(paths=[str(original)])))
 
     item = response["uploads"][0]
+    assert item["id"] == 73
     assert item["path"] == str(original.resolve())
     assert item["uploaded_path"] is None
     assert item["compatibility"]["cached"] is False
     assert ensured == [original.resolve()]
     assert inspected == [original.resolve()]
+    assert registered == [original.resolve()]
+
+
+def test_analysis_demo_registration_creates_and_reuses_stable_id(monkeypatch, tmp_path: Path):
+    demo = tmp_path / "analysis.dem"
+    demo.write_bytes(b"analysis-demo")
+
+    class FakeDemoDB:
+        def __init__(self):
+            self.row = None
+            self.add_calls = []
+
+        async def get_demo_by_path(self, path):
+            return self.row
+
+        async def add_demo(self, path, **kwargs):
+            self.add_calls.append((path, kwargs))
+            self.row = {"id": 91, "path": path}
+            return 91, True
+
+    fake_db = FakeDemoDB()
+    notifications = []
+
+    async def fake_notify(event):
+        notifications.append(event)
+
+    monkeypatch.setattr(main, "demo_db", fake_db)
+    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=fake_notify))
+
+    first = asyncio.run(main._ensure_analysis_demo_row(demo))
+    second = asyncio.run(main._ensure_analysis_demo_row(demo))
+
+    assert first == second == 91
+    assert len(fake_db.add_calls) == 1
+    assert fake_db.add_calls[0][0] == str(demo.resolve())
+    assert fake_db.add_calls[0][1]["status"] == "pending"
+    assert fake_db.add_calls[0][1]["file_size"] == len(b"analysis-demo")
+    assert notifications == ["enqueue"]
