@@ -138,7 +138,20 @@ describe("CosmeticsView", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getAllByText("Lᵒᵛᵉᵧₒᵤ 玫瑰の吻").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("53009600926")).toBeTruthy();
+    expect(within(dialog).queryByText(/Demo 没有提供可归属的贴纸数据|no attributable sticker data/i)).toBeNull();
     expect(dialog.textContent).not.toContain("OriginalOwner");
+  });
+
+  test("shows missing sticker evidence only for guns, not knives or gloves", () => {
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ type: "weapon", model: "ak47", def_index: 7, name_zh: "AK原皮" })] } } }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /AK原皮/ })[0]);
+    expect(within(screen.getByRole("dialog")).getByText(/Demo 没有提供可归属的贴纸数据|no attributable sticker data/i)).toBeTruthy();
   });
 
   test("opens the hosted viewer without its light backdrop", () => {
@@ -198,7 +211,7 @@ describe("CosmeticsView", () => {
     expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
-  test("renders agent and music-kit evidence alongside equipment", () => {
+  test("renders agent evidence but omits music-kit and C4 rows", () => {
     const { container } = render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -208,6 +221,7 @@ describe("CosmeticsView", () => {
               [STEAM_ID]: [
                 cosmetic({ catalog_id: 8666, item_id: undefined, def_index: 4736, paint_index: 0, type: "agent", name_zh: "探员 | 血腥达里尔爵士（沉默）", paint_seed: undefined, paint_wear: undefined }),
                 cosmetic({ catalog_id: 12000, item_id: undefined, def_index: 1314, paint_index: 76, type: "musickit", name_zh: "音乐盒 | Under Bright Lights", paint_seed: undefined, paint_wear: undefined }),
+                cosmetic({ catalog_id: 49, item_id: undefined, def_index: 49, paint_index: 0, type: "utility", model: "c4", name_zh: "C4 炸弹", paint_seed: undefined, paint_wear: undefined }),
               ],
             },
           },
@@ -217,10 +231,11 @@ describe("CosmeticsView", () => {
 
     expect(screen.getByText("探员")).toBeTruthy();
     expect(screen.getByText("血腥达里尔爵士（沉默）")).toBeTruthy();
-    expect(screen.getByText("音乐盒")).toBeTruthy();
-    expect(screen.getByText("Under Bright Lights")).toBeTruthy();
-    // Agent + music kit + natural knife/glove placeholders (no default guns).
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(4);
+    expect(screen.queryByText("音乐盒")).toBeNull();
+    expect(screen.queryByText("Under Bright Lights")).toBeNull();
+    expect(screen.queryByText("C4 炸弹")).toBeNull();
+    // Agent + natural knife/glove placeholders (no default guns or non-skin evidence).
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(3);
   });
 
   test("custom mode grays non-swappable items and opens picker for weapons", async () => {

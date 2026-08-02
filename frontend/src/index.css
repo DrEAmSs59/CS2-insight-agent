@@ -1031,6 +1031,23 @@ body {
   font-family: var(--font-sans);
 }
 
+#root,
+#root * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#root input,
+#root textarea,
+#root [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#root img {
+  -webkit-user-drag: none;
+}
+
 /* 浅色模式下击杀图标反色（SVG 为白色填充） */
 .light .killfeed-icon-strip img {
   filter: invert(1);

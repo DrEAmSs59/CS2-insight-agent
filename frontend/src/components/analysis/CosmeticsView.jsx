@@ -169,6 +169,12 @@ function playerName(player) {
   return String(player?.name || player?.player_name || "").trim();
 }
 
+function isVisibleCosmeticEvidence(item) {
+  const type = String(item?.type || "").toLowerCase();
+  const model = String(item?.model || "").toLowerCase();
+  return type !== "musickit" && model !== "c4" && Number(item?.def_index) !== 49;
+}
+
 function localized(item, field, locale) {
   const chinese = String(item?.[`${field}_zh`] || "").trim();
   const english = String(item?.[`${field}_en`] || "").trim();
@@ -606,6 +612,7 @@ function DetailRow({ label, children }) {
 function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspectUrl, inspectBusy }) {
   const t = useT();
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
+  const supportsStickers = String(item?.type || "") === "weapon";
   const observed = Array.isArray(item?.observed_teams) ? item.observed_teams : [];
   const compatible = eligibleTeams(item);
   const description = localized(item, "desc", locale);
@@ -624,7 +631,7 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
           </div>
         ) : null}
         <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="max-h-[300px] w-full" />
-        {stickers.length && onlineAssetsEnabled ? (
+        {supportsStickers && stickers.length && onlineAssetsEnabled ? (
           <div className="flex w-full flex-wrap justify-center gap-4">
             {stickers.map((sticker, index) => (
               <div key={`${sticker?.catalog_id || "sticker"}-${index}`} className="w-[5.5rem] text-center">
@@ -635,11 +642,11 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
               </div>
             ))}
           </div>
-        ) : stickers.length ? (
+        ) : supportsStickers && stickers.length ? (
           <div className="inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
-        ) : (
+        ) : supportsStickers ? (
           <div className="inline-flex items-center gap-1.5 text-[10px] text-cs2-text-muted"><Sticker className="h-3.5 w-3.5" />{t("analysis.cosmetics.noStickerEvidence")}</div>
-        )}
+        ) : null}
       </div>
       <div className="min-w-0 p-5">
         <div className="mb-4 border-b border-cs2-border pb-4">
@@ -700,7 +707,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [teamTab, setTeamTab] = useState("ct");
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
-    return Array.isArray(rows) ? rows : [];
+    return Array.isArray(rows) ? rows.filter(isVisibleCosmeticEvidence) : [];
   }, [steamid, workspace?.cosmetics?.players]);
   const ctItems = useMemo(
     () => mergeLoadoutWithEvidence(listDefaultLoadout("ct"), itemsForTeam(inventory, "ct"), locale),

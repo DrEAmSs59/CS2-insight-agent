@@ -908,6 +908,31 @@ class ParseRequest(BaseModel):
     locale: str = "zh"
 
 
+async def _ensure_analysis_demo_row(path: Path) -> int:
+    """Give every successfully opened analysis demo a stable library id.
+
+    Cosmetics rewrites are persisted and resolved through ``demo_files``.  The
+    direct-analysis upload path used to skip that registration, leaving a fully
+    parsed demo without the id required by the custom-skin API.
+    """
+    resolved = path.resolve(strict=True)
+    demo_path = str(resolved)
+    existing = await demo_db.get_demo_by_path(demo_path)
+    if existing:
+        return int(existing["id"])
+
+    stat = await asyncio.to_thread(resolved.stat)
+    demo_id, inserted = await demo_db.add_demo(
+        demo_path,
+        file_size=stat.st_size,
+        source=infer_demo_source(resolved.name),
+        status="pending",
+    )
+    if inserted:
+        await demo_library_hub.notify("enqueue")
+    return int(demo_id)
+
+
 @app.post("/api/demo/upload")
 async def upload_demo(
     file: UploadFile = File(...),
@@ -928,7 +953,9 @@ async def upload_demo(
     compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
 
     players, match_meta, inspection_error = await _safe_upload_demo_meta(persistent_path)
+    demo_id = await _ensure_analysis_demo_row(persistent_path)
     return {
+        "id": demo_id,
         "filename": filename,
         "path": str(persistent_path),
         "uploaded_path": str(dest),
@@ -984,8 +1011,10 @@ async def upload_demos(
         if inspection_error:
             failed.append({"filename": filename, "code": inspection_error})
             continue
+        demo_id = await _ensure_analysis_demo_row(persistent_path)
         out.append(
             {
+                "id": demo_id,
                 "filename": filename,
                 "path": str(persistent_path),
                 "uploaded_path": str(dest),
@@ -1033,8 +1062,10 @@ async def open_local_demos(body: OpenLocalDemosBody):
         if inspection_error:
             failed.append({"filename": path.name, "code": inspection_error})
             continue
+        demo_id = await _ensure_analysis_demo_row(path)
         uploads.append(
             {
+                "id": demo_id,
                 "filename": path.name,
                 "path": str(path),
                 "uploaded_path": None,
