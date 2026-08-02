@@ -15,6 +15,7 @@ class _FakePovManager:
 
     def __init__(self, _config):
         self.installed = 0
+        self.installed_demo_paths = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -26,8 +27,9 @@ class _FakePovManager:
             "original_gameinfo_sha256": "a" * 64 if self.needs_restore else None,
         }
 
-    def install(self):
+    def install(self, *, demo_path=None):
         self.installed += 1
+        self.installed_demo_paths.append(demo_path)
         self.needs_restore = True
 
     def restore(self):
@@ -155,6 +157,7 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     manager = _FakePovManager.instances[-1]
     assert result["pov_hud_enabled"] is True
     assert manager.installed == 1
+    assert manager.installed_demo_paths == [demo]
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "cl_draw_only_deathnotices false" in cfg_text

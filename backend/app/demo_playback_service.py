@@ -281,7 +281,7 @@ class DemoPlaybackService:
 
                 if options.enabled:
                     pov_install_attempted = True
-                    pov_manager.install()
+                    pov_manager.install(demo_path=dem_path)
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
                         installed_status.get("original_gameinfo_sha256") or ""

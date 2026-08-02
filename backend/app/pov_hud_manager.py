@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .cs2_config_backup import is_cs2_running
+from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
+
+logger = logging.getLogger(__name__)
 
 CS2_RUNNING_POV_MSG = (
     "检测到 CS2 正在运行。POV HUD 需要修改本地资源加载配置，请先关闭 CS2 后再继续。"
@@ -146,6 +149,9 @@ class PovHudManager:
     def get_pov_vpk_source_path(self, map_name: Optional[str] = None) -> Path:
         return resolve_pov_vpk_source_in_project_pov_dir(self.get_project_pov_dir(), map_name)
 
+    def get_voice_hud_template_path(self) -> Path:
+        return self.get_project_pov_dir() / "pov_voice_template.vpk"
+
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
 
@@ -258,7 +264,12 @@ class PovHudManager:
             "warnings": warnings,
         }
 
-    def install(self, map_name: Optional[str] = None) -> None:
+    def install(
+        self,
+        map_name: Optional[str] = None,
+        *,
+        demo_path: Optional[str | Path] = None,
+    ) -> None:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
         if is_cs2_running():
@@ -267,6 +278,26 @@ class PovHudManager:
         pov_src = self.get_pov_vpk_source_path(map_name)
         if not pov_src.is_file():
             raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
+
+        voice_build: Optional[DemoVoiceHudBuild] = None
+        voice_template = self.get_voice_hud_template_path()
+        if demo_path is not None and voice_template.is_file():
+            try:
+                voice_build = build_demo_voice_hud_vpk(demo_path, voice_template)
+                logger.info(
+                    "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
+                    "locations=%d payload=%d bytes",
+                    voice_build.voice_packets,
+                    voice_build.speakers,
+                    voice_build.intervals,
+                    voice_build.location_changes,
+                    voice_build.payload_bytes,
+                )
+            except (DemoVoiceHudError, OSError) as exc:
+                logger.warning(
+                    "Could not build demo-specific voice HUD; using the static POV package: %s",
+                    exc,
+                )
 
         csgo = self.get_csgo_dir()
         gi_path = self.get_gameinfo_path()
@@ -292,7 +323,10 @@ class PovHudManager:
         shutil.copy2(gi_path, bak_path)
 
         try:
-            shutil.copy2(pov_src, pov_dst)
+            if voice_build is not None:
+                pov_dst.write_bytes(voice_build.vpk_bytes)
+            else:
+                shutil.copy2(pov_src, pov_dst)
         except OSError as e:
             raise PovHudError("无法写入 CS2 目录，请尝试以管理员权限运行，或检查 Steam / CS2 目录权限。") from e
 
@@ -322,7 +356,22 @@ class PovHudManager:
             "gameinfo_path": str(gi_path),
             "backup_gameinfo_path": str(bak_path),
             "pov_vpk_path": str(pov_dst),
-            "pov_vpk_source_basename": pov_src.name,
+            "pov_vpk_source_basename": (
+                voice_template.name if voice_build is not None else pov_src.name
+            ),
+            "demo_voice_hud_generated": voice_build is not None,
+            "demo_voice_hud": (
+                {
+                    "voice_packets": voice_build.voice_packets,
+                    "speakers": voice_build.speakers,
+                    "intervals": voice_build.intervals,
+                    "location_changes": voice_build.location_changes,
+                    "payload_bytes": voice_build.payload_bytes,
+                    "location_parse_failed": bool(voice_build.location_parse_failed),
+                }
+                if voice_build is not None
+                else None
+            ),
             "demo_map_name_used": (map_name or "").strip(),
             "original_gameinfo_sha256": original_sha,
             "patched_gameinfo_sha256": patched_sha,

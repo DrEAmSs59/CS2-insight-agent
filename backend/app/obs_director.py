@@ -43,7 +43,12 @@ from .cs2_config_backup import (
     write_recording_state,
     write_persistent_backup_from_snap,
 )
-from .env_utils import OBSConfig, SpecPlayerVerifyConfig, _steam_install_from_registry as _get_steam_install_root
+from .env_utils import (
+    OBSConfig,
+    SpecPlayerVerifyConfig,
+    _candidate_steam_roots,
+    _steam_install_from_registry as _get_steam_install_root,
+)
 from .gsi_ready import (
     cleanup_stale_gsi_configs,
     gsi_config_path,
@@ -60,6 +65,28 @@ from .recording.platform_utils import (
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_voice_ban_payload(original: bytes) -> bytes:
+    """Return a valid empty voice-ban file in the source file's format."""
+    bom = b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
+    content = original[len(bom):]
+    if content.lstrip().startswith(b"<!-- kv3"):
+        text = content.decode("utf-8", errors="strict")
+        first_line = text.splitlines()[0]
+        newline = "\r\n" if "\r\n" in text else "\n"
+        empty = newline.join((
+            first_line,
+            "{",
+            "\tusers =",
+            "\t[",
+            "\t]",
+            "\tplayer_volume_map = null",
+            "}",
+            "",
+        ))
+        return bom + empty.encode("utf-8")
+    return struct.pack("<I", 0)
 
 
 class _ObswsBoundedHandshake(obsws):
@@ -3012,6 +3039,8 @@ class OBSDirector:
                         add_path(p, record_missing=False)
                 except OSError as e:
                     logger.warning("Snapshot user config glob %s failed: %s", d / pattern, e)
+        for p in self._voice_ban_paths():
+            add_path(p, record_missing=False)
         self._user_config_snapshot = snap
         if snap:
             logger.info(
@@ -3159,39 +3188,59 @@ class OBSDirector:
         }
 
     def _voice_ban_paths(self) -> list[Path]:
-        """返回所有 Steam 账号的 ``userdata/<id>/730/voice_ban.dt`` 路径。"""
+        """返回所有 Steam 账号现存的 ``voice_ban.dt`` 路径。"""
         paths: list[Path] = []
         seen: set[str] = set()
-        for cfg_dir in self._candidate_user_config_dirs():
-            try:
-                parent_730 = cfg_dir.parents[2]
-            except IndexError:
-                continue
-            if parent_730.name != "730":
-                continue
-            candidate = parent_730 / "voice_ban.dt"
-            key = str(candidate)
-            if key not in seen:
+
+        def add_account_730(account_730: Path) -> None:
+            if account_730.name != "730":
+                return
+            for relative in (
+                Path("remote") / "voice_ban.dt",
+                Path("local") / "voice_ban.dt",
+                Path("local") / "cfg" / "voice_ban.dt",
+                Path("voice_ban.dt"),
+            ):
+                candidate = account_730 / relative
+                key = str(candidate).casefold()
+                if key in seen or not candidate.is_file():
+                    continue
                 seen.add(key)
                 paths.append(candidate)
+
+        for cfg_dir in self._candidate_user_config_dirs():
+            for parent in cfg_dir.parents:
+                if parent.name == "730":
+                    add_account_730(parent)
+                    break
+        for steam_root in _candidate_steam_roots():
+            userdata = steam_root / "userdata"
+            if not userdata.is_dir():
+                continue
+            try:
+                for account_dir in userdata.iterdir():
+                    if account_dir.is_dir():
+                        add_account_730(account_dir / "730")
+            except OSError as e:
+                logger.warning("iter Steam userdata for voice bans failed: %s", e)
         return paths
 
     def _clear_voice_ban_files(self) -> None:
-        """CS2 启动前将 voice_ban.dt 清空（count=0），确保无人被静音。
+        """CS2 启动前临时清空 voice_ban.dt，确保无人被本地持久静音。
         tv_listen_voice_indices 在 demo 层做队伍过滤，dt 文件仅需保持全开。
         结束后由 _restore_user_configs 自动还原原始文件。
         """
-        data = struct.pack("<I", 0)  # count=0，无屏蔽名单
         for p in self._voice_ban_paths():
             try:
+                current = p.read_bytes()
                 if p not in self._user_config_snapshot:
-                    self._user_config_snapshot[p] = p.read_bytes() if p.is_file() else None
-                current = p.read_bytes() if p.is_file() else None
+                    self._user_config_snapshot[p] = current
+                data = _empty_voice_ban_payload(current)
                 if current == data:
                     continue
                 _atomic_write_bytes(p, data)
                 logger.info("voice_ban.dt cleared: %s", p)
-            except OSError as e:
+            except (OSError, UnicodeError) as e:
                 logger.warning("Clear voice_ban.dt failed for %s: %s", p, e)
 
     def _patch_video_configs_for_resolution(
@@ -3824,27 +3873,14 @@ class OBSDirector:
             # Do not continue into POV installation or launch CS2 after that.
             self._check_abort()
 
-            # ── POV HUD install (before first CS2 launch) ─────────────────────
+            # ── POV HUD manager (the VPK is generated per demo below) ─────────
             if pov_on_v3:
                 try:
                     from .env_utils import load_config as _load_cfg
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
-                    logger.info("[RecordingV3][POV] install unified pov_default.vpk")
-                    pov_install_attempted = True
-                    pov_mgr_v3.install()
-                    installed_status = pov_mgr_v3.status()
-                    pov_expected_gameinfo_sha256 = str(
-                        installed_status.get("original_gameinfo_sha256") or ""
-                    ).strip().lower() or None
-                    if not pov_expected_gameinfo_sha256:
-                        raise PovHudError(
-                            "POV HUD install manifest does not contain the original gameinfo.gi hash."
-                        )
-                    logger.info("[RecordingV3][POV] patch gameinfo.gi")
-                    self._pov_enabled = True
                 except PovHudError as _pov_e:
-                    logger.error("[RecordingV3][POV] install failed: %s; continuing without POV HUD", _pov_e)
+                    logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
 
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
@@ -3852,6 +3888,32 @@ class OBSDirector:
                 demo_name = demo_abs.name
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
+
+                # The speaking schedule is demo-specific. CS2 is stopped between
+                # groups, so restore/reinstall the package with this demo's data.
+                if pov_on_v3 and pov_mgr_v3 is not None:
+                    try:
+                        logger.info("[RecordingV3][POV] build and install voice HUD for %s", demo_name)
+                        pov_install_attempted = True
+                        pov_mgr_v3.install(demo_path=demo_abs)
+                        installed_status = pov_mgr_v3.status()
+                        pov_expected_gameinfo_sha256 = str(
+                            installed_status.get("original_gameinfo_sha256") or ""
+                        ).strip().lower() or None
+                        if not pov_expected_gameinfo_sha256:
+                            raise PovHudError(
+                                "POV HUD install manifest does not contain the original gameinfo.gi hash."
+                            )
+                        self._pov_enabled = True
+                    except PovHudError as _pov_e:
+                        logger.error(
+                            "[RecordingV3][POV] install failed for %s: %s; "
+                            "continuing without POV HUD",
+                            demo_name,
+                            _pov_e,
+                        )
+                        pov_on_v3 = False
+                        self._pov_enabled = False
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
