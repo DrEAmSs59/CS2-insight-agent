@@ -60,9 +60,27 @@ function formatWear(value) {
   return wear.toFixed(6);
 }
 
-function isValidWear(value) {
+function wearBounds(item) {
+  const rawMin = item?.wear_min;
+  const rawMax = item?.wear_max;
+  const parsedMin = rawMin === "" || rawMin === null || rawMin === undefined
+    ? WEAR_MIN
+    : Number(rawMin);
+  const parsedMax = rawMax === "" || rawMax === null || rawMax === undefined
+    ? WEAR_MAX
+    : Number(rawMax);
+  const min = Number.isFinite(parsedMin)
+    ? Math.min(WEAR_MAX, Math.max(WEAR_MIN, parsedMin))
+    : WEAR_MIN;
+  const max = Number.isFinite(parsedMax)
+    ? Math.min(WEAR_MAX, Math.max(WEAR_MIN, parsedMax))
+    : WEAR_MAX;
+  return min <= max ? { min, max } : { min: WEAR_MIN, max: WEAR_MAX };
+}
+
+function isValidWear(value, min = WEAR_MIN, max = WEAR_MAX) {
   const wear = Number(value);
-  return Number.isFinite(wear) && wear >= WEAR_MIN && wear <= WEAR_MAX;
+  return Number.isFinite(wear) && wear >= min && wear <= max;
 }
 
 function isValidSeed(value) {
@@ -76,8 +94,8 @@ function parseSeed(value) {
   return Number.isInteger(seed) && seed >= SEED_MIN && seed <= SEED_MAX ? seed : null;
 }
 
-function randomWear() {
-  return formatWear(Math.random() * (WEAR_MAX - WEAR_MIN) + WEAR_MIN);
+function randomWear(min = WEAR_MIN, max = WEAR_MAX) {
+  return formatWear(Math.random() * (max - min) + min);
 }
 
 function randomSeed() {
@@ -123,29 +141,41 @@ function ParamRow({
   onRandom,
   kind,
   invalidText,
+  minValue,
+  maxValue,
 }) {
   const t = useT();
   const isWear = kind === "wear";
+  const min = isWear ? minValue : SEED_MIN;
+  const max = isWear ? maxValue : SEED_MAX;
   const numeric = Number(value);
   const sliderValue = Number.isFinite(numeric)
-    ? Math.min(isWear ? WEAR_MAX : SEED_MAX, Math.max(isWear ? WEAR_MIN : SEED_MIN, numeric))
-    : (isWear ? WEAR_MIN : SEED_MIN);
+    ? Math.min(max, Math.max(min, numeric))
+    : min;
 
   return (
     <label className="flex w-full min-w-0 shrink-0 flex-col gap-0.5 text-[11px]">
-      <span className="text-cs2-text-muted">{label}</span>
+      <span className="flex items-center justify-between gap-2 text-cs2-text-muted">
+        <span>{label}</span>
+        {isWear ? (
+          <span className="font-mono text-[9px] text-cs2-text-secondary">
+            {formatWear(min)}–{formatWear(max)}
+          </span>
+        ) : null}
+      </span>
       <div className="flex items-center gap-1.5">
         <input
           type="text"
           inputMode={isWear ? "decimal" : "numeric"}
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
+          aria-invalid={Boolean(invalidText)}
           className="w-[84px] shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent"
         />
         <input
           type="range"
-          min={isWear ? WEAR_MIN : SEED_MIN}
-          max={isWear ? WEAR_MAX : SEED_MAX}
+          min={min}
+          max={max}
           step={isWear ? 0.000001 : 1}
           value={sliderValue}
           onChange={(event) => {
@@ -193,6 +223,8 @@ function SkinColumn({
   onSeedChange,
   wearInvalid,
   seedInvalid,
+  wearMin = WEAR_MIN,
+  wearMax = WEAR_MAX,
   testId,
 }) {
   const t = useT();
@@ -219,8 +251,10 @@ function SkinColumn({
           kind="wear"
           value={wear}
           onChange={onWearChange}
-          onRandom={() => onWearChange?.(randomWear())}
+          onRandom={() => onWearChange?.(randomWear(wearMin, wearMax))}
           invalidText={wearInvalid}
+          minValue={wearMin}
+          maxValue={wearMax}
         />
       ) : (
         <ParamValue label={t("analysis.cosmetics.picker.wear")} value={wear} />
@@ -285,17 +319,30 @@ export default function SkinReplacementPicker({
     () => filterCandidates(candidates, query, locale, activeTypeGroup),
     [activeTypeGroup, candidates, query, locale],
   );
+  const selectedWearBounds = useMemo(() => wearBounds(selected), [selected]);
 
   const selectTypeGroup = (key) => {
     setActiveTypeGroup(key);
     setSelected(null);
   };
 
+  const selectCandidate = (candidate) => {
+    const bounds = wearBounds(candidate);
+    setSelected(candidate);
+    setWear((current) => {
+      const numeric = Number(current);
+      const next = Number.isFinite(numeric)
+        ? Math.min(bounds.max, Math.max(bounds.min, numeric))
+        : bounds.min;
+      return formatWear(next);
+    });
+  };
+
   const replacementPreview = selected
     ? { ...selected, paint_wear: wear, paint_seed: seed }
     : null;
 
-  const wearValid = isValidWear(wear);
+  const wearValid = isValidWear(wear, selectedWearBounds.min, selectedWearBounds.max);
   const seedValid = isValidSeed(seed);
   const canConfirm = Boolean(selected) && wearValid && seedValid;
 
@@ -312,6 +359,8 @@ export default function SkinReplacementPicker({
       alt_name: selected.alt_name,
       image_url: selected.image_url,
       rarity: selected.rarity,
+      wear_min: selectedWearBounds.min,
+      wear_max: selectedWearBounds.max,
       paint_wear: Number(wear),
       paint_seed: parseSeed(seed),
     });
@@ -374,8 +423,13 @@ export default function SkinReplacementPicker({
             seedEditable
             onWearChange={setWear}
             onSeedChange={setSeed}
-            wearInvalid={wearValid ? null : t("analysis.cosmetics.picker.wearInvalid")}
+            wearInvalid={wearValid ? null : t("analysis.cosmetics.picker.wearInvalid", {
+              min: formatWear(selectedWearBounds.min),
+              max: formatWear(selectedWearBounds.max),
+            })}
             seedInvalid={seedValid ? null : t("analysis.cosmetics.picker.seedInvalid")}
+            wearMin={selectedWearBounds.min}
+            wearMax={selectedWearBounds.max}
           />
         </div>
 
@@ -439,7 +493,7 @@ export default function SkinReplacementPicker({
                 <button
                   key={`${candidate.catalog_id}-${candidate.paint_index}`}
                   type="button"
-                  onClick={() => setSelected(candidate)}
+                  onClick={() => selectCandidate(candidate)}
                   aria-pressed={active}
                   aria-label={formatCraftPipeName(candidate, locale) || displayName(candidate, locale)}
                   data-skin-tile

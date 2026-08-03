@@ -50,7 +50,7 @@ export default {
   "analysis.cosmetics.picker.random": "随机",
   "analysis.cosmetics.picker.cancel": "取消",
   "analysis.cosmetics.picker.confirm": "确认",
-  "analysis.cosmetics.picker.wearInvalid": "磨损需在 0.000000–1.000000 之间",
+  "analysis.cosmetics.picker.wearInvalid": "该饰品磨损需在 {min}–{max} 之间",
   "analysis.cosmetics.picker.seedInvalid": "模板需为 0–1000 的整数",
   "analysis.cosmetics.saveSuccess": "自定义皮肤方案已保存",
   "analysis.cosmetics.savePartial": "部分饰品已保存，其余未写入",

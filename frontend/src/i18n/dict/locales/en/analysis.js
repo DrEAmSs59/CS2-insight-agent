@@ -50,7 +50,7 @@ export default {
   "analysis.cosmetics.picker.random": "Random",
   "analysis.cosmetics.picker.cancel": "Cancel",
   "analysis.cosmetics.picker.confirm": "Confirm",
-  "analysis.cosmetics.picker.wearInvalid": "Wear must be between 0.000000 and 1.000000",
+  "analysis.cosmetics.picker.wearInvalid": "Wear must be between {min} and {max} for this finish",
   "analysis.cosmetics.picker.seedInvalid": "Seed must be an integer from 0 to 1000",
   "analysis.cosmetics.saveSuccess": "Custom skin plan saved",
   "analysis.cosmetics.savePartial": "Some skins were saved; others were not written",

@@ -480,6 +480,36 @@ def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatc
     assert cached.read_bytes() == prior
 
 
+def test_post_rejects_catalog_invalid_wear_without_calling_skin_core(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
+    called = {"n": 0}
+
+    def should_not_run(**_kwargs):
+        called["n"] += 1
+        raise AssertionError("skin-core must not run on catalog validation failure")
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", should_not_run)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": STEAM_ID,
+            "replacements": {
+                "id:10": _replacement(paint_index=282, paint_wear=0.05),
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "0.100000..0.700000" in str(response.json()["detail"])
+    assert called["n"] == 0
+    assert cached.read_bytes() == prior
+
+
 def test_post_second_player_reapplies_first_player_plan(api_env, monkeypatch):
     """Saving player B must chain-rewrite from original through player A's plan."""
     client = api_env["client"]

@@ -160,11 +160,69 @@ def test_build_batch_sets_replacement_definition_index_for_cross_model_glove():
             observed_teams=["t"],
         )
     ]
-    repl = replacement(type="glove", def_index=5030, paint_index=10038, model="specialist_gloves")
+    repl = replacement(
+        type="glove",
+        def_index=5030,
+        paint_index=10038,
+        model="specialist_gloves",
+        paint_wear=0.07,
+    )
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
     assert batch_items[0]["replacement_definition_index"] == 5030
     assert batch_items[0]["definition_index"] == 5027
     assert batch_items[0]["team"] == "T"
+
+
+@pytest.mark.parametrize("wear", [0.059999, 0.800001])
+def test_build_batch_rejects_wear_outside_target_finish_catalog_range(wear):
+    inv = [
+        inventory_row(
+            item_id=99,
+            type="glove",
+            def_index=5030,
+            paint_index=10047,
+            model="sporty_gloves",
+        )
+    ]
+    repl = replacement(
+        type="glove",
+        def_index=5034,
+        paint_index=10033,
+        model="specialist_gloves",
+        paint_wear=wear,
+    )
+    with pytest.raises(
+        CosmeticsSkinPlanError,
+        match=r"outside catalog range 0\.060000\.\.0\.800000",
+    ):
+        build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
+
+
+@pytest.mark.parametrize("wear", [0.06, 0.8])
+def test_build_batch_accepts_target_finish_catalog_wear_boundaries(wear):
+    inv = [inventory_row(item_id=99, type="glove", def_index=5030)]
+    repl = replacement(
+        type="glove",
+        def_index=5034,
+        paint_index=10033,
+        paint_wear=wear,
+    )
+    batch_items, plan = build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
+    assert batch_items[0]["wear"] == wear
+    assert plan["items"][0]["replacement"]["paint_wear"] == wear
+
+
+@pytest.mark.parametrize("wear", [-0.000001, 1.000001])
+def test_build_batch_rejects_wear_outside_global_range_for_unknown_finish(wear):
+    inv = [inventory_row(item_id=10, type="weapon", def_index=7)]
+    repl = replacement(
+        type="weapon",
+        def_index=7,
+        paint_index=16_000_000,
+        paint_wear=wear,
+    )
+    with pytest.raises(CosmeticsSkinPlanError, match="between 0.000000 and 1.000000"):
+        build_batch_and_plan(STEAM_ID, inv, {"id:10": repl})
 
 
 def test_build_batch_emits_side_team_for_vanilla_gloves():
@@ -185,8 +243,12 @@ def test_build_batch_emits_side_team_for_vanilla_gloves():
         ),
     ]
     replacements = {
-        slot_key(inv[0]): replacement(type="glove", def_index=5030, paint_index=10048),
-        slot_key(inv[1]): replacement(type="glove", def_index=5030, paint_index=10038),
+        slot_key(inv[0]): replacement(
+            type="glove", def_index=5030, paint_index=10048, paint_wear=0.07
+        ),
+        slot_key(inv[1]): replacement(
+            type="glove", def_index=5030, paint_index=10038, paint_wear=0.07
+        ),
     }
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, replacements)
     by_def = {row["definition_index"]: row for row in batch_items}
@@ -199,8 +261,12 @@ def test_build_batch_emits_side_team_for_vanilla_gloves():
 def test_build_batch_placeholder_gloves_take_team_from_originals():
     """UI default gloves are not in workspace inventory; originals carry the side."""
     replacements = {
-        "placeholder:5028": replacement(type="glove", def_index=5027, paint_index=10006),
-        "placeholder:5029": replacement(type="glove", def_index=5027, paint_index=10007),
+        "placeholder:5028": replacement(
+            type="glove", def_index=5027, paint_index=10006, paint_wear=0.07
+        ),
+        "placeholder:5029": replacement(
+            type="glove", def_index=5027, paint_index=10007, paint_wear=0.07
+        ),
     }
     originals = {
         "placeholder:5028": {
@@ -236,8 +302,12 @@ def test_build_batch_placeholder_gloves_take_team_from_originals():
 def test_build_batch_placeholder_gloves_infer_team_from_default_defs():
     """Even if the UI snapshot omitted observed_teams, 5028/5029 are side-fixed."""
     replacements = {
-        "placeholder:5028": replacement(type="glove", def_index=5032, paint_index=10008),
-        "placeholder:5029": replacement(type="glove", def_index=5032, paint_index=10009),
+        "placeholder:5028": replacement(
+            type="glove", def_index=5032, paint_index=10008, paint_wear=0.07
+        ),
+        "placeholder:5029": replacement(
+            type="glove", def_index=5032, paint_index=10009, paint_wear=0.07
+        ),
     }
     originals = {
         "placeholder:5028": {

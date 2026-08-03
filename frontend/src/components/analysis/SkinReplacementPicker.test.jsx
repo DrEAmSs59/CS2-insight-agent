@@ -88,6 +88,52 @@ test("groups knife candidates by model tag before showing finishes", () => {
   expect(candidates.every((candidate) => /蝴蝶刀/.test(candidate.getAttribute("aria-label") || ""))).toBe(true);
 });
 
+test("uses the selected finish wear range and rejects out-of-range input", () => {
+  const onConfirm = vi.fn();
+  render(
+    <SkinReplacementPicker
+      open
+      locale="zh"
+      onlineAssetsEnabled={false}
+      sourceItem={{
+        type: "weapon",
+        def_index: 7,
+        model: "ak47",
+        name_zh: "AK-47 | 表面淬火",
+        name_en: "AK-47 | Case Hardened",
+        paint_wear: 0.25,
+        paint_seed: 412,
+        image_url: "",
+      }}
+      onClose={() => {}}
+      onConfirm={onConfirm}
+    />,
+  );
+
+  const candidates = screen.getByTestId("skin-candidate-list");
+  fireEvent.click(within(candidates).getByRole("button", { name: /AK-47 \| 红线|AK-47 \| Redline/i }));
+
+  const replacement = screen.getByTestId("skin-picker-replacement");
+  const wearInput = within(replacement).getByDisplayValue("0.100000");
+  const wearSlider = within(replacement).getAllByRole("slider")[0];
+  expect(wearSlider.getAttribute("min")).toBe("0.1");
+  expect(wearSlider.getAttribute("max")).toBe("0.7");
+  expect(within(replacement).getByText("0.100000–0.700000")).toBeTruthy();
+
+  fireEvent.change(wearInput, { target: { value: "0.099999" } });
+  expect(screen.getByRole("button", { name: /确认|Confirm/i }).disabled).toBe(true);
+  expect(screen.getByText(/0.100000–0.700000/)).toBeTruthy();
+
+  fireEvent.change(wearInput, { target: { value: "0.700000" } });
+  fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  expect(onConfirm.mock.calls[0][0]).toMatchObject({
+    paint_wear: 0.7,
+    wear_min: 0.1,
+    wear_max: 0.7,
+  });
+});
+
 test("replacement seed must be an integer between 0 and 1000", () => {
   const onConfirm = vi.fn();
   render(

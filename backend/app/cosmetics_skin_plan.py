@@ -10,10 +10,14 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .parser.cs2_item_catalog import resolve_cs2_item
+
 _ALLOWED_TYPES = frozenset({"melee", "glove", "weapon"})
 # Frontend uses "melee"; closed skin-core kind is knife. Mapper treats them as the same
 # for replacement_definition_index (cross-model) awareness.
 _CROSS_MODEL_TYPES = frozenset({"melee", "glove"})  # melee ≡ knife
+_WEAR_MIN = 0.0
+_WEAR_MAX = 1.0
 
 
 class CosmeticsSkinPlanError(ValueError):
@@ -86,6 +90,29 @@ def _require_float(value: Any, field: str) -> float:
     return float(num)
 
 
+def _require_catalog_wear(value: Any, definition_index: int, paint_kit: int) -> float:
+    wear = _require_float(value, "wear")
+    if wear < _WEAR_MIN or wear > _WEAR_MAX:
+        raise CosmeticsSkinPlanError("wear must be between 0.000000 and 1.000000")
+
+    catalog_item = resolve_cs2_item(definition_index, paint_kit)
+    if not catalog_item or not catalog_item.get("catalog_exact"):
+        return wear
+    try:
+        wear_min = float(catalog_item.get("wear_min"))
+        wear_max = float(catalog_item.get("wear_max"))
+    except (TypeError, ValueError):
+        return wear
+    if not math.isfinite(wear_min) or not math.isfinite(wear_max) or wear_min > wear_max:
+        return wear
+    if wear < wear_min or wear > wear_max:
+        raise CosmeticsSkinPlanError(
+            f"wear {wear:.6f} outside catalog range {wear_min:.6f}..{wear_max:.6f} "
+            f"for definition_index={definition_index} paint_kit={paint_kit}"
+        )
+    return wear
+
+
 def _glove_batch_team(inventory_row: dict[str, Any]) -> str | None:
     """Map inventory observed_teams to skin-core batch team (T/CT).
 
@@ -127,6 +154,8 @@ def _display_fields(row: dict[str, Any]) -> dict[str, Any]:
         "paint_index",
         "paint_seed",
         "paint_wear",
+        "wear_min",
+        "wear_max",
         "item_id",
         "type",
         "model",
@@ -229,7 +258,14 @@ def build_batch_and_plan(
 
         paint_kit = _require_int(repl.get("paint_index"), "paint_kit")
         pattern_seed = _require_float(repl.get("paint_seed"), "pattern_seed")
-        wear = _require_float(repl.get("paint_wear"), "wear")
+        replacement_definition_index = definition_index
+        if item_type in _CROSS_MODEL_TYPES:
+            replacement_definition_index = _require_int(
+                repl.get("def_index"), "replacement.def_index"
+            )
+        wear = _require_catalog_wear(
+            repl.get("paint_wear"), replacement_definition_index, paint_kit
+        )
 
         batch_item: dict[str, Any] = {
             "item_id64": item_id64,
@@ -242,9 +278,8 @@ def build_batch_and_plan(
         # melee → knife kind awareness: set replacement_definition_index only when
         # knife/glove model changes. Closed v1 may validate-bail on cross-model.
         if item_type in _CROSS_MODEL_TYPES:
-            repl_def = _require_int(repl.get("def_index"), "replacement.def_index")
-            if repl_def != definition_index:
-                batch_item["replacement_definition_index"] = repl_def
+            if replacement_definition_index != definition_index:
+                batch_item["replacement_definition_index"] = replacement_definition_index
 
         # Zero-id glove materialize is side-scoped: T and CT may coexist, but two
         # ANY (or same-side) rules collide on the pawn EconGloves state.
