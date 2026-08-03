@@ -28,14 +28,14 @@ export default function DemoLibraryToolbar({
     </button>
   );
   return (
-    <div className="flex shrink-0 flex-col gap-3 border-b border-cs2-border pb-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="demo-library-toolbar flex shrink-0 flex-col gap-3 border-b border-cs2-border pb-3">
       <div className="min-w-0">
         <h1 className="text-lg font-bold text-cs2-text-primary">{t("library.pageTitle")}</h1>
         <p className="mt-0.5 text-[12px] leading-relaxed text-cs2-text-muted">
           {t("library.pageSubtitle")}
         </p>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+      <div className="demo-library-toolbar__actions flex min-w-0 w-full flex-wrap items-center justify-end gap-1">
         <div className="mr-1 flex items-center rounded-lg bg-cs2-bg-input/70 p-1 border border-cs2-border">
           {viewBtn("grid", LayoutGrid)}
           {viewBtn("list", List)}

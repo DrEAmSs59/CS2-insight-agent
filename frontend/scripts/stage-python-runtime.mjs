@@ -53,7 +53,9 @@ if (existsSync(pythonExe) && process.env.CS2_INSIGHT_REFRESH_PYTHON !== "1") {
       [
         "import sys",
         "sys.path.insert(0, sys.argv[1])",
-        "import cryptography  # noqa: F401 — skin_core_crypto / cosmetics_skin",
+        // Keep this command comment-free: the statements are joined onto one
+        // Python line, so an inline `#` would hide every validation after it.
+        "import cryptography",
         "from app.demoparser_runtime import main",
         "raise SystemExit(main())",
       ].join("; "),

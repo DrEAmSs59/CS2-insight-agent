@@ -5,7 +5,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
 
   return (
     <div
-      className="max-h-[min(42vh,22rem)] overflow-y-auto rounded-md border border-cs2-border bg-cs2-bg-input/40 px-3 py-2 text-[12px] text-cs2-text-secondary shadow-inner"
+      className="demo-library-advanced-filters max-h-[min(42vh,22rem)] overflow-y-auto rounded-md border border-cs2-border bg-cs2-bg-input/40 px-3 py-2 text-[12px] text-cs2-text-secondary shadow-inner"
       role="region"
       aria-label={t("library.advRegionLabel")}
     >
@@ -13,7 +13,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
         {t("library.advPlayerHint")}
       </p>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="demo-library-advanced-grid grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-0.5">
           <span className="text-[11px] text-cs2-text-muted">{t("library.advPlayerLabel")}</span>
           <input
@@ -36,7 +36,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
         </label>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="demo-library-advanced-grid mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <label className="flex flex-col gap-0.5">
           <span className="text-[11px] text-cs2-text-muted">{t("library.advKillsLabel")}</span>
           <input
@@ -79,7 +79,7 @@ export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFi
         </label>
       </div>
 
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <div className="demo-library-advanced-grid mt-2 grid gap-2 sm:grid-cols-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] text-cs2-text-muted">{t("library.advRoundsLabel")}</span>
           <div className="flex items-center gap-1">

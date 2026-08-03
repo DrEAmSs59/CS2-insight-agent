@@ -37,9 +37,9 @@ export default function DemoLibraryQueryBar({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-b border-cs2-border pb-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[min(100%,14rem)] flex-1">
+    <div className="demo-library-querybar flex shrink-0 flex-col gap-2 border-b border-cs2-border pb-2">
+      <div className="demo-library-querybar__controls flex min-w-0 flex-wrap items-center gap-2">
+        <div className="demo-library-querybar__search relative min-w-0 flex-[1_1_14rem]">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />
           <input
             type="search"
@@ -86,12 +86,12 @@ export default function DemoLibraryQueryBar({
           ))}
         </select>
 
-        <div className="flex items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input px-1 py-0.5">
+        <div className="demo-library-querybar__date-range flex min-w-0 max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input px-1 py-0.5">
           <Calendar className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
           <input
             type="date"
             aria-label={t("library.dateFromAriaLabel")}
-            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
+            className="min-w-0 flex-1 bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateFrom}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateFrom: e.target.value }))}
           />
@@ -99,16 +99,16 @@ export default function DemoLibraryQueryBar({
           <input
             type="date"
             aria-label={t("library.dateToAriaLabel")}
-            className="max-w-[8.5rem] bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
+            className="min-w-0 flex-1 bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
             value={libraryAdvFilters.dateTo}
             onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateTo: e.target.value }))}
           />
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="demo-library-querybar__sort flex min-w-0 items-center gap-1">
           <ArrowUpDown className="h-3.5 w-3.5 text-cs2-text-muted" aria-hidden />
           <select
-            className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
+            className="demo-library-querybar__sort-select min-w-0 rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
             value={sortKey}
             onChange={(e) => {
               const k = e.target.value;

@@ -17,6 +17,7 @@ export const API_ERROR_I18N_KEYS = {
   DEMO_PLAYBACK_POV_FAILED: "api.err.demoPlaybackPovFailed",
   DEMO_PLAYBACK_LAUNCH_FAILED: "api.err.demoPlaybackLaunchFailed",
   DEMO_FILE_NOT_FOUND: "api.err.demoFileNotFound",
+  DEMO_INVALID_EXTENSION: "api.err.demoInvalidExtension",
   DEMO_PREPARE_FAILED: "api.err.demoPrepareFailed",
   DEMO_INSPECTION_TIMEOUT: "api.err.demoInspectionTimeout",
   DEMO_INSPECTION_FAILED: "api.err.demoInspectionFailed",

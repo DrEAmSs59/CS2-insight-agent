@@ -387,6 +387,315 @@
   transition: none;
 }
 
+/* CS2 inventory-style neutral studio backdrop. The layered gradients keep
+ * transparent weapon art readable without falling back to a flat black tile. */
+.cosmetic-preview-surface {
+  background:
+    radial-gradient(ellipse at 48% 24%, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.08) 32%, transparent 62%),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--cs2-bg-input) 48%, #777d82) 0%,
+      color-mix(in srgb, var(--cs2-bg-input) 30%, #b7b9ba) 52%,
+      color-mix(in srgb, var(--cs2-bg-input) 58%, #656b70) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -28px 48px rgba(0, 0, 0, 0.14);
+}
+
+.light .cosmetic-preview-surface {
+  background:
+    radial-gradient(ellipse at 48% 24%, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.12) 36%, transparent 64%),
+    linear-gradient(145deg, #b9bdc0 0%, #dedfdf 52%, #a8adb0 100%);
+}
+
+/* ===== 页面级容器适配 =====
+ * 视口断点无法反映可用内容宽度：侧栏可以被拖到 340px，系统缩放也会
+ * 让同一个视口塞进更少的 CSS 像素。页面使用 inline-size 容器查询，因而
+ * 按实际剩余空间切换布局，避免控件在中间宽度硬挤到彼此上面。 */
+.page-container {
+  min-width: 0;
+  container: page / inline-size;
+}
+
+.demo-library-page,
+.demo-library-results,
+.demo-library-grid,
+.demo-library-list {
+  min-width: 0;
+}
+
+.demo-library-toolbar__actions {
+  align-content: flex-start;
+}
+
+.demo-library-toolbar__actions > *,
+.demo-library-querybar__controls > * {
+  max-width: 100%;
+}
+
+.demo-library-querybar__date-range {
+  flex: 1 1 18rem;
+}
+
+.demo-library-querybar__sort {
+  flex: 1 1 auto;
+}
+
+.demo-library-querybar__sort-select {
+  flex: 1 1 auto;
+}
+
+.demo-library-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+.match-list-row__details {
+  min-width: 160px;
+}
+
+.match-list-row__details-normal,
+.match-list-row__details-actions,
+.match-list-row__team,
+.match-card__hero-main,
+.match-card__hero-meta {
+  min-width: 0;
+}
+
+.match-card {
+  container: match-card / inline-size;
+}
+
+.match-card__hero-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container page (min-width: 920px) {
+  .demo-library-toolbar {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .demo-library-toolbar__actions {
+    width: auto;
+    max-width: 72%;
+    flex: 0 1 auto;
+  }
+}
+
+@container page (max-width: 760px) {
+  .match-list-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .match-list-row__map {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 11rem;
+  }
+
+  .match-list-row__details {
+    min-width: 0;
+    flex: 1 1 10rem;
+  }
+
+  .match-list-row__details-normal {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .match-list-row__teams {
+    order: 3;
+    width: 100%;
+    flex: 1 1 100%;
+    gap: 0.75rem;
+    padding-inline: 0;
+  }
+}
+
+@container page (max-width: 720px) {
+  .demo-library-toolbar__actions {
+    justify-content: flex-start;
+  }
+
+  .demo-library-querybar__search,
+  .demo-library-querybar__date-range,
+  .demo-library-querybar__sort {
+    flex-basis: 100%;
+  }
+
+  .demo-library-querybar__sort-select {
+    min-width: 0;
+  }
+
+  .demo-library-advanced-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@container page (max-width: 520px) {
+  .demo-library-results {
+    padding: 0.75rem;
+  }
+
+  .match-list-row__map,
+  .match-list-row__details {
+    flex-basis: 100%;
+  }
+
+  .match-list-row__details {
+    margin-left: 0;
+  }
+}
+
+@container match-card (max-width: 360px) {
+  .match-card__hero {
+    height: 82px;
+  }
+
+  .match-card__hero-content {
+    position: relative;
+    inset: auto;
+    min-height: 82px;
+    justify-content: space-between;
+    gap: 0.25rem;
+  }
+
+  .match-card__hero-main {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+  }
+
+  .match-card__hero-meta {
+    width: 100%;
+    max-width: 100%;
+    padding-right: 6.5rem;
+  }
+
+  .match-card__score {
+    position: static;
+    order: 3;
+    margin-inline: auto;
+    transform: none;
+  }
+
+  .match-card__actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  .match-card__source-row {
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+  }
+
+  .match-card__clock {
+    position: static;
+    margin-left: auto;
+    transform: none;
+  }
+}
+
+/* ===== 合集工作台适配 ===== */
+.montage-workbench-page {
+  min-width: 0;
+  container: montage-page / inline-size;
+}
+
+.montage-workbench-shell,
+.montage-workbench-grid,
+.montage-workbench-panel {
+  min-width: 0;
+}
+
+.montage-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.montage-workbench-panel {
+  min-height: 30rem;
+}
+
+@container montage-page (min-width: 1180px) {
+  .montage-workbench-grid {
+    grid-template-columns: minmax(280px, 22rem) minmax(360px, 1fr) minmax(300px, 26rem);
+    align-content: stretch;
+    overflow: hidden;
+  }
+
+  .montage-workbench-panel {
+    min-height: 0;
+  }
+}
+
+@container montage-page (min-width: 860px) and (max-width: 1179px) {
+  .montage-workbench-grid {
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.45fr);
+    grid-template-rows: auto auto;
+  }
+
+  .montage-workbench-pool {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .montage-workbench-orchestration {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .montage-workbench-console {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@container montage-page (max-width: 859px) {
+  .montage-workbench-toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .montage-workbench-toolbar__title,
+  .montage-workbench-toolbar__actions {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .montage-workbench-toolbar__actions {
+    justify-content: flex-start;
+  }
+}
+
+@container montage-page (max-width: 600px) {
+  .montage-workbench-toolbar__actions > * {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .montage-workbench-grid {
+    grid-auto-rows: minmax(28rem, auto);
+  }
+
+  .montage-workbench-panel {
+    min-height: 28rem;
+  }
+}
+
 .app-sidebar__nav-item--active {
   box-shadow: inset 3px 0 0 var(--cs2-accent);
 }

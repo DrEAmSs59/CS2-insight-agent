@@ -40,7 +40,11 @@ test("renders candidate search under title, fills grid, defaults replacement wea
     expect(el.className).toMatch(/h-\[192px\]/);
   }
 
-  expect(screen.getByDisplayValue("0.250000")).toBeTruthy();
+  const currentSkin = screen.getByTestId("skin-picker-current");
+  expect(within(currentSkin).getByText("0.250000")).toBeTruthy();
+  expect(within(currentSkin).getByText("412")).toBeTruthy();
+  expect(within(currentSkin).queryByRole("slider")).toBeNull();
+  expect(within(currentSkin).queryByRole("textbox")).toBeNull();
   expect(screen.getAllByDisplayValue("0.000000").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByDisplayValue("0").some((input) => !input.readOnly && !input.disabled)).toBe(true);
 
@@ -50,6 +54,38 @@ test("renders candidate search under title, fills grid, defaults replacement wea
   expect(onConfirm).toHaveBeenCalledTimes(1);
   expect(onConfirm.mock.calls[0][0].paint_wear).toBe(0);
   expect(onConfirm.mock.calls[0][0].paint_seed).toBe(0);
+});
+
+test("groups knife candidates by model tag before showing finishes", () => {
+  render(
+    <SkinReplacementPicker
+      open
+      locale="zh"
+      onlineAssetsEnabled={false}
+      sourceItem={{
+        type: "melee",
+        def_index: 507,
+        model: "knife_karambit",
+        name_zh: "爪子刀 | 多普勒",
+        name_en: "Karambit | Doppler",
+        paint_wear: 0.023656,
+        paint_seed: 701,
+        image_url: "",
+      }}
+      onClose={() => {}}
+      onConfirm={() => {}}
+    />,
+  );
+
+  const filters = screen.getByTestId("skin-type-filters");
+  expect(within(filters).getByRole("button", { name: /爪子刀/ }).getAttribute("aria-pressed")).toBe("true");
+  const butterfly = within(filters).getByRole("button", { name: /蝴蝶刀/ });
+  fireEvent.click(butterfly);
+
+  expect(butterfly.getAttribute("aria-pressed")).toBe("true");
+  const candidates = within(screen.getByTestId("skin-candidate-list")).getAllByRole("button");
+  expect(candidates.length).toBeGreaterThan(1);
+  expect(candidates.every((candidate) => /蝴蝶刀/.test(candidate.getAttribute("aria-label") || ""))).toBe(true);
 });
 
 test("replacement seed must be an integer between 0 and 1000", () => {

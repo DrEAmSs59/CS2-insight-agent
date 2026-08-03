@@ -161,8 +161,8 @@ export function MontageWorkbenchToolbar({
 }) {
   const t = useT();
   return (
-    <header className={`flex h-14 shrink-0 items-center gap-3 border-b px-4 ${isPage ? "border-cs2-border rounded-t-lg" : "border-cs2-border bg-cs2-surface-1"}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+    <header className={`montage-workbench-toolbar flex min-h-14 shrink-0 items-center gap-3 border-b px-4 ${isPage ? "border-cs2-border rounded-t-lg" : "border-cs2-border bg-cs2-surface-1"}`}>
+      <div className="montage-workbench-toolbar__title flex min-w-0 flex-1 items-center gap-2.5">
         <Clapperboard className="h-4 w-4 shrink-0 text-cs2-accent" aria-hidden />
         <div className="min-w-0">
           <h2 id="montage-title" className="truncate text-sm font-bold text-cs2-text-primary">
@@ -176,7 +176,7 @@ export function MontageWorkbenchToolbar({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <div className="montage-workbench-toolbar__actions flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
         <SortDropdown
           onAutoSort={onAutoSort}
           onTimelineSort={onTimelineSort}

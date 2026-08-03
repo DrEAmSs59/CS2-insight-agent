@@ -108,6 +108,18 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     assert item["uploaded_path"] == item["path"]
 
 
+def test_single_upload_rejects_non_dem_with_specific_error_code():
+    upload = main.UploadFile(filename="notes.txt", file=io.BytesIO(b"not-a-demo"))
+
+    try:
+        asyncio.run(main.upload_demo(upload))
+    except main.HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == {"code": "DEMO_INVALID_EXTENSION"}
+    else:
+        raise AssertionError("Expected invalid extension to be rejected")
+
+
 def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_path: Path):
     bad = main.UploadFile(filename="broken.dem", file=io.BytesIO(b"broken"))
     good = main.UploadFile(filename="good.dem", file=io.BytesIO(b"good"))
@@ -206,6 +218,19 @@ def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: P
     assert ensured == [original.resolve()]
     assert inspected == [original.resolve()]
     assert registered == [original.resolve()]
+
+
+def test_open_local_reports_non_dem_as_invalid_extension(tmp_path: Path):
+    invalid = tmp_path / "manual.zip"
+    invalid.write_bytes(b"not-a-demo")
+
+    response = asyncio.run(main.open_local_demos(main.OpenLocalDemosBody(paths=[str(invalid)])))
+
+    assert response["uploads"] == []
+    assert response["failed"] == [{
+        "filename": "manual.zip",
+        "code": "DEMO_INVALID_EXTENSION",
+    }]
 
 
 def test_analysis_demo_registration_creates_and_reuses_stable_id(monkeypatch, tmp_path: Path):

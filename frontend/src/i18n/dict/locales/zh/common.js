@@ -50,6 +50,7 @@ export default {
   "upload.processingTitle": "正在处理 Demo",
   "upload.processingFallback": "正在上传并解析所选 Demo，请稍候…",
   "upload.pipelineLabel": ".DEM 批量流水线",
+  "upload.invalidExtension": "无法导入：{files} 不是 .dem 文件。请选择后缀为 .dem 的 CS2 Demo。",
   "progressbar.closeAriaLabel": "关闭通知",
   "progressbar.queueBtn": "录制队列",
   "progressbar.abortBtn": "中止录制",

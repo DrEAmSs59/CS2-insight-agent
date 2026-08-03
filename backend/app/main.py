@@ -582,6 +582,8 @@ def _demo_failure_code(error: BaseException, phase: str) -> str:
     if isinstance(error, FileNotFoundError):
         return "DEMO_FILE_NOT_FOUND"
     text = str(error).casefold()
+    if "not a .dem file" in text or "only .dem" in text:
+        return "DEMO_INVALID_EXTENSION"
     if any(marker in text for marker in ("not found", "no such file", "找不到", "不存在")):
         return "DEMO_FILE_NOT_FOUND"
     if "timeout" in text or "timed out" in text or "超时" in text:
@@ -939,7 +941,7 @@ async def upload_demo(
     source_path: Annotated[Optional[str], Form()] = None,
 ):
     if not file.filename or not str(file.filename).lower().endswith(".dem"):
-        raise HTTPException(400, "Only .dem files are accepted")
+        raise HTTPException(400, error_detail("DEMO_INVALID_EXTENSION"))
 
     filename = Path(file.filename).name
     dest = UPLOAD_DIR / filename

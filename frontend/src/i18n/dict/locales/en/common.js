@@ -49,6 +49,7 @@ export default {
   "upload.processingTitle": "Processing demos",
   "upload.processingFallback": "Uploading and analyzing the selected demos…",
   "upload.pipelineLabel": ".DEM BATCH PIPELINE",
+  "upload.invalidExtension": "Cannot import {files}: it is not a .dem file. Select a CS2 Demo with the .dem extension.",
   "progressbar.closeAriaLabel": "Close notification",
   "progressbar.queueBtn": "Recording Queue",
   "progressbar.abortBtn": "Abort recording",

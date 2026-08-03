@@ -425,7 +425,7 @@ function CosmeticCard({
       }`}
       aria-label={accessibleName}
     >
-      <span className="relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border bg-cs2-bg-input transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
+      <span className="cosmetic-preview-surface relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
         {showClear ? (
           <span
             role="button"
@@ -626,7 +626,7 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
   const finishKnown = item?.finish_known !== false;
   return (
     <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-      <div className="flex flex-col items-center justify-center gap-4 border-b border-cs2-border bg-cs2-bg-page/55 p-5 lg:border-b-0 lg:border-r">
+      <div className="cosmetic-preview-surface flex flex-col items-center justify-center gap-4 border-b border-cs2-border p-5 lg:border-b-0 lg:border-r">
         {onlineAssetsEnabled && collection && item?.collection_image_url ? (
           <div className="flex items-center gap-2 self-start text-[11px] text-cs2-text-secondary">
             <img src={item.collection_image_url} alt="" className="h-8 w-8 object-contain" />

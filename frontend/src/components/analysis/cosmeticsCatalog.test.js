@@ -4,6 +4,7 @@ import {
   filterCandidates,
   formatCraftPipeName,
   imageUrlForWear,
+  listCandidateTypeGroups,
   listSkinCandidates,
   sortCandidatesByRarityDesc,
 } from "./cosmeticsCatalog.js";
@@ -22,6 +23,20 @@ describe("cosmeticsCatalog", () => {
     expect(rows.every((row) => row.type === "melee")).toBe(true);
     const models = new Set(rows.map((row) => row.model));
     expect(models.size).toBeGreaterThan(1);
+  });
+
+  test("builds knife and glove model groups and filters candidates by group", () => {
+    const knives = listSkinCandidates({ type: "melee", def_index: 507, model: "knife_karambit" });
+    const knifeGroups = listCandidateTypeGroups(knives, "zh");
+    expect(knifeGroups.some((group) => group.label === "爪子刀")).toBe(true);
+    const butterfly = knifeGroups.find((group) => group.label === "蝴蝶刀");
+    expect(butterfly).toBeTruthy();
+    expect(filterCandidates(knives, "", "zh", butterfly.key).every((row) => row.def_index === 515)).toBe(true);
+
+    const gloves = listSkinCandidates({ type: "glove", def_index: 5030, model: "sporty_gloves" });
+    const gloveLabels = listCandidateTypeGroups(gloves, "zh").map((group) => group.label);
+    expect(gloveLabels).toContain("运动手套");
+    expect(gloveLabels).toContain("专业手套");
   });
 
   test("sorts by rarity descending then filters by localized name", () => {

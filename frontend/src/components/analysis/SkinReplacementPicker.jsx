@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { PackageOpen, Shuffle, WifiOff } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import Modal from "../ui/Modal.jsx";
-import { craftNameParts, filterCandidates, formatCraftPipeName, imageUrlForWear, listSkinCandidates } from "./cosmeticsCatalog.js";
+import {
+  candidateTypeGroupKey,
+  craftNameParts,
+  filterCandidates,
+  formatCraftPipeName,
+  imageUrlForWear,
+  listCandidateTypeGroups,
+  listSkinCandidates,
+} from "./cosmeticsCatalog.js";
 
 const WEAR_MIN = 0;
 const WEAR_MAX = 1;
@@ -113,7 +121,6 @@ function ParamRow({
   value,
   onChange,
   onRandom,
-  readOnly,
   kind,
   invalidText,
 }) {
@@ -131,38 +138,45 @@ function ParamRow({
         <input
           type="text"
           inputMode={isWear ? "decimal" : "numeric"}
-          readOnly={readOnly}
-          disabled={readOnly}
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
-          className="w-[84px] shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-[84px] shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent"
         />
         <input
           type="range"
           min={isWear ? WEAR_MIN : SEED_MIN}
           max={isWear ? WEAR_MAX : SEED_MAX}
           step={isWear ? 0.000001 : 1}
-          disabled={readOnly}
           value={sliderValue}
           onChange={(event) => {
             const next = Number(event.target.value);
             onChange?.(isWear ? formatWear(next) : String(Math.round(next)));
           }}
-          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-cs2-accent"
         />
         <button
           type="button"
-          disabled={readOnly}
           onClick={onRandom}
           title={t("analysis.cosmetics.picker.random")}
           aria-label={t("analysis.cosmetics.picker.random")}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-cs2-border bg-cs2-bg-input text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-cs2-border bg-cs2-bg-input text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
         >
           <Shuffle className="h-3.5 w-3.5" />
         </button>
       </div>
       {invalidText ? <span className="text-[10px] text-red-400">{invalidText}</span> : null}
     </label>
+  );
+}
+
+function ParamValue({ label, value }) {
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-b border-cs2-border-subtle py-1.5 text-[11px] last:border-b-0">
+      <span className="text-cs2-text-muted">{label}</span>
+      <output className="min-w-0 text-right font-mono font-semibold text-cs2-text-secondary">
+        {value === "" || value === null || value === undefined ? "—" : value}
+      </output>
+    </div>
   );
 }
 
@@ -179,14 +193,15 @@ function SkinColumn({
   onSeedChange,
   wearInvalid,
   seedInvalid,
+  testId,
 }) {
   const t = useT();
   return (
-    <div className="flex w-full min-w-0 shrink-0 flex-col gap-1">
+    <div data-testid={testId} className="flex w-full min-w-0 shrink-0 flex-col gap-1">
       <span className="shrink-0 text-xs font-medium text-cs2-text-muted">{label}</span>
       <div
         data-skin-tile
-        className="flex h-[192px] w-full shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border bg-cs2-bg-input"
+        className="cosmetic-preview-surface flex h-[192px] w-full shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border"
       >
         <TileImage
           item={item}
@@ -198,24 +213,30 @@ function SkinColumn({
         />
       </div>
       <ItemCaption item={item} locale={locale} />
-      <ParamRow
-        label={t("analysis.cosmetics.picker.wear")}
-        kind="wear"
-        value={wear}
-        readOnly={!wearEditable}
-        onChange={onWearChange}
-        onRandom={() => onWearChange?.(randomWear())}
-        invalidText={wearInvalid}
-      />
-      <ParamRow
-        label={t("analysis.cosmetics.picker.seed")}
-        kind="seed"
-        value={seed}
-        readOnly={!seedEditable}
-        onChange={onSeedChange}
-        onRandom={() => onSeedChange?.(randomSeed())}
-        invalidText={seedInvalid}
-      />
+      {wearEditable ? (
+        <ParamRow
+          label={t("analysis.cosmetics.picker.wear")}
+          kind="wear"
+          value={wear}
+          onChange={onWearChange}
+          onRandom={() => onWearChange?.(randomWear())}
+          invalidText={wearInvalid}
+        />
+      ) : (
+        <ParamValue label={t("analysis.cosmetics.picker.wear")} value={wear} />
+      )}
+      {seedEditable ? (
+        <ParamRow
+          label={t("analysis.cosmetics.picker.seed")}
+          kind="seed"
+          value={seed}
+          onChange={onSeedChange}
+          onRandom={() => onSeedChange?.(randomSeed())}
+          invalidText={seedInvalid}
+        />
+      ) : (
+        <ParamValue label={t("analysis.cosmetics.picker.seed")} value={seed} />
+      )}
     </div>
   );
 }
@@ -230,10 +251,21 @@ export default function SkinReplacementPicker({
 }) {
   const t = useT();
   const candidates = useMemo(() => listSkinCandidates(sourceItem), [sourceItem]);
+  const typeGroups = useMemo(
+    () => listCandidateTypeGroups(candidates, locale),
+    [candidates, locale],
+  );
+  const defaultTypeGroup = useMemo(() => {
+    if (typeGroups.length <= 1) return "";
+    const sourceGroup = candidateTypeGroupKey(sourceItem);
+    if (typeGroups.some((group) => group.key === sourceGroup)) return sourceGroup;
+    return typeGroups[0]?.key || "";
+  }, [sourceItem, typeGroups]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(null);
   const [wear, setWear] = useState("");
   const [seed, setSeed] = useState("");
+  const [activeTypeGroup, setActiveTypeGroup] = useState("");
 
   const currentWear = formatWear(sourceItem?.paint_wear) || String(sourceItem?.paint_wear ?? "");
   const currentSeed = sourceItem?.paint_seed === undefined || sourceItem?.paint_seed === null
@@ -246,12 +278,18 @@ export default function SkinReplacementPicker({
     setSelected(null);
     setWear(formatWear(WEAR_MIN));
     setSeed(String(SEED_MIN));
-  }, [open, sourceItem]);
+    setActiveTypeGroup(defaultTypeGroup);
+  }, [defaultTypeGroup, open, sourceItem]);
 
   const filtered = useMemo(
-    () => filterCandidates(candidates, query, locale),
-    [candidates, query, locale],
+    () => filterCandidates(candidates, query, locale, activeTypeGroup),
+    [activeTypeGroup, candidates, query, locale],
   );
+
+  const selectTypeGroup = (key) => {
+    setActiveTypeGroup(key);
+    setSelected(null);
+  };
 
   const replacementPreview = selected
     ? { ...selected, paint_wear: wear, paint_seed: seed }
@@ -318,6 +356,7 @@ export default function SkinReplacementPicker({
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
             label={t("analysis.cosmetics.picker.current")}
+            testId="skin-picker-current"
             wear={currentWear}
             seed={currentSeed}
             wearEditable={false}
@@ -328,6 +367,7 @@ export default function SkinReplacementPicker({
             locale={locale}
             onlineAssetsEnabled={onlineAssetsEnabled}
             label={t("analysis.cosmetics.picker.replacement")}
+            testId="skin-picker-replacement"
             wear={wear}
             seed={seed}
             wearEditable
@@ -350,6 +390,44 @@ export default function SkinReplacementPicker({
             placeholder={t("analysis.cosmetics.picker.search")}
             className="w-full shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
           />
+          {typeGroups.length > 1 ? (
+            <div data-testid="skin-type-filters" className="shrink-0">
+              <div className="mb-1.5 text-[11px] font-medium text-cs2-text-muted">
+                {String(sourceItem?.type || "") === "glove"
+                  ? t("analysis.cosmetics.picker.gloveTypes")
+                  : t("analysis.cosmetics.picker.knifeTypes")}
+              </div>
+              <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                <button
+                  type="button"
+                  aria-pressed={!activeTypeGroup}
+                  onClick={() => selectTypeGroup("")}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    !activeTypeGroup
+                      ? "border-cs2-accent bg-cs2-accent/15 text-cs2-accent"
+                      : "border-cs2-border bg-cs2-bg-input text-cs2-text-secondary hover:border-cs2-text-muted"
+                  }`}
+                >
+                  {t("analysis.cosmetics.picker.allTypes")} · {candidates.length}
+                </button>
+                {typeGroups.map((group) => (
+                  <button
+                    key={group.key}
+                    type="button"
+                    aria-pressed={activeTypeGroup === group.key}
+                    onClick={() => selectTypeGroup(group.key)}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      activeTypeGroup === group.key
+                        ? "border-cs2-accent bg-cs2-accent/15 text-cs2-accent"
+                        : "border-cs2-border bg-cs2-bg-input text-cs2-text-secondary hover:border-cs2-text-muted"
+                    }`}
+                  >
+                    {group.label} · {group.count}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div
             data-testid="skin-candidate-list"
             className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-3 content-start gap-3 overflow-y-auto overflow-x-hidden pr-1"
@@ -365,10 +443,10 @@ export default function SkinReplacementPicker({
                   aria-pressed={active}
                   aria-label={formatCraftPipeName(candidate, locale) || displayName(candidate, locale)}
                   data-skin-tile
-                  className={`relative box-border flex h-[192px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
+                  className={`cosmetic-preview-surface relative box-border flex h-[192px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
                     active
-                      ? "border-cs2-accent bg-cs2-bg-hover"
-                      : "border-cs2-border bg-cs2-bg-input hover:border-cs2-text-muted"
+                      ? "border-cs2-accent ring-1 ring-cs2-accent/40"
+                      : "border-cs2-border hover:border-cs2-text-muted"
                   }`}
                 >
                   <div className="min-h-0 flex-1">

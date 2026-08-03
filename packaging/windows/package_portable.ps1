@@ -135,14 +135,19 @@ function Install-BackendRequirements {
     if ($LASTEXITCODE -ne 0) { throw "uv runtime install failed (exit $LASTEXITCODE)" }
     $leanWheel = (Resolve-Path -LiteralPath $DemoparserWheel).Path
     Write-Step "Install patched demoparser wheel"
+    # A reused trimmed runtime has no wheel RECORD files, so remove every old
+    # parser generation explicitly before installing the required wheel.
+    $pythonRoot = Split-Path -Parent $PythonExe
+    $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
+    Remove-Item -LiteralPath (Join-Path $sitePackages "demoparser2") -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $sitePackages -Directory -Filter "demoparser2-*.dist-info" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
     & $Uv.Source pip install --python $PythonExe --no-deps $leanWheel --compile-bytecode
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser wheel install failed (exit $LASTEXITCODE)" }
     Remove-Item -LiteralPath $runtimeRequirements -Force -ErrorAction SilentlyContinue
     $leanMeta = Get-Content (Join-Path $Root "packaging\demoparser-lean\demoparser-runtime.json") -Raw | ConvertFrom-Json
     & $PythonExe -c "import importlib.metadata as m, importlib.util as u, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None; assert u.find_spec('polars') is None; assert u.find_spec('pyarrow') is None" $leanMeta.distribution_version
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed (exit $LASTEXITCODE)" }
-    $pythonRoot = Split-Path -Parent $PythonExe
-    $sitePackages = Join-Path $pythonRoot "Lib\site-packages"
     foreach ($rel in @(
         "Scripts",
         "Lib\site-packages\websocket\tests",

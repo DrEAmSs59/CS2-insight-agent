@@ -127,7 +127,7 @@ export function MatchListRow({
 
   return (
     <div
-      className={`group relative flex items-center gap-4 rounded-lg border px-4 py-2 transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
+      className={`match-list-row group relative flex min-w-0 items-center gap-4 rounded-lg border px-4 py-2 transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
       {/* 1. 勾选 */}
@@ -141,7 +141,7 @@ export function MatchListRow({
       </div>
 
       {/* 2. 地图与来源 */}
-      <div className="flex items-center gap-3 w-[180px] shrink-0">
+      <div className="match-list-row__map flex min-w-0 items-center gap-3 w-[180px] shrink-0">
         <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-cs2-bg-input/70 border border-cs2-border relative">
           <img
             src={`/images/maps/${mapName}.webp`}
@@ -165,9 +165,9 @@ export function MatchListRow({
       </div>
 
       {/* 3. 核心：Team A + Score + Team B */}
-      <div className="flex min-w-0 flex-1 items-center justify-between gap-6 px-4">
+      <div className="match-list-row__teams flex min-w-0 flex-1 items-center justify-between gap-6 px-4">
         {/* Team A & Players */}
-        <div className="flex-1 flex flex-col items-end min-w-0">
+        <div className="match-list-row__team flex min-w-0 flex-1 flex-col items-end">
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full text-right mb-0.5">
             {matchMeta.team_a_name || t("match.teamA")}
           </span>
@@ -181,14 +181,14 @@ export function MatchListRow({
         </div>
 
         {/* Score */}
-        <div className="flex items-center gap-2 px-3 py-1 bg-cs2-bg-input/70 rounded-lg border border-cs2-border shrink-0">
+        <div className="match-list-row__score flex shrink-0 items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input/70 px-3 py-1">
            <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_a_score ?? 0}</span>
            <div className="h-3 w-[1px] bg-cs2-border" />
            <span className="text-lg font-black text-cs2-accent tabular-nums">{matchMeta.team_b_score ?? 0}</span>
         </div>
 
         {/* Team B & Players */}
-        <div className="flex-1 flex flex-col items-start min-w-0">
+        <div className="match-list-row__team flex min-w-0 flex-1 flex-col items-start">
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full mb-0.5">
             {matchMeta.team_b_name || t("match.teamB")}
           </span>
@@ -203,9 +203,9 @@ export function MatchListRow({
       </div>
 
       {/* 4. 右侧动态区域：平时显示状态/时间，悬停显示操作 */}
-      <div className="relative ml-auto shrink-0 min-w-[160px] flex justify-end items-center">
+      <div className="match-list-row__details relative ml-auto flex min-w-0 shrink-0 items-center justify-end">
         {/* 平时显示：状态 + 入库日期 + 时长 */}
-        <div className="flex items-center gap-6 group-hover:hidden animate-in fade-in duration-200">
+        <div className="match-list-row__details-normal flex items-center gap-6 group-hover:hidden animate-in fade-in duration-200">
           <div className="flex flex-col items-end gap-0.5">
             <div className="flex items-center gap-1.5">
               <span
@@ -230,7 +230,7 @@ export function MatchListRow({
         </div>
 
         {/* 悬停显示：操作按钮 */}
-        <div className="hidden group-hover:flex items-center gap-1 animate-in fade-in duration-200" onClick={e => e.stopPropagation()}>
+        <div className="match-list-row__details-actions hidden items-center gap-1 group-hover:flex animate-in fade-in duration-200" onClick={e => e.stopPropagation()}>
           <button
             onClick={() => setIsEditingRemark(!isEditingRemark)}
             className={`p-2 rounded-md transition-colors ${demo.remark ? 'text-cs2-accent' : 'text-cs2-text-muted'} hover:bg-cs2-bg-input/50`}
@@ -374,11 +374,11 @@ export default function MatchCard({
 
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
+      className={`match-card group relative flex min-w-0 flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
       {/* 顶部：地图缩略图背景 */}
-      <div className="relative h-[70px] w-full overflow-hidden">
+      <div className="match-card__hero relative h-[70px] w-full overflow-hidden">
         <img
           src={mapThumbnail}
           alt={mapName}
@@ -388,9 +388,9 @@ export default function MatchCard({
         <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
 
         {/* 顶部悬浮信息 */}
-        <div className="absolute inset-0 flex flex-col justify-center px-2 py-0.5">
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        <div className="match-card__hero-content absolute inset-0 flex min-w-0 flex-col justify-center px-2 py-0.5">
+          <div className="match-card__hero-main relative flex min-w-0 items-center justify-between">
+            <div className="match-card__hero-meta flex min-w-0 items-center gap-2" onClick={e => e.stopPropagation()}>
               <input
                 type="checkbox"
                 checked={isSelected}
@@ -403,7 +403,7 @@ export default function MatchCard({
             </div>
 
             {/* 比分：Trophy 严格居中 */}
-            <div className="absolute left-1/2 -translate-x-1/2 grid grid-cols-[minmax(0,1fr)_min-content_minmax(0,1fr)] items-center">
+            <div className="match-card__score absolute left-1/2 grid grid-cols-[minmax(0,1fr)_min-content_minmax(0,1fr)] items-center -translate-x-1/2">
               <span className="text-right text-xl font-black text-cs2-accent tabular-nums drop-shadow-md">
                 {matchMeta.team_a_score ?? 0}
               </span>
@@ -413,7 +413,7 @@ export default function MatchCard({
               </span>
             </div>
 
-            <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+            <div className="match-card__actions flex min-w-0 gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
               <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title={t("match.btnPlayCs2")}><Play className="h-4 w-4 fill-current" /></button>
               <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all" title={t("match.btnLocate")}><FolderSearch className="h-4 w-4" /></button>
               <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all" title={t("match.btnDelete")}><Trash2 className="h-4 w-4" /></button>
@@ -421,12 +421,12 @@ export default function MatchCard({
           </div>
 
           {/* 底部行：来源 / 时长 / 日期 */}
-          <div className="relative flex items-center justify-between text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
+          <div className="match-card__source-row relative flex min-w-0 items-center justify-between text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
             <div className="flex items-center gap-1.5">
               <img src={sourceLogo} alt={demo.source} className="h-3 object-contain opacity-80" />
               <span className="uppercase">{demo.source || "Local"}</span>
             </div>
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
+            <div className="match-card__clock absolute left-1/2 flex items-center gap-1 -translate-x-1/2">
               <Clock className="h-3 w-3" />
               {formatDuration(matchMeta.duration_mins)}
             </div>

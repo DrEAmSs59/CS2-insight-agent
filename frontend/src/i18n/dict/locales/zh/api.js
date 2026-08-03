@@ -16,6 +16,7 @@ export default {
   "api.err.demoPlaybackPovFailed": "POV HUD 准备失败：{err}",
   "api.err.demoPlaybackLaunchFailed": "启动 CS2 播放 Demo 失败：{err}",
   "api.err.demoFileNotFound": "Demo 文件已经移动、删除或无法访问，请重新选择该文件。",
+  "api.err.demoInvalidExtension": "所选文件不是 .dem 文件。请选择后缀为 .dem 的 CS2 Demo。",
   "api.err.demoPrepareFailed": "无法读取这个 Demo。文件可能不完整、已损坏或不是受支持的 CS2 Demo。",
   "api.err.demoInspectionTimeout": "读取 Demo 信息超时，已自动跳过。你可以稍后单独重试。",
   "api.err.demoInspectionFailed": "无法识别这个 Demo 的比赛信息，已自动跳过。",

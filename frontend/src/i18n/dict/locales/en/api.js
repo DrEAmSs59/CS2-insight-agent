@@ -16,6 +16,7 @@ export default {
   "api.err.demoPlaybackPovFailed": "POV HUD preparation failed: {err}",
   "api.err.demoPlaybackLaunchFailed": "Failed to launch CS2 demo playback: {err}",
   "api.err.demoFileNotFound": "The Demo was moved, deleted, or is unavailable. Select the file again.",
+  "api.err.demoInvalidExtension": "The selected file is not a .dem file. Select a CS2 Demo with the .dem extension.",
   "api.err.demoPrepareFailed": "This Demo could not be read. It may be incomplete, damaged, or not a supported CS2 Demo.",
   "api.err.demoInspectionTimeout": "Reading Demo information timed out, so this file was skipped. You can retry it separately later.",
   "api.err.demoInspectionFailed": "Match information could not be read from this Demo, so it was skipped.",

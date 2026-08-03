@@ -1,4 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -78,5 +79,20 @@ function maybeStageSkinCore() {
 }
 
 maybeStageSkinCore();
+
+// Run the exact parser command used by the NSIS postinstall hook against the
+// copied bundle, not merely against the repo-root staging source. This keeps a
+// stale or incomplete resource directory from becoming an uninstallable setup.
+const bundledPython = join(destination, "python", "python.exe");
+const bundledParserGate = join(destination, "backend", "app", "demoparser_runtime.py");
+const parserVerification = spawnSync(
+  bundledPython,
+  ["-I", bundledParserGate],
+  { cwd: destination, env: process.env, stdio: "inherit", shell: false },
+);
+if (parserVerification.status !== 0) {
+  console.error("[desktop] staged Tauri resources failed the NSIS demoparser validation");
+  process.exit(parserVerification.status ?? 1);
+}
 
 console.log(`[desktop] staged Tauri resources at ${destination}`);

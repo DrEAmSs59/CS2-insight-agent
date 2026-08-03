@@ -254,7 +254,7 @@ export default function DemoLibraryPage() {
   }, [s]);
 
   return (
-    <PageContainer className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
+    <PageContainer className="demo-library-page flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
         onScan={s.handleScanDemos}
@@ -291,13 +291,13 @@ export default function DemoLibraryPage() {
       ) : null}
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+        <div className="demo-library-results min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 custom-scrollbar">
           {s.libraryLoading ? (
             <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{t("library.loading")}</div>
           ) : filteredRows.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{emptyMessage || t("library.noDemo")}</div>
           ) : viewMode === "grid" ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="demo-library-grid grid gap-4">
               {filteredRows.map((it) => (
                 <MatchCard
                   key={it.id}
@@ -320,7 +320,7 @@ export default function DemoLibraryPage() {
               ))}
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="demo-library-list flex flex-col gap-2">
               {filteredRows.map((it) => (
                 <MatchListRow
                   key={it.id}

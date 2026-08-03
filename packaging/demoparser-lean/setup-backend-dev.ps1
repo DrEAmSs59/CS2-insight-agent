@@ -13,6 +13,15 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $metadata = Get-Content -LiteralPath (Join-Path $PSScriptRoot "demoparser-runtime.json") -Raw |
     ConvertFrom-Json
 
+function Remove-BundledDemoparser {
+    param([Parameter(Mandatory)][string]$PythonExe)
+
+    $sitePackages = Join-Path (Split-Path -Parent $PythonExe) "Lib\site-packages"
+    Remove-Item -LiteralPath (Join-Path $sitePackages "demoparser2") -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $sitePackages -Directory -Filter "demoparser2-*.dist-info" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+}
+
 & $UvExe --version
 if ($LASTEXITCODE -ne 0) { throw "uv 0.11.x is required. Install uv and retry." }
 & $UvExe sync --project $repoRoot --frozen
@@ -61,6 +70,9 @@ if (Test-Path -LiteralPath $desktopPython -PathType Leaf) {
     & $desktopPython -c "import json,sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import inspect_demoparser_runtime; report = inspect_demoparser_runtime(); print(json.dumps(report, ensure_ascii=False, sort_keys=True)); raise SystemExit(0 if report['ready'] else 1)" $backend
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Repairing the existing desktop Python runtime..."
+        # Release trimming removes wheel RECORD files, so package managers
+        # cannot reliably uninstall an older parser from this runtime.
+        Remove-BundledDemoparser -PythonExe $desktopPython
         & $UvExe pip install --python $desktopPython --reinstall --no-deps --compile-bytecode $runtimeWheel
         if ($LASTEXITCODE -ne 0) { throw "Repairing the desktop demoparser runtime failed." }
         & $desktopPython -c "import sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import main; raise SystemExit(main())" $backend

@@ -59,16 +59,59 @@ export function sortCandidatesByRarityDesc(candidates) {
   ));
 }
 
-export function filterCandidates(candidates, query, locale = "zh") {
+export function candidateTypeGroupKey(candidate) {
+  const type = String(candidate?.type || "");
+  if (type !== "melee" && type !== "glove") return "";
+  const def = Number(candidate?.def_index);
+  if (Number.isFinite(def)) return `${type}:${def}`;
+  const model = String(candidate?.model || "").trim();
+  return model ? `${type}:model:${model}` : "";
+}
+
+export function listCandidateTypeGroups(candidates, locale = "zh") {
+  const groups = new Map();
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const key = candidateTypeGroupKey(candidate);
+    if (!key) continue;
+    const defIndex = Number(candidate?.def_index);
+    const label = craftNameParts(candidate, locale).model.replace(/^★\s*/, "")
+      || String(candidate?.model || "").trim()
+      || key;
+    const current = groups.get(key);
+    if (current) {
+      current.count += 1;
+      continue;
+    }
+    groups.set(key, {
+      key,
+      label,
+      count: 1,
+      def_index: Number.isFinite(defIndex) ? defIndex : null,
+      model: String(candidate?.model || ""),
+    });
+  }
+  return [...groups.values()].sort((left, right) => (
+    (left.def_index ?? Number.MAX_SAFE_INTEGER) - (right.def_index ?? Number.MAX_SAFE_INTEGER)
+    || left.label.localeCompare(right.label)
+  ));
+}
+
+export function filterCandidates(candidates, query, locale = "zh", typeGroupKey = "") {
+  const rows = (Array.isArray(candidates) ? candidates : []).filter((row) => (
+    !typeGroupKey || candidateTypeGroupKey(row) === typeGroupKey
+  ));
   const q = String(query || "").trim().toLowerCase();
-  if (!q) return Array.isArray(candidates) ? candidates : [];
+  if (!q) return rows;
   const zh = String(locale || "").toLowerCase().startsWith("zh");
-  return (Array.isArray(candidates) ? candidates : []).filter((row) => {
+  return rows.filter((row) => {
     const name = zh
       ? String(row?.name_zh || row?.name_en || "")
       : String(row?.name_en || row?.name_zh || "");
     const alt = String(row?.alt_name || "");
-    return name.toLowerCase().includes(q) || alt.toLowerCase().includes(q);
+    const model = String(row?.model || "");
+    return name.toLowerCase().includes(q)
+      || alt.toLowerCase().includes(q)
+      || model.toLowerCase().includes(q);
   });
 }
 

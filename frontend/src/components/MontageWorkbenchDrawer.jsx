@@ -1201,7 +1201,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const exportDirForButton = exportOk ? dirnamePath(lastExport.output_path) : "";
 
   const shellClass = isPage
-    ? "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-cs2-border"
+    ? "montage-workbench-shell flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border"
     : "flex h-full w-[min(1680px,99vw)] flex-col border-l border-cs2-border bg-cs2-bg-card shadow-2xl";
 
   const inner = (
@@ -1249,10 +1249,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           </div>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)_minmax(380px,440px)]">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="montage-workbench-grid min-h-0 min-w-0 flex-1 gap-0">
             {/* 左侧素材池 */}
-            <aside className="flex min-h-0 flex-col border-cs2-border bg-cs2-bg-card xl:border-r">
+            <aside className="montage-workbench-panel montage-workbench-pool flex min-h-0 min-w-0 flex-col border-cs2-border bg-cs2-bg-card xl:border-r">
               <div className="shrink-0 border-b border-cs2-border p-4">
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="text-xs font-bold uppercase tracking-wide text-cs2-text-muted">{t("montage.poolTitle")}</p>
@@ -1371,7 +1371,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </aside>
 
             {/* 中间：合集结构（编排主线） */}
-            <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden border-cs2-border bg-cs2-bg-page px-3 py-3 xl:border-r">
+            <section className="montage-workbench-panel montage-workbench-orchestration flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden border-cs2-border bg-cs2-bg-page px-3 py-3 xl:border-r">
               {unknownDurationHint ? (
                 <p className="shrink-0 text-xs font-medium text-cs2-amber-on-surface bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">{unknownDurationHint}</p>
               ) : null}
@@ -1409,7 +1409,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </section>
 
             {/* 右侧：合辑成片控制台 */}
-            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-cs2-border xl:border-l xl:bg-cs2-bg-card">
+            <div className="montage-workbench-panel montage-workbench-console flex min-h-0 min-w-0 flex-col overflow-hidden border-cs2-border xl:border-l xl:bg-cs2-bg-card">
               <MontageStyleConsole
                 bgmPath={bgmPath}
                 onBgmPathChange={setBgmPath}
@@ -1566,7 +1566,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   if (isPage) {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-5">
+      <div className="montage-workbench-page flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3">
         {inner}
       </div>
     );
