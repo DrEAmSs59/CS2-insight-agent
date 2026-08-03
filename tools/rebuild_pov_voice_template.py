@@ -18,7 +18,7 @@ from backend.app.demo_voice_hud import (  # noqa: E402
 
 TEMPLATE = ROOT / "pov" / "pov_voice_template.vpk"
 INJECTION = ROOT / "pov" / "voice_hud_injection.js"
-PAYLOAD_CAPACITY = 400_000
+PAYLOAD_CAPACITY = 8_000_000
 
 
 def replace_data_block(resource: bytes, script: bytes) -> bytes:

@@ -380,6 +380,14 @@ class PovHudManager:
                     "input_commands": voice_build.input_commands,
                     "input_button_updates": voice_build.input_button_updates,
                     "input_subtick_steps": voice_build.input_subtick_steps,
+                    "radar_players": voice_build.radar_players,
+                    "radar_samples": voice_build.radar_samples,
+                    "radar_parse_failed": bool(voice_build.radar_parse_failed),
+                    "radar_map": voice_build.radar_map,
+                    "radar_planted_bombs": voice_build.radar_planted_bombs,
+                    "radar_player_sounds": voice_build.radar_player_sounds,
+                    "kill_feedback_events": voice_build.kill_feedback_events,
+                    "kill_feedback_parse_failed": bool(voice_build.kill_feedback_parse_failed),
                 }
                 if voice_build is not None
                 else None

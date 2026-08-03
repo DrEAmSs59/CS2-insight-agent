@@ -23,4 +23,6 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "cl_radar_always_centered 1",
     "cl_radar_square_when_spectating 0",
     "cl_radar_scale 0.4",
+    # 0=team color, 12=teammate/player color (HP/ammo accents follow slot colors).
+    "cl_hud_color 12",
 ]

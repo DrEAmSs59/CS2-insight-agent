@@ -32,6 +32,10 @@ def test_pov_forces_rotating_round_scaled_radar():
     assert expected.issubset(POV_CORE_FORCED_COMMANDS)
 
 
+def test_pov_forces_teammate_hud_color():
+    assert "cl_hud_color 12" in POV_CORE_FORCED_COMMANDS
+
+
 def test_pov_restore_removes_session_backup_and_next_install_uses_fresh_gameinfo(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
     monkeypatch.setattr(pov_hud_manager, "is_cs2_running", lambda: False)

@@ -11,6 +11,8 @@ from app.demo_voice_hud import (
     VOICE_DATA_END,
     VOICE_SCRIPT_PATH,
     add_input_tracks_to_payload,
+    add_kill_feedback_track_to_payload,
+    add_radar_track_to_payload,
     build_voice_payload,
     inject_voice_payload,
     read_inline_vpk,
@@ -137,9 +139,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     end = script.index(VOICE_DATA_END)
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
-    assert end - start == 400_000
+    assert end - start == 8_000_000
     assert b"CS2InsightDemoVoice" in script
     assert b"CS2InsightInputHud" in script
+    assert b"CS2InsightRadarHud" in script
+    assert b"updateRadarHud" in script
     assert b"GetHudPlayerXuid" in script
     assert b"updateVoiceAudience" in script
     assert b"tv_listen_voice_indices -1" not in script
@@ -148,6 +152,101 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'["R", 194, 0' in script
     assert b"onlyWhenActive" in script
     assert b"765611" not in script
+
+
+def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
+    class _RadarParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name):
+            if name == "round_start":
+                return {"tick": [8, 64]}
+            if name == "round_end":
+                return {"tick": [24, 80]}
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            # 8Hz stride at 64 tickrate => every 8 ticks from 8..80
+            sample_ticks = ticks or []
+            out = {
+                "tick": [],
+                "steamid": [],
+                "X": [],
+                "Y": [],
+                "yaw": [],
+                "is_alive": [],
+                "player_color": [],
+                "team_num": [],
+            }
+            for tick in sample_ticks:
+                out["tick"].extend([tick, tick])
+                out["steamid"].extend([111, 222])
+                out["X"].extend([100 + tick, 200 + tick])
+                out["Y"].extend([300 + tick, 400 + tick])
+                out["yaw"].extend([45, 90])
+                out["is_alive"].extend([True, tick < 70])
+                out["player_color"].extend(["yellow", "blue"])
+                out["team_num"].extend([2, 3])
+            return out
+
+    monkeypatch.setattr(
+        "app.radar.radar_map_assets.lookup_map_data",
+        lambda _map: {"pos_x": -2476, "pos_y": 3239, "scale": 4.4},
+    )
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_RadarParser)
+    payload, stats = add_radar_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_RadarParser,
+    )
+    packed = json.loads(payload)
+    assert len(packed) >= 9
+    radar = packed[8]
+    assert radar[0] == "de_dust2"
+    assert radar[1] == [-2476, 3239, 4400]
+    assert radar[2] == 8
+    assert stats["radar_players"] == 2
+    assert stats["radar_samples"] > 0
+    assert stats["radar_map"] == "de_dust2"
+    xuids = {row[0] for row in radar[3]}
+    assert xuids == {"111", "222"}
+    assert all(isinstance(row[3], str) and row[3] for row in radar[3])
+
+
+def test_kill_feedback_track_is_appended_at_payload_index_nine():
+    class _KillParser(_FakeParser):
+        @staticmethod
+        def parse_event(name):
+            if name != "player_death":
+                return {"tick": []}
+            return {
+                "tick": [100, 120, 140, 160],
+                "attacker_steamid": [111, 222, 111, 111],
+                "user_steamid": [222, 111, 111, 222],
+                "headshot": [True, False, False, True],
+                "dmg_armor": [0, 4, 0, 2],
+            }
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_KillParser)
+    payload, stats = add_kill_feedback_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_KillParser,
+    )
+    packed = json.loads(payload)
+    assert len(packed) >= 10
+    track = packed[9]
+    assert track[0] == ["111", "222"]
+    # suicide at tick 140 is dropped; remaining: 100 HS, 120 body+armor, 160 HS+armor
+    assert track[1] == "2s.0.1,k.1.2,14.0.3"
+    assert stats["kill_feedback_events"] == 3
+    assert stats["kill_feedback_parse_failed"] == 0
 
 
 def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Path):

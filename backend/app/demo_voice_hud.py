@@ -34,6 +34,22 @@ class DemoVoiceHudError(RuntimeError):
     """Raised when a safe demo-specific HUD package cannot be produced."""
 
 
+# Payload indices 0-3 are voice/input/roster. 4-7 are reserved for mouse /
+# subtitles / weapon pulses / broadcast (see internal Panorama VPK guide).
+# Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio.
+RADAR_PAYLOAD_INDEX = 8
+KILL_FEEDBACK_PAYLOAD_INDEX = 9
+RADAR_SAMPLE_HZ = 8
+# Flags for kill-feedback samples: bit0 = headshot, bit1 = armor damage.
+_COLOR_SLOT_NAMES = {
+    "blue": 0,
+    "green": 1,
+    "yellow": 2,
+    "orange": 3,
+    "purple": 4,
+}
+
+
 @dataclass(frozen=True)
 class DemoVoiceHudBuild:
     vpk_bytes: bytes
@@ -48,6 +64,15 @@ class DemoVoiceHudBuild:
     input_commands: int = 0
     input_button_updates: int = 0
     input_subtick_steps: int = 0
+    radar_players: int = 0
+    radar_samples: int = 0
+    radar_parse_failed: int = 0
+    radar_map: str = ""
+    radar_planted_bombs: int = 0
+    radar_dropped_bombs: int = 0
+    radar_player_sounds: int = 0
+    kill_feedback_events: int = 0
+    kill_feedback_parse_failed: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -261,6 +286,883 @@ def _as_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _zigzag_encode(value: int) -> int:
+    return (value << 1) if value >= 0 else ((-value << 1) - 1)
+
+
+def _player_color_slot(value: Any) -> int:
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in _COLOR_SLOT_NAMES:
+            return _COLOR_SLOT_NAMES[key]
+    slot = _as_int(value)
+    if slot is not None and 0 <= slot <= 4:
+        return slot
+    return -1
+
+
+def _normalize_map_name(raw: Any) -> str:
+    text = str(raw or "").strip().replace("\\", "/").split("/")[-1]
+    if text.lower().endswith(".bsp"):
+        text = text[:-4]
+    return text.strip()
+
+
+def _pad_payload_slots(
+    packed: list[Any],
+    length: int = KILL_FEEDBACK_PAYLOAD_INDEX + 1,
+) -> list[Any]:
+    if not isinstance(packed, list):
+        raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
+    if len(packed) < 4:
+        raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
+    while len(packed) < length:
+        packed.append([])
+    return packed
+
+
+def _encode_kill_feedback_events(
+    events: list[tuple[int, int, int]],
+) -> str:
+    """Delta-encode ``(tick, attacker_xuid_index, flags)`` as base36."""
+    previous_tick = 0
+    encoded: list[str] = []
+    for tick, attacker_index, flags in events:
+        encoded.append(
+            f"{_base36(tick - previous_tick)}.{_base36(attacker_index)}.{_base36(int(flags) & 0xFF)}"
+        )
+        previous_tick = tick
+    return ",".join(encoded)
+
+
+def _build_kill_feedback_payload(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Compact POV kill/HS feedback events for local Panorama ``play`` cues."""
+    try:
+        rows = parser.parse_event("player_death")
+    except Exception as exc:  # noqa: BLE001 - demoparser failures vary by demo
+        raise DemoVoiceHudError(f"could not parse player_death for kill feedback: {exc}") from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported player_death rows")
+
+    ticks = rows.get("tick")
+    attackers = rows.get("attacker_steamid")
+    victims = rows.get("user_steamid")
+    headshots = rows.get("headshot")
+    armor_dmg = rows.get("dmg_armor")
+    if not isinstance(ticks, list) or not isinstance(attackers, list) or not isinstance(victims, list):
+        raise DemoVoiceHudError("player_death rows are missing tick/attacker/victim fields")
+
+    xuid_table: list[str] = []
+    xuid_index: dict[int, int] = {}
+    events: list[tuple[int, int, int]] = []
+    count = min(len(ticks), len(attackers), len(victims))
+    for i in range(count):
+        tick = _as_int(ticks[i])
+        attacker = _as_positive_int(attackers[i])
+        victim = _as_positive_int(victims[i])
+        if tick is None or tick < 0 or attacker is None:
+            continue
+        if victim is not None and victim == attacker:
+            continue
+        if attacker not in roster_by_xuid:
+            continue
+        if attacker not in xuid_index:
+            xuid_index[attacker] = len(xuid_table)
+            xuid_table.append(str(attacker))
+        flags = 0
+        if isinstance(headshots, list) and i < len(headshots) and bool(headshots[i]):
+            flags |= 0x1
+        if isinstance(armor_dmg, list) and i < len(armor_dmg):
+            armor = _as_int(armor_dmg[i])
+            if armor is not None and armor > 0:
+                flags |= 0x2
+        events.append((tick, xuid_index[attacker], flags))
+
+    events.sort(key=lambda item: item[0])
+    if not events:
+        raise DemoVoiceHudError("demo contains no usable player_death kill feedback events")
+
+    payload = [xuid_table, _encode_kill_feedback_events(events)]
+    return payload, {
+        "kill_feedback_events": len(events),
+        "kill_feedback_parse_failed": 0,
+    }
+
+
+def _demo_tick_bounds(parser: Any) -> tuple[int, int]:
+    """Best-effort inclusive tick window for radar sampling."""
+    candidates: list[int] = []
+    for event_name in ("round_start", "round_freeze_end", "round_end", "round_officially_ended"):
+        try:
+            rows = parser.parse_event(event_name)
+        except Exception:  # noqa: BLE001 - optional bounds probe
+            continue
+        ticks = rows.get("tick") if isinstance(rows, Mapping) else None
+        if not isinstance(ticks, list):
+            continue
+        for raw in ticks:
+            tick = _as_int(raw)
+            if tick is not None and tick >= 0:
+                candidates.append(tick)
+    if len(candidates) >= 2:
+        return min(candidates), max(candidates)
+    if candidates:
+        only = candidates[0]
+        return only, only + 64 * 60
+    raise DemoVoiceHudError("demo contains no round events for radar tick bounds")
+
+
+def _encode_radar_samples(
+    samples: list[tuple[int, int, int, int]],
+) -> str:
+    """Delta-encode ``(x, y, yaw_deg, flags)`` samples as base36 zigzag.
+
+    ``flags`` bit0 = alive, bit1 = carrying C4,
+    bit2 = spotted by any T (team 2), bit3 = spotted by any CT (team 3),
+    bit4 = current side is CT (team 3); clear means T (team 2). Tracks half swaps.
+    """
+    if not samples:
+        return ""
+    previous_x = previous_y = previous_yaw = 0
+    encoded: list[str] = []
+    for x, y, yaw, flags in samples:
+        dx = _zigzag_encode(x - previous_x)
+        dy = _zigzag_encode(y - previous_y)
+        dyaw = _zigzag_encode(yaw - previous_yaw)
+        encoded.append(
+            f"{_base36(dx)}.{_base36(dy)}.{_base36(dyaw)}.{_base36(int(flags) & 0xFF)}"
+        )
+        previous_x, previous_y, previous_yaw = x, y, yaw
+    return ",".join(encoded)
+
+
+def _build_radar_payload(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    sample_hz: int = RADAR_SAMPLE_HZ,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Extract an 8Hz XUID-bound radar track for Panorama interpolation."""
+    try:
+        header = parser.parse_header()
+    except Exception as exc:  # noqa: BLE001
+        raise DemoVoiceHudError(f"could not parse demo header for radar: {exc}") from exc
+    if not isinstance(header, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported demo header")
+    map_name = _normalize_map_name(header.get("map_name"))
+    if not map_name or map_name == "unknown":
+        raise DemoVoiceHudError("demo header is missing map_name for radar")
+
+    from .radar.radar_map_assets import lookup_map_data
+
+    try:
+        transform = lookup_map_data(map_name)
+    except KeyError as exc:
+        raise DemoVoiceHudError(f"no bundled radar transform for map {map_name}") from exc
+
+    try:
+        pos_x = float(transform["pos_x"])
+        pos_y = float(transform["pos_y"])
+        scale = float(transform["scale"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DemoVoiceHudError(f"radar transform for {map_name} is incomplete") from exc
+    if scale == 0:
+        raise DemoVoiceHudError(f"radar transform scale for {map_name} is zero")
+
+    raw_tick_rate = header.get("tick_rate") or header.get("tickrate") or 64
+    try:
+        tick_rate = float(raw_tick_rate)
+    except (TypeError, ValueError):
+        tick_rate = 64.0
+    if tick_rate <= 0:
+        tick_rate = 64.0
+    hz = max(1, int(sample_hz))
+    stride = max(1, int(round(tick_rate / hz)))
+
+    start_tick, end_tick = _demo_tick_bounds(parser)
+    if end_tick < start_tick:
+        start_tick, end_tick = end_tick, start_tick
+    sample_ticks = list(range(start_tick, end_tick + 1, stride))
+    if not sample_ticks:
+        raise DemoVoiceHudError("radar sample tick list is empty")
+
+    field_sets = [
+        [
+            "X",
+            "Y",
+            "yaw",
+            "steamid",
+            "team_num",
+            "is_alive",
+            "player_color",
+            "has_c4",
+            "inventory",
+            "spotted",
+            "approximate_spotted_by",
+        ],
+        [
+            "X",
+            "Y",
+            "yaw",
+            "steamid",
+            "team_num",
+            "is_alive",
+            "player_color",
+            "inventory",
+            "spotted",
+            "approximate_spotted_by",
+        ],
+        ["X", "Y", "yaw", "steamid", "team_num", "is_alive", "player_color", "has_c4", "inventory"],
+        ["X", "Y", "yaw", "steamid", "team_num", "is_alive", "player_color", "inventory"],
+    ]
+    rows = None
+    last_exc: Exception | None = None
+    for fields in field_sets:
+        try:
+            rows = parser.parse_ticks(fields, ticks=sample_ticks)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            rows = None
+    if rows is None:
+        raise DemoVoiceHudError(f"could not parse radar player ticks: {last_exc}")
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported radar tick table")
+
+    ticks = rows.get("tick", [])
+    xuids = rows.get("steamid", [])
+    xs = rows.get("X", [])
+    ys = rows.get("Y", [])
+    yaws = rows.get("yaw", [])
+    alives = rows.get("is_alive", [])
+    colors = rows.get("player_color", [])
+    teams = rows.get("team_num", [])
+    c4s = rows.get("has_c4", [])
+    inventories = rows.get("inventory", [])
+    spotteds = rows.get("spotted", [])
+    spotted_by = rows.get("approximate_spotted_by", [])
+    column_lengths = [len(col) for col in (ticks, xuids, xs, ys, yaws) if isinstance(col, list)]
+    if not column_lengths or len(set(column_lengths)) != 1:
+        raise DemoVoiceHudError("radar tick columns are missing or misaligned")
+    row_count = column_lengths[0]
+
+    def _inventory_has_c4(raw: Any) -> bool:
+        if raw is None:
+            return False
+        if isinstance(raw, (list, tuple, set)):
+            return any("c4" in str(item).lower() for item in raw)
+        text = str(raw).lower()
+        return "c4" in text
+
+    def _spotted_team_bits(raw_by: Any) -> int:
+        """Return bit2/bit3 for T/CT spotters listed in approximate_spotted_by."""
+        if raw_by is None:
+            return 0
+        values: list[Any]
+        if isinstance(raw_by, (list, tuple, set)):
+            values = list(raw_by)
+        else:
+            text = str(raw_by).strip()
+            if not text or text in ("[]", "None"):
+                return 0
+            values = [text]
+        bits = 0
+        for item in values:
+            spotter = _as_positive_int(item)
+            if spotter is None or spotter not in roster_by_xuid:
+                continue
+            spotter_team = roster_by_xuid[spotter][1]
+            if spotter_team == 2:
+                bits |= 4
+            elif spotter_team == 3:
+                bits |= 8
+        return bits
+
+    samples_by_xuid: dict[int, dict[int, tuple[int, int, int, int]]] = defaultdict(dict)
+    color_by_xuid: dict[int, int] = {}
+    for index in range(row_count):
+        xuid = _as_positive_int(xuids[index] if index < len(xuids) else None)
+        tick = _as_int(ticks[index] if index < len(ticks) else None)
+        if xuid is None or tick is None or xuid not in roster_by_xuid:
+            continue
+        team = _as_int(teams[index] if isinstance(teams, list) and index < len(teams) else None)
+        if team not in (2, 3):
+            continue
+        try:
+            x = int(round(float(xs[index])))
+            y = int(round(float(ys[index])))
+            yaw = int(round(float(yaws[index]))) % 360
+        except (TypeError, ValueError, OverflowError):
+            continue
+        alive_raw = alives[index] if isinstance(alives, list) and index < len(alives) else True
+        if isinstance(c4s, list) and index < len(c4s) and c4s[index] is not None:
+            has_c4 = bool(c4s[index])
+        elif isinstance(inventories, list) and index < len(inventories):
+            has_c4 = _inventory_has_c4(inventories[index])
+        else:
+            has_c4 = False
+        spotted_bits = 0
+        if isinstance(spotted_by, list) and index < len(spotted_by):
+            spotted_bits = _spotted_team_bits(spotted_by[index])
+        elif isinstance(spotteds, list) and index < len(spotteds) and bool(spotteds[index]):
+            # Fallback: known spotted but spotter list missing — mark both teams.
+            spotted_bits = 4 | 8
+        flags = (
+            (1 if bool(alive_raw) else 0)
+            | (2 if has_c4 else 0)
+            | spotted_bits
+            | (16 if team == 3 else 0)
+        )
+        samples_by_xuid[xuid][tick] = (x, y, yaw, flags)
+        if xuid not in color_by_xuid and isinstance(colors, list) and index < len(colors):
+            color_by_xuid[xuid] = _player_color_slot(colors[index])
+        elif (
+            isinstance(colors, list)
+            and index < len(colors)
+            and color_by_xuid.get(xuid, -1) < 0
+        ):
+            slot = _player_color_slot(colors[index])
+            if slot >= 0:
+                color_by_xuid[xuid] = slot
+
+    # 8Hz position samples miss brief spotted pulses. OR spotter bits from a denser
+    # probe onto the enclosing sample tick so radar red dots match live contact.
+    probe_stride = max(1, stride // 4)
+    probe_ticks = list(range(start_tick, end_tick + 1, probe_stride))
+    if probe_ticks and probe_stride < stride:
+        try:
+            spot_rows = parser.parse_ticks(
+                ["steamid", "spotted", "approximate_spotted_by"],
+                ticks=probe_ticks,
+            )
+        except Exception:  # noqa: BLE001
+            spot_rows = None
+        if isinstance(spot_rows, Mapping):
+            spot_ticks = spot_rows.get("tick", [])
+            spot_xuids = spot_rows.get("steamid", [])
+            spot_flags = spot_rows.get("spotted", [])
+            spot_by = spot_rows.get("approximate_spotted_by", [])
+            if isinstance(spot_ticks, list) and isinstance(spot_xuids, list):
+                sample_set = set(sample_ticks)
+
+                def _snap_sample_tick(raw_tick: int) -> int | None:
+                    # Map probe tick onto the sample grid (ceil to next sample).
+                    snapped = start_tick + ((raw_tick - start_tick + stride - 1) // stride) * stride
+                    if snapped in sample_set:
+                        return snapped
+                    # Fallback: nearest lower sample.
+                    snapped = start_tick + ((raw_tick - start_tick) // stride) * stride
+                    return snapped if snapped in sample_set else None
+
+                for index, raw_tick in enumerate(spot_ticks):
+                    tick = _as_int(raw_tick)
+                    xuid = _as_positive_int(spot_xuids[index] if index < len(spot_xuids) else None)
+                    if tick is None or xuid is None or xuid not in samples_by_xuid:
+                        continue
+                    sample_tick = _snap_sample_tick(tick)
+                    if sample_tick is None or sample_tick not in samples_by_xuid[xuid]:
+                        continue
+                    bits = 0
+                    if isinstance(spot_by, list) and index < len(spot_by):
+                        bits = _spotted_team_bits(spot_by[index])
+                    elif (
+                        isinstance(spot_flags, list)
+                        and index < len(spot_flags)
+                        and bool(spot_flags[index])
+                    ):
+                        bits = 4 | 8
+                    if bits == 0:
+                        continue
+                    x, y, yaw, flags = samples_by_xuid[xuid][sample_tick]
+                    samples_by_xuid[xuid][sample_tick] = (x, y, yaw, flags | bits)
+
+    encoded_players: list[list[Any]] = []
+    sample_count = 0
+    for xuid in sorted(samples_by_xuid):
+        by_tick = samples_by_xuid[xuid]
+        aligned_start = next((tick for tick in sample_ticks if tick in by_tick), None)
+        if aligned_start is None:
+            continue
+        window: list[tuple[int, int, int, int]] = []
+        last: tuple[int, int, int, int] | None = None
+        for tick in sample_ticks:
+            if tick < aligned_start:
+                continue
+            sample = by_tick.get(tick, last)
+            if sample is None:
+                continue
+            window.append(sample)
+            last = sample
+        encoded = _encode_radar_samples(window)
+        if not encoded:
+            continue
+        encoded_players.append(
+            [
+                str(xuid),
+                int(color_by_xuid.get(xuid, -1)),
+                _base36(aligned_start),
+                encoded,
+            ]
+        )
+        sample_count += len(window)
+
+    if not encoded_players:
+        raise DemoVoiceHudError("demo contains no roster-bound radar samples")
+
+    planted_bombs = _build_planted_bomb_track(parser, roster_by_xuid)
+    dropped_bombs = _build_dropped_bomb_track(parser, roster_by_xuid)
+    player_sounds = _build_player_sound_track(parser, roster_by_xuid)
+
+    radar = [
+        map_name,
+        [int(round(pos_x)), int(round(pos_y)), int(round(scale * 1000))],
+        stride,
+        encoded_players,
+        planted_bombs,
+        player_sounds,
+        dropped_bombs,
+    ]
+    stats = {
+        "radar_players": len(encoded_players),
+        "radar_dropped_bombs": len(dropped_bombs),
+        "radar_samples": sample_count,
+        "radar_parse_failed": 0,
+        "radar_map": map_name,
+        "radar_planted_bombs": len(planted_bombs),
+        "radar_player_sounds": len(player_sounds[1].split(",")) if player_sounds and player_sounds[1] else 0,
+    }
+    return radar, stats
+
+
+def _normalize_weapon_name(weapon: Any) -> str:
+    text = str(weapon or "").strip().lower()
+    if not text:
+        return ""
+    if not text.startswith("weapon_"):
+        text = f"weapon_{text}"
+    return text
+
+
+def _is_util_weapon_name(weapon: Any) -> bool:
+    text = _normalize_weapon_name(weapon)
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "flashbang",
+            "hegrenade",
+            "smokegrenade",
+            "molotov",
+            "incgrenade",
+            "decoy",
+        )
+    )
+
+
+def _is_gun_weapon_name(weapon: Any) -> bool:
+    text = _normalize_weapon_name(weapon)
+    if not text:
+        return False
+    blocked = (
+        "knife",
+        "bayonet",
+        "taser",
+        "flashbang",
+        "hegrenade",
+        "smokegrenade",
+        "molotov",
+        "incgrenade",
+        "decoy",
+        "c4",
+    )
+    return not any(token in text for token in blocked)
+
+
+def _weapon_fire_sound_radius(weapon: Any, silenced: Any) -> int | None:
+    """Stock-ish audible radius for radar rings synthesized from ``weapon_fire``.
+
+    Utility throws also get a thin ring (native bounce mid-radii are filtered from
+    ``player_sound``; synthesize the throw itself from ``weapon_fire``).
+    """
+    if _is_util_weapon_name(weapon):
+        # Throw pull/release — thinner/shorter than gunfire, not landing-loud.
+        return 700
+    if not _is_gun_weapon_name(weapon):
+        return None
+    text = _normalize_weapon_name(weapon).replace("weapon_", "")
+    if bool(silenced) or "silencer" in text:
+        return 800
+    if text in ("awp", "ssg08", "g3sg1", "scar20", "negev", "m249"):
+        return 1400
+    return 1100
+
+
+def _player_sound_flags(
+    *,
+    is_step: bool,
+    radius: int,
+    kind: str = "auto",
+) -> int:
+    """bit0 = footstep, bit1 = loud visual (``.player-sound-max`` / thick border).
+
+    Native hudradar.css: default ``.PlayerSound`` is a thin 1px ring; landing uses
+    ``.player-sound-max`` (3px flash). Jump impulses are tiny non-step radii (~98)
+    and stay thin. Gunfire is also a thin ring — only landing-like loud movement
+    (non-step radius >= 1000) gets the thick flash. Mid radii (~500–999) are
+    utility / bounce noise and are filtered out before flags are applied.
+    """
+    flags = 1 if is_step else 0
+    if kind == "weapon":
+        return flags
+    if kind == "loud" or (kind == "auto" and (not is_step) and radius >= 1000):
+        flags |= 2
+    return flags
+
+
+def _build_player_sound_track(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> list[Any]:
+    """Compact ``player_sound`` (+ synthesized gunfire) events for radar rings.
+
+    Returns ``[xuid_table, "dt.xi.radius.durMs.flags,..."]`` where ``xi`` indexes
+    ``xuid_table`` and ``flags`` is ``bit0=step, bit1=loudMax``. Missing demos
+    yield ``[[], ""]``.
+    """
+    events: list[tuple[int, int, int, int, int]] = []
+
+    # Equip/buy/pickup clicks show up as non-step ~1100 ``player_sound`` rows but
+    # are not audible movement/gun cues on the live radar — suppress those.
+    equip_ticks: set[tuple[int, int]] = set()
+    for event_name, silent_key in (
+        ("item_pickup", "silent"),
+        ("item_purchase", None),
+    ):
+        try:
+            rows = parser.parse_event(event_name)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(rows, Mapping):
+            continue
+        ticks = rows.get("tick", [])
+        xuids = rows.get("user_steamid", rows.get("steamid", []))
+        silent = rows.get(silent_key, []) if silent_key else None
+        if not isinstance(ticks, list):
+            continue
+        for index, raw_tick in enumerate(ticks):
+            tick = _as_int(raw_tick)
+            xuid = None
+            if isinstance(xuids, list) and index < len(xuids):
+                xuid = _as_positive_int(xuids[index])
+            if tick is None or xuid is None or xuid not in roster_by_xuid:
+                continue
+            if isinstance(silent, list) and index < len(silent) and bool(silent[index]):
+                continue
+            for delta in range(-8, 9):
+                equip_ticks.add((tick + delta, xuid))
+
+    def _near_equip_sound(tick: int, xuid: int) -> bool:
+        return (tick, xuid) in equip_ticks
+
+    try:
+        rows = parser.parse_event("player_sound")
+    except Exception:  # noqa: BLE001
+        rows = None
+    if isinstance(rows, Mapping):
+        ticks = rows.get("tick", [])
+        xuids = rows.get("user_steamid", [])
+        radii = rows.get("radius", [])
+        durations = rows.get("duration", [])
+        steps = rows.get("step", [])
+        if isinstance(ticks, list):
+            for index, raw_tick in enumerate(ticks):
+                tick = _as_int(raw_tick)
+                xuid = None
+                if isinstance(xuids, list) and index < len(xuids):
+                    xuid = _as_positive_int(xuids[index])
+                if tick is None or tick < 0 or xuid is None or xuid not in roster_by_xuid:
+                    continue
+                try:
+                    radius = (
+                        int(round(float(radii[index])))
+                        if isinstance(radii, list) and index < len(radii)
+                        else 0
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    radius = 0
+                if radius <= 0:
+                    continue
+                is_step = bool(steps[index]) if isinstance(steps, list) and index < len(steps) else False
+                # Mid non-step (~597) is sniper scope-open on CS2 demos; keep that
+                # band. Other mid radii are util bounce / land-on-you noise.
+                is_scope = (not is_step) and 580 <= radius <= 620
+                if (not is_step) and 200 <= radius < 1000 and not is_scope:
+                    continue
+                # Buy/equip/pickup clicks masquerade as non-step ~1100 sounds.
+                if (not is_step) and radius >= 1000 and _near_equip_sound(tick, xuid):
+                    continue
+                try:
+                    duration = (
+                        float(durations[index])
+                        if isinstance(durations, list) and index < len(durations)
+                        else 0.1
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    duration = 0.1
+                duration_ms = max(50, int(round(duration * 1000)))
+                # Scope click is ~100ms in the demo; stretch so the ring is visible.
+                if is_scope and duration_ms < 280:
+                    duration_ms = 280
+                flags = _player_sound_flags(is_step=is_step, radius=radius)
+                if (flags & 2) != 0 and duration_ms < 400:
+                    duration_ms = 400
+                events.append((tick, xuid, radius, duration_ms, flags))
+
+    # GOTV ``player_sound`` almost never records gunshots; synthesize from weapon_fire.
+    existing_loud: set[tuple[int, int]] = {
+        (tick, xuid)
+        for tick, xuid, _radius, _dur, flags in events
+        if (flags & 2) != 0
+    }
+    try:
+        fires = parser.parse_event("weapon_fire")
+    except Exception:  # noqa: BLE001
+        fires = None
+    if isinstance(fires, Mapping):
+        ticks = fires.get("tick", [])
+        xuids = fires.get("user_steamid", [])
+        weapons = fires.get("weapon", [])
+        silenced = fires.get("silenced", [])
+        if isinstance(ticks, list):
+            for index, raw_tick in enumerate(ticks):
+                tick = _as_int(raw_tick)
+                xuid = None
+                if isinstance(xuids, list) and index < len(xuids):
+                    xuid = _as_positive_int(xuids[index])
+                if tick is None or tick < 0 or xuid is None or xuid not in roster_by_xuid:
+                    continue
+                weapon = weapons[index] if isinstance(weapons, list) and index < len(weapons) else ""
+                sil = silenced[index] if isinstance(silenced, list) and index < len(silenced) else False
+                radius = _weapon_fire_sound_radius(weapon, sil)
+                if radius is None:
+                    continue
+                is_util = _is_util_weapon_name(weapon)
+                # Gunfire dedupes against existing loud cues; util throws are thin
+                # rings and should still show next to footsteps / landings.
+                if (not is_util) and any(
+                    (tick + delta, xuid) in existing_loud for delta in range(-2, 3)
+                ):
+                    continue
+                flags = _player_sound_flags(is_step=False, radius=radius, kind="weapon")
+                duration_ms = 160 if is_util else 100
+                events.append((tick, xuid, radius, duration_ms, flags))
+                if not is_util:
+                    existing_loud.add((tick, xuid))
+
+    if not events:
+        return [[], ""]
+
+    # Same-tick: keep loud cues after footsteps so the active ring prefers gun/land.
+    events.sort(key=lambda item: (item[0], item[1], 0 if (item[4] & 2) == 0 else 1))
+    xuid_table: list[str] = []
+    xuid_index: dict[int, int] = {}
+    encoded: list[str] = []
+    previous_tick = 0
+    for tick, xuid, radius, duration_ms, flags in events:
+        if xuid not in xuid_index:
+            xuid_index[xuid] = len(xuid_table)
+            xuid_table.append(str(xuid))
+        dt = tick - previous_tick
+        if dt < 0:
+            dt = 0
+        previous_tick = tick
+        encoded.append(
+            f"{_base36(dt)}.{_base36(xuid_index[xuid])}.{_base36(radius)}"
+            f".{_base36(duration_ms)}.{_base36(int(flags) & 0xFF)}"
+        )
+    return [xuid_table, ",".join(encoded)]
+
+
+def _event_ticks_and_xuids(parser: Any, event_name: str) -> list[tuple[int, int | None]]:
+    try:
+        rows = parser.parse_event(event_name)
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(rows, Mapping):
+        return []
+    ticks = rows.get("tick", [])
+    xuids = rows.get("user_steamid", [])
+    if not isinstance(ticks, list):
+        return []
+    out: list[tuple[int, int | None]] = []
+    for index, raw_tick in enumerate(ticks):
+        tick = _as_int(raw_tick)
+        if tick is None or tick < 0:
+            continue
+        xuid = None
+        if isinstance(xuids, list) and index < len(xuids):
+            xuid = _as_positive_int(xuids[index])
+        out.append((tick, xuid))
+    return out
+
+
+def _build_planted_bomb_track(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> list[list[int]]:
+    """Return ``[startTick, endTick, x, y]`` rows using planter position at plant tick."""
+    plants = _event_ticks_and_xuids(parser, "bomb_planted")
+    if not plants:
+        return []
+    end_ticks = sorted(
+        tick
+        for tick, _xuid in (
+            _event_ticks_and_xuids(parser, "bomb_defused")
+            + _event_ticks_and_xuids(parser, "bomb_exploded")
+            + _event_ticks_and_xuids(parser, "round_end")
+            + _event_ticks_and_xuids(parser, "round_officially_ended")
+        )
+    )
+    plant_ticks = [tick for tick, _xuid in plants]
+    try:
+        rows = parser.parse_ticks(["X", "Y", "steamid"], ticks=plant_ticks)
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(rows, Mapping):
+        return []
+    ticks = rows.get("tick", [])
+    xuids = rows.get("steamid", [])
+    xs = rows.get("X", [])
+    ys = rows.get("Y", [])
+    if not all(isinstance(col, list) for col in (ticks, xuids, xs, ys)):
+        return []
+
+    pos_by_key: dict[tuple[int, int], tuple[int, int]] = {}
+    for index, raw_tick in enumerate(ticks):
+        tick = _as_int(raw_tick)
+        xuid = _as_positive_int(xuids[index] if index < len(xuids) else None)
+        if tick is None or xuid is None:
+            continue
+        try:
+            x = int(round(float(xs[index])))
+            y = int(round(float(ys[index])))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        pos_by_key[(tick, xuid)] = (x, y)
+
+    planted: list[list[int]] = []
+    for plant_tick, planter_xuid in plants:
+        pos = None
+        if planter_xuid is not None:
+            pos = pos_by_key.get((plant_tick, planter_xuid))
+        if pos is None:
+            # Fall back to any roster player sampled on that tick.
+            for (tick, xuid), sample in pos_by_key.items():
+                if tick == plant_tick and xuid in roster_by_xuid:
+                    pos = sample
+                    break
+        if pos is None:
+            continue
+        end_tick = plant_tick + 64 * 40
+        for candidate in end_ticks:
+            if candidate > plant_tick:
+                end_tick = candidate
+                break
+        planted.append([plant_tick, end_tick, pos[0], pos[1]])
+    return planted
+
+
+def _build_dropped_bomb_track(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> list[list[int]]:
+    """Return ``[startTick, endTick, x, y]`` for ground C4 between drop and pickup/plant.
+
+    ``endTick`` is inclusive but ends on the tick *before* pickup/plant/next-drop
+    so the carrier's C4 pip and the ground marker never overlap.
+    """
+    drops = _event_ticks_and_xuids(parser, "bomb_dropped")
+    if not drops:
+        return []
+    end_events = sorted(
+        {
+            tick
+            for tick, _xuid in (
+                _event_ticks_and_xuids(parser, "bomb_pickup")
+                + _event_ticks_and_xuids(parser, "bomb_planted")
+                + _event_ticks_and_xuids(parser, "round_end")
+                + _event_ticks_and_xuids(parser, "round_officially_ended")
+            )
+            if tick and tick > 0
+        }
+    )
+    drop_ticks = [tick for tick, _xuid in drops]
+    try:
+        rows = parser.parse_ticks(["X", "Y", "steamid"], ticks=drop_ticks)
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(rows, Mapping):
+        return []
+    ticks = rows.get("tick", [])
+    xuids = rows.get("steamid", [])
+    xs = rows.get("X", [])
+    ys = rows.get("Y", [])
+    if not all(isinstance(col, list) for col in (ticks, xuids, xs, ys)):
+        return []
+
+    pos_by_key: dict[tuple[int, int], tuple[int, int]] = {}
+    for index, raw_tick in enumerate(ticks):
+        tick = _as_int(raw_tick)
+        xuid = _as_positive_int(xuids[index] if index < len(xuids) else None)
+        if tick is None or xuid is None:
+            continue
+        try:
+            x = int(round(float(xs[index])))
+            y = int(round(float(ys[index])))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        pos_by_key[(tick, xuid)] = (x, y)
+
+    dropped: list[list[int]] = []
+    for index, (drop_tick, dropper_xuid) in enumerate(drops):
+        pos = None
+        if dropper_xuid is not None:
+            pos = pos_by_key.get((drop_tick, dropper_xuid))
+        if pos is None:
+            for (tick, xuid), sample in pos_by_key.items():
+                if tick == drop_tick and xuid in roster_by_xuid:
+                    pos = sample
+                    break
+        if pos is None:
+            continue
+        candidates = [tick for tick in end_events if tick > drop_tick]
+        # Only one C4 exists — a later drop means the prior ground pack ended.
+        if index + 1 < len(drops):
+            next_drop = drops[index + 1][0]
+            if next_drop > drop_tick:
+                candidates.append(next_drop)
+        if candidates:
+            # Exclusive at the ending event so pickup tick only shows the carrier pip.
+            end_tick = min(candidates) - 1
+        else:
+            end_tick = drop_tick + 64 * 40
+        if end_tick < drop_tick:
+            continue
+        dropped.append([drop_tick, end_tick, pos[0], pos[1]])
+    return dropped
+
+
 def _build_team_roster(parser: Any) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
     """Return compact ``[xuid, slot, team]`` rows keyed by exact Steam ID."""
     try:
@@ -332,7 +1234,21 @@ def build_voice_payload(
             continue
         ticks_by_xuid[xuid].append(tick)
     if not ticks_by_xuid:
-        raise DemoVoiceHudError("demo contains no team-bound voice packets")
+        # GOTV / stripped demos may have no svc_VoiceData. Keep a roster-only
+        # payload so radar and kill-feedback tracks can still attach.
+        payload = json.dumps(
+            [[""], [], [], encoded_roster],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        return payload, {
+            "voice_packets": 0,
+            "speakers": 0,
+            "intervals": 0,
+            "location_changes": 0,
+            "payload_bytes": len(payload),
+            "location_parse_failed": 0,
+        }
     voice_packets = sum(len(ticks) for ticks in ticks_by_xuid.values())
 
     try:
@@ -420,8 +1336,7 @@ def add_input_tracks_to_payload(
         packed = json.loads(voice_payload.decode("ascii"))
     except (UnicodeDecodeError, ValueError, TypeError) as exc:
         raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
-    if not isinstance(packed, list) or len(packed) != 4:
-        raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
+    packed = _pad_payload_slots(packed)
 
     slot_to_xuid: dict[int, int] = {}
     encoded_roster = packed[3]
@@ -485,6 +1400,95 @@ def add_input_tracks_to_payload(
     }
 
 
+def add_radar_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+    sample_hz: int = RADAR_SAMPLE_HZ,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append the XUID-bound radar track at payload index 8."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    roster_by_xuid: dict[int, tuple[int, int]] = {}
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) != 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        slot = _as_int(row[1])
+        team = _as_int(row[2])
+        if xuid is None or slot is None or team not in (2, 3):
+            continue
+        roster_by_xuid[xuid] = (slot, team)
+    if not roster_by_xuid:
+        raise DemoVoiceHudError("voice HUD payload contains no team-bound Steam IDs")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    radar, stats = _build_radar_payload(
+        parser,
+        roster_by_xuid,
+        sample_hz=sample_hz,
+    )
+    packed[RADAR_PAYLOAD_INDEX] = radar
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    stats = dict(stats)
+    stats["payload_bytes"] = len(payload)
+    return payload, stats
+
+
+def add_kill_feedback_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append POV kill/HS feedback events at payload index 9."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    roster_by_xuid: dict[int, tuple[int, int]] = {}
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) != 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        slot = _as_int(row[1])
+        team = _as_int(row[2])
+        if xuid is None or slot is None or team not in (2, 3):
+            continue
+        roster_by_xuid[xuid] = (slot, team)
+    if not roster_by_xuid:
+        raise DemoVoiceHudError("voice HUD payload contains no team-bound Steam IDs")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    kill_feedback, stats = _build_kill_feedback_payload(parser, roster_by_xuid)
+    packed[KILL_FEEDBACK_PAYLOAD_INDEX] = kill_feedback
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    stats = dict(stats)
+    stats["payload_bytes"] = len(payload)
+    return payload, stats
+
+
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
     """Fill the bounded data slot and rebuild the VPK with fresh CRCs."""
     entries = read_inline_vpk(template_vpk)
@@ -535,6 +1539,54 @@ def build_demo_voice_hud_vpk(
             parser_factory=parser_factory,
         )
         stats["payload_bytes"] = len(payload)
+
+    radar_stats: dict[str, Any] = {
+        "radar_players": 0,
+        "radar_samples": 0,
+        "radar_parse_failed": 0,
+        "radar_map": "",
+    }
+    try:
+        payload, radar_stats = add_radar_track_to_payload(
+            payload,
+            demo_path,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = int(radar_stats.pop("payload_bytes", len(payload)))
+    except DemoVoiceHudError:
+        radar_stats = {
+            "radar_players": 0,
+            "radar_samples": 0,
+            "radar_parse_failed": 1,
+            "radar_map": "",
+            "radar_planted_bombs": 0,
+            "radar_dropped_bombs": 0,
+            "radar_player_sounds": 0,
+        }
+
+    kill_feedback_stats: dict[str, Any] = {
+        "kill_feedback_events": 0,
+        "kill_feedback_parse_failed": 0,
+    }
+    try:
+        payload, kill_feedback_stats = add_kill_feedback_track_to_payload(
+            payload,
+            demo_path,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = int(kill_feedback_stats.pop("payload_bytes", len(payload)))
+    except DemoVoiceHudError:
+        kill_feedback_stats = {
+            "kill_feedback_events": 0,
+            "kill_feedback_parse_failed": 1,
+        }
+
     template = Path(template_vpk_path).read_bytes()
     vpk_bytes = inject_voice_payload(template, payload)
-    return DemoVoiceHudBuild(vpk_bytes=vpk_bytes, **stats, **input_stats)
+    return DemoVoiceHudBuild(
+        vpk_bytes=vpk_bytes,
+        **stats,
+        **input_stats,
+        **radar_stats,
+        **kill_feedback_stats,
+    )
