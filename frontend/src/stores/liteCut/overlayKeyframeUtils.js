@@ -12,7 +12,7 @@ export function normalizedOverlayTransform(transform, defaults = TRANSFORM_DEFAU
   return {
     x: Math.max(0, Math.min(1, number(raw.x, defaults.x))),
     y: Math.max(0, Math.min(1, number(raw.y, defaults.y))),
-    scale: Math.max(0.01, Math.min(4, number(raw.scale, defaults.scale))),
+    scale: Math.max(0.01, Math.min(5, number(raw.scale, defaults.scale))),
     rotation: Math.max(-360, Math.min(360, number(raw.rotation, defaults.rotation))),
     width: Math.max(0.01, Math.min(10, number(raw.width, defaults.width))),
     height: Math.max(0.01, Math.min(10, number(raw.height, defaults.height))),

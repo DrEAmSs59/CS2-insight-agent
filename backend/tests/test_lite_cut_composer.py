@@ -1494,10 +1494,50 @@ def test_drawtext_filter_uses_center_anchor_and_escapes_text():
     )
     assert "drawtext=" in fc
     assert "A\\:B\\'s 100\\%" in fc
-    assert "w*0.250000-text_w/2" in fc
-    assert "h*0.750000-text_h/2" in fc
+    assert "w*0.250000-w*0.650000/2" in fc
+    assert "h*0.750000-h*0.180000/2+(h*0.180000-text_h)/2" in fc
+    assert "text_align=center" in fc
+    assert "boxw=1248" in fc
+    assert "boxh=194" in fc
     assert "fontcolor=0x67e8f9" in fc
     assert "alpha='0.500000'" in fc
+
+
+def test_drawtext_filter_preserves_text_newlines_for_ffmpeg():
+    fc = _drawtext_filter_complex(
+        text_clip={
+            "type": "text",
+            "transform": {"x": 0.5, "y": 0.5, "scale": 1},
+            "text": {"content": "CLUTCH\nTETE", "font_size": 48, "preset_id": "clutch"},
+        },
+        enable_expr="between(t,0,3)",
+    )
+    assert "CLUTCH\nTETE" in fc
+    assert "CLUTCHnTETE" not in fc
+
+
+@pytest.mark.parametrize(
+    ("align", "expected_x"),
+    [
+        ("left", "w*0.500000-text_w/2"),
+        ("center", "w*0.500000-w*0.650000/2"),
+        ("right", "w*0.500000-w*0.650000+text_w/2"),
+    ],
+)
+def test_drawtext_alignment_keeps_rendered_text_centered(align, expected_x):
+    fc = _drawtext_filter_complex(
+        text_clip={
+            "type": "text",
+            "transform": {"x": 0.5, "y": 0.5, "scale": 2.5, "width": 0.65, "height": 0.18},
+            "text": {"content": "CLUTCH\nTEST", "font_size": 64, "align": align},
+        },
+        enable_expr="between(t,0,3)",
+    )
+    assert "fontsize=160" in fc
+    assert f"text_align={align}" in fc
+    assert "boxw=1248" in fc
+    assert "boxh=194" in fc
+    assert f"x='{expected_x}'" in fc
 
 
 def test_drawtext_filter_applies_visual_fades():
@@ -1533,7 +1573,7 @@ def test_drawtext_filter_applies_text_animation_expressions():
         },
         enable_expr="between(t,2,6)",
     )
-    assert "x='if(lt(t\\,2.450000)\\,w*0.500000-text_w/2+w*0.120000*(1-(t-2.000000)/0.450000)" in fc
+    assert "x='if(lt(t\\,2.450000)\\,w*0.500000-w*0.650000/2+w*0.120000*(1-(t-2.000000)/0.450000)" in fc
     assert "alpha='if(gt(t\\,5.550000)\\,1.000000*(6.000000-t)/0.450000\\,1.000000)'" in fc
 
 
@@ -1550,7 +1590,7 @@ def test_drawtext_filter_applies_clip_transition_timing_and_slide_position():
         },
         enable_expr="between(t,2,6)",
     )
-    assert "x='if(lt(t\\,2.600000)\\,w*0.500000-text_w/2+w*0.120000*(1-(t-2.000000)/0.600000)" in fc
+    assert "x='if(lt(t\\,2.600000)\\,w*0.500000-w*0.650000/2+w*0.120000*(1-(t-2.000000)/0.600000)" in fc
     assert "alpha='if(gt(t\\,5.500000)\\,1.000000*(6.000000-t)/0.500000\\,1.000000)'" in fc
 
 

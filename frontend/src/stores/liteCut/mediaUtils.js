@@ -46,6 +46,7 @@ export function mapRecordedClipRow(row) {
     map,
     category,
     duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
+    fps: Number(row.fps ?? row.frame_rate) > 0 ? Number(row.fps ?? row.frame_rate) : null,
     round: row.round ?? null,
     score: row.ai_score ?? null,
     ai: row.ai_comment || row.ai_commentary || null,

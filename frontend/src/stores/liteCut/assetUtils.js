@@ -9,6 +9,7 @@ export function mapAssetRow(row) {
     path: row.file_path,
     file_path: row.file_path,
     duration_sec: row.duration_sec,
+    fps: Number(row.fps) > 0 ? Number(row.fps) : null,
     width: row.width,
     height: row.height,
     has_alpha: Boolean(row.has_alpha),

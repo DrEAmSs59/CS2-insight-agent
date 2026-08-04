@@ -86,16 +86,28 @@ def _setup_status_obs_handshake_timeout_sec() -> float:
     return 4.0
 
 
+def _configured_ffmpeg_toolkit_report(raw_path: str) -> dict[str, object]:
+    from ..ffmpeg_compatibility import inspect_ffmpeg_toolkit
+    from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
+
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return {"ok": False, "reason": "not_configured", "ffmpeg_path": ""}
+    if not Path(raw).is_file():
+        return {"ok": False, "reason": "path_not_found", "ffmpeg_path": raw}
+    try:
+        ffmpeg_bin = resolve_ffmpeg_binary(raw)
+    except MontageComposerError:
+        return {"ok": False, "reason": "not_usable", "ffmpeg_path": raw}
+    return inspect_ffmpeg_toolkit(ffmpeg_bin)
+
+
 @router.get("/api/config/quick-check")
 def config_quick_check():
     """Return setup flags without opening an OBS WebSocket connection."""
     cfg = ensure_cs2_path(load_config())
     cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
-    ffmpeg_ok = (
-        Path(cfg.ffmpeg_path).is_file()
-        if cfg.ffmpeg_path
-        else shutil.which("ffmpeg") is not None
-    )
+    ffmpeg_ok = bool(_configured_ffmpeg_toolkit_report(cfg.ffmpeg_path).get("ok"))
     ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
         cfg.llm.base_url
     )
@@ -111,32 +123,16 @@ def config_quick_check():
 
 @router.get("/api/config/ffmpeg-check")
 def ffmpeg_montage_gate_check():
-    from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
-
-    raw = (load_config().ffmpeg_path or "").strip()
-    if not raw:
-        return {"ok": False, "reason": "not_configured", "ffmpeg_path": ""}
-    if not Path(raw).is_file():
-        return {"ok": False, "reason": "path_not_found", "ffmpeg_path": raw}
-    try:
-        return {"ok": True, "ffmpeg_path": str(resolve_ffmpeg_binary(raw))}
-    except MontageComposerError:
-        return {"ok": False, "reason": "not_usable", "ffmpeg_path": raw}
+    return _configured_ffmpeg_toolkit_report(load_config().ffmpeg_path)
 
 
 @router.get("/api/status/setup")
 def setup_status():
     """Run the full setup check, including a real OBS WebSocket handshake."""
     from ..obs_director import OBSDirector
-    from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
-
     cfg = ensure_cs2_path(load_config())
     cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
-    try:
-        resolve_ffmpeg_binary(cfg.ffmpeg_path or None)
-        ffmpeg_ok = True
-    except MontageComposerError:
-        ffmpeg_ok = False
+    ffmpeg_ok = bool(_configured_ffmpeg_toolkit_report(cfg.ffmpeg_path).get("ok"))
     ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
         cfg.llm.base_url
     )

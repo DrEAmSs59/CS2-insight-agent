@@ -102,8 +102,13 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
   const overlayVideoTimeRef = useRef(overlayVideoTime);
   overlayVideoTimeRef.current = overlayVideoTime;
   const isText = ov.type === "text";
+  // Text scaling follows the export path: it enlarges glyphs but keeps the
+  // authored alignment box anchored in place. File overlays still scale their
+  // full box as before.
+  const visualScale = isText ? 1 : scale;
   const textCard = TEXT_STYLE_CARDS.find((c) => c.id === (ov.text?.preset_id || ov.meta?.textStyleId)) || TEXT_STYLE_CARDS.find((c) => c.id === "plain");
   const textContent = ov.text?.content || ov.meta?.name || "Text";
+  const textAlign = ["left", "center", "right"].includes(ov.text?.align) ? ov.text.align : "center";
   const customFont = fontAssetSources[String(ov.text?.font_file || "")];
   const resolvedFontFamily = previewFontFamily(ov, fontAssetSources);
   const requestedFont = String(ov.text?.font_family || "微软雅黑");
@@ -291,7 +296,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
       },
       onDragMove: (ev) => {
         const dist = Math.hypot(ev.clientX - rect.left - tx * rect.width, ev.clientY - rect.top - ty * rect.height);
-        const next = Math.max(0.01, Math.min(4, originScale * (dist / originDist)));
+        const next = Math.max(0.01, Math.min(5, originScale * (dist / originDist)));
         setLive({ x: tx, y: ty, scale: next, rotation });
         applyTransform({ scale: next });
       },
@@ -356,7 +361,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
 
   const handleCls =
     "absolute z-[8] h-3.5 w-3.5 rounded-full border-2 border-white bg-cs2-accent shadow pointer-events-auto touch-none";
-  const handleInverseScale = 1 / Math.max(0.01, Math.abs(scale));
+  const handleInverseScale = 1 / Math.max(0.01, Math.abs(visualScale));
   const cornerHandleStyle = { transform: `scale(${handleInverseScale})` };
   const horizontalHandleStyle = { transform: `translateY(-50%) scale(${handleInverseScale})` };
   const verticalHandleStyle = { transform: `translateX(-50%) scale(${handleInverseScale})` };
@@ -377,7 +382,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
         height: `${(boxH * 100).toFixed(2)}%`,
         opacity,
         clipPath: transitionVisual.mainClipPath || undefined,
-        transform: `${transitionVisual.mainTransform || ""} translate(-50%, -50%) scale(${scale * (flipHorizontal ? -1 : 1)}, ${scale * (flipVertical ? -1 : 1)}) rotate(${rotation}deg)`.trim(),
+        transform: `${transitionVisual.mainTransform || ""} translate(-50%, -50%) scale(${visualScale * (flipHorizontal ? -1 : 1)}, ${visualScale * (flipVertical ? -1 : 1)}) rotate(${rotation}deg)`.trim(),
         transition: isDragging || isPlaying ? "none" : "transform 0.12s ease",
         willChange: isPlaying ? "transform, opacity, clip-path" : undefined,
       }}
@@ -389,10 +394,11 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
         {isText ? (
           <div
             data-font-load-revision={fontLoadRevision}
-            className={`pointer-events-none flex h-full min-h-8 w-full items-center justify-center text-center leading-tight ${textCard?.className || "font-bold text-white"}`}
+            className={`pointer-events-none flex h-full min-h-8 w-full items-center justify-center overflow-hidden leading-tight whitespace-pre-wrap break-words ${textCard?.className || "font-bold text-white"}`}
             style={{
               fontFamily: resolvedFontFamily,
-              fontSize: `${(Math.max(1, Number(ov.text?.font_size) || 48) / Math.max(1, Number(canvasHeight) || 1080)) * 100}cqh`,
+              fontSize: `${(Math.max(1, Number(ov.text?.font_size) || 48) * Math.max(0.1, Number(scale) || 1) / Math.max(1, Number(canvasHeight) || 1080)) * 100}cqh`,
+              textAlign,
               textShadow: "0 2px 12px rgba(0,0,0,0.72)",
             }}
           >
@@ -898,7 +904,7 @@ export default function LiteCutPreviewPanel({
       onDragStart: () => setMainLayerDragging(true),
       onDragMove: (ev) => {
         const dist = Math.hypot(ev.clientX - cx, ev.clientY - cy);
-        onMainLayerTransform?.({ scale: Math.max(0.1, Math.min(3, originScale * (dist / originDist))) });
+        onMainLayerTransform?.({ scale: Math.max(0.1, Math.min(5, originScale * (dist / originDist))) });
       },
       onDragEnd: () => setMainLayerDragging(false),
     });
@@ -1532,7 +1538,7 @@ export default function LiteCutPreviewPanel({
                     selectedElement === "text" ? "ring-2 ring-cs2-accent ring-offset-2 ring-offset-transparent" : ""
                   }`}
                 >
-                  <span className={`select-none whitespace-nowrap ${styleCard?.className || ""}`}>
+                  <span className={`select-none whitespace-pre-wrap break-words ${styleCard?.className || ""}`}>
                     {overlayText || styleCard?.sample}
                   </span>
                 </div>

@@ -40,6 +40,7 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_FFMPEG_PATH_MISSING: "montage.err.ffmpegPathMissing",
   MONTAGE_FFMPEG_NOT_RUNNABLE: "montage.err.ffmpegNotRunnable",
   MONTAGE_FFPROBE_NOT_FOUND: "montage.err.ffprobeNotFound",
+  MONTAGE_FFPROBE_VERSION_MISMATCH: "montage.err.ffprobeVersionMismatch",
   MONTAGE_FFPROBE_FAILED: "montage.err.ffprobeFailed",
   MONTAGE_FFMPEG_SOURCE_COMPATIBILITY: "montage.err.ffmpegSourceCompatibility",
   MONTAGE_FFMPEG_ENCODER_COMPATIBILITY: "montage.err.ffmpegEncoderCompatibility",
@@ -109,5 +110,15 @@ export function messageFromApiCode(code, t, params = {}) {
   if (!code) return null;
   const key = API_ERROR_I18N_KEYS[code];
   if (!key) return null;
-  return t(key, params);
+  const safeParams = { ...params };
+  if (
+    [
+      "MONTAGE_FFPROBE_FAILED",
+      "MONTAGE_FFMPEG_SOURCE_COMPATIBILITY",
+    ].includes(code) &&
+    !String(safeParams.name || "").trim()
+  ) {
+    safeParams.name = t("montage.unknownClipName");
+  }
+  return t(key, safeParams);
 }

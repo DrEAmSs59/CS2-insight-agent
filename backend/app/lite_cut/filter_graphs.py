@@ -688,7 +688,8 @@ def _escape_drawtext_value(value: str) -> str:
         .replace(":", "\\:")
         .replace("'", "\\'")
         .replace("%", "\\%")
-        .replace("\n", "\\n")
+        # Pass real line-feed characters to drawtext. This FFmpeg build
+        # renders an escaped `\\n` as a literal n instead of a line break.
     )
 
 
@@ -753,14 +754,21 @@ def _drawtext_alpha_expr(text_clip: dict[str, Any], opacity: float) -> str | Non
     return f"'{expr}'"
 
 
-def _drawtext_position_expr(text_clip: dict[str, Any], tx: float, ty: float) -> tuple[str, str]:
+def _drawtext_position_expr(
+    text_clip: dict[str, Any],
+    tx: float,
+    ty: float,
+    *,
+    x_anchor_expr: str | None = None,
+    y_anchor_expr: str | None = None,
+) -> tuple[str, str]:
     text = text_clip.get("text") if isinstance(text_clip.get("text"), dict) else {}
     start = max(0.0, float(text_clip.get("timeline_start") or 0))
     duration = _clip_duration_sec(text_clip)
     end = start + duration
     anim_dur = min(0.45, duration)
-    x_expr = f"w*{tx:.6f}-text_w/2"
-    y_expr = f"h*{ty:.6f}-text_h/2"
+    x_expr = x_anchor_expr or f"w*{tx:.6f}-text_w/2"
+    y_expr = y_anchor_expr or f"h*{ty:.6f}-text_h/2"
     if anim_dur <= 0:
         return x_expr, y_expr
 
@@ -833,7 +841,7 @@ def _drawtext_filter_complex(*, text_clip: dict[str, Any], enable_expr: str, can
     transform = text_clip.get("transform") if isinstance(text_clip.get("transform"), dict) else {}
     tx = max(0.0, min(1.0, float(transform.get("x", 0.5))))
     ty = max(0.0, min(1.0, float(transform.get("y", 0.22))))
-    scale = max(0.1, min(4.0, float(transform.get("scale", 1.0))))
+    scale = max(0.1, min(5.0, float(transform.get("scale", 1.0))))
     box_height = max(0.02, min(10.0, float(transform.get("height", 0.18))))
     box_width = max(0.02, min(10.0, float(transform.get("width", 0.65))))
     base_font_size = float(text.get("font_size") or 64)
@@ -841,13 +849,38 @@ def _drawtext_filter_complex(*, text_clip: dict[str, Any], enable_expr: str, can
     # font_size is stored in output-canvas pixels. The browser preview scales
     # those pixels with the canvas; export must use the exact same value.
     font_size = max(1, min(2000, int(round(base_font_size * scale))))
+    text_align = str(text.get("align") or "center").strip().lower()
+    if text_align not in {"left", "center", "right"}:
+        text_align = "center"
+    # Text scale only changes glyph size, while the authored box remains the
+    # paragraph-alignment area.  ``transform.x`` anchors the rendered text
+    # block itself (as in the browser preview), not the fixed-width box: left
+    # and right alignment must therefore offset the box so the widest line
+    # stays centred on the authored anchor.
+    box_width_px = max(1, int(round(canvas_width * box_width)))
+    box_height_px = max(1, int(round(canvas_height * box_height)))
     preset_id = str(text.get("preset_id") or meta.get("textStyleId") or "plain")
     font_file = str(text.get("font_file") or "").strip() or _builtin_text_font_file(str(text.get("font_family") or ""))
     opacity = _overlay_opacity_from_transform(transform)
-    x_expr, y_expr = _drawtext_position_expr(text_clip, tx, ty)
+    if text_align == "left":
+        x_anchor_expr = f"w*{tx:.6f}-text_w/2"
+    elif text_align == "right":
+        x_anchor_expr = f"w*{tx:.6f}-w*{box_width:.6f}+text_w/2"
+    else:
+        x_anchor_expr = f"w*{tx:.6f}-w*{box_width:.6f}/2"
+    x_expr, y_expr = _drawtext_position_expr(
+        text_clip,
+        tx,
+        ty,
+        x_anchor_expr=x_anchor_expr,
+        y_anchor_expr=f"h*{ty:.6f}-h*{box_height:.6f}/2+(h*{box_height:.6f}-text_h)/2",
+    )
     opts = [
         f"text='{content}'",
         f"fontsize={font_size}",
+        f"text_align={text_align}",
+        f"boxw={box_width_px}",
+        f"boxh={box_height_px}",
         f"x='{x_expr}'",
         f"y='{y_expr}'",
         f"enable='{enable_expr}'",

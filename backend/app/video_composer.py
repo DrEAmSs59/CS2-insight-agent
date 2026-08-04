@@ -28,9 +28,10 @@ from .montage_encoder import (
     resolve_h264_codec_name,  # compatibility re-export for existing callers
 )
 from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
-from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint
+from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint, ffmpeg_tool_version_identity
 from .frame_blend import (
     build_frame_blend_command,
+    is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
 )
@@ -62,14 +63,28 @@ def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
 
 
 def resolve_ffprobe_binary(ffmpeg_bin: Path) -> Path:
-    """与 ffmpeg 同目录的 ffprobe，否则 PATH。"""
+    """Resolve the matching ffprobe shipped beside the selected FFmpeg."""
+
     probe = ffmpeg_bin.parent / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
-    if probe.is_file():
-        return probe.resolve()
-    w = shutil.which("ffprobe")
-    if w:
-        return Path(w).resolve()
-    raise MontageComposerError("MONTAGE_FFPROBE_NOT_FOUND")
+    if not probe.is_file():
+        # Never silently pair a configured FFmpeg with an unrelated ffprobe
+        # from PATH.  Mixed builds are a common source of false "corrupt clip"
+        # errors and disappear as soon as a complete toolkit is selected.
+        raise MontageComposerError(
+            "MONTAGE_FFPROBE_NOT_FOUND",
+            ffmpeg_path=str(Path(ffmpeg_bin).resolve()),
+        )
+    resolved_ffmpeg = Path(ffmpeg_bin).resolve()
+    resolved_probe = probe.resolve()
+    ffmpeg_version = ffmpeg_tool_version_identity(resolved_ffmpeg)
+    ffprobe_version = ffmpeg_tool_version_identity(resolved_probe)
+    if not ffmpeg_version or not ffprobe_version or ffmpeg_version != ffprobe_version:
+        raise MontageComposerError(
+            "MONTAGE_FFPROBE_VERSION_MISMATCH",
+            ffmpeg_version=ffmpeg_version or "unknown",
+            ffprobe_version=ffprobe_version or "unknown",
+        )
+    return resolved_probe
 
 
 def _run_ffmpeg_capture(
@@ -1437,6 +1452,7 @@ def _compose_montage_once(
         _outro_idx = len(segments) - 1 if outro_path is not None else -1
 
         normed: list[Path] = []
+        source_fps_values: list[float] = [fps]
         for i, seg in enumerate(segments):
             out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
             if _is_image_path(seg):
@@ -1454,6 +1470,12 @@ def _compose_montage_once(
                 normed.append(out_ts)
                 continue
             info = probe_video_audio_summary(seg, ffprobe)
+            try:
+                segment_fps = float(info.get("fps") or 0)
+                if segment_fps > 0:
+                    source_fps_values.append(segment_fps)
+            except (TypeError, ValueError):
+                pass
             dur = info.get("duration")
             if dur is None or dur <= 0:
                 dur = 0.1
@@ -1769,7 +1791,13 @@ def _compose_montage_once(
                 )
                 raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
 
-        blend_frames = normalize_frame_blend_frames(frame_blend_enabled, frame_blend_frames)
+        frame_blend_source_supported = bool(source_fps_values) and all(
+            is_frame_blend_source_supported(source_fps) for source_fps in source_fps_values
+        )
+        blend_frames = normalize_frame_blend_frames(
+            frame_blend_source_supported and frame_blend_enabled,
+            frame_blend_frames,
+        )
         if blend_frames > 1:
             delivery_fps = resolve_frame_blend_output_fps(
                 fps,
@@ -1785,6 +1813,7 @@ def _compose_montage_once(
                 frames=blend_frames,
                 fps=delivery_fps,
                 video_encode_args=video_encode_quality,
+                source_fps=fps,
             )
             r4 = _run_ffmpeg_capture(
                 cmd_blend,

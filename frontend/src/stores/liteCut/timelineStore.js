@@ -248,9 +248,9 @@ function motionPresetKeyframes(transform, duration, preset, defaults) {
     start.x = Math.max(0, base.x - 0.22);
     end.x = Math.min(1, base.x + 0.22);
   } else if (preset === "zoom_in") {
-    end.scale = Math.min(4, base.scale * 1.25);
+    end.scale = Math.min(5, base.scale * 1.25);
   } else if (preset === "zoom_out") {
-    start.scale = Math.min(4, base.scale * 1.25);
+    start.scale = Math.min(5, base.scale * 1.25);
   } else {
     return null;
   }
@@ -1188,6 +1188,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     fontFamily = "微软雅黑",
     fontFile = null,
     fontSize = 64,
+    align = "center",
     overlayTrackId = null,
   } = {}) => {
     const { playheadSec, snapEnabled } = get();
@@ -1209,7 +1210,8 @@ export const useLiteCutTimelineStore = create((set, get) => ({
           content,
           font_family: fontFamily || "微软雅黑",
           font_file: fontFile || null,
-          font_size: Math.max(12, Math.min(220, Number(fontSize) || 64)),
+          font_size: Math.max(12, Math.min(1000, Number(fontSize) || 64)),
+          align: ["left", "center", "right"].includes(align) ? align : "center",
           preset_id: presetId,
           anim_in: null,
           anim_out: null,

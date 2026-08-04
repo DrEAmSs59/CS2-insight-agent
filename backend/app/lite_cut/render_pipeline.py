@@ -81,6 +81,7 @@ from ..montage_exceptions import HardwareEncoderFailure
 from ..ffmpeg_compatibility import add_ffmpeg_compatibility_hint
 from ..frame_blend import (
     build_frame_blend_command,
+    is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
 )
@@ -894,7 +895,35 @@ def _compose_lite_cut_montage_once(
     )
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
+    overlay_clips = _resolve_overlay_clip_paths(
+        _all_overlay_clips_for_export(project_body, base_track_id=base_track_id),
+        clip_path_by_id,
+    )
+    frame_blend_source_paths = list(paths)
+    video_extensions = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".mts", ".m2ts"}
+    for overlay in overlay_clips:
+        if overlay.get("type") == "text":
+            continue
+        overlay_meta = overlay.get("meta") if isinstance(overlay.get("meta"), dict) else {}
+        overlay_path = Path(str(overlay.get("file_path") or "")).expanduser().resolve()
+        overlay_kind = str(overlay_meta.get("kind") or overlay.get("type") or "").lower()
+        if overlay_kind in {"video", "webm"} or overlay_path.suffix.lower() in video_extensions:
+            if overlay_path.is_file() and overlay_path not in frame_blend_source_paths:
+                frame_blend_source_paths.append(overlay_path)
+
     ref = probe_video_audio_summary(paths[0], ffprobe)
+    source_fps_values: list[float] = []
+    source_fps_probe_failed = False
+    for source_path in frame_blend_source_paths:
+        try:
+            source_info = ref if source_path == paths[0] else probe_video_audio_summary(source_path, ffprobe)
+            source_fps = float(source_info.get("fps") or 0)
+            if source_fps > 0:
+                source_fps_values.append(source_fps)
+            else:
+                source_fps_probe_failed = True
+        except Exception:
+            source_fps_probe_failed = True
     if int(ref["width"]) <= 0 or int(ref["height"]) <= 0:
         raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
     w, h, fps = _project_output_settings(project_body, ref)
@@ -1009,10 +1038,6 @@ def _compose_lite_cut_montage_once(
             raise MontageComposerError("MONTAGE_EXPORT_FAILED")
         _emit_progress(progress_callback, 0.68, "concat")
 
-        overlay_clips = _resolve_overlay_clip_paths(
-            _all_overlay_clips_for_export(project_body, base_track_id=base_track_id),
-            clip_path_by_id,
-        )
         if overlay_clips:
             _raise_if_cancelled(cancel_event)
             v1_base = Path(tmpdir) / "v1_concat.mp4"
@@ -1084,9 +1109,15 @@ def _compose_lite_cut_montage_once(
             high_frame_downsample_enabled=bool(output_settings.get("high_frame_downsample_enabled")),
             delivery_fps=output_settings.get("delivery_fps"),
         )
-        high_frame_downsample_active = delivery_fps < fps - 1e-6
+        frame_blend_source_supported = (
+            not source_fps_probe_failed
+            and bool(source_fps_values)
+            and all(is_frame_blend_source_supported(source_fps) for source_fps in source_fps_values)
+            and is_frame_blend_source_supported(fps)
+        )
         blend_frames = normalize_frame_blend_frames(
-            bool(output_settings.get("frame_blend_enabled")) or high_frame_downsample_active,
+            frame_blend_source_supported
+            and bool(output_settings.get("frame_blend_enabled")),
             output_settings.get("frame_blend_frames", 5),
         )
         if blend_frames > 1:
@@ -1103,6 +1134,7 @@ def _compose_lite_cut_montage_once(
                 frames=blend_frames,
                 fps=delivery_fps,
                 video_encode_args=video_encode_quality,
+                source_fps=fps,
             )
             blend_result = _run_ffmpeg_process(cmd_blend, timeout=3600, cancel_event=cancel_event)
             if blend_result.returncode != 0:

@@ -146,7 +146,7 @@ def detect_ffmpeg_save():
     if not path:
         raise HTTPException(
             404,
-            "未找到 FFmpeg（ffmpeg.exe）。请安装 FFmpeg 并确保其在系统 PATH 中，或在设置中手动填写完整路径。",
+            "未找到完整且兼容的 FFmpeg 工具包。请使用同一目录内同时包含 ffmpeg.exe 和 ffprobe.exe 的推荐 Full Build，或在设置中手动填写其 ffmpeg.exe 完整路径。",
         )
     cfg = load_config()
     cfg.ffmpeg_path = path

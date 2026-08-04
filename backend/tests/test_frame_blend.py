@@ -11,6 +11,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 from app.frame_blend import (
     build_frame_blend_command,
     build_frame_blend_filter,
+    is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
 )
@@ -27,6 +28,39 @@ class TestFrameBlend(unittest.TestCase):
             "tmix=frames=5:weights='1 1 1 1 1',"
             "fps=60,setsar=1,format=yuv420p",
         )
+
+    def test_240_to_60_uses_hermite_temporal_mixing(self):
+        self.assertEqual(
+            build_frame_blend_filter(7, 60, source_fps=240),
+            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
+            "unsharp=5:5:0.3:5:5:0,setsar=1",
+        )
+
+    def test_120_to_60_uses_hermite_temporal_mixing(self):
+        self.assertEqual(
+            build_frame_blend_filter(7, 60, source_fps=120),
+            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
+            "unsharp=5:5:0.3:5:5:0,setsar=1",
+        )
+
+    def test_intermediate_and_360_to_60_use_the_same_hermite_path(self):
+        expected = (
+            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
+            "unsharp=5:5:0.3:5:5:0,setsar=1"
+        )
+        self.assertEqual(build_frame_blend_filter(5, 60, source_fps=180), expected)
+        self.assertEqual(build_frame_blend_filter(5, 60, source_fps=360), expected)
+
+    def test_60_fps_source_skips_frame_blending(self):
+        self.assertEqual(
+            build_frame_blend_filter(7, 60, source_fps=60),
+            "fps=60,setsar=1,format=yuv420p",
+        )
+
+    def test_frame_blending_starts_at_120_fps(self):
+        self.assertFalse(is_frame_blend_source_supported(60))
+        self.assertTrue(is_frame_blend_source_supported(120))
+        self.assertTrue(is_frame_blend_source_supported(240))
 
     def test_command_reencodes_video_and_copies_optional_audio(self):
         command = build_frame_blend_command(

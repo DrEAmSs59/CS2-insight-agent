@@ -107,6 +107,9 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
           <span className="absolute bottom-0.5 right-0.5 rounded bg-black/75 px-1 py-px font-mono text-[8px] text-cs2-accent">
             {formatDuration(item.duration)}
           </span>
+          <span className="absolute bottom-0.5 left-0.5 rounded bg-black/75 px-1 py-px font-mono text-[8px] text-white">
+            {item.fps != null ? `${Math.round(Number(item.fps) * 100) / 100} FPS` : "FPS ?"}
+          </span>
         </div>
         <div className="min-w-0 flex-1 py-0.5">
           <div className="flex flex-wrap items-center gap-1">
@@ -206,6 +209,11 @@ function LocalAssetCard({
           {Number(item.duration_sec) > 0 ? (
             <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[8px] text-cs2-accent">
               {formatDuration(item.duration_sec)}
+            </span>
+          ) : null}
+          {isVideo ? (
+            <span className="absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[8px] text-white">
+              {item.fps != null ? `${Math.round(Number(item.fps) * 100) / 100} FPS` : "FPS ?"}
             </span>
           ) : null}
           {proxyBusy ? (

@@ -9,6 +9,9 @@ import {
   RotateCcw,
   FlipHorizontal,
   FlipVertical,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
   Captions,
   CopyCheck,
   Check,
@@ -29,6 +32,7 @@ import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import API from "../../../api/api.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
+import { getHighFrameBlendPlan, isFrameBlendSourceSupported, summarizeFrameBlendSources } from "../../../utils/frameBlend.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import ColorPropertyPane from "./ColorPropertyPane.jsx";
 import SpeedPropertyPane from "./SpeedPropertyPane.jsx";
@@ -358,7 +362,7 @@ export function ClipPane({
             value={Math.round((clipTransform.scale ?? 1) * 100)}
             onChange={(v) => onClipTransformChange?.({ scale: v / 100 })}
             min={10}
-            max={300}
+            max={500}
             resetValue={100}
           />
           <ProSlider
@@ -437,7 +441,7 @@ export function ClipPane({
             value={Math.round((overlayTransform.scale ?? 0.38) * 100)}
             onChange={(v) => onOverlayTransformChange?.({ scale: v / 100 })}
             min={1}
-            max={300}
+            max={500}
             resetValue={100}
           />
           <ProSlider
@@ -530,7 +534,7 @@ export function ClipPane({
 }
 
 export const TEXT_FONT_SIZE_MIN = 12;
-export const TEXT_FONT_SIZE_MAX = 220;
+export const TEXT_FONT_SIZE_MAX = 1000;
 
 export function clampTextFontSize(value, fallback = 48) {
   return Math.max(TEXT_FONT_SIZE_MIN, Math.min(TEXT_FONT_SIZE_MAX, Number(value) || fallback));
@@ -545,6 +549,7 @@ function TextPane({
   fontFamily,
   fontFile,
   fontSize = 48,
+  textAlign = "center",
   animIn = "",
   animOut = "",
   fontAssets = [],
@@ -554,6 +559,7 @@ function TextPane({
   onApplySubtitleStyle,
   overlayTransform = null,
   overlayDuration = 3,
+  maxTextDuration = 60,
   overlayFadeInSec = 0,
   overlayFadeOutSec = 0,
   onOverlayTransformChange,
@@ -568,6 +574,8 @@ function TextPane({
   const [sizeLinked, setSizeLinked] = useState(true);
   const effectiveFont = fontFamily || font;
   const effectiveFontSize = clampTextFontSize(fontSize, draftFontSize);
+  const effectiveTextAlign = ["left", "center", "right"].includes(textAlign) ? textAlign : "center";
+  const textDurationMax = Math.max(60, Number(maxTextDuration) || 60);
   const systemFontValue = FONT_OPTIONS.includes(effectiveFont) ? effectiveFont : "__project_font__";
   const handleFontChange = (value) => {
     setFont(value);
@@ -637,6 +645,7 @@ function TextPane({
             font_family: effectiveFont,
             font_file: fontFile || null,
             font_size: effectiveFontSize,
+            align: effectiveTextAlign,
           })}
           className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-cs2-border/70 bg-cs2-surface-1 py-1.5 text-[10px] font-semibold text-cs2-text-primary hover:border-cs2-accent/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -655,7 +664,28 @@ function TextPane({
           className="w-full resize-none rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-3 py-2 text-sm font-bold outline-none focus:border-cs2-accent/50"
           style={{ fontFamily: effectiveFont }}
         />
-        <ProSlider label="素材显示时间 (s)" value={Number(Math.max(0.1, overlayDuration).toFixed(2))} onChange={(value) => onOverlayPatch?.({ duration: Math.max(0.1, value) })} min={0.1} max={60} resetValue={3} step={0.1} />
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-semibold text-cs2-text-muted">文字对齐</span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              ["left", "左对齐", AlignLeft],
+              ["center", "居中对齐", AlignCenter],
+              ["right", "右对齐", AlignRight],
+            ].map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={effectiveTextAlign === value}
+                onClick={() => onTextPatch?.({ align: value })}
+                className={`inline-flex items-center justify-center gap-1 rounded-md border py-1.5 text-[10px] font-semibold ${effectiveTextAlign === value ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted hover:border-cs2-accent/50"}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ProSlider label="素材显示时间 (s)" value={Number(Math.max(0.1, Math.min(textDurationMax, overlayDuration)).toFixed(2))} onChange={(value) => onOverlayPatch?.({ duration: Math.max(0.1, Math.min(textDurationMax, value)) })} min={0.1} max={textDurationMax} resetValue={3} step={0.1} />
         <select value={systemFontValue} onChange={(e) => handleFontChange(e.target.value)} className="w-full rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-2 py-2 text-xs">
           {systemFontValue === "__project_font__" ? <option value="__project_font__" disabled>使用项目字体</option> : null}
           {FONT_OPTIONS.map((item) => <option key={item}>{item}</option>)}
@@ -679,7 +709,7 @@ function TextPane({
             onOverlayTransformChange?.(sizeLinked ? { height, width: (Number(overlayTransform.width) || 0.65) * height / currentHeight } : { height });
           }} min={5} max={300} linked={sizeLinked} onToggleLinked={() => setSizeLinked((value) => !value)} />
         </div>
-        <ProSlider label="整体缩放 %" value={Math.round((overlayTransform.scale ?? 1) * 100)} onChange={(value) => onOverlayTransformChange?.({ scale: value / 100 })} min={10} max={300} resetValue={100} />
+        <ProSlider label="整体缩放 %" value={Math.round((overlayTransform.scale ?? 1) * 100)} onChange={(value) => onOverlayTransformChange?.({ scale: value / 100 })} min={10} max={500} resetValue={100} />
         <ProSlider label="旋转 °" value={Math.round(overlayTransform.rotation ?? 0)} onChange={(value) => onOverlayTransformChange?.({ rotation: snapRotation(value) })} min={-180} max={180} resetValue={0} />
         <div className="grid grid-cols-2 gap-1.5">
           <button type="button" title="左右镜像" aria-label="左右镜像" onClick={() => onOverlayPatch?.({ flip_horizontal: !flipHorizontal })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${flipHorizontal ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipHorizontal className="h-4 w-4" />左右镜像</button>
@@ -1142,8 +1172,7 @@ function ExportPane({
   fps = 60,
   frameBlendEnabled = false,
   frameBlendFrames = 5,
-  highFrameDownsampleEnabled = false,
-  deliveryFps = 60,
+  frameBlendSourceItems = [],
   encoder = "auto",
   encoderTier = "quality",
   canvasFit = "contain",
@@ -1172,34 +1201,42 @@ function ExportPane({
   const [encoderDetection, setEncoderDetection] = useState(null);
   const commitSize = (patch) => onOutputSettingsChange?.(patch);
   const setPresetSize = (w, h) => commitSize({ width: w, height: h });
-  const deliveryFpsOptions = [24, 30, 50, 60, 120, 144, 240, 480].filter((value) => value < Number(fps));
-  const canHighFrameDownsample = deliveryFpsOptions.length > 0;
-  const fallbackDeliveryFps = deliveryFpsOptions.includes(60)
-    ? 60
-    : deliveryFpsOptions[deliveryFpsOptions.length - 1] || 60;
-  const activeDeliveryFps = deliveryFpsOptions.includes(Number(deliveryFps))
-    ? Number(deliveryFps)
-    : fallbackDeliveryFps;
+  const frameBlendSourceSummary = summarizeFrameBlendSources(frameBlendSourceItems);
+  const frameBlendProjectSupported = isFrameBlendSourceSupported(fps);
+  const frameBlendSourceSupported = frameBlendSourceSummary.allSupported;
+  const frameBlendAvailable = frameBlendProjectSupported && frameBlendSourceSupported;
+  const frameBlendActive = frameBlendAvailable && Boolean(frameBlendEnabled);
+  const frameBlendBlockedReason = !frameBlendProjectSupported
+    ? t("liteCut.frameBlendBlockedProjectFps")
+    : frameBlendSourceSummary.lowFpsValues.length
+      ? t("liteCut.frameBlendBlockedSourceFps")
+      : frameBlendSourceSummary.hasUnknownFps || !frameBlendSourceItems.length
+        ? t("liteCut.frameBlendBlockedUnknownFps")
+        : "";
+  const fixedFrameBlendPlan = getHighFrameBlendPlan(fps, 60);
   const commitWorkingFps = (value) => {
     const nextFps = Math.max(1, Math.min(1000, Math.round(Number(value) || 60)));
+    const nextPlan = getHighFrameBlendPlan(nextFps, 60);
     commitSize({
       fps: nextFps,
-      ...(highFrameDownsampleEnabled && Number(deliveryFps) >= nextFps
-        ? { high_frame_downsample_enabled: false }
-        : {}),
+      ...(nextFps < 120
+        ? { frame_blend_enabled: false, high_frame_downsample_enabled: false }
+        : nextPlan
+          ? { frame_blend_frames: nextPlan.frames }
+          : {}),
     });
   };
-  const toggleHighFrameDownsample = () => {
-    if (!canHighFrameDownsample) return;
-    if (highFrameDownsampleEnabled) {
-      commitSize({ high_frame_downsample_enabled: false });
+  const toggleFrameBlend = () => {
+    if (!frameBlendAvailable) return;
+    if (frameBlendActive) {
+      commitSize({ frame_blend_enabled: false, high_frame_downsample_enabled: false });
       return;
     }
     commitSize({
-      high_frame_downsample_enabled: true,
-      delivery_fps: activeDeliveryFps,
       frame_blend_enabled: true,
-      frame_blend_frames: [2, 3].includes(Number(frameBlendFrames)) ? Number(frameBlendFrames) : 3,
+      high_frame_downsample_enabled: true,
+      delivery_fps: 60,
+      frame_blend_frames: fixedFrameBlendPlan?.frames ?? (Number(frameBlendFrames) || 5),
     });
   };
   const maxRangeEnd = Math.max(0.1, Number(timelineTotalSec) || 0.1);
@@ -1359,16 +1396,17 @@ function ExportPane({
             <div className="min-w-0">
               <p className="text-[11px] font-bold text-cs2-text-primary">帧混合（动态模糊）</p>
               <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
-                使用 FFmpeg tmix 叠加相邻帧；未开启高帧降采样时保持工程帧率，不进行运动插值。
+                只有工程和时间轴内所有视频素材都达到 120 FPS，才允许启用；启用后固定按 120/240 FPS 到 60 FPS 的对应方案导出。
               </p>
             </div>
             <button
               type="button"
-              aria-pressed={Boolean(frameBlendEnabled)}
+              aria-pressed={frameBlendActive}
               aria-label="帧混合（动态模糊）"
-              onClick={() => commitSize({ frame_blend_enabled: !frameBlendEnabled })}
+              disabled={!frameBlendAvailable}
+              onClick={toggleFrameBlend}
               className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 ${
-                frameBlendEnabled
+                frameBlendActive
                   ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
                   : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
               }`}
@@ -1376,59 +1414,10 @@ function ExportPane({
               <Check size={17} strokeWidth={3} aria-hidden="true" />
             </button>
           </div>
-          {frameBlendEnabled ? (
-            <label className="mt-2.5 flex items-center justify-between gap-3">
-              <span className="text-[10px] font-semibold text-cs2-text-secondary">混合帧数</span>
-              <select
-                value={frameBlendFrames}
-                onChange={(e) => commitSize({ frame_blend_frames: Number(e.target.value) || 5 })}
-                className="rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
-              >
-                {[2, 3, 5, 7, 9].map((value) => (
-                  <option key={value} value={value}>
-                    {value} 帧{highFrameDownsampleEnabled && value <= 3 ? "（推荐）" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </div>
-        <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold text-cs2-text-primary">高帧降采样</p>
-              <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
-                工程先按 {fps} FPS 合成，最终先混合相邻帧，再降到交付帧率。推荐 120 → 60 FPS 搭配 2～3 帧混合。
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-pressed={Boolean(highFrameDownsampleEnabled)}
-              aria-label="高帧降采样"
-              disabled={!canHighFrameDownsample}
-              onClick={toggleHighFrameDownsample}
-              className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
-                highFrameDownsampleEnabled
-                  ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
-                  : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
-              }`}
-            >
-              <Check size={17} strokeWidth={3} aria-hidden="true" />
-            </button>
-          </div>
-          {highFrameDownsampleEnabled ? (
-            <label className="mt-2.5 flex items-center justify-between gap-3">
-              <span className="text-[10px] font-semibold text-cs2-text-secondary">交付帧率</span>
-              <select
-                value={activeDeliveryFps}
-                onChange={(e) => commitSize({ delivery_fps: Number(e.target.value) || fallbackDeliveryFps })}
-                className="rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
-              >
-                {deliveryFpsOptions.map((value) => (
-                  <option key={value} value={value}>{value} FPS</option>
-                ))}
-              </select>
-            </label>
+          {!frameBlendAvailable ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-amber-300/90">{frameBlendBlockedReason}</p>
+          ) : frameBlendActive ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">{t("liteCut.frameBlendLockedPlan")}</p>
           ) : null}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -1763,6 +1752,7 @@ export default function LiteCutPropertyPanel({
   textFontFamily,
   textFontFile,
   textFontSize,
+  textAlign = "center",
   textAnimIn = "",
   textAnimOut = "",
   fontAssets = [],
@@ -1782,6 +1772,7 @@ export default function LiteCutPropertyPanel({
   outputFrameBlendFrames = 5,
   outputHighFrameDownsampleEnabled = false,
   outputDeliveryFps = 60,
+  frameBlendSourceItems = [],
   outputEncoder = "auto",
   outputEncoderTier = "quality",
   outputCanvasFit = "contain",
@@ -1973,6 +1964,7 @@ export default function LiteCutPropertyPanel({
               fontFamily={textFontFamily}
               fontFile={textFontFile}
               fontSize={textFontSize}
+              textAlign={textAlign}
               animIn={textAnimIn}
               animOut={textAnimOut}
               fontAssets={fontAssets}
@@ -1982,6 +1974,7 @@ export default function LiteCutPropertyPanel({
               onApplySubtitleStyle={onApplySubtitleStyle}
               overlayTransform={overlayTransform}
               overlayDuration={selectedMedia?.duration || 3}
+              maxTextDuration={Math.max(60, Number(timelineTotalSec) || 60)}
               overlayFadeInSec={overlayFadeInSec}
               overlayFadeOutSec={overlayFadeOutSec}
               onOverlayTransformChange={onOverlayTransformChange}
@@ -2059,6 +2052,7 @@ export default function LiteCutPropertyPanel({
               frameBlendFrames={outputFrameBlendFrames}
               highFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
               deliveryFps={outputDeliveryFps}
+              frameBlendSourceItems={frameBlendSourceItems}
               encoder={outputEncoder}
               encoderTier={outputEncoderTier}
               canvasFit={outputCanvasFit}

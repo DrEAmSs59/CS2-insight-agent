@@ -97,3 +97,58 @@ def test_failed_probe_gets_recommended_build_hint(monkeypatch, tmp_path: Path) -
     assert hinted.params["name"] == "clip.mp4"
     assert hinted.params["recommended"] == "ffmpeg-reference-full_build"
     assert hinted.params["original_code"] == "MONTAGE_FFPROBE_FAILED"
+
+
+def test_toolkit_requires_sibling_ffprobe(tmp_path: Path) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffmpeg.write_bytes(b"test")
+
+    report = ffmpeg_compatibility.inspect_ffmpeg_toolkit(ffmpeg)
+
+    assert report["ok"] is False
+    assert report["reason"] == "ffprobe_missing"
+
+
+def test_toolkit_rejects_mismatched_tool_versions(monkeypatch, tmp_path: Path) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffprobe = tmp_path / "ffprobe.exe"
+    ffmpeg.write_bytes(b"test")
+    ffprobe.write_bytes(b"test")
+    monkeypatch.setattr(
+        ffmpeg_compatibility,
+        "ffmpeg_tool_version_identity",
+        lambda path: "ffmpeg-build" if Path(path).name == "ffmpeg.exe" else "ffprobe-build",
+    )
+
+    report = ffmpeg_compatibility.inspect_ffmpeg_toolkit(ffmpeg)
+
+    assert report["ok"] is False
+    assert report["reason"] == "version_mismatch"
+
+
+def test_toolkit_accepts_matching_compatible_full_build(monkeypatch, tmp_path: Path) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffprobe = tmp_path / "ffprobe.exe"
+    ffmpeg.write_bytes(b"test")
+    ffprobe.write_bytes(b"test")
+    monkeypatch.setattr(
+        ffmpeg_compatibility,
+        "ffmpeg_tool_version_identity",
+        lambda _path: "matching-full-build",
+    )
+    monkeypatch.setattr(
+        ffmpeg_compatibility,
+        "audit_ffmpeg_compatibility",
+        lambda _path: {
+            "compatible": True,
+            "audit_failed": False,
+            "recommended": "matching-full-build",
+            "current_version": "matching-full-build",
+            "issues": [],
+        },
+    )
+
+    report = ffmpeg_compatibility.inspect_ffmpeg_toolkit(ffmpeg)
+
+    assert report["ok"] is True
+    assert report["reason"] == "ok"

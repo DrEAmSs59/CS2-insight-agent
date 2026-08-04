@@ -82,6 +82,87 @@ def _run(command: list[str]) -> str:
     return "\n".join(part for part in (result.stdout, result.stderr) if part)
 
 
+@lru_cache(maxsize=32)
+def _tool_version_identity_cached(path: str, modified_ns: int) -> str | None:
+    del modified_ns
+    try:
+        output = _run([path, "-version"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first_line = output.splitlines()[0].strip() if output.splitlines() else ""
+    match = re.match(
+        r"^(?:ffmpeg|ffprobe)\s+version\s+(.+?)(?:\s+Copyright|$)",
+        first_line,
+        re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else None
+
+
+def ffmpeg_tool_version_identity(executable: Path) -> str | None:
+    """Return the build identity shared by matching ffmpeg/ffprobe binaries."""
+
+    resolved = Path(executable).resolve()
+    try:
+        modified_ns = resolved.stat().st_mtime_ns
+    except OSError:
+        modified_ns = 0
+    return _tool_version_identity_cached(str(resolved), modified_ns)
+
+
+def inspect_ffmpeg_toolkit(ffmpeg_bin: Path) -> dict[str, Any]:
+    """Validate a complete, same-directory and baseline-compatible toolkit."""
+
+    ffmpeg = Path(ffmpeg_bin).resolve()
+    ffprobe = ffmpeg.with_name("ffprobe.exe" if ffmpeg.name.lower().endswith(".exe") else "ffprobe")
+    baseline = load_ffmpeg_baseline()
+    payload: dict[str, Any] = {
+        "ok": False,
+        "reason": "not_runnable",
+        "ffmpeg_path": str(ffmpeg),
+        "ffprobe_path": str(ffprobe),
+        "recommended": str(baseline.get("recommended_name") or ""),
+    }
+    if not ffmpeg.is_file():
+        payload["reason"] = "path_not_found"
+        return payload
+    if not ffprobe.is_file():
+        payload["reason"] = "ffprobe_missing"
+        return payload
+
+    ffmpeg_version = ffmpeg_tool_version_identity(ffmpeg)
+    ffprobe_version = ffmpeg_tool_version_identity(ffprobe)
+    payload.update(
+        {
+            "ffmpeg_version": ffmpeg_version or "unknown",
+            "ffprobe_version": ffprobe_version or "unknown",
+            "current_version": ffmpeg_version or "unknown",
+        },
+    )
+    if not ffmpeg_version or not ffprobe_version:
+        payload["reason"] = "not_runnable"
+        return payload
+    if ffmpeg_version != ffprobe_version:
+        payload["reason"] = "version_mismatch"
+        return payload
+
+    compatibility = audit_ffmpeg_compatibility(ffmpeg)
+    payload.update(
+        {
+            "recommended": compatibility.get("recommended", payload["recommended"]),
+            "current_version": compatibility.get("current_version", ffmpeg_version),
+            "compatibility_issues": list(compatibility.get("issues") or []),
+        },
+    )
+    if compatibility.get("audit_failed"):
+        payload["reason"] = "not_runnable"
+        return payload
+    if not compatibility.get("compatible"):
+        payload["reason"] = "incompatible"
+        return payload
+    payload.update({"ok": True, "reason": "ok"})
+    return payload
+
+
 @lru_cache(maxsize=16)
 def _audit_cached(path: str, modified_ns: int) -> dict[str, Any]:
     del modified_ns

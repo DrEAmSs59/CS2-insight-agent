@@ -7,6 +7,7 @@ import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
 import { Loader2 } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 import { formatMontageApiError, humanizeMontageError } from "../utils/formatMontageApiError.js";
+import { ffmpegGateSubtitle } from "../utils/ffmpegGateMessages.js";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
@@ -250,13 +251,6 @@ function montageToastFromError(e, t) {
 
 const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
 
-function ffmpegGateSubtitle(reason, t) {
-  if (reason === "not_configured") return t("montage.ffmpegGateNotConfigured");
-  if (reason === "path_not_found") return t("montage.ffmpegGatePathNotFound");
-  if (reason === "not_usable") return t("montage.ffmpegGateNotUsable");
-  return t("montage.ffmpegGateNotReady");
-}
-
 export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer" }) {
   const t = useT();
   const isPage = layout === "page";
@@ -275,6 +269,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [frameBlendEnabled, setFrameBlendEnabled] = useState(false);
   const [frameBlendFrames, setFrameBlendFrames] = useState(5);
   const [frameBlendDeliveryFps, setFrameBlendDeliveryFps] = useState(null);
+  const handleFrameBlendEnabledChange = useCallback((enabled) => {
+    const nextEnabled = Boolean(enabled);
+    setFrameBlendEnabled(nextEnabled);
+    setFrameBlendDeliveryFps(nextEnabled ? 60 : null);
+  }, []);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
   const exporting = useMontageStore((s) => s.exporting);
@@ -804,7 +803,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         name_cards_enabled: nameCardsEnabled,
         frame_blend_enabled: frameBlendEnabled,
         frame_blend_frames: frameBlendFrames,
-        frame_blend_delivery_fps: frameBlendDeliveryFps,
+        frame_blend_delivery_fps: frameBlendEnabled ? 60 : null,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -920,7 +919,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         name_cards_enabled: nameCardsEnabled,
         frame_blend_enabled: frameBlendEnabled,
         frame_blend_frames: frameBlendFrames,
-        frame_blend_delivery_fps: frameBlendDeliveryFps,
+        frame_blend_delivery_fps: frameBlendEnabled ? 60 : null,
       });
       setLastExport({ ok: true, ...data });
       showToast(t("montage.toastExportComplete"));
@@ -1461,11 +1460,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
                 frameBlendEnabled={frameBlendEnabled}
-                frameBlendFrames={frameBlendFrames}
-                frameBlendDeliveryFps={frameBlendDeliveryFps}
-                onFrameBlendEnabledChange={setFrameBlendEnabled}
-                onFrameBlendFramesChange={setFrameBlendFrames}
-                onFrameBlendDeliveryFpsChange={setFrameBlendDeliveryFps}
+                onFrameBlendEnabledChange={handleFrameBlendEnabledChange}
               />
             </div>
 

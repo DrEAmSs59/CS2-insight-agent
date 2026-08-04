@@ -41,6 +41,7 @@ import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore";
 import { labelTag } from "../../utils/tagDescriptions";
 import { weaponUsedTokens } from "../../i18n/weaponNames.js";
+import { getClipFps } from "../../utils/frameBlend.js";
 
 function montageAiExplainText(clip, t) {
   const c = getClipComment(clip);
@@ -747,6 +748,8 @@ export function MontageMaterialPoolCard({
   const locale = useLocaleStore((s) => s.locale);
   const mapName = mapNameFromClip(clip);
   const dur = getClipDurationSeconds(clip);
+  const fps = getClipFps(clip);
+  const fpsLabel = fps == null ? "FPS ?" : `${Math.round(fps * 100) / 100} FPS`;
   const weaponPrimary = weaponUsedTokens(clip.weapon_used, locale)[0];
   const weaponShow = weaponPrimary
     ? weaponPrimary.length > 22
@@ -796,6 +799,9 @@ export function MontageMaterialPoolCard({
               <span className="truncate text-sm font-bold text-cs2-text-primary">{playerName}</span>
               <span className="shrink-0 font-mono text-xs font-semibold text-cs2-accent bg-cs2-accent-soft px-2 py-0.5 rounded-md">
                 {dur != null ? `${dur.toFixed(1)}s` : "?s"}
+              </span>
+              <span className="shrink-0 font-mono text-xs font-semibold text-cs2-text-secondary bg-cs2-bg-input px-2 py-0.5 rounded-md">
+                {fpsLabel}
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-1">

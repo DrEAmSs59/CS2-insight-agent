@@ -44,6 +44,7 @@ export function packagingBundleFromBody(body) {
           font_family: text.font_family || "sans-serif",
           font_file: text.font_file || null,
           font_size: Math.max(12, Number(text.font_size) || 48),
+          align: ["left", "center", "right"].includes(text.align) ? text.align : "center",
           anim_in: text.anim_in || null,
           anim_out: text.anim_out || null,
           content_template: text.content || "{{player_name}}",

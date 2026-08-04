@@ -656,24 +656,64 @@ def _iter_ffmpeg_glob_candidates(exe_name: str):
             continue
 
 
-def detect_ffmpeg_path() -> Optional[str]:
-    """搜索本机 FFmpeg 可执行文件。优先级：bundled → PATH → 固定目录 → 盘根 ffmpeg* 通配。"""
+def _iter_ffmpeg_candidates():
+    """Yield de-duplicated FFmpeg candidates in discovery priority order."""
+
+    seen: set[str] = set()
+
+    def emit(candidate: Path | None):
+        if candidate is None or not candidate.is_file():
+            return None
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return None
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            return None
+        seen.add(key)
+        return resolved
+
     bundled = get_data_dir().parent / "third_party" / "ffmpeg" / "ffmpeg.exe"
-    if bundled.is_file():
-        return str(bundled.resolve())
+    candidate = emit(bundled)
+    if candidate is not None:
+        yield candidate
 
     found = shutil.which("ffmpeg")
     if found:
-        return str(Path(found).resolve())
+        candidate = emit(Path(found))
+        if candidate is not None:
+            yield candidate
 
     exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     for d in _DEFAULT_FFMPEG_DIRS:
-        candidate = d / exe_name
-        if candidate.is_file():
-            return str(candidate.resolve())
+        candidate = emit(d / exe_name)
+        if candidate is not None:
+            yield candidate
 
     for candidate in _iter_ffmpeg_glob_candidates(exe_name):
-        return str(candidate.resolve())
+        resolved = emit(candidate)
+        if resolved is not None:
+            yield resolved
+
+
+def detect_ffmpeg_path() -> Optional[str]:
+    """Find the first complete FFmpeg toolkit that passes the project baseline."""
+
+    from .ffmpeg_compatibility import inspect_ffmpeg_toolkit
+
+    for candidate in _iter_ffmpeg_candidates():
+        report = inspect_ffmpeg_toolkit(candidate)
+        logger.info(
+            "FFmpeg discovery candidate=%s ok=%s reason=%s current=%s recommended=%s",
+            candidate,
+            report.get("ok"),
+            report.get("reason"),
+            report.get("current_version", "unknown"),
+            report.get("recommended", ""),
+        )
+        if report.get("ok"):
+            return str(candidate)
 
     return None
 

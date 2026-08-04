@@ -30,6 +30,46 @@ router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-assets"])
 logger = logging.getLogger(__name__)
 
 
+async def _attach_video_fps(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add source FPS to video assets for the media bin and export checks."""
+    video_items = [item for item in items if str(item.get("kind") or "").lower() in {"video", "webm"}]
+    if not video_items:
+        return items
+    try:
+        from ..video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
+
+        ffprobe = resolve_ffprobe_binary(resolve_ffmpeg_binary(load_config().ffmpeg_path))
+    except Exception:
+        logger.debug("Unable to prepare ffprobe for LiteCut asset FPS labels", exc_info=True)
+        return items
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def enrich(item: dict[str, Any]) -> dict[str, Any]:
+        path = Path(str(item.get("file_path") or ""))
+        if not path.is_file():
+            return item
+        async with semaphore:
+            try:
+                info = await asyncio.to_thread(
+                    probe_video_audio_summary,
+                    path,
+                    ffprobe,
+                    "lite_cut_asset_fps_probe",
+                    "lite_cut_asset",
+                )
+                fps = float(info.get("fps") or 0)
+                if fps > 0:
+                    return {**item, "fps": fps}
+            except Exception:
+                logger.debug("Unable to probe LiteCut asset FPS: %s", path, exc_info=True)
+        return item
+
+    enriched = await asyncio.gather(*(enrich(item) for item in video_items))
+    by_id = {int(item["id"]): item for item in enriched if item.get("id") is not None}
+    return [by_id.get(int(item["id"]), item) if item.get("id") is not None else item for item in items]
+
+
 class LiteCutAssetValidationBody(BaseModel):
     body: dict[str, Any]
 
@@ -76,6 +116,7 @@ async def list_lite_cut_assets(
             await get_lite_cut_db().update_asset_dimensions(int(item["id"]), *dimensions)
     for item in items:
         _decorate_asset_preview_state(item)
+    items = await _attach_video_fps(items)
     return {"items": items, "limit": limit, "offset": offset}
 
 
@@ -149,7 +190,7 @@ async def upload_lite_cut_asset(
         raise HTTPException(500, error_detail("LITECUT_ASSET_SAVE_FAILED"))
     alpha_hint = bool(media_info.get("has_alpha")) if "has_alpha" in media_info else None
     return _decorate_asset_preview_state(
-        item,
+        {**item, "fps": media_info.get("fps") if kind in {"video", "webm"} else None},
         has_alpha=alpha_hint,
         video_codec=str(media_info.get("codec_name") or "") or None,
         audio_codec=str(media_info.get("audio_codec_name") or ""),

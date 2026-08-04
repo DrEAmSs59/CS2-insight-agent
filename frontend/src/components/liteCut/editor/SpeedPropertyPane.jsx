@@ -90,6 +90,6 @@ export default function SpeedPropertyPane({
       <dl className="grid grid-cols-2 gap-2 text-[11px]"><dt className="text-cs2-text-muted">原始时长</dt><dd className="font-mono text-cs2-text-secondary">{baseDur ? `${baseDur.toFixed(1)}s` : "-"}</dd><dt className="text-cs2-text-muted">调速后</dt><dd className="font-mono font-semibold text-cs2-accent">{effectiveDur ? `${effectiveDur.toFixed(1)}s` : "-"}</dd></dl>
       <p className="text-[10px] leading-relaxed text-cs2-text-muted">速度、音调和反向仅作用于选中片段；导出时 FFmpeg 会通过 setpts / atempo / asetrate / reverse 处理。</p>
     </PaneSection>
-    {!isAudioClip ? <PaneSection title="末帧定格"><ProSlider label="定格时长 (s)" value={safeFreeze} onChange={(value) => onFreezeFrameChange?.(Math.max(0, Math.min(30, Number(value) || 0)))} min={0} max={10} step={0.1} resetValue={0} /></PaneSection> : null}
+    {!isAudioClip ? <PaneSection title="末帧定格"><ProSlider label="定格时长 (s)" value={safeFreeze} onChange={(value) => onFreezeFrameChange?.(Math.max(0, Math.min(30, Number(value) || 0)))} min={0} max={30} step={0.1} resetValue={0} /></PaneSection> : null}
   </>;
 }

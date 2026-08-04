@@ -19,6 +19,7 @@ from app.video_composer import (
     build_bgm_filter,
     probe_video_audio_summary,
     resolve_ffmpeg_binary,
+    resolve_ffprobe_binary,
     validate_output_path,
 )
 
@@ -68,6 +69,45 @@ class TestResolveFfmpegBundled(unittest.TestCase):
                 with patch("app.video_composer.shutil.which", return_value=None):
                     p = resolve_ffmpeg_binary("")
                     self.assertEqual(p.resolve(), exe.resolve())
+
+
+class TestResolveFfprobe(unittest.TestCase):
+    def test_uses_matching_sibling_tool(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ffmpeg = root / "ffmpeg.exe"
+            ffprobe = root / "ffprobe.exe"
+            ffmpeg.write_bytes(b"")
+            ffprobe.write_bytes(b"")
+            with patch(
+                "app.video_composer.ffmpeg_tool_version_identity",
+                return_value="2026-full-build",
+            ):
+                self.assertEqual(resolve_ffprobe_binary(ffmpeg), ffprobe.resolve())
+
+    def test_does_not_mix_ffprobe_from_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            ffmpeg = Path(td) / "ffmpeg.exe"
+            ffmpeg.write_bytes(b"")
+            with patch("app.video_composer.shutil.which", return_value="C:/other/ffprobe.exe"):
+                with self.assertRaises(MontageComposerError) as caught:
+                    resolve_ffprobe_binary(ffmpeg)
+            self.assertEqual(caught.exception.code, "MONTAGE_FFPROBE_NOT_FOUND")
+
+    def test_rejects_different_ffmpeg_and_ffprobe_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ffmpeg = root / "ffmpeg.exe"
+            ffprobe = root / "ffprobe.exe"
+            ffmpeg.write_bytes(b"")
+            ffprobe.write_bytes(b"")
+            with patch(
+                "app.video_composer.ffmpeg_tool_version_identity",
+                side_effect=["new-full-build", "old-essentials-build"],
+            ):
+                with self.assertRaises(MontageComposerError) as caught:
+                    resolve_ffprobe_binary(ffmpeg)
+            self.assertEqual(caught.exception.code, "MONTAGE_FFPROBE_VERSION_MISMATCH")
 
 
 class TestBgmFilter(unittest.TestCase):

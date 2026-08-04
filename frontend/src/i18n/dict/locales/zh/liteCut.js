@@ -1,5 +1,9 @@
 // zh / liteCut — keep keys scoped to this feature catalog.
 export default {
+  "liteCut.frameBlendBlockedProjectFps": "工程帧率低于 120 FPS，无法使用帧混合。",
+  "liteCut.frameBlendBlockedSourceFps": "时间轴中含有低于 120 FPS（包括 60 FPS）的素材，无法使用帧混合。",
+  "liteCut.frameBlendBlockedUnknownFps": "时间轴中有视频素材无法读取 FPS，无法使用帧混合。",
+  "liteCut.frameBlendLockedPlan": "已启用固定方案：120/240 FPS 素材降至 60 FPS 时自动使用对应的 Hermite 动态模糊参数。",
   "liteCut.project.name": "工程名称",
   "liteCut.project.headerMeta": "LiteCut · 工程 #{id} · {state}",
   "liteCut.project.headerMetaDetailed": "LiteCut · 工程 #{id} · {width}×{height} · {fps} FPS · {state}",

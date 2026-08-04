@@ -143,6 +143,7 @@ class OverlayText(BaseModel):
     font_family: str = "sans-serif"
     font_file: Optional[str] = None
     font_size: int = 48
+    align: Literal["left", "center", "right"] = "center"
     preset_id: Optional[str] = None
     anim_in: Optional[str] = None
     anim_out: Optional[str] = None
@@ -292,6 +293,7 @@ class TextStylePresetBody(BaseModel):
     font_family: str = "sans-serif"
     font_file: Optional[str] = None
     font_size: int = 48
+    align: Literal["left", "center", "right"] = "center"
     color: Optional[str] = None
     anim_in: Optional[str] = None
     anim_out: Optional[str] = None

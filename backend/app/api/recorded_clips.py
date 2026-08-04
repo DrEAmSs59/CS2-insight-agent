@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -15,12 +16,53 @@ from ..lite_cut.stream import stream_file_with_range, validate_recorded_clip_pat
 router = APIRouter(tags=["recorded-clips"])
 
 
+async def _attach_video_fps(rows: list[dict]) -> list[dict]:
+    """Add the measured source FPS to material cards without decoding video."""
+    if not rows:
+        return rows
+    try:
+        from ..video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
+
+        ffmpeg_bin = resolve_ffmpeg_binary(load_config().ffmpeg_path)
+        ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
+    except Exception:
+        logging.getLogger(__name__).debug("Unable to prepare ffprobe for material FPS labels", exc_info=True)
+        return rows
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def enrich(row: dict) -> dict:
+        if row.get("fps") is not None:
+            return row
+        path = Path(str(row.get("output_path") or ""))
+        if not path.is_file():
+            return row
+        async with semaphore:
+            try:
+                info = await asyncio.to_thread(
+                    probe_video_audio_summary,
+                    path,
+                    ffprobe,
+                    "montage_material_fps_probe",
+                    "recorded_clip",
+                )
+                fps = float(info.get("fps") or 0)
+                if fps > 0:
+                    return {**row, "fps": fps}
+            except Exception:
+                logging.getLogger(__name__).debug("Unable to probe material FPS: %s", path, exc_info=True)
+        return row
+
+    return list(await asyncio.gather(*(enrich(row) for row in rows)))
+
+
 @router.get("/api/recorded-clips")
 async def list_recorded_clips(
     limit: int = Query(default=300, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
     rows = await montage_db.list_recorded_clips(limit=limit, offset=offset)
+    rows = await _attach_video_fps(rows)
     return {"items": rows, "limit": limit, "offset": offset}
 
 

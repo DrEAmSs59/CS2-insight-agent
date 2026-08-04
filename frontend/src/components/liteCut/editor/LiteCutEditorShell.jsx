@@ -87,17 +87,38 @@ import {
   timelineTotalSec,
 } from "../../../stores/liteCut/timelineUtils.js";
 import { formatMontageApiError } from "../../../utils/formatMontageApiError.js";
+import { ffmpegGateSubtitle } from "../../../utils/ffmpegGateMessages.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { stripMp4Extension } from "../../../utils/montageUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
 const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
 
-function ffmpegGateSubtitle(reason, t) {
-  if (reason === "not_configured") return t("montage.ffmpegGateNotConfigured");
-  if (reason === "path_not_found") return t("montage.ffmpegGatePathNotFound");
-  if (reason === "not_usable") return t("montage.ffmpegGateNotUsable");
-  return t("montage.ffmpegGateNotReady");
+function collectLiteCutFrameBlendSourceItems(body, mediaCache, mediaAssets) {
+  const assetsById = new Map((mediaAssets || []).map((asset) => [String(asset?.id), asset]));
+  const items = [];
+  const addClip = (clip) => {
+    const meta = clip?.meta && typeof clip.meta === "object" ? clip.meta : {};
+    const kind = String(meta.kind || clip?.type || "").toLowerCase();
+    const isVideo = clip?.source_type === "recorded_clip" || kind === "video" || kind === "webm";
+    if (!isVideo) return;
+    const recorded = clip?.source_id != null ? mediaCache?.[clip.source_id] : null;
+    const asset = meta.asset_id != null ? assetsById.get(String(meta.asset_id)) : null;
+    const fps = Number(
+      meta.fps
+        ?? meta.source_fps
+        ?? recorded?.fps
+        ?? recorded?._raw?.fps
+        ?? asset?.fps,
+    );
+    items.push({ fps: Number.isFinite(fps) && fps > 0 ? fps : null });
+  };
+  for (const track of body?.tracks || []) {
+    if (track?.type !== "video") continue;
+    for (const clip of track?.clips || []) addClip(clip);
+  }
+  for (const overlay of body?.overlays || []) addClip(overlay);
+  return items;
 }
 
 function clipToMedia(clip, mediaCache) {
@@ -249,9 +270,10 @@ export default function LiteCutEditorShell({
   const [inspectorTab, setInspectorTab] = useState(defaultInspectorTab);
   const [textStyleId, setTextStyleId] = useState("clutch");
   const [overlayText, setOverlayText] = useState("CLUTCH");
-  const [textDefaults, setTextDefaults] = useState({ font_family: "微软雅黑", font_file: null, font_size: 64 });
+  const [textDefaults, setTextDefaults] = useState({ font_family: "微软雅黑", font_file: null, font_size: 64, align: "center" });
   const [fontAssets, setFontAssets] = useState([]);
   const [audioAssets, setAudioAssets] = useState([]);
+  const [mediaAssets, setMediaAssets] = useState([]);
   const [assetPreviewVersions, setAssetPreviewVersions] = useState({});
   const [assetProxyBusy, setAssetProxyBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -378,6 +400,7 @@ export default function LiteCutEditorShell({
         params: { project_id: projectId ?? undefined, limit: 500 },
       });
       const mapped = (data.items || []).map(mapAssetRow).filter(Boolean);
+      setMediaAssets(mapped);
       setFontAssets(mapped.filter((a) => a?.kind === "font"));
       setAudioAssets(mapped.filter((a) => a?.kind === "audio"));
       setAssetPreviewVersions(Object.fromEntries(mapped.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
@@ -385,6 +408,7 @@ export default function LiteCutEditorShell({
     } catch {
       setFontAssets([]);
       setAudioAssets([]);
+      setMediaAssets([]);
       setAssetPreviewVersions({});
       setAssetProxyBusy(false);
     }
@@ -415,6 +439,10 @@ export default function LiteCutEditorShell({
 
   const totalSec = useMemo(() => timelineTotalSec(body, 30), [body]);
   const exportableClipCount = useMemo(() => mainVideoClips(body).length, [body]);
+  const frameBlendSourceItems = useMemo(
+    () => collectLiteCutFrameBlendSourceItems(body, mediaCache, mediaAssets),
+    [body, mediaAssets, mediaCache],
+  );
 
   const restartOrTogglePlayback = useCallback((forced) => {
     if (typeof forced === "boolean") {
@@ -592,6 +620,7 @@ export default function LiteCutEditorShell({
   const activeTextFontFamily = selectedTextOverlay?.text?.font_family ?? textDefaults.font_family;
   const activeTextFontFile = selectedTextOverlay?.text?.font_file ?? textDefaults.font_file;
   const activeTextFontSize = selectedTextOverlay?.text?.font_size ?? textDefaults.font_size;
+  const activeTextAlign = selectedTextOverlay?.text?.align ?? textDefaults.align ?? "center";
   const activeTextAnimIn = selectedTextOverlay?.text?.anim_in || "";
   const activeTextAnimOut = selectedTextOverlay?.text?.anim_out || "";
 
@@ -1322,6 +1351,7 @@ export default function LiteCutEditorShell({
 
   const handleAssetsLoaded = useCallback((assets) => {
     const allAssets = assets || [];
+    setMediaAssets(allAssets);
     setFontAssets(allAssets.filter((a) => a?.kind === "font"));
     setAudioAssets(allAssets.filter((a) => a?.kind === "audio"));
     setAssetPreviewVersions(Object.fromEntries(allAssets.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
@@ -1413,6 +1443,7 @@ export default function LiteCutEditorShell({
       fontFamily: textDefaults.font_family,
       fontFile: textDefaults.font_file,
       fontSize: textDefaults.font_size,
+      align: textDefaults.align,
     });
     setInspectorTab("text");
   }, [addTextOverlay, overlayText, textStyleId, playheadSec, textDefaults]);
@@ -1924,6 +1955,7 @@ export default function LiteCutEditorShell({
             textFontFamily={activeTextFontFamily}
             textFontFile={activeTextFontFile}
             textFontSize={activeTextFontSize}
+            textAlign={activeTextAlign}
             textAnimIn={activeTextAnimIn}
             textAnimOut={activeTextAnimOut}
             fontAssets={fontAssets}
@@ -1940,6 +1972,7 @@ export default function LiteCutEditorShell({
             outputFrameBlendFrames={outputFrameBlendFrames}
             outputHighFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
             outputDeliveryFps={outputDeliveryFps}
+            frameBlendSourceItems={frameBlendSourceItems}
             outputEncoder={outputEncoder}
             outputEncoderTier={outputEncoderTier}
             outputCanvasFit={outputCanvasFit}
