@@ -48,7 +48,11 @@ def test_animated_avatar_url_is_scoped_to_profile_avatar_container():
     html = f"""
         <img src="https://shared.fastly.steamstatic.com/unrelated.gif">
         <div class="playerAvatarAutoSizeInner">
-            <img src="{animated}">
+            <picture>
+                <source media="(prefers-reduced-motion: reduce)"
+                        srcset="https://shared.fastly.steamstatic.com/community_assets/images/items/2928650/static.jpg">
+                <img srcset="{animated}">
+            </picture>
         </div>
     """
 
@@ -86,7 +90,14 @@ def test_public_player_summary_prefers_profile_animated_avatar(monkeypatch):
             requested_urls.append(url)
             if "/miniprofile/" in url:
                 return FakeResponse(payload={"persona_name": "TeSeS", "avatar_url": static})
-            return FakeResponse(text=f'<div class="playerAvatarAutoSizeInner"><img src="{animated}"></div>')
+            return FakeResponse(
+                text=(
+                    '<div class="playerAvatarAutoSizeInner"><picture>'
+                    '<source media="(prefers-reduced-motion: reduce)" '
+                    'srcset="https://shared.fastly.steamstatic.com/static.jpg">'
+                    f'<img srcset="{animated}"></picture></div>'
+                )
+            )
 
     monkeypatch.setattr("app.steam_match_history.httpx.AsyncClient", lambda **_kwargs: FakeClient())
     _steam_public_profile_cache.clear()

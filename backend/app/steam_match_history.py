@@ -232,6 +232,16 @@ def _official_steam_animated_avatar_url(value: object) -> str:
     return url if urlparse(url).path.lower().endswith(".gif") else ""
 
 
+def _animated_avatar_url_from_image_attributes(attributes: dict[str, str | None]) -> str:
+    for attribute in ("src", "data-src", "srcset", "data-srcset"):
+        for source in str(attributes.get(attribute) or "").split(","):
+            candidate = source.strip().split(maxsplit=1)[0] if source.strip() else ""
+            animated_url = _official_steam_animated_avatar_url(candidate)
+            if animated_url:
+                return animated_url
+    return ""
+
+
 class _SteamProfileAnimatedAvatarParser(HTMLParser):
     """Extract the animated avatar nested inside Steam's profile avatar container."""
 
@@ -254,9 +264,7 @@ class _SteamProfileAnimatedAvatarParser(HTMLParser):
             self._container_depth += 1
 
         if self._container_depth and tag == "img" and not self.avatar_url:
-            self.avatar_url = _official_steam_animated_avatar_url(
-                attributes.get("src") or attributes.get("data-src")
-            )
+            self.avatar_url = _animated_avatar_url_from_image_attributes(attributes)
 
     def handle_endtag(self, _tag: str) -> None:
         if self._container_depth:
