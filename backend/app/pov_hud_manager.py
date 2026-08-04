@@ -270,7 +270,7 @@ class PovHudManager:
         *,
         demo_path: Optional[str | Path] = None,
         input_track_report: Optional[Mapping[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
         if is_cs2_running():
@@ -411,6 +411,8 @@ class PovHudManager:
             except OSError:
                 pass
             raise PovHudError("无法写入 CS2 目录，请尝试以管理员权限运行，或检查 Steam / CS2 目录权限。") from e
+
+        return voice_build
 
     def restore(self) -> dict[str, Any]:
         if sys.platform != "win32":

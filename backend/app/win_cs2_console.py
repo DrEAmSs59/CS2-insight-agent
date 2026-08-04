@@ -8,7 +8,8 @@ CS2 客户端播 demo 时 RCON 不可靠，故用前台窗口 + 模拟键盘输�
 - ``~``（控制台开关）与 Space（demo UI）使用 ``SendInput``，需要 CS2 在前台。
 - 控制台**文字字符与 Enter**使用 ``PostMessage(WM_CHAR)`` 直接投递到 CS2 消息队列，
   绕过 Windows UIPI 对 ``SendInput`` 的静默拦截（症状：SendInput 返回 0/2，
-  文字输入到一半卡住）。所有 ``time.sleep`` 节奏保持原值不变。
+  文字输入到一半卡住）。多条命令用 ``;`` 合并后一次提交；超过控制台
+  单行安全长度时才拆成下一批，避免逐条回车的固定等待。
 """
 
 from __future__ import annotations
@@ -27,6 +28,35 @@ __all__ = [
     "send_cs2_space_taps",
     "send_cs2_vk_tap",
 ]
+
+
+# Source console command buffers are intentionally bounded.  510 keeps the
+# terminating NUL outside the classic 512-byte boundary while allowing the
+# default 24-command recording warmup (509 chars when joined) in one submit.
+_CONSOLE_COMMAND_BATCH_LIMIT = 510
+
+
+def _batch_console_commands(
+    lines: list[str],
+    *,
+    max_chars: int = _CONSOLE_COMMAND_BATCH_LIMIT,
+) -> list[str]:
+    """Join commands with semicolons, preserving order and safe line length."""
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    commands = [str(line).strip() for line in lines if line and str(line).strip()]
+    batches: list[str] = []
+    current = ""
+    for command in commands:
+        candidate = command if not current else f"{current};{command}"
+        if current and len(candidate) > max_chars:
+            batches.append(current)
+            current = command
+        else:
+            current = candidate
+    if current:
+        batches.append(current)
+    return batches
 
 
 if sys.platform != "win32":
@@ -51,7 +81,13 @@ if sys.platform != "win32":
     ) -> bool:
         cmds = [str(ln).strip() for ln in lines if ln and str(ln).strip()]
         if cmds:
-            logger.info("[非Windows] 模拟 CS2 控制台注入 %d 条指令: %s", len(cmds), cmds)
+            batches = _batch_console_commands(cmds)
+            logger.info(
+                "[非Windows] 模拟 CS2 控制台注入 %d 条指令（%d 批）: %s",
+                len(cmds),
+                len(batches),
+                cmds,
+            )
         return False
 
     def send_cs2_vk_tap(vk: int) -> bool:
@@ -383,10 +419,16 @@ else:
         skip_console_toggle: bool = False,
         close_console: bool = True,
     ) -> bool:
-        cmds = [ln.strip() for ln in lines if ln and str(ln).strip()]
+        cmds = [str(ln).strip() for ln in lines if ln and str(ln).strip()]
         if not cmds:
             return True
-        logger.info("CS2 控制台注入 %d 条指令: %s", len(cmds), cmds)
+        batches = _batch_console_commands(cmds)
+        logger.info(
+            "CS2 控制台注入 %d 条指令（合并为 %d 批）: %s",
+            len(cmds),
+            len(batches),
+            cmds,
+        )
         hwnd = find_cs2_hwnd()
         if not hwnd:
             logger.error("未找到 Counter-Strike 窗口，无法注入控制台命令")
@@ -404,8 +446,8 @@ else:
             vk_toggle, scan_toggle = _console_toggle_vk_scan()
             _vk_tap_with_fallback(hwnd, vk_toggle, scan_toggle)
             time.sleep(0.18)
-        for cmd in cmds:
-            for ch in cmd:
+        for batch in batches:
+            for ch in batch:
                 _post_char(hwnd, ord(ch))
                 time.sleep(0.002)
             time.sleep(0.02)

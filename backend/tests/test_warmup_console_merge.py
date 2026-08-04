@@ -9,6 +9,7 @@ from app.obs_director import (
     _apply_voice_filter_to_plan,
 )
 from app.recording.platform_utils import VOICE_LISTEN_MASK_ALL
+from app.win_cs2_console import _batch_console_commands
 
 FIXED_CVARS = (
     "cl_hud_telemetry_frametime_show 0",
@@ -123,6 +124,40 @@ def test_off_leaves_voice_unmanaged():
         "tv_listen_voice_indices",
         "tv_listen_voice_indices_h",
     } for line in lines)
+
+
+def test_silent_demo_omits_all_voice_console_commands():
+    director = _director("voice_modenable 1\nsnd_voipvolume 1")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(voice_filter="team"),
+        has_demo_voice=False,
+    )
+
+    assert not any(line.split()[0].lower() in {
+        "voice_modenable",
+        "snd_voipvolume",
+        "tv_listen_voice_indices",
+        "tv_listen_voice_indices_h",
+    } for line in lines)
+
+
+def test_default_warmup_commands_are_submitted_as_one_console_batch():
+    director = _director("")
+    lines = director._recording_warmup_console_lines(RecordingWarmupExtras())
+
+    batches = _batch_console_commands(lines)
+
+    assert batches == [";".join(lines)]
+    assert len(batches[0]) <= 510
+
+
+def test_console_batching_preserves_order_when_safety_limit_is_reached():
+    commands = ["a" * 300, "b" * 300, "tail"]
+
+    assert _batch_console_commands(commands) == [
+        "a" * 300,
+        f"{'b' * 300};tail",
+    ]
 
 
 def test_stale_client_voice_commands_cannot_override_team_policy():

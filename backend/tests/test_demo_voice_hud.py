@@ -14,6 +14,7 @@ from app.demo_voice_hud import (
     add_kill_feedback_track_to_payload,
     add_radar_track_to_payload,
     build_voice_payload,
+    demo_has_voice_packets,
     inject_voice_payload,
     read_inline_vpk,
     write_inline_vpk,
@@ -72,6 +73,48 @@ def test_voice_payload_compacts_intervals_and_location_changes():
     ]
     assert input_tracks == []
     assert roster == [["111", 0, 2], ["222", 1, 3]]
+
+
+def test_demo_voice_probe_requires_a_non_empty_audio_packet():
+    class _NoVoiceParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_voice():
+            return [
+                {"tick": 10, "steamid": 111, "bytes": b""},
+                {"tick": 20, "steamid": 111, "bytes": None},
+            ]
+
+    assert demo_has_voice_packets("match.dem", parser_factory=_FakeParser) is True
+    assert demo_has_voice_packets("silent.dem", parser_factory=_NoVoiceParser) is False
+
+
+def test_unmapped_voice_packet_is_not_mistaken_for_a_silent_demo():
+    class _UnmappedVoiceParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_voice():
+            return [{"tick": 10, "steamid": 999, "bytes": b"voice"}]
+
+        @staticmethod
+        def parse_player_info():
+            return {
+                "steamid": [111],
+                "name": ["known"],
+                "team_number": [2],
+            }
+
+    _payload, stats = build_voice_payload(
+        "match.dem",
+        parser_factory=_UnmappedVoiceParser,
+    )
+
+    assert stats["voice_packets"] == 1
+    assert stats["speakers"] == 0
 
 
 def test_exact_input_tracks_are_mapped_from_usercmd_slots_to_xuids():
@@ -290,8 +333,9 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
     monkeypatch.setattr(manager, "get_project_pov_dir", lambda: pov_dir)
 
-    manager.install(demo_path=demo)
+    result = manager.install(demo_path=demo)
 
+    assert result is built
     assert calls == [(demo, template, None)]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))

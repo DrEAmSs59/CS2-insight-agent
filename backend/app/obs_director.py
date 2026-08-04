@@ -3598,7 +3598,12 @@ class OBSDirector:
             return lines
         return [*lines, *self._extra_warmup_console_lines]
 
-    def _recording_warmup_console_lines(self, w: RecordingWarmupExtras) -> list[str]:
+    def _recording_warmup_console_lines(
+        self,
+        w: RecordingWarmupExtras,
+        *,
+        has_demo_voice: Optional[bool] = None,
+    ) -> list[str]:
         """录制会话首次 seek 前注入的观战 cvar（与空格预热后的控制台批次合并）。
 
         在所有 cvar 之前注入 ``unbindall`` + 一组最小默认绑定，把玩家自定义
@@ -3612,6 +3617,8 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
+            if has_demo_voice is False:
+                return _without_voice_console_lines(lines)
             return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
@@ -3664,6 +3671,8 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
+        if has_demo_voice is False:
+            return _without_voice_console_lines(lines)
         return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
 
     async def execute_plan_queue(
@@ -3689,6 +3698,7 @@ class OBSDirector:
             restore_pov_after_cs2_exit,
         )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
+        from .demo_voice_hud import demo_has_voice_packets
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3886,6 +3896,7 @@ class OBSDirector:
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
                 demo_abs = demo_abs_map[demo_key]
                 demo_name = demo_abs.name
+                demo_has_voice: Optional[bool] = None
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
 
@@ -3895,7 +3906,9 @@ class OBSDirector:
                     try:
                         logger.info("[RecordingV3][POV] build and install voice HUD for %s", demo_name)
                         pov_install_attempted = True
-                        pov_mgr_v3.install(demo_path=demo_abs)
+                        voice_build = pov_mgr_v3.install(demo_path=demo_abs)
+                        if voice_build is not None:
+                            demo_has_voice = voice_build.voice_packets > 0
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
                             installed_status.get("original_gameinfo_sha256") or ""
@@ -3914,6 +3927,24 @@ class OBSDirector:
                         )
                         pov_on_v3 = False
                         self._pov_enabled = False
+
+                if demo_has_voice is None:
+                    try:
+                        demo_has_voice = await asyncio.to_thread(
+                            demo_has_voice_packets,
+                            demo_abs,
+                        )
+                    except Exception as _voice_probe_error:  # noqa: BLE001
+                        # Unknown must preserve the existing fail-closed policy.
+                        logger.warning(
+                            "[RecordingV3] demo voice probe failed for %s; keeping voice policy: %s",
+                            demo_name,
+                            _voice_probe_error,
+                        )
+                if demo_has_voice is False:
+                    logger.info(
+                        "[RecordingV3] demo contains no voice packets; skipping all voice cvar injection"
+                    )
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
@@ -3958,12 +3989,19 @@ class OBSDirector:
                 # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
                 # can send a keypress instead of opening the console during recording.
                 _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
-                _voice_mode = normalize_voice_filter(
-                    getattr(warmup, "voice_filter", "mute") if warmup else "mute"
+                _voice_mode = (
+                    "off"
+                    if demo_has_voice is False
+                    else normalize_voice_filter(
+                        getattr(warmup, "voice_filter", "mute") if warmup else "mute"
+                    )
                 )
                 _warmup_inject_ok = False
                 if warmup is not None:
-                    warmup_cmds = self._recording_warmup_console_lines(warmup)
+                    warmup_cmds = self._recording_warmup_console_lines(
+                        warmup,
+                        has_demo_voice=demo_has_voice,
+                    )
                     warmup_cmds = [*warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
                     if self._pov_enabled:
                         pov_cmds = [
@@ -3989,14 +4027,15 @@ class OBSDirector:
                         except Exception as _wce:
                             logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
                 else:
-                    # No warmup object means the safe default: mute via both mask halves.
+                    # No warmup object means the safe default: mute only when the
+                    # demo actually carries voice (or the probe was inconclusive).
+                    default_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS]
+                    if demo_has_voice is not False:
+                        default_warmup_cmds.extend(_voice_filter_warmup_console_lines("mute"))
                     try:
                         _warmup_inject_ok = bool(await asyncio.to_thread(
                             inject_console_sequence,
-                            [
-                                *_V3_DEMO_KEY_BINDINGS,
-                                *_voice_filter_warmup_console_lines("mute"),
-                            ],
+                            default_warmup_cmds,
                         ))
                         if not _warmup_inject_ok:
                             logger.warning("[RecordingV3] default mute warmup injection returned false")

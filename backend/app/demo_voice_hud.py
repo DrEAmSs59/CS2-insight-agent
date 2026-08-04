@@ -1198,12 +1198,11 @@ def _build_team_roster(parser: Any) -> tuple[list[list[Any]], dict[int, tuple[in
     return roster, by_xuid
 
 
-def build_voice_payload(
+def _parse_demo_voice_rows(
     demo_path: str | Path,
     *,
     parser_factory: Callable[[str], Any] | None = None,
-) -> tuple[bytes, dict[str, int]]:
-    """Extract and compact the voice packet/location timeline for Panorama."""
+) -> tuple[Any, list[Any]]:
     if parser_factory is None:
         from demoparser2 import DemoParser
 
@@ -1215,6 +1214,49 @@ def build_voice_payload(
         raise DemoVoiceHudError(f"could not parse demo voice packets: {exc}") from exc
     if not isinstance(voice_rows, list):
         raise DemoVoiceHudError("demoparser returned an unsupported voice table")
+    return parser, voice_rows
+
+
+def demo_has_voice_packets(
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> bool:
+    """Return whether the demo contains at least one non-empty voice packet.
+
+    This intentionally does not require roster resolution: recording only needs
+    to know whether voice cvars are useful at all.  Parse failures remain errors
+    so callers can preserve the existing fail-closed voice policy.
+    """
+    _parser, voice_rows = _parse_demo_voice_rows(
+        demo_path,
+        parser_factory=parser_factory,
+    )
+    return any(
+        isinstance(row, Mapping)
+        and isinstance(row.get("bytes"), (bytes, bytearray))
+        and bool(row.get("bytes"))
+        for row in voice_rows
+    )
+
+
+def build_voice_payload(
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, int]]:
+    """Extract and compact the voice packet/location timeline for Panorama."""
+    parser, voice_rows = _parse_demo_voice_rows(
+        demo_path,
+        parser_factory=parser_factory,
+    )
+    raw_voice_packets = sum(
+        1
+        for row in voice_rows
+        if isinstance(row, Mapping)
+        and isinstance(row.get("bytes"), (bytes, bytearray))
+        and bool(row.get("bytes"))
+    )
 
     encoded_roster, roster_by_xuid = _build_team_roster(parser)
 
@@ -1242,14 +1284,17 @@ def build_voice_payload(
             separators=(",", ":"),
         ).encode("ascii")
         return payload, {
-            "voice_packets": 0,
+            # Keep raw packet presence even when no speaker can be mapped into
+            # the roster.  Recording must not mistake an identity mismatch for
+            # a genuinely silent demo and disable voice isolation.
+            "voice_packets": raw_voice_packets,
             "speakers": 0,
             "intervals": 0,
             "location_changes": 0,
             "payload_bytes": len(payload),
             "location_parse_failed": 0,
         }
-    voice_packets = sum(len(ticks) for ticks in ticks_by_xuid.values())
+    voice_packets = raw_voice_packets
 
     try:
         location_rows = parser.parse_ticks(["last_place_name"])
