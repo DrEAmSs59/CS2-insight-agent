@@ -88,6 +88,44 @@ test("groups knife candidates by model tag before showing finishes", () => {
   expect(candidates.every((candidate) => /蝴蝶刀/.test(candidate.getAttribute("aria-label") || ""))).toBe(true);
 });
 
+test("keeps Specialist Gloves catalog identity when replacing Sport Gloves", () => {
+  const onConfirm = vi.fn();
+  render(
+    <SkinReplacementPicker
+      open
+      locale="zh"
+      onlineAssetsEnabled={false}
+      sourceItem={{
+        type: "glove",
+        def_index: 5030,
+        model: "sporty_gloves",
+        name_zh: "运动手套 | 欧米伽",
+        name_en: "Sport Gloves | Omega",
+        paint_wear: 0.600376,
+        paint_seed: 278,
+        image_url: "",
+      }}
+      onClose={() => {}}
+      onConfirm={onConfirm}
+    />,
+  );
+
+  fireEvent.click(within(screen.getByTestId("skin-type-filters")).getByRole("button", { name: /专业手套/ }));
+  fireEvent.click(
+    within(screen.getByTestId("skin-candidate-list")).getByRole("button", { name: /专业手套 \| 深红和服/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  expect(onConfirm.mock.calls[0][0]).toMatchObject({
+    catalog_id: 1764,
+    def_index: 5034,
+    paint_index: 10033,
+    model: "specialist_gloves",
+    type: "glove",
+  });
+});
+
 test("uses the selected finish wear range and rejects out-of-range input", () => {
   const onConfirm = vi.fn();
   render(

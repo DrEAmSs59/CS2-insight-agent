@@ -103,6 +103,41 @@ def resolve_cs2_item(def_index: object, paint_index: object) -> dict[str, Any] |
     return item
 
 
+@lru_cache(maxsize=1)
+def _cs2_items_by_catalog_id() -> dict[int, tuple[int, int]]:
+    """Index generated finish rows by cs2-lib catalog id."""
+
+    out: dict[int, tuple[int, int]] = {}
+    for raw in (load_cs2_item_catalog().get("items") or {}).values():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            catalog_id = int(raw.get("id"))
+            definition = int(raw.get("def"))
+            paint = int(raw.get("paint"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if catalog_id > 0:
+            out[catalog_id] = (definition, paint)
+    return out
+
+
+def resolve_cs2_item_by_catalog_id(catalog_id: object) -> dict[str, Any] | None:
+    """Resolve one exact generated finish by its stable cs2-lib catalog id."""
+
+    try:
+        number = float(catalog_id)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or not number.is_integer() or number <= 0:
+        return None
+    item_id = int(number)
+    identity = _cs2_items_by_catalog_id().get(item_id)
+    if identity is None:
+        return None
+    return resolve_cs2_item(*identity)
+
+
 def resolve_cs2_sticker(sticker_id: object) -> dict[str, Any] | None:
     sticker = _safe_int(sticker_id)
     if sticker is None or sticker <= 0:

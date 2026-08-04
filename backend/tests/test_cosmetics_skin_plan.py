@@ -43,7 +43,7 @@ def inventory_row(**overrides):
 
 def replacement(**overrides):
     row = {
-        "catalog_id": 2002,
+        "catalog_id": 1379,
         "def_index": 508,
         "paint_index": 418,
         "paint_wear": 0.01,
@@ -140,7 +140,7 @@ def test_build_batch_from_plan_json_requires_items():
 
 def test_build_batch_sets_replacement_definition_index_for_cross_model_melee():
     inv = [inventory_row(item_id=53009600926, type="melee", def_index=508)]
-    repl = replacement(def_index=507, type="melee")  # different knife model
+    repl = replacement(catalog_id=1345, def_index=507, type="melee")  # different knife model
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, {"id:53009600926": repl})
 
     assert batch_items[0]["definition_index"] == 508
@@ -161,16 +161,82 @@ def test_build_batch_sets_replacement_definition_index_for_cross_model_glove():
         )
     ]
     repl = replacement(
+        catalog_id=1718,
         type="glove",
         def_index=5030,
         paint_index=10038,
-        model="specialist_gloves",
+        model="sporty_gloves",
         paint_wear=0.07,
     )
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
     assert batch_items[0]["replacement_definition_index"] == 5030
     assert batch_items[0]["definition_index"] == 5027
     assert batch_items[0]["team"] == "T"
+
+
+@pytest.mark.parametrize("stale_definition", [5030, None])
+def test_build_batch_repairs_glove_definition_drift_from_catalog_id(caplog, stale_definition):
+    """Regression: never put a Specialist paint kit on the Sport Gloves model."""
+
+    inv = [
+        inventory_row(
+            item_id=53150323835,
+            type="glove",
+            def_index=5030,
+            paint_index=10047,
+            model="sporty_gloves",
+        )
+    ]
+    repl = replacement(
+        catalog_id=1764,
+        type="glove",
+        def_index=stale_definition,  # catalog 1764 is Specialist Gloves 5034
+        paint_index=10033,
+        model="specialist_gloves",
+        paint_wear=0.07,
+    )
+
+    with caplog.at_level("WARNING"):
+        batch_items, plan = build_batch_and_plan(
+            STEAM_ID,
+            inv,
+            {"id:53150323835": repl},
+        )
+
+    assert batch_items[0]["definition_index"] == 5030
+    assert batch_items[0]["replacement_definition_index"] == 5034
+    assert plan["items"][0]["replacement"]["def_index"] == 5034
+    assert "Corrected replacement definition drift" in caplog.text
+
+
+def test_build_batch_rejects_nonexact_cross_model_pair_without_catalog_identity():
+    inv = [inventory_row(item_id=99, type="glove", def_index=5030, paint_index=10047)]
+    repl = replacement(
+        catalog_id=None,
+        type="glove",
+        def_index=5030,
+        paint_index=10033,
+        model="specialist_gloves",
+        paint_wear=0.07,
+    )
+
+    with pytest.raises(CosmeticsSkinPlanError, match="not an exact glove catalog item"):
+        build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
+
+
+def test_build_batch_rejects_catalog_identity_that_disagrees_with_paint():
+    inv = [inventory_row(item_id=99, type="glove", def_index=5030, paint_index=10047)]
+    repl = replacement(
+        catalog_id=1764,
+        type="glove",
+        def_index=5034,
+        paint_index=1438,
+        model="specialist_gloves",
+        paint_wear=0.07,
+    )
+
+    with pytest.raises(CosmeticsSkinPlanError, match="does not match"):
+        build_batch_and_plan(STEAM_ID, inv, {"id:99": repl})
 
 
 @pytest.mark.parametrize("wear", [0.059999, 0.800001])
@@ -185,6 +251,7 @@ def test_build_batch_rejects_wear_outside_target_finish_catalog_range(wear):
         )
     ]
     repl = replacement(
+        catalog_id=1764,
         type="glove",
         def_index=5034,
         paint_index=10033,
@@ -202,6 +269,7 @@ def test_build_batch_rejects_wear_outside_target_finish_catalog_range(wear):
 def test_build_batch_accepts_target_finish_catalog_wear_boundaries(wear):
     inv = [inventory_row(item_id=99, type="glove", def_index=5030)]
     repl = replacement(
+        catalog_id=1764,
         type="glove",
         def_index=5034,
         paint_index=10033,
@@ -244,10 +312,10 @@ def test_build_batch_emits_side_team_for_vanilla_gloves():
     ]
     replacements = {
         slot_key(inv[0]): replacement(
-            type="glove", def_index=5030, paint_index=10048, paint_wear=0.07
+            catalog_id=1722, type="glove", def_index=5030, paint_index=10048, paint_wear=0.07
         ),
         slot_key(inv[1]): replacement(
-            type="glove", def_index=5030, paint_index=10038, paint_wear=0.07
+            catalog_id=1718, type="glove", def_index=5030, paint_index=10038, paint_wear=0.07
         ),
     }
     batch_items, _plan = build_batch_and_plan(STEAM_ID, inv, replacements)
@@ -262,10 +330,10 @@ def test_build_batch_placeholder_gloves_take_team_from_originals():
     """UI default gloves are not in workspace inventory; originals carry the side."""
     replacements = {
         "placeholder:5028": replacement(
-            type="glove", def_index=5027, paint_index=10006, paint_wear=0.07
+            catalog_id=1711, type="glove", def_index=5027, paint_index=10006, paint_wear=0.07
         ),
         "placeholder:5029": replacement(
-            type="glove", def_index=5027, paint_index=10007, paint_wear=0.07
+            catalog_id=1712, type="glove", def_index=5027, paint_index=10007, paint_wear=0.07
         ),
     }
     originals = {
@@ -303,10 +371,10 @@ def test_build_batch_placeholder_gloves_infer_team_from_default_defs():
     """Even if the UI snapshot omitted observed_teams, 5028/5029 are side-fixed."""
     replacements = {
         "placeholder:5028": replacement(
-            type="glove", def_index=5032, paint_index=10008, paint_wear=0.07
+            catalog_id=1740, type="glove", def_index=5032, paint_index=10010, paint_wear=0.07
         ),
         "placeholder:5029": replacement(
-            type="glove", def_index=5032, paint_index=10009, paint_wear=0.07
+            catalog_id=1739, type="glove", def_index=5032, paint_index=10009, paint_wear=0.07
         ),
     }
     originals = {
@@ -402,6 +470,7 @@ def test_build_batch_emits_zero_item_id64_for_vanilla_inventory():
 
 def test_build_batch_accepts_placeholder_melee_without_inventory_row():
     repl = replacement(
+        catalog_id=1345,
         type="melee",
         def_index=507,
         paint_index=418,

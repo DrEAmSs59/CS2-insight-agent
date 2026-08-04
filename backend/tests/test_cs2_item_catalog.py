@@ -6,6 +6,7 @@ from app.parser.cs2_item_catalog import (
     build_player_cosmetic_inventory,
     build_player_skin_loadouts,
     resolve_cs2_item,
+    resolve_cs2_item_by_catalog_id,
     resolve_weapon_model,
     skin_for_player_weapon,
 )
@@ -29,6 +30,22 @@ def test_catalog_resolves_models_and_exact_finishes():
     assert item["name_zh"] == "M9 刺刀 | 多普勒"
     assert item["alt_name"] == "Ruby"
     assert item["image_url"].startswith("https://cdn.cstrike.app/images/")
+
+
+def test_catalog_resolves_exact_finish_by_catalog_id():
+    item = resolve_cs2_item_by_catalog_id(1764)
+
+    assert item is not None
+    assert item["def"] == 5034
+    assert item["paint"] == 10033
+    assert item["type"] == "glove"
+    assert item["catalog_exact"] is True
+
+
+def test_catalog_id_resolver_rejects_unknown_or_invalid_ids():
+    assert resolve_cs2_item_by_catalog_id(999_999_999) is None
+    assert resolve_cs2_item_by_catalog_id("not-an-id") is None
+    assert resolve_cs2_item_by_catalog_id(1764.5) is None
 
 
 def test_player_loadouts_keep_only_unambiguous_weapon_finishes():

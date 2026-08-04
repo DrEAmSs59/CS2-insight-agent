@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
-from .parser.cs2_item_catalog import resolve_cs2_item
+from .parser.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_TYPES = frozenset({"melee", "glove", "weapon"})
 # Frontend uses "melee"; closed skin-core kind is knife. Mapper treats them as the same
@@ -111,6 +114,63 @@ def _require_catalog_wear(value: Any, definition_index: int, paint_kit: int) -> 
             f"for definition_index={definition_index} paint_kit={paint_kit}"
         )
     return wear
+
+
+def _require_replacement_definition(
+    repl: dict[str, Any],
+    *,
+    item_type: str,
+    source_definition_index: int,
+    paint_kit: int,
+) -> int:
+    """Resolve a knife/glove target from redundant catalog identity fields.
+
+    ``catalog_id`` is the stable identity emitted by the picker.  Treat it as
+    authoritative when present so a stale/merged frontend ``def_index`` cannot
+    pair (for example) a Specialist Gloves paint kit with the Sport Gloves
+    model.  Legacy payloads without a catalog id remain accepted only when the
+    requested definition+paint pair is exact in the generated catalog.
+    """
+
+    catalog_id = repl.get("catalog_id")
+    catalog_target = resolve_cs2_item_by_catalog_id(catalog_id)
+    if catalog_target is not None:
+        try:
+            requested_definition: int | None = _require_int(
+                repl.get("def_index"), "replacement.def_index"
+            )
+        except CosmeticsSkinPlanError:
+            requested_definition = None
+        target_type = str(catalog_target.get("type") or "")
+        target_paint = _require_int(catalog_target.get("paint"), "catalog.paint")
+        target_definition = _require_int(catalog_target.get("def"), "catalog.def")
+        if target_type != item_type or target_paint != paint_kit:
+            raise CosmeticsSkinPlanError(
+                f"replacement catalog_id={catalog_id} does not match "
+                f"type={item_type} paint_kit={paint_kit}"
+            )
+        if target_definition != requested_definition:
+            logger.warning(
+                "Corrected replacement definition drift for %s catalog_id=%s "
+                "(source=%s): %s -> %s",
+                item_type,
+                catalog_id,
+                source_definition_index,
+                requested_definition,
+                target_definition,
+            )
+        return target_definition
+
+    requested_definition = _require_int(repl.get("def_index"), "replacement.def_index")
+    requested_target = resolve_cs2_item(requested_definition, paint_kit)
+    exact = bool(requested_target and requested_target.get("catalog_exact"))
+    target_type = str((requested_target or {}).get("type") or "")
+    if not exact or target_type != item_type:
+        raise CosmeticsSkinPlanError(
+            f"replacement definition_index={requested_definition} paint_kit={paint_kit} "
+            f"is not an exact {item_type} catalog item"
+        )
+    return requested_definition
 
 
 def _glove_batch_team(inventory_row: dict[str, Any]) -> str | None:
@@ -260,8 +320,11 @@ def build_batch_and_plan(
         pattern_seed = _require_float(repl.get("paint_seed"), "pattern_seed")
         replacement_definition_index = definition_index
         if item_type in _CROSS_MODEL_TYPES:
-            replacement_definition_index = _require_int(
-                repl.get("def_index"), "replacement.def_index"
+            replacement_definition_index = _require_replacement_definition(
+                repl,
+                item_type=item_type,
+                source_definition_index=definition_index,
+                paint_kit=paint_kit,
             )
         wear = _require_catalog_wear(
             repl.get("paint_wear"), replacement_definition_index, paint_kit
@@ -301,11 +364,17 @@ def build_batch_and_plan(
         else:
             plan_original = _display_fields(inventory_row)
 
+        plan_replacement = _display_fields(repl)
+        if item_type in _CROSS_MODEL_TYPES:
+            # Persist the catalog-resolved identity, not a stale frontend def,
+            # so later plan replays remain canonical without another repair.
+            plan_replacement["def_index"] = replacement_definition_index
+
         plan_entries.append(
             {
                 "slot_key": str(key),
                 "original": plan_original,
-                "replacement": _display_fields(repl),
+                "replacement": plan_replacement,
             }
         )
 
