@@ -560,13 +560,33 @@ def _sample_player_context(
                         "stickers": resolved_stickers,
                         "evidence_observations": 0,
                         "_owner_observation_ticks": set(),
+                        "_snapshot_tick": tick,
                     })
                     previous = observed_items.get(key)
                     if previous is None:
                         observed_items[key] = observed_entry
                         previous = observed_entry
-                    elif len(resolved_stickers) > len(previous.get("stickers") or []):
-                        previous["stickers"] = resolved_stickers
+                    else:
+                        observed_teams = set(previous.get("observed_teams") or [])
+                        observation_ticks = set(previous.get("_owner_observation_ticks") or set())
+                        previous_stickers = list(previous.get("stickers") or [])
+                        previous_tick = _safe_int(previous.get("_snapshot_tick"))
+                        # Each sampled row is an already merged baseline -> entity-delta
+                        # snapshot. For the same economy asset, the latest snapshot must
+                        # replace the older cosmetic state wholesale, including an explicit
+                        # paint kit 0. This is deliberately not a non-zero fallback.
+                        if tick is not None and (previous_tick is None or tick > previous_tick):
+                            observed_entry["observed_teams"] = sorted(
+                                observed_teams | set(observed_entry.get("observed_teams") or []),
+                                key=("t", "ct").index,
+                            )
+                            observed_entry["_owner_observation_ticks"] = observation_ticks
+                            if len(previous_stickers) > len(resolved_stickers):
+                                observed_entry["stickers"] = previous_stickers
+                            observed_items[key] = observed_entry
+                            previous = observed_entry
+                        elif len(resolved_stickers) > len(previous_stickers):
+                            previous["stickers"] = resolved_stickers
                     if team and account_owner == steamid:
                         previous["observed_teams"] = sorted(
                             set(previous.get("observed_teams") or []) | {team},
@@ -735,6 +755,7 @@ def _sample_player_context(
     }
     for entry in observed_items.values():
         entry["evidence_observations"] = len(entry.pop("_owner_observation_ticks", set()))
+        entry.pop("_snapshot_tick", None)
     for entry in default_weapons.values():
         entry["evidence_observations"] = len(entry.pop("_owner_observation_ticks", set()))
     for collection in (pawn_gloves, agents):
@@ -837,13 +858,24 @@ def build_player_cosmetic_inventory(
             )
         ), None)
         if matching is not None:
+            # parse_skins() is useful ownership/string-table evidence, but the
+            # sampled weapon entity is the protocol-final baseline -> delta state.
+            # Replace the cosmetic snapshot for this exact item ID rather than
+            # allowing a stale/default skin-table value to win.  Preserve a custom
+            # name only when the entity snapshot does not expose one.
+            custom_name = matching.get("custom_name")
+            prior_teams = set(matching.get("observed_teams") or [])
+            prior_stickers = list(matching.get("stickers") or [])
+            matching.update(observed_entry)
+            if custom_name and not matching.get("custom_name"):
+                matching["custom_name"] = custom_name
             matching["observed_teams"] = sorted(
-                set(matching.get("observed_teams") or [])
+                prior_teams
                 | set(observed_entry.get("observed_teams") or []),
                 key=("t", "ct").index,
             )
-            if len(observed_entry.get("stickers") or []) > len(matching.get("stickers") or []):
-                matching["stickers"] = observed_entry["stickers"]
+            if len(prior_stickers) > len(matching.get("stickers") or []):
+                matching["stickers"] = prior_stickers
             continue
         # A real asset ID plus its economy account is sufficient for weapons.
         # Melee additionally needs that account's player to hold the asset at two

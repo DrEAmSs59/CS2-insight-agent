@@ -114,6 +114,89 @@ def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits():
     assert item["ownership_evidence"] == "demo_skin_table"
 
 
+def test_entity_snapshot_replaces_stale_skin_table_cosmetics_for_same_asset():
+    owner = "76561198000000001"
+    item_id = 53009600926
+
+    class FakeParser:
+        def parse_skins(self):
+            return {
+                "steamid": [owner],
+                "def_index": [515],
+                "item_id": [item_id],
+                "paint_index": [0],
+                "paint_seed": [0],
+                "paint_wear": [0.0],
+                "custom_name": ["baseline-proof"],
+            }
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [42, 84]
+            return {
+                "steamid": [owner, owner],
+                "tick": [42, 84],
+                "item_id_high": [item_id >> 32] * 2,
+                "item_id_low": [item_id & 0xFFFFFFFF] * 2,
+                "Weapon.m_iAccountID": [account_id(owner)] * 2,
+                "weapon_stickers": [[], []],
+                "item_def_idx": [515, 515],
+                "weapon_skin_id": [415, 415],
+                "weapon_paint_seed": [602, 602],
+                "weapon_float": [0.027376356, 0.027376356],
+                "team_num": [2, 2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42, 84])
+    knife = next(item for item in inventory[owner] if item.get("item_id") == item_id)
+
+    assert knife["def_index"] == 515
+    assert knife["paint_index"] == 415
+    assert knife["paint_seed"] == 602
+    assert knife["paint_wear"] == 0.027376
+    assert knife["custom_name"] == "baseline-proof"
+    assert knife["ownership_evidence"] == "weapon_account_id"
+
+
+def test_latest_entity_snapshot_can_explicitly_clear_skin_table_cosmetics():
+    owner = "76561198000000001"
+    item_id = 53009600926
+
+    class FakeParser:
+        def parse_skins(self):
+            return {
+                "steamid": [owner],
+                "def_index": [515],
+                "item_id": [item_id],
+                "paint_index": [415],
+                "paint_seed": [602],
+                "paint_wear": [0.027376356],
+                "custom_name": [None],
+            }
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [42, 84]
+            return {
+                "steamid": [owner, owner],
+                "tick": [42, 84],
+                "item_id_high": [item_id >> 32] * 2,
+                "item_id_low": [item_id & 0xFFFFFFFF] * 2,
+                "Weapon.m_iAccountID": [account_id(owner)] * 2,
+                "weapon_stickers": [[], []],
+                "item_def_idx": [515, 515],
+                "weapon_skin_id": [415, 0],
+                "weapon_paint_seed": [602, 0],
+                "weapon_float": [0.027376356, 0.0],
+                "team_num": [2, 2],
+            }
+
+    inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42, 84])
+    knife = next(item for item in inventory[owner] if item.get("item_id") == item_id)
+
+    assert knife["paint_index"] == 0
+    assert knife["paint_seed"] == 0
+    assert knife["paint_wear"] == 0.0
+
+
 def test_cosmetic_inventory_attaches_only_catalogued_stickers_to_the_exact_owned_asset():
     item_id = 53009600926
 
