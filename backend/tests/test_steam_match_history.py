@@ -10,8 +10,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.steam_match_history import (
+    _animated_avatar_url_from_profile_html,
     _official_steam_avatar_url,
+    _steam_public_profile_cache,
     _decompress_bz2_atomic,
+    fetch_public_player_summaries,
     is_demo_expired,
     demo_expires_at_iso,
     map_enum_to_name,
@@ -27,9 +30,74 @@ from app.env_utils import AppConfig
 def test_official_steam_avatar_url_accepts_only_https_steam_cdn():
     avatar = "https://avatars.cloudflare.steamstatic.com/abc_full.jpg"
     assert _official_steam_avatar_url(avatar) == avatar
+    animated = (
+        "https://shared.fastly.steamstatic.com/community_assets/images/items/2928650/"
+        "119373dde20ed21e9e784e98323cfd6ee4ef264d.gif"
+    )
+    assert _official_steam_avatar_url(animated) == animated
     assert _official_steam_avatar_url("//avatars.steamstatic.com/abc.jpg") == "https://avatars.steamstatic.com/abc.jpg"
     assert _official_steam_avatar_url("http://avatars.steamstatic.com/abc.jpg") == ""
     assert _official_steam_avatar_url("https://example.com/abc.jpg") == ""
+
+
+def test_animated_avatar_url_is_scoped_to_profile_avatar_container():
+    animated = (
+        "https://shared.fastly.steamstatic.com/community_assets/images/items/2928650/"
+        "119373dde20ed21e9e784e98323cfd6ee4ef264d.gif"
+    )
+    html = f"""
+        <img src="https://shared.fastly.steamstatic.com/unrelated.gif">
+        <div class="playerAvatarAutoSizeInner">
+            <img src="{animated}">
+        </div>
+    """
+
+    assert _animated_avatar_url_from_profile_html(html) == animated
+
+
+def test_public_player_summary_prefers_profile_animated_avatar(monkeypatch):
+    steam_id = "76561197996678278"
+    static = "https://avatars.fastly.steamstatic.com/static_full.jpg"
+    animated = (
+        "https://shared.fastly.steamstatic.com/community_assets/images/items/2928650/"
+        "119373dde20ed21e9e784e98323cfd6ee4ef264d.gif"
+    )
+    requested_urls: list[str] = []
+
+    class FakeResponse:
+        def __init__(self, *, payload=None, text=""):
+            self._payload = payload
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _traceback):
+            return None
+
+        async def get(self, url, **_kwargs):
+            requested_urls.append(url)
+            if "/miniprofile/" in url:
+                return FakeResponse(payload={"persona_name": "TeSeS", "avatar_url": static})
+            return FakeResponse(text=f'<div class="playerAvatarAutoSizeInner"><img src="{animated}"></div>')
+
+    monkeypatch.setattr("app.steam_match_history.httpx.AsyncClient", lambda **_kwargs: FakeClient())
+    _steam_public_profile_cache.clear()
+
+    result = asyncio.run(fetch_public_player_summaries([steam_id]))
+
+    assert result == [{"steamid": steam_id, "personaname": "TeSeS", "avatarfull": animated}]
+    assert requested_urls == [
+        "https://steamcommunity.com/miniprofile/36412550/json",
+        f"https://steamcommunity.com/profiles/{steam_id}/",
+    ]
 
 
 def test_player_avatar_route_is_disabled_without_network_opt_in(monkeypatch):

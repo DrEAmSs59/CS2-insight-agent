@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -207,7 +208,7 @@ async def fetch_player_summary(api_key: str, steam_id64: str) -> dict:
 
 
 def _official_steam_avatar_url(value: object) -> str:
-    """Return only Steam-owned avatar CDN URLs supplied by the mini-profile API."""
+    """Return only Steam-owned avatar CDN URLs supplied by Steam public pages."""
     url = str(value or "").strip()
     if url.startswith("//"):
         url = f"https:{url}"
@@ -224,8 +225,53 @@ def _official_steam_avatar_url(value: object) -> str:
     return url if parsed.scheme == "https" and allowed else ""
 
 
+def _official_steam_animated_avatar_url(value: object) -> str:
+    url = _official_steam_avatar_url(value)
+    if not url:
+        return ""
+    return url if urlparse(url).path.lower().endswith(".gif") else ""
+
+
+class _SteamProfileAnimatedAvatarParser(HTMLParser):
+    """Extract the animated avatar nested inside Steam's profile avatar container."""
+
+    _VOID_TAGS = {
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "source", "track", "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.avatar_url = ""
+        self._container_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        classes = str(attributes.get("class") or "").split()
+        if self._container_depth == 0 and "playerAvatarAutoSizeInner" in classes:
+            self._container_depth = 1
+        elif self._container_depth and tag not in self._VOID_TAGS:
+            self._container_depth += 1
+
+        if self._container_depth and tag == "img" and not self.avatar_url:
+            self.avatar_url = _official_steam_animated_avatar_url(
+                attributes.get("src") or attributes.get("data-src")
+            )
+
+    def handle_endtag(self, _tag: str) -> None:
+        if self._container_depth:
+            self._container_depth -= 1
+
+
+def _animated_avatar_url_from_profile_html(profile_html: str) -> str:
+    parser = _SteamProfileAnimatedAvatarParser()
+    parser.feed(str(profile_html or ""))
+    parser.close()
+    return parser.avatar_url
+
+
 async def fetch_public_player_summaries(steam_ids64: list[str]) -> list[dict]:
-    """Resolve public mini-profile avatars without requiring a Steam Web API key."""
+    """Resolve public static or animated avatars without requiring a Steam Web API key."""
     steam_ids = list(dict.fromkeys(
         str(value).strip()
         for value in steam_ids64
@@ -258,22 +304,42 @@ async def fetch_public_player_summaries(steam_ids64: list[str]) -> list[dict]:
                 account_id = int(steam_id64) - STEAM_ID64_ACCOUNT_BASE
                 if account_id < 0:
                     return steam_id64, None
+            except (TypeError, ValueError):
+                return steam_id64, None
+
+            payload: dict = {}
+            try:
                 response = await client.get(f"{STEAM_COMMUNITY_BASE}/miniprofile/{account_id}/json")
                 response.raise_for_status()
-                payload = response.json()
-                avatar_url = _official_steam_avatar_url(
-                    payload.get("avatar_url") or payload.get("avatarfull")
-                )
-                if not avatar_url:
-                    return steam_id64, None
-                return steam_id64, {
-                    "steamid": steam_id64,
-                    "personaname": str(payload.get("persona_name") or payload.get("personaname") or ""),
-                    "avatarfull": avatar_url,
-                }
+                decoded = response.json()
+                if isinstance(decoded, dict):
+                    payload = decoded
             except (httpx.HTTPError, TypeError, ValueError):
                 logger.debug("Public Steam mini-profile unavailable for %s", steam_id64, exc_info=True)
+
+            avatar_url = _official_steam_avatar_url(
+                payload.get("avatar_url") or payload.get("avatarfull")
+            )
+            if not _official_steam_animated_avatar_url(avatar_url):
+                try:
+                    profile_response = await client.get(
+                        f"{STEAM_COMMUNITY_BASE}/profiles/{steam_id64}/",
+                        headers={"Accept": "text/html,application/xhtml+xml"},
+                    )
+                    profile_response.raise_for_status()
+                    animated_url = _animated_avatar_url_from_profile_html(profile_response.text)
+                    if animated_url:
+                        avatar_url = animated_url
+                except httpx.HTTPError:
+                    logger.debug("Public Steam profile unavailable for %s", steam_id64, exc_info=True)
+
+            if not avatar_url:
                 return steam_id64, None
+            return steam_id64, {
+                "steamid": steam_id64,
+                "personaname": str(payload.get("persona_name") or payload.get("personaname") or ""),
+                "avatarfull": avatar_url,
+            }
 
         async with client:
             fetched = await asyncio.gather(*(fetch_one(steam_id) for steam_id in missing))
