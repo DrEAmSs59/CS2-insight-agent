@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
 
@@ -19,26 +19,43 @@ export default function ExperimentalPovSection({
   className,
 }) {
   const t = useT();
-  const [povNeedsRestore, setPovNeedsRestore] = useState(false);
+  const [povStatus, setPovStatus] = useState(null);
   const [povStatusLoading, setPovStatusLoading] = useState(false);
+  const [povStatusError, setPovStatusError] = useState("");
   const [povRestoreBusy, setPovRestoreBusy] = useState(false);
+  const [povRestoreResult, setPovRestoreResult] = useState(null);
 
   const radarVal = povRadarMode === 0 ? 0 : -1;
 
+  const loadPovStatus = useCallback(async () => {
+    setPovStatusLoading(true);
+    setPovStatusError("");
+    try {
+      const { data } = await API.get("experimental/pov/status");
+      setPovStatus(data && typeof data === "object" ? data : null);
+    } catch (error) {
+      setPovStatus(null);
+      setPovStatusError(
+        error?.response?.data?.detail || error?.message || t("pov.statusError"),
+      );
+    } finally {
+      setPovStatusLoading(false);
+    }
+  }, [t]);
+
   useEffect(() => {
     if (!visible) return;
-    setPovStatusLoading(true);
-    (async () => {
-      try {
-        const { data } = await API.get("experimental/pov/status");
-        setPovNeedsRestore(!!data?.needs_restore);
-      } catch {
-        setPovNeedsRestore(false);
-      } finally {
-        setPovStatusLoading(false);
-      }
-    })();
-  }, [visible, experimentalPovEnabled]);
+    setPovRestoreResult(null);
+    void loadPovStatus();
+  }, [visible, experimentalPovEnabled, loadPovStatus]);
+
+  const povNeedsRestore = Boolean(povStatus?.needs_restore);
+  const restoreState = String(povStatus?.state || "managed").toLowerCase();
+  const restoreNeededKey = restoreState === "orphaned"
+    ? "pov.restoreOrphaned"
+    : restoreState === "corrupted"
+      ? "pov.restoreCorrupted"
+      : "pov.restoreManaged";
 
   const rootClass =
     className ??
@@ -109,19 +126,66 @@ export default function ExperimentalPovSection({
         {t("pov.disclaimer")}
       </div>
 
+      {povStatusError && !povStatusLoading ? (
+        <div className="mt-3 rounded border border-amber-500/35 bg-cs2-amber-surface px-2.5 py-2 text-[11px] text-cs2-amber-on-surface">
+          <p>{t("pov.statusError")}</p>
+          <p className="mt-1 break-all text-[10px] opacity-85">{povStatusError}</p>
+          <button
+            type="button"
+            onClick={() => void loadPovStatus()}
+            className="mt-2 rounded border border-amber-400/40 px-2 py-1 text-[11px] font-semibold hover:bg-cs2-amber-surface"
+          >
+            {t("pov.statusRetryBtn")}
+          </button>
+        </div>
+      ) : null}
+
       {povNeedsRestore && !povStatusLoading ? (
         <div className="mt-3 rounded border border-rose-500/35 bg-cs2-rose-surface px-2.5 py-2 text-[11px] text-cs2-rose-on-surface">
-          <p>{t("pov.restoreNeeded")}</p>
+          <p className="font-semibold">{t(restoreNeededKey)}</p>
+          <p className="mt-1 text-[10px] opacity-85">
+            {povStatus?.cs2_running ? t("pov.restoreCloseCs2") : t("pov.restoreReady")}
+          </p>
+          {povRestoreResult?.tone === "error" ? (
+            <p className="mt-2 break-all rounded border border-rose-400/30 bg-black/10 px-2 py-1.5 text-[10px]">
+              {t("pov.restoreFailed", { msg: povRestoreResult.message })}
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={povRestoreBusy}
             onClick={async () => {
               setPovRestoreBusy(true);
+              setPovRestoreResult(null);
               try {
-                await API.post("experimental/pov/restore");
-                setPovNeedsRestore(false);
-              } catch {
-                /* ignore */
+                const { data } = await API.post("experimental/pov/restore");
+                const restore = data?.restore && typeof data.restore === "object"
+                  ? data.restore
+                  : {};
+                if (data?.ok !== true || restore.verified !== true) {
+                  throw new Error(restore.error || t("pov.restoreUnverified"));
+                }
+                const mode = String(restore.verification_mode || "none").toLowerCase();
+                const messageKey = mode === "strict"
+                  ? "pov.restoreStrictSuccess"
+                  : mode === "semantic"
+                    ? "pov.restoreSemanticSuccess"
+                    : "pov.restoreNoneSuccess";
+                setPovRestoreResult({ tone: "success", messageKey });
+                setPovStatus((current) => ({
+                  ...(current || {}),
+                  state: "clean",
+                  needs_restore: false,
+                  installed: false,
+                  gameinfo_patched: false,
+                  manifest_exists: false,
+                  backup_exists: false,
+                }));
+              } catch (error) {
+                setPovRestoreResult({
+                  tone: "error",
+                  message: error?.response?.data?.detail || error?.message || t("common.requestFail"),
+                });
               } finally {
                 setPovRestoreBusy(false);
               }
@@ -130,6 +194,12 @@ export default function ExperimentalPovSection({
           >
             {povRestoreBusy ? t("pov.restoringBtn") : t("pov.restoreBtn")}
           </button>
+        </div>
+      ) : null}
+
+      {!povNeedsRestore && povRestoreResult?.tone === "success" ? (
+        <div className="mt-3 rounded border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-400">
+          {t(povRestoreResult.messageKey)}
         </div>
       ) : null}
     </section>

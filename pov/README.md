@@ -25,7 +25,11 @@ The baked Panorama script also drives the rest of the POV HUD:
 While POV is active, Insight also forces `cl_hud_color 12` (teammate / player
 color) through `POV_CORE_FORCED_COMMANDS`, so stock HA accents follow slot
 colors. Radar scale/centering and other POV cvars stay in that same list;
-session restore still only rolls back `gameinfo.gi` + `pov.vpk` (unchanged).
+Session restore rolls back `gameinfo.gi` and removes the fixed target `pov.vpk`.
+When the manifest and backup are valid it performs a byte-verified restore. If
+those records are missing or stale, it removes only the Agent-owned
+`Game csgo/pov.vpk` search-path entry from the current `gameinfo.gi`, preserving
+all other Steam or user changes.
 
 For demos with a decodable `svc_UserCmds` chain, the same native Panorama
 layer renders the observed pawn's W/A/S/D, Shift (walk), Ctrl (crouch), Space
@@ -48,6 +52,8 @@ hidden rather than substituting motion inference. Radar fails closed the same
 way: if the map transform or tick samples cannot be extracted, the custom radar
 HUD stays hidden while voice continues to work.
 
-If a demo has no usable voice packets, parsing fails, or the compact schedule
-does not fit the fixed template slot, installation falls back to
-`pov_default.vpk` rather than installing a partial package.
+If a demo has no usable voice packets, the generated package keeps a
+roster-only payload so radar and kill-feedback tracks can still attach. If the
+dynamic build fails or the compact payload does not fit the fixed template
+slot, installation falls back to `pov_default.vpk` rather than installing a
+partial package.

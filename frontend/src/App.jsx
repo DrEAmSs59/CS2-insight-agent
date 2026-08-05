@@ -2150,6 +2150,7 @@ export default function App() {
               configRecoveryNeeded,
               povEnabled: session.experimental_pov_enabled,
               povRecoveryNeeded,
+              povRecoveryMode: reportedRecovery?.pov_restore?.verification_mode,
             })));
             setRecordingBlockedCode("RECORDING_CS2_EXITED");
             setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });

@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import demo_playback_service as playback
+from app import pov_hud_manager
 
 
 class _FakePovManager:
@@ -205,3 +206,34 @@ def test_pov_launch_failure_rolls_back_files(monkeypatch, tmp_path: Path):
     assert manager.restored == 1
     assert list((tmp_path / "game" / "csgo").glob("_insight_preview_*")) == []
     assert service._active is None
+
+
+def test_normal_playback_repairs_orphaned_pov_residue_before_launch(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, game_root = _paths(tmp_path)
+    csgo = game_root / "csgo"
+    gameinfo = csgo / "gameinfo.gi"
+    gameinfo.write_text(
+        'FileSystem\n{\n  SearchPaths\n  {\n    Game csgo/pov.vpk\n    Game csgo\n  }\n}\n',
+        encoding="utf-8",
+    )
+    (csgo / "pov.vpk").write_bytes(b"residue")
+    process = _FakeProcess()
+
+    monkeypatch.setattr(playback, "PovHudManager", pov_hud_manager.PovHudManager)
+    monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
+    monkeypatch.setattr(pov_hud_manager, "is_cs2_running", lambda: False)
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    result = service.launch(demo, cfg)
+
+    assert result["ok"] is True
+    assert "csgo/pov.vpk" not in gameinfo.read_text(encoding="utf-8")
+    assert not (csgo / "pov.vpk").exists()
+    session = service._active
+    assert session is not None
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)

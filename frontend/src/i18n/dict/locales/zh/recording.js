@@ -366,7 +366,7 @@ export default {
   "record.commonExpBadge": "实验性",
   "record.commonExpTitle": "实验功能：POV HUD",
   "record.commonExpDesc": "影响说明：启用后以更接近真实第一人称的 HUD 资源录制本地 Demo，与普通观战 HUD 管线不同。",
-  "record.commonExpStatus": "当前状态：{status}。兼容性：需本地 Demo、临时改写 gameinfo 与 pov.vpk，仅用于离线回放；勿连接联机服务器。",
+  "record.commonExpStatus": "当前状态：{status}。兼容性：需本地 Demo；Agent 会临时安装 pov.vpk 并在 gameinfo.gi 中加入加载项，结束后自动恢复或安全清理；仅用于离线回放，勿连接联机服务器。",
   "record.commonExpStatusOn": "已启用 POV 特殊录制模式",
   "record.commonExpStatusOff": "未启用（使用标准观战 HUD 管线）",
   "record.commonSecBasicCamera": "基础镜头参数",

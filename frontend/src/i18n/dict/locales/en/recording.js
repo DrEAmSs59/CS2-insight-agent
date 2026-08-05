@@ -366,7 +366,7 @@ export default {
   "record.commonExpBadge": "Experimental",
   "record.commonExpTitle": "Experimental: POV HUD",
   "record.commonExpDesc": "Effect: when enabled, records local demos using HUD assets closer to real first-person view — different from the standard spectator HUD pipeline.",
-  "record.commonExpStatus": "Current status: {status}. Compatibility: requires a local demo, temporary gameinfo and pov.vpk rewrite, offline playback only — do not connect to online servers.",
+  "record.commonExpStatus": "Current status: {status}. Compatibility: requires a local demo. The Agent temporarily installs pov.vpk and adds a gameinfo.gi load entry, then restores or safely cleans them on exit. Offline playback only — do not connect to online servers.",
   "record.commonExpStatusOn": "POV recording mode active",
   "record.commonExpStatusOff": "Disabled (standard spectator HUD pipeline)",
   "record.commonSecBasicCamera": "Basic camera params",

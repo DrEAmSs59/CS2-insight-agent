@@ -52,6 +52,8 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
         verified: true,
         gameinfo_restored: true,
         pov_vpk_removed: true,
+        verification_mode: "strict",
+        byte_verified: true,
         expected_gameinfo_sha256: "a".repeat(64),
         actual_gameinfo_sha256: "a".repeat(64),
       },
@@ -62,7 +64,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     await screen.findByRole("button", { name: /实验功能：POV HUD/ });
     fireEvent.click(screen.getByRole("button", { name: /实验功能：POV HUD/ }));
 
-    await screen.findByText("POV 文件已确认恢复");
+    await screen.findByText("POV 文件已按备份完整恢复");
     expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
       id: 7,
       povHud: expect.objectContaining({ enabled: true }),

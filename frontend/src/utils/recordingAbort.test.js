@@ -49,6 +49,18 @@ describe("recording abort outcome", () => {
     expect(unexpectedCs2ExitRecoveryMessageKey({ povEnabled: true })).toBe(
       "app.unexpectedCs2ExitRecoveredWithPov",
     );
+    expect(unexpectedCs2ExitRecoveryMessageKey({
+      povEnabled: true,
+      povRecoveryMode: "semantic",
+    })).toBe("app.unexpectedCs2ExitRecoveredWithPovCleanup");
+    expect(unexpectedCs2ExitRecoveryMessageKey({
+      povEnabled: true,
+      povRecoveryMode: "strict",
+    })).toBe("app.unexpectedCs2ExitRecoveredWithPovStrict");
+    expect(unexpectedCs2ExitRecoveryMessageKey({
+      povEnabled: true,
+      povRecoveryMode: "none",
+    })).toBe("app.unexpectedCs2ExitRecoveredWithPovNoChange");
     expect(unexpectedCs2ExitRecoveryMessageKey({ configRecoveryNeeded: true })).toBe(
       "app.unexpectedCs2ExitConfigPending",
     );

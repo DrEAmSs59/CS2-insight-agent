@@ -38,12 +38,22 @@ export function unexpectedCs2ExitRecoveryMessageKey({
   configRecoveryNeeded = false,
   povEnabled = false,
   povRecoveryNeeded = false,
+  povRecoveryMode = "",
 } = {}) {
   if (configRecoveryNeeded && povEnabled && povRecoveryNeeded) {
     return "app.unexpectedCs2ExitBothPending";
   }
   if (configRecoveryNeeded) return "app.unexpectedCs2ExitConfigPending";
   if (povEnabled && povRecoveryNeeded) return "app.unexpectedCs2ExitPovPending";
+  if (povEnabled && String(povRecoveryMode).toLowerCase() === "semantic") {
+    return "app.unexpectedCs2ExitRecoveredWithPovCleanup";
+  }
+  if (povEnabled && String(povRecoveryMode).toLowerCase() === "strict") {
+    return "app.unexpectedCs2ExitRecoveredWithPovStrict";
+  }
+  if (povEnabled && String(povRecoveryMode).toLowerCase() === "none") {
+    return "app.unexpectedCs2ExitRecoveredWithPovNoChange";
+  }
   if (povEnabled) return "app.unexpectedCs2ExitRecoveredWithPov";
   return "app.unexpectedCs2ExitRecovered";
 }

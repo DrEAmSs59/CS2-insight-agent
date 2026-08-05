@@ -105,7 +105,7 @@ export default {
   "guide.faq15q": "CS2 路径没有自动检测到？",
   "guide.faq15a": "手动在设置中填写完整路径。默认 Steam 路径通常为 C:\\Program Files (x86)\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\game\\bin\\win64\\cs2.exe；若游戏库在其他盘，将盘符替换即可。注意：录制开始后请勿干预键鼠操作，否则可能覆盖玩家本机的游戏设置。",
   "guide.faq16q": "实验性功能 POV HUD 是什么？",
-  "guide.faq16a": "POV HUD 能让 Demo 画面更接近实际个人游戏视角。在「常用参数管理」→「实验性功能」中勾选 POV 后，录制时会临时安装项目自带的 pov.vpk 并修改 gameinfo.gi 搜索路径，录制结束后程序自动恢复。若异常退出导致修改未恢复，可在同一页面点击「恢复 POV 修改」（需先关闭 CS2）。",
+  "guide.faq16a": "POV HUD 能让 Demo 画面更接近实际个人游戏视角。在「常用参数管理」→「实验性功能」中勾选 POV 后，录制时会临时安装 Agent 自带的 pov.vpk，并在 gameinfo.gi 中加入加载项。结束后若本次备份有效，会完整恢复并核验；若恢复记录缺失或损坏，只会移除 Agent 的加载项和临时文件，不覆盖其他 gameinfo.gi 内容。若仍有残留，可在同一页面点击「恢复 POV 修改」（需先关闭 CS2）。",
   "guide.faq17q": "录制出来的视频是第三人称视角？",
   "guide.faq17a": "程序会自动切换为第一人称视角。若出现问题，请在解析结果中确认选择的目标玩家名称与 Demo 中完全一致。",
   "guide.faq18q": "解析很慢怎么办？",

@@ -34,6 +34,35 @@ export default function DemoPlaybackRestoreModal({
   const verified = Boolean(final && restore?.verified);
   const failed = final && !verified;
   const canClose = final || Boolean(pollError);
+  const verificationMode = String(restore?.verification_mode || "").toLowerCase();
+  const strictRestore = verified && verificationMode === "strict" && restore?.byte_verified === true;
+  const semanticRestore = verified && verificationMode === "semantic";
+  const noRestoreNeeded = verified && verificationMode === "none";
+  const successTitleKey = strictRestore
+    ? "playDemo.restoreStrictTitle"
+    : semanticRestore
+      ? "playDemo.restoreSemanticTitle"
+      : noRestoreNeeded
+        ? "playDemo.restoreNoneTitle"
+        : "playDemo.restoreVerifiedTitle";
+  const successDescKey = strictRestore
+    ? "playDemo.restoreStrictDesc"
+    : semanticRestore
+      ? "playDemo.restoreSemanticDesc"
+      : noRestoreNeeded
+        ? "playDemo.restoreNoneDesc"
+        : "playDemo.restoreVerifiedDesc";
+  const gameinfoSuccessKey = strictRestore
+    ? "playDemo.gameinfoStrictRestored"
+    : semanticRestore
+      ? "playDemo.gameinfoSemanticCleaned"
+      : noRestoreNeeded
+        ? "playDemo.gameinfoNoRestoreNeeded"
+        : "playDemo.gameinfoRestored";
+  const showHashes = Boolean(
+    (strictRestore || failed)
+    && (restore?.expected_gameinfo_sha256 || restore?.actual_gameinfo_sha256),
+  );
 
   return (
     <Modal
@@ -66,10 +95,10 @@ export default function DemoPlaybackRestoreModal({
         ) : (
           <div className={`rounded-lg border px-4 py-3 ${verified ? "border-emerald-500/35 bg-emerald-500/10" : "border-rose-500/35 bg-cs2-rose-surface"}`}>
             <p className={`text-sm font-bold ${verified ? "text-emerald-400" : "text-cs2-rose-on-surface"}`}>
-              {verified ? t("playDemo.restoreVerifiedTitle") : t("playDemo.restoreFailedTitle")}
+              {verified ? t(successTitleKey) : t("playDemo.restoreFailedTitle")}
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-              {verified ? t("playDemo.restoreVerifiedDesc") : t("playDemo.restoreFailedDesc")}
+              {verified ? t(successDescKey) : t("playDemo.restoreFailedDesc")}
             </p>
           </div>
         )}
@@ -79,7 +108,7 @@ export default function DemoPlaybackRestoreModal({
             <FactRow
               label="gameinfo.gi"
               value={restore.gameinfo_restored}
-              successText={t("playDemo.gameinfoRestored")}
+              successText={t(gameinfoSuccessKey)}
               failureText={t("playDemo.gameinfoNotRestored")}
               unknownText={t("playDemo.restoreUnknown")}
             />
@@ -90,7 +119,7 @@ export default function DemoPlaybackRestoreModal({
               failureText={t("playDemo.vpkStillPresent")}
               unknownText={t("playDemo.restoreUnknown")}
             />
-            {restore.expected_gameinfo_sha256 || restore.actual_gameinfo_sha256 ? (
+            {showHashes ? (
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 text-[10px] text-cs2-text-muted">
                 <p className="break-all">{t("playDemo.expectedHash")}: {restore.expected_gameinfo_sha256 || "—"}</p>
                 <p className="mt-1 break-all">{t("playDemo.actualHash")}: {restore.actual_gameinfo_sha256 || "—"}</p>
