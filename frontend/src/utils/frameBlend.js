@@ -1,5 +1,5 @@
 const FRAME_RATE_TOLERANCE = 0.5;
-const MIN_FRAME_BLEND_SOURCE_FPS = 120;
+const MIN_FRAME_BLEND_SOURCE_FPS = 1;
 
 function nearFrameRate(actual, expected) {
   const value = Number(actual);
@@ -8,7 +8,7 @@ function nearFrameRate(actual, expected) {
 
 export function isFrameBlendSourceSupported(sourceFps) {
   const value = Number(sourceFps);
-  return Number.isFinite(value) && value >= MIN_FRAME_BLEND_SOURCE_FPS - FRAME_RATE_TOLERANCE;
+  return Number.isFinite(value) && value >= MIN_FRAME_BLEND_SOURCE_FPS;
 }
 
 export function getClipFps(clip) {
@@ -29,14 +29,23 @@ export function summarizeFrameBlendSources(clips = []) {
 }
 
 /**
- * Return the deterministic high-frame delivery plan supported by the backend.
- * A null result means the legacy/manual frame-blend setting should remain in use.
+ * Preview the source-aware integer-multiple policy implemented by the custom
+ * FFmpeg runtime. The runtime remains authoritative and preserves rational FPS.
  */
 export function getHighFrameBlendPlan(sourceFps, deliveryFps) {
   if (!nearFrameRate(deliveryFps, 60)) return null;
-  if (nearFrameRate(sourceFps, 240)) return { sourceFps: 240, deliveryFps: 60, frames: 4 };
-  if (nearFrameRate(sourceFps, 120)) return { sourceFps: 120, deliveryFps: 60, frames: 2 };
-  return null;
+  const source = Number(sourceFps);
+  if (!Number.isFinite(source) || source < MIN_FRAME_BLEND_SOURCE_FPS) return null;
+  const minimumTarget = source < 56 ? 200 : 300;
+  const multiplier = source >= 300 ? 1 : Math.max(1, Math.ceil(minimumTarget / source));
+  const targetFps = source * multiplier;
+  return {
+    sourceFps: source,
+    targetFps,
+    deliveryFps: 60,
+    multiplier,
+    frames: Math.max(2, Math.min(9, Math.round(targetFps / 60))),
+  };
 }
 
 export function effectiveHighFrameBlendFrames(sourceFps, deliveryFps, fallback = 5) {

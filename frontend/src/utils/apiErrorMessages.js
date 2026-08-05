@@ -39,6 +39,7 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_FFMPEG_NOT_FOUND: "montage.err.ffmpegNotFound",
   MONTAGE_FFMPEG_PATH_MISSING: "montage.err.ffmpegPathMissing",
   MONTAGE_FFMPEG_NOT_RUNNABLE: "montage.err.ffmpegNotRunnable",
+  MONTAGE_CUSTOM_BLUR_REQUIRED: "montage.err.customBlurRequired",
   MONTAGE_FFPROBE_NOT_FOUND: "montage.err.ffprobeNotFound",
   MONTAGE_FFPROBE_VERSION_MISMATCH: "montage.err.ffprobeVersionMismatch",
   MONTAGE_FFPROBE_FAILED: "montage.err.ffprobeFailed",

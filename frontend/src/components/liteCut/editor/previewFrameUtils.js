@@ -67,6 +67,14 @@ export function shouldPublishVideoTimeUpdate({ hasStream, freezePlayback, revers
   return Boolean(hasStream && !freezePlayback && !reversePlayback && !awaitingHandoff);
 }
 
+export function shouldPublishPreviewClock(now, lastPublishedAt, intervalMs = 33) {
+  const current = Number(now);
+  const previous = Number(lastPublishedAt);
+  if (!Number.isFinite(current)) return false;
+  if (!Number.isFinite(previous)) return true;
+  return current - previous >= Math.max(1, Number(intervalMs) || 33);
+}
+
 export const HANDOFF_MAX_WAIT_MS = 700;
 export const HANDOFF_SEEK_RETRY_MS = 200;
 export const HANDOFF_MAX_SEEK_LEAD_SEC = 0.6;

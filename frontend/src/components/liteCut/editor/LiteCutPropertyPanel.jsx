@@ -1213,17 +1213,17 @@ function ExportPane({
       : frameBlendSourceSummary.hasUnknownFps || !frameBlendSourceItems.length
         ? t("liteCut.frameBlendBlockedUnknownFps")
         : "";
-  const fixedFrameBlendPlan = getHighFrameBlendPlan(fps, 60);
+  const highestSourceFps = frameBlendSourceSummary.fpsValues
+    .filter((value) => Number.isFinite(value))
+    .reduce((highest, value) => Math.max(highest, value), Number(fps) || 60);
+  const suggestedFrameBlendFps = Math.max(Number(fps) || 60, highestSourceFps);
+  const fixedFrameBlendPlan = getHighFrameBlendPlan(suggestedFrameBlendFps, 60);
   const commitWorkingFps = (value) => {
     const nextFps = Math.max(1, Math.min(1000, Math.round(Number(value) || 60)));
     const nextPlan = getHighFrameBlendPlan(nextFps, 60);
     commitSize({
       fps: nextFps,
-      ...(nextFps < 120
-        ? { frame_blend_enabled: false, high_frame_downsample_enabled: false }
-        : nextPlan
-          ? { frame_blend_frames: nextPlan.frames }
-          : {}),
+      ...(nextPlan ? { frame_blend_frames: nextPlan.frames } : {}),
     });
   };
   const toggleFrameBlend = () => {
@@ -1233,6 +1233,7 @@ function ExportPane({
       return;
     }
     commitSize({
+      fps: suggestedFrameBlendFps,
       frame_blend_enabled: true,
       high_frame_downsample_enabled: true,
       delivery_fps: 60,
@@ -1396,7 +1397,7 @@ function ExportPane({
             <div className="min-w-0">
               <p className="text-[11px] font-bold text-cs2-text-primary">帧混合（动态模糊）</p>
               <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
-                只有工程和时间轴内所有视频素材都达到 120 FPS，才允许启用；启用后固定按 120/240 FPS 到 60 FPS 的对应方案导出。
+                {t("liteCut.frameBlendHint")}
               </p>
             </div>
             <button

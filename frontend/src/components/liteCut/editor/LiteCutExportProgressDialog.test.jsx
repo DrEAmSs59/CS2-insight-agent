@@ -10,9 +10,27 @@ describe("LiteCutExportProgressDialog", () => {
 
     expect(screen.getByRole("dialog", { name: "导出进度" })).toBeTruthy();
     expect(screen.getByText("42%")).toBeTruthy();
+    expect(screen.getByText("已用时间 00:00")).toBeTruthy();
     expect(screen.queryByLabelText("关闭导出窗口")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "取消导出" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows live Blur frame progress and an estimated remaining time", () => {
+    render(<LiteCutExportProgressDialog phase="running" result={{
+      export_id: 3,
+      stage: "frame_blend",
+      progress: 0.75,
+      elapsed_seconds: 125,
+      estimated_remaining_seconds: 64,
+      processed_frames: 3000,
+      total_frames: 7500,
+    }} onCancel={vi.fn()} />);
+
+    expect(screen.getByText(/Blur 补帧、去重与运动模糊/)).toBeTruthy();
+    expect(screen.getByText("已用时间 02:05")).toBeTruthy();
+    expect(screen.getByText("预计剩余 01:04")).toBeTruthy();
+    expect(screen.getByText("Blur 帧进度 3000 / 7500")).toBeTruthy();
   });
 
   it("shows the unified completion modal", () => {

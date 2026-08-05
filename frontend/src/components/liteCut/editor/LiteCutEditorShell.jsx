@@ -43,6 +43,7 @@ import {
 import {
   nextTopVideoPlaybackAfter,
   hasSoloAudioTracks,
+  partitionMainVideoAudioPreview,
   resolveAudioPreviewPreloadItems,
   resolveAudioPreviewItems,
   resolveBaseVideoTrackId,
@@ -865,7 +866,10 @@ export default function LiteCutEditorShell({
         const assetId = item.clip?.meta?.asset_id;
         const recordedId = Number(item.clip?.source_id);
         const src = assetId != null
-          ? getLiteCutAssetStreamUrl(assetId)
+          ? getLiteCutAssetStreamUrl(
+              assetId,
+              assetPreviewVersions?.[Number(assetId)] || item.clip?.meta?.preview_proxy_version || "",
+            )
           : Number.isFinite(recordedId) && recordedId > 0
             ? getRecordedClipStreamUrl(recordedId)
             : null;
@@ -898,7 +902,15 @@ export default function LiteCutEditorShell({
       if (!duckingEnabled || !hasForeground) return allItems;
       return allItems.map((item) => (item.trackId === "bgm" && !item.preloadOnly ? { ...item, volume: item.volume * duckingVolume } : item));
     },
-    [bgm?.ducking_enabled, bgm?.ducking_volume, body, masterVolume, playheadSec],
+    [assetPreviewVersions, bgm?.ducking_enabled, bgm?.ducking_volume, body, masterVolume, playheadSec],
+  );
+  const { mainAudioItem, audioItems: dedicatedAudioPreviewItems } = useMemo(
+    () => partitionMainVideoAudioPreview(audioPreviewItems, {
+      clipId: playback?.clip?.id,
+      trackId: playback?.trackId,
+      allowMainAudio: Boolean(streamUrl && playback?.clip && !playback?.frozen),
+    }),
+    [audioPreviewItems, playback?.clip, playback?.frozen, playback?.trackId, streamUrl],
   );
 
   useEffect(() => {
@@ -1875,9 +1887,9 @@ export default function LiteCutEditorShell({
                 if (selectedClipId && selectedTrackId) updateClipTransformAtTime(selectedClipId, selectedTrackId, playheadSec, patch);
               }}
               mainIsVideoLayer={playbackIsVideoLayer}
-              mainMuted={true}
-              mainVolume={0}
-              audioPreviewItems={audioPreviewItems}
+              mainMuted={!mainAudioItem}
+              mainVolume={mainAudioItem?.volume ?? 0}
+              audioPreviewItems={dedicatedAudioPreviewItems}
               underlayStreamUrl={underlayStreamUrl}
               underlaySourceTime={underlayPlayback?.sourceTime ?? 0}
               underlayPlaybackRate={underlayPlayback?.clip ? clipSpeedAtTimeline(underlayPlayback.clip, underlayPlayback.localTime) : 1}

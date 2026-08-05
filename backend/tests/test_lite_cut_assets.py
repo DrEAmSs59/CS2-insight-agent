@@ -15,6 +15,7 @@ from app.lite_cut.assets import (
     _run_proxy_process,
     alpha_preview_proxy_command,
     alpha_preview_proxy_path_for_asset,
+    asset_exceeds_direct_preview_limits,
     asset_kind_for_path,
     asset_needs_browser_proxy,
     asset_stream_path,
@@ -376,14 +377,60 @@ def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path)
     assert command[-1] == str(output)
 
 
-def test_native_h264_mp4_never_needs_a_size_based_preview_proxy(tmp_path):
+def test_native_h264_mp4_stays_direct_when_average_bitrate_is_light(tmp_path):
     small = tmp_path / "small.mp4"
     large = tmp_path / "large.mp4"
     small.write_bytes(b"video")
     with large.open("wb") as output:
         output.truncate(256 * 1024 * 1024)
-    assert asset_needs_browser_proxy(small) is False
-    assert asset_needs_browser_proxy(large) is False
+    assert asset_needs_browser_proxy(small, duration_sec=1) is False
+    assert asset_needs_browser_proxy(large, duration_sec=600) is False
+
+
+def test_high_bitrate_or_high_fps_h264_mp4_requires_smooth_preview_proxy(tmp_path):
+    source = tmp_path / "high-load.mp4"
+    with source.open("wb") as output:
+        output.truncate(6 * 1024 * 1024)
+
+    assert asset_exceeds_direct_preview_limits(source, duration_sec=1) is True
+    assert asset_needs_browser_proxy(source, video_codec="h264", duration_sec=1) is True
+    assert asset_needs_browser_proxy(source, video_codec="h264", duration_sec=60, fps=240) is True
+
+
+def test_high_load_mp4_stream_uses_ready_proxy(tmp_path):
+    source = tmp_path / "high-load.mp4"
+    with source.open("wb") as output:
+        output.truncate(6 * 1024 * 1024)
+    proxy = preview_proxy_path_for_asset(source)
+    proxy.write_bytes(b"proxy")
+
+    assert asset_stream_path(source, duration_sec=1) == proxy
+
+
+def test_ready_high_fps_proxy_survives_requests_without_probe_metadata(tmp_path):
+    source = tmp_path / "high-fps-light-bitrate.mp4"
+    source.write_bytes(b"source")
+    proxy = preview_proxy_path_for_asset(source)
+    proxy.write_bytes(b"proxy")
+
+    # Stream/cache requests only have the persisted asset row after restart;
+    # the FPS that triggered generation was intentionally not persisted.
+    assert asset_stream_path(source, duration_sec=60) == proxy
+
+    from app.lite_cut.proxy_api import (
+        _decorate_asset_preview_state,
+        _row_requires_or_has_preview_proxy,
+    )
+
+    row = {
+        "id": 91,
+        "file_path": str(source),
+        "duration_sec": 60,
+    }
+    assert _row_requires_or_has_preview_proxy(row) is True
+    state = _decorate_asset_preview_state(dict(row), schedule=False)
+    assert state["preview_proxy_required"] is True
+    assert state["preview_proxy_status"] == "ready"
 
 
 def test_hevc_mp4_requires_browser_preview_proxy(tmp_path):
@@ -397,7 +444,7 @@ def test_hevc_mp4_requires_browser_preview_proxy(tmp_path):
 def test_native_mp4_ignores_an_old_size_based_proxy(tmp_path):
     source = tmp_path / "large.mp4"
     source.write_bytes(b"source")
-    preview_proxy_path_for_asset(source).write_bytes(b"stale proxy")
+    source.with_name(f"{source.stem}.preview60.mp4").write_bytes(b"stale proxy")
 
     assert asset_stream_path(source) == source
 
@@ -468,6 +515,47 @@ def test_failed_remux_falls_back_to_transcode(tmp_path, monkeypatch):
     assert modes == ["remux", "transcode"]
     assert proxy == preview_proxy_path_for_asset(source)
     assert proxy.read_bytes() == b"transcoded proxy"
+
+
+def test_high_fps_h264_proxy_job_transcodes_instead_of_remuxing(tmp_path, monkeypatch):
+    from app import env_utils, video_composer
+    from app.lite_cut import assets as assets_mod
+    from app.lite_cut import proxy_api as api_mod
+    from app.lite_cut.runtime import LiteCutPreviewProxyJob
+
+    source = tmp_path / "240fps.mp4"
+    source.write_bytes(b"source")
+    output = preview_proxy_path_for_asset(source)
+    captured = {}
+
+    monkeypatch.setattr(env_utils, "load_config", lambda: SimpleNamespace(ffmpeg_path=None, lite_cut_proxy_resolution=720))
+    monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
+
+    def fake_create(source_path, **kwargs):
+        captured.update(kwargs)
+        output.write_bytes(b"proxy")
+        assert source_path == source
+        return output
+
+    monkeypatch.setattr(assets_mod, "create_browser_preview_proxy", fake_create)
+    job = LiteCutPreviewProxyJob(
+        asset_id=42,
+        has_alpha=False,
+        video_codec="h264",
+        audio_codec="aac",
+        pixel_format="yuv420p",
+        source_fps=240,
+    )
+
+    proxy, has_alpha = api_mod._create_preview_proxy_sync(
+        job,
+        {"file_path": str(source), "duration_sec": 60},
+    )
+
+    assert proxy == output
+    assert has_alpha is False
+    assert captured["copy_video"] is False
+    assert captured["force"] is True
 
 
 def test_mov_always_uses_an_audio_compatible_browser_proxy(tmp_path):

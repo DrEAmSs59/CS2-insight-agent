@@ -8,6 +8,16 @@ function basenameFromPath(path) {
   return index >= 0 ? normalized.slice(index + 1) : normalized;
 }
 
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 function exportStageLabel(result) {
   return {
     queued: "排队中",
@@ -18,6 +28,8 @@ function exportStageLabel(result) {
     concat: "拼接主轨",
     overlays: "合成叠加层",
     audio: "混音",
+    range: "裁剪输出范围",
+    frame_blend: "Blur 补帧、去重与运动模糊",
     done: "完成",
     cancelling: "正在取消",
     cancelled: "已取消",
@@ -31,6 +43,12 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
   const fileName = basenameFromPath(outputPath);
   const progressPct = Math.round(Math.max(0, Math.min(1, Number(result?.progress) || 0)) * 100);
   const running = phase === "running";
+  const elapsedText = formatDuration(result?.elapsed_seconds);
+  const etaSeconds = Number(result?.estimated_remaining_seconds);
+  const hasEta = Number.isFinite(etaSeconds) && etaSeconds >= 0;
+  const processedFrames = Number(result?.processed_frames);
+  const totalFrames = Number(result?.total_frames);
+  const hasFrameProgress = Number.isFinite(processedFrames) && Number.isFinite(totalFrames) && totalFrames > 0;
 
   const copyPath = async () => {
     if (!outputPath) return;
@@ -66,7 +84,15 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
           <div className="flex items-center gap-2 text-xs text-cs2-text-secondary"><Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />视频 · 转场 · 叠加层 · 音频 · 调色</div>
           <div className="flex items-center justify-between text-[11px] font-semibold text-cs2-text-secondary"><span>{exportStageLabel(result)} · 任务 #{result?.export_id || "-"}</span><span className="font-mono text-cs2-text-primary">{progressPct}%</span></div>
           <div className="h-2 overflow-hidden rounded-full bg-cs2-bg-input"><div className="h-full rounded-full bg-cs2-accent transition-[width]" style={{ width: `${Math.max(4, progressPct)}%` }} /></div>
-          <p className="font-mono text-[11px] text-cs2-text-muted">请稍候，导出正在后台执行…</p>
+          <div className="flex items-center justify-between gap-3 font-mono text-[11px] text-cs2-text-muted">
+            <span>已用时间 {elapsedText}</span>
+            <span>{hasEta ? `预计剩余 ${formatDuration(etaSeconds)}` : "正在计算剩余时间"}</span>
+          </div>
+          {hasFrameProgress ? (
+            <p className="font-mono text-[11px] text-cs2-text-muted">Blur 帧进度 {processedFrames} / {totalFrames}</p>
+          ) : (
+            <p className="font-mono text-[11px] text-cs2-text-muted">请稍候，导出正在后台执行…</p>
+          )}
           <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-rose-400/60 hover:text-rose-300">取消导出</button>
         </div> : null}
 

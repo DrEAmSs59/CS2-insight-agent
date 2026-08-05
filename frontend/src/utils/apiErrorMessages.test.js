@@ -18,4 +18,11 @@ describe("messageFromApiCode", () => {
 
     expect(message).toContain("clip.mp4");
   });
+
+  it("shows a direct reminder when the configured FFmpeg has no custom Blur route", () => {
+    const message = messageFromApiCode("MONTAGE_CUSTOM_BLUR_REQUIRED", zh, {});
+
+    expect(message).toContain("定制 Blur");
+    expect(message).toContain("ffmpeg.exe");
+  });
 });

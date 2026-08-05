@@ -1,9 +1,10 @@
 // zh / liteCut — keep keys scoped to this feature catalog.
 export default {
-  "liteCut.frameBlendBlockedProjectFps": "工程帧率低于 120 FPS，无法使用帧混合。",
-  "liteCut.frameBlendBlockedSourceFps": "时间轴中含有低于 120 FPS（包括 60 FPS）的素材，无法使用帧混合。",
+  "liteCut.frameBlendHint": "使用定制 FFmpeg Blur，自动保留时间线最高有效帧率，按倍率补帧、RIFE 去重并生成 Vegas 风格运动模糊，最终输出 60 FPS。",
+  "liteCut.frameBlendBlockedProjectFps": "工程 FPS 无效，无法启动定制 Blur。",
+  "liteCut.frameBlendBlockedSourceFps": "时间轴中有素材的 FPS 无效，无法启动定制 Blur。",
   "liteCut.frameBlendBlockedUnknownFps": "时间轴中有视频素材无法读取 FPS，无法使用帧混合。",
-  "liteCut.frameBlendLockedPlan": "已启用固定方案：120/240 FPS 素材降至 60 FPS 时自动使用对应的 Hermite 动态模糊参数。",
+  "liteCut.frameBlendLockedPlan": "已启用定制 Blur：自动倍率补帧、RIFE 去重与 Vegas 权重运动模糊，最终输出 60 FPS。",
   "liteCut.project.name": "工程名称",
   "liteCut.project.headerMeta": "LiteCut · 工程 #{id} · {state}",
   "liteCut.project.headerMetaDetailed": "LiteCut · 工程 #{id} · {width}×{height} · {fps} FPS · {state}",

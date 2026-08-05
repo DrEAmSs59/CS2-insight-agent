@@ -34,6 +34,7 @@ from .frame_blend import (
     is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
+    supports_blur_pipeline,
 )
 from .env_utils import (
     resolve_name_card_font,
@@ -210,7 +211,7 @@ def ffprobe_streams(
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,width,height,r_frame_rate,channels,sample_rate:stream_tags=alpha_mode",
+            "format=duration:stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,width,height,r_frame_rate,avg_frame_rate,nb_frames,duration,channels,sample_rate:stream_tags=alpha_mode",
             "-of",
             "json",
             str(path),
@@ -221,21 +222,74 @@ def ffprobe_streams(
     )
 
 
-def parse_r_frame_rate(s: str) -> float:
+_DEFAULT_VIDEO_FPS = 60.0
+_MAX_SUPPORTED_VIDEO_FPS = 1000.0
+
+
+def _parse_frame_rate(s: str) -> Optional[float]:
     s = (s or "").strip()
     if not s or s == "0/0":
-        return 60.0
+        return None
     if "/" in s:
         a, b = s.split("/", 1)
         try:
             bf = float(b)
-            return float(a) / bf if bf else 60.0
+            value = float(a) / bf if bf else 0.0
         except ValueError:
-            return 60.0
+            return None
+    else:
+        try:
+            value = float(s)
+        except ValueError:
+            return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def parse_r_frame_rate(s: str) -> float:
+    """Parse a rational frame rate while preserving the legacy 60 FPS fallback."""
+    return _parse_frame_rate(s) or _DEFAULT_VIDEO_FPS
+
+
+def _plausible_video_fps(value: Optional[float]) -> bool:
+    return value is not None and value <= _MAX_SUPPORTED_VIDEO_FPS
+
+
+def _frame_count_fps(stream: dict[str, Any], format_duration: Optional[float]) -> Optional[float]:
     try:
-        return float(s)
-    except ValueError:
-        return 60.0
+        frame_count = float(stream.get("nb_frames") or 0)
+    except (TypeError, ValueError):
+        return None
+    try:
+        stream_duration = float(stream.get("duration") or 0)
+    except (TypeError, ValueError):
+        stream_duration = 0.0
+    duration = stream_duration if stream_duration > 0 else float(format_duration or 0)
+    if not math.isfinite(frame_count) or not math.isfinite(duration) or frame_count <= 0 or duration <= 0:
+        return None
+    value = frame_count / duration
+    return value if _plausible_video_fps(value) else None
+
+
+def _resolve_video_fps(stream: dict[str, Any], format_duration: Optional[float]) -> float:
+    """Prefer measured average FPS; r_frame_rate may merely mirror a stream time base."""
+    average_fps = _parse_frame_rate(str(stream.get("avg_frame_rate") or ""))
+    counted_fps = _frame_count_fps(stream, format_duration)
+    nominal_fps = _parse_frame_rate(str(stream.get("r_frame_rate") or ""))
+
+    if _plausible_video_fps(average_fps):
+        if counted_fps is not None and not math.isclose(average_fps, counted_fps, rel_tol=0.02, abs_tol=0.05):
+            logger.debug(
+                "Ignoring inconsistent avg_frame_rate %.6f in favor of frame count %.6f",
+                average_fps,
+                counted_fps,
+            )
+            return counted_fps
+        return average_fps
+    if counted_fps is not None:
+        return counted_fps
+    if _plausible_video_fps(nominal_fps):
+        return nominal_fps
+    return _DEFAULT_VIDEO_FPS
 
 
 def probe_video_audio_summary(
@@ -274,7 +328,7 @@ def probe_video_audio_summary(
                 vh = int(st.get("height") or vh)
             except (TypeError, ValueError):
                 pass
-            fps = parse_r_frame_rate(str(st.get("r_frame_rate") or ""))
+            fps = _resolve_video_fps(st, dur_s)
             pixel_format = str(st.get("pix_fmt") or "").strip().lower()
             codec_name = str(st.get("codec_name") or "").strip().lower()
         elif ct == "audio":
@@ -1431,13 +1485,13 @@ def _compose_montage_once(
     try:
         working_clip_paths = list(clip_paths)
 
-        # 以首段为主分辨率 / 帧率
+        # 以首段为主分辨率；启用 Blur 时保留所有片段中的最高有效帧率，
+        # 避免高帧素材先被压到首段帧率后再交给插帧器。
         ref = probe_video_audio_summary(working_clip_paths[0], ffprobe)
         w, h, fps = int(ref["width"]), int(ref["height"]), float(ref["fps"])
         if w <= 0 or h <= 0:
             raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
         _name_card_scale = max(1.0, min(h / 1080.0, 2.25))
-        fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
 
         segments: list[Path] = []
         if intro_path is not None:
@@ -1446,13 +1500,34 @@ def _compose_montage_once(
         if outro_path is not None:
             segments.append(outro_path)
 
+        probed_segment_info: dict[Path, dict[str, Any]] = {
+            working_clip_paths[0].resolve(): ref,
+        }
+        if frame_blend_enabled:
+            for segment in segments:
+                if _is_image_path(segment):
+                    continue
+                resolved_segment = segment.resolve()
+                try:
+                    info = probed_segment_info.get(resolved_segment)
+                    if info is None:
+                        info = probe_video_audio_summary(segment, ffprobe)
+                        probed_segment_info[resolved_segment] = info
+                    segment_fps = float(info.get("fps") or 0)
+                    if segment_fps > 0:
+                        fps = max(fps, segment_fps)
+                except (MontageComposerError, OSError, TypeError, ValueError):
+                    # The normal per-segment probe below remains authoritative
+                    # and will surface a concrete source error when necessary.
+                    continue
+        fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
+
         _intro_img_dur = max(1.0, float(intro_image_duration)) if intro_image_duration is not None else 3.0
         _outro_img_dur = max(1.0, float(outro_image_duration)) if outro_image_duration is not None else 3.0
         _intro_idx = 0 if intro_path is not None else -1
         _outro_idx = len(segments) - 1 if outro_path is not None else -1
 
         normed: list[Path] = []
-        source_fps_values: list[float] = [fps]
         for i, seg in enumerate(segments):
             out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
             if _is_image_path(seg):
@@ -1469,13 +1544,7 @@ def _compose_montage_once(
                 )
                 normed.append(out_ts)
                 continue
-            info = probe_video_audio_summary(seg, ffprobe)
-            try:
-                segment_fps = float(info.get("fps") or 0)
-                if segment_fps > 0:
-                    source_fps_values.append(segment_fps)
-            except (TypeError, ValueError):
-                pass
+            info = probed_segment_info.get(seg.resolve()) or probe_video_audio_summary(seg, ffprobe)
             dur = info.get("duration")
             if dur is None or dur <= 0:
                 dur = 0.1
@@ -1791,14 +1860,14 @@ def _compose_montage_once(
                 )
                 raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
 
-        frame_blend_source_supported = bool(source_fps_values) and all(
-            is_frame_blend_source_supported(source_fps) for source_fps in source_fps_values
-        )
+        frame_blend_source_supported = is_frame_blend_source_supported(fps)
         blend_frames = normalize_frame_blend_frames(
             frame_blend_source_supported and frame_blend_enabled,
             frame_blend_frames,
         )
         if blend_frames > 1:
+            if not supports_blur_pipeline(ffmpeg_bin):
+                raise MontageComposerError("MONTAGE_CUSTOM_BLUR_REQUIRED")
             delivery_fps = resolve_frame_blend_output_fps(
                 fps,
                 high_frame_downsample_enabled=frame_blend_delivery_fps is not None,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
+import threading
 import time
 from typing import Any, Callable
 
@@ -12,14 +14,29 @@ from ..video_composer import MontageComposerError
 
 logger = logging.getLogger(__name__)
 
-ProgressCallback = Callable[[float, str], None]
+ProgressCallback = Callable[..., None]
+_MAX_CAPTURE_BYTES = 4 * 1024 * 1024
+_VSPIPE_PROGRESS_RE = re.compile(rb"Frame:\s*(\d+)\s*/\s*(\d+)")
 
 
-def emit_progress(callback: ProgressCallback | None, progress: float, stage: str) -> None:
+def emit_progress(
+    callback: ProgressCallback | None,
+    progress: float,
+    stage: str,
+    detail: dict[str, Any] | None = None,
+) -> None:
     if not callback:
         return
     try:
-        callback(max(0.0, min(1.0, float(progress))), stage)
+        safe_progress = max(0.0, min(1.0, float(progress)))
+        if detail is None:
+            callback(safe_progress, stage)
+        else:
+            try:
+                callback(safe_progress, stage, detail)
+            except TypeError:
+                # Preserve compatibility with older two-argument callbacks.
+                callback(safe_progress, stage)
     except Exception:
         logger.debug("lite_cut export progress callback failed", exc_info=True)
 
@@ -33,22 +50,107 @@ def raise_if_cancelled(cancel_event: Any | None) -> None:
         raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
 
 
-def run_ffmpeg_process(cmd: list[str], *, timeout: float = 3600, cancel_event: Any | None = None) -> subprocess.CompletedProcess:
+def _append_bounded(target: bytearray, chunk: bytes) -> None:
+    target.extend(chunk)
+    overflow = len(target) - _MAX_CAPTURE_BYTES
+    if overflow > 0:
+        del target[:overflow]
+
+
+def run_ffmpeg_process(
+    cmd: list[str],
+    *,
+    timeout: float = 3600,
+    cancel_event: Any | None = None,
+    progress_callback: ProgressCallback | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
+    progress_stage: str = "encoding",
+) -> subprocess.CompletedProcess:
+    """Run a cancelable process while continuously draining both output pipes.
+
+    Blur's VSPipe child writes carriage-return progress updates to stderr. If
+    stderr is captured but not read until process exit, the Windows pipe fills
+    and blocks the entire render. Reader threads prevent that deadlock and also
+    translate ``Frame: current/total`` updates into the export progress range.
+    """
+
     started = time.monotonic()
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    stdout_buffer = bytearray()
+    stderr_buffer = bytearray()
+    progress_state = {"last_frame": -1, "rolling": b""}
+
+    def drain(stream: Any, target: bytearray, *, parse_progress: bool = False) -> None:
+        try:
+            read_chunk = getattr(stream, "read1", stream.read)
+            while True:
+                # ``read1`` returns currently available pipe data instead of
+                # waiting to fill the entire request, so UI progress remains
+                # responsive even when updates are small.
+                chunk = read_chunk(65536)
+                if not chunk:
+                    return
+                _append_bounded(target, chunk)
+                if not parse_progress or not progress_callback:
+                    continue
+                rolling = (progress_state["rolling"] + chunk)[-8192:]
+                progress_state["rolling"] = rolling[-256:]
+                matches = list(_VSPIPE_PROGRESS_RE.finditer(rolling))
+                if not matches:
+                    continue
+                current = int(matches[-1].group(1))
+                total = int(matches[-1].group(2))
+                if total <= 0 or current <= progress_state["last_frame"]:
+                    continue
+                progress_state["last_frame"] = current
+                stage_progress = max(0.0, min(1.0, current / total))
+                mapped = progress_start + (progress_end - progress_start) * stage_progress
+                emit_progress(
+                    progress_callback,
+                    mapped,
+                    progress_stage,
+                    {
+                        "stage_progress": stage_progress,
+                        "processed_frames": current,
+                        "total_frames": total,
+                    },
+                )
+        except (OSError, ValueError):
+            logger.debug("LiteCut process output reader stopped", exc_info=True)
+
+    assert process.stdout is not None and process.stderr is not None
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, stdout_buffer), daemon=True),
+        threading.Thread(
+            target=drain,
+            args=(process.stderr, stderr_buffer),
+            kwargs={"parse_progress": True},
+            daemon=True,
+        ),
+    ]
+    for reader in readers:
+        reader.start()
+
+    def completed(returncode: int) -> subprocess.CompletedProcess:
+        for reader in readers:
+            reader.join(timeout=5.0)
+        return subprocess.CompletedProcess(
+            cmd,
+            returncode,
+            decode_process_output(bytes(stdout_buffer)),
+            decode_process_output(bytes(stderr_buffer)),
+        )
+
     while True:
         if cancel_requested(cancel_event):
             process.kill()
-            process.communicate()
+            process.wait(timeout=10)
+            for reader in readers:
+                reader.join(timeout=2.0)
             raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            result = subprocess.CompletedProcess(
-                cmd,
-                process.returncode,
-                decode_process_output(stdout),
-                decode_process_output(stderr),
-            )
+            result = completed(int(process.returncode or 0))
             if result.returncode != 0:
                 logger.error(
                     "LiteCut FFmpeg failed returncode=%d command=%s stderr=%s",
@@ -59,12 +161,7 @@ def run_ffmpeg_process(cmd: list[str], *, timeout: float = 3600, cancel_event: A
             return result
         if time.monotonic() - started > timeout:
             process.kill()
-            stdout, stderr = process.communicate()
+            process.wait(timeout=10)
             logger.error("LiteCut FFmpeg timed out command=%s", command_for_log(cmd))
-            return subprocess.CompletedProcess(
-                cmd,
-                124,
-                decode_process_output(stdout),
-                decode_process_output(stderr),
-            )
+            return completed(124)
         time.sleep(0.25)

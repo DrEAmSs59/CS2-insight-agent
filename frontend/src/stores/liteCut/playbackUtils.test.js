@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   nextTopVideoPlaybackAfter,
+  partitionMainVideoAudioPreview,
   previewAudioState,
   projectBgmPreviewClip,
   resolveAudioPreviewPreloadItems,
@@ -440,6 +441,27 @@ describe("playbackUtils", () => {
       expect.objectContaining({ id: base.id, trackId: "v1", sourceTime: 2, volume: 0.8 }),
       expect.objectContaining({ id: layer.id, trackId: "v2", sourceTime: 1, volume: 0.25 }),
     ]));
+  });
+
+  it("reuses the main video element for its audio and keeps other layers dedicated", () => {
+    const items = [
+      { id: "main", trackId: "v1", volume: 0.8, muted: false, reversePlayback: false },
+      { id: "underlay", trackId: "v2", volume: 0.4, muted: false, reversePlayback: false },
+      { id: "next", trackId: "v1", volume: 1, preloadOnly: true },
+    ];
+
+    expect(partitionMainVideoAudioPreview(items, { clipId: "main", trackId: "v1" })).toEqual({
+      mainAudioItem: items[0],
+      audioItems: [items[1], items[2]],
+    });
+  });
+
+  it("keeps reverse or muted main audio out of the video element", () => {
+    const reversed = [{ id: "main", trackId: "v1", volume: 1, reversePlayback: true }];
+    const muted = [{ id: "main", trackId: "v1", volume: 1, muted: true }];
+
+    expect(partitionMainVideoAudioPreview(reversed, { clipId: "main", trackId: "v1" }).mainAudioItem).toBeNull();
+    expect(partitionMainVideoAudioPreview(muted, { clipId: "main", trackId: "v1" }).mainAudioItem).toBeNull();
   });
 
   it("keeps consecutive clips from the same audio asset as separate preview items", () => {

@@ -289,6 +289,47 @@ def test_cancellable_ffmpeg_process_raises_cancelled():
     assert exc.value.code == "MONTAGE_EXPORT_CANCELLED"
 
 
+def test_ffmpeg_process_drains_large_stdout_and_stderr_without_deadlock():
+    payload_size = 256 * 1024
+    result = _run_ffmpeg_process(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                f"sys.stdout.buffer.write(b'o' * {payload_size}); sys.stdout.flush(); "
+                f"sys.stderr.buffer.write(b'e' * {payload_size}); sys.stderr.flush()"
+            ),
+        ],
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert len(result.stdout) == payload_size
+    assert len(result.stderr) == payload_size
+
+
+def test_ffmpeg_process_maps_vspipe_frame_progress():
+    updates = []
+    result = _run_ffmpeg_process(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('Frame: 5/10\\rFrame: 10/10\\r'); sys.stderr.flush()",
+        ],
+        timeout=5,
+        progress_callback=lambda progress, stage, detail=None: updates.append((progress, stage, detail)),
+        progress_start=0.60,
+        progress_end=0.995,
+        progress_stage="frame_blend",
+    )
+    assert result.returncode == 0
+    assert updates
+    progress, stage, detail = updates[-1]
+    assert progress == pytest.approx(0.995)
+    assert stage == "frame_blend"
+    assert detail == {"stage_progress": 1.0, "processed_frames": 10, "total_frames": 10}
+
+
 def test_color_preset_vf():
     vf = _build_color_vf({"filter_preset": "esports"})
     assert "saturation=1.35" in vf

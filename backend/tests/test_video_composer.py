@@ -17,6 +17,7 @@ from app.video_composer import (
     MontageComposerError,
     _run_ffmpeg_capture,
     build_bgm_filter,
+    ffprobe_streams,
     probe_video_audio_summary,
     resolve_ffmpeg_binary,
     resolve_ffprobe_binary,
@@ -118,6 +119,70 @@ class TestBgmFilter(unittest.TestCase):
 
 
 class TestProbeVideoSummary(unittest.TestCase):
+    def test_ffprobe_requests_average_rate_and_frame_count(self):
+        with patch("app.video_composer._run_json", return_value={}) as run_json:
+            ffprobe_streams(Path("source.mp4"), Path("ffprobe.exe"))
+        command = run_json.call_args.args[0]
+        entries = command[command.index("-show_entries") + 1]
+        self.assertIn("avg_frame_rate", entries)
+        self.assertIn("nb_frames", entries)
+
+    def test_prefers_average_fps_when_r_frame_rate_is_stream_time_base(self):
+        payload = {
+            "format": {"duration": "1155.584000"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "av1",
+                    "width": 1440,
+                    "height": 1080,
+                    "r_frame_rate": "90000/1",
+                    "avg_frame_rate": "416005000/1155569",
+                    "nb_frames": "416005",
+                    "duration": "1155.569000",
+                },
+            ],
+        }
+        with patch("app.video_composer.ffprobe_streams", return_value=payload):
+            info = probe_video_audio_summary(Path("360fps.mp4"), Path("ffprobe.exe"))
+        self.assertAlmostEqual(info["fps"], 360.00013846, places=6)
+
+    def test_keeps_normal_constant_frame_rates(self):
+        for fps in (60, 240):
+            with self.subTest(fps=fps):
+                payload = {
+                    "format": {"duration": "10.0"},
+                    "streams": [
+                        {
+                            "codec_type": "video",
+                            "r_frame_rate": f"{fps}/1",
+                            "avg_frame_rate": f"{fps}/1",
+                            "nb_frames": str(fps * 10),
+                            "duration": "10.0",
+                        },
+                    ],
+                }
+                with patch("app.video_composer.ffprobe_streams", return_value=payload):
+                    info = probe_video_audio_summary(Path("constant.mp4"), Path("ffprobe.exe"))
+                self.assertEqual(info["fps"], float(fps))
+
+    def test_uses_frame_count_when_average_rate_is_missing_and_nominal_rate_is_absurd(self):
+        payload = {
+            "format": {"duration": "10.0"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "r_frame_rate": "90000/1",
+                    "avg_frame_rate": "0/0",
+                    "nb_frames": "3600",
+                    "duration": "10.0",
+                },
+            ],
+        }
+        with patch("app.video_composer.ffprobe_streams", return_value=payload):
+            info = probe_video_audio_summary(Path("counted.mp4"), Path("ffprobe.exe"))
+        self.assertEqual(info["fps"], 360.0)
+
     def test_detects_prores_4444_alpha_pixel_format(self):
         payload = {
             "format": {"duration": "2.5"},

@@ -1,8 +1,11 @@
 """Frame-blending configuration and FFmpeg command tests."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
@@ -10,10 +13,10 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.frame_blend import (
     build_frame_blend_command,
-    build_frame_blend_filter,
     is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
+    supports_blur_pipeline,
 )
 from app.lite_cut.runtime import normalize_project_body
 
@@ -22,47 +25,37 @@ class TestFrameBlend(unittest.TestCase):
     def test_disabled_skips_the_filter_window(self):
         self.assertEqual(normalize_frame_blend_frames(False, 9), 1)
 
-    def test_filter_uses_equal_weights_and_preserves_target_fps(self):
-        self.assertEqual(
-            build_frame_blend_filter(5, 60),
-            "tmix=frames=5:weights='1 1 1 1 1',"
-            "fps=60,setsar=1,format=yuv420p",
-        )
-
-    def test_240_to_60_uses_hermite_temporal_mixing(self):
-        self.assertEqual(
-            build_frame_blend_filter(7, 60, source_fps=240),
-            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
-            "unsharp=5:5:0.3:5:5:0,setsar=1",
-        )
-
-    def test_120_to_60_uses_hermite_temporal_mixing(self):
-        self.assertEqual(
-            build_frame_blend_filter(7, 60, source_fps=120),
-            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
-            "unsharp=5:5:0.3:5:5:0,setsar=1",
-        )
-
-    def test_intermediate_and_360_to_60_use_the_same_hermite_path(self):
-        expected = (
-            "libplacebo=fps=60:frame_mixer=hermite:format=yuv420p,"
-            "unsharp=5:5:0.3:5:5:0,setsar=1"
-        )
-        self.assertEqual(build_frame_blend_filter(5, 60, source_fps=180), expected)
-        self.assertEqual(build_frame_blend_filter(5, 60, source_fps=360), expected)
-
-    def test_60_fps_source_skips_frame_blending(self):
-        self.assertEqual(
-            build_frame_blend_filter(7, 60, source_fps=60),
-            "fps=60,setsar=1,format=yuv420p",
-        )
-
-    def test_frame_blending_starts_at_120_fps(self):
-        self.assertFalse(is_frame_blend_source_supported(60))
+    def test_custom_blur_accepts_60_fps_and_higher_sources(self):
+        self.assertTrue(is_frame_blend_source_supported(30))
+        self.assertTrue(is_frame_blend_source_supported(60))
         self.assertTrue(is_frame_blend_source_supported(120))
         self.assertTrue(is_frame_blend_source_supported(240))
+        self.assertFalse(is_frame_blend_source_supported(0.5))
+        self.assertFalse(is_frame_blend_source_supported(None))
 
-    def test_command_reencodes_video_and_copies_optional_audio(self):
+    def test_runtime_capability_requires_custom_blur_help_marker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ffmpeg = Path(tmpdir) / "ffmpeg.exe"
+            ffmpeg.write_bytes(b"test")
+            result = SimpleNamespace(
+                returncode=0,
+                stdout="FFmpeg Insight headless Blur mode\n",
+                stderr="",
+            )
+            with patch("app.frame_blend.subprocess.run", return_value=result) as run:
+                self.assertTrue(supports_blur_pipeline(ffmpeg))
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][1:], ["-blur", "--help"])
+
+    def test_standard_ffmpeg_is_rejected_for_blur_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ffmpeg = Path(tmpdir) / "standard-ffmpeg.exe"
+            ffmpeg.write_bytes(b"test")
+            result = SimpleNamespace(returncode=0, stdout="ffmpeg version standard\n", stderr="")
+            with patch("app.frame_blend.subprocess.run", return_value=result):
+                self.assertFalse(supports_blur_pipeline(ffmpeg))
+
+    def test_command_uses_custom_blur_and_copies_optional_audio(self):
         command = build_frame_blend_command(
             ffmpeg_bin=Path("ffmpeg.exe"),
             source_path=Path("input.mp4"),
@@ -71,11 +64,26 @@ class TestFrameBlend(unittest.TestCase):
             fps=30,
             video_encode_args=["-c:v", "libx264", "-crf", "18"],
         )
-        self.assertTrue(command[command.index("-vf") + 1].startswith("tmix=frames=3:"))
-        audio_index = command.index("0:a?")
-        self.assertEqual(command[audio_index - 1 : audio_index + 1], ["-map", "0:a?"])
+        self.assertEqual(command[1], "-blur")
+        self.assertEqual(command[command.index("--performance-mode") + 1], "balanced")
+        self.assertEqual(command[command.index("--blur-output-fps") + 1], "30")
+        self.assertEqual(command[command.index("--weighting") + 1], "vegas")
+        self.assertEqual(command[command.index("--deduplicate-method") + 1], "rife")
         self.assertEqual(command[command.index("-c:a") + 1], "copy")
         self.assertEqual(command[-1], "output.mp4")
+
+    def test_command_preserves_nvenc_device_binding_and_quality(self):
+        command = build_frame_blend_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            frames=5,
+            fps=60,
+            video_encode_args=["-c:v", "h264_nvenc", "-gpu", "2", "-cq", "21"],
+        )
+        self.assertEqual(command[command.index("-c:v") + 1], "h264_nvenc")
+        self.assertEqual(command[command.index("-gpu") + 1], "2")
+        self.assertEqual(command[command.index("-cq") + 1], "21")
 
     def test_high_frame_downsample_targets_lower_delivery_fps_only(self):
         self.assertEqual(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -125,11 +126,18 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
     job.status = "running"
     job.stage = "starting"
     job.progress = max(job.progress, 0.01)
+    job.started_at_monotonic = time.monotonic()
+    job.stage_started_at_monotonic = job.started_at_monotonic
     await db.update_export(job.export_id, status="running", output_path=job.output_path)
 
-    def on_progress(progress: float, stage: str) -> None:
+    def on_progress(progress: float, stage: str, detail: dict[str, Any] | None = None) -> None:
         next_progress = max(0.0, min(1.0, float(progress or 0.0)))
         next_stage = str(stage or job.stage or "running")
+        if next_stage != job.stage:
+            job.stage_started_at_monotonic = time.monotonic()
+            job.stage_progress = None
+            job.processed_frames = None
+            job.total_frames = None
         # A full encoder retry starts the render from the beginning. Reflect
         # that reset instead of leaving the UI stuck at 99–100% while x264 runs.
         if next_stage.startswith("fallback_"):
@@ -137,6 +145,14 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
         else:
             job.progress = max(job.progress, next_progress)
         job.stage = next_stage
+        if isinstance(detail, dict):
+            raw_stage_progress = detail.get("stage_progress")
+            if raw_stage_progress is not None:
+                job.stage_progress = max(0.0, min(1.0, float(raw_stage_progress)))
+            if detail.get("processed_frames") is not None:
+                job.processed_frames = max(0, int(detail["processed_frames"]))
+            if detail.get("total_frames") is not None:
+                job.total_frames = max(0, int(detail["total_frames"]))
 
     try:
         out = await asyncio.to_thread(

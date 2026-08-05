@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -28,6 +29,11 @@ class LiteCutExportJob:
     stage: str = "queued"
     output_path: str = ""
     error: str = ""
+    started_at_monotonic: float = field(default_factory=time.monotonic)
+    stage_started_at_monotonic: float = field(default_factory=time.monotonic)
+    stage_progress: float | None = None
+    processed_frames: int | None = None
+    total_frames: int | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     task: asyncio.Task | None = None
 
@@ -40,6 +46,7 @@ class LiteCutPreviewProxyJob:
     video_codec: str | None = None
     audio_codec: str | None = None
     pixel_format: str | None = None
+    source_fps: float | None = None
     mode: str = "queued"
     error: str = ""
     cancel_event: threading.Event = field(default_factory=threading.Event)
@@ -164,6 +171,12 @@ def normalize_project_body(raw: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def export_job_snapshot(job: LiteCutExportJob) -> dict[str, Any]:
+    now = time.monotonic()
+    elapsed_seconds = max(0.0, now - job.started_at_monotonic)
+    stage_elapsed_seconds = max(0.0, now - job.stage_started_at_monotonic)
+    estimated_remaining_seconds: float | None = None
+    if job.stage_progress is not None and 0.005 < job.stage_progress < 1.0:
+        estimated_remaining_seconds = stage_elapsed_seconds * (1.0 - job.stage_progress) / job.stage_progress
     return {
         "export_id": job.export_id,
         "project_id": job.project_id,
@@ -172,6 +185,11 @@ def export_job_snapshot(job: LiteCutExportJob) -> dict[str, Any]:
         "stage": job.stage,
         "output_path": job.output_path,
         "error": job.error,
+        "elapsed_seconds": elapsed_seconds,
+        "stage_progress": job.stage_progress,
+        "processed_frames": job.processed_frames,
+        "total_frames": job.total_frames,
+        "estimated_remaining_seconds": estimated_remaining_seconds,
     }
 
 

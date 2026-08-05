@@ -5,7 +5,7 @@ import { TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { startPendingDrag } from "./timelineInteraction.js";
 import { overlayTransformAt } from "../../../stores/liteCut/overlayKeyframeUtils.js";
 import { textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
-import { handoffFrameAction, normalizePreviewLayerTransform, previewFrameTimes, previewMediaIdentity, promotedUnderlayForMain, shouldApplyPreviewSeek, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
+import { handoffFrameAction, normalizePreviewLayerTransform, previewFrameTimes, previewMediaIdentity, promotedUnderlayForMain, shouldApplyPreviewSeek, shouldPublishPreviewClock, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";
 import { createMediaElementRefRegistry, drawVideoFrame, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
 
@@ -568,6 +568,7 @@ export default function LiteCutPreviewPanel({
   const previewClipIdRef = useRef(previewClipId);
   const onPlayheadChangeRef = useRef(onPlayheadChange);
   const presentedStreamRef = useRef(null);
+  const lastPreviewClockAtRef = useRef(Number.NEGATIVE_INFINITY);
   const lastGlobalClockAtRef = useRef(0);
   const previousUnderlayLayersRef = useRef([]);
   const retainedPromotionLayerRef = useRef(null);
@@ -621,6 +622,7 @@ export default function LiteCutPreviewPanel({
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !hasStream || !isPlaying || reversePlayback || freezePlayback) return;
+    lastPreviewClockAtRef.current = Number.NEGATIVE_INFINITY;
     let cancelled = false;
     let videoFrameId = null;
     let animationFrameId = null;
@@ -653,12 +655,15 @@ export default function LiteCutPreviewPanel({
       }
       handoffStartedAtRef.current = 0;
       const frame = previewFrameTimes(frameAnchorRef.current, mediaTime);
-      setPreviewClock((previous) => (
-        Math.abs(previous.sourceTime - frame.sourceTime) < 0.0005
-        && Math.abs(previous.timelineTime - frame.timelineTime) < 0.0005
-          ? previous
-          : frame
-      ));
+      if (shouldPublishPreviewClock(now, lastPreviewClockAtRef.current)) {
+        lastPreviewClockAtRef.current = now;
+        setPreviewClock((previous) => (
+          Math.abs(previous.sourceTime - frame.sourceTime) < 0.0005
+          && Math.abs(previous.timelineTime - frame.timelineTime) < 0.0005
+            ? previous
+            : frame
+        ));
+      }
       releasePromotedUnderlay();
       if (presentedStreamRef.current !== mediaIdentity) {
         presentedStreamRef.current = mediaIdentity;
@@ -803,7 +808,7 @@ export default function LiteCutPreviewPanel({
   const flashOpacity = Math.max(0, Math.min(1, Number(resolvedFlashOpacity) || 0));
   const blackOpacity = Math.max(0, Math.min(1, Number(resolvedBlackOpacity) || 0));
   const safeMainVolume = Math.max(0, Math.min(1, Number(mainVolume) || 0));
-  const mainAudioMuted = Boolean(mainMuted || mainIsVideoLayer || safeMainVolume <= 0);
+  const mainAudioMuted = Boolean(mainMuted || safeMainVolume <= 0);
   const mainVideoStyle = mainIsVideoLayer
     ? {
         left: `${(normalizedMainLayerTransform.x * 100).toFixed(2)}%`,
@@ -1434,7 +1439,7 @@ export default function LiteCutPreviewPanel({
                       className={`pointer-events-none block h-full w-full ${transformedMainObjectFit}`}
                       playsInline
                       preload="auto"
-                      muted
+                      muted={mainAudioMuted}
                       onTimeUpdate={handleVideoTimeUpdate}
                       onLoadedMetadata={handleVideoLoaded}
                       onCanPlay={handleVideoCanPlay}
@@ -1466,7 +1471,7 @@ export default function LiteCutPreviewPanel({
                     style={mainVideoStyle}
                     playsInline
                     preload="auto"
-                    muted
+                    muted={mainAudioMuted}
                     onTimeUpdate={handleVideoTimeUpdate}
                     onLoadedMetadata={handleVideoLoaded}
                     onCanPlay={handleVideoCanPlay}

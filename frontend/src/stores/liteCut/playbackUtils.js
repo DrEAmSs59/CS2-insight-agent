@@ -330,6 +330,33 @@ export function resolveAudioPreviewItems(body, timelineSec, masterVolume = 1) {
 }
 
 /**
+ * Let the visible main <video> provide its own audio instead of opening the
+ * same large MP4 a second time through a dedicated <audio> element.
+ */
+export function partitionMainVideoAudioPreview(
+  items,
+  { clipId = null, trackId = null, allowMainAudio = true } = {},
+) {
+  const audioItems = Array.isArray(items) ? items : [];
+  if (!allowMainAudio || clipId == null || trackId == null) {
+    return { mainAudioItem: null, audioItems };
+  }
+  const index = audioItems.findIndex((item) => (
+    String(item?.id) === String(clipId)
+    && String(item?.trackId) === String(trackId)
+    && !item?.preloadOnly
+    && !item?.reversePlayback
+    && !item?.muted
+    && Number(item?.volume) > 0
+  ));
+  if (index < 0) return { mainAudioItem: null, audioItems };
+  return {
+    mainAudioItem: audioItems[index],
+    audioItems: audioItems.filter((_item, itemIndex) => itemIndex !== index),
+  };
+}
+
+/**
  * Keep media for clips about to start mounted before the timeline reaches the
  * cut.  The actual preview item reuses this DOM node at the boundary, which
  * avoids an audio decoder/network startup in the audible frame.

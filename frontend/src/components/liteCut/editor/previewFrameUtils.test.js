@@ -8,6 +8,7 @@ import {
   previewFrameTimes,
   promotedUnderlayForMain,
   shouldApplyPreviewSeek,
+  shouldPublishPreviewClock,
   shouldPublishVideoTimeUpdate,
   shouldUseMediaPreviewClock,
   transitionVisualAtLocalTime,
@@ -193,5 +194,14 @@ describe("shouldPublishVideoTimeUpdate", () => {
   it("keeps the timeline timer authoritative during reverse preview seeks", () => {
     expect(shouldPublishVideoTimeUpdate({ hasStream: true, freezePlayback: false, reversePlayback: true, awaitingHandoff: false })).toBe(false);
     expect(shouldPublishVideoTimeUpdate({ hasStream: true, freezePlayback: false, reversePlayback: false, awaitingHandoff: false })).toBe(true);
+  });
+});
+
+describe("shouldPublishPreviewClock", () => {
+  it("caps React preview-clock publications near 30 Hz for high-fps sources", () => {
+    expect(shouldPublishPreviewClock(100, Number.NEGATIVE_INFINITY)).toBe(true);
+    expect(shouldPublishPreviewClock(104, 100)).toBe(false);
+    expect(shouldPublishPreviewClock(132, 100)).toBe(false);
+    expect(shouldPublishPreviewClock(133, 100)).toBe(true);
   });
 });

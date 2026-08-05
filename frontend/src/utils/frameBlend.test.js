@@ -2,25 +2,28 @@ import { describe, expect, it } from "vitest";
 import { effectiveHighFrameBlendFrames, getHighFrameBlendPlan, getClipFps, isFrameBlendSourceSupported, summarizeFrameBlendSources } from "./frameBlend";
 
 describe("frame blend delivery plan", () => {
-  it("uses four-frame blending for 240 to 60", () => {
-    expect(getHighFrameBlendPlan(240, 60)).toEqual({ sourceFps: 240, deliveryFps: 60, frames: 4 });
-    expect(effectiveHighFrameBlendFrames(239.76, 60, 5)).toBe(4);
+  it("previews the custom 240 to 480 to 60 policy", () => {
+    expect(getHighFrameBlendPlan(240, 60)).toEqual({
+      sourceFps: 240, targetFps: 480, deliveryFps: 60, multiplier: 2, frames: 8,
+    });
+    expect(effectiveHighFrameBlendFrames(240, 60, 5)).toBe(8);
   });
 
-  it("uses two-frame blending for 120 to 60", () => {
-    expect(getHighFrameBlendPlan(120, 60)).toEqual({ sourceFps: 120, deliveryFps: 60, frames: 2 });
-    expect(effectiveHighFrameBlendFrames(119.88, 60, 5)).toBe(2);
+  it("previews automatic integer multiples for low and intermediate rates", () => {
+    expect(getHighFrameBlendPlan(60, 60)).toMatchObject({ targetFps: 300, multiplier: 5, frames: 5 });
+    expect(getHighFrameBlendPlan(120, 60)).toMatchObject({ targetFps: 360, multiplier: 3, frames: 6 });
+    expect(getHighFrameBlendPlan(53, 60)).toMatchObject({ targetFps: 212, multiplier: 4, frames: 4 });
   });
 
-  it("leaves 60 to 60 on the manual legacy setting", () => {
-    expect(getHighFrameBlendPlan(60, 60)).toBeNull();
-    expect(effectiveHighFrameBlendFrames(60, 60, 7)).toBe(7);
+  it("keeps native 360 without interpolation", () => {
+    expect(getHighFrameBlendPlan(360, 60)).toMatchObject({ targetFps: 360, multiplier: 1, frames: 6 });
   });
 
-  it("only enables frame blending from 120 FPS upward", () => {
-    expect(isFrameBlendSourceSupported(60)).toBe(false);
-    expect(isFrameBlendSourceSupported(119.5)).toBe(true);
+  it("enables the custom pipeline for every positive known FPS", () => {
+    expect(isFrameBlendSourceSupported(30)).toBe(true);
+    expect(isFrameBlendSourceSupported(60)).toBe(true);
     expect(isFrameBlendSourceSupported(120)).toBe(true);
+    expect(isFrameBlendSourceSupported(null)).toBe(false);
   });
 
   it("summarizes all clips before enabling frame blending", () => {
@@ -28,7 +31,7 @@ describe("frame blend delivery plan", () => {
     expect(summarizeFrameBlendSources([{ fps: 240 }, { fps: 60 }])).toMatchObject({
       primaryFps: 240,
       hasUnknownFps: false,
-      allSupported: false,
+      allSupported: true,
     });
     expect(summarizeFrameBlendSources([{ fps: 120 }, { fps: 240 }]).allSupported).toBe(true);
   });

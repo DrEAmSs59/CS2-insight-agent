@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -77,6 +78,8 @@ _BROWSER_PROXY_EXTS = frozenset({".avi", ".mkv", ".gif", ".mov"})
 _MP4_LIKE_EXTS = frozenset({".mp4", ".m4v"})
 _HEVC_SAMPLE_ENTRY_TAGS = (b"hvc1", b"hev1", b"dvhe", b"dvh1")
 _MP4_CODEC_SCAN_BYTES = 2 * 1024 * 1024
+_DIRECT_PREVIEW_MAX_FPS = 120.0
+_DIRECT_PREVIEW_MAX_BITRATE = 40_000_000.0
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -179,9 +182,10 @@ def probe_image_dimensions(path: Path) -> tuple[int, int] | None:
 
 
 def preview_proxy_path_for_asset(path: Path) -> Path:
-    # Versioned name: v2 preserves source cadence up to 60 fps. Keeping this
-    # separate prevents reuse of older fixed-30-fps proxies.
-    return path.with_name(f"{path.stem}.preview60.mp4")
+    # Versioned name: v3 also marks proxies created for high-cadence/high-
+    # bitrate sources. Keeping this separate prevents a stale size-only proxy
+    # from being mistaken for an intentional smooth-playback proxy.
+    return path.with_name(f"{path.stem}.preview60-v3.mp4")
 
 
 def alpha_preview_proxy_path_for_asset(path: Path) -> Path:
@@ -195,6 +199,7 @@ def asset_companion_paths(path: Path) -> list[Path]:
 
     return [
         preview_proxy_path_for_asset(path),
+        path.with_name(f"{path.stem}.preview60.mp4"),
         path.with_name(f"{path.stem}.preview.mp4"),
         alpha_preview_proxy_path_for_asset(path),
         path.with_name(f"{path.stem}.preview-alpha-v2.webm"),
@@ -275,14 +280,30 @@ def relocate_asset_file_bundle(raw_path: str | Path, project_name: str) -> Path:
     return target
 
 
-def asset_stream_path(path: Path) -> Path:
-    if not asset_needs_browser_proxy(path):
-        return path
+def asset_stream_path(
+    path: Path,
+    *,
+    video_codec: str | None = None,
+    duration_sec: float | None = None,
+    fps: float | None = None,
+) -> Path:
+    # A current-version proxy is proof that this asset was deliberately
+    # classified and converted. Prefer it even when this request only has the
+    # database row and therefore lacks the transient ffprobe FPS/codec facts.
     alpha_proxy = alpha_preview_proxy_path_for_asset(path)
     if alpha_proxy.is_file():
         return alpha_proxy
     proxy = preview_proxy_path_for_asset(path)
-    return proxy if proxy.is_file() else path
+    if proxy.is_file():
+        return proxy
+    if not asset_needs_browser_proxy(
+        path,
+        video_codec=video_codec,
+        duration_sec=duration_sec,
+        fps=fps,
+    ):
+        return path
+    return path
 
 
 def _mp4_container_mentions_hevc(path: Path) -> bool:
@@ -304,18 +325,57 @@ def _mp4_container_mentions_hevc(path: Path) -> bool:
     return any(tag in chunk for chunk in chunks for tag in _HEVC_SAMPLE_ENTRY_TAGS)
 
 
-def asset_needs_browser_proxy(path: Path, *, video_codec: str | None = None) -> bool:
-    """Whether preview must be converted to a codec WebView2 reliably decodes."""
+def asset_exceeds_direct_preview_limits(
+    path: Path,
+    *,
+    duration_sec: float | None = None,
+    fps: float | None = None,
+) -> bool:
+    """Whether native playback is likely to overload WebView2's media pipeline."""
+    try:
+        source_fps = float(fps or 0)
+    except (TypeError, ValueError):
+        source_fps = 0.0
+    if math.isfinite(source_fps) and source_fps > _DIRECT_PREVIEW_MAX_FPS:
+        return True
+
+    try:
+        duration = float(duration_sec or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if not math.isfinite(duration) or duration <= 0:
+        return False
+    try:
+        bitrate = path.stat().st_size * 8.0 / duration
+    except OSError:
+        return False
+    return bitrate > _DIRECT_PREVIEW_MAX_BITRATE
+
+
+def asset_needs_browser_proxy(
+    path: Path,
+    *,
+    video_codec: str | None = None,
+    duration_sec: float | None = None,
+    fps: float | None = None,
+) -> bool:
+    """Whether preview must be converted for compatibility or smooth playback."""
     extension = path.suffix.lower()
     if extension in _BROWSER_PROXY_EXTS:
         return True
     if extension not in _MP4_LIKE_EXTS:
         return False
-    # Do not proxy ordinary browser-native H.264 MP4 just because it is large.
     # HEVC MP4 is container-valid but frequently black in WebView2 when the OS
-    # codec extension or hardware decoder is unavailable.
+    # codec extension or hardware decoder is unavailable. Very high cadence or
+    # bitrate H.264 is browser-native but still expensive to seek and decode;
+    # those sources get a lightweight 60-fps preview while export keeps using
+    # the untouched original.
     codec = str(video_codec or "").strip().lower()
-    return codec in {"hevc", "h265", "h.265"} or _mp4_container_mentions_hevc(path)
+    return (
+        codec in {"hevc", "h265", "h.265"}
+        or _mp4_container_mentions_hevc(path)
+        or asset_exceeds_direct_preview_limits(path, duration_sec=duration_sec, fps=fps)
+    )
 
 
 def preview_proxy_remux_command(
@@ -472,10 +532,11 @@ def create_browser_preview_proxy(
     max_edge: int = 1280,
     copy_video: bool = False,
     copy_audio: bool = False,
+    force: bool = False,
     on_mode_change: Callable[[str], None] | None = None,
 ) -> Path | None:
     """Create an MP4 preview for containers that ordinary browser video cannot decode."""
-    if not asset_needs_browser_proxy(source):
+    if not force and not asset_needs_browser_proxy(source):
         return None
     output = preview_proxy_path_for_asset(source)
     with _proxy_lock_for(output):

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _attach_video_fps(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Add source FPS to video assets for the media bin and export checks."""
+    """Add probed video facts used by labels and preview-proxy selection."""
     video_items = [item for item in items if str(item.get("kind") or "").lower() in {"video", "webm"}]
     if not video_items:
         return items
@@ -59,8 +59,14 @@ async def _attach_video_fps(items: list[dict[str, Any]]) -> list[dict[str, Any]]
                     "lite_cut_asset",
                 )
                 fps = float(info.get("fps") or 0)
-                if fps > 0:
-                    return {**item, "fps": fps}
+                return {
+                    **item,
+                    "fps": fps if fps > 0 else None,
+                    "codec_name": str(info.get("codec_name") or "") or None,
+                    "audio_codec_name": str(info.get("audio_codec_name") or ""),
+                    "pixel_format": str(info.get("pixel_format") or ""),
+                    "has_alpha": bool(info.get("has_alpha")) if "has_alpha" in info else None,
+                }
             except Exception:
                 logger.debug("Unable to probe LiteCut asset FPS: %s", path, exc_info=True)
         return item
@@ -114,9 +120,16 @@ async def list_lite_cut_assets(
         if dimensions:
             item["width"], item["height"] = dimensions
             await get_lite_cut_db().update_asset_dimensions(int(item["id"]), *dimensions)
-    for item in items:
-        _decorate_asset_preview_state(item)
     items = await _attach_video_fps(items)
+    for item in items:
+        _decorate_asset_preview_state(
+            item,
+            has_alpha=item.get("has_alpha"),
+            video_codec=item.get("codec_name"),
+            audio_codec=item.get("audio_codec_name"),
+            pixel_format=item.get("pixel_format"),
+            source_fps=item.get("fps"),
+        )
     return {"items": items, "limit": limit, "offset": offset}
 
 
@@ -195,6 +208,7 @@ async def upload_lite_cut_asset(
         video_codec=str(media_info.get("codec_name") or "") or None,
         audio_codec=str(media_info.get("audio_codec_name") or ""),
         pixel_format=str(media_info.get("pixel_format") or ""),
+        source_fps=media_info.get("fps"),
     )
 
 
@@ -317,7 +331,10 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
         # Never pin a video request to a minutes-long FFmpeg job. The editor
         # polls asset state and replaces the cache-busted URL when ready.
         raise HTTPException(425, "预览代理正在后台生成", headers={"Retry-After": "1"})
-    return await stream_file_with_range(asset_stream_path(path), request)
+    return await stream_file_with_range(
+        asset_stream_path(path, duration_sec=row.get("duration_sec")),
+        request,
+    )
 
 
 @router.post("/assets/{asset_id}/proxy/retry")

@@ -84,6 +84,7 @@ from ..frame_blend import (
     is_frame_blend_source_supported,
     normalize_frame_blend_frames,
     resolve_frame_blend_output_fps,
+    supports_blur_pipeline,
 )
 
 logger = logging.getLogger(__name__)
@@ -856,6 +857,23 @@ def _compose_lite_cut_montage_once(
     encoder_device_args: Sequence[str] | None = None,
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
+    output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
+    frame_blend_requested = bool(output_settings.get("frame_blend_enabled"))
+    external_progress_callback = progress_callback
+
+    def mapped_progress_callback(
+        progress: float,
+        stage: str,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        mapped = float(progress)
+        if frame_blend_requested and stage not in {"frame_blend", "done"}:
+            # Reserve 40% of the visible range for the usually dominant Blur
+            # pass instead of reporting 99% before interpolation has started.
+            mapped = min(0.60, mapped * (0.60 / 0.98))
+        _emit_progress(external_progress_callback, mapped, stage, detail)
+
+    progress_callback = mapped_progress_callback
     _emit_progress(progress_callback, 0.02, "checking")
     _raise_if_cancelled(cancel_event)
     base_track_id, clips = _base_video_track_for_export(project_body)
@@ -913,20 +931,20 @@ def _compose_lite_cut_montage_once(
 
     ref = probe_video_audio_summary(paths[0], ffprobe)
     source_fps_values: list[float] = []
-    source_fps_probe_failed = False
     for source_path in frame_blend_source_paths:
         try:
             source_info = ref if source_path == paths[0] else probe_video_audio_summary(source_path, ffprobe)
             source_fps = float(source_info.get("fps") or 0)
             if source_fps > 0:
                 source_fps_values.append(source_fps)
-            else:
-                source_fps_probe_failed = True
         except Exception:
-            source_fps_probe_failed = True
+            pass
     if int(ref["width"]) <= 0 or int(ref["height"]) <= 0:
         raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
     w, h, fps = _project_output_settings(project_body, ref)
+    if bool(output_settings.get("frame_blend_enabled")) and source_fps_values:
+        # Keep native temporal information until the dedicated final Blur pass.
+        fps = max(fps, max(source_fps_values))
     canvas_fit, background_color, blur_amount = _project_canvas_settings(project_body)
     range_start_sec, range_end_sec = _project_export_range(project_body)
     _emit_progress(progress_callback, 0.08, "normalizing")
@@ -1103,18 +1121,12 @@ def _compose_lite_cut_montage_once(
                 video_encode_quality=video_encode_quality,
                 cancel_event=cancel_event,
             )
-        output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
         delivery_fps = resolve_frame_blend_output_fps(
             fps,
             high_frame_downsample_enabled=bool(output_settings.get("high_frame_downsample_enabled")),
             delivery_fps=output_settings.get("delivery_fps"),
         )
-        frame_blend_source_supported = (
-            not source_fps_probe_failed
-            and bool(source_fps_values)
-            and all(is_frame_blend_source_supported(source_fps) for source_fps in source_fps_values)
-            and is_frame_blend_source_supported(fps)
-        )
+        frame_blend_source_supported = is_frame_blend_source_supported(fps)
         blend_frames = normalize_frame_blend_frames(
             frame_blend_source_supported
             and bool(output_settings.get("frame_blend_enabled")),
@@ -1122,7 +1134,9 @@ def _compose_lite_cut_montage_once(
         )
         if blend_frames > 1:
             _raise_if_cancelled(cancel_event)
-            _emit_progress(progress_callback, 0.99, "frame_blend")
+            if not supports_blur_pipeline(ffmpeg_bin):
+                raise MontageComposerError("MONTAGE_CUSTOM_BLUR_REQUIRED")
+            _emit_progress(progress_callback, 0.60, "frame_blend")
             frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
             import shutil
 
@@ -1136,7 +1150,15 @@ def _compose_lite_cut_montage_once(
                 video_encode_args=video_encode_quality,
                 source_fps=fps,
             )
-            blend_result = _run_ffmpeg_process(cmd_blend, timeout=3600, cancel_event=cancel_event)
+            blend_result = _run_ffmpeg_process(
+                cmd_blend,
+                timeout=3600,
+                cancel_event=cancel_event,
+                progress_callback=progress_callback,
+                progress_start=0.60,
+                progress_end=0.995,
+                progress_stage="frame_blend",
+            )
             if blend_result.returncode != 0:
                 tail = (blend_result.stderr or blend_result.stdout or "").strip()[-600:]
                 logger.error("lite_cut frame blend failed: %s", tail)
