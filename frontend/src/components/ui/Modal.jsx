@@ -16,6 +16,7 @@ import { X } from "lucide-react";
  *   className?: string;
  *   contentClassName?: string;
  *   zIndex?: number;
+ *   contained?: boolean;
  * }} props
  */
 export default function Modal({
@@ -32,13 +33,14 @@ export default function Modal({
   className = "",
   contentClassName = "flex-1 overflow-y-auto",
   zIndex = 90,
+  contained = false,
 }) {
   if (!open) return null;
 
   return (
     <div
       style={{ zIndex }}
-      className="fixed inset-0 flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
+      className={`${contained ? "absolute" : "fixed"} inset-0 flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm`}
       role="dialog"
       aria-modal="true"
       onClick={(e) => {

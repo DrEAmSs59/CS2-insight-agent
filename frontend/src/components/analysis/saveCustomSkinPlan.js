@@ -1,14 +1,17 @@
 import API from "../../api/api.js";
 
-function detailFromAxios(error) {
+const GENERIC_SKIN_SAVE_ERROR = "COSMETICS_SKIN_REWRITE_FAILED";
+
+function publicErrorCodeFromAxios(error) {
   const detail = error?.response?.data?.detail;
-  if (typeof detail === "string" && detail.trim()) return detail.trim();
-  if (Array.isArray(detail)) {
-    const parts = detail.map((row) => (typeof row === "string" ? row : row?.msg)).filter(Boolean);
-    if (parts.length) return parts.join("; ");
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const code = String(detail.code || "").trim();
+    if (code === "COSMETICS_SKIN_CORE_UNAVAILABLE" || code === GENERIC_SKIN_SAVE_ERROR) {
+      return code;
+    }
   }
-  if (error?.message) return String(error.message);
-  return "Request failed";
+  // Never surface backend/native exception text, including from an older server.
+  return GENERIC_SKIN_SAVE_ERROR;
 }
 
 /** Persist custom skin plan and rewrite the demo working cache. */
@@ -27,7 +30,7 @@ export async function saveCustomSkinPlan({ demoId, steamid, replacements, origin
       plan: null,
       succeeded: [],
       failed: [],
-      error: detailFromAxios(error),
+      error_code: publicErrorCodeFromAxios(error),
     };
   }
 }

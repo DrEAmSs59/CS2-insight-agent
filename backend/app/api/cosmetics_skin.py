@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from ..api_errors import error_detail
 from ..cosmetics_skin_plan import (
     CosmeticsSkinPlanError,
     build_batch_and_plan,
@@ -32,6 +33,10 @@ from ..skin_core_client import SkinCoreError, SkinCoreNotFound, run_rewrite_owne
 
 router = APIRouter(tags=["cosmetics-skin"])
 logger = logging.getLogger(__name__)
+
+_ERR_SKIN_CORE_UNAVAILABLE = "COSMETICS_SKIN_CORE_UNAVAILABLE"
+_ERR_SKIN_REWRITE_FAILED = "COSMETICS_SKIN_REWRITE_FAILED"
+_ERR_SKIN_ITEM_FAILED = "COSMETICS_SKIN_ITEM_FAILED"
 
 
 class CustomSkinPlanBody(BaseModel):
@@ -69,23 +74,6 @@ def _cleanup_temp(path: Path) -> None:
         logger.warning("Failed to remove skin rewrite temp: %s", path)
 
 
-def _skin_core_failure_message(skin_result: Any) -> str:
-    """Build a 502 detail from skin-core response fields (fail-closed messaging)."""
-    if not isinstance(skin_result, dict):
-        return "skin-core rewrite failed"
-    message = (
-        skin_result.get("error_message")
-        or skin_result.get("error")
-        or skin_result.get("message")
-        or "skin-core rewrite failed"
-    )
-    text = str(message).strip() or "skin-core rewrite failed"
-    error_code = skin_result.get("error_code")
-    if error_code is not None and str(error_code).strip():
-        return f"{error_code}: {text}"
-    return text
-
-
 def _run_one_owned_batch(
     *,
     input_dem: Path,
@@ -106,12 +94,50 @@ def _run_one_owned_batch(
     return skin_result
 
 
-def _map_skin_core_call_error(exc: Exception) -> HTTPException:
+def _map_skin_core_call_error(
+    exc: Exception,
+    *,
+    demo_id: int,
+    steamid: str,
+    phase: str,
+) -> HTTPException:
+    logger.error(
+        "skin-core call failed: demo_id=%s steamid=%s phase=%s",
+        demo_id,
+        steamid,
+        phase,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
     if isinstance(exc, SkinCoreNotFound):
-        return HTTPException(503, str(exc))
-    if isinstance(exc, SkinCoreError):
-        return HTTPException(502, str(exc))
-    return HTTPException(502, f"skin-core failed: {exc}")
+        return HTTPException(503, error_detail(_ERR_SKIN_CORE_UNAVAILABLE))
+    return HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
+
+
+def _log_skin_core_result_failure(
+    result: Any,
+    *,
+    demo_id: int,
+    steamid: str,
+    phase: str,
+) -> None:
+    logger.error(
+        "skin-core returned failure: demo_id=%s steamid=%s phase=%s response=%r",
+        demo_id,
+        steamid,
+        phase,
+        result,
+    )
+
+
+def _sanitize_failed_item_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep item identity/display fields while removing skin-core internals."""
+    sanitized: list[dict[str, Any]] = []
+    for row in rows:
+        public_row = dict(row)
+        public_row.pop("error", None)
+        public_row["error_code"] = _ERR_SKIN_ITEM_FAILED
+        sanitized.append(public_row)
+    return sanitized
 
 
 @router.get("/api/demos/{demo_id}/cosmetics/custom-plan")
@@ -186,10 +212,13 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         try:
             other_batch = build_batch_from_plan_json(other_plan, other_inventory)
         except CosmeticsSkinPlanError as exc:
-            raise HTTPException(
-                400,
-                f"cannot re-apply stored plan for {other_steamid}: {exc}",
-            ) from exc
+            logger.error(
+                "stored cosmetics plan could not be rebuilt: demo_id=%s steamid=%s",
+                demo_id,
+                other_steamid,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            raise HTTPException(500, error_detail(_ERR_SKIN_REWRITE_FAILED)) from exc
         if other_batch:
             prior_passes.append((other_steamid, other_batch))
 
@@ -222,19 +251,29 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     steam_id64=other_steamid,
                     items=other_batch,
                 )
-            except (SkinCoreNotFound, SkinCoreError, Exception) as exc:
-                raise _map_skin_core_call_error(exc) from exc
+            except Exception as exc:
+                raise _map_skin_core_call_error(
+                    exc,
+                    demo_id=int(demo_id),
+                    steamid=other_steamid,
+                    phase="reapply",
+                ) from exc
             if prior_result.get("ok") is not True:
-                raise HTTPException(
-                    502,
-                    f"re-apply plan for {other_steamid} failed: "
-                    f"{_skin_core_failure_message(prior_result)}",
+                _log_skin_core_result_failure(
+                    prior_result,
+                    demo_id=int(demo_id),
+                    steamid=other_steamid,
+                    phase="reapply",
                 )
+                raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
             if not prior_out.is_file():
-                raise HTTPException(
-                    502,
-                    f"re-apply plan for {other_steamid} produced no output demo",
+                logger.error(
+                    "skin-core produced no reapply output: demo_id=%s steamid=%s path=%s",
+                    demo_id,
+                    other_steamid,
+                    prior_out,
                 )
+                raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
             if current_input is not temp_in:
                 _cleanup_temp(current_input)
             current_input = prior_out
@@ -247,8 +286,13 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                 steam_id64=steamid,
                 items=batch_items,
             )
-        except (SkinCoreNotFound, SkinCoreError, Exception) as exc:
-            raise _map_skin_core_call_error(exc) from exc
+        except Exception as exc:
+            raise _map_skin_core_call_error(
+                exc,
+                demo_id=int(demo_id),
+                steamid=steamid,
+                phase="rewrite",
+            ) from exc
 
         succeeded_raw = skin_result.get("succeeded")
         failed_raw = skin_result.get("failed")
@@ -258,6 +302,14 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
         failed_mapped = map_item_statuses(
             plan_json, failed_raw if isinstance(failed_raw, list) else []
         )
+        failed_public = _sanitize_failed_item_rows(failed_mapped)
+        if failed_mapped and skin_result.get("ok") is True:
+            _log_skin_core_result_failure(
+                skin_result,
+                demo_id=int(demo_id),
+                steamid=steamid,
+                phase="rewrite-partial",
+            )
         succeeded_ids = {
             str(row.get("item_id64") or "").strip()
             for row in (succeeded_raw if isinstance(succeeded_raw, list) else [])
@@ -297,6 +349,12 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
 
         # Soft all-fail: structured failed[] with ok:false — do not replace cache.
         if skin_result.get("ok") is not True:
+            _log_skin_core_result_failure(
+                skin_result,
+                demo_id=int(demo_id),
+                steamid=steamid,
+                phase="rewrite",
+            )
             if failed_mapped or succeeded_mapped:
                 return {
                     "ok": False,
@@ -304,13 +362,19 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     "demo_id": int(demo_id),
                     "plan": None,
                     "succeeded": succeeded_mapped,
-                    "failed": failed_mapped,
-                    "error": _skin_core_failure_message(skin_result),
+                    "failed": failed_public,
+                    "error_code": _ERR_SKIN_REWRITE_FAILED,
                 }
-            raise HTTPException(502, _skin_core_failure_message(skin_result))
+            raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
 
         if not temp_out.is_file():
-            raise HTTPException(502, "skin-core produced no output demo")
+            logger.error(
+                "skin-core reported success without output: demo_id=%s steamid=%s path=%s",
+                demo_id,
+                steamid,
+                temp_out,
+            )
+            raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
 
         os.replace(temp_out, cached_path)
         replaced = True
@@ -342,8 +406,18 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
             "output_sha256": output_sha256,
             "plan": filtered_plan,
             "succeeded": succeeded_mapped,
-            "failed": failed_mapped,
+            "failed": failed_public,
         }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "unexpected cosmetics rewrite failure: demo_id=%s steamid=%s",
+            demo_id,
+            steamid,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        raise HTTPException(500, error_detail(_ERR_SKIN_REWRITE_FAILED)) from exc
     finally:
         if temp_in is not None:
             _cleanup_temp(temp_in)

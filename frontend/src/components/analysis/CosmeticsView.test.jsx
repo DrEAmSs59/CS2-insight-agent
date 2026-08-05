@@ -136,6 +136,8 @@ describe("CosmeticsView", () => {
 
     fireEvent.click(card);
     const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("absolute");
+    expect(dialog.className).not.toContain("fixed");
     expect(within(dialog).getAllByText("Lᵒᵛᵉᵧₒᵤ 玫瑰の吻").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("53009600926")).toBeTruthy();
     expect(within(dialog).queryByText(/Demo 没有提供可归属的贴纸数据|no attributable sticker data/i)).toBeNull();
@@ -700,7 +702,8 @@ describe("CosmeticsView", () => {
     expect(within(result).getByText("AK新皮")).toBeTruthy();
     expect(within(result).getByText("默认刀")).toBeTruthy();
     expect(within(result).getByText("刺刀 | 多普勒")).toBeTruthy();
-    expect(within(result).getByText(/need a donor knife/i)).toBeTruthy();
+    expect(within(result).getByText(/该饰品无法修改|could not be changed/i)).toBeTruthy();
+    expect(within(result).queryByText(/need a donor knife/i)).toBeNull();
   });
 
   test("save result dialog enriches original names from inventory when API omits them", async () => {

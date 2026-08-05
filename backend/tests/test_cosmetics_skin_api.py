@@ -223,15 +223,20 @@ def test_post_custom_plan_restores_cache_from_original_before_rewrite(api_env, m
     assert not seen["input_path"].exists()
 
 
-def test_post_leaves_cache_untouched_on_skin_core_failure(api_env, monkeypatch):
+def test_post_logs_skin_core_failure_without_exposing_native_details(api_env, monkeypatch, caplog):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
     prior = b"PREVIOUSLY-REWRITTEN"
     cached.write_bytes(prior)
 
+    internal = (
+        "did not resolve any original entity handle for "
+        "player/account/class/item/source definition/team"
+    )
+
     def boom(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
-        raise SkinCoreError("auth failed")
+        raise SkinCoreError(internal)
 
     monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", boom)
 
@@ -241,7 +246,9 @@ def test_post_leaves_cache_untouched_on_skin_core_failure(api_env, monkeypatch):
     )
 
     assert response.status_code == 502
-    assert "auth failed" in str(response.json()["detail"])
+    assert response.json()["detail"] == {"code": "COSMETICS_SKIN_REWRITE_FAILED"}
+    assert "entity handle" not in response.text
+    assert internal in caplog.text
     # Prior rewritten cache must survive skin-core failure (no pre-rewrite overwrite).
     assert cached.read_bytes() == prior
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
@@ -272,7 +279,7 @@ def test_post_missing_ok_does_not_replace_cache(api_env, monkeypatch):
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
-def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
+def test_post_ok_false_logs_error_without_exposing_response_details(api_env, monkeypatch, caplog):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
@@ -295,9 +302,11 @@ def test_post_ok_false_surfaces_error_message(api_env, monkeypatch):
     )
 
     assert response.status_code == 502
-    detail = str(response.json()["detail"])
-    assert "item not owned by steamid" in detail
-    assert "OWNERSHIP_MISMATCH" in detail
+    assert response.json()["detail"] == {"code": "COSMETICS_SKIN_REWRITE_FAILED"}
+    assert "item not owned by steamid" not in response.text
+    assert "OWNERSHIP_MISMATCH" not in response.text
+    assert "item not owned by steamid" in caplog.text
+    assert "OWNERSHIP_MISMATCH" in caplog.text
     assert cached.read_bytes() == prior
     assert cached.read_bytes() != b"PARTIAL-OUTPUT"
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
@@ -328,7 +337,7 @@ def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     assert body["output_sha256"] == "abc123"
 
 
-def test_post_partial_success_writes_cache_and_returns_item_results(api_env, monkeypatch):
+def test_post_partial_success_sanitizes_item_failures(api_env, monkeypatch, caplog):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
@@ -407,14 +416,17 @@ def test_post_partial_success_writes_cache_and_returns_item_results(api_env, mon
     assert body["succeeded"][0]["original_name_zh"] == "AK原皮"
     assert body["succeeded"][0]["replacement_name_zh"] == "AK-47 | 红线"
     assert body["failed"][0]["slot_key"] == "id:11"
-    assert "donor" in body["failed"][0]["error"]
+    assert body["failed"][0]["error_code"] == "COSMETICS_SKIN_ITEM_FAILED"
+    assert "error" not in body["failed"][0]
+    assert "donor" not in response.text
+    assert "donor" in caplog.text
 
     stored = asyncio.run(db.get_custom_skin_plan(str(original), STEAM_ID))
     assert stored is not None
     assert len(stored["plan_json"]["items"]) == 1
 
 
-def test_post_all_items_soft_failed_returns_200_without_cache_write(api_env, monkeypatch):
+def test_post_all_items_soft_failed_logs_and_returns_only_public_codes(api_env, monkeypatch, caplog):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
     cached: Path = api_env["cached"]
@@ -449,6 +461,11 @@ def test_post_all_items_soft_failed_returns_200_without_cache_write(api_env, mon
     assert body["ok"] is False
     assert body["plan"] is None
     assert body["failed"][0]["slot_key"] == "id:10"
+    assert body["failed"][0]["error_code"] == "COSMETICS_SKIN_ITEM_FAILED"
+    assert "error" not in body["failed"][0]
+    assert body["error_code"] == "COSMETICS_SKIN_REWRITE_FAILED"
+    assert "requested Econ item" not in response.text
+    assert "requested Econ item" in caplog.text
     # Soft-fail must leave prior rewritten cache untouched.
     assert cached.read_bytes() == prior
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None

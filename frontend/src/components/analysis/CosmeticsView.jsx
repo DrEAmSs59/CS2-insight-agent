@@ -212,6 +212,19 @@ function saveResultReplacementName(row, locale) {
   return en || zh || String(row?.item_id64 || "");
 }
 
+function saveFailureMessage(result, t) {
+  if (result?.error_code === "COSMETICS_SKIN_CORE_UNAVAILABLE") {
+    return t("analysis.cosmetics.saveCoreUnavailable");
+  }
+  return t("analysis.cosmetics.saveFailedLogged");
+}
+
+function failedItemMessage(row, t) {
+  if (!row?.error_code && !row?.error) return null;
+  // Defense in depth for responses from older backends: never render raw native errors.
+  return t("analysis.cosmetics.saveItemFailed");
+}
+
 /** Fill original/replacement names from local inventory when API omits them. */
 function enrichSaveResultRows(rows, inventoryRows, replacements) {
   const bySlot = new Map();
@@ -913,6 +926,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         localReplacements,
       );
       const hasItemResults = succeeded.length > 0 || failed.length > 0;
+      const failureMessage = result?.ok ? null : saveFailureMessage(result, t);
 
       if (hasItemResults) {
         setSaveResult({
@@ -920,7 +934,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           partial: Boolean(result?.partial) || (succeeded.length > 0 && failed.length > 0),
           succeeded,
           failed,
-          error: result?.error || null,
+          error: failureMessage,
         });
       }
 
@@ -950,7 +964,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       } else {
         setNotice({
           tone: "error",
-          text: result?.error || t("analysis.cosmetics.saveFailed"),
+          text: failureMessage,
         });
       }
     } catch (error) {
@@ -1104,6 +1118,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       <Modal
         open={Boolean(detail)}
         onClose={() => setDetail(null)}
+        contained
         title={detail ? (customName(detail.item) || displayName(detail.item, locale)) : ""}
         subtitle={detail?.mode === "3d" ? t("analysis.cosmetics.inspect3d") : localized(detail?.item, "collection_name", locale) || t("analysis.cosmetics.itemInfo")}
         icon={detail?.mode === "3d" ? <Rotate3D className="h-4 w-4 text-cs2-accent" /> : <Gem className="h-4 w-4 text-cs2-accent" />}
@@ -1198,6 +1213,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                   {saveResult.failed.map((row) => {
                     const from = saveResultOriginalName(row, locale);
                     const to = saveResultReplacementName(row, locale);
+                    const itemError = failedItemMessage(row, t);
                     return (
                       <li key={`fail-${row.slot_key || row.item_id64}`} className="text-[12px] leading-snug">
                         {from ? (
@@ -1209,8 +1225,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                         ) : (
                           <span className="font-medium text-cs2-text-primary">{to}</span>
                         )}
-                        {row.error ? (
-                          <span className="mt-0.5 block text-cs2-text-muted">— {row.error}</span>
+                        {itemError ? (
+                          <span className="mt-0.5 block text-cs2-text-muted">— {itemError}</span>
                         ) : null}
                       </li>
                     );

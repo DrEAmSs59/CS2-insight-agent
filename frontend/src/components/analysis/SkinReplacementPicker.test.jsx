@@ -28,16 +28,16 @@ test("renders candidate search under title, fills grid, defaults replacement wea
   const currentColumn = screen.getByTestId("skin-picker-current-column");
   expect(currentColumn.className).toMatch(/overflow-y-auto/);
   const candidates = screen.getByTestId("skin-candidate-list");
-  expect(candidates.className).toMatch(/grid-cols-3/);
+  expect(candidates.className).toMatch(/grid-cols-5/);
   expect(candidates.className).toMatch(/flex-1/);
   // Search stays in the candidate panel, above the grid.
   expect(search.compareDocumentPosition(candidates) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(search.parentElement?.contains(candidates)).toBe(true);
 
-  const sized = document.querySelectorAll("[data-skin-tile]");
+  const sized = candidates.querySelectorAll("[data-skin-tile]");
   expect(sized.length).toBeGreaterThan(2);
   for (const el of sized) {
-    expect(el.className).toMatch(/h-\[192px\]/);
+    expect(el.className).toMatch(/h-\[128px\]/);
   }
 
   const currentSkin = screen.getByTestId("skin-picker-current");

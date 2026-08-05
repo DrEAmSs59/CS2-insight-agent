@@ -484,7 +484,7 @@ export default function SkinReplacementPicker({
           ) : null}
           <div
             data-testid="skin-candidate-list"
-            className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-3 content-start gap-3 overflow-y-auto overflow-x-hidden pr-1"
+            className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-5 content-start gap-2 overflow-y-auto overflow-x-hidden pr-1"
           >
             {filtered.map((candidate) => {
               const active = selected?.catalog_id === candidate.catalog_id
@@ -497,7 +497,7 @@ export default function SkinReplacementPicker({
                   aria-pressed={active}
                   aria-label={formatCraftPipeName(candidate, locale) || displayName(candidate, locale)}
                   data-skin-tile
-                  className={`cosmetic-preview-surface relative box-border flex h-[192px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
+                  className={`cosmetic-preview-surface relative box-border flex h-[128px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
                     active
                       ? "border-cs2-accent ring-1 ring-cs2-accent/40"
                       : "border-cs2-border hover:border-cs2-text-muted"

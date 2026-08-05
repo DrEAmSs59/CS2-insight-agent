@@ -54,6 +54,25 @@ describe("saveCustomSkinPlan", () => {
     });
   });
 
+  test("never exposes backend or native exception details", async () => {
+    API.post.mockRejectedValue({
+      response: {
+        data: {
+          detail: "did not resolve any original entity handle for player/account/class/item",
+        },
+      },
+    });
+
+    const result = await saveCustomSkinPlan({
+      demoId: 42,
+      steamid: "1",
+      replacements: { "id:10": { paint_index: 340 } },
+    });
+
+    expect(result.error_code).toBe("COSMETICS_SKIN_REWRITE_FAILED");
+    expect(JSON.stringify(result)).not.toContain("entity handle");
+  });
+
   test("GETs custom-plan for demoId and steamid", async () => {
     API.get.mockResolvedValue({ data: { ok: true, plan: null } });
 
