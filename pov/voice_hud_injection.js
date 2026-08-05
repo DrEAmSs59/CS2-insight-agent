@@ -18,6 +18,8 @@
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const KILL_FEEDBACK_CATCHUP_TICKS = 128;
+    const MAX_VISIBLE_VOICE_NOTICES = 3;
+    const VOICE_NOTICE_ROW_HEIGHT = 22;
     // Stock attacker-only SOS events (needs sv_cheats; local -insecure demos OK).
     const KILL_FEEDBACK_EVENT_HS = "Player.DeathHeadShot.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_HS_ARMOR = "Player.DeathHeadShotArmor.AttackerFeedback";
@@ -28,6 +30,7 @@
             xuid: String(encoded[0]),
             slot: Number(encoded[1]),
             team: Number(encoded[2]),
+            unmuted: false,
         };
     }).filter(function (player) {
         return player.xuid && player.slot >= 0 && (player.team === 2 || player.team === 3);
@@ -57,7 +60,6 @@
             intervals: intervals,
             locations: locations,
             panel: null,
-            unmuted: false,
         };
     });
     const controller = $.GetContextPanel();
@@ -216,14 +218,10 @@
     let inputKeyPanels = [];
     let radarHud = null;
     let radarMapImage = null;
-    let radarForceShown = false;
     let radarBombMarker = null;
     let radarBombIcon = null;
     let radarDroppedBombMarker = null;
     let radarDroppedBombIcon = null;
-    let radarSoundMarkers = [];
-    // Sound rings + POV frustum live under #Radar (like stock RI_PlayerSoundContainer),
-    // outside Round--Inner's border-radius clip — keeps the circular map intact.
     let radarUnclipHud = null;
     let povRadarFx = null;
     let killFeedbackLastTick = -1;
@@ -1127,14 +1125,21 @@
         }
 
         let pending = false;
-        speakers.forEach(function (speaker) {
-            if (!speaker.xuid || speaker.unmuted) {
+        roster.forEach(function (player) {
+            if (!player.xuid || player.unmuted) {
                 return;
             }
-            GameStateAPI.SetPlayerVoiceVolume(speaker.xuid, 1);
-            speaker.unmuted = !GameStateAPI.IsSelectedPlayerMuted(speaker.xuid)
-                && GameStateAPI.GetPlayerVoiceVolume(speaker.xuid) > 0;
-            pending = pending || !speaker.unmuted;
+            try {
+                if (GameStateAPI.IsSelectedPlayerMuted(player.xuid)) {
+                    GameStateAPI.ToggleMute(player.xuid);
+                }
+                GameStateAPI.SetPlayerVoiceVolume(player.xuid, 1);
+                player.unmuted = GameStateAPI.IsSelectedPlayerMuted(player.xuid) === false
+                    && GameStateAPI.GetPlayerVoiceVolume(player.xuid) > 0;
+            } catch (err) {
+                player.unmuted = false;
+            }
+            pending = pending || !player.unmuted;
         });
 
         unmuteAttempts += 1;
@@ -1382,10 +1387,10 @@
             y: lerp(a.y, b.y, t),
             yaw: lerpAngle(a.yaw, b.yaw, t),
             alive: a.alive,
-            hasC4: a.hasC4 || b.hasC4,
-            spottedByT: a.spottedByT || b.spottedByT,
-            spottedByCT: a.spottedByCT || b.spottedByCT,
-            team: (t < 0.5 ? a.team : b.team) || a.team || b.team || 0,
+            hasC4: a.hasC4,
+            spottedByT: a.spottedByT,
+            spottedByCT: a.spottedByCT,
+            team: a.team || 0,
         };
     }
 
@@ -1439,24 +1444,8 @@
 
     function hideNativeRadarPlayerIcons(nativeRadar) {
         // Only hide stock player icon packages. Never touch DirectionArrow (rim
-        // facing pointer), map transforms, bomb zones, or the place-name label.
-        // Native footstep rings live under RI_PlayerSoundContainer and are re-shown
-        // by C++ during demo playback — suppress every frame and clear children.
-        const soundRoot = nativeRadar.FindChildTraverse("RI_PlayerSoundContainer");
-        if (soundRoot && soundRoot.IsValid()) {
-            soundRoot.visible = false;
-            if (soundRoot.RemoveAndDeleteChildren) {
-                try { soundRoot.RemoveAndDeleteChildren(); } catch (err) {}
-            } else if (soundRoot.GetChildCount) {
-                for (let i = soundRoot.GetChildCount() - 1; i >= 0; i -= 1) {
-                    const child = soundRoot.GetChild(i);
-                    if (child && child.IsValid()) {
-                        child.visible = false;
-                        try { child.DeleteAsync(0.0); } catch (err2) {}
-                    }
-                }
-            }
-        }
+        // facing pointer), native RI_PlayerSoundContainer, map transforms, bomb
+        // zones, or the place-name label. Sound visualization belongs to CS2.
 
         function hideIfNativePlayerIcon(child) {
             if (!child || !child.IsValid()) {
@@ -1726,9 +1715,7 @@
         if (povRadarFx
             && povRadarFx.anchor && povRadarFx.anchor.IsValid()
             && povRadarFx.anchor.GetParent() === unclip
-            && povRadarFx.frustum && povRadarFx.frustum.IsValid()
-            && povRadarFx.soundRing && povRadarFx.soundRing.IsValid()
-            && povRadarFx.soundRing2 && povRadarFx.soundRing2.IsValid()) {
+            && povRadarFx.frustum && povRadarFx.frustum.IsValid()) {
             return povRadarFx;
         }
 
@@ -1763,26 +1750,10 @@
         frustum.style.washColor = "#ffffffff";
         frustum.visible = false;
 
-        function makeSoundRing(id) {
-            const ring = $.CreatePanel("Panel", unclip, id);
-            ring.hittest = false;
-            ring.AddClass("PlayerSound");
-            ring.AddClass("hud-colorize-wash");
-            ring.style.borderRadius = "50% / 50%";
-            ring.style.zIndex = "41";
-            ring.style.horizontalAlign = "left";
-            ring.style.verticalAlign = "top";
-            ring.style.overflow = "noclip";
-            ring.visible = false;
-            return ring;
-        }
-
         povRadarFx = {
             anchor: anchor,
             rotated: rotated,
             frustum: frustum,
-            soundRing: makeSoundRing("CS2InsightPovSoundRing"),
-            soundRing2: makeSoundRing("CS2InsightPovSoundRing2"),
         };
         return povRadarFx;
     }
@@ -1812,14 +1783,7 @@
         if (!nativeRadar) {
             return null;
         }
-        nativeRadar.visible = true;
-        // Do not override Insight POV radar cvars. Only ensure the stock radar draws.
-        if (!radarForceShown) {
-            GameInterfaceAPI.ConsoleCommand("cl_drawhud_force_radar 0");
-            radarForceShown = true;
-        }
         hideNativeRadarPlayerIcons(nativeRadar);
-        unclipRadarForSoundRings(nativeRadar);
         return resolveMapTransformHost(nativeRadar);
     }
 
@@ -1828,9 +1792,7 @@
             && player.enemyPip && player.enemyPip.IsValid()
             && player.enemyGhost && player.enemyGhost.IsValid()
             && player.deathIcon && player.deathIcon.IsValid()
-            && player.frustum && player.frustum.IsValid()
-            && player.soundRing && player.soundRing.IsValid()
-            && player.soundRing2 && player.soundRing2.IsValid()) {
+            && player.frustum && player.frustum.IsValid()) {
             return player.marker;
         }
         if (player.marker && player.marker.IsValid()) {
@@ -1846,12 +1808,9 @@
         player.enemyPip = null;
         player.enemyGhost = null;
         player.deathIcon = null;
-        player.soundRing = null;
-        player.soundRing2 = null;
 
-        // Mirror stock PlayerIcons packaging. Rings/frustum stay on the marker
-        // (InnerTransform percent space) — reliable. Unclip overlay was crashing
-        // the radar tick and falling back to native team-colored icons.
+        // Mirror stock PlayerIcons packaging. Frustum stays on the marker in
+        // InnerTransform percent space and inherits the native radar transform.
         const marker = $.CreatePanel("Panel", parent, "CS2InsightRadarPlayer" + index);
         marker.hittest = false;
         marker.AddClass("PlayerIcons");
@@ -1962,22 +1921,6 @@
         deathIcon.style.verticalAlign = "top";
         deathIcon.visible = false;
 
-        function makeSoundRing(id) {
-            const ring = $.CreatePanel("Panel", marker, id);
-            ring.hittest = false;
-            ring.AddClass("PlayerSound");
-            ring.AddClass("hud-colorize-wash");
-            ring.style.borderRadius = "50% / 50%";
-            ring.style.zIndex = "1";
-            ring.style.horizontalAlign = "left";
-            ring.style.verticalAlign = "top";
-            ring.style.overflow = "noclip";
-            ring.visible = false;
-            return ring;
-        }
-        const soundRing = makeSoundRing("CS2InsightPovSoundRing");
-        const soundRing2 = makeSoundRing("CS2InsightPovSoundRing2");
-
         player.marker = marker;
         player.facingRoot = rotated;
         player.rotated = rotated;
@@ -1988,8 +1931,6 @@
         player.enemyPip = enemyPip;
         player.enemyGhost = enemyGhost;
         player.deathIcon = deathIcon;
-        player.soundRing = soundRing;
-        player.soundRing2 = soundRing2;
         return marker;
     }
 
@@ -2236,21 +2177,13 @@
                     player.deathIcon.style.visibility = "visible";
                 }
             }
-            if (player.soundRing && player.soundRing.IsValid() && !isPov) {
-                player.soundRing.visible = false;
-            }
-            if (player.soundRing2 && player.soundRing2.IsValid() && !isPov) {
-                player.soundRing2.visible = false;
-            }
         });
 
         try {
             updatePlantedBombMarker(hud, tick, povTeam);
-            updateRadarSoundMarkers(tick, povXuid, povSample);
             const nativeRadar = findNativeRadar();
             if (nativeRadar) {
                 hideNativeRadarPlayerIcons(nativeRadar);
-                unclipRadarForSoundRings(nativeRadar);
                 updateRadarCombatBorder(nativeRadar, tick, povXuid);
             }
         } catch (radarErr) {
@@ -2290,13 +2223,6 @@
         }
     }
 
-    function worldRadiusToRadarDiameterPercent(radius, transform) {
-        // Diameter as % of the overview UV host (InnerTransform). Percent sizing
-        // tracks radar zoom with the map; px+actuallayoutwidth was undersized.
-        const mapPx = (2 * Math.max(0, Number(radius) || 0)) / transform.scale;
-        return Math.max(2.5, (mapPx / RADAR_MAP_SIZE) * 100);
-    }
-
     function findActivePovSounds(tick, povXuid) {
         // Live HUD can stack two radii (e.g. footstep + gun). Prefer distinct
         // radii: one loud/land, one thinner step/weapon when both overlap.
@@ -2304,7 +2230,8 @@
         if (!povXuid || !sounds.length) {
             return [];
         }
-        const windowStart = tick - 64;
+        const tickRate = Math.max(1, Number(radarTrack.stride) * 8);
+        const windowStart = tick - tickRate;
         let lo = 0;
         let hi = sounds.length;
         while (lo < hi) {
@@ -2324,7 +2251,7 @@
             if (String(sound.xuid) !== String(povXuid)) {
                 continue;
             }
-            const endTick = sound.tick + Math.max(1, Math.round((sound.durationMs / 1000) * 64));
+            const endTick = sound.tick + Math.max(1, Math.round((sound.durationMs / 1000) * tickRate));
             if (tick > endTick) {
                 continue;
             }
@@ -2354,38 +2281,6 @@
         return picked;
     }
 
-    function paintPovSoundRingPx(ring, cx, cy, diamPx, sound) {
-        if (!ring || !ring.IsValid()) {
-            return;
-        }
-        if (!sound || !(diamPx > 0)) {
-            ring.visible = false;
-            return;
-        }
-        const half = diamPx / 2;
-        ring.visible = true;
-        ring.style.overflow = "noclip";
-        ring.style.width = diamPx + "px";
-        ring.style.height = diamPx + "px";
-        ring.style.x = (cx - half) + "px";
-        ring.style.y = (cy - half) + "px";
-        ring.style.marginLeft = "0px";
-        ring.style.marginTop = "0px";
-        ring.style.position = "0px 0px 0px";
-        ring.style.horizontalAlign = "left";
-        ring.style.verticalAlign = "top";
-        ring.style.zIndex = "41";
-        ring.RemoveClass("player-sound-max");
-        if (sound.loud) {
-            ring.AddClass("player-sound-max");
-            ring.style.border = "3px solid #ffffffff";
-            ring.style.brightness = "5";
-        } else {
-            ring.style.border = "1px solid #ffffff40";
-            ring.style.brightness = "1";
-        }
-    }
-
     function hidePovRadarFx() {
         if (!povRadarFx) {
             return;
@@ -2396,32 +2291,16 @@
         if (povRadarFx.frustum && povRadarFx.frustum.IsValid()) {
             povRadarFx.frustum.visible = false;
         }
-        if (povRadarFx.soundRing && povRadarFx.soundRing.IsValid()) {
-            povRadarFx.soundRing.visible = false;
-        }
-        if (povRadarFx.soundRing2 && povRadarFx.soundRing2.IsValid()) {
-            povRadarFx.soundRing2.visible = false;
-        }
     }
 
     function updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam) {
-        // Hide any leftover per-player rings from older builds.
+        // This helper owns only the custom POV viewing frustum. Sound circles are
+        // rendered exclusively by CS2's native RI_PlayerSoundContainer.
         radarTrack.players.forEach(function (player) {
-            if (player.soundRing && player.soundRing.IsValid()) {
-                player.soundRing.visible = false;
-            }
-            if (player.soundRing2 && player.soundRing2.IsValid()) {
-                player.soundRing2.visible = false;
-            }
             if (player.frustum && player.frustum.IsValid()) {
                 player.frustum.visible = false;
             }
         });
-        for (let index = 0; index < radarSoundMarkers.length; index += 1) {
-            if (radarSoundMarkers[index] && radarSoundMarkers[index].IsValid()) {
-                radarSoundMarkers[index].visible = false;
-            }
-        }
 
         const fx = ensurePovRadarFx(nativeRadar);
         if (!fx) {
@@ -2455,146 +2334,6 @@
             fx.frustum.style.opacity = "0.08";
         }
 
-        const activeSounds = findActivePovSounds(tick, povXuid);
-        function diamFor(sound) {
-            if (!sound) {
-                return 0;
-            }
-            return Math.max(8, (2 * Math.max(0, Number(sound.radius) || 0) / radarTrack.transform.scale) * pos.pxPerMap);
-        }
-        paintPovSoundRingPx(fx.soundRing, pos.x, pos.y, diamFor(activeSounds[0]), activeSounds[0] || null);
-        paintPovSoundRingPx(fx.soundRing2, pos.x, pos.y, diamFor(activeSounds[1]), activeSounds[1] || null);
-    }
-
-    function paintPovSoundRing(ring, hud, percent, sound) {
-        // Percent of player layer (synced to InnerTransform UV; may clip at #Radar).
-        // All rings stay thin; size alone encodes loudness / radius.
-        if (!ring || !ring.IsValid()) {
-            return;
-        }
-        if (!sound) {
-            ring.visible = false;
-            return;
-        }
-        if (hud && ring.GetParent() !== hud) {
-            try { ring.SetParent(hud); } catch (err) {}
-        }
-        const diamPct = worldRadiusToRadarDiameterPercent(sound.radius, radarTrack.transform);
-        const half = diamPct / 2;
-        ring.visible = true;
-        ring.style.overflow = "noclip";
-        ring.style.position = percent.x + "% " + percent.y + "% 0px";
-        ring.style.width = diamPct + "%";
-        ring.style.height = diamPct + "%";
-        ring.style.marginLeft = (-half) + "%";
-        ring.style.marginTop = (-half) + "%";
-        ring.style.horizontalAlign = "left";
-        ring.style.verticalAlign = "top";
-        ring.style.zIndex = "1";
-        ring.RemoveClass("player-sound-max");
-        ring.style.border = "1px solid #ffffff40";
-        ring.style.brightness = "1";
-    }
-
-    function paintPovSoundRingAtPx(ring, parent, cx, cy, diamPx, sound) {
-        if (!ring || !ring.IsValid()) {
-            return;
-        }
-        if (!sound || !(diamPx > 0) || !parent) {
-            ring.visible = false;
-            return;
-        }
-        try {
-            if (ring.GetParent() !== parent) {
-                ring.SetParent(parent);
-            }
-        } catch (err) {
-            ring.visible = false;
-            return;
-        }
-        const half = diamPx / 2;
-        ring.visible = true;
-        ring.style.overflow = "noclip";
-        ring.style.width = diamPx + "px";
-        ring.style.height = diamPx + "px";
-        ring.style.position = (cx - half) + "px " + (cy - half) + "px 0px";
-        ring.style.marginLeft = "0px";
-        ring.style.marginTop = "0px";
-        ring.style.horizontalAlign = "left";
-        ring.style.verticalAlign = "top";
-        ring.style.zIndex = "81";
-        ring.RemoveClass("player-sound-max");
-        if (sound.loud) {
-            ring.AddClass("player-sound-max");
-            ring.style.border = "3px solid #ffffffff";
-            ring.style.brightness = "5";
-        } else {
-            ring.style.border = "1px solid #ffffff40";
-            ring.style.brightness = "1";
-        }
-    }
-
-    function updateRadarSoundMarkers(tick, povXuid, povSample) {
-        for (let index = 0; index < radarSoundMarkers.length; index += 1) {
-            if (radarSoundMarkers[index] && radarSoundMarkers[index].IsValid()) {
-                radarSoundMarkers[index].visible = false;
-            }
-        }
-
-        let povPlayer = null;
-        radarTrack.players.forEach(function (player) {
-            if (String(player.xuid) === String(povXuid)) {
-                povPlayer = player;
-            }
-            if (player.soundRing && player.soundRing.IsValid() && String(player.xuid) !== String(povXuid)) {
-                player.soundRing.visible = false;
-            }
-            if (player.soundRing2 && player.soundRing2.IsValid() && String(player.xuid) !== String(povXuid)) {
-                player.soundRing2.visible = false;
-            }
-        });
-
-        if (!povPlayer || !povSample || !povSample.alive) {
-            if (povPlayer) {
-                if (povPlayer.soundRing && povPlayer.soundRing.IsValid()) {
-                    povPlayer.soundRing.visible = false;
-                }
-                if (povPlayer.soundRing2 && povPlayer.soundRing2.IsValid()) {
-                    povPlayer.soundRing2.visible = false;
-                }
-            }
-            hidePovRadarFx();
-            return;
-        }
-
-        // Keep frustum on the rotated marker (aligned with pip).
-        if (povPlayer.frustum && povPlayer.frustum.IsValid() && povPlayer.rotated
-            && povPlayer.rotated.IsValid()) {
-            try {
-                if (povPlayer.frustum.GetParent() !== povPlayer.rotated) {
-                    povPlayer.frustum.SetParent(povPlayer.rotated);
-                }
-                povPlayer.frustum.style.position = "";
-                povPlayer.frustum.style.marginLeft = "";
-                povPlayer.frustum.style.marginTop = "";
-                povPlayer.frustum.style.transform = "none";
-                povPlayer.frustum.style.height = "64px";
-                povPlayer.frustum.style.width = "128px";
-                povPlayer.frustum.style.horizontalAlign = "center";
-                povPlayer.frustum.style.y = "-12px";
-            } catch (err) {}
-        }
-
-        const activeSounds = findActivePovSounds(tick, povXuid);
-        const hud = radarHud && radarHud.IsValid() ? radarHud : null;
-        const percent = worldToRadarPercent(povSample.x, povSample.y, radarTrack.transform);
-        // Larger radius first so the smaller ring paints nested inside.
-        const ordered = activeSounds.slice().sort(function (a, b) {
-            return b.radius - a.radius;
-        });
-        paintPovSoundRing(povPlayer.soundRing, hud, percent, ordered[0] || null);
-        paintPovSoundRing(povPlayer.soundRing2, hud, percent, ordered[1] || null);
-        hidePovRadarFx();
     }
 
     function ensurePlantedBombMarker(parent) {
@@ -2944,16 +2683,32 @@
             return;
         }
 
+        const activeRows = {};
+        let activeRowCount = 0;
         speakers.forEach(function (speaker, index) {
             const speakerPlayer = rosterByXuid[speaker.xuid];
             const sameTeam = povTeam !== 0 && speakerPlayer
                 && resolvePovTeam(speaker.xuid, state.nTick) === povTeam;
-            const active = sameTeam && isSpeaking(speaker.intervals, state.nTick);
+            if (sameTeam
+                && isSpeaking(speaker.intervals, state.nTick)
+                && activeRowCount < MAX_VISIBLE_VOICE_NOTICES) {
+                activeRows[index] = activeRowCount;
+                activeRowCount += 1;
+            }
+        });
+
+        speakers.forEach(function (speaker, index) {
+            const row = activeRows[index];
+            const active = row !== undefined;
             if (!active && (!speaker.panel || !speaker.panel.IsValid())) {
                 return;
             }
             const notice = ensureNotice(speaker, index, voicePanel);
             if (active) {
+                // Stock VoicePanel uses flow-children:none. Native notices are
+                // explicitly row-positioned; injected notices must do the same
+                // or every speaker occupies the lower-left origin.
+                notice.style.position = "0px " + (row * VOICE_NOTICE_ROW_HEIGHT) + "px 0px";
                 const xuid = speaker.xuid || GameStateAPI.GetPlayerXuidStringFromPlayerSlot(speaker.slot);
                 const name = xuid ? GameStateAPI.GetPlayerName(xuid) : "";
                 notice.FindChildTraverse("VoiceText").text = name || ("Player " + (speaker.slot + 1));

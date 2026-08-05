@@ -23,6 +23,9 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "cl_radar_always_centered 1",
     "cl_radar_square_when_spectating 0",
     "cl_radar_scale 0.4",
+    # Keep CS2's own footstep/sound visualization authoritative. Panorama must
+    # never synthesize replacement circles when the demo has no native event.
+    "snd_disable_radar_visualize 0",
     # 0=team color, 12=teammate/player color (HP/ammo accents follow slot colors).
     "cl_hud_color 12",
 ]

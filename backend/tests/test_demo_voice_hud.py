@@ -189,7 +189,14 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"updateRadarHud" in script
     assert b"GetHudPlayerXuid" in script
     assert b"updateVoiceAudience" in script
+    assert b"MAX_VISIBLE_VOICE_NOTICES = 3" in script
+    assert b"row * VOICE_NOTICE_ROW_HEIGHT" in script
+    assert b"roster.forEach(function (player)" in script
+    assert b"GameStateAPI.ToggleMute(player.xuid)" in script
     assert b"tv_listen_voice_indices -1" not in script
+    assert b"CS2InsightPovSoundRing" not in script
+    assert b'FindChildTraverse("RI_PlayerSoundContainer")' not in script
+    assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
     assert b'["SHIFT", 0, 0' in script
     assert b'["SPACE", 82, 112' in script
     assert b'["R", 194, 0' in script
