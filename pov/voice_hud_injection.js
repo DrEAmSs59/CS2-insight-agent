@@ -4,7 +4,7 @@
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
-// kill/HS attacker-feedback cues at index 9].
+// kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -15,16 +15,29 @@
     const encodedRoster = packed[3] || [];
     const encodedRadar = packed[8] || null;
     const encodedKillFeedback = packed[9] || null;
+    const encodedFlashBlind = packed[10] || null;
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const KILL_FEEDBACK_CATCHUP_TICKS = 128;
     const MAX_VISIBLE_VOICE_NOTICES = 3;
     const VOICE_NOTICE_ROW_HEIGHT = 22;
+    // Half-angle for "in POV view" checks (dropped C4 for CT, etc.).
+    // Keep near the stock radar FOV cone (~80° total) so wall-blocked pings
+    // outside the visible cone are not treated as "in view".
+    const POV_VIEW_HALF_FOV_DEG = 40;
+    // CT dropped-C4: world-model sight range approx; blocks far wallhack pings.
+    const POV_C4_MAX_VIEW_DIST = 750;
     // Stock attacker-only SOS events (needs sv_cheats; local -insecure demos OK).
     const KILL_FEEDBACK_EVENT_HS = "Player.DeathHeadShot.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_HS_ARMOR = "Player.DeathHeadShotArmor.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_BODY = "Player.DeathBody.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_BODY_ARMOR = "Player.DeathBodyArmor.AttackerFeedback";
+    // Flash tinnitus SOS events (duration bands match stock Flashbang.Ring.*).
+    const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
+    const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
+    const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
+    // Full-face blind_duration ≈ 4.5s @ 64 tick/s. Peak wash scales to this.
+    const FLASH_FULL_DURATION_TICKS = 288;
     const roster = encodedRoster.map(function (encoded) {
         return {
             xuid: String(encoded[0]),
@@ -174,6 +187,19 @@
         }).filter(function (drop) {
             return drop.endTick >= drop.startTick;
         });
+        const occlusionRaw = raw[7] || null;
+        let occlusion = null;
+        if (occlusionRaw && occlusionRaw.length >= 2) {
+            const grid = Number(occlusionRaw[0]) || 0;
+            const hex = String(occlusionRaw[1] || "");
+            if (grid >= 8 && hex.length >= 2) {
+                const bytes = [];
+                for (let h = 0; h + 1 < hex.length; h += 2) {
+                    bytes.push(parseInt(hex.substr(h, 2), 16) || 0);
+                }
+                occlusion = { grid: grid, bytes: bytes };
+            }
+        }
         return {
             mapName: mapName,
             transform: transform,
@@ -182,6 +208,7 @@
             plantedBombs: plantedBombs,
             sounds: sounds,
             droppedBombs: droppedBombs,
+            occlusion: occlusion,
         };
     }
 
@@ -210,6 +237,29 @@
     }
 
     const killFeedbackEvents = decodeKillFeedbackTrack(encodedKillFeedback);
+
+    function decodeFlashBlindTrack(raw) {
+        if (!raw || !raw.length || raw.length < 2) {
+            return null;
+        }
+        const xuids = (raw[0] || []).map(function (xuid) { return String(xuid || ""); });
+        let previousTick = 0;
+        const events = String(raw[1] || "").split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            previousTick += parseInt(fields[0], 36) || 0;
+            const durationTicks = parseInt(fields[1], 36) || 0;
+            return {
+                tick: previousTick,
+                endTick: previousTick + Math.max(1, durationTicks),
+                xuid: xuids[parseInt(fields[2], 36) || 0] || "",
+            };
+        }).filter(function (event) {
+            return event.xuid && event.tick >= 0 && event.endTick > event.tick;
+        });
+        return events.length ? events : null;
+    }
+
+    const flashBlindEvents = decodeFlashBlindTrack(encodedFlashBlind);
     let unmuteAttempts = 0;
     let audiencePovXuid = "";
     let audienceMaskSignature = "";
@@ -217,6 +267,8 @@
     let inputHud = null;
     let inputKeyPanels = [];
     let radarHud = null;
+    let flashWashPanel = null;
+    let flashTinnitusArmedTick = -1;
     let radarMapImage = null;
     let radarBombMarker = null;
     let radarBombIcon = null;
@@ -1157,6 +1209,294 @@
         return status && status.IsValid() ? status.FindChildTraverse("VoicePanel") : null;
     }
 
+    function flashBlindAt(xuid, tick) {
+        if (!flashBlindEvents || !xuid) {
+            return null;
+        }
+        const want = normalizeXuid(xuid);
+        if (!want) {
+            return null;
+        }
+        let best = null;
+        for (let i = 0; i < flashBlindEvents.length; i += 1) {
+            const event = flashBlindEvents[i];
+            if (tick < event.tick) {
+                break;
+            }
+            if (tick < event.endTick && sameXuid(event.xuid, want)) {
+                if (!best || event.endTick > best.endTick) {
+                    best = event;
+                }
+            }
+        }
+        return best;
+    }
+
+    function flashWashOpacity(blind, tick) {
+        if (!blind) {
+            return 0;
+        }
+        const start = blind.tick | 0;
+        const end = blind.endTick | 0;
+        const span = Math.max(1, end - start);
+        let t = (Number(tick) - start) / span;
+        if (t < 0) {
+            t = 0;
+        }
+        if (t > 1) {
+            t = 1;
+        }
+        // Degree comes from demo blind_duration (encoded as duration ticks).
+        // Glancing flash → low peak; full-face → peak ~1.
+        const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS);
+        // Stronger flash lingers nearer white (lower power); weak fades quicker.
+        const fadePower = 2.4 - 1.2 * peak;
+        return peak * Math.pow(1 - t, fadePower);
+    }
+
+    function ensureFlashWash(root) {
+        if (!root) {
+            return null;
+        }
+        // Legacy binary cover / pliers debug from older builds — keep inert.
+        const legacyIds = ["CS2InsightFlashCover", "CS2InsightPliersDebug"];
+        for (let i = 0; i < legacyIds.length; i += 1) {
+            const legacy = root.FindChildTraverse(legacyIds[i]);
+            if (legacy && legacy.IsValid()) {
+                legacy.visible = false;
+                try {
+                    legacy.style.opacity = "0";
+                } catch (errLegacy) {}
+            }
+        }
+        let wash = flashWashPanel;
+        if (!wash || !wash.IsValid()) {
+            wash = root.FindChildTraverse("CS2InsightFlashWash");
+        }
+        if (!wash || !wash.IsValid()) {
+            wash = $.CreatePanel("Panel", root, "CS2InsightFlashWash");
+        }
+        wash.hittest = false;
+        wash.style.width = "100%";
+        wash.style.height = "100%";
+        wash.style.horizontalAlign = "center";
+        wash.style.verticalAlign = "center";
+        wash.style.backgroundColor = "#ffffffff";
+        wash.style.zIndex = "30000";
+        try {
+            if (wash.GetParent() !== root) {
+                wash.SetParent(root);
+            }
+            const count = root.GetChildCount ? root.GetChildCount() : 0;
+            if (count > 0 && typeof root.MoveChildAfter === "function") {
+                const last = root.GetChild(count - 1);
+                if (last && last !== wash) {
+                    root.MoveChildAfter(wash, last);
+                }
+            }
+        } catch (errOrder) {}
+        flashWashPanel = wash;
+        return wash;
+    }
+
+    function updateFlashWash(blind, tick) {
+        const root = hudRootPanel();
+        const wash = ensureFlashWash(root);
+        if (!wash || !wash.IsValid()) {
+            return;
+        }
+        const opacity = flashWashOpacity(blind, tick);
+        if (opacity <= 0.01) {
+            wash.visible = false;
+            try {
+                wash.style.opacity = "0";
+            } catch (errHide) {}
+            return;
+        }
+        wash.visible = true;
+        try {
+            wash.style.opacity = String(opacity.toFixed(3));
+        } catch (errOp) {}
+    }
+
+    function hideStockDefuserChrome(root) {
+        // Hide stock defuser/C4 chrome. Never DeleteAsync stock panels — that
+        // crashes the client when the engine still holds references.
+        if (!root || !root.FindChildTraverse) {
+            return;
+        }
+        const ids = [
+            "RI_BombDefuserPackage",
+            "RI_DefuserPackage",
+            "DefuserIconDropped",
+            "DefuserIconPackage",
+            "CreateBombPack",
+        ];
+        for (let i = 0; i < ids.length; i += 1) {
+            const panel = root.FindChildTraverse(ids[i]);
+            if (!panel || !panel.IsValid()) {
+                continue;
+            }
+            panel.visible = false;
+            try {
+                panel.style.opacity = "0.0";
+                panel.style.visibility = "collapse";
+            } catch (errStyle) {}
+        }
+    }
+
+    function flashTinnitusEventForBlind(blind) {
+        if (!blind) {
+            return FLASH_TINNITUS_MEDIUM;
+        }
+        const durationTicks = Math.max(1, (blind.endTick | 0) - (blind.tick | 0));
+        // ~64 tick/s GOTV: Short <1.5s, Long >=3s.
+        if (durationTicks < 96) {
+            return FLASH_TINNITUS_SHORT;
+        }
+        if (durationTicks >= 192) {
+            return FLASH_TINNITUS_LONG;
+        }
+        return FLASH_TINNITUS_MEDIUM;
+    }
+
+    function playFlashTinnitus(blind) {
+        ensureKillFeedbackCheats();
+        const soundEvent = flashTinnitusEventForBlind(blind);
+        try {
+            GameInterfaceAPI.ConsoleCommand("snd_sos_start_soundevent " + soundEvent);
+        } catch (errTinnitus) {}
+    }
+
+    function tickFlashBlindHud() {
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            $.Schedule(0.1, tickFlashBlindHud);
+            return;
+        }
+        const povXuid = currentPovXuid(state);
+        const blind = flashBlindAt(povXuid, state.nTick);
+        updateFlashWash(blind, state.nTick);
+        if (blind && flashTinnitusArmedTick !== blind.tick) {
+            flashTinnitusArmedTick = blind.tick;
+            playFlashTinnitus(blind);
+        }
+        if (!blind) {
+            flashTinnitusArmedTick = -1;
+        }
+        $.Schedule(0.05, tickFlashBlindHud);
+    }
+
+    function worldInPovView(povSample, worldX, worldY, halfFovDeg) {
+        if (!povSample) {
+            return false;
+        }
+        const dx = Number(worldX) - Number(povSample.x);
+        const dy = Number(worldY) - Number(povSample.y);
+        if (!isFinite(dx) || !isFinite(dy)) {
+            return false;
+        }
+        if (dx * dx + dy * dy < 1) {
+            return true;
+        }
+        // CS yaw 0 = +X (east), 90 = +Y (north). atan2(dy, dx) matches.
+        const targetYaw = Math.atan2(dy, dx) * (180 / Math.PI);
+        let delta = ((targetYaw - Number(povSample.yaw) + 540) % 360) - 180;
+        const half = halfFovDeg == null ? POV_VIEW_HALF_FOV_DEG : halfFovDeg;
+        return Math.abs(delta) <= half;
+    }
+
+    function worldDist2D(ax, ay, bx, by) {
+        const dx = Number(bx) - Number(ax);
+        const dy = Number(by) - Number(ay);
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function occlusionCellBlocked(occlusion, gx, gy) {
+        if (!occlusion || !occlusion.bytes) {
+            return false;
+        }
+        const grid = occlusion.grid | 0;
+        if (gx < 0 || gy < 0 || gx >= grid || gy >= grid) {
+            return true;
+        }
+        const index = gy * grid + gx;
+        const byte = occlusion.bytes[index >> 3] || 0;
+        return ((byte >> (7 - (index & 7))) & 1) !== 0;
+    }
+
+    function worldRadarOccluded(fromX, fromY, toX, toY) {
+        // Best-effort 2D LOS via radar overview edges (not true BSP traces).
+        const occlusion = radarTrack && radarTrack.occlusion;
+        const transform = radarTrack && radarTrack.transform;
+        if (!occlusion || !transform || !transform.scale) {
+            return false;
+        }
+        const grid = occlusion.grid | 0;
+        const a = worldToRadarPercent(fromX, fromY, transform);
+        const b = worldToRadarPercent(toX, toY, transform);
+        const gx0 = Math.floor((a.x / 100) * grid);
+        const gy0 = Math.floor((a.y / 100) * grid);
+        const gx1 = Math.floor((b.x / 100) * grid);
+        const gy1 = Math.floor((b.y / 100) * grid);
+        const steps = Math.max(Math.abs(gx1 - gx0), Math.abs(gy1 - gy0), 1) * 2;
+        let streak = 0;
+        let maxStreak = 0;
+        for (let i = 0; i <= steps; i += 1) {
+            const t = i / steps;
+            if (t < 0.08 || t > 0.92) {
+                streak = 0;
+                continue;
+            }
+            const gx = Math.round(gx0 + (gx1 - gx0) * t);
+            const gy = Math.round(gy0 + (gy1 - gy0) * t);
+            if (occlusionCellBlocked(occlusion, gx, gy)) {
+                streak += 1;
+                if (streak > maxStreak) {
+                    maxStreak = streak;
+                }
+            } else {
+                streak = 0;
+            }
+        }
+        return maxStreak >= 2;
+    }
+
+    function ctCanSeeDroppedBomb(povSample, dropX, dropY) {
+        if (!povSample) {
+            return false;
+        }
+        const dist = worldDist2D(povSample.x, povSample.y, dropX, dropY);
+        if (!(dist <= POV_C4_MAX_VIEW_DIST)) {
+            return false;
+        }
+        if (!worldInPovView(povSample, dropX, dropY, POV_VIEW_HALF_FOV_DEG)) {
+            return false;
+        }
+        if (worldRadarOccluded(povSample.x, povSample.y, dropX, dropY)) {
+            return false;
+        }
+        return true;
+    }
+
+    function pinVoiceNotices(voicePanel, activeRowCount, notice, row) {
+        if (!voicePanel || !voicePanel.IsValid() || !notice || !notice.IsValid()) {
+            return;
+        }
+        // Stock VoicePanel reserves tall empty space; row0 at y=0 sits far above money.
+        // Shrink to active rows and bottom-align so notices stay flush above money.
+        const rows = Math.max(1, activeRowCount | 0);
+        try {
+            voicePanel.style.verticalAlign = "bottom";
+            voicePanel.style.height = (rows * VOICE_NOTICE_ROW_HEIGHT) + "px";
+            voicePanel.style.overflow = "noclip";
+        } catch (errPanel) {}
+        try {
+            notice.style.transitionProperty = "none";
+            notice.style.position = "0px " + (row * VOICE_NOTICE_ROW_HEIGHT) + "px 0px";
+        } catch (errNotice) {}
+    }
+
     function createClassedPanel(type, parent, id, className) {
         const panel = $.CreatePanel(type, parent, id);
         panel.AddClass(className);
@@ -1459,10 +1799,20 @@
                 id === "DirectionArrow" ||
                 id === "Radar__Round" ||
                 id === "Radar__Square" ||
-                id === "RI_BombDefuserPackage" ||
                 id.indexOf("BombZone") === 0 ||
                 id.indexOf("HZone") === 0
             ) {
+                return;
+            }
+            // Always suppress stock bomb/defuser chrome — we draw our own C4.
+            if (
+                id === "RI_BombDefuserPackage" ||
+                id === "RI_DefuserPackage" ||
+                id === "DroppedBomb" ||
+                id === "DefuserIconDropped" ||
+                id === "DefuserIconPackage"
+            ) {
+                child.visible = false;
                 return;
             }
             let isPlayerIcons = false;
@@ -1512,6 +1862,27 @@
         const rim = nativeRadar.FindChildTraverse("DirectionArrow");
         if (rim && rim.IsValid()) {
             rim.visible = true;
+        }
+
+        hideStockDefuserChrome(hudRootPanel());
+        // Nested stock bomb/defuser packages survive the shallow child walk.
+        const stockChromeIds = [
+            "RI_BombDefuserPackage",
+            "RI_DefuserPackage",
+            "DroppedBomb",
+            "DefuserIconDropped",
+            "DefuserIconPackage",
+            "CreateBombPack",
+        ];
+        for (let s = 0; s < stockChromeIds.length; s += 1) {
+            const chrome = nativeRadar.FindChildTraverse(stockChromeIds[s]);
+            if (chrome && chrome.IsValid()) {
+                chrome.visible = false;
+                try {
+                    chrome.style.opacity = "0.0";
+                    chrome.style.visibility = "collapse";
+                } catch (errChrome) {}
+            }
         }
     }
 
@@ -1999,10 +2370,10 @@
             $.Schedule(0.1, updateRadarHud);
             return;
         }
-        hud.visible = true;
         const povXuid = currentPovXuid(state);
         const povTeam = resolvePovTeam(povXuid, state.nTick);
         const tick = state.nTick;
+        hud.visible = true;
 
         let povSample = null;
         radarTrack.players.forEach(function (player) {
@@ -2123,6 +2494,8 @@
                 }
             }
             if (player.pip && player.pip.IsValid()) {
+                // Stock: CreateBombPack replaces the colored pip while carrying;
+                // DirectionalIndicator stays on PI_FirstRotated.
                 player.pip.visible = sameTeam && sample.alive && !carrying && !showDeath;
                 player.pip.style.washColor = sample.alive ? color : "#6d7680";
                 // Same size as teammates so stock DirectionalIndicator (y:32) seats
@@ -2132,7 +2505,8 @@
                 player.pip.style.brightness = isPov ? "1.15" : "1.0";
             }
             if (player.facing && player.facing.IsValid()) {
-                player.facing.visible = sameTeam && sample.alive && !carrying && !showDeath;
+                // Keep the small facing tip while carrying C4 (stock behavior).
+                player.facing.visible = sameTeam && sample.alive && !showDeath;
                 player.facing.style.washColor = "#ffffffff";
                 player.facing.style.height = "20px";
                 player.facing.style.width = "11px";
@@ -2180,7 +2554,7 @@
         });
 
         try {
-            updatePlantedBombMarker(hud, tick, povTeam);
+            updatePlantedBombMarker(hud, tick, povTeam, povXuid);
             const nativeRadar = findNativeRadar();
             if (nativeRadar) {
                 hideNativeRadarPlayerIcons(nativeRadar);
@@ -2404,7 +2778,7 @@
         return null;
     }
 
-    function updatePlantedBombMarker(hud, tick, povTeam) {
+    function updatePlantedBombMarker(hud, tick, povTeam, povXuid) {
         const plant = plantedBombAt(tick);
         if (!plant) {
             if (radarBombMarker && radarBombMarker.IsValid()) {
@@ -2416,7 +2790,7 @@
             marker.visible = true;
             marker.style.position = percent.x + "% " + percent.y + "% 0px";
         }
-        updateDroppedBombMarker(hud, tick, povTeam);
+        updateDroppedBombMarker(hud, tick, povTeam, povXuid);
     }
 
     function droppedBombAt(tick) {
@@ -2487,9 +2861,9 @@
         return false;
     }
 
-    function updateDroppedBombMarker(hud, tick, povTeam) {
-        // Live CS2: both sides see ground C4 until pickup/plant. Never stack with
-        // the carrier pip or the planted glyph.
+    function updateDroppedBombMarker(hud, tick, povTeam, povXuid) {
+        // Live CS2: T always sees ground C4. CT only with POV FOV + range +
+        // best-effort radar-edge occlusion (no BSP wallhack ping).
         if (plantedBombAt(tick) || anyoneCarryingBomb(tick)) {
             if (radarDroppedBombMarker && radarDroppedBombMarker.IsValid()) {
                 radarDroppedBombMarker.visible = false;
@@ -2502,6 +2876,16 @@
                 radarDroppedBombMarker.visible = false;
             }
             return;
+        }
+        if (povTeam === 3) {
+            const povPlayer = findRadarPlayerByXuid(povXuid);
+            const povSample = povPlayer ? radarSampleAt(povPlayer, tick, radarTrack.stride) : null;
+            if (!ctCanSeeDroppedBomb(povSample, drop.x, drop.y)) {
+                if (radarDroppedBombMarker && radarDroppedBombMarker.IsValid()) {
+                    radarDroppedBombMarker.visible = false;
+                }
+                return;
+            }
         }
         const marker = ensureDroppedBombMarker(hud);
         const percent = worldToRadarPercent(drop.x, drop.y, radarTrack.transform);
@@ -2705,10 +3089,7 @@
             }
             const notice = ensureNotice(speaker, index, voicePanel);
             if (active) {
-                // Stock VoicePanel uses flow-children:none. Native notices are
-                // explicitly row-positioned; injected notices must do the same
-                // or every speaker occupies the lower-left origin.
-                notice.style.position = "0px " + (row * VOICE_NOTICE_ROW_HEIGHT) + "px 0px";
+                pinVoiceNotices(voicePanel, activeRowCount, notice, row);
                 const xuid = speaker.xuid || GameStateAPI.GetPlayerXuidStringFromPlayerSlot(speaker.slot);
                 const name = xuid ? GameStateAPI.GetPlayerName(xuid) : "";
                 notice.FindChildTraverse("VoiceText").text = name || ("Player " + (speaker.slot + 1));
@@ -2727,6 +3108,7 @@
     $.Schedule(0, update);
     $.Schedule(0, updateInputHud);
     $.Schedule(0, tickTeamCounterHud);
+    $.Schedule(0, tickFlashBlindHud);
     if (radarTrack) {
         $.Schedule(0, updateRadarHud);
     }

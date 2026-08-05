@@ -462,15 +462,18 @@
   min-width: 0;
 }
 
-.match-card {
-  container: match-card / inline-size;
+/* 给居中比分留出中间通道，避免窄卡时地图名与比分重叠；不再用 container query 随缩放切换布局 */
+.match-card__hero-meta {
+  max-width: calc(50% - 2.75rem);
 }
 
+/* 斜体末字外溢；过长时才省略 */
 .match-card__hero-meta > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 0.28em;
 }
 
 @container page (min-width: 920px) {
@@ -552,55 +555,6 @@
 
   .match-list-row__details {
     margin-left: 0;
-  }
-}
-
-@container match-card (max-width: 360px) {
-  .match-card__hero {
-    height: 82px;
-  }
-
-  .match-card__hero-content {
-    position: relative;
-    inset: auto;
-    min-height: 82px;
-    justify-content: space-between;
-    gap: 0.25rem;
-  }
-
-  .match-card__hero-main {
-    flex-wrap: wrap;
-    row-gap: 0.25rem;
-  }
-
-  .match-card__hero-meta {
-    width: 100%;
-    max-width: 100%;
-    padding-right: 6.5rem;
-  }
-
-  .match-card__score {
-    position: static;
-    order: 3;
-    margin-inline: auto;
-    transform: none;
-  }
-
-  .match-card__actions {
-    position: absolute;
-    top: 0;
-    right: 0;
-  }
-
-  .match-card__source-row {
-    flex-wrap: wrap;
-    gap: 0.25rem 0.75rem;
-  }
-
-  .match-card__clock {
-    position: static;
-    margin-left: auto;
-    transform: none;
   }
 }
 

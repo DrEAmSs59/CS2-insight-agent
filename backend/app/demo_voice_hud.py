@@ -18,6 +18,9 @@ import struct
 from typing import Any, Callable, Iterable, Mapping
 import zlib
 
+# Radar overview edge mask for CT dropped-C4 LOS (grid^2 bits, hex-packed).
+RADAR_OCCLUSION_GRID = 96
+
 _VPK_SIGNATURE = 0x55AA1234
 _VPK_VERSION = 2
 _VPK_HEADER = struct.Struct("<7I")
@@ -36,9 +39,11 @@ class DemoVoiceHudError(RuntimeError):
 
 # Payload indices 0-3 are voice/input/roster. 4-7 are reserved for mouse /
 # subtitles / weapon pulses / broadcast (see internal Panorama VPK guide).
-# Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio.
+# Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio;
+# index 10 is POV flash-blind intervals (HUD wash + tinnitus cues).
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
+FLASH_BLIND_PAYLOAD_INDEX = 10
 RADAR_SAMPLE_HZ = 8
 # Flags for kill-feedback samples: bit0 = headshot, bit1 = armor damage.
 _COLOR_SLOT_NAMES = {
@@ -71,8 +76,11 @@ class DemoVoiceHudBuild:
     radar_planted_bombs: int = 0
     radar_dropped_bombs: int = 0
     radar_player_sounds: int = 0
+    radar_occlusion_grid: int = 0
     kill_feedback_events: int = 0
     kill_feedback_parse_failed: int = 0
+    flash_blind_events: int = 0
+    flash_blind_parse_failed: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -317,7 +325,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = KILL_FEEDBACK_PAYLOAD_INDEX + 1,
+    length: int = FLASH_BLIND_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -396,6 +404,164 @@ def _build_kill_feedback_payload(
     return payload, {
         "kill_feedback_events": len(events),
         "kill_feedback_parse_failed": 0,
+    }
+
+
+def _encode_flash_blind_events(
+    events: list[tuple[int, int, int]],
+) -> str:
+    """Delta-encode ``(tick, duration_ticks, victim_xuid_index)`` as base36."""
+    previous_tick = 0
+    encoded: list[str] = []
+    for tick, duration_ticks, victim_index in events:
+        encoded.append(
+            f"{_base36(tick - previous_tick)}.{_base36(max(1, int(duration_ticks)))}.{_base36(victim_index)}"
+        )
+        previous_tick = tick
+    return ",".join(encoded)
+
+
+def _infer_demo_tick_rate(parser: Any, header: Mapping[str, Any] | None = None) -> float:
+    """Best-effort ticks/sec for converting ``blind_duration`` seconds → ticks."""
+    if header is None:
+        try:
+            parsed = parser.parse_header()
+            header = parsed if isinstance(parsed, Mapping) else {}
+        except Exception:  # noqa: BLE001
+            header = {}
+    raw = (header or {}).get("tick_rate") or (header or {}).get("tickrate")
+    try:
+        tick_rate = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        tick_rate = 0.0
+    if tick_rate > 0:
+        return tick_rate
+    # GOTV/SourceTV demos often omit tick_rate; 64 is the usual broadcast rate.
+    return 64.0
+
+
+def _build_radar_occlusion_mask(map_name: str, grid: int = RADAR_OCCLUSION_GRID) -> list[Any] | None:
+    """Pack a radar-overview edge mask as ``[grid, hex_bits]`` for Panorama LOS.
+
+    True 3D wall traces need BSP; this approximates blockers from overview edges so
+    CT dropped-C4 radar pings do not freely cross corridors drawn as walls.
+    """
+    try:
+        from PIL import Image
+
+        from .radar.radar_map_assets import resolve_map_png_path
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        png = resolve_map_png_path(map_name)
+        image = Image.open(png).convert("L")
+    except Exception:  # noqa: BLE001
+        return None
+
+    width, height = image.size
+    if width < 8 or height < 8 or grid < 8:
+        return None
+    pixels = image.load()
+    edge = [[0] * width for _ in range(height)]
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            grad = abs(int(pixels[x + 1, y]) - int(pixels[x - 1, y])) + abs(
+                int(pixels[x, y + 1]) - int(pixels[x, y - 1])
+            )
+            if grad >= 40:
+                edge[y][x] = 1
+    # 1px dilate so thin wall strokes survive downsampling.
+    dilated = [[0] * width for _ in range(height)]
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            if (
+                edge[y][x]
+                or edge[y - 1][x]
+                or edge[y + 1][x]
+                or edge[y][x - 1]
+                or edge[y][x + 1]
+            ):
+                dilated[y][x] = 1
+
+    cell_w = width / float(grid)
+    cell_h = height / float(grid)
+    bits = bytearray((grid * grid + 7) // 8)
+    for gy in range(grid):
+        y0 = int(gy * cell_h)
+        y1 = max(y0 + 1, int((gy + 1) * cell_h))
+        for gx in range(grid):
+            x0 = int(gx * cell_w)
+            x1 = max(x0 + 1, int((gx + 1) * cell_w))
+            hit = 0
+            total = 0
+            y = y0
+            while y < y1:
+                x = x0
+                while x < x1:
+                    total += 1
+                    if dilated[y][x]:
+                        hit += 1
+                    x += 2
+                y += 2
+            if total and (hit / total) >= 0.08:
+                index = gy * grid + gx
+                bits[index >> 3] |= 1 << (7 - (index & 7))
+    return [int(grid), bits.hex()]
+
+
+def _build_flash_blind_payload(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Compact ``player_blind`` intervals for POV flash wash + tinnitus cues.
+
+    Demo has no separate tinnitus timeline; CS2 tinnitus tracks flash blindness.
+    ``player_blind.blind_duration`` (seconds) is the authoritative window.
+    """
+    try:
+        rows = parser.parse_event("player_blind")
+    except Exception as exc:  # noqa: BLE001
+        raise DemoVoiceHudError(f"could not parse player_blind for flash track: {exc}") from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported player_blind rows")
+
+    ticks = rows.get("tick")
+    victims = rows.get("user_steamid")
+    durations = rows.get("blind_duration")
+    if not isinstance(ticks, list) or not isinstance(victims, list) or not isinstance(durations, list):
+        raise DemoVoiceHudError("player_blind rows are missing tick/victim/duration fields")
+
+    tick_rate = _infer_demo_tick_rate(parser)
+
+    xuid_table: list[str] = []
+    xuid_index: dict[int, int] = {}
+    events: list[tuple[int, int, int]] = []
+    count = min(len(ticks), len(victims), len(durations))
+    for i in range(count):
+        tick = _as_int(ticks[i])
+        victim = _as_positive_int(victims[i])
+        try:
+            seconds = float(durations[i])
+        except (TypeError, ValueError):
+            continue
+        if tick is None or tick < 0 or victim is None or victim not in roster_by_xuid:
+            continue
+        if seconds <= 0.05:
+            continue
+        duration_ticks = max(1, int(round(seconds * tick_rate)))
+        if victim not in xuid_index:
+            xuid_index[victim] = len(xuid_table)
+            xuid_table.append(str(victim))
+        events.append((tick, duration_ticks, xuid_index[victim]))
+
+    events.sort(key=lambda item: item[0])
+    if not events:
+        raise DemoVoiceHudError("demo contains no usable player_blind flash events")
+
+    payload = [xuid_table, _encode_flash_blind_events(events)]
+    return payload, {
+        "flash_blind_events": len(events),
+        "flash_blind_parse_failed": 0,
     }
 
 
@@ -722,6 +888,7 @@ def _build_radar_payload(
     planted_bombs = _build_planted_bomb_track(parser, roster_by_xuid)
     dropped_bombs = _build_dropped_bomb_track(parser, roster_by_xuid)
     player_sounds = _build_player_sound_track(parser, roster_by_xuid)
+    occlusion = _build_radar_occlusion_mask(map_name)
 
     radar = [
         map_name,
@@ -731,6 +898,7 @@ def _build_radar_payload(
         planted_bombs,
         player_sounds,
         dropped_bombs,
+        occlusion,
     ]
     stats = {
         "radar_players": len(encoded_players),
@@ -740,6 +908,7 @@ def _build_radar_payload(
         "radar_map": map_name,
         "radar_planted_bombs": len(planted_bombs),
         "radar_player_sounds": len(player_sounds[1].split(",")) if player_sounds and player_sounds[1] else 0,
+        "radar_occlusion_grid": int(occlusion[0]) if occlusion else 0,
     }
     return radar, stats
 
@@ -1534,6 +1703,48 @@ def add_kill_feedback_track_to_payload(
     return payload, stats
 
 
+def add_flash_blind_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append POV flash-blind intervals at payload index 10."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    roster_by_xuid: dict[int, tuple[int, int]] = {}
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) != 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        slot = _as_int(row[1])
+        team = _as_int(row[2])
+        if xuid is None or slot is None or team not in (2, 3):
+            continue
+        roster_by_xuid[xuid] = (slot, team)
+    if not roster_by_xuid:
+        raise DemoVoiceHudError("voice HUD payload contains no team-bound Steam IDs")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    flash_blind, stats = _build_flash_blind_payload(parser, roster_by_xuid)
+    packed[FLASH_BLIND_PAYLOAD_INDEX] = flash_blind
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    stats = dict(stats)
+    stats["payload_bytes"] = len(payload)
+    return payload, stats
+
+
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
     """Fill the bounded data slot and rebuild the VPK with fresh CRCs."""
     entries = read_inline_vpk(template_vpk)
@@ -1607,6 +1818,7 @@ def build_demo_voice_hud_vpk(
             "radar_planted_bombs": 0,
             "radar_dropped_bombs": 0,
             "radar_player_sounds": 0,
+            "radar_occlusion_grid": 0,
         }
 
     kill_feedback_stats: dict[str, Any] = {
@@ -1626,6 +1838,23 @@ def build_demo_voice_hud_vpk(
             "kill_feedback_parse_failed": 1,
         }
 
+    flash_blind_stats: dict[str, Any] = {
+        "flash_blind_events": 0,
+        "flash_blind_parse_failed": 0,
+    }
+    try:
+        payload, flash_blind_stats = add_flash_blind_track_to_payload(
+            payload,
+            demo_path,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = int(flash_blind_stats.pop("payload_bytes", len(payload)))
+    except DemoVoiceHudError:
+        flash_blind_stats = {
+            "flash_blind_events": 0,
+            "flash_blind_parse_failed": 1,
+        }
+
     template = Path(template_vpk_path).read_bytes()
     vpk_bytes = inject_voice_payload(template, payload)
     return DemoVoiceHudBuild(
@@ -1634,4 +1863,5 @@ def build_demo_voice_hud_vpk(
         **input_stats,
         **radar_stats,
         **kill_feedback_stats,
+        **flash_blind_stats,
     )

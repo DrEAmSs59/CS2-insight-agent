@@ -377,33 +377,33 @@ export default function MatchCard({
       className={`match-card group relative flex min-w-0 flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
       onClick={() => onOpenInfo?.(demo.id)}
     >
-      {/* 顶部：地图缩略图背景 */}
+      {/* 顶部：地图缩略图背景（图绝对定位，文案叠在上层；比分绝对居中） */}
       <div className="match-card__hero relative h-[70px] w-full overflow-hidden">
         <img
           src={mapThumbnail}
           alt={mapName}
-          className="h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
+          className="absolute inset-0 h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
           onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.webp"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
 
         {/* 顶部悬浮信息 */}
-        <div className="match-card__hero-content absolute inset-0 flex min-w-0 flex-col justify-center px-2 py-0.5">
-          <div className="match-card__hero-main relative flex min-w-0 items-center justify-between">
+        <div className="match-card__hero-content absolute inset-0 z-[1] flex min-w-0 flex-col justify-center px-2 py-0.5">
+          <div className="match-card__hero-main relative flex min-w-0 items-center">
             <div className="match-card__hero-meta flex min-w-0 items-center gap-2" onClick={e => e.stopPropagation()}>
               <input
                 type="checkbox"
                 checked={isSelected}
                 onChange={(e) => onSelect(demo.id, e.target.checked)}
-                className="h-4 w-4 rounded border-white/40 bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
+                className="h-4 w-4 shrink-0 rounded border-white/40 bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
               />
-              <span className="text-lg font-black text-cs2-text-primary uppercase italic tracking-tighter drop-shadow-md">
+              <span className="min-w-0 truncate text-lg font-black text-cs2-text-primary uppercase italic tracking-tighter drop-shadow-md pr-[0.28em]">
                 {mapName.replace('de_', '').replace('cs_', '')}
               </span>
             </div>
 
-            {/* 比分：Trophy 严格居中 */}
-            <div className="match-card__score absolute left-1/2 grid grid-cols-[minmax(0,1fr)_min-content_minmax(0,1fr)] items-center -translate-x-1/2">
+            {/* 比分：相对整张卡片水平居中，不受左右内容宽度影响 */}
+            <div className="match-card__score pointer-events-none absolute left-1/2 z-[1] grid grid-cols-[minmax(0,1fr)_min-content_minmax(0,1fr)] items-center -translate-x-1/2">
               <span className="text-right text-xl font-black text-cs2-accent tabular-nums drop-shadow-md">
                 {matchMeta.team_a_score ?? 0}
               </span>
@@ -413,7 +413,7 @@ export default function MatchCard({
               </span>
             </div>
 
-            <div className="match-card__actions flex min-w-0 gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+            <div className="match-card__actions absolute right-0 top-1/2 z-[2] flex -translate-y-1/2 gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
               <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title={t("match.btnPlayCs2")}><Play className="h-4 w-4 fill-current" /></button>
               <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all" title={t("match.btnLocate")}><FolderSearch className="h-4 w-4" /></button>
               <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all" title={t("match.btnDelete")}><Trash2 className="h-4 w-4" /></button>
