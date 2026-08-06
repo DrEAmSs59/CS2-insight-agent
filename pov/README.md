@@ -13,6 +13,10 @@ stock map backdrop, and interpolates teammate markers at frame rate with real
 player colors, yaw, alive/dead state, and POV highlight. Seek, pause, playback
 speed, and observer switches follow `GetDemoControllerState().nTick` and
 `GameStateAPI.GetHudPlayerXuid()`—the same clock as the voice/input overlays.
+Enemy spotted bits are classified from each target's live `team_num` at that
+tick, not the end-of-demo roster snapshot. Switching the observed player to
+any CT or T therefore immediately selects that side's red contacts and
+last-known question marks, including across half-time team swaps.
 
 The baked Panorama script also drives the rest of the POV HUD:
 
@@ -57,3 +61,13 @@ roster-only payload so radar and kill-feedback tracks can still attach. If the
 dynamic build fails or the compact payload does not fit the fixed template
 slot, installation falls back to `pov_default.vpk` rather than installing a
 partial package.
+
+Every POV kill plays the stock body/headshot attacker-feedback event and the
+stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The
+confirmation sound is additive; it does not replace the armor/headshot variant.
+
+Strong flash-blind events (at least three seconds at the usual 64 tick rate)
+hold the full-screen Panorama wash at exact opacity 1 before a two-second fade.
+This deliberately covers radar, teamcounter, kill feed, and other HUD panels;
+short glancing flashes keep a duration-scaled translucent peak. The opacity
+curve never changes the demo-authored start/end ticks or extends the effect.

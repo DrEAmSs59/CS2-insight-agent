@@ -32,12 +32,17 @@
     const KILL_FEEDBACK_EVENT_HS_ARMOR = "Player.DeathHeadShotArmor.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_BODY = "Player.DeathBody.AttackerFeedback";
     const KILL_FEEDBACK_EVENT_BODY_ARMOR = "Player.DeathBodyArmor.AttackerFeedback";
+    // Stock game_sounds_ui confirmation layer (sounds/player/kill_doof_01.vsnd).
+    // Play it alongside every body/headshot feedback event, never instead of it.
+    const KILL_CONFIRMATION_EVENT = "UI.KillCard.1";
     // Flash tinnitus SOS events (duration bands match stock Flashbang.Ring.*).
     const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
     const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
     const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
-    // Full-face blind_duration ≈ 4.5s @ 64 tick/s. Peak wash scales to this.
-    const FLASH_FULL_DURATION_TICKS = 288;
+    // At 64 tick/s, a >=3s blind is a strong/full flash. Keep the wash fully
+    // opaque first so no Panorama HUD leaks through, then fade over ~2 seconds.
+    const FLASH_FULL_OPAQUE_THRESHOLD_TICKS = 192;
+    const FLASH_FADE_TICKS = 128;
     const roster = encodedRoster.map(function (encoded) {
         return {
             xuid: String(encoded[0]),
@@ -1239,16 +1244,32 @@
         const start = blind.tick | 0;
         const end = blind.endTick | 0;
         const span = Math.max(1, end - start);
-        let t = (Number(tick) - start) / span;
+        const elapsed = Math.max(0, Number(tick) - start);
+        let t = elapsed / span;
         if (t < 0) {
             t = 0;
         }
         if (t > 1) {
             t = 1;
         }
-        // Degree comes from demo blind_duration (encoded as duration ticks).
-        // Glancing flash → low peak; full-face → peak ~1.
-        const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS);
+        // A strong flash must be genuinely opaque for a meaningful interval.
+        // A translucent white panel leaves HUD panels visible as grey silhouettes.
+        if (span >= FLASH_FULL_OPAQUE_THRESHOLD_TICKS) {
+            const fadeTicks = Math.max(1, Math.min(FLASH_FADE_TICKS, span));
+            const holdTicks = Math.max(0, span - fadeTicks);
+            if (elapsed <= holdTicks) {
+                return 1;
+            }
+            const fadeProgress = Math.max(
+                0,
+                Math.min(1, (elapsed - holdTicks) / fadeTicks),
+            );
+            return Math.pow(1 - fadeProgress, 1.2);
+        }
+
+        // Glancing/weak flashes remain translucent, with strength derived from
+        // the authoritative player_blind duration.
+        const peak = Math.min(1, span / FLASH_FULL_OPAQUE_THRESHOLD_TICKS);
         // Stronger flash lingers nearer white (lower power); weak fades quicker.
         const fadePower = 2.4 - 1.2 * peak;
         return peak * Math.pow(1 - t, fadePower);
@@ -1305,14 +1326,14 @@
         if (!wash || !wash.IsValid()) {
             return;
         }
-        const opacity = flashWashOpacity(blind, tick);
-        if (opacity <= 0.01) {
+        if (!blind) {
             wash.visible = false;
             try {
                 wash.style.opacity = "0";
             } catch (errHide) {}
             return;
         }
+        const opacity = Math.max(0, Math.min(1, flashWashOpacity(blind, tick)));
         wash.visible = true;
         try {
             wash.style.opacity = String(opacity.toFixed(3));
@@ -3009,6 +3030,7 @@
             soundEvent = KILL_FEEDBACK_EVENT_BODY_ARMOR;
         }
         GameInterfaceAPI.ConsoleCommand("snd_sos_start_soundevent " + soundEvent);
+        GameInterfaceAPI.ConsoleCommand("snd_sos_start_soundevent " + KILL_CONFIRMATION_EVENT);
     }
 
     function updateKillFeedback() {

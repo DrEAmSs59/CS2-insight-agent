@@ -188,12 +188,27 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"CS2InsightRadarHud" in script
     assert b"updateRadarHud" in script
     assert b"GetHudPlayerXuid" in script
+    assert b"const povXuid = currentPovXuid(state)" in script
+    assert b"const povTeam = resolvePovTeam(povXuid, state.nTick)" in script
+    assert b"povTeam === 2 && sample.spottedByT" in script
+    assert b"povTeam === 3 && sample.spottedByCT" in script
     assert b"updateVoiceAudience" in script
     assert b"MAX_VISIBLE_VOICE_NOTICES = 3" in script
     assert b"row * VOICE_NOTICE_ROW_HEIGHT" in script
     assert b"roster.forEach(function (player)" in script
     assert b"GameStateAPI.ToggleMute(player.xuid)" in script
     assert b"tv_listen_voice_indices -1" not in script
+    assert b'const KILL_CONFIRMATION_EVENT = "UI.KillCard.1"' in script
+    assert (
+        b'ConsoleCommand("snd_sos_start_soundevent " + KILL_CONFIRMATION_EVENT)'
+        in script
+    )
+    assert b"FLASH_FULL_OPAQUE_THRESHOLD_TICKS = 192" in script
+    assert b"FLASH_FADE_TICKS = 128" in script
+    assert b"if (elapsed <= holdTicks)" in script
+    assert b"return Math.pow(1 - fadeProgress, 1.2)" in script
+    assert b"Math.min(1, flashWashOpacity(blind, tick))" in script
+    assert b"if (opacity <= 0.01)" not in script
     assert b"CS2InsightPovSoundRing" not in script
     assert b'FindChildTraverse("RI_PlayerSoundContainer")' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
@@ -267,6 +282,101 @@ def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
     xuids = {row[0] for row in radar[3]}
     assert xuids == {"111", "222"}
     assert all(isinstance(row[3], str) and row[3] for row in radar[3])
+
+
+def test_radar_spotted_side_follows_live_team_and_any_current_pov(monkeypatch):
+    class _SwitchingRadarParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name):
+            if name == "round_start":
+                return {"tick": [8, 48]}
+            if name == "round_end":
+                return {"tick": [40, 80]}
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            out = {
+                "tick": [],
+                "steamid": [],
+                "X": [],
+                "Y": [],
+                "yaw": [],
+                "is_alive": [],
+                "player_color": [],
+                "team_num": [],
+                "spotted": [],
+                "approximate_spotted_by": [],
+            }
+            for tick in ticks or []:
+                # parse_player_info below is an end-of-demo snapshot (T, CT).
+                # Before tick 48 the live sides are reversed; afterwards they
+                # match that static snapshot. Both players currently see one
+                # another so either POV side must receive its matching bit.
+                teams = [3, 2] if tick < 48 else [2, 3]
+                out["tick"].extend([tick, tick])
+                out["steamid"].extend([111, 222])
+                out["X"].extend([100 + tick, 200 + tick])
+                out["Y"].extend([300 + tick, 400 + tick])
+                out["yaw"].extend([45, 90])
+                out["is_alive"].extend([True, True])
+                out["player_color"].extend(["yellow", "blue"])
+                out["team_num"].extend(teams)
+                out["spotted"].extend([True, True])
+                out["approximate_spotted_by"].extend([[222], [111]])
+            return out
+
+    monkeypatch.setattr(
+        "app.radar.radar_map_assets.lookup_map_data",
+        lambda _map: {"pos_x": -2476, "pos_y": 3239, "scale": 4.4},
+    )
+    voice_payload, _ = build_voice_payload(
+        "match.dem",
+        parser_factory=_SwitchingRadarParser,
+    )
+    payload, _ = add_radar_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_SwitchingRadarParser,
+    )
+    radar = json.loads(payload)[8]
+    stride = radar[2]
+    flags_by_xuid = {}
+    for xuid, _color, start_token, encoded in radar[3]:
+        tick = int(start_token, 36)
+        flags_by_tick = {}
+        for token in encoded.split(","):
+            flags_by_tick[tick] = int(token.split(".")[3], 36)
+            tick += stride
+        flags_by_xuid[xuid] = flags_by_tick
+
+    def live_team(xuid: str, tick: int) -> int:
+        return 3 if flags_by_xuid[xuid][tick] & 16 else 2
+
+    def current_pov_sees_enemy(viewer: str, enemy: str, tick: int) -> bool:
+        viewer_team = live_team(viewer, tick)
+        assert viewer_team != live_team(enemy, tick)
+        spotted_bit = 4 if viewer_team == 2 else 8
+        return bool(flags_by_xuid[enemy][tick] & spotted_bit)
+
+    # Before the swap 111 is CT and 222 is T, despite the opposite static roster.
+    assert live_team("111", 8) == 3
+    assert live_team("222", 8) == 2
+    assert current_pov_sees_enemy("111", "222", 8)
+    assert current_pov_sees_enemy("222", "111", 8)
+
+    # After the swap, selecting either player immediately uses that player's
+    # new live side and the corresponding spotted bit.
+    assert live_team("111", 64) == 2
+    assert live_team("222", 64) == 3
+    assert current_pov_sees_enemy("111", "222", 64)
+    assert current_pov_sees_enemy("222", "111", 64)
 
 
 def test_kill_feedback_track_is_appended_at_payload_index_nine():

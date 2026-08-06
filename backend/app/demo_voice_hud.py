@@ -730,29 +730,32 @@ def _build_radar_payload(
         text = str(raw).lower()
         return "c4" in text
 
-    def _spotted_team_bits(raw_by: Any) -> int:
-        """Return bit2/bit3 for T/CT spotters listed in approximate_spotted_by."""
-        if raw_by is None:
-            return 0
-        values: list[Any]
+    def _spotted_team_bits(
+        raw_by: Any,
+        raw_spotted: Any,
+        target_team: int | None,
+    ) -> int:
+        """Return the live T/CT side that currently has contact on this target.
+
+        ``parse_player_info`` is commonly an end-of-demo team snapshot, so using
+        the spotter's roster team reverses these bits before/after a half swap.
+        The target row's ``team_num`` is live at this tick, and a spotted player
+        can only be enemy radar intel for the opposite playing side. This keeps
+        the result correct when Panorama switches POV between any T/CT player.
+        """
+        has_spotter = False
         if isinstance(raw_by, (list, tuple, set)):
-            values = list(raw_by)
-        else:
+            has_spotter = len(raw_by) > 0
+        elif raw_by is not None:
             text = str(raw_by).strip()
-            if not text or text in ("[]", "None"):
-                return 0
-            values = [text]
-        bits = 0
-        for item in values:
-            spotter = _as_positive_int(item)
-            if spotter is None or spotter not in roster_by_xuid:
-                continue
-            spotter_team = roster_by_xuid[spotter][1]
-            if spotter_team == 2:
-                bits |= 4
-            elif spotter_team == 3:
-                bits |= 8
-        return bits
+            has_spotter = bool(text and text not in ("[]", "None"))
+        if not has_spotter and not bool(raw_spotted):
+            return 0
+        if target_team == 2:
+            return 8  # T target is visible to CT.
+        if target_team == 3:
+            return 4  # CT target is visible to T.
+        return 0
 
     samples_by_xuid: dict[int, dict[int, tuple[int, int, int, int]]] = defaultdict(dict)
     color_by_xuid: dict[int, int] = {}
@@ -777,12 +780,17 @@ def _build_radar_payload(
             has_c4 = _inventory_has_c4(inventories[index])
         else:
             has_c4 = False
-        spotted_bits = 0
-        if isinstance(spotted_by, list) and index < len(spotted_by):
-            spotted_bits = _spotted_team_bits(spotted_by[index])
-        elif isinstance(spotteds, list) and index < len(spotteds) and bool(spotteds[index]):
-            # Fallback: known spotted but spotter list missing — mark both teams.
-            spotted_bits = 4 | 8
+        raw_spotted_by = (
+            spotted_by[index]
+            if isinstance(spotted_by, list) and index < len(spotted_by)
+            else None
+        )
+        raw_spotted = (
+            spotteds[index]
+            if isinstance(spotteds, list) and index < len(spotteds)
+            else False
+        )
+        spotted_bits = _spotted_team_bits(raw_spotted_by, raw_spotted, team)
         flags = (
             (1 if bool(alive_raw) else 0)
             | (2 if has_c4 else 0)
@@ -808,7 +816,7 @@ def _build_radar_payload(
     if probe_ticks and probe_stride < stride:
         try:
             spot_rows = parser.parse_ticks(
-                ["steamid", "spotted", "approximate_spotted_by"],
+                ["steamid", "team_num", "spotted", "approximate_spotted_by"],
                 ticks=probe_ticks,
             )
         except Exception:  # noqa: BLE001
@@ -816,6 +824,7 @@ def _build_radar_payload(
         if isinstance(spot_rows, Mapping):
             spot_ticks = spot_rows.get("tick", [])
             spot_xuids = spot_rows.get("steamid", [])
+            spot_teams = spot_rows.get("team_num", [])
             spot_flags = spot_rows.get("spotted", [])
             spot_by = spot_rows.get("approximate_spotted_by", [])
             if isinstance(spot_ticks, list) and isinstance(spot_xuids, list):
@@ -838,15 +847,26 @@ def _build_radar_payload(
                     sample_tick = _snap_sample_tick(tick)
                     if sample_tick is None or sample_tick not in samples_by_xuid[xuid]:
                         continue
-                    bits = 0
-                    if isinstance(spot_by, list) and index < len(spot_by):
-                        bits = _spotted_team_bits(spot_by[index])
-                    elif (
-                        isinstance(spot_flags, list)
-                        and index < len(spot_flags)
-                        and bool(spot_flags[index])
-                    ):
-                        bits = 4 | 8
+                    target_team = _as_int(
+                        spot_teams[index]
+                        if isinstance(spot_teams, list) and index < len(spot_teams)
+                        else None
+                    )
+                    if target_team not in (2, 3):
+                        # The aligned 8Hz sample still carries the live side bit.
+                        current_flags = samples_by_xuid[xuid][sample_tick][3]
+                        target_team = 3 if current_flags & 16 else 2
+                    raw_spotted_by = (
+                        spot_by[index]
+                        if isinstance(spot_by, list) and index < len(spot_by)
+                        else None
+                    )
+                    raw_spotted = (
+                        spot_flags[index]
+                        if isinstance(spot_flags, list) and index < len(spot_flags)
+                        else False
+                    )
+                    bits = _spotted_team_bits(raw_spotted_by, raw_spotted, target_team)
                     if bits == 0:
                         continue
                     x, y, yaw, flags = samples_by_xuid[xuid][sample_tick]
