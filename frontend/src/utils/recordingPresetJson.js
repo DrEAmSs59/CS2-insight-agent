@@ -67,10 +67,6 @@ function parseWarmup(value, defaults) {
       const n = requireNumber(value[key], field, -1, 0, true);
       if (n !== -1 && n !== 0) invalid(field, "range");
       result[key] = n;
-    } else if (key === "voice_filter") {
-      const text = requireString(value[key], field, 16);
-      if (!["off", "open", "team", "enemy", "mute"].includes(text)) invalid(field, "range");
-      result[key] = text;
     } else if (key === "aspect_ratio") {
       const text = requireString(value[key], field, 8);
       if (!["", "4:3", "16:9", "16:10"].includes(text)) invalid(field, "range");

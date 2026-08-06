@@ -10,9 +10,9 @@ from app.env_utils import OBSConfig
 from app.obs_director import (
     OBSDirector,
     RecordingWarmupExtras,
-    _apply_voice_filter_to_plan,
+    _disable_backend_voice_masks,
 )
-from app.recording.platform_utils import VOICE_LISTEN_MASK_ALL
+from app.pov_constants import POV_CORE_FORCED_COMMANDS
 
 FIXED_CVARS = (
     "cl_hud_telemetry_frametime_show 0",
@@ -70,78 +70,60 @@ def test_third_person_camera_injects_the_configured_camera_commands():
     assert lines[start : start + len(third_person_commands)] == third_person_commands
 
 
-def test_team_and_enemy_warmup_start_fail_closed():
-    director = _director("")
-
-    for mode in ("team", "enemy"):
-        lines = director._recording_warmup_console_lines(
-            RecordingWarmupExtras(voice_filter=mode)
-        )
-        assert lines[-4:] == [
-            "tv_listen_voice_indices 0",
-            "tv_listen_voice_indices_h 0",
-            "voice_modenable 1",
-            "snd_voipvolume 1",
-        ]
-        assert "tv_listen_voice_indices -1" not in lines
-        assert "tv_listen_voice_indices_h -1" not in lines
-
-
-def test_mute_does_not_depend_on_snd_voipvolume():
-    director = _director("")
-    lines = director._recording_warmup_console_lines(
-        RecordingWarmupExtras(voice_filter="mute")
-    )
-
-    assert lines[-4:] == [
-        "tv_listen_voice_indices 0",
-        "tv_listen_voice_indices_h 0",
-        "voice_modenable 0",
-        "snd_voipvolume 0",
+def _voice_lines(lines):
+    return [
+        line
+        for line in lines
+        if line.split()[0].lower() in {
+            "voice_modenable",
+            "snd_voipvolume",
+            "tv_listen_voice_indices",
+            "tv_listen_voice_indices_h",
+        }
     ]
 
 
-def test_open_sets_both_mask_halves_to_all_players():
+def test_non_pov_only_mutes_global_voice_volume():
     director = _director("")
     lines = director._recording_warmup_console_lines(
-        RecordingWarmupExtras(voice_filter="open")
+        RecordingWarmupExtras(),
+        pov_enabled=False,
     )
 
-    assert lines[-4:] == [
+    assert _voice_lines(lines) == ["snd_voipvolume 0"]
+
+
+def test_pov_warmup_leaves_voice_to_pov_pipeline():
+    director = _director("")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(),
+        pov_enabled=True,
+    )
+
+    assert _voice_lines(lines) == []
+    assert POV_CORE_FORCED_COMMANDS[:2] == [
         "voice_modenable 1",
         "snd_voipvolume 1",
-        "tv_listen_voice_indices -1",
-        "tv_listen_voice_indices_h -1",
     ]
 
 
-def test_off_leaves_voice_unmanaged():
-    director = _director("")
-    lines = director._recording_warmup_console_lines(
-        RecordingWarmupExtras(voice_filter="off")
-    )
-
-    assert not any(line.split()[0] in {
-        "voice_modenable",
-        "snd_voipvolume",
-        "tv_listen_voice_indices",
-        "tv_listen_voice_indices_h",
-    } for line in lines)
-
-
-def test_silent_demo_omits_all_voice_console_commands():
+def test_stale_client_voice_commands_cannot_override_non_pov_policy():
     director = _director("voice_modenable 1\nsnd_voipvolume 1")
     lines = director._recording_warmup_console_lines(
-        RecordingWarmupExtras(voice_filter="team"),
-        has_demo_voice=False,
+        RecordingWarmupExtras(
+            console_cmds=(
+                "cl_draw_only_deathnotices true",
+                "voice_modenable 1",
+                "snd_voipvolume 1",
+                "tv_listen_voice_indices -1",
+                "tv_listen_voice_indices_h -1",
+            ),
+        ),
+        pov_enabled=False,
     )
 
-    assert not any(line.split()[0].lower() in {
-        "voice_modenable",
-        "snd_voipvolume",
-        "tv_listen_voice_indices",
-        "tv_listen_voice_indices_h",
-    } for line in lines)
+    assert "cl_draw_only_deathnotices true" in lines
+    assert _voice_lines(lines) == ["snd_voipvolume 0"]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="CS2 console injection is Windows-only")
@@ -179,28 +161,7 @@ def test_demo_seek_commands_are_submitted_with_separate_enter_presses(monkeypatc
     assert submitted == ["demo_pause", "demo_gototick 5745"]
 
 
-def test_stale_client_voice_commands_cannot_override_team_policy():
-    director = _director("tv_listen_voice_indices -1\ntv_listen_voice_indices_h -1")
-    lines = director._recording_warmup_console_lines(RecordingWarmupExtras(
-        voice_filter="team",
-        console_cmds=(
-            "cl_draw_only_deathnotices true",
-            "snd_voipvolume 1",
-            "tv_listen_voice_indices -1",
-            "tv_listen_voice_indices_h -1",
-        ),
-    ))
-
-    assert "cl_draw_only_deathnotices true" in lines
-    assert lines[-4:] == [
-        "tv_listen_voice_indices 0",
-        "tv_listen_voice_indices_h 0",
-        "voice_modenable 1",
-        "snd_voipvolume 1",
-    ]
-
-
-def test_plan_modes_resolve_masks_explicitly():
+def test_recording_disables_backend_segment_voice_masks():
     segment = SimpleNamespace(
         segment_index=0,
         target_steamid64="76561198000000001",
@@ -209,13 +170,5 @@ def test_plan_modes_resolve_masks_explicitly():
     )
     plan = SimpleNamespace(segments=[segment], warnings=[])
 
-    assert _apply_voice_filter_to_plan(plan, "open") == "open"
-    assert segment.voice_listen_mask == VOICE_LISTEN_MASK_ALL
-
-    segment.voice_listen_mask = 0
-    assert _apply_voice_filter_to_plan(plan, "team") == "team"
-    assert segment.voice_listen_mask == 0
-    assert "muted fail-closed" in plan.warnings[-1]
-
-    assert _apply_voice_filter_to_plan(plan, "off") == "off"
+    _disable_backend_voice_masks(plan)
     assert segment.voice_listen_mask is None

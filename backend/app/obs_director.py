@@ -58,10 +58,6 @@ from .gsi_ready import (
     wait_gsi_payload_after,
 )
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
-from .recording.platform_utils import (
-    normalize_voice_filter,
-    select_voice_listen_mask,
-)
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -1816,9 +1812,6 @@ class RecordingWarmupExtras:
     third_person_camera: bool = False
     # Demo 观战闪光弹亮度；None 表示不注入。POV HUD 录制时由 pov_constants 强制 1.0
     spectator_flashbang_opacity: Optional[float] = None
-    # "mute"=全部静音, "open"=所有玩家, "team"=当前 POV 队伍,
-    # "enemy"=当前 POV 对方队伍, "off"=不管理语音
-    voice_filter: str = "mute"
     # Demo 底部时间轴 / 回放控制条：社区常用需先 sv_cheats 1 再 demoui false
     hide_demo_playback_ui: bool = True
     # 投掷物抛物线 + 画中窗预览
@@ -1924,50 +1917,23 @@ def _without_voice_console_lines(lines) -> list[str]:
     return out
 
 
-def _voice_filter_warmup_console_lines(voice_filter) -> list[str]:
-    """Return the authoritative final voice state for the selected mode."""
-    mode = normalize_voice_filter(voice_filter)
-    if mode == "off":
-        return []
-    if mode == "open":
-        return [
-            "voice_modenable 1",
-            "snd_voipvolume 1",
-            "tv_listen_voice_indices -1",
-            "tv_listen_voice_indices_h -1",
-        ]
+def _apply_recording_voice_policy(lines, *, pov_enabled: bool) -> list[str]:
+    """Apply the sole recording voice policy after removing stale client settings.
 
-    # Restricted modes start silent. Per-segment team/enemy masks are applied only
-    # after the POV SteamID has been selected and verified.
-    lines = [
-        "tv_listen_voice_indices 0",
-        "tv_listen_voice_indices_h 0",
-    ]
-    if mode in ("team", "enemy"):
-        lines.extend(("voice_modenable 1", "snd_voipvolume 1"))
-    else:
-        lines.extend(("voice_modenable 0", "snd_voipvolume 0"))
-    return lines
+    POV owns native voice enablement and audience masks through its forced
+    commands and Panorama script. Without POV, recording only zeros the global
+    voice volume; it intentionally leaves ``voice_modenable`` untouched.
+    """
+    clean = _without_voice_console_lines(lines)
+    if pov_enabled:
+        return clean
+    return [*clean, "snd_voipvolume 0"]
 
 
-def _apply_voice_filter_to_plan(plan, voice_filter) -> str:
-    """Resolve each final segment mask, muting when roster identity is incomplete."""
-    mode = normalize_voice_filter(voice_filter)
+def _disable_backend_voice_masks(plan) -> None:
+    """Keep per-segment mask injection out of both recording voice pipelines."""
     for segment in plan.segments:
-        selected = select_voice_listen_mask(
-            mode,
-            segment.voice_listen_mask or 0,
-            segment.voice_listen_mask_enemy or 0,
-        )
-        if mode in ("team", "enemy") and selected == 0:
-            warning = (
-                f"segment {segment.segment_index}: {mode} voice roster unavailable for "
-                f"POV SteamID {segment.target_steamid64 or '(missing)'}; muted fail-closed"
-            )
-            if warning not in plan.warnings:
-                plan.warnings.append(warning)
-        segment.voice_listen_mask = selected
-    return mode
+        segment.voice_listen_mask = None
 
 
 class OBSDirector:
@@ -3602,7 +3568,7 @@ class OBSDirector:
         self,
         w: RecordingWarmupExtras,
         *,
-        has_demo_voice: Optional[bool] = None,
+        pov_enabled: bool = False,
     ) -> list[str]:
         """录制会话首次 seek 前注入的观战 cvar（与空格预热后的控制台批次合并）。
 
@@ -3617,9 +3583,7 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
-            if has_demo_voice is False:
-                return _without_voice_console_lines(lines)
-            return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
+            return _apply_recording_voice_policy(lines, pov_enabled=pov_enabled)
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
         if w.cl_draw_only_deathnotices:
@@ -3671,9 +3635,7 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
-        if has_demo_voice is False:
-            return _without_voice_console_lines(lines)
-        return [*lines, *_voice_filter_warmup_console_lines(w.voice_filter)]
+        return _apply_recording_voice_policy(lines, pov_enabled=pov_enabled)
 
     async def execute_plan_queue(
         self,
@@ -3698,7 +3660,6 @@ class OBSDirector:
             restore_pov_after_cs2_exit,
         )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
-        from .demo_voice_hud import demo_has_voice_packets
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3896,7 +3857,6 @@ class OBSDirector:
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
                 demo_abs = demo_abs_map[demo_key]
                 demo_name = demo_abs.name
-                demo_has_voice: Optional[bool] = None
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
 
@@ -3906,9 +3866,7 @@ class OBSDirector:
                     try:
                         logger.info("[RecordingV3][POV] build and install voice HUD for %s", demo_name)
                         pov_install_attempted = True
-                        voice_build = pov_mgr_v3.install(demo_path=demo_abs)
-                        if voice_build is not None:
-                            demo_has_voice = voice_build.voice_packets > 0
+                        pov_mgr_v3.install(demo_path=demo_abs)
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
                             installed_status.get("original_gameinfo_sha256") or ""
@@ -3927,24 +3885,6 @@ class OBSDirector:
                         )
                         pov_on_v3 = False
                         self._pov_enabled = False
-
-                if demo_has_voice is None:
-                    try:
-                        demo_has_voice = await asyncio.to_thread(
-                            demo_has_voice_packets,
-                            demo_abs,
-                        )
-                    except Exception as _voice_probe_error:  # noqa: BLE001
-                        # Unknown must preserve the existing fail-closed policy.
-                        logger.warning(
-                            "[RecordingV3] demo voice probe failed for %s; keeping voice policy: %s",
-                            demo_name,
-                            _voice_probe_error,
-                        )
-                if demo_has_voice is False:
-                    logger.info(
-                        "[RecordingV3] demo contains no voice packets; skipping all voice cvar injection"
-                    )
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
@@ -3989,18 +3929,14 @@ class OBSDirector:
                 # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
                 # can send a keypress instead of opening the console during recording.
                 _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
-                _voice_mode = (
-                    "off"
-                    if demo_has_voice is False
-                    else normalize_voice_filter(
-                        getattr(warmup, "voice_filter", "mute") if warmup else "mute"
-                    )
-                )
+                # Voice ownership is no longer user-configurable. POV manages its
+                # dynamic audience mask; non-POV recording only mutes global volume.
+                # In both cases the per-segment backend mask injector stays disabled.
                 _warmup_inject_ok = False
                 if warmup is not None:
                     warmup_cmds = self._recording_warmup_console_lines(
                         warmup,
-                        has_demo_voice=demo_has_voice,
+                        pov_enabled=self._pov_enabled,
                     )
                     warmup_cmds = [*warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
                     if self._pov_enabled:
@@ -4027,11 +3963,9 @@ class OBSDirector:
                         except Exception as _wce:
                             logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
                 else:
-                    # No warmup object means the safe default: mute only when the
-                    # demo actually carries voice (or the probe was inconclusive).
-                    default_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS]
-                    if demo_has_voice is not False:
-                        default_warmup_cmds.extend(_voice_filter_warmup_console_lines("mute"))
+                    # POV cannot be enabled without a warmup object. The non-POV
+                    # default intentionally mutes only the global voice volume.
+                    default_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS, "snd_voipvolume 0"]
                     try:
                         _warmup_inject_ok = bool(await asyncio.to_thread(
                             inject_console_sequence,
@@ -4044,7 +3978,7 @@ class OBSDirector:
 
                 self._check_abort()
 
-                if _voice_mode in ("mute", "team", "enemy") and not _warmup_inject_ok:
+                if not _warmup_inject_ok:
                     error = "voice isolation warmup injection failed; recording aborted fail-closed"
                     logger.error("[RecordingV3] %s", error)
                     for dto in demo_requests:
@@ -4056,12 +3990,12 @@ class OBSDirector:
                             "warnings": [],
                         })
                     await self._run_cleanup_step(
-                        "CS2 shutdown after voice isolation failure",
+                        "CS2 shutdown after recording voice policy failure",
                         self._kill_cs2,
                         timeout=30.0,
                     )
                     await self._run_cleanup_step(
-                        "CS2 artifact cleanup after voice isolation failure",
+                        "CS2 artifact cleanup after recording voice policy failure",
                         self._cleanup_cs2_artifacts,
                         timeout=8.0,
                     )
@@ -4122,9 +4056,9 @@ class OBSDirector:
                         logger.info("[RecordingV3] using pre-built plan: request_id=%s type=%s",
                                     dto.request_id, dto.request_type.value)
 
-                    # Resolve every segment explicitly. Missing roster data is mask 0;
-                    # only an explicit "off" leaves voice state unmanaged (None).
-                    _apply_voice_filter_to_plan(plan, _voice_mode)
+                    # POV owns its dynamic audience mask; non-POV uses only the
+                    # one-time global volume mute. Never inject per-segment masks.
+                    _disable_backend_voice_masks(plan)
 
                     logger.info("[RecordingV3] execute plan: %d active segments", len(plan.segments))
                     _pre_execute_wall = time.time()

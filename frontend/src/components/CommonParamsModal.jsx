@@ -403,13 +403,6 @@ export default function CommonParamsModal({
   );
   const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
 
-  const VF_OPTIONS = [
-    { value: "open",  labelKey: "record.warmupVoiceOpen",  code: "tv_listen_voice_indices -1",     descKey: "record.warmupVoiceOpenDesc" },
-    { value: "team",  labelKey: "record.warmupVoiceTeam",  code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceTeamDesc" },
-    { value: "enemy", labelKey: "record.warmupVoiceEnemy", code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceEnemyDesc" },
-    { value: "mute",  labelKey: "record.warmupVoiceMute",  code: "snd_voipvolume 0",              descKey: "record.warmupVoiceMuteDesc" },
-  ];
-
   const KB_POSITIONS = [
     { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
     { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
@@ -421,9 +414,6 @@ export default function CommonParamsModal({
     { ar: "16:9",  sample: "1920×1080", tagKey: "record.arTag169" },
     { ar: "16:10", sample: "1920×1200", tagKey: "record.arTag1610" },
   ];
-
-  const vf = warmupOpts.voice_filter ?? "mute";
-  const selectedVf = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
 
   const saveButton = onSaveAllCommonParams ? (
     <button
@@ -1140,37 +1130,6 @@ export default function CommonParamsModal({
                 />
 
                 <div className="my-5 border-t border-cs2-border" />
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                  {t("record.commonCaptureLabel")}
-                </p>
-            {(() => {
-              const selectedVfLocal = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
-              return (
-                <>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                    {VF_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => patchWarmup({ voice_filter: opt.value })}
-                        className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                          vf === opt.value
-                            ? "border-cs2-accent/60 bg-cs2-accent/10"
-                            : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
-                        }`}
-                      >
-                        <p className="text-[11px] font-semibold text-cs2-text-primary">{t(opt.labelKey)}</p>
-                        <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <p className={`mb-4 mt-1.5 ml-0.5 text-xs leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
-                    {t(selectedVfLocal.descKey)}
-                  </p>
-                </>
-              );
-            })()}
-
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
               {t("record.commonResSection")}
             </p>

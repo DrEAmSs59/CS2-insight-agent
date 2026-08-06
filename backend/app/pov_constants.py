@@ -16,6 +16,11 @@ def pov_tail_commands(*, teamcounter_numeric: bool, radar_mode: int) -> list[str
 
 # 与 POV 同时注入、不因 UI 改变的固定项（末尾再由 pov_tail_commands 追加雷达与头像栏）
 POV_CORE_FORCED_COMMANDS: list[str] = [
+    # POV owns voice selection dynamically through the Panorama audience mask.
+    # Keep the native demo voice path enabled; the script handles per-player
+    # unmute/volume and current-POV team filtering.
+    "voice_modenable 1",
+    "snd_voipvolume 1",
     "cl_draw_only_deathnotices false",
     "cl_trueview_show_status 0",
     "cl_spec_show_bindings 0",

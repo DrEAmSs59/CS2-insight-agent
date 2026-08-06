@@ -57,32 +57,6 @@ export function buildWarmupConsoleCommands(o) {
   if (flashOpacity != null) {
     lines.push(`r_spectator_flashbang_opacity ${flashOpacity}`);
   }
-  const vf = o.voice_filter ?? "mute";
-  if (vf === "mute" || vf === "all") {
-    lines.push(
-      "tv_listen_voice_indices 0",
-      "tv_listen_voice_indices_h 0",
-      "voice_modenable 0",
-      "snd_voipvolume 0",
-    );
-  } else if (vf === "open") {
-    lines.push(
-      "voice_modenable 1",
-      "snd_voipvolume 1",
-      "tv_listen_voice_indices -1",
-      "tv_listen_voice_indices_h -1",
-    );
-  } else if (vf === "off") {
-    // 不注入语音指令
-  } else {
-    // "team" / "enemy"：先静音，per-segment 按当前 POV SteamID 成功解析后再放行。
-    lines.push(
-      "tv_listen_voice_indices 0",
-      "tv_listen_voice_indices_h 0",
-      "voice_modenable 1",
-      "snd_voipvolume 1",
-    );
-  }
   if (o.hide_grenade_trajectory_pip) {
     lines.push("sv_grenade_trajectory 0");
     lines.push("sv_grenade_trajectory_prac_pipreview 0");
@@ -102,7 +76,6 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   third_person_camera: false,
   apply_spectator_flashbang_opacity: false,
   spectator_flashbang_opacity: SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
-  voice_filter: "mute",
   hide_demo_playback_ui: true,
   hide_grenade_trajectory_pip: true,
   aspect_ratio: "",
@@ -299,7 +272,6 @@ export default function RecordWarmupModal({
       viewmodel_fov_68: opts.viewmodel_fov_68,
       third_person_camera: opts.third_person_camera,
       spectator_flashbang_opacity: effectiveSpectatorFlashbangOpacity(opts, sessionPovEnabled),
-      voice_filter: opts.voice_filter ?? "mute",
       hide_demo_playback_ui: opts.hide_demo_playback_ui,
       hide_grenade_trajectory_pip: opts.hide_grenade_trajectory_pip,
       resolution_width: rw,
@@ -341,13 +313,6 @@ export default function RecordWarmupModal({
   // formatResolutionSummary returns a "record.*" key when no actual resolution is set
   const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
 
-  const VF_OPTIONS = [
-    { value: "open",  labelKey: "record.warmupVoiceOpen",  code: "tv_listen_voice_indices -1",     descKey: "record.warmupVoiceOpenDesc" },
-    { value: "team",  labelKey: "record.warmupVoiceTeam",  code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceTeamDesc" },
-    { value: "enemy", labelKey: "record.warmupVoiceEnemy", code: "tv_listen_voice_indices <mask>", descKey: "record.warmupVoiceEnemyDesc" },
-    { value: "mute",  labelKey: "record.warmupVoiceMute",  code: "snd_voipvolume 0",              descKey: "record.warmupVoiceMuteDesc" },
-  ];
-
   const KB_POSITIONS = [
     { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
     { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
@@ -359,9 +324,6 @@ export default function RecordWarmupModal({
     { ar: "16:9",  sample: "1920×1080", tagKey: "record.arTag169" },
     { ar: "16:10", sample: "1920×1200", tagKey: "record.arTag1610" },
   ];
-
-  const vf = opts.voice_filter ?? "mute";
-  const selectedVf = VF_OPTIONS.find((o) => o.value === vf) ?? VF_OPTIONS[3];
 
   return (
     <div
@@ -750,30 +712,8 @@ export default function RecordWarmupModal({
           />
 
           <section aria-labelledby="sec-audio">
-            <SectionHeader en="Audio & canvas" zh={t("record.warmupSecAudio")} />
+            <SectionHeader en="Recording canvas" zh={t("record.warmupSecAudio")} />
             <div id="sec-audio" className="space-y-2">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupVoiceSectionLabel")}</p>
-              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                {VF_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => set({ voice_filter: opt.value })}
-                    className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                      vf === opt.value
-                        ? "border-cs2-accent/60 bg-cs2-accent/10"
-                        : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border-focus"
-                    }`}
-                  >
-                    <p className="text-[11px] font-semibold text-cs2-text-primary">{t(opt.labelKey)}</p>
-                    <p className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">{opt.code}</p>
-                  </button>
-                ))}
-              </div>
-              <p className={`mb-4 mt-1.5 ml-0.5 text-[11px] leading-relaxed ${vf === "open" ? "text-cs2-text-muted" : "text-emerald-400/85"}`}>
-                {t(selectedVf.descKey)}
-              </p>
-
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
                 {t("record.warmupResSection")}
               </p>

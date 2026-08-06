@@ -113,10 +113,6 @@ export function warmupUiOptsToPersisted(opts) {
     spectator_flashbang_opacity: hasFlash
       ? clampSpectatorFlashbangOpacity(opts.spectator_flashbang_opacity)
       : SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
-    voice_filter: ["off", "open", "team", "enemy", "mute"].includes(opts.voice_filter)
-      ? opts.voice_filter
-      : opts.voice_filter === "all" ? "mute"  // old value compat
-      : opts.snd_voipvolume_mute === false ? "team" : "mute",
     hide_demo_playback_ui: !!opts.hide_demo_playback_ui,
     hide_grenade_trajectory_pip: !!opts.hide_grenade_trajectory_pip,
     aspect_ratio: opts.aspect_ratio != null ? String(opts.aspect_ratio) : "",
@@ -155,10 +151,6 @@ export function warmupApiPayloadToPersisted(warmup) {
     spectator_flashbang_opacity: hasFlash
       ? clampSpectatorFlashbangOpacity(fb)
       : SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
-    voice_filter: ["off", "open", "team", "enemy", "mute"].includes(warmup.voice_filter)
-      ? warmup.voice_filter
-      : warmup.voice_filter === "all" ? "mute"  // old value compat
-      : warmup.snd_voipvolume_mute === false ? "team" : "mute",
     hide_demo_playback_ui: !!warmup.hide_demo_playback_ui,
     hide_grenade_trajectory_pip: !!warmup.hide_grenade_trajectory_pip,
     aspect_ratio: warmup.aspect_ratio != null ? String(warmup.aspect_ratio) : "",
