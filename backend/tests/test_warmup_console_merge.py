@@ -1,7 +1,11 @@
 """录制预热控制台注入：固定 cvar 已迁出硬编码，仅由 record_inject_console_lines 提供。"""
 
+import sys
 from types import SimpleNamespace
 
+import pytest
+
+from app import win_cs2_console
 from app.env_utils import OBSConfig
 from app.obs_director import (
     OBSDirector,
@@ -9,7 +13,6 @@ from app.obs_director import (
     _apply_voice_filter_to_plan,
 )
 from app.recording.platform_utils import VOICE_LISTEN_MASK_ALL
-from app.win_cs2_console import _batch_console_commands
 
 FIXED_CVARS = (
     "cl_hud_telemetry_frametime_show 0",
@@ -141,23 +144,39 @@ def test_silent_demo_omits_all_voice_console_commands():
     } for line in lines)
 
 
-def test_default_warmup_commands_are_submitted_as_one_console_batch():
-    director = _director("")
-    lines = director._recording_warmup_console_lines(RecordingWarmupExtras())
+@pytest.mark.skipif(sys.platform != "win32", reason="CS2 console injection is Windows-only")
+def test_demo_seek_commands_are_submitted_with_separate_enter_presses(monkeypatch):
+    events: list[str | None] = []
+    monkeypatch.setattr(win_cs2_console, "find_cs2_hwnd", lambda: 123)
+    monkeypatch.setattr(win_cs2_console, "ensure_cs2_foreground", lambda _timeout: True)
+    monkeypatch.setattr(
+        win_cs2_console,
+        "_post_char",
+        lambda _hwnd, code: events.append(chr(code)),
+    )
+    monkeypatch.setattr(
+        win_cs2_console,
+        "_post_enter",
+        lambda _hwnd: events.append(None),
+    )
+    monkeypatch.setattr(win_cs2_console.time, "sleep", lambda _seconds: None)
 
-    batches = _batch_console_commands(lines)
+    assert win_cs2_console.inject_console_sequence(
+        ["demo_pause", "demo_gototick 5745"],
+        skip_console_toggle=True,
+        close_console=False,
+    )
 
-    assert batches == [";".join(lines)]
-    assert len(batches[0]) <= 510
+    submitted: list[str] = []
+    current: list[str] = []
+    for event in events:
+        if event is None:
+            submitted.append("".join(current))
+            current.clear()
+        else:
+            current.append(event)
 
-
-def test_console_batching_preserves_order_when_safety_limit_is_reached():
-    commands = ["a" * 300, "b" * 300, "tail"]
-
-    assert _batch_console_commands(commands) == [
-        "a" * 300,
-        f"{'b' * 300};tail",
-    ]
+    assert submitted == ["demo_pause", "demo_gototick 5745"]
 
 
 def test_stale_client_voice_commands_cannot_override_team_policy():
