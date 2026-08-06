@@ -29,12 +29,11 @@ from .montage_encoder import (
 )
 from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
 from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint, ffmpeg_tool_version_identity
-from .frame_blend import (
-    build_frame_blend_command,
-    is_frame_blend_source_supported,
-    normalize_frame_blend_frames,
-    resolve_frame_blend_output_fps,
-    supports_blur_pipeline,
+from .framemeld import (
+    build_framemeld_command,
+    framemeld_sources_are_compatible,
+    framemeld_working_fps,
+    probe_framemeld,
 )
 from .env_utils import (
     resolve_name_card_font,
@@ -1446,9 +1445,7 @@ def _compose_montage_once(
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
-    frame_blend_enabled: bool = False,
-    frame_blend_frames: int = 5,
-    frame_blend_delivery_fps: Optional[float] = None,
+    framemeld_enabled: bool = False,
     encoder_device_args: Sequence[str] | None = None,
 ) -> None:
     if not clip_paths:
@@ -1503,7 +1500,8 @@ def _compose_montage_once(
         probed_segment_info: dict[Path, dict[str, Any]] = {
             working_clip_paths[0].resolve(): ref,
         }
-        if frame_blend_enabled:
+        framemeld_source_fps_values: list[float] = []
+        if framemeld_enabled:
             for segment in segments:
                 if _is_image_path(segment):
                     continue
@@ -1514,12 +1512,17 @@ def _compose_montage_once(
                         info = probe_video_audio_summary(segment, ffprobe)
                         probed_segment_info[resolved_segment] = info
                     segment_fps = float(info.get("fps") or 0)
-                    if segment_fps > 0:
-                        fps = max(fps, segment_fps)
+                    if segment_fps < 1.0:
+                        raise ValueError("invalid source frame rate")
+                    framemeld_source_fps_values.append(segment_fps)
                 except (MontageComposerError, OSError, TypeError, ValueError):
-                    # The normal per-segment probe below remains authoritative
-                    # and will surface a concrete source error when necessary.
-                    continue
+                    raise MontageComposerError(
+                        "MONTAGE_FRAMEMELD_SOURCE_FPS_REQUIRED",
+                        name=segment.name,
+                    )
+            if not framemeld_sources_are_compatible(framemeld_source_fps_values):
+                raise MontageComposerError("MONTAGE_FRAMEMELD_MIXED_SOURCE_FPS")
+            fps = framemeld_working_fps(framemeld_source_fps_values)
         fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
 
         _intro_img_dur = max(1.0, float(intro_image_duration)) if intro_image_duration is not None else 3.0
@@ -1860,47 +1863,36 @@ def _compose_montage_once(
                 )
                 raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
 
-        frame_blend_source_supported = is_frame_blend_source_supported(fps)
-        blend_frames = normalize_frame_blend_frames(
-            frame_blend_source_supported and frame_blend_enabled,
-            frame_blend_frames,
-        )
-        if blend_frames > 1:
-            if not supports_blur_pipeline(ffmpeg_bin):
-                raise MontageComposerError("MONTAGE_CUSTOM_BLUR_REQUIRED")
-            delivery_fps = resolve_frame_blend_output_fps(
-                fps,
-                high_frame_downsample_enabled=frame_blend_delivery_fps is not None,
-                delivery_fps=frame_blend_delivery_fps,
-            )
-            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
-            shutil.move(str(output_path), str(frame_blend_base))
-            cmd_blend = build_frame_blend_command(
+        if framemeld_enabled:
+            capability = probe_framemeld(ffmpeg_bin)
+            if capability is None:
+                raise MontageComposerError("MONTAGE_FRAMEMELD_REQUIRED")
+            framemeld_base = Path(tmpdir) / "framemeld_base.mp4"
+            shutil.move(str(output_path), str(framemeld_base))
+            cmd_framemeld = build_framemeld_command(
                 ffmpeg_bin=ffmpeg_bin,
-                source_path=frame_blend_base,
+                source_path=framemeld_base,
                 output_path=output_path,
-                frames=blend_frames,
-                fps=delivery_fps,
                 video_encode_args=video_encode_quality,
-                source_fps=fps,
+                capability=capability,
             )
             r4 = _run_ffmpeg_capture(
-                cmd_blend,
+                cmd_framemeld,
                 timeout=3600,
-                stage="montage_frame_blend",
+                stage="montage_framemeld",
                 output_path=output_path,
             )
             if r4.returncode != 0:
                 logger.error(
-                    "montage frame blend failed returncode=%d command=%s stderr=%s",
+                    "montage FrameMeld failed returncode=%d command=%s stderr=%s",
                     r4.returncode,
-                    command_for_log(cmd_blend),
+                    command_for_log(cmd_framemeld),
                     process_error_tail(r4),
                 )
                 raise_hardware_encoder_failure(
-                    cmd_blend,
+                    cmd_framemeld,
                     r4,
-                    stage="montage_frame_blend",
+                    stage="montage_framemeld",
                     artifact_path=output_path,
                     public_code="MONTAGE_EXPORT_FAILED",
                 )
@@ -1928,9 +1920,7 @@ def compose_montage(
     outro_image_duration: Optional[float] = None,
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
-    frame_blend_enabled: bool = False,
-    frame_blend_frames: int = 5,
-    frame_blend_delivery_fps: Optional[float] = None,
+    framemeld_enabled: bool = False,
 ) -> Any:
     """Export with GPU-aware target probing and an x264 safety fallback."""
 
@@ -2066,9 +2056,7 @@ def compose_montage(
                 outro_image_duration=outro_image_duration,
                 montage_encoder=candidate.codec,
                 name_cards=name_cards,
-                frame_blend_enabled=frame_blend_enabled,
-                frame_blend_frames=frame_blend_frames,
-                frame_blend_delivery_fps=frame_blend_delivery_fps,
+                framemeld_enabled=framemeld_enabled,
                 encoder_device_args=candidate.ffmpeg_device_args,
             )
             final_info = ffprobe_streams(

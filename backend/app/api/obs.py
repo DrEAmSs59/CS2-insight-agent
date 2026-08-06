@@ -88,18 +88,41 @@ def _setup_status_obs_handshake_timeout_sec() -> float:
 
 def _configured_ffmpeg_toolkit_report(raw_path: str) -> dict[str, object]:
     from ..ffmpeg_compatibility import inspect_ffmpeg_toolkit
+    from ..framemeld import probe_framemeld
     from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
 
     raw = str(raw_path or "").strip()
     if not raw:
-        return {"ok": False, "reason": "not_configured", "ffmpeg_path": ""}
+        return {
+            "ok": False,
+            "reason": "not_configured",
+            "ffmpeg_path": "",
+            "framemeld_available": False,
+        }
     if not Path(raw).is_file():
-        return {"ok": False, "reason": "path_not_found", "ffmpeg_path": raw}
+        return {
+            "ok": False,
+            "reason": "path_not_found",
+            "ffmpeg_path": raw,
+            "framemeld_available": False,
+        }
     try:
         ffmpeg_bin = resolve_ffmpeg_binary(raw)
     except MontageComposerError:
-        return {"ok": False, "reason": "not_usable", "ffmpeg_path": raw}
-    return inspect_ffmpeg_toolkit(ffmpeg_bin)
+        return {
+            "ok": False,
+            "reason": "not_usable",
+            "ffmpeg_path": raw,
+            "framemeld_available": False,
+        }
+    report = inspect_ffmpeg_toolkit(ffmpeg_bin)
+    capability = probe_framemeld(ffmpeg_bin) if report.get("ok") else None
+    return {
+        **report,
+        "framemeld_available": capability is not None,
+        "framemeld_route": capability.route if capability is not None else None,
+        "framemeld_api_version": capability.api_version if capability is not None else None,
+    }
 
 
 @router.get("/api/config/quick-check")

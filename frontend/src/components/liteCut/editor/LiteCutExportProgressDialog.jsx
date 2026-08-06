@@ -29,7 +29,7 @@ function exportStageLabel(result) {
     overlays: "合成叠加层",
     audio: "混音",
     range: "裁剪输出范围",
-    frame_blend: "Blur 补帧、去重与运动模糊",
+    framemeld: "FrameMeld 自动运动渲染",
     done: "完成",
     cancelling: "正在取消",
     cancelled: "已取消",

@@ -48,3 +48,17 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 
 - **CPython Windows runtime** (installer and portable zip): sourced from the Astral `python-build-standalone` project (`install_only` tarball), Python Software Foundation license. See `packaging/windows/python-runtime.json` for the pinned URL.
 - **Optional FFmpeg** (GPL): when the user selects the matching Inno task, the installer downloads `ffmpeg-8.1.1-essentials_build.zip` from the GyanD `codexffmpeg` GitHub release (see `packaging/windows/ffmpeg-redist.json`). FFmpeg is a trademark of the FFmpeg project.
+
+## External FrameMeld runtime
+
+FrameMeld is a separate GPL-3.0-only program. Insight Agent communicates with
+it only as an external process through its public command-line interface and
+media files; FrameMeld source code is not part of Insight Agent. The PolyForm
+Noncommercial license in this repository applies to Insight Agent code and
+does not replace FrameMeld's GPL license.
+
+FrameMeld is not installed by the existing two-file optional FFmpeg installer.
+If a future package distributes FrameMeld, the complete runtime must remain in
+a separate component directory and ship with its GPL license, copyright
+notices, exact version, and corresponding-source information. See
+`docs/FRAMEMELD_INTEGRATION.md` for the maintained integration boundary.

@@ -93,9 +93,15 @@ import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { stripMp4Extension } from "../../../utils/montageUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
-const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
+const FFMPEG_GATE_IDLE = {
+  loading: true,
+  blocked: false,
+  subtitle: "",
+  message: "",
+  framemeldAvailable: false,
+};
 
-function collectLiteCutFrameBlendSourceItems(body, mediaCache, mediaAssets) {
+function collectLiteCutFrameMeldSourceItems(body, mediaCache, mediaAssets) {
   const assetsById = new Map((mediaAssets || []).map((asset) => [String(asset?.id), asset]));
   const items = [];
   const addClip = (clip) => {
@@ -312,7 +318,13 @@ export default function LiteCutEditorShell({
     try {
       const { data } = await API.get("config/ffmpeg-check");
       if (data?.ok) {
-        setFfmpegGate({ loading: false, blocked: false, subtitle: "", message: "" });
+        setFfmpegGate({
+          loading: false,
+          blocked: false,
+          subtitle: "",
+          message: "",
+          framemeldAvailable: data?.framemeld_available === true,
+        });
         return;
       }
       setFfmpegGate({
@@ -320,6 +332,7 @@ export default function LiteCutEditorShell({
         blocked: true,
         subtitle: ffmpegGateSubtitle(data?.reason, t),
         message: t("liteCut.ffmpegGateDefaultMessage"),
+        framemeldAvailable: false,
       });
     } catch {
       setFfmpegGate({
@@ -327,6 +340,7 @@ export default function LiteCutEditorShell({
         blocked: true,
         subtitle: t("montage.ffmpegGateDetectFail"),
         message: t("montage.ffmpegGateConnectFail"),
+        framemeldAvailable: false,
       });
     }
   }, [t]);
@@ -334,6 +348,16 @@ export default function LiteCutEditorShell({
   useEffect(() => {
     void checkFfmpegGate();
   }, [checkFfmpegGate, location.pathname]);
+
+  useEffect(() => {
+    if (
+      !ffmpegGate.loading
+      && !ffmpegGate.framemeldAvailable
+      && body?.output?.framemeld_enabled === true
+    ) {
+      patchOutput({ framemeld_enabled: false });
+    }
+  }, [body?.output?.framemeld_enabled, ffmpegGate.framemeldAvailable, ffmpegGate.loading, patchOutput]);
 
   useEffect(() => {
     // Native file pickers temporarily blur the window. Recheck FFmpeg after
@@ -440,8 +464,8 @@ export default function LiteCutEditorShell({
 
   const totalSec = useMemo(() => timelineTotalSec(body, 30), [body]);
   const exportableClipCount = useMemo(() => mainVideoClips(body).length, [body]);
-  const frameBlendSourceItems = useMemo(
-    () => collectLiteCutFrameBlendSourceItems(body, mediaCache, mediaAssets),
+  const framemeldSourceItems = useMemo(
+    () => collectLiteCutFrameMeldSourceItems(body, mediaCache, mediaAssets),
     [body, mediaAssets, mediaCache],
   );
 
@@ -467,10 +491,7 @@ export default function LiteCutEditorShell({
   const outputWidth = Math.max(320, Math.min(7680, Number(body?.output?.width) || 1920));
   const outputHeight = Math.max(180, Math.min(4320, Number(body?.output?.height) || 1080));
   const outputFps = Math.max(1, Math.min(1000, Number(body?.output?.fps) || 60));
-  const outputFrameBlendEnabled = body?.output?.frame_blend_enabled === true;
-  const outputFrameBlendFrames = Math.max(2, Math.min(9, Number(body?.output?.frame_blend_frames) || 5));
-  const outputHighFrameDownsampleEnabled = body?.output?.high_frame_downsample_enabled === true;
-  const outputDeliveryFps = Math.max(1, Math.min(1000, Number(body?.output?.delivery_fps) || 60));
+  const outputFrameMeldEnabled = body?.output?.framemeld_enabled === true;
   const outputEncoder = ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body?.output?.encoder)
     ? body.output.encoder
     : "auto";
@@ -1980,11 +2001,9 @@ export default function LiteCutEditorShell({
             outputWidth={outputWidth}
             outputHeight={outputHeight}
             outputFps={outputFps}
-            outputFrameBlendEnabled={outputFrameBlendEnabled}
-            outputFrameBlendFrames={outputFrameBlendFrames}
-            outputHighFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
-            outputDeliveryFps={outputDeliveryFps}
-            frameBlendSourceItems={frameBlendSourceItems}
+            outputFrameMeldEnabled={outputFrameMeldEnabled}
+            outputFrameMeldAvailable={ffmpegGate.framemeldAvailable}
+            framemeldSourceItems={framemeldSourceItems}
             outputEncoder={outputEncoder}
             outputEncoderTier={outputEncoderTier}
             outputCanvasFit={outputCanvasFit}

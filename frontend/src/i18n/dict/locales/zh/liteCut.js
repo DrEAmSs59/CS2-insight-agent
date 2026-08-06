@@ -1,10 +1,10 @@
 // zh / liteCut — keep keys scoped to this feature catalog.
 export default {
-  "liteCut.frameBlendHint": "使用定制 FFmpeg Blur，自动保留时间线最高有效帧率，按倍率补帧、RIFE 去重并生成 Vegas 风格运动模糊，最终输出 60 FPS。",
-  "liteCut.frameBlendBlockedProjectFps": "工程 FPS 无效，无法启动定制 Blur。",
-  "liteCut.frameBlendBlockedSourceFps": "时间轴中有素材的 FPS 无效，无法启动定制 Blur。",
-  "liteCut.frameBlendBlockedUnknownFps": "时间轴中有视频素材无法读取 FPS，无法使用帧混合。",
-  "liteCut.frameBlendLockedPlan": "已启用定制 Blur：自动倍率补帧、RIFE 去重与 Vegas 权重运动模糊，最终输出 60 FPS。",
+  "liteCut.frameMeldHint": "通过外部 FrameMeld 自动处理补帧、去重和运动模糊，固定输出 60 FPS。具体渲染策略由 FrameMeld 管理。",
+  "liteCut.frameMeldUnavailable": "当前配置的是普通 FFmpeg，可使用其他导出功能，但不能启用 FrameMeld。",
+  "liteCut.frameMeldBlockedUnknownFps": "时间轴中有视频素材无法读取 FPS，无法启动 FrameMeld。",
+  "liteCut.frameMeldBlockedMixedFps": "当前时间轴包含不同帧率的视频。为避免破坏源时间线，请统一素材帧率后再启动 FrameMeld。",
+  "liteCut.frameMeldLockedPlan": "已启用 FrameMeld 自动运动渲染，最终输出 60 FPS。",
   "liteCut.project.name": "工程名称",
   "liteCut.project.headerMeta": "LiteCut · 工程 #{id} · {state}",
   "liteCut.project.headerMetaDetailed": "LiteCut · 工程 #{id} · {width}×{height} · {fps} FPS · {state}",

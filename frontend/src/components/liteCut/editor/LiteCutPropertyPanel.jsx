@@ -32,7 +32,7 @@ import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import API from "../../../api/api.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
-import { getHighFrameBlendPlan, isFrameBlendSourceSupported, summarizeFrameBlendSources } from "../../../utils/frameBlend.js";
+import { summarizeFrameMeldSources } from "../../../utils/framemeld.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import ColorPropertyPane from "./ColorPropertyPane.jsx";
 import SpeedPropertyPane from "./SpeedPropertyPane.jsx";
@@ -1170,9 +1170,9 @@ function ExportPane({
   width = 1920,
   height = 1080,
   fps = 60,
-  frameBlendEnabled = false,
-  frameBlendFrames = 5,
-  frameBlendSourceItems = [],
+  framemeldEnabled = false,
+  framemeldRuntimeAvailable = false,
+  framemeldSourceItems = [],
   encoder = "auto",
   encoderTier = "quality",
   canvasFit = "contain",
@@ -1201,44 +1201,23 @@ function ExportPane({
   const [encoderDetection, setEncoderDetection] = useState(null);
   const commitSize = (patch) => onOutputSettingsChange?.(patch);
   const setPresetSize = (w, h) => commitSize({ width: w, height: h });
-  const frameBlendSourceSummary = summarizeFrameBlendSources(frameBlendSourceItems);
-  const frameBlendProjectSupported = isFrameBlendSourceSupported(fps);
-  const frameBlendSourceSupported = frameBlendSourceSummary.allSupported;
-  const frameBlendAvailable = frameBlendProjectSupported && frameBlendSourceSupported;
-  const frameBlendActive = frameBlendAvailable && Boolean(frameBlendEnabled);
-  const frameBlendBlockedReason = !frameBlendProjectSupported
-    ? t("liteCut.frameBlendBlockedProjectFps")
-    : frameBlendSourceSummary.lowFpsValues.length
-      ? t("liteCut.frameBlendBlockedSourceFps")
-      : frameBlendSourceSummary.hasUnknownFps || !frameBlendSourceItems.length
-        ? t("liteCut.frameBlendBlockedUnknownFps")
+  const framemeldSourceSummary = summarizeFrameMeldSources(framemeldSourceItems);
+  const framemeldAvailable = framemeldRuntimeAvailable && framemeldSourceSummary.compatible;
+  const framemeldActive = framemeldAvailable && Boolean(framemeldEnabled);
+  const framemeldBlockedReason = !framemeldRuntimeAvailable
+    ? t("liteCut.frameMeldUnavailable")
+    : framemeldSourceSummary.hasUnknownFps || !framemeldSourceItems.length
+      ? t("liteCut.frameMeldBlockedUnknownFps")
+      : framemeldSourceSummary.hasMixedFrameRates
+        ? t("liteCut.frameMeldBlockedMixedFps")
         : "";
-  const highestSourceFps = frameBlendSourceSummary.fpsValues
-    .filter((value) => Number.isFinite(value))
-    .reduce((highest, value) => Math.max(highest, value), Number(fps) || 60);
-  const suggestedFrameBlendFps = Math.max(Number(fps) || 60, highestSourceFps);
-  const fixedFrameBlendPlan = getHighFrameBlendPlan(suggestedFrameBlendFps, 60);
   const commitWorkingFps = (value) => {
     const nextFps = Math.max(1, Math.min(1000, Math.round(Number(value) || 60)));
-    const nextPlan = getHighFrameBlendPlan(nextFps, 60);
-    commitSize({
-      fps: nextFps,
-      ...(nextPlan ? { frame_blend_frames: nextPlan.frames } : {}),
-    });
+    commitSize({ fps: nextFps });
   };
-  const toggleFrameBlend = () => {
-    if (!frameBlendAvailable) return;
-    if (frameBlendActive) {
-      commitSize({ frame_blend_enabled: false, high_frame_downsample_enabled: false });
-      return;
-    }
-    commitSize({
-      fps: suggestedFrameBlendFps,
-      frame_blend_enabled: true,
-      high_frame_downsample_enabled: true,
-      delivery_fps: 60,
-      frame_blend_frames: fixedFrameBlendPlan?.frames ?? (Number(frameBlendFrames) || 5),
-    });
+  const toggleFrameMeld = () => {
+    if (!framemeldAvailable) return;
+    commitSize({ framemeld_enabled: !framemeldActive });
   };
   const maxRangeEnd = Math.max(0.1, Number(timelineTotalSec) || 0.1);
   const clampRangeStart = (value) => Math.max(0, Math.min(maxRangeEnd - 0.1, Number(value) || 0));
@@ -1395,19 +1374,19 @@ function ExportPane({
         <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-bold text-cs2-text-primary">帧混合（动态模糊）</p>
+              <p className="text-[11px] font-bold text-cs2-text-primary">FrameMeld</p>
               <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
-                {t("liteCut.frameBlendHint")}
+                {t("liteCut.frameMeldHint")}
               </p>
             </div>
             <button
               type="button"
-              aria-pressed={frameBlendActive}
-              aria-label="帧混合（动态模糊）"
-              disabled={!frameBlendAvailable}
-              onClick={toggleFrameBlend}
+              aria-pressed={framemeldActive}
+              aria-label="FrameMeld"
+              disabled={!framemeldAvailable}
+              onClick={toggleFrameMeld}
               className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 ${
-                frameBlendActive
+                framemeldActive
                   ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
                   : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
               }`}
@@ -1415,10 +1394,10 @@ function ExportPane({
               <Check size={17} strokeWidth={3} aria-hidden="true" />
             </button>
           </div>
-          {!frameBlendAvailable ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-amber-300/90">{frameBlendBlockedReason}</p>
-          ) : frameBlendActive ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">{t("liteCut.frameBlendLockedPlan")}</p>
+          {!framemeldAvailable ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-amber-300/90">{framemeldBlockedReason}</p>
+          ) : framemeldActive ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">{t("liteCut.frameMeldLockedPlan")}</p>
           ) : null}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -1769,11 +1748,9 @@ export default function LiteCutPropertyPanel({
   outputWidth = 1920,
   outputHeight = 1080,
   outputFps = 60,
-  outputFrameBlendEnabled = false,
-  outputFrameBlendFrames = 5,
-  outputHighFrameDownsampleEnabled = false,
-  outputDeliveryFps = 60,
-  frameBlendSourceItems = [],
+  outputFrameMeldEnabled = false,
+  outputFrameMeldAvailable = false,
+  framemeldSourceItems = [],
   outputEncoder = "auto",
   outputEncoderTier = "quality",
   outputCanvasFit = "contain",
@@ -2049,11 +2026,9 @@ export default function LiteCutPropertyPanel({
               width={outputWidth}
               height={outputHeight}
               fps={outputFps}
-              frameBlendEnabled={outputFrameBlendEnabled}
-              frameBlendFrames={outputFrameBlendFrames}
-              highFrameDownsampleEnabled={outputHighFrameDownsampleEnabled}
-              deliveryFps={outputDeliveryFps}
-              frameBlendSourceItems={frameBlendSourceItems}
+              framemeldEnabled={outputFrameMeldEnabled}
+              framemeldRuntimeAvailable={outputFrameMeldAvailable}
+              framemeldSourceItems={framemeldSourceItems}
               encoder={outputEncoder}
               encoderTier={outputEncoderTier}
               canvasFit={outputCanvasFit}

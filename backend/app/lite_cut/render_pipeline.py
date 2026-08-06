@@ -79,12 +79,11 @@ from ..montage_encoder import (
 )
 from ..montage_exceptions import HardwareEncoderFailure
 from ..ffmpeg_compatibility import add_ffmpeg_compatibility_hint
-from ..frame_blend import (
-    build_frame_blend_command,
-    is_frame_blend_source_supported,
-    normalize_frame_blend_frames,
-    resolve_frame_blend_output_fps,
-    supports_blur_pipeline,
+from ..framemeld import (
+    build_framemeld_command,
+    framemeld_sources_are_compatible,
+    framemeld_working_fps,
+    probe_framemeld,
 )
 
 logger = logging.getLogger(__name__)
@@ -858,7 +857,7 @@ def _compose_lite_cut_montage_once(
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
     output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
-    frame_blend_requested = bool(output_settings.get("frame_blend_enabled"))
+    framemeld_requested = bool(output_settings.get("framemeld_enabled"))
     external_progress_callback = progress_callback
 
     def mapped_progress_callback(
@@ -867,8 +866,8 @@ def _compose_lite_cut_montage_once(
         detail: dict[str, Any] | None = None,
     ) -> None:
         mapped = float(progress)
-        if frame_blend_requested and stage not in {"frame_blend", "done"}:
-            # Reserve 40% of the visible range for the usually dominant Blur
+        if framemeld_requested and stage not in {"framemeld", "done"}:
+            # Reserve 40% of the visible range for the usually dominant FrameMeld
             # pass instead of reporting 99% before interpolation has started.
             mapped = min(0.60, mapped * (0.60 / 0.98))
         _emit_progress(external_progress_callback, mapped, stage, detail)
@@ -917,7 +916,7 @@ def _compose_lite_cut_montage_once(
         _all_overlay_clips_for_export(project_body, base_track_id=base_track_id),
         clip_path_by_id,
     )
-    frame_blend_source_paths = list(paths)
+    framemeld_source_paths = list(paths)
     video_extensions = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".mts", ".m2ts"}
     for overlay in overlay_clips:
         if overlay.get("type") == "text":
@@ -926,25 +925,32 @@ def _compose_lite_cut_montage_once(
         overlay_path = Path(str(overlay.get("file_path") or "")).expanduser().resolve()
         overlay_kind = str(overlay_meta.get("kind") or overlay.get("type") or "").lower()
         if overlay_kind in {"video", "webm"} or overlay_path.suffix.lower() in video_extensions:
-            if overlay_path.is_file() and overlay_path not in frame_blend_source_paths:
-                frame_blend_source_paths.append(overlay_path)
+            if overlay_path.is_file() and overlay_path not in framemeld_source_paths:
+                framemeld_source_paths.append(overlay_path)
 
     ref = probe_video_audio_summary(paths[0], ffprobe)
     source_fps_values: list[float] = []
-    for source_path in frame_blend_source_paths:
+    for source_path in framemeld_source_paths:
         try:
             source_info = ref if source_path == paths[0] else probe_video_audio_summary(source_path, ffprobe)
             source_fps = float(source_info.get("fps") or 0)
-            if source_fps > 0:
-                source_fps_values.append(source_fps)
+            if source_fps < 1.0:
+                raise ValueError("invalid source frame rate")
+            source_fps_values.append(source_fps)
         except Exception:
-            pass
+            if framemeld_requested:
+                raise MontageComposerError(
+                    "MONTAGE_FRAMEMELD_SOURCE_FPS_REQUIRED",
+                    name=source_path.name,
+                )
     if int(ref["width"]) <= 0 or int(ref["height"]) <= 0:
         raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
     w, h, fps = _project_output_settings(project_body, ref)
-    if bool(output_settings.get("frame_blend_enabled")) and source_fps_values:
-        # Keep native temporal information until the dedicated final Blur pass.
-        fps = max(fps, max(source_fps_values))
+    if framemeld_requested:
+        if not framemeld_sources_are_compatible(source_fps_values):
+            raise MontageComposerError("MONTAGE_FRAMEMELD_MIXED_SOURCE_FPS")
+        # Preserve one real source-rate family until the external final pass.
+        fps = framemeld_working_fps(source_fps_values)
     canvas_fit, background_color, blur_amount = _project_canvas_settings(project_body)
     range_start_sec, range_end_sec = _project_export_range(project_body)
     _emit_progress(progress_callback, 0.08, "normalizing")
@@ -1121,51 +1127,39 @@ def _compose_lite_cut_montage_once(
                 video_encode_quality=video_encode_quality,
                 cancel_event=cancel_event,
             )
-        delivery_fps = resolve_frame_blend_output_fps(
-            fps,
-            high_frame_downsample_enabled=bool(output_settings.get("high_frame_downsample_enabled")),
-            delivery_fps=output_settings.get("delivery_fps"),
-        )
-        frame_blend_source_supported = is_frame_blend_source_supported(fps)
-        blend_frames = normalize_frame_blend_frames(
-            frame_blend_source_supported
-            and bool(output_settings.get("frame_blend_enabled")),
-            output_settings.get("frame_blend_frames", 5),
-        )
-        if blend_frames > 1:
+        if framemeld_requested:
             _raise_if_cancelled(cancel_event)
-            if not supports_blur_pipeline(ffmpeg_bin):
-                raise MontageComposerError("MONTAGE_CUSTOM_BLUR_REQUIRED")
-            _emit_progress(progress_callback, 0.60, "frame_blend")
-            frame_blend_base = Path(tmpdir) / "frame_blend_base.mp4"
+            capability = probe_framemeld(ffmpeg_bin)
+            if capability is None:
+                raise MontageComposerError("MONTAGE_FRAMEMELD_REQUIRED")
+            _emit_progress(progress_callback, 0.60, "framemeld")
+            framemeld_base = Path(tmpdir) / "framemeld_base.mp4"
             import shutil
 
-            shutil.move(str(output_path), str(frame_blend_base))
-            cmd_blend = build_frame_blend_command(
+            shutil.move(str(output_path), str(framemeld_base))
+            cmd_framemeld = build_framemeld_command(
                 ffmpeg_bin=ffmpeg_bin,
-                source_path=frame_blend_base,
+                source_path=framemeld_base,
                 output_path=output_path,
-                frames=blend_frames,
-                fps=delivery_fps,
                 video_encode_args=video_encode_quality,
-                source_fps=fps,
+                capability=capability,
             )
-            blend_result = _run_ffmpeg_process(
-                cmd_blend,
+            framemeld_result = _run_ffmpeg_process(
+                cmd_framemeld,
                 timeout=3600,
                 cancel_event=cancel_event,
                 progress_callback=progress_callback,
                 progress_start=0.60,
                 progress_end=0.995,
-                progress_stage="frame_blend",
+                progress_stage="framemeld",
             )
-            if blend_result.returncode != 0:
-                tail = (blend_result.stderr or blend_result.stdout or "").strip()[-600:]
-                logger.error("lite_cut frame blend failed: %s", tail)
+            if framemeld_result.returncode != 0:
+                tail = (framemeld_result.stderr or framemeld_result.stdout or "").strip()[-600:]
+                logger.error("lite_cut FrameMeld failed: %s", tail)
                 raise_hardware_encoder_failure(
-                    cmd_blend,
-                    blend_result,
-                    stage="lite_cut_frame_blend",
+                    cmd_framemeld,
+                    framemeld_result,
+                    stage="lite_cut_framemeld",
                     artifact_path=output_path,
                     public_code="MONTAGE_EXPORT_FAILED",
                 )

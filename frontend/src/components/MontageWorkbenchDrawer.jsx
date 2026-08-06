@@ -249,7 +249,13 @@ function montageToastFromError(e, t) {
   return formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
 }
 
-const FFMPEG_GATE_IDLE = { loading: true, blocked: false, subtitle: "", message: "" };
+const FFMPEG_GATE_IDLE = {
+  loading: true,
+  blocked: false,
+  subtitle: "",
+  message: "",
+  framemeldAvailable: false,
+};
 
 export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer" }) {
   const t = useT();
@@ -266,13 +272,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [introDuration, setIntroDuration] = useState(3);
   const [outroPath, setOutroPath] = useState("");
   const [outroDuration, setOutroDuration] = useState(3);
-  const [frameBlendEnabled, setFrameBlendEnabled] = useState(false);
-  const [frameBlendFrames, setFrameBlendFrames] = useState(5);
-  const [frameBlendDeliveryFps, setFrameBlendDeliveryFps] = useState(null);
-  const handleFrameBlendEnabledChange = useCallback((enabled) => {
-    const nextEnabled = Boolean(enabled);
-    setFrameBlendEnabled(nextEnabled);
-    setFrameBlendDeliveryFps(nextEnabled ? 60 : null);
+  const [framemeldEnabled, setFrameMeldEnabled] = useState(false);
+  const handleFrameMeldEnabledChange = useCallback((enabled) => {
+    setFrameMeldEnabled(Boolean(enabled));
   }, []);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
@@ -312,7 +314,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     try {
       const { data } = await API.get("config/ffmpeg-check");
       if (data?.ok) {
-        setFfmpegGate({ loading: false, blocked: false, subtitle: "", message: "" });
+        setFfmpegGate({
+          loading: false,
+          blocked: false,
+          subtitle: "",
+          message: "",
+          framemeldAvailable: data?.framemeld_available === true,
+        });
         return;
       }
       setFfmpegGate({
@@ -320,6 +328,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         blocked: true,
         subtitle: ffmpegGateSubtitle(data?.reason, t),
         message: t("montage.ffmpegGateDefaultMessage"),
+        framemeldAvailable: false,
       });
     } catch {
       setFfmpegGate({
@@ -327,6 +336,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         blocked: true,
         subtitle: t("montage.ffmpegGateDetectFail"),
         message: t("montage.ffmpegGateConnectFail"),
+        framemeldAvailable: false,
       });
     }
   }, [open, isPage, t]);
@@ -334,6 +344,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   useEffect(() => {
     void checkFfmpegGate();
   }, [checkFfmpegGate, location.pathname]);
+
+  useEffect(() => {
+    if (!ffmpegGate.loading && !ffmpegGate.framemeldAvailable && framemeldEnabled) {
+      setFrameMeldEnabled(false);
+    }
+  }, [ffmpegGate.framemeldAvailable, ffmpegGate.loading, framemeldEnabled]);
 
   useEffect(() => {
     if (!open && !isPage) return;
@@ -456,9 +472,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    frameBlendEnabled,
-    frameBlendFrames,
-    frameBlendDeliveryFps,
+    framemeldEnabled,
   ]);
 
   const byId = useMemo(() => {
@@ -801,9 +815,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         bgm_volume: bgmVolume / 100,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        frame_blend_enabled: frameBlendEnabled,
-        frame_blend_frames: frameBlendFrames,
-        frame_blend_delivery_fps: frameBlendEnabled ? 60 : null,
+        framemeld_enabled: framemeldEnabled,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -837,16 +849,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       if (typeof data?.body?.name_cards_enabled === "boolean") {
         setNameCardsEnabled(data.body.name_cards_enabled);
       }
-      if (typeof data?.body?.frame_blend_enabled === "boolean") {
-        setFrameBlendEnabled(data.body.frame_blend_enabled);
-      }
-      if (Number.isFinite(Number(data?.body?.frame_blend_frames))) {
-        setFrameBlendFrames(Math.max(2, Math.min(9, Number(data.body.frame_blend_frames))));
-      }
-      if (data?.body?.frame_blend_delivery_fps == null) {
-        setFrameBlendDeliveryFps(null);
-      } else if (Number.isFinite(Number(data.body.frame_blend_delivery_fps))) {
-        setFrameBlendDeliveryFps(Math.max(1, Math.min(240, Number(data.body.frame_blend_delivery_fps))));
+      if (typeof data?.body?.framemeld_enabled === "boolean") {
+        setFrameMeldEnabled(data.body.framemeld_enabled);
       }
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
@@ -874,9 +878,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    frameBlendEnabled,
-    frameBlendFrames,
-    frameBlendDeliveryFps,
+    framemeldEnabled,
     t,
   ]);
 
@@ -917,9 +919,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         theme_id: selectedThemeId,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        frame_blend_enabled: frameBlendEnabled,
-        frame_blend_frames: frameBlendFrames,
-        frame_blend_delivery_fps: frameBlendEnabled ? 60 : null,
+        framemeld_enabled: framemeldEnabled,
       });
       setLastExport({ ok: true, ...data });
       showToast(t("montage.toastExportComplete"));
@@ -949,9 +949,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    frameBlendEnabled,
-    frameBlendFrames,
-    frameBlendDeliveryFps,
+    framemeldEnabled,
     showToast,
     t,
   ]);
@@ -1459,8 +1457,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 nameCardsEnabled={nameCardsEnabled}
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
-                frameBlendEnabled={frameBlendEnabled}
-                onFrameBlendEnabledChange={handleFrameBlendEnabledChange}
+                framemeldEnabled={framemeldEnabled}
+                framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
+                onFrameMeldEnabledChange={handleFrameMeldEnabledChange}
               />
             </div>
 

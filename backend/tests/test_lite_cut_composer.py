@@ -320,13 +320,13 @@ def test_ffmpeg_process_maps_vspipe_frame_progress():
         progress_callback=lambda progress, stage, detail=None: updates.append((progress, stage, detail)),
         progress_start=0.60,
         progress_end=0.995,
-        progress_stage="frame_blend",
+        progress_stage="framemeld",
     )
     assert result.returncode == 0
     assert updates
     progress, stage, detail = updates[-1]
     assert progress == pytest.approx(0.995)
-    assert stage == "frame_blend"
+    assert stage == "framemeld"
     assert detail == {"stage_progress": 1.0, "processed_frames": 10, "total_frames": 10}
 
 

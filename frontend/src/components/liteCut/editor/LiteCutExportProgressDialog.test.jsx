@@ -19,7 +19,7 @@ describe("LiteCutExportProgressDialog", () => {
   it("shows live Blur frame progress and an estimated remaining time", () => {
     render(<LiteCutExportProgressDialog phase="running" result={{
       export_id: 3,
-      stage: "frame_blend",
+      stage: "framemeld",
       progress: 0.75,
       elapsed_seconds: 125,
       estimated_remaining_seconds: 64,
@@ -27,7 +27,7 @@ describe("LiteCutExportProgressDialog", () => {
       total_frames: 7500,
     }} onCancel={vi.fn()} />);
 
-    expect(screen.getByText(/Blur 补帧、去重与运动模糊/)).toBeTruthy();
+    expect(screen.getByText(/FrameMeld 自动运动渲染/)).toBeTruthy();
     expect(screen.getByText("已用时间 02:05")).toBeTruthy();
     expect(screen.getByText("预计剩余 01:04")).toBeTruthy();
     expect(screen.getByText("Blur 帧进度 3000 / 7500")).toBeTruthy();

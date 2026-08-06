@@ -63,10 +63,7 @@ export function normalizeLiteCutBody(rawBody) {
       height: 1080,
       fps: 60,
       encoder: "auto",
-      frame_blend_enabled: false,
-      frame_blend_frames: 5,
-      high_frame_downsample_enabled: false,
-      delivery_fps: 60,
+      framemeld_enabled: false,
       range_mode: "full",
       range_start_sec: 0,
       range_end_sec: null,
@@ -85,26 +82,14 @@ export function normalizeLiteCutBody(rawBody) {
       body.output.encoder = "auto";
       changed = true;
     }
-    if (typeof body.output.frame_blend_enabled !== "boolean") {
-      body.output.frame_blend_enabled = false;
-      changed = true;
+    for (const legacyKey of ["frame_blend_enabled", "frame_blend_frames", "high_frame_downsample_enabled", "delivery_fps"]) {
+      if (legacyKey in body.output) {
+        delete body.output[legacyKey];
+        changed = true;
+      }
     }
-    const rawFrameBlendFrames = Number(body.output.frame_blend_frames);
-    if (!Number.isInteger(rawFrameBlendFrames) || rawFrameBlendFrames < 2 || rawFrameBlendFrames > 9) {
-      body.output.frame_blend_frames = 5;
-      changed = true;
-    }
-    if (typeof body.output.high_frame_downsample_enabled !== "boolean") {
-      body.output.high_frame_downsample_enabled = false;
-      changed = true;
-    }
-    const rawDeliveryFps = Number(body.output.delivery_fps);
-    if (!Number.isInteger(rawDeliveryFps) || rawDeliveryFps < 1 || rawDeliveryFps > 1000) {
-      body.output.delivery_fps = 60;
-      changed = true;
-    }
-    if (body.output.high_frame_downsample_enabled && Number(body.output.delivery_fps) >= Number(body.output.fps)) {
-      body.output.high_frame_downsample_enabled = false;
+    if (typeof body.output.framemeld_enabled !== "boolean") {
+      body.output.framemeld_enabled = false;
       changed = true;
     }
     if (!["full", "custom"].includes(body.output.range_mode)) {

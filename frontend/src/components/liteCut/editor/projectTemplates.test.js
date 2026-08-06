@@ -11,10 +11,7 @@ describe("projectBodyFromTemplate", () => {
         width: 1920,
         height: 1080,
         fps: 60,
-        frame_blend_enabled: false,
-        frame_blend_frames: 5,
-        high_frame_downsample_enabled: false,
-        delivery_fps: 60,
+        framemeld_enabled: false,
       },
     });
     expect(projectBodyFromTemplate("shorts-9x16")).toMatchObject({

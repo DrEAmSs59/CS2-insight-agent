@@ -14,7 +14,7 @@ import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
 import { useT } from "../../i18n/useT.js";
 import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
-import { summarizeFrameBlendSources } from "../../utils/frameBlend.js";
+import { summarizeFrameMeldSources } from "../../utils/framemeld.js";
 
 function pathBasename(path) {
   const s = String(path || "").trim();
@@ -200,18 +200,21 @@ export function MontageStyleConsole({
   nameCardsEnabled,
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
-  frameBlendEnabled,
-  onFrameBlendEnabledChange,
+  framemeldEnabled,
+  framemeldRuntimeAvailable = false,
+  onFrameMeldEnabledChange,
 }) {
   const t = useT();
-  const frameBlendSourceSummary = summarizeFrameBlendSources(clips || []);
-  const frameBlendSourceSupported = frameBlendSourceSummary.allSupported;
-  const frameBlendActive = frameBlendSourceSupported && Boolean(frameBlendEnabled);
-  const frameBlendBlockedReason = frameBlendSourceSummary.lowFpsValues.length > 0
-    ? t("montage.consoleFrameBlendBlockedLowFps")
-    : frameBlendSourceSummary.hasUnknownFps
-      ? t("montage.consoleFrameBlendBlockedUnknownFps")
-      : null;
+  const framemeldSourceSummary = summarizeFrameMeldSources(clips || []);
+  const framemeldAvailable = framemeldRuntimeAvailable && framemeldSourceSummary.compatible;
+  const framemeldActive = framemeldAvailable && Boolean(framemeldEnabled);
+  const framemeldBlockedReason = !framemeldRuntimeAvailable
+    ? t("montage.consoleFrameMeldUnavailable")
+    : framemeldSourceSummary.hasUnknownFps
+      ? t("montage.consoleFrameMeldBlockedUnknownFps")
+      : framemeldSourceSummary.hasMixedFrameRates
+        ? t("montage.consoleFrameMeldBlockedMixedFps")
+        : null;
   const dirOk = Boolean(String(outputDir || "").trim()) || Boolean(String(effectiveOutputDirHint || "").trim());
   const nameOk = Boolean(String(outputFilename || "").trim());
   const bgmFilled = Boolean(String(bgmPath || "").trim());
@@ -510,20 +513,20 @@ export function MontageStyleConsole({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-cs2-text-primary">
-                    {t("montage.consoleFrameBlendTitle")}
+                    {t("montage.consoleFrameMeldTitle")}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-cs2-text-muted">
-                    {t("montage.consoleFrameBlendHint")}
+                    {t("montage.consoleFrameMeldHint")}
                   </p>
                 </div>
                 <button
                   type="button"
-                  aria-pressed={frameBlendActive}
-                  aria-label={t("montage.consoleFrameBlendTitle")}
-                  disabled={!frameBlendSourceSupported}
-                  onClick={() => onFrameBlendEnabledChange?.(!frameBlendActive)}
+                  aria-pressed={framemeldActive}
+                  aria-label={t("montage.consoleFrameMeldTitle")}
+                  disabled={!framemeldAvailable}
+                  onClick={() => onFrameMeldEnabledChange?.(!framemeldActive)}
                   className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
-                    frameBlendActive
+                    framemeldActive
                       ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
                       : "border-cs2-border bg-cs2-bg-input text-transparent hover:border-cs2-accent/70 hover:bg-cs2-surface-2"
                   }`}
@@ -531,13 +534,13 @@ export function MontageStyleConsole({
                   <Check size={17} strokeWidth={3} aria-hidden="true" />
                 </button>
               </div>
-              {frameBlendBlockedReason ? (
+              {framemeldBlockedReason ? (
                 <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
-                  {frameBlendBlockedReason}
+                  {framemeldBlockedReason}
                 </p>
-              ) : frameBlendActive ? (
+              ) : framemeldActive ? (
                 <p className="mt-3 rounded-lg border border-cs2-accent/25 bg-cs2-accent-soft px-3 py-2 text-[11px] leading-relaxed text-cs2-accent">
-                  {t("montage.consoleFrameBlendLockedPlan")}
+                  {t("montage.consoleFrameMeldLockedPlan")}
                 </p>
               ) : null}
             </div>
