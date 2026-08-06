@@ -23,31 +23,48 @@ import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import Modal from "../ui/Modal";
 import Button from "../ui/Button";
 import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
-import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow } from "./cosmeticsLayout.js";
+import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow, teamSlotKey } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
-function replacementsFromPlan(plan) {
+function planRowSlotKeys(row, inventory = []) {
+  const key = String(row?.slot_key || "").trim();
+  if (!key) return [];
+  if (/^(?:t|ct):/i.test(key)) return [key.toLowerCase()];
+  const originalTeams = Array.isArray(row?.original?.observed_teams)
+    ? row.original.observed_teams
+    : [];
+  const inventoryItem = inventory.find((item) => slotKey(item) === key);
+  const observed = originalTeams.length ? originalTeams : (inventoryItem?.observed_teams || []);
+  const teams = [...new Set(observed.map((team) => String(team || "").toLowerCase()))]
+    .filter((team) => team === "t" || team === "ct");
+  return teams.length ? teams.map((team) => `${team}:${key}`) : [key];
+}
+
+function replacementsFromPlan(plan, inventory = []) {
   const items = Array.isArray(plan?.items) ? plan.items : [];
   if (!items.length) return null;
   const next = {};
   for (const row of items) {
-    const key = String(row?.slot_key || "").trim();
-    if (!key || !row?.replacement || typeof row.replacement !== "object") continue;
-    next[key] = row.replacement;
+    if (!row?.replacement || typeof row.replacement !== "object") continue;
+    for (const key of planRowSlotKeys(row, inventory)) next[key] = row.replacement;
   }
   return Object.keys(next).length ? next : null;
 }
 
 /** Original demo skins stored in a custom plan (survives post-apply inventory drift). */
-function originalsFromPlan(plan) {
+function originalsFromPlan(plan, inventory = []) {
   const items = Array.isArray(plan?.items) ? plan.items : [];
   if (!items.length) return {};
   const next = {};
   for (const row of items) {
-    const key = String(row?.slot_key || "").trim();
-    if (!key || !row?.original || typeof row.original !== "object") continue;
-    next[key] = row.original;
+    if (!row?.original || typeof row.original !== "object") continue;
+    for (const key of planRowSlotKeys(row, inventory)) {
+      const scopedTeam = key.match(/^(t|ct):/i)?.[1]?.toLowerCase();
+      next[key] = scopedTeam
+        ? { ...row.original, observed_teams: [scopedTeam] }
+        : row.original;
+    }
   }
   return next;
 }
@@ -88,7 +105,8 @@ function restoreOriginalVisual(item, snapshot) {
   };
 }
 
-function snapshotOriginalItem(item) {
+function snapshotOriginalItem(item, team = null) {
+  const scopedTeam = String(team || "").toLowerCase();
   return {
     item_id: item?.item_id,
     type: item?.type,
@@ -111,7 +129,9 @@ function snapshotOriginalItem(item) {
     model: item?.model,
     // Required for zero-id glove materialize (T/CT). Default loadout placeholders
     // set this; dropping it makes both sides land as team ANY and soft-fail.
-    observed_teams: Array.isArray(item?.observed_teams) ? [...item.observed_teams] : item?.observed_teams,
+    observed_teams: scopedTeam === "t" || scopedTeam === "ct"
+      ? [scopedTeam]
+      : Array.isArray(item?.observed_teams) ? [...item.observed_teams] : item?.observed_teams,
   };
 }
 
@@ -232,6 +252,10 @@ function enrichSaveResultRows(rows, inventoryRows, replacements) {
   for (const item of inventoryRows || []) {
     const key = slotKey(item);
     if (key) bySlot.set(key, item);
+    for (const team of Array.isArray(item?.observed_teams) ? item.observed_teams : []) {
+      const scoped = String(team || "").toLowerCase();
+      if (scoped === "t" || scoped === "ct") bySlot.set(teamSlotKey(item, scoped), item);
+    }
     const id = String(item?.item_id ?? "").trim();
     if (id && id !== "0") byItemId.set(id, item);
   }
@@ -504,18 +528,25 @@ function CosmeticsTeamRow({
   return (
     <section data-testid={`cosmetics-row-${teamKey}`} className="space-y-2">
       {showHeading ? (
-        <h3 className="text-[11px] font-black uppercase tracking-wide text-cs2-text-muted">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
+        <div className={`flex items-center justify-between border-l-2 px-3 py-2 ${
+          teamKey === "ct"
+            ? "border-sky-400 bg-sky-500/10 text-sky-200"
+            : "border-amber-400 bg-amber-500/10 text-amber-200"
+        }`}>
+          <h3 className="text-[11px] font-black uppercase tracking-wide">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
+          <span className="font-mono text-[10px] font-semibold opacity-75">{items.length}</span>
+        </div>
       ) : null}
       {items.length ? (
         <div className="grid grid-cols-2 items-start gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {sortCosmeticsForRow(items, locale, (item) => {
-            const key = slotKey(item);
+            const key = teamSlotKey(item, teamKey);
             const replacement = localReplacements?.[key];
             const snapshot = originalBySlot?.[key];
             if (replacement) return cosmeticPreview(item, replacement);
             return restoreOriginalVisual(item, snapshot);
           }).map((item, index) => {
-            const key = slotKey(item);
+            const key = teamSlotKey(item, teamKey);
             const replacement = localReplacements?.[key] || null;
             const snapshot = originalBySlot?.[key] || null;
             const visualItem = replacement
@@ -541,7 +572,7 @@ function CosmeticsTeamRow({
               replacementLabel={replacement && !replacement.restore ? t("analysis.cosmetics.replacementPreview", {
                 name: formatCraftPipeName(replacement, locale) || displayName(replacement, locale),
               }) : null}
-              onOpen={() => onOpen?.(item, visualItem)}
+              onOpen={() => onOpen?.(item, visualItem, teamKey)}
               onHoverStart={(event) => onHoverStart?.(event, visualItem)}
               onHoverEnd={onHoverEnd}
               onClearReplacement={replacement && !replacement.restore && onClearReplacement
@@ -722,9 +753,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [originalBySlot, setOriginalBySlot] = useState({});
   const [savedOriginals, setSavedOriginals] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
+  const [pickerTeam, setPickerTeam] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
-  const [teamTab, setTeamTab] = useState("ct");
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
     return Array.isArray(rows) ? rows.filter(isVisibleCosmeticEvidence) : [];
@@ -737,8 +768,6 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     () => mergeLoadoutWithEvidence(listDefaultLoadout("t"), itemsForTeam(inventory, "t"), locale),
     [inventory, locale],
   );
-  const activeTeam = teamTab === "t" ? "t" : "ct";
-  const activeItems = activeTeam === "t" ? tItems : ctItems;
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
   const canSavePlan = Boolean(demoId) && hasReplacements && !saving;
@@ -747,6 +776,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setDetail(null);
     setHoverCard(null);
     setPickerItem(null);
+    setPickerTeam(null);
   };
 
   useEffect(() => {
@@ -759,13 +789,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setOriginalBySlot({});
     setSavedOriginals({});
     setPickerItem(null);
+    setPickerTeam(null);
     setSaving(false);
     setSaveResult(null);
   }, [demoId, steamid]);
-
-  useEffect(() => {
-    setTeamTab("ct");
-  }, [steamid]);
 
   useEffect(() => {
     if (!demoId || !steamid) return undefined;
@@ -774,8 +801,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       try {
         const data = await loadCustomSkinPlan({ demoId, steamid });
         if (cancelled) return;
-        const seeded = replacementsFromPlan(data?.plan);
-        const originals = originalsFromPlan(data?.plan);
+        const seeded = replacementsFromPlan(data?.plan, inventory);
+        const originals = originalsFromPlan(data?.plan, inventory);
         setSavedReplacements(seeded || {});
         setLocalReplacements(seeded || {});
         setSavedOriginals(originals);
@@ -787,7 +814,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     return () => {
       cancelled = true;
     };
-  }, [demoId, steamid]);
+  }, [demoId, inventory, steamid]);
 
   useEffect(() => {
     if (!hoverCard) return undefined;
@@ -848,13 +875,14 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setDetail({ item, mode: "info" });
   };
 
-  const openCard = (item, previewItem) => {
+  const openCard = (item, previewItem, team) => {
     if (browseMode) {
       openItemDetail(previewItem || item);
       return;
     }
     if (isCustomizable(item)) {
       setPickerItem(item);
+      setPickerTeam(team);
     }
   };
 
@@ -867,11 +895,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
   const confirmReplacement = (replacement) => {
     if (!pickerItem) return;
-    const key = slotKey(pickerItem);
+    const key = teamSlotKey(pickerItem, pickerTeam);
     setOriginalBySlot((prev) => {
       if (prev[key]) return prev;
       // Row map may already show the preview skin; prefer the live inventory row.
-      const evidence = inventory.find((row) => slotKey(row) === key) || pickerItem;
+      const baseKey = slotKey(pickerItem);
+      const evidence = inventory.find((row) => slotKey(row) === baseKey) || pickerItem;
       const pending = localReplacements[key];
       if (pending && !pending.restore) {
         const paintMatches = Number(evidence?.paint_index) === Number(pending.paint_index)
@@ -879,10 +908,11 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         // Inventory already equals the customized skin — do not treat it as the demo original.
         if (paintMatches) return prev;
       }
-      return { ...prev, [key]: snapshotOriginalItem(evidence) };
+      return { ...prev, [key]: snapshotOriginalItem(evidence, pickerTeam) };
     });
     setLocalReplacements((prev) => ({ ...prev, [key]: replacement }));
     setPickerItem(null);
+    setPickerTeam(null);
   };
 
   const clearReplacement = (key) => {
@@ -939,8 +969,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       }
 
       if (result?.ok) {
-        const seeded = replacementsFromPlan(result?.plan) || {};
-        const fromPlan = originalsFromPlan(result?.plan);
+        const seeded = replacementsFromPlan(result?.plan, inventory) || {};
+        const fromPlan = originalsFromPlan(result?.plan, inventory);
         // Prefer in-session first-seen originals over plan rows (inventory may already be the new skin).
         const originals = mergeOriginalsPreferExisting(fromPlan, originalBySlot);
         setSavedReplacements(seeded);
@@ -1064,54 +1094,27 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         <div className="mb-3 flex items-center gap-2 border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
       ) : null}
 
-      <div
-        role="tablist"
-        aria-label={t("analysis.cosmetics.teamTabs")}
-        className="mb-4 inline-flex rounded border border-cs2-border bg-cs2-bg-input p-0.5"
-      >
-        {["ct", "t"].map((team) => {
-          const active = activeTeam === team;
-          const count = team === "ct" ? ctItems.length : tItems.length;
-          return (
-            <button
-              key={team}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              data-testid={`cosmetics-team-tab-${team}`}
-              onClick={() => {
-                setHoverCard(null);
-                setTeamTab(team);
-              }}
-              className={`inline-flex h-8 min-w-[4.5rem] items-center justify-center gap-1.5 px-3 text-[11px] font-black uppercase tracking-wide transition-colors ${
-                active
-                  ? team === "ct"
-                    ? "bg-sky-500/20 text-sky-200"
-                    : "bg-amber-500/20 text-amber-200"
-                  : "text-cs2-text-muted hover:text-cs2-text-secondary"
-              }`}
-            >
-              <span>{t(`analysis.cosmetics.team.${team}`)}</span>
-              <span className={`font-mono text-[10px] font-semibold ${active ? "opacity-90" : "opacity-60"}`}>{count}</span>
-            </button>
-          );
-        })}
+      <div className="space-y-7" data-testid="cosmetics-team-stack">
+        {[
+          ["ct", ctItems],
+          ["t", tItems],
+        ].map(([team, items]) => (
+          <CosmeticsTeamRow
+            key={team}
+            team={team}
+            items={items}
+            locale={locale}
+            onlineAssetsEnabled={onlineAssetsEnabled}
+            customMode={!browseMode}
+            localReplacements={localReplacements}
+            originalBySlot={originalBySlot}
+            onOpen={openCard}
+            onHoverStart={openHover}
+            onHoverEnd={() => setHoverCard(null)}
+            onClearReplacement={browseMode ? null : clearReplacement}
+          />
+        ))}
       </div>
-
-      <CosmeticsTeamRow
-        team={activeTeam}
-        items={activeItems}
-        locale={locale}
-        onlineAssetsEnabled={onlineAssetsEnabled}
-        customMode={!browseMode}
-        localReplacements={localReplacements}
-        originalBySlot={originalBySlot}
-        showHeading={false}
-        onOpen={openCard}
-        onHoverStart={openHover}
-        onHoverEnd={() => setHoverCard(null)}
-        onClearReplacement={browseMode ? null : clearReplacement}
-      />
 
       {hoverCard ? <HoverDetails item={hoverCard.item} locale={locale} position={hoverCard.position} /> : null}
 
@@ -1145,7 +1148,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         sourceItem={pickerItem}
         locale={locale}
         onlineAssetsEnabled={onlineAssetsEnabled}
-        onClose={() => setPickerItem(null)}
+        onClose={() => {
+          setPickerItem(null);
+          setPickerTeam(null);
+        }}
         onConfirm={confirmReplacement}
       />
 

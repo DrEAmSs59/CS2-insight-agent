@@ -13,6 +13,8 @@ from app.cosmetics_skin_plan import (
     CosmeticsSkinPlanError,
     build_batch_and_plan,
     build_batch_from_plan_json,
+    filter_plan_by_succeeded_item_ids,
+    map_item_statuses,
     slot_key,
 )
 
@@ -533,6 +535,73 @@ def test_build_batch_multiple_slots():
     assert len(batch_items) == 2
     assert {row["item_id64"] for row in batch_items} == {"10", "11"}
     assert len(plan["items"]) == 2
+
+
+def test_shared_item_id_builds_independent_t_ct_pawn_rules():
+    inv = [inventory_row(item_id=53009600926, observed_teams=["t", "ct"])]
+    replacements = {
+        "t:id:53009600926": replacement(paint_seed=12, paint_wear=0.01),
+        "ct:id:53009600926": replacement(paint_seed=99, paint_wear=0.02),
+    }
+    originals = {
+        "t:id:53009600926": inventory_row(
+            item_id=53009600926, observed_teams=["t"]
+        ),
+        "ct:id:53009600926": inventory_row(
+            item_id=53009600926, observed_teams=["ct"]
+        ),
+    }
+
+    batch, plan = build_batch_and_plan(
+        STEAM_ID, inv, replacements, originals=originals
+    )
+
+    assert [(row["team"], row["pattern_seed"]) for row in batch] == [
+        ("T", 12.0),
+        ("CT", 99.0),
+    ]
+    assert [entry["slot_key"] for entry in plan["items"]] == [
+        "t:id:53009600926",
+        "ct:id:53009600926",
+    ]
+    assert plan["items"][0]["original"]["observed_teams"] == ["t"]
+    assert plan["items"][1]["original"]["observed_teams"] == ["ct"]
+    assert build_batch_from_plan_json(plan, inv) == batch
+
+
+def test_scoped_slot_rejects_team_not_observed_for_item():
+    inv = [inventory_row(item_id=10, observed_teams=["t"])]
+    with pytest.raises(CosmeticsSkinPlanError, match="not observed for team CT"):
+        build_batch_and_plan(
+            STEAM_ID,
+            inv,
+            {"ct:id:10": replacement()},
+        )
+
+
+def test_status_and_partial_plan_match_same_item_id_by_team():
+    inv = [inventory_row(item_id=10, observed_teams=["t", "ct"])]
+    replacements = {
+        "t:id:10": replacement(paint_seed=12),
+        "ct:id:10": replacement(paint_seed=99),
+    }
+    originals = {
+        "t:id:10": inventory_row(item_id=10, observed_teams=["t"]),
+        "ct:id:10": inventory_row(item_id=10, observed_teams=["ct"]),
+    }
+    _, plan = build_batch_and_plan(
+        STEAM_ID, inv, replacements, originals=originals
+    )
+
+    statuses = [{"item_id64": "10", "definition_index": 508, "team": "CT"}]
+    mapped = map_item_statuses(plan, statuses)
+    assert mapped[0]["slot_key"] == "ct:id:10"
+    assert mapped[0]["team"] == "CT"
+
+    filtered = filter_plan_by_succeeded_item_ids(
+        plan, {"10"}, succeeded_rows=statuses
+    )
+    assert [entry["slot_key"] for entry in filtered["items"]] == ["ct:id:10"]
 
 
 def test_build_batch_prefers_client_originals_for_plan_display():

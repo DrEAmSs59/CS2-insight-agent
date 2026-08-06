@@ -327,17 +327,12 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     plan_json,
                     [
                         {
-                            "item_id64": item_id,
-                            "definition_index": next(
-                                (
-                                    b.get("definition_index")
-                                    for b in batch_items
-                                    if str(b.get("item_id64")) == item_id
-                                ),
-                                None,
-                            ),
+                            "item_id64": str(item.get("item_id64") or ""),
+                            "definition_index": item.get("definition_index"),
+                            "team": item.get("team"),
                         }
-                        for item_id in succeeded_ids
+                        for item in batch_items
+                        if isinstance(item, dict)
                     ],
                 )
 

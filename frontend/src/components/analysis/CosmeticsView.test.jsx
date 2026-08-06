@@ -59,15 +59,15 @@ describe("CosmeticsView", () => {
     );
 
     expect(screen.getAllByText("“全角，测试！”").length).toBeGreaterThan(0);
-    expect(screen.getByText("AWP")).toBeTruthy();
-    expect(screen.getByText("九头金蛇")).toBeTruthy();
+    expect(screen.getAllByText("AWP")).toHaveLength(2);
+    expect(screen.getAllByText("九头金蛇")).toHaveLength(2);
     expect(screen.queryByText("“不属于 JW”")).toBeNull();
     expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
-    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
-    expect(screen.getByTestId("cosmetics-team-tab-ct")).toBeTruthy();
-    expect(screen.getByTestId("cosmetics-team-tab-t")).toBeTruthy();
-    // Evidence knife + AWP + natural glove placeholder (no default weapon rows).
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(3);
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
+    expect(screen.queryByTestId("cosmetics-team-tab-ct")).toBeNull();
+    expect(screen.queryByTestId("cosmetics-team-tab-t")).toBeNull();
+    // Both team sections show the evidence knife + AWP + natural glove placeholder.
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(6);
   });
 
   test("renders CT then T rows from observed_teams and dual-team items appear in both", () => {
@@ -92,14 +92,49 @@ describe("CosmeticsView", () => {
     expect(within(ctRow).getByText(/★ CT 刀/)).toBeTruthy();
     expect(within(ctRow).getByText(/★ 双阵营刀/)).toBeTruthy();
     expect(within(ctRow).queryByText(/T AK/)).toBeNull();
-    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
-
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     const tRow = screen.getByTestId("cosmetics-row-t");
     expect(within(tRow).getByText(/T AK/)).toBeTruthy();
     expect(within(tRow).getByText(/★ 双阵营刀/)).toBeTruthy();
     expect(within(tRow).queryByText(/★ CT 刀/)).toBeNull();
-    expect(screen.queryByTestId("cosmetics-row-ct")).toBeNull();
+    expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
+  });
+
+  test("editing a shared item in T does not change or submit its CT slot", async () => {
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+
+    render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [cosmetic({ item_id: 10, type: "weapon", model: "deagle", def_index: 1, name_zh: "共享沙鹰" })],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    const ctRow = screen.getByTestId("cosmetics-row-ct");
+    const tRow = screen.getByTestId("cosmetics-row-t");
+    fireEvent.click(within(tRow).getByRole("button", { name: /共享沙鹰/ }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+
+    expect(within(tRow).getByText(/→\s*.+/)).toBeTruthy();
+    expect(within(ctRow).queryByText(/→\s*.+/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i }));
+    await waitFor(() => {
+      const request = vi.mocked(saveCustomSkinPlan).mock.calls.at(-1)?.[0];
+      expect(request.replacements).toHaveProperty("t:id:10");
+      expect(request.replacements).not.toHaveProperty("ct:id:10");
+      expect(request.originals["t:id:10"].observed_teams).toEqual(["t"]);
+    });
   });
 
   test("replaces evidence count with customize entry and removes card team dots", () => {
@@ -231,13 +266,13 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByText("探员")).toBeTruthy();
-    expect(screen.getByText("血腥达里尔爵士（沉默）")).toBeTruthy();
+    expect(screen.getAllByText("探员")).toHaveLength(2);
+    expect(screen.getAllByText("血腥达里尔爵士（沉默）")).toHaveLength(2);
     expect(screen.queryByText("音乐盒")).toBeNull();
     expect(screen.queryByText("Under Bright Lights")).toBeNull();
     expect(screen.queryByText("C4 炸弹")).toBeNull();
-    // Agent + natural knife/glove placeholders (no default guns or non-skin evidence).
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(3);
+    // Each team shows the agent + natural knife/glove placeholders.
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(6);
   });
 
   test("custom mode grays non-swappable items and opens picker for weapons", async () => {
@@ -257,7 +292,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
 
@@ -301,7 +335,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
 
@@ -338,10 +371,10 @@ describe("CosmeticsView", () => {
         demoId: 42,
         steamid: STEAM_ID,
         replacements: expect.objectContaining({
-          "id:10": expect.objectContaining({ catalog_id: expect.any(Number) }),
+          "t:id:10": expect.objectContaining({ catalog_id: expect.any(Number) }),
         }),
         originals: expect.objectContaining({
-          "id:10": expect.objectContaining({ name_zh: "AK原皮" }),
+          "t:id:10": expect.objectContaining({ name_zh: "AK原皮", observed_teams: ["t"] }),
         }),
       });
     });
@@ -382,7 +415,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
@@ -403,7 +435,7 @@ describe("CosmeticsView", () => {
         demoId: 42,
         steamid: STEAM_ID,
         replacements: expect.objectContaining({
-          "id:10": expect.objectContaining({
+          "t:id:10": expect.objectContaining({
             paint_index: 282,
             paint_seed: 1,
             paint_wear: 0.1,
@@ -411,11 +443,11 @@ describe("CosmeticsView", () => {
           }),
         }),
         originals: expect.objectContaining({
-          "id:10": expect.objectContaining({ name_zh: "AK原皮" }),
+          "t:id:10": expect.objectContaining({ name_zh: "AK原皮", observed_teams: ["t"] }),
         }),
       });
     });
-    const posted = vi.mocked(saveCustomSkinPlan).mock.calls.at(-1)?.[0]?.replacements?.["id:10"];
+    const posted = vi.mocked(saveCustomSkinPlan).mock.calls.at(-1)?.[0]?.replacements?.["t:id:10"];
     expect(posted).not.toHaveProperty("restore");
   });
 
@@ -503,8 +535,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
-
     await waitFor(() => {
       expect(screen.getByText("→ AK-47 | 野荷")).toBeTruthy();
     });
@@ -526,7 +556,7 @@ describe("CosmeticsView", () => {
       expect(saveCustomSkinPlan).toHaveBeenCalledWith(
         expect.objectContaining({
           originals: expect.objectContaining({
-            "id:10": expect.objectContaining({ name_zh: "AK原皮", paint_index: 282 }),
+            "t:id:10": expect.objectContaining({ name_zh: "AK原皮", paint_index: 282 }),
           }),
         }),
       );
@@ -566,7 +596,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
@@ -686,7 +715,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
@@ -759,7 +787,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
@@ -824,7 +851,6 @@ describe("CosmeticsView", () => {
       expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
     });
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     await waitFor(() => {
       expect(screen.getByText(/→\s*.+/)).toBeTruthy();
     });
@@ -989,7 +1015,6 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
@@ -1049,7 +1074,6 @@ describe("CosmeticsView", () => {
     await waitFor(() => {
       expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 7, steamid: STEAM_ID });
     });
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     await waitFor(() => {
       expect(screen.getByText(/→\s*.+/)).toBeTruthy();
     });
@@ -1145,13 +1169,11 @@ describe("CosmeticsView", () => {
     );
 
     expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
-    expect(screen.queryByTestId("cosmetics-row-t")).toBeNull();
+    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
     expect(within(screen.getByTestId("cosmetics-row-ct")).getByText("★ 匕首")).toBeTruthy();
     expect(within(screen.getByTestId("cosmetics-row-ct")).getByText(/手套/)).toBeTruthy();
     expect(within(screen.getByTestId("cosmetics-row-ct")).queryByText(/M4A4|P2000|USP|AK-47/)).toBeNull();
 
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
-    expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
     expect(within(screen.getByTestId("cosmetics-row-t")).getByText(/手套/)).toBeTruthy();
     expect(within(screen.getByTestId("cosmetics-row-t")).queryByText("AK-47")).toBeNull();
     expect(screen.queryByText(/这个 Demo 没有留下可用的饰品记录|This demo contains no usable cosmetic records/)).toBeNull();
@@ -1174,7 +1196,6 @@ describe("CosmeticsView", () => {
     );
 
     expect(within(screen.getByTestId("cosmetics-row-ct")).getByText(/★ CT 刀/)).toBeTruthy();
-    fireEvent.click(screen.getByTestId("cosmetics-team-tab-t"));
     expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ import {
   itemsForTeam,
   mergeLoadoutWithEvidence,
   slotKey,
+  teamSlotKey,
   sortCosmeticsForRow,
   weaponClassRank,
 } from "./cosmeticsLayout.js";
@@ -16,6 +17,8 @@ describe("cosmeticsLayout", () => {
     expect(slotKey({ def_index: 7, paint_index: 282, paint_seed: 1, paint_wear: 0.2 }))
       .toBe("def:7:282:1:0.2");
     expect(slotKey({ is_placeholder: true, def_index: 7 })).toBe("placeholder:7");
+    expect(teamSlotKey({ item_id: 99 }, "t")).toBe("t:id:99");
+    expect(teamSlotKey({ item_id: 99 }, "ct")).toBe("ct:id:99");
   });
 
   test("isCustomizable allows melee/glove/weapon only", () => {

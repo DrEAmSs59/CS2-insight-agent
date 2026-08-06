@@ -17,6 +17,12 @@ export function slotKey(item) {
   return `def:${Number(item?.def_index) || 0}:${Number(item?.paint_index) || 0}:${Number(item?.paint_seed) || 0}:${Number(item?.paint_wear) || 0}`;
 }
 
+export function teamSlotKey(item, team) {
+  const side = String(team || "").trim().toLowerCase();
+  if (side !== "t" && side !== "ct") return slotKey(item);
+  return `${side}:${slotKey(item)}`;
+}
+
 export function isCustomizable(item) {
   if (!item) return false;
   const type = String(item?.type || "");

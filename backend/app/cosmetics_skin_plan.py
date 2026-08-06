@@ -173,12 +173,12 @@ def _require_replacement_definition(
     return requested_definition
 
 
-def _glove_batch_team(inventory_row: dict[str, Any]) -> str | None:
-    """Map inventory observed_teams to skin-core batch team (T/CT).
+def _batch_team(inventory_row: dict[str, Any]) -> str | None:
+    """Map a uniquely observed inventory side to skin-core batch team (T/CT).
 
-    Returns None when the side is unknown or mixed so skin-core can keep ANY
-    for a single glove rule. Default glove defs 5028/5029 are side-fixed even
-    when observed_teams was dropped from a UI snapshot.
+    Returns None when the side is unknown or mixed so legacy unscoped plans can
+    keep ANY. Default glove defs 5028/5029 are side-fixed even when
+    observed_teams was dropped from a UI snapshot.
     """
     raw = inventory_row.get("observed_teams")
     if isinstance(raw, (list, tuple)):
@@ -203,6 +203,31 @@ def _glove_batch_team(inventory_row: dict[str, Any]) -> str | None:
     if def_index == 5029:
         return "CT"
     return None
+
+
+def _split_team_slot_key(value: Any) -> tuple[str | None, str]:
+    """Return (skin-core team, base slot key) for ``t:...`` / ``ct:...`` keys."""
+    key = str(value or "").strip()
+    lowered = key.lower()
+    if lowered.startswith("t:"):
+        return "T", key[2:]
+    if lowered.startswith("ct:"):
+        return "CT", key[3:]
+    return None, key
+
+
+def _normalized_team(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    if text in {"t", "2", "terrorist"}:
+        return "T"
+    if text in {"ct", "3", "counter-terrorist", "counterterrorist"}:
+        return "CT"
+    return None
+
+
+def _entry_team(entry: dict[str, Any], original: dict[str, Any]) -> str | None:
+    scoped, _ = _split_team_slot_key(entry.get("slot_key"))
+    return scoped or _batch_team(original)
 
 
 def _display_fields(row: dict[str, Any]) -> dict[str, Any]:
@@ -276,15 +301,20 @@ def build_batch_and_plan(
     for key, repl in replacements.items():
         if not isinstance(repl, dict):
             raise CosmeticsSkinPlanError(f"invalid replacement for slot {key!r}")
-        inventory_row = by_key.get(str(key))
-        client_original = originals_by_key.get(str(key)) or {}
-        if inventory_row is None and str(key).startswith("placeholder:"):
+        scoped_team, base_key = _split_team_slot_key(key)
+        inventory_row = by_key.get(base_key)
+        client_original = (
+            originals_by_key.get(str(key))
+            or originals_by_key.get(base_key)
+            or {}
+        )
+        if inventory_row is None and base_key.startswith("placeholder:"):
             try:
                 source_def = int(
                     float(
                         client_original.get("def_index")
                         if "def_index" in client_original
-                        else str(key).split(":", 1)[-1]
+                        else base_key.split(":", 1)[-1]
                     )
                 )
             except (TypeError, ValueError):
@@ -303,6 +333,25 @@ def build_batch_and_plan(
                 inventory_row["observed_teams"] = list(observed)
         if inventory_row is None:
             raise CosmeticsSkinPlanError(f"slot not found in inventory: {key}")
+        inventory_row = dict(inventory_row)
+        if scoped_team:
+            side = scoped_team.lower()
+            observed = inventory_row.get("observed_teams")
+            if isinstance(observed, (list, tuple)):
+                normalized = {
+                    str(entry or "").strip().lower()
+                    for entry in observed
+                }
+                if side not in normalized:
+                    raise CosmeticsSkinPlanError(
+                        f"slot {key!r} was not observed for team {scoped_team}"
+                    )
+            inventory_row["observed_teams"] = [side]
+            if client_original:
+                client_original = {
+                    **client_original,
+                    "observed_teams": [side],
+                }
 
         item_type = str(inventory_row.get("type") or "")
         if item_type not in _ALLOWED_TYPES:
@@ -344,12 +393,11 @@ def build_batch_and_plan(
             if replacement_definition_index != definition_index:
                 batch_item["replacement_definition_index"] = replacement_definition_index
 
-        # Zero-id glove materialize is side-scoped: T and CT may coexist, but two
-        # ANY (or same-side) rules collide on the pawn EconGloves state.
-        if item_type == "glove":
-            team = _glove_batch_team(inventory_row) or _glove_batch_team(client_original)
-            if team:
-                batch_item["team"] = team
+        # Every UI slot is Pawn-side scoped. For legacy unscoped plans, retain
+        # unique observed-side inference; ambiguous rows remain ANY.
+        team = scoped_team or _batch_team(inventory_row) or _batch_team(client_original)
+        if team:
+            batch_item["team"] = team
 
         batch_items.append(batch_item)
 
@@ -434,25 +482,42 @@ def filter_plan_by_succeeded_item_ids(
 ) -> dict[str, Any]:
     """Keep plan entries that match succeeded skin-core rows.
 
-    Positive ``item_id`` rows match ``succeeded_item_ids``. Vanilla rows
-    (no durable id) match a succeeded row with ``item_id64 == "0"`` and the
-    same ``definition_index``.
+    Side-aware status rows match positive items by ``item_id64 + team`` and
+    vanilla items by ``item_id64=0 + definition_index + team``. Legacy status
+    rows without ``team`` retain their identity-wide behavior.
     """
     items = plan_json.get("items") if isinstance(plan_json, dict) else None
     if not isinstance(items, list):
         return {"steamid": str((plan_json or {}).get("steamid") or ""), "items": []}
 
     id_set = {str(x) for x in (succeeded_item_ids or set()) if str(x)}
-    zero_defs: set[int] = set()
-    for row in succeeded_rows or []:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("item_id64") or "").strip() != "0":
-            continue
-        try:
-            zero_defs.add(int(float(row.get("definition_index"))))
-        except (TypeError, ValueError):
-            continue
+    status_rows = [row for row in (succeeded_rows or []) if isinstance(row, dict)]
+
+    def status_matches(
+        *,
+        item_id64: str,
+        definition_index: int,
+        team: str | None,
+    ) -> bool:
+        matching = []
+        for row in status_rows:
+            if str(row.get("item_id64") or "").strip() != item_id64:
+                continue
+            if item_id64 == "0":
+                try:
+                    if int(float(row.get("definition_index"))) != definition_index:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            matching.append(row)
+        if matching:
+            scoped = [row for row in matching if _normalized_team(row.get("team"))]
+            if not scoped:
+                return True
+            return bool(team) and any(
+                _normalized_team(row.get("team")) == team for row in scoped
+            )
+        return not status_rows and item_id64 in id_set
 
     kept: list[dict[str, Any]] = []
     for entry in items:
@@ -461,18 +526,27 @@ def filter_plan_by_succeeded_item_ids(
         original = entry.get("original")
         if not isinstance(original, dict):
             continue
+        team = _entry_team(entry, original)
         item_id = _finite_item_id(original)
         if item_id is not None:
-            if str(item_id) in id_set:
+            if status_matches(
+                item_id64=str(item_id),
+                definition_index=_require_int(
+                    original.get("def_index"), "definition_index"
+                ),
+                team=team,
+            ):
                 kept.append(entry)
             continue
         try:
             def_index = int(float(original.get("def_index")))
         except (TypeError, ValueError):
             continue
-        if def_index in zero_defs:
-            kept.append(entry)
-        elif not zero_defs and "0" in id_set and not succeeded_rows:
+        if status_matches(
+            item_id64="0",
+            definition_index=def_index,
+            team=team,
+        ):
             kept.append(entry)
     return {
         "steamid": str(plan_json.get("steamid") or ""),
@@ -485,8 +559,8 @@ def map_item_statuses(
     statuses: list[Any] | None,
 ) -> list[dict[str, Any]]:
     """Attach slot_key / original→replacement names from plan to status rows."""
-    by_id: dict[str, dict[str, Any]] = {}
-    by_zero_def: dict[int, dict[str, Any]] = {}
+    by_id_team: dict[tuple[str, str | None], dict[str, Any]] = {}
+    by_zero_def_team: dict[tuple[int, str | None], dict[str, Any]] = {}
 
     def _meta(entry: dict[str, Any], original: dict[str, Any], replacement: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -506,32 +580,49 @@ def map_item_statuses(
         original = entry.get("original") if isinstance(entry.get("original"), dict) else {}
         replacement = entry.get("replacement") if isinstance(entry.get("replacement"), dict) else {}
         meta = _meta(entry, original, replacement)
+        team = _entry_team(entry, original)
         item_id = _finite_item_id(original)
         if item_id is not None:
-            by_id[str(item_id)] = meta
+            by_id_team[(str(item_id), team)] = meta
             continue
         try:
             def_index = int(float(original.get("def_index")))
         except (TypeError, ValueError):
             continue
-        by_zero_def[def_index] = meta
+        by_zero_def_team[(def_index, team)] = meta
+
+    def fallback_meta(
+        mapping: dict[tuple[Any, str | None], dict[str, Any]],
+        identity: Any,
+        team: str | None,
+    ) -> dict[str, Any]:
+        exact = mapping.get((identity, team))
+        if exact is not None:
+            return exact
+        unscoped = mapping.get((identity, None))
+        if unscoped is not None:
+            return unscoped
+        matches = [meta for (key, _), meta in mapping.items() if key == identity]
+        return matches[0] if len(matches) == 1 else {}
 
     out: list[dict[str, Any]] = []
     for row in statuses or []:
         if not isinstance(row, dict):
             continue
         item_id64 = str(row.get("item_id64") or "").strip()
+        team = _normalized_team(row.get("team"))
         if item_id64 == "0":
             try:
                 def_index = int(float(row.get("definition_index")))
-                meta = by_zero_def.get(def_index, {})
+                meta = fallback_meta(by_zero_def_team, def_index, team)
             except (TypeError, ValueError):
                 meta = {}
         else:
-            meta = by_id.get(item_id64, {})
+            meta = fallback_meta(by_id_team, item_id64, team)
         mapped: dict[str, Any] = {
             "item_id64": item_id64,
             "definition_index": row.get("definition_index"),
+            "team": team,
             "slot_key": meta.get("slot_key"),
             "original_name_zh": meta.get("original_name_zh"),
             "original_name_en": meta.get("original_name_en"),
