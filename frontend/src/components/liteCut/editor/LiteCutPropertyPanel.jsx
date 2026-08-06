@@ -1374,7 +1374,7 @@ function ExportPane({
         <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-bold text-cs2-text-primary">FrameMeld</p>
+              <p className="text-[11px] font-bold text-cs2-text-primary">{t("liteCut.frameMeldTitle")}</p>
               <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
                 {t("liteCut.frameMeldHint")}
               </p>
@@ -1382,7 +1382,7 @@ function ExportPane({
             <button
               type="button"
               aria-pressed={framemeldActive}
-              aria-label="FrameMeld"
+              aria-label={t("liteCut.frameMeldTitle")}
               disabled={!framemeldAvailable}
               onClick={toggleFrameMeld}
               className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 ${

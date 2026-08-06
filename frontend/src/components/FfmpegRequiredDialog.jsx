@@ -13,7 +13,7 @@ export default function FfmpegRequiredDialog({ title, subtitle, message, onGoSet
       aria-modal="true"
       aria-labelledby="ffmpeg-required-title"
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl">
+      <div className="relative w-full max-w-2xl overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl">
         <div className="flex items-start gap-3 border-b border-cs2-border px-5 py-4">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-accent/30 bg-cs2-accent/10 text-cs2-accent">
             <Clapperboard className="h-5 w-5" />

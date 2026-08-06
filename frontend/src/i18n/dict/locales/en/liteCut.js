@@ -166,6 +166,7 @@ export default {
   "liteCut.inspector.audioDescription": "Project, track, and clip mixing",
   "liteCut.inspector.speedDescription": "Constant and segmented speed",
   "liteCut.inspector.exportDescription": "Canvas, encoder, and output range",
+  "liteCut.frameMeldTitle": "Frame Blending (Dynamic Blur)",
   "liteCut.frameMeldHint": "Uses the external FrameMeld runtime for automatic interpolation, duplicate repair, and motion blur with fixed 60 FPS delivery. FrameMeld owns the render policy.",
   "liteCut.frameMeldUnavailable": "The configured executable is standard FFmpeg. Other export features remain available, but FrameMeld cannot be enabled.",
   "liteCut.frameMeldBlockedUnknownFps": "A timeline video has no readable FPS, so FrameMeld cannot start.",

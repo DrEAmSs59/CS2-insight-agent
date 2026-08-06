@@ -1,6 +1,7 @@
 // zh / liteCut — keep keys scoped to this feature catalog.
 export default {
-  "liteCut.frameMeldHint": "通过外部 FrameMeld 自动处理补帧、去重和运动模糊，固定输出 60 FPS。具体渲染策略由 FrameMeld 管理。",
+  "liteCut.frameMeldTitle": "帧混合(动态模糊)",
+  "liteCut.frameMeldHint": "通过特定版本ffmpeg：FrameMeld_ffmpeg自动处理补帧、去重和运动模糊，固定输出60 FPS。具体渲染策略由FrameMeld_ffmpeg管理。勾选后导出时间会变长。",
   "liteCut.frameMeldUnavailable": "当前配置的是普通 FFmpeg，可使用其他导出功能，但不能启用 FrameMeld。",
   "liteCut.frameMeldBlockedUnknownFps": "时间轴中有视频素材无法读取 FPS，无法启动 FrameMeld。",
   "liteCut.frameMeldBlockedMixedFps": "当前时间轴包含不同帧率的视频。为避免破坏源时间线，请统一素材帧率后再启动 FrameMeld。",
@@ -57,7 +58,7 @@ export default {
   "liteCut.project.creating": "创建中…",
   "liteCut.project.startTitle": "选择或新建工程",
   "liteCut.ffmpegRequiredTitle": "无法使用 LiteCut",
-  "liteCut.ffmpegGateDefaultMessage": "FFmpeg 未配置或不可用，请前往设置页配置后再使用 LiteCut。",
+  "liteCut.ffmpegGateDefaultMessage": "FFmpeg未配置或不可用，请前往设置页配置后再使用LiteCut。\n若已填写ffmpeg路径，则是ffmpeg版本不受支持。\n请下载FrameMeld_ffmpeg或ffmpeg-2026-05-06-git-f2e5eff3ff-full_build",
   "liteCut.project.startHint": "打开一个已有工程继续剪辑，或者主动创建新工程。LiteCut 不会再自动生成未命名工程。",
   "liteCut.project.startNew": "新建工程",
   "liteCut.project.startNewHint": "设置名称、画布尺寸和视频帧率",
