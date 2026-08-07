@@ -497,6 +497,71 @@ def test_post_rejects_invalid_slot_without_calling_skin_core(api_env, monkeypatc
     assert cached.read_bytes() == prior
 
 
+def test_post_reuses_persisted_team_provenance_after_reanalysis_drift(api_env, monkeypatch):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    db = api_env["db"]
+    original: Path = api_env["original"]
+
+    drifted_inventory = _inventory_row(item_id=10, observed_teams=[])
+    persisted_plan = {
+        "steamid": STEAM_ID,
+        "items": [
+            {
+                "slot_key": "ct:id:10",
+                "original": _inventory_row(item_id=10, observed_teams=["ct"]),
+                "replacement": _replacement(),
+            }
+        ],
+    }
+    asyncio.run(
+        db.save_result(
+            str(original),
+            {
+                "analysis_workspace": {
+                    "cosmetics": {"players": {STEAM_ID: [drifted_inventory]}}
+                }
+            },
+        )
+    )
+    asyncio.run(
+        db.upsert_custom_skin_plan(
+            str(original), STEAM_ID, persisted_plan, output_sha256="old"
+        )
+    )
+
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
+        assert steam_id64 == STEAM_ID
+        assert items[0]["item_id64"] == "10"
+        assert items[0]["team"] == "CT"
+        Path(output_dem).write_bytes(b"REWRITTEN-AFTER-DRIFT")
+        return {
+            "ok": True,
+            "sha256": "new",
+            "items_rewritten": 1,
+            "succeeded": [
+                {"item_id64": "10", "definition_index": 7, "team": "CT"}
+            ],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": STEAM_ID,
+            "replacements": {"ct:id:10": _replacement()},
+            "originals": {
+                "ct:id:10": _inventory_row(item_id=10, observed_teams=["ct"])
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
 def test_post_rejects_catalog_invalid_wear_without_calling_skin_core(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]

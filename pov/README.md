@@ -71,3 +71,6 @@ hold the full-screen Panorama wash at exact opacity 1 before a two-second fade.
 This deliberately covers radar, teamcounter, kill feed, and other HUD panels;
 short glancing flashes keep a duration-scaled translucent peak. The opacity
 curve never changes the demo-authored start/end ticks or extends the effect.
+While a flash wash is active, only its Panorama render cadence rises from 20Hz
+to about 60Hz; idle polling remains 20Hz. Detection, hold/fade tick counts,
+pause/seek behavior, and the existing opacity curve remain unchanged.

@@ -1352,25 +1352,80 @@ def _build_dropped_bomb_track(
     return dropped
 
 
-def _build_team_roster(parser: Any) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
-    """Return compact ``[xuid, slot, team]`` rows keyed by exact Steam ID."""
+def _build_team_roster_from_tick_fallback(
+    parser: Any,
+    demo_path: str | Path,
+) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
+    """Reuse the analyzer's event/tick roster when player metadata is unavailable."""
     try:
-        player_info = parser.parse_player_info()
-    except Exception as exc:  # noqa: BLE001 - native parser errors are contextualized
-        raise DemoVoiceHudError(f"could not parse demo player teams: {exc}") from exc
-    if not isinstance(player_info, Mapping):
-        raise DemoVoiceHudError("demoparser returned unsupported player info")
+        from .parser.player_roster import get_player_list
 
-    player_xuids = player_info.get("steamid")
-    player_teams = player_info.get("team_number")
-    if not isinstance(player_xuids, list) or not isinstance(player_teams, list):
-        raise DemoVoiceHudError("demo player info contains no Steam ID/team roster")
-    if len(player_xuids) != len(player_teams):
-        raise DemoVoiceHudError("demo player info Steam ID/team columns are misaligned")
+        players = get_player_list(demo_path, parser=parser)
+    except Exception as exc:  # noqa: BLE001 - native parser errors are contextualized
+        raise DemoVoiceHudError(f"could not recover demo player teams from ticks: {exc}") from exc
 
     roster: list[list[Any]] = []
     by_xuid: dict[int, tuple[int, int]] = {}
-    for slot, (raw_xuid, raw_team) in enumerate(zip(player_xuids, player_teams)):
+    for player in players:
+        if not isinstance(player, Mapping):
+            continue
+        xuid = _as_positive_int(
+            player.get("steam_id64") or player.get("steam_id") or player.get("xuid")
+        )
+        try:
+            team = int(player.get("team") or player.get("team_num"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if xuid is None or team not in (2, 3):
+            continue
+        if xuid in by_xuid:
+            raise DemoVoiceHudError(f"tick fallback repeats Steam ID {xuid}")
+        # The payload binds all dynamic tracks by XUID. Keep a compact parser
+        # slot only for the legacy runtime-slot fallback when the game API does
+        # not expose the current POV XUID directly.
+        slot = len(roster)
+        by_xuid[xuid] = (slot, team)
+        roster.append([str(xuid), slot, team])
+    if not roster:
+        raise DemoVoiceHudError("tick fallback contains no team-bound Steam IDs")
+    return roster, by_xuid
+
+
+def _build_team_roster(
+    parser: Any,
+    demo_path: str | Path,
+) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
+    """Return compact ``[xuid, slot, team]`` rows keyed by exact Steam ID."""
+    player_info_error: str | None = None
+    try:
+        player_info = parser.parse_player_info()
+    except Exception as exc:  # noqa: BLE001 - native parser errors are contextualized
+        player_info = None
+        player_info_error = f"could not parse demo player teams: {exc}"
+    if player_info is not None and not isinstance(player_info, Mapping):
+        player_info_error = "demoparser returned unsupported player info"
+        player_info = None
+
+    player_xuids = player_info.get("steamid") if player_info is not None else None
+    player_teams = player_info.get("team_number") if player_info is not None else None
+    if player_info is not None and (
+        not isinstance(player_xuids, list) or not isinstance(player_teams, list)
+    ):
+        player_info_error = "demo player info contains no Steam ID/team roster"
+        player_xuids = None
+        player_teams = None
+    if (
+        isinstance(player_xuids, list)
+        and isinstance(player_teams, list)
+        and len(player_xuids) != len(player_teams)
+    ):
+        player_info_error = "demo player info Steam ID/team columns are misaligned"
+        player_xuids = None
+        player_teams = None
+
+    roster: list[list[Any]] = []
+    by_xuid: dict[int, tuple[int, int]] = {}
+    for slot, (raw_xuid, raw_team) in enumerate(zip(player_xuids or [], player_teams or [])):
         xuid = _as_positive_int(raw_xuid)
         try:
             team = int(raw_team)
@@ -1382,9 +1437,15 @@ def _build_team_roster(parser: Any) -> tuple[list[list[Any]], dict[int, tuple[in
             raise DemoVoiceHudError(f"demo player roster repeats Steam ID {xuid}")
         by_xuid[xuid] = (slot, team)
         roster.append([str(xuid), slot, team])
-    if not roster:
-        raise DemoVoiceHudError("demo player info contains no team-bound Steam IDs")
-    return roster, by_xuid
+    if roster:
+        return roster, by_xuid
+
+    if player_info_error is None:
+        player_info_error = "demo player info contains no team-bound Steam IDs"
+    try:
+        return _build_team_roster_from_tick_fallback(parser, demo_path)
+    except DemoVoiceHudError as exc:
+        raise DemoVoiceHudError(f"{player_info_error}; {exc}") from exc
 
 
 def _parse_demo_voice_rows(
@@ -1447,7 +1508,7 @@ def build_voice_payload(
         and bool(row.get("bytes"))
     )
 
-    encoded_roster, roster_by_xuid = _build_team_roster(parser)
+    encoded_roster, roster_by_xuid = _build_team_roster(parser, demo_path)
 
     ticks_by_xuid: dict[int, list[int]] = defaultdict(list)
     for row in voice_rows:

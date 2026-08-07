@@ -187,20 +187,39 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
 
     result = await demo_db.get_result(original_path)
     inventory = _inventory_for_steamid(result, steamid)
+    # Load once before validation.  The current player's persisted plan is the
+    # trusted T/CT provenance for owned entities whose observed side disappears
+    # after the rewritten demo is analyzed again.
+    stored_plans = await demo_db.list_custom_skin_plans_for_demo(original_path)
+    trusted_plan: dict[str, Any] | None = None
+    for stored in stored_plans:
+        if str(stored.get("steamid") or "").strip() != steamid:
+            continue
+        candidate = stored.get("plan_json")
+        if isinstance(candidate, dict):
+            trusted_plan = candidate
+        break
     try:
         batch_items, plan_json = build_batch_and_plan(
             steamid,
             inventory,
             body.replacements,
             originals=body.originals,
+            trusted_plan=trusted_plan,
         )
     except CosmeticsSkinPlanError as exc:
+        logger.warning(
+            "cosmetics plan validation failed: demo_id=%s steamid=%s slots=%s error=%s",
+            demo_id,
+            steamid,
+            sorted(str(key) for key in body.replacements),
+            exc,
+        )
         raise HTTPException(400, str(exc)) from exc
 
     # Other players' persisted plans must be re-applied onto the original before
     # this player's pass; skin-core accepts one steamid per call.
     prior_passes: list[tuple[str, list[dict[str, Any]]]] = []
-    stored_plans = await demo_db.list_custom_skin_plans_for_demo(original_path)
     for stored in stored_plans:
         other_steamid = str(stored.get("steamid") or "").strip()
         if not other_steamid or other_steamid == steamid:

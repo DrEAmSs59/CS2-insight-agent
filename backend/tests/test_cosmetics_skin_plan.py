@@ -579,6 +579,75 @@ def test_scoped_slot_rejects_team_not_observed_for_item():
         )
 
 
+def test_scoped_slot_accepts_empty_observed_team_only_from_trusted_persisted_plan():
+    """Re-analysis after rewrite may move CT evidence to a synthetic entity."""
+    inv = [inventory_row(item_id=10, observed_teams=[])]
+    replacements = {"ct:id:10": replacement()}
+    persisted = {
+        "steamid": STEAM_ID,
+        "items": [
+            {
+                "slot_key": "ct:id:10",
+                "original": inventory_row(item_id=10, observed_teams=["ct"]),
+                "replacement": replacement(),
+            }
+        ],
+    }
+
+    batch, plan = build_batch_and_plan(
+        STEAM_ID,
+        inv,
+        replacements,
+        originals={"ct:id:10": persisted["items"][0]["original"]},
+        trusted_plan=persisted,
+    )
+
+    assert batch[0]["item_id64"] == "10"
+    assert batch[0]["team"] == "CT"
+    assert plan["items"][0]["slot_key"] == "ct:id:10"
+
+
+def test_trusted_plan_does_not_authorize_a_different_scoped_slot():
+    inv = [inventory_row(item_id=10, observed_teams=[])]
+    persisted = {
+        "steamid": STEAM_ID,
+        "items": [
+            {
+                "slot_key": "t:id:10",
+                "original": inventory_row(item_id=10, observed_teams=["t"]),
+                "replacement": replacement(),
+            }
+        ],
+    }
+
+    with pytest.raises(CosmeticsSkinPlanError, match="not observed for team CT"):
+        build_batch_and_plan(
+            STEAM_ID,
+            inv,
+            {"ct:id:10": replacement()},
+            trusted_plan=persisted,
+        )
+
+
+def test_rebuilding_persisted_plan_keeps_team_after_observed_side_drift():
+    inv = [inventory_row(item_id=10, observed_teams=[])]
+    persisted = {
+        "steamid": STEAM_ID,
+        "items": [
+            {
+                "slot_key": "ct:id:10",
+                "original": inventory_row(item_id=10, observed_teams=["ct"]),
+                "replacement": replacement(),
+            }
+        ],
+    }
+
+    batch = build_batch_from_plan_json(persisted, inv)
+
+    assert batch[0]["item_id64"] == "10"
+    assert batch[0]["team"] == "CT"
+
+
 def test_status_and_partial_plan_match_same_item_id_by_team():
     inv = [inventory_row(item_id=10, observed_teams=["t", "ct"])]
     replacements = {

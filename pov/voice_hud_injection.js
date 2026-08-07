@@ -43,6 +43,10 @@
     // opaque first so no Panorama HUD leaks through, then fade over ~2 seconds.
     const FLASH_FULL_OPAQUE_THRESHOLD_TICKS = 192;
     const FLASH_FADE_TICKS = 128;
+    // Rendering cadence only: flash timing and strength remain demo-tick based.
+    // Raise active washes to ~60Hz so opacity changes do not arrive in 20Hz steps.
+    const FLASH_ACTIVE_REFRESH_SECONDS = 0.016;
+    const FLASH_IDLE_REFRESH_SECONDS = 0.05;
     const roster = encodedRoster.map(function (encoded) {
         return {
             xuid: String(encoded[0]),
@@ -1405,7 +1409,10 @@
         if (!blind) {
             flashTinnitusArmedTick = -1;
         }
-        $.Schedule(0.05, tickFlashBlindHud);
+        $.Schedule(
+            blind ? FLASH_ACTIVE_REFRESH_SECONDS : FLASH_IDLE_REFRESH_SECONDS,
+            tickFlashBlindHud,
+        );
     }
 
     function worldInPovView(povSample, worldX, worldY, halfFovDeg) {

@@ -216,6 +216,31 @@ def _split_team_slot_key(value: Any) -> tuple[str | None, str]:
     return None, key
 
 
+def _trusted_scoped_slot_keys(plan_json: dict[str, Any] | None) -> frozenset[str]:
+    """Return normalized T/CT slot keys backed by a server-persisted plan.
+
+    A rewritten demo can leave the original owned entity in inventory with an
+    empty ``observed_teams`` list while the replacement entity carries the
+    side.  The persisted plan is the durable provenance for that original
+    slot.  Only exact scoped keys are trusted; callers must never pass an
+    untrusted request body as ``trusted_plan``.
+    """
+    if not isinstance(plan_json, dict):
+        return frozenset()
+    items = plan_json.get("items")
+    if not isinstance(items, list):
+        return frozenset()
+    keys: set[str] = set()
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("slot_key") or "").strip().lower()
+        scoped_team, base_key = _split_team_slot_key(key)
+        if scoped_team and base_key:
+            keys.add(key)
+    return frozenset(keys)
+
+
 def _normalized_team(value: Any) -> str | None:
     text = str(value or "").strip().lower()
     if text in {"t", "2", "terrorist"}:
@@ -263,6 +288,8 @@ def build_batch_and_plan(
     inventory_rows: list[dict[str, Any]] | None,
     replacements: dict[str, Any] | None,
     originals: dict[str, Any] | None = None,
+    *,
+    trusted_plan: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Resolve frontend replacements against inventory into batch items + plan_json.
 
@@ -273,6 +300,10 @@ def build_batch_and_plan(
     ``originals`` (optional) is the first-seen demo skin per slot from the UI. After a
     prior rewrite the live inventory may already be the new skin; prefer these
     snapshots for plan display so the UI keeps showing 原皮 → 新皮.
+
+    ``trusted_plan`` may only be a plan loaded from server persistence. Its exact
+    scoped slot keys retain their prior T/CT provenance when re-analysis of a
+    rewritten demo leaves the original owned inventory row with no observed side.
 
     Raises:
         CosmeticsSkinPlanError: if replacements empty, any slot missing, or type
@@ -294,6 +325,7 @@ def build_batch_and_plan(
         for key, value in (originals or {}).items()
         if isinstance(value, dict)
     }
+    trusted_scoped_keys = _trusted_scoped_slot_keys(trusted_plan)
 
     batch_items: list[dict[str, Any]] = []
     plan_entries: list[dict[str, Any]] = []
@@ -342,7 +374,12 @@ def build_batch_and_plan(
                     str(entry or "").strip().lower()
                     for entry in observed
                 }
-                if side not in normalized:
+                # A prior successful rewrite can move the observed side onto a
+                # synthetic replacement entity and leave this original owned
+                # item with [].  Preserve only exact server-persisted slot
+                # provenance; new/untrusted slots still fail closed here.
+                trusted_after_rewrite = str(key).strip().lower() in trusted_scoped_keys
+                if side not in normalized and not trusted_after_rewrite:
                     raise CosmeticsSkinPlanError(
                         f"slot {key!r} was not observed for team {scoped_team}"
                     )
@@ -470,6 +507,7 @@ def build_batch_from_plan_json(
         inventory_rows,
         replacements,
         originals=originals or None,
+        trusted_plan=plan_json,
     )
     return batch_items
 
