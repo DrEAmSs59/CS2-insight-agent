@@ -26,7 +26,7 @@ import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
-import { playerIdentityKey } from "../utils/playerIdentity.js";
+import { playerDisplayName, playerIdentityKey } from "../utils/playerIdentity.js";
 
 /**
  * @param {{
@@ -73,6 +73,14 @@ export default function DemoInfoModal({
     [parsedPlayers, activePlayerTab, queuedClientClipUids],
   );
   const activePlayerData = activePlayerScope.playerData;
+  const activePlayerDisplayName = useMemo(() => {
+    const resultName = String(activePlayerData?.match_meta?.target_player || "").trim();
+    if (resultName) return resultName;
+    const rosterPlayer = (demoData?.players || []).find(
+      (player) => playerIdentityKey(player) === activePlayerTab,
+    );
+    return playerDisplayName(rosterPlayer) || activePlayerTab;
+  }, [activePlayerData, activePlayerTab, demoData?.players]);
   const clips = activePlayerScope.clips;
   const roundTimeline = activePlayerData?.round_timeline || [];
   const weaponKillSummary = summarizeWeaponKills(roundTimeline);
@@ -331,18 +339,18 @@ export default function DemoInfoModal({
       });
     }
     if (!toAdd.length) {
-      onEnqueueNotice?.(t("app.enqueuePlayerHighlightsEmpty", { player: activePlayerTab }));
+      onEnqueueNotice?.(t("app.enqueuePlayerHighlightsEmpty", { player: activePlayerDisplayName }));
       return;
     }
     onAddToQueue(toAdd);
     onEnqueueNotice?.(t("app.enqueuePlayerHighlightsDone", {
-      player: activePlayerTab,
+      player: activePlayerDisplayName,
       n: toAdd.length,
     }), {
       autoDismissMs: 2000,
       queueLink: true,
     });
-  }, [activePlayerScope, activePlayerTab, demoData, onAddToQueue, onEnqueueNotice, t]);
+  }, [activePlayerScope, activePlayerDisplayName, activePlayerTab, demoData, onAddToQueue, onEnqueueNotice, t]);
 
   const handleSelectAll = useCallback(() => {
     setSelectedClipUids((prev) => {
@@ -630,7 +638,7 @@ export default function DemoInfoModal({
                   onDeselectAll={handleDeselectAll}
                   onAddSelectedToQueue={handleAddSelected}
                   onAddCurrentPlayerHighlights={handleAddCurrentPlayerHighlights}
-                  currentPlayer={activePlayerTab}
+                  currentPlayer={activePlayerDisplayName}
                   queueLength={queueLength}
                   batchRecording={false}
                   canAddCurrentPlayerHighlights={canAddCurrentPlayerHighlights}

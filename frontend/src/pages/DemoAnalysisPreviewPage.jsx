@@ -710,7 +710,7 @@ export default function DemoAnalysisPreviewPage() {
                 onDeselectAll={s.handleDeselectAll}
                 onAddSelectedToQueue={s.handleAddSelectedToQueue}
                 onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
-                currentPlayer={activePlayer}
+                currentPlayer={activePlayerLabel}
                 queueLength={s.queue.length}
                 batchRecording={s.batchRecording}
                 canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}

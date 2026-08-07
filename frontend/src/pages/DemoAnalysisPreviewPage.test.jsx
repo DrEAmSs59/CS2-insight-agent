@@ -1009,6 +1009,43 @@ describe("DemoAnalysisPreviewPage Insight Agent flow", () => {
     expect(addPlayerHighlights.className).toContain("bg-cs2-accent");
   });
 
+  test("uses the roster nickname in the action bar for SteamID-backed player keys", async () => {
+    const steamId = "76561198981861845";
+    const playerKey = `steamid:${steamId}`;
+    const clip = {
+      client_clip_uid: "clip-steamid-player",
+      category: "highlight",
+      round: 1,
+      start_tick: 100,
+      end_tick: 400,
+      context_tags: [],
+    };
+    renderPage(buildShell({
+      players: [{ name: "Hhippo", steam_id64: steamId, team: 2, kills: 14, deaths: 10, assists: 3 }],
+      currentActivePlayer: playerKey,
+      currentParsed: {
+        players: {
+          [playerKey]: {
+            clips: [clip],
+            match_meta: { target_player: "Hhippo", target_steam_id: steamId },
+          },
+        },
+      },
+      parsedPlayerNames: [playerKey],
+      clips: [clip],
+      regularSelectableTotal: 1,
+      canAddCurrentPlayerHighlights: true,
+    }));
+
+    await waitFor(() => expect(API.get).toHaveBeenCalledWith("/steam/player-avatars", {
+      params: { steam_ids: steamId },
+    }));
+    const actionBar = screen.getByTestId("clip-selection-action-bar");
+    expect(actionBar.textContent).toContain("Hhippo");
+    expect(actionBar.textContent).not.toContain("steamid:");
+    expect(actionBar.textContent).not.toContain(steamId);
+  });
+
   test("renders the analysis entry and navigation in English", () => {
     useLocaleStore.getState().hydrate("en");
     renderPage(buildShell());
