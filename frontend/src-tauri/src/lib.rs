@@ -138,6 +138,18 @@ fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<Pa
 }
 
 fn runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
+    // `tauri dev` copies configured bundle resources into target/debug. Those
+    // files may be leftovers from the last NSIS staging run, so preferring the
+    // resource directory in a debug build silently runs a stale backend and
+    // bundled Python. Development must always use the live checkout and its
+    // .venv; release builds continue to use the packaged resources below.
+    if cfg!(debug_assertions) {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .map_err(|error| format!("无法解析开发目录：{error}"));
+    }
+
     let bundled_root = app
         .path()
         .resource_dir()
@@ -146,12 +158,6 @@ fn runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
         && bundled_root.join("python/python.exe").is_file()
     {
         return Ok(bundled_root);
-    }
-    if cfg!(debug_assertions) {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .map_err(|error| format!("无法解析开发目录：{error}"));
     }
     Ok(bundled_root)
 }
