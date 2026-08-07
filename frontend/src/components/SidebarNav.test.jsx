@@ -24,6 +24,9 @@ describe("SidebarNav", () => {
     renderSidebar({ queueLength: 3 });
     const sidebar = screen.getByTestId("app-sidebar");
 
+    // Full-screen modal backdrops start at z-index 50 and must cover app chrome.
+    expect(sidebar.style.zIndex).toBe("40");
+
     expect(screen.getByRole("link", { name: /上手指南|Getting Started/ })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Demo 库|Demo Library/ })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Demo 分析|Analysis/ })).toBeTruthy();

@@ -22,6 +22,7 @@ const DEFAULT_WIDTH = 224;
 const MIN_WIDTH = 184;
 const MAX_WIDTH = 340;
 const COLLAPSED_WIDTH = 56;
+const SIDEBAR_Z_INDEX = 40;
 
 export const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
@@ -124,8 +125,8 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
 
   return (
     <aside
-      className="app-sidebar relative z-[95] flex h-screen shrink-0 flex-col border-r border-cs2-border-subtle bg-cs2-bg-sidebar text-cs2-text-primary"
-      style={{ width: `${visibleWidth}px` }}
+      className="app-sidebar relative flex h-screen shrink-0 flex-col border-r border-cs2-border-subtle bg-cs2-bg-sidebar text-cs2-text-primary"
+      style={{ width: `${visibleWidth}px`, zIndex: SIDEBAR_Z_INDEX }}
       data-collapsed={collapsed ? "true" : "false"}
       data-resizing={resizing ? "true" : "false"}
       data-testid="app-sidebar"
