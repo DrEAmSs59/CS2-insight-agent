@@ -379,7 +379,13 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
                 ) from exc
         else:
             try:
-                persisted = await demo_db.get_result(str(dem_path))
+                # match_results is keyed by the library's original path, while
+                # replay I/O normally runs against its cached working copy.
+                # Keep those identities separate so a cold desktop cache can
+                # rebuild from the persisted analysis workspace.
+                persisted = await demo_db.get_result(str(req.path))
+                if persisted is None and str(req.path) != str(dem_path):
+                    persisted = await demo_db.get_result(str(dem_path))
                 workspace = (
                     persisted.get("analysis_workspace")
                     if isinstance(persisted, dict)

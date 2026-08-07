@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import demo_parse_isolation, main
+from app.api import demo_replay as demo_replay_api
 from app.parser import replay_match_cache
 
 
@@ -74,6 +75,59 @@ def test_binary_endpoint_repairs_cold_parquet_from_persisted_workspace(
             "fps": 32.0,
         }
     ]
+
+
+def test_binary_endpoint_uses_original_library_path_when_working_copy_is_cached(
+    monkeypatch,
+    tmp_path,
+):
+    original_path = tmp_path / "library" / "match.dem"
+    cached_path = tmp_path / "demo-cache" / "cached.dem"
+    original_path.parent.mkdir()
+    cached_path.parent.mkdir()
+    original_path.write_bytes(b"original")
+    cached_path.write_bytes(b"cached")
+    load_calls = 0
+    result_lookups: list[str] = []
+
+    async def fake_resolve(path, *, demo_db):
+        assert path == str(original_path)
+        assert demo_db is main.demo_db
+        return cached_path.resolve()
+
+    def fake_load(path, **_kwargs):
+        nonlocal load_calls
+        assert path == str(cached_path.resolve())
+        load_calls += 1
+        return None if load_calls == 1 else b"CS2RPL01-cached-repaired"
+
+    async def fake_get_result(path):
+        result_lookups.append(path)
+        if path == str(original_path):
+            return {"analysis_workspace": {"rounds": [{"round_number": 1}]}}
+        return None
+
+    def fake_materialize(path, workspace, *, fps):
+        assert path == str(cached_path.resolve())
+        assert workspace == {"rounds": [{"round_number": 1}]}
+        assert fps == 32.0
+        return {"status": "materialized"}
+
+    monkeypatch.setattr(demo_replay_api, "resolve_working_demo_path", fake_resolve)
+    monkeypatch.setattr(replay_match_cache, "load_match_replay_round_binary", fake_load)
+    monkeypatch.setattr(main.demo_db, "get_result", fake_get_result)
+    monkeypatch.setattr(
+        demo_parse_isolation,
+        "materialize_match_replay_parquet_isolated",
+        fake_materialize,
+    )
+
+    response = asyncio.run(main.get_demo_replay_binary(_request(str(original_path))))
+
+    assert response.status_code == 200
+    assert response.body == b"CS2RPL01-cached-repaired"
+    assert result_lookups == [str(original_path)]
+    assert load_calls == 2
 
 
 def test_binary_endpoint_reports_reanalysis_when_workspace_is_unavailable(
