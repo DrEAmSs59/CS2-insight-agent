@@ -398,7 +398,7 @@ def test_post_partial_success_sanitizes_item_failures(api_env, monkeypatch, capl
                     def_index=500,
                     paint_index=415,
                     model="bayonet",
-                    name_zh="刺刀 | 多普�?,
+                    name_zh="刺刀 | 多普勒",
                     name_en="Bayonet | Doppler",
                 ),
             },
