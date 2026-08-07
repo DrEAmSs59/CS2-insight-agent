@@ -79,6 +79,7 @@ export default {
   "analysis.cosmetics.inspectLaunched": "CS2 inspection launched through Steam.",
   "analysis.cosmetics.inspectCommandCopied": "The inspect command exceeds Steam's URL limit. It was copied for the CS2 console.",
   "analysis.cosmetics.inspectUrlCopied": "Inspect URL copied.",
+  "analysis.cosmetics.inspectCopyFailed": "The inspect URL was generated, but could not be written to the system clipboard.",
   "analysis.cosmetics.inspectFailed": "Could not generate inspection data for this item.",
   "analysis.cosmetics.noStickerEvidence": "The demo contains no attributable sticker data",
   "analysis.cosmetics.teamEvidence": "Equipped-team appearances observed in the demo",

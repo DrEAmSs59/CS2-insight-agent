@@ -18,7 +18,9 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
+import { desktopBridge } from "../../desktop/desktopBridge.js";
 import { useT } from "../../i18n/useT.js";
+import { buildCs2InspectLink } from "../../utils/cs2Inspect.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
 import { playerIdentityKey } from "../../utils/playerIdentity.js";
 import Modal from "../ui/Modal";
@@ -661,7 +663,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspectUrl, inspectBusy }) {
+function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspectUrl, inspectBusy, inspectFeedback }) {
   const t = useT();
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const supportsStickers = String(item?.type || "") === "weapon";
@@ -673,9 +675,10 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
   const wear = finiteNumber(item?.paint_wear);
   const seed = finiteNumber(item?.paint_seed);
   const finishKnown = item?.finish_known !== false;
+  const inspectCopied = inspectFeedback?.tone === "success";
   return (
     <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-      <div className="cosmetic-preview-surface flex flex-col items-center justify-center gap-4 border-b border-cs2-border p-5 lg:border-b-0 lg:border-r">
+      <div data-cosmetic-detail-preview className="flex flex-col items-center justify-center gap-4 border-b border-cs2-border bg-cs2-bg-page/30 p-5 lg:border-b-0 lg:border-r">
         {onlineAssetsEnabled && collection && item?.collection_image_url ? (
           <div className="flex items-center gap-2 self-start text-[11px] text-cs2-text-secondary">
             <img src={item.collection_image_url} alt="" className="h-8 w-8 object-contain" />
@@ -727,9 +730,33 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
         {!finishKnown ? <div className="mt-3 border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[10px] leading-relaxed text-amber-200">{t("analysis.cosmetics.finishUnavailable")}</div> : null}
         <WearBar wear={wear} wearMin={item?.wear_min} wearMax={item?.wear_max} />
         {description ? <p className="mt-4 whitespace-pre-line border-t border-cs2-border pt-4 text-[11px] leading-relaxed text-cs2-text-secondary">{description}</p> : null}
+        {inspectFeedback?.tone === "error" ? (
+          <div role="alert" className="mt-4 flex items-center gap-2 border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[10px] text-rose-300">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            {inspectFeedback.text}
+          </div>
+        ) : null}
         <div className="mt-5 grid grid-cols-2 border border-cs2-border">
           <button data-cosmetic-open-3d type="button" disabled={!canInspect3d(item, onlineAssetsEnabled)} onClick={onOpen3d} className="inline-flex h-10 items-center justify-center gap-2 border-r border-cs2-border text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Rotate3D className="h-4 w-4" />{t("analysis.cosmetics.inspect3d")}</button>
-          <button type="button" disabled={!canInspectInGame(item) || inspectBusy} onClick={onCopyInspectUrl} className="inline-flex h-10 items-center justify-center gap-2 text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"><Copy className="h-4 w-4" />{t("analysis.cosmetics.copyInspectUrl")}</button>
+          <button
+            type="button"
+            disabled={!canInspectInGame(item) || inspectBusy}
+            onClick={onCopyInspectUrl}
+            aria-live="polite"
+            data-copied={inspectCopied ? "true" : undefined}
+            className={`inline-flex h-10 items-center justify-center gap-2 text-[11px] font-bold disabled:cursor-not-allowed disabled:opacity-35 ${
+              inspectCopied
+                ? "bg-emerald-500/15 text-emerald-300"
+                : "text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+            }`}
+          >
+            {inspectBusy
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : inspectCopied
+                ? <Check className="h-4 w-4" />
+                : <Copy className="h-4 w-4" />}
+            {inspectCopied ? inspectFeedback.text : t("analysis.cosmetics.copyInspectUrl")}
+          </button>
         </div>
       </div>
     </div>
@@ -753,6 +780,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [hoverCard, setHoverCard] = useState(null);
   const [notice, setNotice] = useState(null);
   const [inspectBusy, setInspectBusy] = useState(false);
+  const [inspectFeedback, setInspectFeedback] = useState(null);
   const [viewMode, setViewMode] = useState("browse");
   const [localReplacements, setLocalReplacements] = useState({});
   const [savedReplacements, setSavedReplacements] = useState({});
@@ -789,6 +817,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setDetail(null);
     setHoverCard(null);
     setNotice(null);
+    setInspectFeedback(null);
     setViewMode("browse");
     setLocalReplacements({});
     setSavedReplacements({});
@@ -799,6 +828,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setSaving(false);
     setSaveResult(null);
   }, [demoId, steamid]);
+
+  useEffect(() => {
+    if (inspectFeedback?.tone !== "success") return undefined;
+    const timeout = window.setTimeout(() => setInspectFeedback(null), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [inspectFeedback]);
 
   useEffect(() => {
     if (!demoId || !steamid) return undefined;
@@ -847,9 +882,24 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const writeClipboard = async (text) => {
+    let clipboardError = null;
+    if (desktopBridge?.writeClipboardText) {
+      try {
+        await desktopBridge.writeClipboardText(text);
+        return;
+      } catch (error) {
+        clipboardError = error;
+      }
+    }
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch (error) {
+        clipboardError = error;
+        // Browser clipboard permissions vary. Keep the synchronous DOM copy
+        // path below for ordinary web previews and older WebViews.
+      }
     }
     const textarea = document.createElement("textarea");
     textarea.value = text;
@@ -859,17 +909,30 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     textarea.select();
     const copied = document.execCommand?.("copy");
     textarea.remove();
-    if (!copied) throw new Error("Clipboard API unavailable");
+    if (!copied) throw clipboardError || new Error("Clipboard API unavailable");
   };
 
   const copyInspectUrl = async (item) => {
     setInspectBusy(true);
+    setInspectFeedback(null);
+    let inspectUrl;
     try {
-      const { buildCs2InspectLink } = await import("../../utils/cs2Inspect.js");
-      await writeClipboard(buildCs2InspectLink(item));
-      setNotice({ tone: "success", text: t("analysis.cosmetics.inspectUrlCopied") });
-    } catch {
-      setNotice({ tone: "error", text: t("analysis.cosmetics.inspectFailed") });
+      // Generate synchronously inside the click handler. Delaying this behind
+      // a dynamic import loses the transient user activation required by web
+      // clipboard APIs.
+      inspectUrl = buildCs2InspectLink(item);
+    } catch (error) {
+      console.warn("Failed to generate CS2 inspect URL", error);
+      setInspectFeedback({ tone: "error", text: t("analysis.cosmetics.inspectFailed") });
+      setInspectBusy(false);
+      return;
+    }
+    try {
+      await writeClipboard(inspectUrl);
+      setInspectFeedback({ tone: "success", text: t("analysis.cosmetics.inspectUrlCopied") });
+    } catch (error) {
+      console.warn("Failed to copy CS2 inspect URL", error);
+      setInspectFeedback({ tone: "error", text: t("analysis.cosmetics.inspectCopyFailed") });
     } finally {
       setInspectBusy(false);
     }
@@ -878,6 +941,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const openItemDetail = (item) => {
     if (!browseMode) return;
     setHoverCard(null);
+    setInspectFeedback(null);
     setDetail({ item, mode: "info" });
   };
 
@@ -1126,7 +1190,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
       <Modal
         open={Boolean(detail)}
-        onClose={() => setDetail(null)}
+        onClose={() => {
+          setDetail(null);
+          setInspectFeedback(null);
+        }}
         contained
         title={detail ? (customName(detail.item) || displayName(detail.item, locale)) : ""}
         subtitle={detail?.mode === "3d" ? t("analysis.cosmetics.inspect3d") : localized(detail?.item, "collection_name", locale) || t("analysis.cosmetics.itemInfo")}
@@ -1145,7 +1212,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             <iframe title={t("analysis.cosmetics.inspect3d")} src={viewerUrl(detail.item)} className="h-[72vh] w-full border-0 bg-transparent" allow="fullscreen" />
           </div>
         ) : detail ? (
-          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} />
+          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} inspectFeedback={inspectFeedback} />
         ) : null}
       </Modal>
 

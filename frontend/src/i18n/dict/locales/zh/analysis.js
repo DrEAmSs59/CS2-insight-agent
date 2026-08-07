@@ -79,6 +79,7 @@ export default {
   "analysis.cosmetics.inspectLaunched": "已通过 Steam 拉起 CS2 检视。",
   "analysis.cosmetics.inspectCommandCopied": "检视指令超过 Steam URL 长度限制，已复制；请粘贴到 CS2 控制台。",
   "analysis.cosmetics.inspectUrlCopied": "检视 URL 已复制。",
+  "analysis.cosmetics.inspectCopyFailed": "检视 URL 已生成，但无法写入系统剪贴板。",
   "analysis.cosmetics.inspectFailed": "无法生成该物品的检视数据。",
   "analysis.cosmetics.noStickerEvidence": "Demo 没有提供可归属的贴纸数据",
   "analysis.cosmetics.teamEvidence": "Demo 中观察到的装备阵营",

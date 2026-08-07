@@ -37,7 +37,10 @@ function stickerCatalogItem(sticker) {
     def_index: sticker?.def_index ?? 1209,
     type: "sticker",
   });
-  return raw ? { ...raw, type: "sticker" } : null;
+  // CS2EconomyInstance requires every sticker catalog row to have a category.
+  // Demo evidence only exposes the sticker kit, not Valve's marketplace
+  // category, and the category is irrelevant to preview serialization.
+  return raw ? { ...raw, type: "sticker", category: "demo" } : null;
 }
 
 /** Build Valve's self-contained CS2 preview link from evidence stored in a Demo. */
@@ -72,7 +75,10 @@ export function buildCs2InspectLink(item) {
       if (!Number.isInteger(id)) return [];
       const stickerData = { id };
       const stickerWear = finiteNumber(sticker?.wear);
-      if (stickerWear !== undefined) stickerData.wear = stickerWear;
+      // cs2-lib models sticker scraping in 0.01 steps. Demo entity floats can
+      // contain binary noise (for example 0.905636), which its inventory
+      // validator correctly rejects unless normalized to that protocol step.
+      if (stickerWear !== undefined) stickerData.wear = Number(stickerWear.toFixed(2));
       return [[String(sticker?.slot ?? index), stickerData]];
     }));
   }

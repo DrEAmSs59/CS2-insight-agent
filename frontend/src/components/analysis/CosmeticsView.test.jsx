@@ -3,6 +3,14 @@ import { describe, expect, test, vi } from "vitest";
 import CosmeticsView from "./CosmeticsView";
 import { loadCustomSkinPlan, saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
+const desktopBridgeMock = vi.hoisted(() => ({
+  writeClipboardText: vi.fn(async () => {}),
+}));
+
+vi.mock("../../desktop/desktopBridge.js", () => ({
+  desktopBridge: desktopBridgeMock,
+}));
+
 vi.mock("./saveCustomSkinPlan.js", () => ({
   saveCustomSkinPlan: vi.fn(async () => ({ ok: true })),
   loadCustomSkinPlan: vi.fn(async () => ({ ok: true, plan: null })),
@@ -177,6 +185,60 @@ describe("CosmeticsView", () => {
     expect(within(dialog).getByText("53009600926")).toBeTruthy();
     expect(within(dialog).queryByText(/Demo 没有提供可归属的贴纸数据|no attributable sticker data/i)).toBeNull();
     expect(dialog.textContent).not.toContain("OriginalOwner");
+  });
+
+  test("copies the generated inspect URL through the native desktop clipboard", async () => {
+    desktopBridgeMock.writeClipboardText.mockClear();
+    desktopBridgeMock.writeClipboardText.mockResolvedValueOnce();
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ catalog_id: 1376, base_catalog_id: 42 })] } } }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /★ M9 刺刀/ })[0]);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /复制检视 URL|Copy inspect URL/i }));
+
+    await waitFor(() => expect(desktopBridgeMock.writeClipboardText).toHaveBeenCalledTimes(1));
+    expect(desktopBridgeMock.writeClipboardText.mock.calls[0][0]).toMatch(/^steam:\/\/rungame\/730\//);
+    const copiedButton = within(dialog).getByRole("button", { name: /检视 URL 已复制|Inspect URL copied/i });
+    expect(copiedButton.dataset.copied).toBe("true");
+  });
+
+  test("reports a clipboard failure separately from inspect-data generation", async () => {
+    desktopBridgeMock.writeClipboardText.mockClear();
+    desktopBridgeMock.writeClipboardText.mockRejectedValueOnce(new Error("clipboard denied"));
+    render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic({ catalog_id: 1376, base_catalog_id: 42 })] } } }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /★ M9 刺刀/ })[0]);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /复制检视 URL|Copy inspect URL/i }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toMatch(/无法写入系统剪贴板|could not be written to the system clipboard/i);
+    expect(screen.queryByText(/无法生成该物品的检视数据|Could not generate inspection data/i)).toBeNull();
+  });
+
+  test("uses a flat background for the item detail preview", () => {
+    const { container } = render(
+      <CosmeticsView
+        selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
+        workspace={{ cosmetics: { players: { [STEAM_ID]: [cosmetic()] } } }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /★ M9 刺刀/ })[0]);
+    const preview = container.querySelector("[data-cosmetic-detail-preview]");
+    expect(preview).toBeTruthy();
+    expect(preview.className).not.toContain("cosmetic-preview-surface");
   });
 
   test("shows missing sticker evidence only for guns, not knives or gloves", () => {

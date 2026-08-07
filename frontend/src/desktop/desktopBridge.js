@@ -1,5 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
@@ -25,6 +26,7 @@ export const desktopBridge = isDesktopApp
         };
       },
       getVersion,
+      writeClipboardText: (text) => writeText(String(text ?? "")),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];
         const selected = await open({
