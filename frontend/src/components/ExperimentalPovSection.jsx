@@ -15,6 +15,8 @@ export default function ExperimentalPovSection({
   onPovRadarModeChange,
   povTeamcounterNumeric = false,
   onPovTeamcounterNumericChange,
+  povVoiceDisabled = false,
+  onPovVoiceDisabledChange,
   omitEyebrow = false,
   className,
 }) {
@@ -89,6 +91,22 @@ export default function ExperimentalPovSection({
 
       {experimentalPovEnabled && onPovRadarModeChange && onPovTeamcounterNumericChange ? (
         <div className="mt-3 space-y-4 rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-input/40 px-2 py-2">
+            <input
+              type="checkbox"
+              disabled={!onPovVoiceDisabledChange}
+              checked={!!povVoiceDisabled}
+              onChange={(e) => onPovVoiceDisabledChange?.(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-40"
+            />
+            <span className="min-w-0 text-[11px] leading-snug text-cs2-text-secondary">
+              <span className="font-semibold text-cs2-text-primary">{t("pov.voiceDisabledTitle")}</span>
+              <span className="mt-0.5 block text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("pov.voiceDisabledHint")}
+              </span>
+            </span>
+          </label>
+
           <label className="block text-[11px] text-cs2-text-secondary">
             <span className="mb-1 block font-medium text-cs2-text-secondary">{t("pov.radarLabel")}</span>
             <select

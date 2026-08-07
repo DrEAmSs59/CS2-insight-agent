@@ -12,7 +12,7 @@ from app.obs_director import (
     RecordingWarmupExtras,
     _disable_backend_voice_masks,
 )
-from app.pov_constants import POV_CORE_FORCED_COMMANDS
+from app.pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 
 FIXED_CVARS = (
     "cl_hud_telemetry_frametime_show 0",
@@ -105,6 +105,23 @@ def test_pov_warmup_leaves_voice_to_pov_pipeline():
         "voice_modenable 1",
         "snd_voipvolume 1",
     ]
+
+
+def test_pov_voice_disable_mutes_after_pov_voice_enablement():
+    director = _director("")
+    warmup = RecordingWarmupExtras(pov_voice_disabled=True)
+    lines = director._recording_warmup_console_lines(warmup, pov_enabled=True)
+
+    assert _voice_lines(lines) == ["snd_voipvolume 0"]
+    commands = [
+        *POV_CORE_FORCED_COMMANDS,
+        *pov_tail_commands(
+            teamcounter_numeric=False,
+            radar_mode=0,
+            voice_disabled=True,
+        ),
+    ]
+    assert commands.index("snd_voipvolume 0") > commands.index("snd_voipvolume 1")
 
 
 def test_stale_client_voice_commands_cannot_override_non_pov_policy():

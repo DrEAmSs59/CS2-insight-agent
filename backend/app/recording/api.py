@@ -570,7 +570,7 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
-    pov_hud: Optional[dict] = None  # {enabled: bool, radar_mode: int, teamcounter_numeric: bool}
+    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_disabled}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
@@ -779,9 +779,16 @@ async def execute_recording_queue(
             pov_hud_enabled=True,
             pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
+            pov_voice_disabled=bool(
+                pov_hud_cfg.get("voice_disabled", warmup_extras.pov_voice_disabled)
+            ),
         )
-        logger.info("[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s",
-                    warmup_extras.pov_radar_mode, warmup_extras.pov_teamcounter_numeric)
+        logger.info(
+            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_disabled=%s",
+            warmup_extras.pov_radar_mode,
+            warmup_extras.pov_teamcounter_numeric,
+            warmup_extras.pov_voice_disabled,
+        )
 
     global _queue_abort_event
     if _queue_abort_event is not None:

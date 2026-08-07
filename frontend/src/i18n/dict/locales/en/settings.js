@@ -1,5 +1,7 @@
 // en / settings — keep keys scoped to this feature catalog.
 export default {
+  "pov.voiceDisabledTitle": "Disable player voice",
+  "pov.voiceDisabledHint": "When checked, POV recordings mute all player voice and hide the lower-left speaking notices. Radar, kill feedback, and other POV effects are unchanged. Off by default.",
   "settings.localePersistFailed": "The language setting could not be saved, so the previous language was restored. Try again later.",
   "settings.pageTitle": "Settings",
   "settings.pageSubtitle": "Manage CS2, FFmpeg, AI insight, and recording options.",

@@ -2080,6 +2080,7 @@ export default function App() {
                 enabled: true,
                 radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
                 teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
+                voice_disabled: Boolean(warmupForApi?.pov_voice_disabled),
               }
             : undefined;
           const body = {

@@ -13,6 +13,7 @@ from app.demo_voice_hud import (
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
     add_radar_track_to_payload,
+    build_demo_voice_hud_vpk,
     build_voice_payload,
     demo_has_voice_packets,
     inject_voice_payload,
@@ -288,6 +289,27 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"765611" not in script
 
 
+def test_disabled_voice_omits_speaking_schedule_but_keeps_other_payload_data():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
+    build = build_demo_voice_hud_vpk(
+        "match.dem",
+        template_path,
+        parser_factory=_FakeParser,
+        voice_enabled=False,
+    )
+    script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
+    start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
+    end = script.index(VOICE_DATA_END)
+    payload = json.loads(script[start:end].rstrip())
+
+    assert payload[0] == [""]
+    assert payload[1] == []
+    assert payload[3] == [["111", 0, 2], ["222", 1, 3]]
+    assert build.voice_packets == 0
+    assert build.speakers == 0
+    assert build.intervals == 0
+
+
 def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
     class _RadarParser(_FakeParser):
         @staticmethod
@@ -511,8 +533,8 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     )
     calls = []
 
-    def fake_build(demo_path, template_path, *, input_track_report=None):
-        calls.append((Path(demo_path), Path(template_path), input_track_report))
+    def fake_build(demo_path, template_path, *, input_track_report=None, voice_enabled=True):
+        calls.append((Path(demo_path), Path(template_path), input_track_report, voice_enabled))
         return built
 
     monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", fake_build)
@@ -522,7 +544,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None)]
+    assert calls == [(demo, template, None, True)]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True

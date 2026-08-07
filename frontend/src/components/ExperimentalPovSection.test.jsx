@@ -28,6 +28,32 @@ describe("ExperimentalPovSection POV recovery", () => {
     useLocaleStore.getState().hydrate("zh");
   });
 
+  it("shows voice disable unchecked above the radar control", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onVoiceChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled
+        onExperimentalPovChange={() => {}}
+        povRadarMode={0}
+        onPovRadarModeChange={() => {}}
+        povTeamcounterNumeric={false}
+        onPovTeamcounterNumericChange={() => {}}
+        povVoiceDisabled={false}
+        onPovVoiceDisabledChange={onVoiceChange}
+      />,
+    );
+
+    const voiceToggle = screen.getByRole("checkbox", { name: /禁用玩家语音/ });
+    const voiceRow = voiceToggle.closest("label");
+    expect(voiceToggle.checked).toBe(false);
+    expect(voiceRow?.nextElementSibling?.textContent).toContain("雷达");
+
+    fireEvent.click(voiceToggle);
+    expect(onVoiceChange).toHaveBeenCalledWith(true);
+  });
+
   it("explains orphaned residue and reports semantic cleanup", async () => {
     API.get.mockResolvedValue({
       data: {

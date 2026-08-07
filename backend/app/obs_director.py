@@ -1823,6 +1823,8 @@ class RecordingWarmupExtras:
     # 实验性 POV：与 pov_tail_commands 对应（仅 pov_enabled 时注入末尾）
     pov_radar_mode: int = 0  # cl_drawhud_force_radar：-1 隐藏，0 显示
     pov_teamcounter_numeric: bool = False  # cl_teamcounter_playercount_instead_of_avatars
+    # Mute native demo voice and omit the custom lower-left speaking schedule.
+    pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
 
@@ -1917,15 +1919,21 @@ def _without_voice_console_lines(lines) -> list[str]:
     return out
 
 
-def _apply_recording_voice_policy(lines, *, pov_enabled: bool) -> list[str]:
+def _apply_recording_voice_policy(
+    lines,
+    *,
+    pov_enabled: bool,
+    pov_voice_disabled: bool = False,
+) -> list[str]:
     """Apply the sole recording voice policy after removing stale client settings.
 
-    POV owns native voice enablement and audience masks through its forced
-    commands and Panorama script. Without POV, recording only zeros the global
-    voice volume; it intentionally leaves ``voice_modenable`` untouched.
+    POV normally owns native voice enablement and audience masks through its
+    forced commands and Panorama script. Without POV, or when the POV voice
+    switch is disabled, recording zeros global voice volume while intentionally
+    leaving ``voice_modenable`` untouched.
     """
     clean = _without_voice_console_lines(lines)
-    if pov_enabled:
+    if pov_enabled and not pov_voice_disabled:
         return clean
     return [*clean, "snd_voipvolume 0"]
 
@@ -3583,7 +3591,11 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
-            return _apply_recording_voice_policy(lines, pov_enabled=pov_enabled)
+            return _apply_recording_voice_policy(
+                lines,
+                pov_enabled=pov_enabled,
+                pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+            )
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
         if w.cl_draw_only_deathnotices:
@@ -3635,7 +3647,11 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
-        return _apply_recording_voice_policy(lines, pov_enabled=pov_enabled)
+        return _apply_recording_voice_policy(
+            lines,
+            pov_enabled=pov_enabled,
+            pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+        )
 
     async def execute_plan_queue(
         self,
@@ -3866,7 +3882,10 @@ class OBSDirector:
                     try:
                         logger.info("[RecordingV3][POV] build and install voice HUD for %s", demo_name)
                         pov_install_attempted = True
-                        pov_mgr_v3.install(demo_path=demo_abs)
+                        if bool(getattr(warmup, "pov_voice_disabled", False)):
+                            pov_mgr_v3.install(demo_path=demo_abs, voice_enabled=False)
+                        else:
+                            pov_mgr_v3.install(demo_path=demo_abs)
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
                             installed_status.get("original_gameinfo_sha256") or ""
@@ -3945,6 +3964,7 @@ class OBSDirector:
                             *pov_tail_commands(
                                 teamcounter_numeric=warmup.pov_teamcounter_numeric,
                                 radar_mode=warmup.pov_radar_mode,
+                                voice_disabled=warmup.pov_voice_disabled,
                             ),
                         ]
                         warmup_cmds = [*warmup_cmds, *pov_cmds]

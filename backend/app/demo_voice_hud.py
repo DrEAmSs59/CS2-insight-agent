@@ -1859,6 +1859,7 @@ def build_demo_voice_hud_vpk(
     *,
     parser_factory: Callable[[str], Any] | None = None,
     input_track_report: Mapping[str, Any] | None = None,
+    voice_enabled: bool = True,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
     input_stats = {
@@ -1935,6 +1936,27 @@ def build_demo_voice_hud_vpk(
             "flash_blind_events": 0,
             "flash_blind_parse_failed": 1,
         }
+
+    if not voice_enabled:
+        # Keep roster, input, radar, kill-feedback, and flash tracks intact.
+        # Only remove the precomputed speaking schedule that drives the custom
+        # lower-left notice; native voice volume is muted by the warmup policy.
+        packed = json.loads(payload.decode("ascii"))
+        packed[0] = [""]
+        packed[1] = []
+        payload = json.dumps(
+            packed,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        stats.update(
+            voice_packets=0,
+            speakers=0,
+            intervals=0,
+            location_changes=0,
+            payload_bytes=len(payload),
+            location_parse_failed=0,
+        )
 
     template = Path(template_vpk_path).read_bytes()
     vpk_bytes = inject_voice_payload(template, payload)

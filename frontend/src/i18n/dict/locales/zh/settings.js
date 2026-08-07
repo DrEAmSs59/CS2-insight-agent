@@ -1,5 +1,7 @@
 // zh / settings — keep keys scoped to this feature catalog.
 export default {
+  "pov.voiceDisabledTitle": "禁用玩家语音",
+  "pov.voiceDisabledHint": "勾选后，POV 录制不播放任何玩家语音，同时隐藏左下角的说话提示；雷达、击杀反馈和其他 POV 效果不受影响。默认不勾选。",
   "settings.localePersistFailed": "语言设置未能保存，已恢复原来的语言。请稍后重试。",
   "settings.pageTitle": "设置中心",
   "settings.pageSubtitle": "管理 CS2、FFmpeg、AI 洞察与录制相关选项。",

@@ -85,6 +85,8 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   pov_radar_mode: 0,
   /** POV：true 正上方显示存活人数；false 显示双方十人头像（默认关存活人数条） */
   pov_teamcounter_numeric: false,
+  /** POV: mute player voice and hide speaking notices. Voice stays enabled by default. */
+  pov_voice_disabled: false,
 };
 
 /** 录制预热弹窗每次打开时的 OBS 转场推荐默认值；勾选关闭则提交 null 沿用服务器全局配置 */
@@ -279,6 +281,7 @@ export default function RecordWarmupModal({
       aspect_ratio: ar || null,
       pov_radar_mode: opts.pov_radar_mode === 0 ? 0 : -1,
       pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
+      pov_voice_disabled: !!opts.pov_voice_disabled,
     };
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
@@ -709,6 +712,8 @@ export default function RecordWarmupModal({
             onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
             povTeamcounterNumeric={opts.pov_teamcounter_numeric}
             onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
+            povVoiceDisabled={opts.pov_voice_disabled}
+            onPovVoiceDisabledChange={(v) => set({ pov_voice_disabled: v })}
           />
 
           <section aria-labelledby="sec-audio">

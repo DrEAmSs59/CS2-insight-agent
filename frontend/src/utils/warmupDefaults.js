@@ -120,6 +120,7 @@ export function warmupUiOptsToPersisted(opts) {
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
     pov_radar_mode: Number(opts.pov_radar_mode) === 0 ? 0 : -1,
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
+    pov_voice_disabled: !!opts.pov_voice_disabled,
   };
 }
 
@@ -158,6 +159,7 @@ export function warmupApiPayloadToPersisted(warmup) {
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
     pov_radar_mode: Number(warmup.pov_radar_mode) === 0 ? 0 : -1,
     pov_teamcounter_numeric: !!warmup.pov_teamcounter_numeric,
+    pov_voice_disabled: !!warmup.pov_voice_disabled,
   };
 }
 

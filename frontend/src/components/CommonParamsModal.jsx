@@ -752,6 +752,8 @@ export default function CommonParamsModal({
                 onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
                 povTeamcounterNumeric={warmupOpts.pov_teamcounter_numeric}
                 onPovTeamcounterNumericChange={(v) => patchWarmup({ pov_teamcounter_numeric: v })}
+                povVoiceDisabled={warmupOpts.pov_voice_disabled}
+                onPovVoiceDisabledChange={(v) => patchWarmup({ pov_voice_disabled: v })}
                 omitEyebrow
                 className="rounded-lg border border-amber-500/20 bg-cs2-bg-input/60 p-3"
               />

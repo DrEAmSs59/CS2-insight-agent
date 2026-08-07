@@ -420,6 +420,7 @@ class PovHudManager:
         *,
         demo_path: Optional[str | Path] = None,
         input_track_report: Optional[Mapping[str, Any]] = None,
+        voice_enabled: bool = True,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -442,6 +443,7 @@ class PovHudManager:
                     demo_path,
                     voice_template,
                     input_track_report=input_track_report,
+                    voice_enabled=voice_enabled,
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
