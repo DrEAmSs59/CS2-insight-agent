@@ -41,13 +41,20 @@ class TestFrameMeld(unittest.TestCase):
             executable.write_bytes(b"test")
             result = SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps({"protocol": "org.framemeld.cli", "api_version": 1}),
+                stdout=json.dumps(
+                    {
+                        "protocol": "org.framemeld.cli",
+                        "api_version": 1,
+                        "features": ["host-managed-encoder-fallback"],
+                    }
+                ),
                 stderr="",
             )
             with patch("app.framemeld.subprocess.run", return_value=result) as run:
                 capability = probe_framemeld(executable)
             self.assertEqual(capability.route, "-framemeld")
             self.assertFalse(capability.legacy)
+            self.assertIn("host-managed-encoder-fallback", capability.features)
             self.assertEqual(run.call_args.args[0][1:], ["-framemeld", "--capabilities-json"])
 
     def test_current_framemeld_build_uses_legacy_cli_route(self):
@@ -85,7 +92,11 @@ class TestFrameMeld(unittest.TestCase):
             source_path=Path("input.mp4"),
             output_path=Path("output.mp4"),
             video_encode_args=["-c:v", "libx264", "-crf", "18"],
-            capability=FrameMeldCapability(route="-framemeld", api_version=1),
+            capability=FrameMeldCapability(
+                route="-framemeld",
+                api_version=1,
+                features=frozenset({"host-managed-encoder-fallback"}),
+            ),
         )
         self.assertEqual(command[1], "-framemeld")
         self.assertEqual(command[command.index("--performance-mode") + 1], "balanced")
@@ -100,6 +111,7 @@ class TestFrameMeld(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, command)
         self.assertEqual(command[command.index("-c:a") + 1], "copy")
+        self.assertIn("--host-managed-encoder-fallback", command)
 
     def test_command_preserves_nvenc_device_binding_and_quality(self):
         from app.framemeld import FrameMeldCapability
@@ -114,6 +126,7 @@ class TestFrameMeld(unittest.TestCase):
         self.assertEqual(command[command.index("-c:v") + 1], "h264_nvenc")
         self.assertEqual(command[command.index("-gpu") + 1], "2")
         self.assertEqual(command[command.index("-cq") + 1], "21")
+        self.assertNotIn("--host-managed-encoder-fallback", command)
 
     def test_lite_cut_schema_keeps_only_new_framemeld_switch(self):
         body = normalize_project_body(

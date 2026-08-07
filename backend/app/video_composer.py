@@ -210,7 +210,7 @@ def ffprobe_streams(
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,width,height,r_frame_rate,avg_frame_rate,nb_frames,duration,channels,sample_rate:stream_tags=alpha_mode",
+            "format=duration:stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,width,height,r_frame_rate,avg_frame_rate,nb_frames,duration,channels,sample_rate:stream_tags=alpha_mode,encoder",
             "-of",
             "json",
             str(path),
@@ -2069,10 +2069,15 @@ def compose_montage(
             _convert_generated_probe_failure(candidate, exc)
             raise
         streams = final_info.get("streams") or []
-        if not any(
-            isinstance(stream, dict) and stream.get("codec_type") == "video"
-            for stream in streams
-        ):
+        video_stream = next(
+            (
+                stream
+                for stream in streams
+                if isinstance(stream, dict) and stream.get("codec_type") == "video"
+            ),
+            None,
+        )
+        if video_stream is None:
             if not candidate.is_software:
                 raise HardwareEncoderFailure(
                     codec=candidate.codec,
@@ -2081,6 +2086,12 @@ def compose_montage(
                     public_code="MONTAGE_OUTPUT_NOT_PLAYABLE",
                 )
             raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE")
+        output_encoder = str((video_stream.get("tags") or {}).get("encoder") or "unknown")
+        logger.info(
+            "Montage output encoder candidate=%s actual=%s",
+            candidate.codec,
+            output_encoder,
+        )
         decode_command = [
             str(ffmpeg_bin),
             "-hide_banner",

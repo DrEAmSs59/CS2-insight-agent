@@ -32,6 +32,7 @@ class FrameMeldCapability:
     route: str
     api_version: int | None
     legacy: bool = False
+    features: frozenset[str] = frozenset()
 
 
 def _run_probe(path: str, *args: str) -> subprocess.CompletedProcess[str] | None:
@@ -59,7 +60,17 @@ def _capability_from_json(result: subprocess.CompletedProcess[str] | None) -> Fr
         return None
     if payload.get("protocol") != FRAMEMELD_PROTOCOL or api_version < FRAMEMELD_MIN_API_VERSION:
         return None
-    return FrameMeldCapability(route=FRAMEMELD_ROUTE, api_version=api_version)
+    raw_features = payload.get("features")
+    features = frozenset(
+        str(item)
+        for item in raw_features
+        if isinstance(item, str) and item
+    ) if isinstance(raw_features, list) else frozenset()
+    return FrameMeldCapability(
+        route=FRAMEMELD_ROUTE,
+        api_version=api_version,
+        features=features,
+    )
 
 
 def _help_identifies_framemeld(result: subprocess.CompletedProcess[str] | None) -> bool:
@@ -189,6 +200,8 @@ def build_framemeld_command(
         "-cq",
         quality,
     ]
+    if "host-managed-encoder-fallback" in resolved_capability.features:
+        command.append("--host-managed-encoder-fallback")
     if encoder_device is not None and codec.casefold().endswith("_nvenc"):
         command.extend(["-gpu", encoder_device])
     command.extend(["-c:a", "copy", str(output_path)])

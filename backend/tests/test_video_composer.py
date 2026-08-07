@@ -126,6 +126,7 @@ class TestProbeVideoSummary(unittest.TestCase):
         entries = command[command.index("-show_entries") + 1]
         self.assertIn("avg_frame_rate", entries)
         self.assertIn("nb_frames", entries)
+        self.assertIn("stream_tags=alpha_mode,encoder", entries)
 
     def test_prefers_average_fps_when_r_frame_rate_is_stream_time_base(self):
         payload = {
