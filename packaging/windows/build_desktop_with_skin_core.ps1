@@ -13,11 +13,14 @@
 #   - Rust + pnpm + Python staging already set up for normal desktop:build:ver
 #   - For -Pack (default): UPX on PATH, or pass -UpxPath / -SkipPack
 #
-# Flow (two-pass so parent PE allowlist matches the shipped Agent):
+# Flow so parent PE allowlist matches the shipped Agent:
 #   1) Stage python + build Insight once (skin-core optional/missing OK)
 #   2) Build anyskin skin-core with -ParentPe @(Agent.exe, python.exe) [+ UPX]
 #   3) Rebuild Insight with CS2_SKIN_CORE_EXE pointing at dist\skin-core.exe
-
+#   4) Re-hash the FINAL Agent PE (each full rebuild can change it), rebuild
+#      skin-core for that hash, copy sidecar into bundle-resources, and re-run
+#      makensis ONLY — do not cargo-rebuild the Agent again (that would change
+#      the PE hash and break the allowlist again).
 [CmdletBinding()]
 param(
     # Installer / app version (same as desktop:build:ver).
@@ -125,6 +128,48 @@ function Invoke-DesktopBuildVer {
     }
 }
 
+function Get-FileSha256Hex {
+    param([string]$Path)
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
+function Invoke-SkinCoreRelease {
+    param(
+        [string]$AgentExe,
+        [string]$PythonExe,
+        [string]$AnyskinRoot,
+        [string]$ReleaseScript,
+        [switch]$SkipPack,
+        [string]$UpxPath
+    )
+    Write-Host "  Agent : $AgentExe"
+    Write-Host "  Python: $PythonExe"
+    Write-Host "  Agent SHA256 : $(Get-FileSha256Hex -Path $AgentExe)"
+    Write-Host "  Python SHA256: $(Get-FileSha256Hex -Path $PythonExe)"
+
+    $skinArgs = @{
+        ParentPe = @($AgentExe, $PythonExe)
+    }
+    if (-not $SkipPack) {
+        $skinArgs.Pack = $true
+        if ($UpxPath) {
+            $skinArgs.UpxPath = $UpxPath
+        }
+    } else {
+        Write-Host "WARNING: -SkipPack set; shipping without UPX (release-ship only)."
+    }
+
+    Push-Location $AnyskinRoot
+    try {
+        & $ReleaseScript @skinArgs
+        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw "release-skin-core.ps1 failed with exit $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 # ---------------------------------------------------------------------------
 $InsightRoot = Get-InsightRepoRoot
 $FrontendRoot = Join-Path $InsightRoot "frontend"
@@ -195,31 +240,14 @@ try {
     }
 
     Write-Host ""
-    Write-Host "=== Build skin-core (allowlist = Agent + bundled python) ==="
-    Write-Host "  Agent : $agentExe"
-    Write-Host "  Python: $BundlePython"
-
-    $skinArgs = @{
-        ParentPe = @($agentExe, $BundlePython)
-    }
-    if (-not $SkipPack) {
-        $skinArgs.Pack = $true
-        if ($UpxPath) {
-            $skinArgs.UpxPath = $UpxPath
-        }
-    } else {
-        Write-Host "WARNING: -SkipPack set; shipping without UPX (release-ship only)."
-    }
-
-    Push-Location $Anyskin
-    try {
-        & $ReleaseSkinCore @skinArgs
-        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-            throw "release-skin-core.ps1 failed with exit $LASTEXITCODE"
-        }
-    } finally {
-        Pop-Location
-    }
+    Write-Host "=== Build skin-core (allowlist = Pass-1 Agent + bundled python) ==="
+    Invoke-SkinCoreRelease `
+        -AgentExe $agentExe `
+        -PythonExe $BundlePython `
+        -AnyskinRoot $Anyskin `
+        -ReleaseScript $ReleaseSkinCore `
+        -SkipPack:$SkipPack `
+        -UpxPath $UpxPath
 
     if (-not (Test-Path -LiteralPath $SkinCoreDist)) {
         throw "skin-core.exe not produced: $SkinCoreDist"
@@ -231,21 +259,119 @@ try {
     Write-Host "=== Pass 2/2: Insight build with skin-core embedded ==="
     Invoke-DesktopBuildVer -FrontendRoot $FrontendRoot -AppVersion $Version
 
+    # Each full Tauri rebuild can change the Agent PE hash. Rebuild skin-core for
+    # the FINAL Agent, then replace the sidecar and re-run makensis only.
+    $agentExe = Find-AgentExe -ReleaseDir $ReleaseDir
+    $finalAgentHash = Get-FileSha256Hex -Path $agentExe
+    $finalPythonHash = Get-FileSha256Hex -Path $BundlePython
+    Write-Host ""
+    Write-Host "=== Final skin-core allowlist (Pass-2 Agent + python; no more Agent rebuild) ==="
+    Write-Host "  Final Agent SHA256 : $finalAgentHash"
+    Write-Host "  Final Python SHA256: $finalPythonHash"
+    Invoke-SkinCoreRelease `
+        -AgentExe $agentExe `
+        -PythonExe $BundlePython `
+        -AnyskinRoot $Anyskin `
+        -ReleaseScript $ReleaseSkinCore `
+        -SkipPack:$SkipPack `
+        -UpxPath $UpxPath
+
+    if (-not (Test-Path -LiteralPath $SkinCoreDist)) {
+        throw "skin-core.exe not produced after final allowlist rebuild: $SkinCoreDist"
+    }
+
+    $toolsSkinBundle = Join-Path $FrontendRoot "src-tauri\bundle-resources\tools\skin-core.exe"
+    $toolsSkinRelease = Join-Path $ReleaseDir "tools\skin-core.exe"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $toolsSkinBundle) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $toolsSkinRelease) | Out-Null
+    Copy-Item -LiteralPath $SkinCoreDist -Destination $toolsSkinBundle -Force
+    Copy-Item -LiteralPath $SkinCoreDist -Destination $toolsSkinRelease -Force
+    Write-Host "Staged final skin-core -> $toolsSkinBundle"
+    Write-Host "Staged final skin-core -> $toolsSkinRelease"
+
+    $allowlistInc = Join-Path $Anyskin "src\parent_allowlist.inc.rs"
+    $allowlistText = Get-Content -LiteralPath $allowlistInc -Raw
+    if ($allowlistText -notmatch [regex]::Escape($finalAgentHash)) {
+        throw "Final Agent SHA256 $finalAgentHash is not present in $allowlistInc — refuse to ship mismatched allowlist."
+    }
+    if ($allowlistText -notmatch [regex]::Escape($finalPythonHash)) {
+        throw "Final Python SHA256 $finalPythonHash is not present in $allowlistInc — refuse to ship mismatched allowlist."
+    }
+    # Confirm Agent PE did not change while we only replaced the sidecar.
+    $agentHashAfter = Get-FileSha256Hex -Path $agentExe
+    if ($agentHashAfter -ne $finalAgentHash) {
+        throw "Agent PE changed unexpectedly while restaging skin-core ($finalAgentHash -> $agentHashAfter)."
+    }
+    Write-Host "Allowlist verified against final Agent + bundled python."
+
+    Write-Host ""
+    Write-Host "=== Repack NSIS with final skin-core (Agent PE unchanged) ==="
     $setup = Join-Path $ReleaseDir "bundle\nsis\CS2 Insight Agent_${Version}_x64-setup.exe"
-    $toolsSkin = Join-Path $FrontendRoot "src-tauri\bundle-resources\tools\skin-core.exe"
+    $nsiDir = Join-Path $ReleaseDir "nsis\x64"
+    $nsi = Join-Path $nsiDir "installer.nsi"
+    $makensis = Join-Path $env:LOCALAPPDATA "tauri\NSIS\makensis.exe"
+    $nsiOut = Join-Path $nsiDir "nsis-output.exe"
+    if (-not (Test-Path -LiteralPath $nsi)) {
+        throw "NSIS script missing after Pass 2: $nsi"
+    }
+    if (-not (Test-Path -LiteralPath $makensis)) {
+        throw "makensis.exe not found at $makensis"
+    }
+    Write-Host "  makensis: $makensis"
+    Write-Host "  script  : $nsi"
+    Push-Location $nsiDir
+    try {
+        & $makensis $nsi
+        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw "makensis failed with exit $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+    if (-not (Test-Path -LiteralPath $nsiOut)) {
+        throw "makensis did not produce $nsiOut"
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $setup) | Out-Null
+    Copy-Item -LiteralPath $nsiOut -Destination $setup -Force
+    if (-not (Test-Path -LiteralPath $setup)) {
+        throw "NSIS installer missing after repack: $setup"
+    }
+
+    # Refresh updater signature when the default private key is present.
+    $updaterKey = Join-Path $env:USERPROFILE ".tauri\cs2-insight-agent.key"
+    $sigPath = "$setup.sig"
+    if (Test-Path -LiteralPath $updaterKey) {
+        Write-Host "Refreshing updater signature with $updaterKey"
+        $signJs = @"
+const { spawnSync } = require('child_process');
+const { readFileSync } = require('fs');
+const { join } = require('path');
+const frontend = process.argv[1];
+const setup = process.argv[2];
+const keyPath = process.argv[3];
+const key = readFileSync(keyPath, 'utf8').trim();
+const tauri = join(frontend, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: key, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' };
+const r = spawnSync(process.execPath, [tauri, 'signer', 'sign', setup], { cwd: frontend, env, stdio: 'inherit' });
+process.exit(r.status ?? 1);
+"@
+        $signJsPath = Join-Path $env:TEMP "cs2-insight-sign-setup.js"
+        Set-Content -LiteralPath $signJsPath -Value $signJs -Encoding UTF8
+        & node $signJsPath $FrontendRoot $setup $updaterKey
+        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            Write-Host "WARNING: updater signer failed (exit $LASTEXITCODE); installer is still usable."
+        }
+        if (Test-Path -LiteralPath $sigPath) {
+            Write-Host "Updater signature: $sigPath"
+        } else {
+            Write-Host "WARNING: updater .sig not refreshed; installer is still usable."
+        }
+    }
 
     Write-Host ""
     Write-Host "Done."
-    if (Test-Path -LiteralPath $toolsSkin) {
-        Write-Host "  Staged sidecar: $toolsSkin"
-    } else {
-        Write-Host "WARNING: tools\skin-core.exe missing after Pass 2 staging."
-    }
-    if (Test-Path -LiteralPath $setup) {
-        Write-Host "  Installer:      $setup"
-    } else {
-        Write-Host "WARNING: NSIS installer not found at expected path: $setup"
-    }
+    Write-Host "  Staged sidecar: $toolsSkinBundle"
+    Write-Host "  Installer:      $setup"
 } finally {
     Remove-Item Env:CS2_SKIN_CORE_EXE -ErrorAction SilentlyContinue
     Remove-Item Env:CS2_INSIGHT_REFRESH_PYTHON -ErrorAction SilentlyContinue

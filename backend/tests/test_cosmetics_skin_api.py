@@ -135,7 +135,7 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     original_bytes = original.read_bytes()
     cached_before = cached.read_bytes()
 
-    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         input_path = Path(input_dem).resolve()
         assert input_path != cached.resolve()
         assert input_path.parent == cached.parent
@@ -196,7 +196,7 @@ def test_post_custom_plan_restores_cache_from_original_before_rewrite(api_env, m
     cached.write_bytes(b"ALREADY-REWRITTEN-CACHE")
     seen = {}
 
-    def capture_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def capture_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         input_path = Path(input_dem).resolve()
         seen["input_bytes"] = input_path.read_bytes()
         seen["input_path"] = input_path
@@ -235,7 +235,7 @@ def test_post_logs_skin_core_failure_without_exposing_native_details(api_env, mo
         "player/account/class/item/source definition/team"
     )
 
-    def boom(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def boom(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         raise SkinCoreError(internal)
 
     monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", boom)
@@ -262,7 +262,7 @@ def test_post_missing_ok_does_not_replace_cache(api_env, monkeypatch):
     prior = b"PREVIOUSLY-REWRITTEN"
     cached.write_bytes(prior)
 
-    def missing_ok(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def missing_ok(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         Path(output_dem).write_bytes(b"SHOULD-NOT-REPLACE")
         return {"sha256": "nope", "items_rewritten": 1}
 
@@ -286,7 +286,7 @@ def test_post_ok_false_logs_error_without_exposing_response_details(api_env, mon
     prior = b"PREVIOUSLY-REWRITTEN"
     cached.write_bytes(prior)
 
-    def ok_false(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def ok_false(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         Path(output_dem).write_bytes(b"PARTIAL-OUTPUT")
         return {
             "ok": False,
@@ -316,7 +316,7 @@ def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]
 
-    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         Path(output_dem).write_bytes(b"REWRITTEN-DEMO")
         return {"ok": True, "sha256": "abc123", "items_rewritten": 1}
 
@@ -369,7 +369,7 @@ def test_post_partial_success_sanitizes_item_failures(api_env, monkeypatch, capl
         )
     )
 
-    def partial_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def partial_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         Path(output_dem).write_bytes(b"PARTIAL-OK")
         return {
             "ok": True,
@@ -398,7 +398,7 @@ def test_post_partial_success_sanitizes_item_failures(api_env, monkeypatch, capl
                     def_index=500,
                     paint_index=415,
                     model="bayonet",
-                    name_zh="刺刀 | 多普勒",
+                    name_zh="刺刀 | 多普�?,
                     name_en="Bayonet | Doppler",
                 ),
             },
@@ -433,7 +433,7 @@ def test_post_all_items_soft_failed_logs_and_returns_only_public_codes(api_env, 
     prior = b"PREVIOUSLY-REWRITTEN"
     cached.write_bytes(prior)
 
-    def all_failed(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def all_failed(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         return {
             "ok": False,
             "items_rewritten": 0,
@@ -573,7 +573,7 @@ def test_post_second_player_reapplies_first_player_plan(api_env, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         payload = Path(input_dem).read_bytes()
         calls.append(
             {
@@ -646,7 +646,7 @@ def test_post_calls_ensure_demo_compatible_before_rewrite(api_env, monkeypatch):
         order.append("compat")
         return type("R", (), {"cached": False, "path": path})()
 
-    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=120.0):
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         order.append("rewrite")
         Path(output_dem).write_bytes(b"OUT")
         return {"ok": True, "sha256": "x", "items_rewritten": 1}

@@ -146,6 +146,11 @@ def _cli_path_str(path: str | Path) -> str:
     return str(path)
 
 
+# Multi-item / large-demo rewrites can take several minutes; keep a high ceiling
+# so a wedged skin-core cannot pin the UI spinner forever (timeout=None).
+_DEFAULT_REWRITE_TIMEOUT_SEC = 600.0
+
+
 def run_rewrite_owned_batch(
     *,
     input_dem: str | Path,
@@ -153,9 +158,12 @@ def run_rewrite_owned_batch(
     steam_id64: str,
     items: Sequence[Mapping[str, Any]],
     demoparser2_python: str | Path,
-    timeout: float | None = 120.0,
+    timeout: float | None = _DEFAULT_REWRITE_TIMEOUT_SEC,
 ) -> dict[str, Any]:
-    """Spawn skin-core rewrite-owned-batch with pipe auth; return decrypted response JSON."""
+    """Spawn skin-core rewrite-owned-batch with pipe auth; return decrypted response JSON.
+
+    Default ``timeout`` is 600s. Pass ``timeout=None`` only for explicit unbounded waits.
+    """
     exe = resolve_skin_core_exe()
 
     input_arg = _cli_path_str(input_dem)
@@ -200,6 +208,13 @@ def run_rewrite_owned_batch(
         if _should_set_dev_env(exe):
             env[_ENV_DEV] = "1"
 
+        logger.info(
+            "skin-core rewrite start: exe=%s steam_id64=%s items=%s timeout=%s",
+            exe,
+            steam_id64,
+            len(items),
+            timeout,
+        )
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -214,14 +229,26 @@ def run_rewrite_owned_batch(
             )
         except subprocess.TimeoutExpired as exc:
             proc.kill()
-            proc.communicate()
-            raise SkinCoreError("skin-core timed out") from exc
+            killed_out, killed_err = proc.communicate()
+            err_tail = (killed_err or b"").decode("utf-8", errors="replace").strip()
+            out_tail = (killed_out or b"").decode("utf-8", errors="replace").strip()
+            logger.error(
+                "skin-core timed out after %ss: stderr=%r stdout=%r",
+                timeout,
+                err_tail[:2000],
+                out_tail[:500],
+            )
+            raise SkinCoreError(
+                f"skin-core timed out after {timeout:g}s"
+                + (f": {err_tail[:300]}" if err_tail else "")
+            ) from exc
 
         code = proc.returncode
         if stdout:
-            logger.debug("skin-core stdout: %s", stdout[:500])
+            logger.info("skin-core stdout: %s", stdout[:500].decode("utf-8", errors="replace"))
         if stderr:
-            logger.debug("skin-core stderr: %s", stderr[:500])
+            logger.info("skin-core stderr: %s", stderr[:500].decode("utf-8", errors="replace"))
+        logger.info("skin-core rewrite finished: exit=%s items=%s", code, len(items))
 
         if code == 2:
             raise SkinCoreError(
