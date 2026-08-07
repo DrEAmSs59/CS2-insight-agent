@@ -345,7 +345,7 @@ export default {
   "montage.ffmpegGateIncompatible": "FFmpeg 版本与当前导出功能不兼容",
   "montage.ffmpegGateNotUsable": "FFmpeg 不可执行",
   "montage.ffmpegGateNotReady": "FFmpeg 未就绪",
-  "montage.ffmpegGateDefaultMessage": "FFmpeg未配置或不可用，请前往设置页配置后再使用合辑工作台。\n若已填写ffmpeg路径，则是ffmpeg版本不受支持。\n请下载FrameMeld_ffmpeg或ffmpeg-2026-05-06-git-f2e5eff3ff-full_build",
+  "montage.ffmpegGateDefaultMessage": "FFmpeg未配置或不可用，请前往设置页配置后再使用合辑工作台。\n若已填写ffmpeg路径，则是ffmpeg版本不受支持。\n请下载 FrameMeld_FFmpeg V0.1.1以上或ffmpeg-9.0-full_build(不支持帧混合)",
   "montage.ffmpegGateDetectFail": "检测失败",
   "montage.ffmpegGateConnectFail": "无法连接后端检测 FFmpeg 配置，请确认程序服务已启动后刷新页面。",
   "montage.ffmpegChecking": "正在检测 FFmpeg…",
