@@ -75,7 +75,7 @@ export default function UpdateCheckModal({ open, info, onClose, onCancel, onConf
         if (forceLocked) e.stopPropagation();
       }}
     >
-      <div className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-[var(--cs2-shadow-lg)]">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-[var(--cs2-shadow-lg)]">
         <div className="border-b border-cs2-border-subtle px-4 py-3">
           <h2 className="text-sm font-bold text-cs2-text-primary">{title || t("dialog.updateTitle")}</h2>
           {latest || current ? (
