@@ -46,6 +46,7 @@ import { useLocaleStore } from "../i18n/localeStore.js";
 import { labelTag } from "../utils/tagDescriptions.js";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 import { playerAppearance, steamIdForPlayer } from "../utils/playerAppearance.js";
+import { playerDisplayName, playerIdentityKey, playerIdentitySuffix } from "../utils/playerIdentity.js";
 
 const PAGE_CONTAINER_CLASS = "w-full px-3 sm:px-4";
 
@@ -63,8 +64,7 @@ const TABS = [
 const ALL_TAG = "__all__";
 
 function playerName(player) {
-  if (typeof player === "string") return player.trim();
-  return String(player?.name || player?.player_name || "").trim();
+  return playerDisplayName(player);
 }
 
 function playerTeamNumber(player) {
@@ -178,7 +178,7 @@ function DemoSelector({ matches, currentIndex, onChange, disabled }) {
 function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, parsedPlayers, totalPlayers, parsing, avatars, onSelect }) {
   const t = useT();
   const statsByName = useMemo(
-    () => new Map((playerStats || []).map((player) => [playerName(player).toLowerCase(), player])),
+    () => new Map((playerStats || []).map((player) => [playerIdentityKey(player), player])),
     [playerStats],
   );
   const renderTeam = (players, teamName, tone) => {
@@ -192,17 +192,19 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
         <div className="pb-1">
           {players.map((player) => {
             const name = playerName(player);
-            const active = name === activePlayer;
-            const stats = statsByName.get(name.toLowerCase()) || player;
+            const playerKey = playerIdentityKey(player);
+            const active = playerKey === activePlayer;
+            const stats = statsByName.get(playerKey) || player;
+            const identitySuffix = playerIdentitySuffix(player);
             const adr = Number(stats?.adr);
             const appearance = playerAppearance(player, isBlue ? "blue" : "amber");
             const avatarUrl = avatars?.[steamIdForPlayer(player)] || "";
             return (
               <button
-                key={`${name}-${player?.steam_id64 || player?.steam_id || ""}`}
+                key={playerKey}
                 type="button"
                 aria-label={t("analysis.workspace.selectPlayerAria", { name })}
-                onClick={() => onSelect(name)}
+                onClick={() => onSelect(playerKey)}
                 data-active={active ? "true" : "false"}
                 className="analysis-player-row grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left transition-colors"
                 style={active ? {
@@ -214,7 +216,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
                 <div className="min-w-0">
                   <span className="block truncate text-[11px] font-bold text-cs2-text-primary">{name}</span>
                   <span className="mt-0.5 block font-mono text-[9px] text-cs2-text-muted">
-                    {Number(player?.kills || 0)} / {Number(player?.deaths || 0)}
+                    {identitySuffix ? `#${identitySuffix} · ` : ""}{Number(player?.kills || 0)} / {Number(player?.deaths || 0)}
                   </span>
                 </div>
                 <span
@@ -466,8 +468,12 @@ export default function DemoAnalysisPreviewPage() {
   const selectedCount = s.selectedPlayersList?.length || 0;
   const parsedNames = s.parsedPlayerNames || [];
   const parsedPlayers = s.currentParsed?.players || {};
-  const activePlayer = s.currentActivePlayer || playerName(s.players?.[0]) || "";
-  const selectedPlayer = (s.players || []).find((player) => playerName(player) === activePlayer) || null;
+  const activePlayer = s.currentActivePlayer || playerIdentityKey(s.players?.[0]) || "";
+  const selectedPlayer = (s.players || []).find((player) => playerIdentityKey(player) === activePlayer) || null;
+  const activePlayerLabel = playerName(selectedPlayer) || activePlayer;
+  const activeAnalysisPlayer = (workspace.players || []).find((player) => (
+    playerIdentityKey(player) === activePlayer
+  ))?.name || activePlayerLabel;
   const activePlayerResult = activePlayer ? parsedPlayers[activePlayer] : null;
   const playerAiReviewed = Boolean(activePlayerResult?.ai_reviewed) || (activePlayerResult?.clips || []).some((clip) => (
     clip?.ai_score != null || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
@@ -489,11 +495,16 @@ export default function DemoAnalysisPreviewPage() {
     && Boolean(selectedPlayer)
     && regularClips.length > 0;
 
-  const selectPlayer = (name) => {
-    s.setActivePlayerTabs((previous) => ({ ...previous, [s.currentMatchIndex]: name }));
+  const selectPlayer = (value) => {
+    const matched = [...(s.players || []), ...(workspace.players || [])].find((player) => (
+      playerIdentityKey(player) === value
+      || String(player?.name || "") === value
+    ));
+    const playerKey = matched ? playerIdentityKey(matched) : value;
+    s.setActivePlayerTabs((previous) => ({ ...previous, [s.currentMatchIndex]: playerKey }));
     setActiveHighlightView("clips");
     setSelectedTag(ALL_TAG);
-    if (s.aiMode) void s.ensurePlayerAiReview?.(name, s.currentMatchIndex);
+    if (s.aiMode) void s.ensurePlayerAiReview?.(playerKey, s.currentMatchIndex);
   };
 
   const playCurrentDemo = () => {
@@ -607,7 +618,7 @@ export default function DemoAnalysisPreviewPage() {
                         activeHighlightView={activeHighlightView}
                         setActiveHighlightView={setActiveHighlightView}
                         selectedPlayer={selectedPlayer}
-                        activePlayer={activePlayer}
+                        activePlayer={activePlayerLabel}
                         regularClips={regularClips}
                         playerAiReviewing={playerAiReviewing}
                         playerAiReviewed={playerAiReviewed}
@@ -621,8 +632,8 @@ export default function DemoAnalysisPreviewPage() {
                       {activeHighlightView === "clips" && (
                         <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
                       )}
-                      {activeHighlightView === "rounds" && <RoundTimelineView roundTimeline={s.roundTimeline} focusedPlayer={activePlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAddEvent={s.handleAddTimelineEventToQueue} onAddRound={s.handleAddTimelineRoundToQueue} onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} onRemoveRound={s.handleRemoveTimelineRoundFromQueue} suppressSummaryHeader />}
-                      {activeHighlightView === "weapons" && <WeaponKillsView roundTimeline={s.roundTimeline} focusedPlayer={activePlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAdd={s.handleAddWeaponKillsToQueue} onRemove={s.handleDequeueClip} onAddEvent={s.handleAddTimelineEventToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} suppressSummaryHeader />}
+                      {activeHighlightView === "rounds" && <RoundTimelineView roundTimeline={s.roundTimeline} focusedPlayer={activeAnalysisPlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAddEvent={s.handleAddTimelineEventToQueue} onAddRound={s.handleAddTimelineRoundToQueue} onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} onRemoveRound={s.handleRemoveTimelineRoundFromQueue} suppressSummaryHeader />}
+                      {activeHighlightView === "weapons" && <WeaponKillsView roundTimeline={s.roundTimeline} focusedPlayer={activeAnalysisPlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAdd={s.handleAddWeaponKillsToQueue} onRemove={s.handleDequeueClip} onAddEvent={s.handleAddTimelineEventToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} suppressSummaryHeader />}
                     </>
                   )}
                 </div>
@@ -681,7 +692,7 @@ export default function DemoAnalysisPreviewPage() {
               {activeTab === "cosmetics" && (
                 <CosmeticsView
                   workspace={workspace}
-                  selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerName(player) === activePlayer)}
+                  selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerIdentityKey(player) === activePlayer)}
                   locale={locale}
                   onlineAssetsEnabled={onlineAssetsEnabled}
                   demoId={currentUpload?.id}

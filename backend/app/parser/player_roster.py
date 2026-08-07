@@ -23,6 +23,7 @@ from .parse_utils import (
     _get_match_start_tick,
 )
 from .tag_constants import TICK_RATE
+from .player_identity import PlayerIdentityRegistry, player_key_for_values
 
 
 _PLAYER_COLOR_NAMES = ("blue", "green", "yellow", "orange", "purple")
@@ -690,11 +691,15 @@ def get_player_list(
     death_events: Optional[pd.DataFrame] = None,
     player_info_df: Optional[pd.DataFrame] = None,
 ) -> list[dict]:
-    """扫描 Demo 所有在 player_death 出现过的玩家，汇总 K/D/A 与队伍。"""
+    """Return one roster row per SteamID/XUID, never per nickname.
+
+    Nicknames are display data. They are not unique in CS2 and can also change
+    during a match, so every participant role is resolved by SteamID first,
+    then engine user id, with the name used only as a last-resort fallback.
+    """
     parser = parser or DemoParser(str(dem_path))
     if match_start_tick is None:
         match_start_tick = _get_match_start_tick(parser)
-    # 单次扫描同时取 user_id + steamid + 所有默认列（3次扫描合1次）
     try:
         events = (
             death_events
@@ -705,37 +710,35 @@ def get_player_list(
         if isinstance(e, _DEMOPARSER_RE_RAISE):
             raise
         return []
-
-    # 从同一 df 派生 name→uid 和 name→steamid，无需额外扫描
-    name_to_uid: dict[str, int] = {}
-    name_to_sid: dict[str, int] = {}
-    for _, row in events.iterrows():
-        vn = _cell_str(row.get("user_name"))
-        vu = _user_id_cell(row.get("user_user_id") or row.get("user_id"))
-        vs = _steam_id_cell(row.get("user_steamid"))
-        if vn:
-            if vu is not None:
-                name_to_uid[vn] = vu
-            if vs is not None:
-                name_to_sid[vn] = vs
-        an = _cell_str(row.get("attacker_name"))
-        au = _user_id_cell(row.get("attacker_user_id") or row.get("attacker_id"))
-        ast = _steam_id_cell(row.get("attacker_steamid"))
-        if an:
-            if au is not None:
-                name_to_uid[an] = au
-            if ast is not None:
-                name_to_sid[an] = ast
-
     if events.empty:
         return []
+
+    try:
+        pi = (
+            player_info_df
+            if player_info_df is not None and not player_info_df.empty
+            else _to_pandas_df(parser.parse_player_info())
+        )
+    except BaseException as e:
+        if isinstance(e, _DEMOPARSER_RE_RAISE):
+            raise
+        pi = pd.DataFrame()
+
+    registry = PlayerIdentityRegistry.from_frames(
+        player_info=pi,
+        death_events=events,
+    )
 
     tick_for_roster = (
         match_start_tick
         if match_start_tick > 0
         else max(1, _int(events["tick"].min()) if "tick" in events.columns else 1)
     )
-    spec_slots = build_player_name_to_spec_player_slot_dict(parser, tick_for_roster, dem_path)
+    spec_slots = build_player_name_to_spec_player_slot_dict(
+        parser,
+        tick_for_roster,
+        dem_path,
+    )
 
     if match_start_tick > 0 and "tick" in events.columns:
         events = events.loc[
@@ -750,64 +753,96 @@ def get_player_list(
     if "tick" in events.columns:
         events = events.sort_values("tick", kind="mergesort")
 
-    death_ticks = events["tick"].dropna().astype(int).unique().tolist()
-    team_by_tick = _build_tick_team_lookup(parser, death_ticks)
+    stats: dict[str, dict[str, object]] = {}
 
-    stats: dict[str, dict] = {}
+    def _identity_values(row: dict, role: str) -> tuple[str, Optional[int], Optional[int]]:
+        name = _cell_str(row.get(f"{role}_name"))
+        if role == "user" and not name:
+            name = _cell_str(row.get("player_name"))
+        sid = _steam_id_cell(row.get(f"{role}_steamid"))
+        uid = _user_id_cell(
+            row.get(f"{role}_user_id")
+            or (row.get("user_id") if role == "user" else None)
+            or (row.get("attacker_id") if role == "attacker" else None)
+        )
+        return name, sid, uid
 
-    def _touch(name: str) -> dict:
-        if name not in stats:
-            stats[name] = {"kills": 0, "deaths": 0, "assists": 0, "team": None, "player_color": None}
-        return stats[name]
+    def _touch(name: str, sid: object = None, uid: object = None) -> tuple[str, dict[str, object]]:
+        identity = registry.identity_for_values(name, sid, uid)
+        key = identity.player_key if identity is not None else player_key_for_values(name, sid, uid)
+        if not key:
+            return "", {}
+        rec = stats.get(key)
+        if rec is None:
+            rec = {
+                "player_key": key,
+                "name": identity.display_name if identity is not None else name,
+                "steam_id": identity.steamid if identity is not None else (_norm_steam_id(sid) or None),
+                "event_user_id": (
+                    _user_id_cell(identity.user_id) if identity is not None else _user_id_cell(uid)
+                ),
+                "kills": 0,
+                "deaths": 0,
+                "assists": 0,
+                "team": None,
+                "player_color": None,
+            }
+            stats[key] = rec
+        return key, rec
 
-    def _set_team_if_missing(name: str, team_val: Optional[int]) -> None:
-        if not name or team_val is None:
-            return
-        rec = _touch(name)
-        if rec["team"] is None:
+    def _set_team_if_missing(rec: dict[str, object], team_val: Optional[int]) -> None:
+        if rec and team_val in (2, 3) and rec.get("team") is None:
             rec["team"] = team_val
 
+    # Seed the full playing roster so a 0/0 player is not lost merely because
+    # they never appeared in player_death.
+    pi_team_col = _player_info_team_col(pi) if not pi.empty else None
+    if not pi.empty and "name" in pi.columns:
+        for _, row in pi.iterrows():
+            name = _cell_str(row.get("name"))
+            sid = _steam_id_cell(row.get("steamid")) if "steamid" in pi.columns else None
+            team = _cell_team(row.get(pi_team_col)) if pi_team_col else None
+            if not name or team not in (2, 3):
+                continue
+            _, rec = _touch(name, sid, row.get("user_id"))
+            _set_team_if_missing(rec, team)
+
     for _, row in events.iterrows():
-        attacker = _cell_str(row.get("attacker_name"))
-        victim = _cell_str(row.get("user_name"))
+        attacker, attacker_sid, attacker_uid = _identity_values(row, "attacker")
+        victim, victim_sid, victim_uid = _identity_values(row, "user")
         assister = _cell_str(row.get(assist_col)) if assist_col else ""
-        tick = _int(row.get("tick"))
+        assister_sid = _steam_id_cell(
+            row.get("assister_steamid") or row.get("assistor_steamid")
+        )
+        assister_uid = _user_id_cell(
+            row.get("assister_user_id") or row.get("assistor_user_id")
+        )
 
         atk_team = _cell_team(row.get("attackerteam"))
         vic_team = _cell_team(row.get("userteam"))
         ast_team = _cell_team(row.get(assister_team_col)) if assister_team_col else None
 
-        if team_by_tick:
-            if attacker:
-                atk_team = _lookup_team_at_tick(team_by_tick, tick, attacker) or atk_team
-            if victim:
-                vic_team = _lookup_team_at_tick(team_by_tick, tick, victim) or vic_team
-            if assister:
-                ast_team = _lookup_team_at_tick(team_by_tick, tick, assister) or ast_team
+        attacker_key, attacker_rec = _touch(attacker, attacker_sid, attacker_uid) if attacker else ("", {})
+        victim_key, victim_rec = _touch(victim, victim_sid, victim_uid) if victim else ("", {})
+        assister_key, assister_rec = _touch(assister, assister_sid, assister_uid) if assister else ("", {})
+        _set_team_if_missing(attacker_rec, atk_team)
+        _set_team_if_missing(victim_rec, vic_team)
+        _set_team_if_missing(assister_rec, ast_team)
 
-        if attacker:
-            _set_team_if_missing(attacker, atk_team)
-        if victim:
-            _set_team_if_missing(victim, vic_team)
-        if assister:
-            _set_team_if_missing(assister, ast_team)
-
-        if victim:
-            _touch(victim)["deaths"] += 1
-        if attacker and attacker != victim:
-            _touch(attacker)["kills"] += 1
-        if assister and assister != victim:
-            _touch(assister)["assists"] += 1
-
-    names = sorted(
-        stats.keys(),
-        key=lambda n: (-stats[n]["kills"], n.lower()),
-    )
+        if victim_rec:
+            victim_rec["deaths"] = int(victim_rec["deaths"]) + 1
+        if attacker_rec and attacker_key != victim_key:
+            attacker_rec["kills"] = int(attacker_rec["kills"]) + 1
+        if assister_rec and assister_key != victim_key:
+            assister_rec["assists"] = int(assister_rec["assists"]) + 1
 
     if match_start_tick > 0 and stats:
         try:
             fix_df = coalesce_player_team_num(_to_pandas_df(
-                parser.parse_ticks(PLAYER_TEAM_PARSE_FIELDS + ["name", "player_color"], ticks=[match_start_tick]),
+                parser.parse_ticks(
+                    PLAYER_TEAM_PARSE_FIELDS + ["name", "steamid", "user_id", "player_color"],
+                    ticks=[match_start_tick],
+                ),
             ))
         except BaseException as e:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
@@ -826,106 +861,51 @@ def get_player_list(
                 tm = _cell_team(r.get("team_num"))
                 if not nm:
                     continue
-                nl = nm.lower()
-                for key in stats:
-                    if key.lower() == nl:
-                        if tm is not None:
-                            stats[key]["team"] = tm
-                        stats[key]["player_color"] = _player_color_name(r.get("player_color"))
-                        break
-
-    player_info_team_by_name: dict[str, int] = {}
-    player_info_team_by_sid: dict[str, int] = {}
-    try:
-        pi = (
-            player_info_df
-            if player_info_df is not None and not player_info_df.empty
-            else _to_pandas_df(parser.parse_player_info())
-        )
-    except BaseException as e:
-        if isinstance(e, _DEMOPARSER_RE_RAISE):
-            raise
-        pi = pd.DataFrame()
-    if not pi.empty and "name" in pi.columns:
-        pi_team_col = next((c for c in ("team_number", "team_num", "team") if c in pi.columns), None)
-        for _, r in pi.iterrows():
-            nm = _cell_str(r.get("name"))
-            sid = _steam_id_cell(r.get("steamid")) if "steamid" in pi.columns else None
-            if nm and sid is not None:
-                name_to_sid[nm] = sid
-            tm = _cell_team(r.get(pi_team_col)) if pi_team_col else None
-            if tm in (2, 3):
-                if nm:
-                    player_info_team_by_name[nm.lower()] = tm
-                if sid is not None:
-                    player_info_team_by_sid[str(sid)] = tm
-
-    if stats and (player_info_team_by_name or player_info_team_by_sid):
-        def _pi_team_for(name: str) -> Optional[int]:
-            sid_i = _lookup_steam_id_for_name(name_to_sid, name)
-            t = player_info_team_by_sid.get(str(sid_i)) if sid_i is not None else None
-            if t is None:
-                t = player_info_team_by_name.get(str(name).strip().lower())
-            return t if t in (2, 3) else None
-
-        # 逐 tick 解析出的 team 是否可信：需覆盖大多数玩家且确实出现两支队伍。
-        # 国服 demo 常见仅极少数玩家有 team_num，会被错误折叠成一队，此时直接采用
-        # parse_player_info 的干净 5v5 分组。
-        resolved_valid = [
-            _cell_team(rec.get("team")) for rec in stats.values()
-            if _cell_team(rec.get("team")) in (2, 3)
-        ]
-        tick_team_reliable = (
-            len(resolved_valid) >= max(4, len(stats) - 2)
-            and len(set(resolved_valid)) >= 2
-        )
-
-        if tick_team_reliable:
-            # 仅补全缺失项，并把 parse_player_info 的队号映射到逐 tick 的队号体系。
-            votes: dict[int, dict[int, int]] = {}
-            for name, rec in stats.items():
-                resolved_team = _cell_team(rec.get("team"))
-                if resolved_team not in (2, 3):
-                    continue
-                pi_team = _pi_team_for(name)
-                if pi_team is not None:
-                    bucket = votes.setdefault(pi_team, {})
-                    bucket[resolved_team] = bucket.get(resolved_team, 0) + 1
-            player_info_to_tick_team: dict[int, int] = {
-                pi_team: max(counts.items(), key=lambda kv: kv[1])[0]
-                for pi_team, counts in votes.items() if counts
-            }
-            for name, rec in stats.items():
-                if rec.get("team") is not None:
-                    continue
-                pi_team = _pi_team_for(name)
-                if pi_team is None:
-                    continue
-                inferred_team = player_info_to_tick_team.get(pi_team, pi_team)
-                if inferred_team in (2, 3):
-                    rec["team"] = inferred_team
-        else:
-            # 逐 tick team 不可靠：全部以 parse_player_info 的队伍身份分组。
-            for name, rec in stats.items():
-                pi_team = _pi_team_for(name)
-                if pi_team in (2, 3):
-                    rec["team"] = pi_team
+                identity = registry.identity_for_values(
+                    nm,
+                    r.get("steamid"),
+                    r.get("user_id"),
+                )
+                key = identity.player_key if identity is not None else player_key_for_values(
+                    nm, r.get("steamid"), r.get("user_id")
+                )
+                rec = stats.get(key)
+                if rec is not None:
+                    if tm in (2, 3) and rec.get("team") is None:
+                        rec["team"] = tm
+                    rec["player_color"] = _player_color_name(r.get("player_color"))
 
     rows: list[dict] = []
-    for n in names:
-        sid_i = _lookup_steam_id_for_name(name_to_sid, n)
-        event_uid = _lookup_user_id_for_name(name_to_uid, n)
+    observed_user_ids = [
+        int(rec["event_user_id"])
+        for rec in stats.values()
+        if rec.get("event_user_id") is not None
+    ]
+    ordered = sorted(
+        stats.values(),
+        key=lambda rec: (-int(rec["kills"]), str(rec["name"]).casefold(), str(rec["player_key"])),
+    )
+    for rec in ordered:
+        name = str(rec["name"])
+        steam_id = str(rec.get("steam_id") or "") or None
+        event_uid = _user_id_cell(rec.get("event_user_id"))
         rows.append(
             {
-                "name": n,
-                "team": stats[n]["team"] if stats[n]["team"] is not None else 0,
-                "kills": stats[n]["kills"],
-                "deaths": stats[n]["deaths"],
-                "assists": stats[n]["assists"],
-                "user_id": _spec_player_slot_from_event_user_id(event_uid, dem_path, tuple(name_to_uid.values()))
-                or lookup_spec_player_slot_for_name(spec_slots, n),
-                "steam_id": str(sid_i) if sid_i is not None else None,
-                "player_color": stats[n].get("player_color"),
+                "name": name,
+                "player_key": str(rec["player_key"]),
+                "team": rec["team"] if rec["team"] is not None else 0,
+                "kills": int(rec["kills"]),
+                "deaths": int(rec["deaths"]),
+                "assists": int(rec["assists"]),
+                "user_id": _spec_player_slot_from_event_user_id(
+                    event_uid,
+                    dem_path,
+                    observed_user_ids,
+                ) or lookup_spec_player_slot_for_name(spec_slots, name),
+                "steam_id": steam_id,
+                "steam_id64": steam_id,
+                "xuid": steam_id,
+                "player_color": rec.get("player_color"),
             },
         )
     return rows

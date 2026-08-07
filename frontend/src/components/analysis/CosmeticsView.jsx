@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import { steamIdForPlayer } from "../../utils/playerAppearance.js";
+import { playerIdentityKey } from "../../utils/playerIdentity.js";
 import Modal from "../ui/Modal";
 import Button from "../ui/Button";
 import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
@@ -738,10 +739,15 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
 export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh", onlineAssetsEnabled = false, demoId = null }) {
   const t = useT();
   const name = playerName(selectedPlayer);
+  const selectedPlayerKey = playerIdentityKey(selectedPlayer);
   const workspacePlayer = useMemo(() => {
+    const byIdentity = (workspace?.players || []).find(
+      (player) => playerIdentityKey(player) === selectedPlayerKey,
+    );
+    if (byIdentity) return byIdentity;
     const target = name.toLocaleLowerCase();
     return (workspace?.players || []).find((player) => playerName(player).toLocaleLowerCase() === target) || null;
-  }, [name, workspace?.players]);
+  }, [name, selectedPlayerKey, workspace?.players]);
   const steamid = steamIdForPlayer(workspacePlayer) || steamIdForPlayer(selectedPlayer);
   const [detail, setDetail] = useState(null);
   const [hoverCard, setHoverCard] = useState(null);

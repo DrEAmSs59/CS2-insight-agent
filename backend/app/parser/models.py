@@ -27,6 +27,8 @@ class MatchMeta:
     map_name: str
     target_player: str
     total_rounds: int
+    # API/result dictionary identity. Names are display-only and may collide.
+    target_player_key: Optional[str] = None
     # 解析侧的观战编号兜底；录制期以 GSI 校准出的 spec_player 槽位为准。
     target_player_user_id: Optional[int] = None
     # Steam64 十进制字符串；观战仍靠昵称在 seek tick 上算槽位（CS2 无按 Steam 切 spec 的官方命令）

@@ -22,6 +22,7 @@ import {
   replayHeatmapPlayerKey,
 } from "../../utils/replayHeatmap";
 import { resolveReplayTransform } from "../../utils/replayRadarTransform";
+import { playerDisplayName, playerIdentityKey } from "../../utils/playerIdentity.js";
 import ReplayCameraControls from "./ReplayCameraControls";
 import ReplayHeatmapCanvas from "./ReplayHeatmapCanvas";
 
@@ -66,7 +67,7 @@ function mapKey(value) {
 }
 
 function playerName(player) {
-  return String(player?.name || player?.player_name || "").trim();
+  return playerDisplayName(player);
 }
 
 function playerTeamKey(player, index, total) {
@@ -149,12 +150,14 @@ export default function DemoHeatmapView({
   const playerOptions = useMemo(() => workspacePlayers
     .map((player, index) => ({
       ...player,
+      key: playerIdentityKey(player),
       name: playerName(player),
+      analysis_name: String(player?.name || player?.player_name || "").trim(),
       team_key: playerTeamKey(player, index, workspacePlayers.length),
     }))
-    .filter((player) => player.name), [workspacePlayers]);
+    .filter((player) => player.name && player.key), [workspacePlayers]);
   const playerTeamKeys = useMemo(() => Object.fromEntries(playerOptions.map((player) => [
-    replayHeatmapPlayerKey(player.name),
+    replayHeatmapPlayerKey(player.analysis_name || player.name),
     player.team_key,
   ])), [playerOptions]);
   const playerTeamSignature = useMemo(
@@ -165,9 +168,10 @@ export default function DemoHeatmapView({
   const [mode, setMode] = useSessionState(`demo-heatmap:${sessionIdentity}:mode`, "movement");
   const [mapLayer, setMapLayer] = useSessionState(`demo-heatmap:${sessionIdentity}:layer`, "upper");
   const [selectedSide, setSelectedSide] = useSessionState(`demo-heatmap:${sessionIdentity}:side`, "all");
-  const focusedPlayer = playerOptions.some((player) => player.name === selectedPlayer)
-    ? selectedPlayer
-    : playerOptions[0]?.name || "";
+  const selectedPlayerOption = playerOptions.find((player) => player.key === selectedPlayer)
+    || playerOptions[0]
+    || null;
+  const focusedPlayer = selectedPlayerOption?.analysis_name || selectedPlayerOption?.name || "";
   const [reloadEpoch, setReloadEpoch] = useState(0);
   const [mapCamera, setMapCamera] = useState({ zoom: 1, offsetX: 0, offsetY: 0 });
   const mapSurfaceRef = useRef(null);
@@ -318,7 +322,6 @@ export default function DemoHeatmapView({
   const deathEvents = activeLayer?.deaths?.eventCount || 0;
   const activeMode = HEATMAP_MODES.find((item) => item.key === mode) || HEATMAP_MODES[0];
   const activeEventCount = mode === "movement" ? movementSamples : activeHeatmap?.eventCount || 0;
-  const selectedPlayerOption = playerOptions.find((player) => player.name === focusedPlayer) || null;
   const activeRoundCount = selectedSide === "all"
     ? loadState.data?.roundCount || jobs.length || 0
     : rounds.filter((round) => {

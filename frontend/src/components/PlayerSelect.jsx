@@ -1,12 +1,15 @@
 import { CheckSquare, Search, SlidersHorizontal, Users } from "lucide-react";
 import { useT } from "../i18n/useT.js";
+import { playerDisplayName, playerIdentityKey, playerIdentitySuffix } from "../utils/playerIdentity.js";
 
 function normalizePlayer(player) {
   if (typeof player === "string") {
-    return { name: player, team: 0, kills: 0, deaths: 0, assists: 0 };
+    return { name: player, key: player, suffix: "", team: 0, kills: 0, deaths: 0, assists: 0 };
   }
   return {
-    name: player.name ?? player.player_name ?? "",
+    name: playerDisplayName(player),
+    key: playerIdentityKey(player),
+    suffix: playerIdentitySuffix(player),
     team: Number(player.team ?? player.team_number) || 0,
     kills: Number(player.kills) || 0,
     deaths: Number(player.deaths) || 0,
@@ -15,11 +18,11 @@ function normalizePlayer(player) {
 }
 
 function PlayerRow({ player, selected, onSelect }) {
-  const active = selected.includes(player.name);
+  const active = selected.includes(player.key);
   return (
     <button
       type="button"
-      onClick={() => onSelect(player.name)}
+      onClick={() => onSelect(player.key)}
       className={[
         "flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors",
         active
@@ -34,6 +37,7 @@ function PlayerRow({ player, selected, onSelect }) {
         {active ? <span className="h-1.5 w-1.5 rounded-sm bg-cs2-text-on-accent" /> : null}
       </span>
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-cs2-text-primary">{player.name}</span>
+      {player.suffix ? <span className="shrink-0 font-mono text-[9px] text-cs2-text-muted">#{player.suffix}</span> : null}
       <span className="shrink-0 font-mono text-[11px] tabular-nums text-cs2-text-muted">
         {player.kills} / {player.deaths} / {player.assists}
       </span>
@@ -51,7 +55,7 @@ function TeamBlock({ title, players, selected, onSelect, emptyLabel }) {
       <div className="space-y-0.5">
         {players.length === 0
           ? <p className="py-2 text-center text-[10px] text-cs2-text-muted">{emptyLabel}</p>
-          : players.map((player) => <PlayerRow key={player.name} player={player} selected={selected} onSelect={onSelect} />)}
+          : players.map((player) => <PlayerRow key={player.key} player={player} selected={selected} onSelect={onSelect} />)}
       </div>
     </div>
   );
@@ -59,16 +63,16 @@ function TeamBlock({ title, players, selected, onSelect, emptyLabel }) {
 
 export default function PlayerSelect({ players, selected, onSelect, onAnalyze, disabled }) {
   const t = useT();
-  const list = (players ?? []).map(normalizePlayer).filter((player) => player.name);
+  const list = (players ?? []).map(normalizePlayer).filter((player) => player.name && player.key);
   const selectedArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
   const teamA = list.filter((player) => player.team === 3);
   const teamB = list.filter((player) => player.team === 2);
   const unknown = list.filter((player) => player.team !== 2 && player.team !== 3);
-  const allSelected = list.length > 0 && list.every((player) => selectedArr.includes(player.name));
+  const allSelected = list.length > 0 && list.every((player) => selectedArr.includes(player.key));
 
   const selectAll = () => {
     list.forEach((player) => {
-      if (!selectedArr.includes(player.name)) onSelect(player.name);
+      if (!selectedArr.includes(player.key)) onSelect(player.key);
     });
   };
   const clearAll = () => {

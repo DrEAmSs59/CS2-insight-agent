@@ -145,7 +145,7 @@ except Exception:
 _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
     weakref.WeakValueDictionary()
 )
-_DEMO_ROSTER_CACHE_VERSION = 2
+_DEMO_ROSTER_CACHE_VERSION = 3
 
 # 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
 _enqueue_striped_locks: list[asyncio.Lock] = []
@@ -780,14 +780,22 @@ def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -
     out: list[dict] = []
     seen_key: set[str] = set()
     for exp in expected:
-        row = _match_expected_to_roster_row(exp, roster)
-        if row is None:
-            continue
-        key = _norm_player_key(str(row.get("name") or ""))
-        if not key or key in seen_key:
-            continue
-        seen_key.add(key)
-        out.append(row)
+        exp_text = str(exp or "").strip()
+        exact = [
+            row for row in roster
+            if str(row.get("player_key") or "").strip() == exp_text
+            or str(row.get("name") or "").strip().casefold() == exp_text.casefold()
+        ]
+        matches = exact or [row for row in [_match_expected_to_roster_row(exp_text, roster)] if row]
+        for row in matches:
+            key = str(row.get("player_key") or "").strip()
+            if not key:
+                sid = str(row.get("steam_id64") or row.get("steamid64") or "").strip()
+                key = f"steamid:{sid}" if sid else _norm_player_key(str(row.get("name") or ""))
+            if not key or key in seen_key:
+                continue
+            seen_key.add(key)
+            out.append(row)
     return out
 
 
@@ -861,10 +869,12 @@ async def _run_library_demo_analyze(
     )
     first_pdata = players_out[first_player]
     players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
+    analyzed_targets = [p for p in target_players if p in players_payload]
+    analyzed_targets.extend(p for p in players_payload if p not in analyzed_targets)
     composite: dict[str, Any] = {
         "players": players_payload,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
-        "analyzed_target_players": [p for p in target_players if p in players_payload],
+        "analyzed_target_players": analyzed_targets,
         "auto_target_player": first_player,
         # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
         "clips": first_pdata.get("clips") or [],
@@ -1419,6 +1429,13 @@ def _roster_rows_for_api(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "player_name": name,
+                "player_key": (
+                    f"steamid:{steam_id64}"
+                    if steam_id64
+                    else f"userid:{user_id}"
+                    if user_id not in (None, "")
+                    else f"name:{name.casefold()}"
+                ),
                 "team": team,
                 "team_number": team,
                 "team_name": str(team_name).strip() if team_name not in (None, "") else None,
@@ -2016,8 +2033,12 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
                 )
             )
             continue
-        names = [str(r.get("name") or "").strip() for r in matched if r.get("name")]
-        resolved[str(did)] = names
+        player_keys = [
+            str(r.get("player_key") or r.get("name") or "").strip()
+            for r in matched
+            if r.get("player_key") or r.get("name")
+        ]
+        resolved[str(did)] = player_keys
     return {"resolved": resolved, "failed": failed}
 
 

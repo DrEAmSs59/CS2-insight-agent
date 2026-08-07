@@ -1,10 +1,4 @@
-function playerName(player) {
-  return String(
-    typeof player === "string"
-      ? player
-      : player?.name || player?.player_name || "",
-  ).trim();
-}
+import { playerIdentityKey } from "./playerIdentity.js";
 
 function normalizedName(value) {
   return String(value || "").trim().toLocaleLowerCase();
@@ -16,7 +10,7 @@ export function demoAnalysisRoster(demo) {
   const seen = new Set();
   const names = [];
   for (const player of Array.isArray(demo?.players) ? demo.players : []) {
-    const name = playerName(player);
+    const name = playerIdentityKey(player);
     const key = normalizedName(name);
     if (!key || seen.has(key)) continue;
     seen.add(key);

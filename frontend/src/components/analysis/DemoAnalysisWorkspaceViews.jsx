@@ -23,6 +23,7 @@ import OpeningAdvantageCard from "./overview/OpeningAdvantageCard";
 import BombObjectiveCard from "./overview/BombObjectiveCard";
 import PlayerEventsCard from "./overview/PlayerEventsCard";
 import KeyRoundsTimeline from "./overview/KeyRoundsTimeline";
+import { playerIdentityKey } from "../../utils/playerIdentity.js";
 
 export function Panel({ title, eyebrow, action, children, className = "" }) {
   return (
@@ -197,9 +198,9 @@ function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, winner 
           </thead>
           <tbody>
             {players.map((player) => (
-              <tr key={player.name} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover">
+              <tr key={playerIdentityKey(player)} className="border-t border-cs2-border/70 hover:bg-cs2-bg-hover">
                 <td className="px-2 py-1.5">
-                  <button type="button" onClick={() => onSelectPlayer?.(player.name)} className="flex max-w-full items-center gap-1.5 text-left">
+                  <button type="button" onClick={() => onSelectPlayer?.(playerIdentityKey(player))} className="flex max-w-full items-center gap-1.5 text-left">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${teamDot(teamKey)}`} />
                     <span className="truncate text-[11px] font-bold text-cs2-text-primary">{player.name}</span>
                   </button>
@@ -536,7 +537,7 @@ function StatGroup({ title, rows }) {
 }
 
 export function PlayersView({ data, selectedPlayer, onBackToOverview }) {
-  const player = data.players.find((item) => item.name === selectedPlayer) || data.players[0];
+  const player = data.players.find((item) => playerIdentityKey(item) === selectedPlayer) || data.players[0];
   if (!player) return <Panel title="全部玩家"><div className="p-12 text-center text-[11px] text-cs2-text-muted">当前解析结果没有玩家统计。</div></Panel>;
   const groups = [
     { title: "Combat", rows: [{ label: "击杀", value: player.kills, max: 40 }, { label: "死亡", value: player.deaths, max: 40 }, { label: "助攻", value: player.assists, max: 20 }, { label: "KPR", value: player.kpr, display: Number(player.kpr || 0).toFixed(2), max: 1.4 }, { label: "DPR", value: player.dpr, display: Number(player.dpr || 0).toFixed(2), max: 1.2 }, { label: "ADR", value: player.adr, display: Number(player.adr || 0).toFixed(1), max: 130 }, { label: "HS%", value: player.hs_percent, display: `${Number(player.hs_percent || 0).toFixed(0)}%` }, { label: "KAST", value: player.kast, display: `${Number(player.kast || 0).toFixed(0)}%` }, { label: "存活率", value: player.survival_rate, display: `${Number(player.survival_rate || 0).toFixed(0)}%` }, { label: "2 杀回合", value: player.two_kill_rounds, max: 8 }, { label: "3 杀回合", value: player.three_kill_rounds, max: 5 }, { label: "4 杀回合", value: player.four_kill_rounds, max: 3 }, { label: "5 杀回合", value: player.five_kill_rounds, max: 1 }] },

@@ -64,6 +64,7 @@ def test_get_or_index_demo_roster_reuses_persisted_stats(monkeypatch):
     assert result["players"] == [{
         "name": "alpha",
         "player_name": "alpha",
+        "player_key": "steamid:76561198000000001",
         "team": 3,
         "team_number": 3,
         "team_name": None,
@@ -524,6 +525,7 @@ def test_roster_cache_round_trip_preserves_public_contract(tmp_path):
     assert players == [{
         "name": "alpha",
         "player_name": "alpha",
+        "player_key": "steamid:76561198000000002",
         "team": 2,
         "team_number": 2,
         "team_name": None,

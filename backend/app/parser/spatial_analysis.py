@@ -261,7 +261,7 @@ def parse_spatial_snapshots(
                 "X", "Y", "Z",
                 "vel_x", "vel_y", "vel_z",
                 "yaw", "pitch",
-                "name", "is_alive", *PLAYER_TEAM_PARSE_FIELDS, "health", "armor",
+                "name", "steamid", "user_id", "is_alive", *PLAYER_TEAM_PARSE_FIELDS, "health", "armor",
             ],
             ticks=unique_ticks,
         )
@@ -269,7 +269,7 @@ def parse_spatial_snapshots(
         try:
             result = parser.parse_ticks(
                 [
-                    "X", "Y", "Z", "vel_z", "yaw", "pitch", "name", "is_alive",
+                    "X", "Y", "Z", "vel_z", "yaw", "pitch", "name", "steamid", "user_id", "is_alive",
                     *PLAYER_TEAM_PARSE_FIELDS, "health", "armor",
                 ],
                 ticks=unique_ticks,

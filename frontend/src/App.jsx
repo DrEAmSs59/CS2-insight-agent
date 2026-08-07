@@ -31,6 +31,7 @@ import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
 import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./utils/demoAnalysisCache";
+import { playerIdentityKey } from "./utils/playerIdentity.js";
 import {
   DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
   demoBatchFailureMessage,
@@ -267,7 +268,7 @@ export default function App() {
 
   const players = currentUpload?.players ?? [];
   const rosterPlayerNames = players
-    .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+    .map(playerIdentityKey)
     .map((name) => String(name).trim())
     .filter(Boolean);
   const availablePlayerNames = rosterPlayerNames.length ? rosterPlayerNames : parsedPlayerNames;
@@ -691,7 +692,7 @@ export default function App() {
             (ordered && ordered[0]) ||
             cachedResult?.auto_target_player ||
             cachedMeta?.target_player ||
-            data.players?.[0]?.name ||
+            playerIdentityKey(data.players?.[0]) ||
             "";
           const displayLabel =
             (item.display_name && String(item.display_name).trim()) || item.filename;
@@ -781,7 +782,7 @@ export default function App() {
           && !Object.prototype.hasOwnProperty.call(selectedMap, i)
         ) {
           const rosterNames = (x.players || [])
-            .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+            .map(playerIdentityKey)
             .filter((name) => typeof name === "string" && name.trim());
           selectedMap[i] = rosterNames;
         }
@@ -1141,7 +1142,7 @@ export default function App() {
       const selectedMap = {};
       uploads.forEach((upload, index) => {
         const names = (upload.players || [])
-          .map((player) => (typeof player === "string" ? player : player?.name || player?.player_name || ""))
+          .map(playerIdentityKey)
           .filter((name) => typeof name === "string" && name.trim());
         selectedMap[index] = names;
       });

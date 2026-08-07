@@ -49,6 +49,7 @@ from .player_roster import (
     build_steam_to_team_from_player_info, build_name_to_team_from_player_info,
     get_player_list,
 )
+from .player_identity import IdentityAwareDemoParser, PlayerIdentityRegistry
 from .spatial_analysis import (
     parse_spatial_snapshots, _victim_facing_attacker, is_jump_kill,
     detect_kill_action_tags, enrich_kill_action_tags_spatial,
@@ -894,15 +895,16 @@ class DemoAnalyzer:
         """
         if not target_players:
             return {}
-        # Dedup + strip, preserve order
+        # Dedup + strip, preserve order. Values may be legacy names or the
+        # stable player_key returned by the roster API.
         seen: set[str] = set()
-        players: list[str] = []
+        requested_players: list[str] = []
         for p in target_players:
             s = str(p or "").strip()
             if s and s not in seen:
                 seen.add(s)
-                players.append(s)
-        if not players:
+                requested_players.append(s)
+        if not requested_players:
             return {}
 
         try:
@@ -926,12 +928,49 @@ class DemoAnalyzer:
             match_start_tick,
             event_batch=event_batch,
         )
+
+        # Demoparser exposes XUID/SteamID for each participant role. Qualify
+        # only colliding nicknames before any player-keyed indexes are built,
+        # then keep future parse_ticks calls on the same identity contract.
+        parser_is_identity_aware = isinstance(self.parser, IdentityAwareDemoParser)
+        identity_registry = (
+            self.parser.identity_registry
+            if parser_is_identity_aware
+            else PlayerIdentityRegistry.from_frames(
+                player_info=_shared.get("player_info_df"),
+                death_events=_shared.get("events"),
+            )
+        )
+        if identity_registry.has_name_collisions:
+            for frame_name in (
+                "events", "fire_df", "hurt_df", "equip_df", "pickup_df",
+                "planted_df", "defused_df", "bomb_exploded_df",
+                "begindefuse_df", "bomb_dropped_df", "bomb_pickup_df",
+                "blind_df", "economy_ticks_df", "player_info_df",
+            ):
+                identity_registry.canonicalize_frame(_shared.get(frame_name))
+            for frame in (_shared.get("nade_batch") or {}).values():
+                identity_registry.canonicalize_frame(frame)
+            _shared["name_to_final_team_shared"] = identity_registry.canonical_team_map(
+                _shared.get("steam_to_final_team_shared") or {},
+                _shared.get("name_to_final_team_shared") or {},
+            )
+            if not parser_is_identity_aware:
+                self.parser = IdentityAwareDemoParser(self.parser, identity_registry)
+
+        resolved_targets = identity_registry.resolve_targets(requested_players)
+        players = [target.analysis_name for target in resolved_targets]
+        if not players:
+            return {}
         shared_facts = self._build_shared_demo_facts(
             match_start_tick=match_start_tick,
             header=header,
             shared_events=_shared,
             expected_players=players,
         )
+        shared_roster = getattr(shared_facts, "all_players_roster", None)
+        if isinstance(shared_roster, list):
+            identity_registry.enrich_roster(shared_roster)
 
         # Phase 2: Per-player first pass (round economy + kill/death extraction, pure Python after events)
         aim_secs = _backstab_aim_sample_offsets_sec()
@@ -1305,6 +1344,7 @@ class DemoAnalyzer:
                 player_results=results,
                 parser=self.parser,
             )
+            identity_registry.enrich_roster(self.analysis_workspace.get("players") or [])
         except BaseException as exc:
             if isinstance(exc, _DEMOPARSER_RE_RAISE):
                 raise
@@ -1322,7 +1362,14 @@ class DemoAnalyzer:
                 "error": f"{type(exc).__name__}: {exc}",
             }
 
-        return results
+        for analysis_name, result in results.items():
+            identity_registry.decorate_result(result, analysis_name)
+
+        return {
+            target.result_key: results[target.analysis_name]
+            for target in resolved_targets
+            if target.analysis_name in results
+        }
 
     def _finish_single_player_analysis(
         self,
@@ -2044,7 +2091,8 @@ class DemoAnalyzer:
         results = self.analyze_multi_players(
             [target_player], freeze_to_death_rounds=freeze_to_death_rounds
         )
-        return results[str(target_player).strip()]
+        requested = str(target_player).strip()
+        return results.get(requested) or next(iter(results.values()))
 
 
 def collect_match_summary_metrics(

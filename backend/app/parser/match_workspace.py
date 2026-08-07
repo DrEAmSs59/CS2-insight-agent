@@ -938,6 +938,8 @@ def _player_stats(
         roster_row = roster_by_name.get(key, {})
         stats_out.append({
             "name": name,
+            "player_key": roster_row.get("player_key"),
+            "display_name": roster_row.get("display_name") or name,
             "steam_id64": str(roster_row.get("steamid64") or roster_row.get("steam_id64") or "") or None,
             "team_key": player_team.get(key),
             "kills": kills,

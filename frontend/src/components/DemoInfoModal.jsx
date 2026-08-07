@@ -26,6 +26,7 @@ import WeaponKillsView from "./analysis/WeaponKillsView";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
 import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
 import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
+import { playerIdentityKey } from "../utils/playerIdentity.js";
 
 /**
  * @param {{
@@ -153,7 +154,7 @@ export default function DemoInfoModal({
 
         // 多玩家分析共享同一次 demo 事件扫描；默认整场，关注名单不再作为隐式筛选器。
         const roster = data.players || [];
-        const names = roster.map((p) => (typeof p === "string" ? p : p.name)).filter(Boolean);
+        const names = roster.map(playerIdentityKey).filter(Boolean);
         setSelectedPlayers(names);
       } catch (e) {
         setProgressText(t("dialog.demoInfoLoadFail", { msg: e.response?.data?.detail || e.message }));
@@ -548,7 +549,7 @@ export default function DemoInfoModal({
                           onClick={() => setActivePlayerTab(name)}
                           className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors ${name === activePlayerTab ? "bg-cs2-accent text-cs2-text-on-accent" : "bg-cs2-bg-hover text-cs2-text-secondary hover:text-cs2-text-primary"}`}
                         >
-                          <span>{name}</span>
+                          <span>{parsedPlayers[name]?.match_meta?.target_player || name}</span>
                           <span className="ml-1.5 rounded bg-cs2-bg-input/50 px-1 font-mono text-[9px] tabular-nums opacity-80">
                             {(parsedPlayers[name]?.clips || []).filter((clip) => clip.category !== "meme_death").length}
                           </span>
