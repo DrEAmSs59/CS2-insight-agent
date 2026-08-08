@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -167,8 +168,54 @@ def test_reads_real_outer_frame_end_tick_without_decoding_payloads(tmp_path: Pat
         tmp_path / "source.dem",
         b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + last + sentinel,
     )
+    original = source.read_bytes()
+    original_sha256 = hashlib.sha256(original).hexdigest()
+    original_stat = compat._stat_fingerprint(source.stat())
 
     assert compat.read_demo_end_tick(source) == 9_999
+    assert source.read_bytes() == original
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == original_sha256
+    assert compat._stat_fingerprint(source.stat()) == original_stat
+
+
+def test_read_end_tick_tolerates_terminal_packet_without_modifying_file(
+    tmp_path: Path,
+):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    source_bytes = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + terminal[:-3]
+    source = _write(tmp_path / "source.dem", source_bytes)
+    original_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    original_stat = compat._stat_fingerprint(source.stat())
+
+    assert compat.read_demo_end_tick(source) == 42
+    assert source.read_bytes() == source_bytes
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == original_sha256
+    assert compat._stat_fingerprint(source.stat()) == original_stat
+
+
+def test_read_end_tick_rejects_incomplete_metadata_without_modifying_file(
+    tmp_path: Path,
+):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal_metadata = _frame(2, 43, b"partial-file-info")
+    source_bytes = (
+        b"PBDEMS2\x00"
+        + (0).to_bytes(8, "little")
+        + first
+        + terminal_metadata[:-3]
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+    original_stat = compat._stat_fingerprint(source.stat())
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="not a packet",
+    ):
+        compat.read_demo_end_tick(source)
+
+    assert source.read_bytes() == source_bytes
+    assert compat._stat_fingerprint(source.stat()) == original_stat
 
 
 def test_opt_in_tail_repair_discards_only_incomplete_final_packet(tmp_path: Path):

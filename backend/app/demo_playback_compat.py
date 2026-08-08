@@ -1150,6 +1150,12 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
     This is the file's playback boundary, unlike event-derived maxima such as
     the last death or round-end tick.  Recording uses it only to stop before
     actual EOF so CS2 cannot finish the demo and return to the main menu.
+
+    An otherwise valid demo may end with one incomplete packet when recording
+    was not finalized.  In that narrow case, return the maximum tick from the
+    complete prefix.  The source stays open read-only and is never truncated,
+    rewritten, or replaced.  Complete demos retain the existing single-pass
+    path; malformed metadata and other corruption remain hard failures.
     """
 
     source = Path(source_path)
@@ -1161,6 +1167,7 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
 
         max_tick = 0
         while True:
+            frame_offset = reader.tell()
             command_result = _read_stream_varint(
                 reader,
                 context="outer command",
@@ -1177,6 +1184,17 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
                 raise _fail(f"outer frame exceeds size limit: {size}")
             payload_end = reader.tell() + size
             if payload_end > file_size:
+                # Reuse the strict terminal-tail classifier rather than turning
+                # every EOF overrun into a successful recording boundary.  The
+                # extra scan occurs only for an incomplete candidate; complete
+                # demos keep the original one-pass behavior.
+                reader.seek(0)
+                truncated_tail = _find_truncated_packet_tail(reader)
+                if (
+                    truncated_tail is not None
+                    and truncated_tail.frame_offset == frame_offset
+                ):
+                    return max_tick
                 raise _fail("outer frame payload extends past end of file")
             reader.seek(size, os.SEEK_CUR)
             # PBDEMS2 uses uint32(-1) on terminal metadata/stop frames.  It is
