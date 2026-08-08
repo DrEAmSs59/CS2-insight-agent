@@ -2500,8 +2500,14 @@ async def batch_ingest_demos(body: BatchIngestBody):
         try:
             working = await _library_working_demo_path(row)
             async with inspect_sem:
-                # Compat repair is deferred to play/analyze/record — ingest only
-                # needs lightweight inspect metadata for library cards.
+                # Finalize the narrowly classified unfinalized-demo shape (and
+                # apply 138/win-panel compatibility patches) before any parser
+                # reads the working copy. Normal demos remain byte-identical.
+                await asyncio.to_thread(
+                    ensure_demo_compatible,
+                    working,
+                    allow_truncated_packet_tail=True,
+                )
                 players, meta = await _inspect_demo_meta(working)
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.

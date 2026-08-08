@@ -6,7 +6,9 @@ legacy entity message ``EM_RemoveAllDecals`` (type 138).  The terminal
 panel, after which later ``demo_gototick`` commands are ignored.  This module
 can prepare a disposable playback copy without that event, and can atomically
 remove both compatibility blockers from the source demo after the rewritten
-file has passed a complete rescan.
+file has passed a complete rescan.  It can also finalize one strictly matched
+unfinalized-demo shape by rebuilding DEM_Stop, DEM_SpawnGroups, and
+DEM_FileInfo from the demo's complete prefix and DEM_Recovery records.
 
 Detection is content-based.  File dates and demo filenames are deliberately
 not used: a packet is changed only when type 138 has the exact, previously
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import struct
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -26,9 +29,13 @@ from typing import BinaryIO, Callable, Literal, Optional
 
 
 PATCH_ID = "drop-legacy-remove-all-decals-138"
-PATCH_REVISION = 3
+PATCH_REVISION = 4
 WIN_PANEL_PATCH_ID = "drop-cs-win-panel-match-gameevent-207"
 PERSISTENT_PATCH_ID = f"{PATCH_ID}+{WIN_PANEL_PATCH_ID}"
+UNFINALIZED_PATCH_ID = "recover-unfinalized-terminal-metadata"
+UNFINALIZED_PERSISTENT_PATCH_ID = (
+    f"{PERSISTENT_PATCH_ID}+{UNFINALIZED_PATCH_ID}"
+)
 
 _MAGIC = b"PBDEMS2\x00"
 _COMPRESSED_COMMAND_FLAG = 64
@@ -78,6 +85,8 @@ class PlaybackDemoReport:
     removed_win_panel_events: int = 0
     remaining_win_panel_events: int = 0
     tolerated_truncated_packet_tail: bool = False
+    recovered_unfinalized_demo: bool = False
+    discarded_truncated_packet_bytes: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -93,6 +102,17 @@ class TruncatedPacketTailRepair:
     available_payload_size: int
     missing_payload_bytes: int
     discarded_bytes: int
+
+
+@dataclass(frozen=True)
+class _UnfinalizedDemoRecoveryPlan:
+    """Strictly classified inputs needed to reproduce CS2's finalization."""
+
+    truncated_tail: TruncatedPacketTailRepair
+    spawn_group_messages: tuple[bytes, ...]
+    max_complete_tick: int
+    packet_frames: int
+    complete_frames: int
 
 
 @dataclass
@@ -769,6 +789,68 @@ def _parse_proto_fields(
     return target
 
 
+def _parse_single_length_delimited_proto_field(data: bytes) -> tuple[int, bytes]:
+    """Parse a protobuf containing exactly one canonical bytes field."""
+
+    key, pos, raw_key = _read_varint_bytes(
+        data,
+        0,
+        max_bits=64,
+        context="single-field protobuf key",
+    )
+    if raw_key != _encode_varint(key) or key == 0 or (key & 7) != 2:
+        raise _fail("recovery record is not one canonical length-delimited field")
+    size, value_start, raw_size = _read_varint_bytes(
+        data,
+        pos,
+        max_bits=64,
+        context="single-field protobuf length",
+    )
+    if raw_size != _encode_varint(size) or size > _MAX_PROTOBUF_FIELD_SIZE:
+        raise _fail("recovery record has a non-canonical or oversized field")
+    value_end = value_start + size
+    if value_end != len(data):
+        raise _fail("recovery record has a truncated value or trailing fields")
+    return key >> 3, data[value_start:value_end]
+
+
+def _parse_recovery_spawn_group_handle(data: bytes) -> int:
+    """Parse the exact ``handle + bool`` payload paired with a recovery blob."""
+
+    pos = 0
+    key, pos = _read_canonical_proto_varint(
+        data,
+        pos,
+        max_bits=64,
+        context="recovery handle field-1 key",
+    )
+    if key != (1 << 3):
+        raise _fail("recovery handle does not begin with varint field 1")
+    handle, pos = _read_canonical_proto_varint(
+        data,
+        pos,
+        max_bits=32,
+        context="recovery spawn-group handle",
+    )
+    key, pos = _read_canonical_proto_varint(
+        data,
+        pos,
+        max_bits=64,
+        context="recovery handle field-2 key",
+    )
+    if key != (2 << 3):
+        raise _fail("recovery handle second field is not varint field 2")
+    enabled, pos = _read_canonical_proto_varint(
+        data,
+        pos,
+        max_bits=64,
+        context="recovery spawn-group enabled flag",
+    )
+    if enabled != 1 or pos != len(data):
+        raise _fail("recovery handle is disabled or contains trailing fields")
+    return int(handle)
+
+
 def _replace_unique_length_delimited_field(
     data: bytes,
     *,
@@ -1128,6 +1210,278 @@ def _rewrite_stream(
     return stats
 
 
+def _encode_outer_frame(command: int, tick: int, payload: bytes) -> bytes:
+    return (
+        _encode_varint(command)
+        + _encode_varint(tick)
+        + _encode_varint(len(payload))
+        + payload
+    )
+
+
+def _build_spawn_groups_payload(messages: tuple[bytes, ...]) -> bytes:
+    return b"".join(
+        b"\x1a" + _encode_varint(len(message)) + message for message in messages
+    )
+
+
+def _build_file_info_payload(*, playback_ticks: int, playback_frames: int) -> bytes:
+    playback_time = float(playback_ticks) / 64.0
+    return (
+        b"\x0d"
+        + struct.pack("<f", playback_time)
+        + b"\x10"
+        + _encode_varint(playback_ticks)
+        + b"\x18"
+        + _encode_varint(playback_frames)
+    )
+
+
+def _rewrite_unfinalized_stream(
+    reader: BinaryIO,
+    writer: BinaryIO,
+    plan: _UnfinalizedDemoRecoveryPlan,
+    *,
+    drop_legacy_type138: bool,
+    drop_win_panel_match: bool,
+) -> _PatchStats:
+    """Patch playback blockers, then reproduce CS2's terminal finalization."""
+
+    header = _read_exact(reader, 16, context="PBDEMS2 short header")
+    if header[:8] != _MAGIC or header[8:16] != b"\x00" * 8:
+        raise _fail("unfinalized demo short header changed before rewrite")
+    writer.write(header)
+
+    stats = _PatchStats()
+    recovery_records: list[tuple[int, bytes]] = []
+    max_complete_tick = 0
+    packet_frames = 0
+    complete_frames = 0
+
+    while reader.tell() < plan.truncated_tail.frame_offset:
+        command_result = _read_stream_varint(
+            reader,
+            context="outer command",
+            allow_clean_eof=False,
+        )
+        assert command_result is not None
+        raw_command, raw_command_bytes = command_result
+        tick_result = _read_stream_varint(reader, context="outer tick")
+        size_result = _read_stream_varint(reader, context="outer payload size")
+        assert tick_result is not None and size_result is not None
+        tick, raw_tick_bytes = tick_result
+        size, raw_size_bytes = size_result
+        if size > _MAX_OUTER_FRAME_SIZE:
+            raise _fail(f"outer frame exceeds size limit: {size}")
+        payload = _read_exact(reader, size, context="outer frame payload")
+        if reader.tell() > plan.truncated_tail.frame_offset:
+            raise _fail("complete frame crosses the classified terminal packet")
+
+        command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+        if command == 18:
+            decoded_recovery = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            recovery_records.append(
+                _parse_single_length_delimited_proto_field(decoded_recovery)
+            )
+        if command == 7:
+            packet_frames += 1
+        if int(tick) != _U32_MAX:
+            max_complete_tick = max(max_complete_tick, int(tick))
+        complete_frames += 1
+        stats.outer_frames += 1
+
+        replacement: Optional[bytes] = None
+        if command in _PACKET_COMMANDS:
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            patched = _patch_outer_payload(
+                command,
+                decoded,
+                tick,
+                stats,
+                drop_legacy_type138=drop_legacy_type138,
+                drop_win_panel_match=drop_win_panel_match,
+                win_panel_match_tick=None,
+            )
+            if patched is not None:
+                replacement = (
+                    _snappy_compress(patched)
+                    if raw_command & _COMPRESSED_COMMAND_FLAG
+                    else patched
+                )
+
+        writer.write(raw_command_bytes)
+        # CS2 normalizes only the leading sentinel FileHeader to tick zero.
+        writer.write(_encode_varint(0) if complete_frames == 1 else raw_tick_bytes)
+        stored_payload = payload if replacement is None else replacement
+        writer.write(
+            raw_size_bytes
+            if replacement is None
+            else _encode_varint(len(stored_payload))
+        )
+        writer.write(stored_payload)
+
+    if reader.tell() != plan.truncated_tail.frame_offset:
+        raise _fail("classified terminal packet is not a frame boundary")
+    command_result = _read_stream_varint(reader, context="outer command")
+    tick_result = _read_stream_varint(reader, context="outer tick")
+    size_result = _read_stream_varint(reader, context="outer payload size")
+    assert (
+        command_result is not None
+        and tick_result is not None
+        and size_result is not None
+    )
+    tail_raw_command, _tail_command_bytes = command_result
+    tail_tick, _tail_tick_bytes = tick_result
+    tail_size, _tail_size_bytes = size_result
+    tail_payload = reader.read()
+    if (
+        (tail_raw_command & ~_COMPRESSED_COMMAND_FLAG) not in _PACKET_COMMANDS
+        or int(tail_tick) != plan.truncated_tail.tick
+        or int(tail_size) != plan.truncated_tail.declared_payload_size
+        or len(tail_payload) != plan.truncated_tail.available_payload_size
+    ):
+        raise _fail("classified terminal packet changed before rewrite")
+
+    paired_messages: list[bytes] = []
+    if len(recovery_records) % 2:
+        raise _fail("DEM_Recovery records changed before rewrite")
+    for pair_index in range(0, len(recovery_records), 2):
+        message_field, message = recovery_records[pair_index]
+        handle_field, handle_payload = recovery_records[pair_index + 1]
+        if (
+            message_field != 2
+            or handle_field != 1
+            or _parse_recovery_spawn_group_handle(handle_payload)
+            != pair_index // 2 + 1
+        ):
+            raise _fail("DEM_Recovery records changed before rewrite")
+        paired_messages.append(message)
+    if (
+        tuple(paired_messages) != plan.spawn_group_messages
+        or max_complete_tick != plan.max_complete_tick
+        or packet_frames != plan.packet_frames
+        or complete_frames != plan.complete_frames
+    ):
+        raise _fail("unfinalized demo prefix changed before rewrite")
+
+    writer.write(_encode_outer_frame(0, 0, b""))
+    spawn_groups_offset = writer.tell()
+    spawn_groups_payload = _snappy_compress(
+        _build_spawn_groups_payload(plan.spawn_group_messages)
+    )
+    writer.write(
+        _encode_outer_frame(
+            15 | _COMPRESSED_COMMAND_FLAG,
+            0,
+            spawn_groups_payload,
+        )
+    )
+    file_info_offset = writer.tell()
+    playback_ticks = plan.max_complete_tick + 1
+    writer.write(
+        _encode_outer_frame(
+            2,
+            0,
+            _build_file_info_payload(
+                playback_ticks=playback_ticks,
+                playback_frames=plan.packet_frames,
+            ),
+        )
+    )
+    stats.outer_frames += 3
+
+    if spawn_groups_offset > _U32_MAX or file_info_offset > _U32_MAX:
+        raise _fail("recovered short-header offset exceeds u32")
+    writer.seek(8)
+    writer.write(int(file_info_offset).to_bytes(4, "little"))
+    writer.write(int(spawn_groups_offset).to_bytes(4, "little"))
+    writer.seek(0, os.SEEK_END)
+    return stats
+
+
+def _verify_recovered_terminal_layout(
+    candidate: Path,
+    plan: _UnfinalizedDemoRecoveryPlan,
+) -> None:
+    """Verify the rebuilt Stop/SpawnGroups/FileInfo suffix before replace."""
+
+    frame_count = 0
+    first_frame: Optional[tuple[int, int, int, bytes]] = None
+    terminal_frames: list[tuple[int, int, int, bytes]] = []
+    with candidate.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        file_info_offset = int.from_bytes(header[8:12], "little")
+        spawn_groups_offset = int.from_bytes(header[12:16], "little")
+        while True:
+            frame_offset = reader.tell()
+            command_result = _read_stream_varint(
+                reader,
+                context="outer command",
+                allow_clean_eof=True,
+            )
+            if command_result is None:
+                break
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            tick, _raw_tick_bytes = tick_result
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            frame = (frame_offset, raw_command, tick, payload)
+            if first_frame is None:
+                first_frame = frame
+            terminal_frames.append(frame)
+            if len(terminal_frames) > 3:
+                del terminal_frames[0]
+            frame_count += 1
+
+    if frame_count != plan.complete_frames + 3 or first_frame is None:
+        raise _fail("recovered demo has an unexpected outer-frame count")
+    first_offset, first_command, first_tick, _first_payload = first_frame
+    if first_offset != 16 or first_command != 1 or first_tick != 0:
+        raise _fail("recovered DEM_FileHeader was not normalized to tick zero")
+
+    if len(terminal_frames) != 3:
+        raise _fail("recovered demo is missing terminal metadata frames")
+    stop, spawn_groups, file_info = terminal_frames
+    if stop[1:] != (0, 0, b""):
+        raise _fail("recovered demo does not end with an empty tick-zero DEM_Stop")
+    if (
+        spawn_groups[0] != spawn_groups_offset
+        or spawn_groups[1] != (15 | _COMPRESSED_COMMAND_FLAG)
+        or spawn_groups[2] != 0
+    ):
+        raise _fail("recovered DEM_SpawnGroups frame or header offset is invalid")
+    if _snappy_decompress(spawn_groups[3]) != _build_spawn_groups_payload(
+        plan.spawn_group_messages
+    ):
+        raise _fail("recovered DEM_SpawnGroups payload does not match DEM_Recovery")
+    expected_file_info = _build_file_info_payload(
+        playback_ticks=plan.max_complete_tick + 1,
+        playback_frames=plan.packet_frames,
+    )
+    if (
+        file_info[0] != file_info_offset
+        or file_info[1] != 2
+        or file_info[2] != 0
+        or file_info[3] != expected_file_info
+    ):
+        raise _fail("recovered DEM_FileInfo frame or header offset is invalid")
+
+
 def _files_equal(left: Path, right: Path) -> bool:
     try:
         if left.stat().st_size != right.stat().st_size:
@@ -1228,6 +1582,7 @@ def _verify_rewritten_demo(
     drop_legacy_type138: bool = True,
     drop_win_panel_match: bool = False,
     win_panel_match_tick: Optional[int] = None,
+    structural_recovery: bool = False,
 ) -> DemoCompatibilityScan:
     verification = scan_demo_playback_messages(
         rewritten,
@@ -1251,6 +1606,7 @@ def _verify_rewritten_demo(
     if (
         stats.removed_messages == 0
         and stats.removed_win_panel_events == 0
+        and not structural_recovery
         and not _files_equal(source, rewritten)
     ):
         raise _fail("clean rewritten demo is not byte-identical to its source")
@@ -1262,12 +1618,17 @@ def _build_report(
     verification: DemoCompatibilityScan,
     *,
     patch_id: str = PATCH_ID,
+    recovered_plan: Optional[_UnfinalizedDemoRecoveryPlan] = None,
 ) -> PlaybackDemoReport:
     return PlaybackDemoReport(
         schema_version=1,
         outcome=(
             "repaired"
-            if stats.removed_messages or stats.removed_win_panel_events
+            if (
+                stats.removed_messages
+                or stats.removed_win_panel_events
+                or recovered_plan is not None
+            )
             else "clean"
         ),
         patch_id=patch_id,
@@ -1280,6 +1641,12 @@ def _build_report(
         remaining_selected_messages=verification.selected_messages,
         removed_win_panel_events=stats.removed_win_panel_events,
         remaining_win_panel_events=verification.selected_win_panel_events,
+        recovered_unfinalized_demo=recovered_plan is not None,
+        discarded_truncated_packet_bytes=(
+            recovered_plan.truncated_tail.discarded_bytes
+            if recovered_plan is not None
+            else 0
+        ),
     )
 
 
@@ -1372,6 +1739,124 @@ def _find_truncated_packet_tail(
         complete_frames += 1
         if int(tick) != _U32_MAX:
             max_tick = max(max_tick, int(tick))
+
+
+def _classify_unfinalized_demo_recovery(
+    source: Path,
+    truncated_tail: TruncatedPacketTailRepair,
+) -> _UnfinalizedDemoRecoveryPlan:
+    """Accept only the tournament-demo shape CS2 can finalize itself.
+
+    The two missing terminal metadata frames are not inferred from a generic
+    EOF overrun.  Eligibility additionally requires an empty short header,
+    no existing Stop/FileInfo/SpawnGroups frame, a sentinel FileHeader, and a
+    complete alternating set of DEM_Recovery spawn-group records.
+    """
+
+    recovery_records: list[tuple[int, bytes]] = []
+    max_complete_tick = 0
+    packet_frames = 0
+    complete_frames = 0
+
+    with source.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        if header[8:16] != b"\x00" * 8:
+            raise _fail(
+                "truncated terminal packet is not eligible for recovery: "
+                "FileInfo/SpawnGroups offsets are not both zero"
+            )
+
+        while reader.tell() < truncated_tail.frame_offset:
+            frame_offset = reader.tell()
+            command_result = _read_stream_varint(
+                reader,
+                context="outer command",
+                allow_clean_eof=False,
+            )
+            assert command_result is not None
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            tick, _raw_tick_bytes = tick_result
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            if reader.tell() > truncated_tail.frame_offset:
+                raise _fail("complete frame crosses the classified terminal packet")
+
+            command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+            if complete_frames == 0 and (
+                command != 1
+                or raw_command & _COMPRESSED_COMMAND_FLAG
+                or int(tick) != _U32_MAX
+            ):
+                raise _fail(
+                    "truncated terminal packet is not eligible for recovery: "
+                    "first frame is not the sentinel DEM_FileHeader"
+                )
+            if command in (0, 2, 15):
+                raise _fail(
+                    "truncated terminal packet is not eligible for recovery: "
+                    "terminal metadata already exists in the complete prefix"
+                )
+
+            if command == 18:
+                if int(tick) != _U32_MAX:
+                    raise _fail("DEM_Recovery frame does not use the sentinel tick")
+                decoded = (
+                    _snappy_decompress(payload)
+                    if raw_command & _COMPRESSED_COMMAND_FLAG
+                    else payload
+                )
+                recovery_records.append(
+                    _parse_single_length_delimited_proto_field(decoded)
+                )
+
+            if command == 7:
+                packet_frames += 1
+            if int(tick) != _U32_MAX:
+                max_complete_tick = max(max_complete_tick, int(tick))
+            complete_frames += 1
+
+        if reader.tell() != truncated_tail.frame_offset:
+            raise _fail("classified terminal packet is not a frame boundary")
+
+    if complete_frames <= 0 or packet_frames <= 0:
+        raise _fail("unfinalized demo recovery has no complete packet frames")
+    if truncated_tail.tick != max_complete_tick + 1:
+        raise _fail(
+            "truncated terminal packet is not eligible for recovery: "
+            "its tick is not immediately after the complete prefix"
+        )
+    if not recovery_records or len(recovery_records) % 2:
+        raise _fail("DEM_Recovery spawn-group records are missing or unpaired")
+
+    spawn_group_messages: list[bytes] = []
+    for pair_index in range(0, len(recovery_records), 2):
+        message_field, message = recovery_records[pair_index]
+        handle_field, handle_payload = recovery_records[pair_index + 1]
+        expected_handle = pair_index // 2 + 1
+        if message_field != 2 or handle_field != 1:
+            raise _fail(
+                "DEM_Recovery records do not alternate spawn-group message/handle"
+            )
+        if _parse_recovery_spawn_group_handle(handle_payload) != expected_handle:
+            raise _fail("DEM_Recovery spawn-group handles are not sequential")
+        if not message:
+            raise _fail("DEM_Recovery contains an empty spawn-group message")
+        spawn_group_messages.append(message)
+
+    return _UnfinalizedDemoRecoveryPlan(
+        truncated_tail=truncated_tail,
+        spawn_group_messages=tuple(spawn_group_messages),
+        max_complete_tick=max_complete_tick,
+        packet_frames=packet_frames,
+        complete_frames=complete_frames,
+    )
 
 
 def repair_truncated_packet_tail_in_place(
@@ -1548,12 +2033,12 @@ def repair_demo_in_place(
     rewriting, verification, metadata copying, or replacement fails, the
     original path still refers to the original file.
 
-    ``allow_truncated_packet_tail`` is an analysis-only compatibility escape
-    hatch.  It accepts exactly the narrow terminal packet shape classified by
-    :func:`_find_truncated_packet_tail`, scans the complete prefix as a logical
-    file, and never removes the incomplete bytes.  Compatibility messages in
-    the retained prefix are reported but not rewritten, because CS2 may still
-    recover only the unfinalized demo's original byte stream.
+    ``allow_truncated_packet_tail`` enables one additional, deliberately strict
+    finalization path.  A generic incomplete packet is still rejected.  Only a
+    demo with empty FileInfo/SpawnGroups offsets, no complete terminal metadata,
+    a sentinel FileHeader, and a complete paired DEM_Recovery set is eligible.
+    The normal 138/win-panel rewrites run first; then the incomplete packet is
+    replaced by the same Stop/SpawnGroups/FileInfo suffix CS2 reconstructs.
     """
 
     source = Path(source_path)
@@ -1561,6 +2046,7 @@ def repair_demo_in_place(
         raise FileNotFoundError(f"Demo file not found: {source}")
     source_before = _stat_fingerprint(source.stat())
     truncated_tail: Optional[TruncatedPacketTailRepair] = None
+    recovered_plan: Optional[_UnfinalizedDemoRecoveryPlan] = None
 
     if allow_truncated_packet_tail:
         with source.open("rb") as reader:
@@ -1569,43 +2055,39 @@ def repair_demo_in_place(
             truncated_tail = _find_truncated_packet_tail(reader)
         if _stat_fingerprint(source.stat()) != source_before:
             raise _fail("source demo changed while terminal-tail scan was running")
+        if truncated_tail is not None:
+            recovered_plan = _classify_unfinalized_demo_recovery(
+                source,
+                truncated_tail,
+            )
+            if _stat_fingerprint(source.stat()) != source_before:
+                raise _fail(
+                    "source demo changed while terminal recovery was classified"
+                )
 
     # A clean demo needs only one read pass and no full-size temporary copy.
     # Legacy demos normally expose the first selected message near the start.
     # A panel-only demo requires one full scan to find its terminal event, then
     # continues through the same rewrite + full verification path.
-    with source.open("rb") as reader:
-        if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
-            raise _fail("source demo changed before compatibility scan started")
-        initial_stats, _ = _scan_stream(
-            reader,
-            stop_after_first_selected=True,
-            drop_legacy_type138=True,
-            drop_win_panel_match=True,
-            logical_end_offset=(
-                truncated_tail.frame_offset if truncated_tail is not None else None
-            ),
-        )
-    if _stat_fingerprint(source.stat()) != source_before:
-        raise _fail("source demo changed while compatibility scan was running")
-    if truncated_tail is not None:
-        return PlaybackDemoReport(
-            schema_version=1,
-            outcome="tolerated",
-            patch_id=PERSISTENT_PATCH_ID,
-            patch_revision=PATCH_REVISION,
-            removed_messages=0,
-            changed_frames=0,
-            first_tick=None,
-            last_tick=None,
-            max_per_frame=0,
-            remaining_selected_messages=initial_stats.removed_messages,
-            removed_win_panel_events=0,
-            remaining_win_panel_events=initial_stats.removed_win_panel_events,
-            tolerated_truncated_packet_tail=True,
-        )
+    if recovered_plan is None:
+        with source.open("rb") as reader:
+            if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+                raise _fail("source demo changed before compatibility scan started")
+            initial_stats, _ = _scan_stream(
+                reader,
+                stop_after_first_selected=True,
+                drop_legacy_type138=True,
+                drop_win_panel_match=True,
+            )
+        if _stat_fingerprint(source.stat()) != source_before:
+            raise _fail("source demo changed while compatibility scan was running")
+    else:
+        # Recovery always changes the suffix, so the rewrite pass can perform
+        # the compatibility scan and patch without a redundant packet decode.
+        initial_stats = _PatchStats(outer_frames=recovered_plan.complete_frames)
     if (
-        initial_stats.removed_messages == 0
+        recovered_plan is None
+        and initial_stats.removed_messages == 0
         and initial_stats.removed_win_panel_events == 0
     ):
         clean_scan = DemoCompatibilityScan(
@@ -1636,12 +2118,21 @@ def repair_demo_in_place(
         with temp_file as writer, source.open("rb") as reader:
             if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
                 raise _fail("source demo changed before compatibility repair started")
-            stats = _rewrite_stream(
-                reader,
-                writer,
-                drop_legacy_type138=True,
-                drop_win_panel_match=True,
-            )
+            if recovered_plan is None:
+                stats = _rewrite_stream(
+                    reader,
+                    writer,
+                    drop_legacy_type138=True,
+                    drop_win_panel_match=True,
+                )
+            else:
+                stats = _rewrite_unfinalized_stream(
+                    reader,
+                    writer,
+                    recovered_plan,
+                    drop_legacy_type138=True,
+                    drop_win_panel_match=True,
+                )
             writer.flush()
             os.fsync(writer.fileno())
 
@@ -1653,11 +2144,19 @@ def repair_demo_in_place(
             stats,
             drop_legacy_type138=True,
             drop_win_panel_match=True,
+            structural_recovery=recovered_plan is not None,
         )
+        if recovered_plan is not None:
+            _verify_recovered_terminal_layout(temp_path, recovered_plan)
         report = _build_report(
             stats,
             verification,
-            patch_id=PERSISTENT_PATCH_ID,
+            patch_id=(
+                UNFINALIZED_PERSISTENT_PATCH_ID
+                if recovered_plan is not None
+                else PERSISTENT_PATCH_ID
+            ),
+            recovered_plan=recovered_plan,
         )
         if report.outcome == "clean":
             return report

@@ -773,11 +773,11 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
         return Path(str(row["path"]))
 
     monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
-    compat_calls: list[str] = []
+    compat_calls: list[tuple[str, bool]] = []
 
-    def fake_ensure(path):
-        compat_calls.append(str(path))
-        raise AssertionError("batch ingest must not call ensure_demo_compatible")
+    def fake_ensure(path, *, allow_truncated_packet_tail=False):
+        compat_calls.append((str(path), allow_truncated_packet_tail))
+        return SimpleNamespace()
 
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(
@@ -797,7 +797,10 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
     )
 
     assert response == {"ingested": 3, "failed": []}
-    assert compat_calls == []
+    assert compat_calls == [
+        (str(tmp_path / f"match-{demo_id}.dem"), True)
+        for demo_id in (1, 2, 3)
+    ]
     assert max_active == 2
     assert [call.args[0] for call in index_stats.await_args_list] == [1, 2, 3]
     assert [

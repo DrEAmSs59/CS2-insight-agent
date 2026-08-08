@@ -119,9 +119,9 @@ def ensure_demo_compatible(
 ) -> DemoCompatibilityEnsureResult:
     """Classify/repair a demo once, then cache its content fingerprint.
 
-    By default, a narrowly validated incomplete terminal packet is treated as
-    a logical EOF for analysis, but its bytes are never removed or replaced.
-    Strict callers can explicitly disable that tolerance.
+    By default, the narrowly validated CS2-unfinalized demo shape is finalized
+    atomically before downstream parsing. Generic truncated packets remain hard
+    failures. Strict callers can explicitly disable terminal recovery.
     """
 
     source = Path(source_path).resolve(strict=True)
@@ -152,13 +152,15 @@ def ensure_demo_compatible(
             else {}
         )
         report = repair_demo_in_place(source, **repair_options)
-        if report.tolerated_truncated_packet_tail:
+        if report.recovered_unfinalized_demo:
             logger.warning(
-                "Accepted incomplete terminal packet for analysis without modifying demo: "
-                "path=%s remaining_type138=%d remaining_win_panel=%d",
+                "Recovered unfinalized demo terminal metadata after compatibility patches: "
+                "path=%s discarded_tail_bytes=%d removed_type138=%d "
+                "removed_win_panel=%d",
                 source,
-                report.remaining_selected_messages,
-                report.remaining_win_panel_events,
+                report.discarded_truncated_packet_bytes,
+                report.removed_messages,
+                report.removed_win_panel_events,
             )
         repaired_fingerprint = _fingerprint(source)
         with _cache_lock:

@@ -80,7 +80,7 @@ def test_ensure_demo_compatible_invalidates_when_file_changes(monkeypatch, tmp_p
     assert calls == 2
 
 
-def test_terminal_tail_tolerance_is_default_but_can_be_strict(monkeypatch, tmp_path: Path):
+def test_terminal_recovery_is_default_but_can_be_strict(monkeypatch, tmp_path: Path):
     source = tmp_path / "match.dem"
     source.write_bytes(b"demo-bytes")
     ensure_options: list[bool] = []
@@ -100,19 +100,23 @@ def test_terminal_tail_tolerance_is_default_but_can_be_strict(monkeypatch, tmp_p
     assert ensure_options == [True, False]
 
 
-def test_tolerated_terminal_tail_is_cached_without_changing_uploaded_bytes(
+def test_recovered_terminal_tail_is_cached_after_atomic_finalization(
     monkeypatch,
     tmp_path: Path,
 ):
     source = tmp_path / "unfinalized.dem"
+    recovery_message = b"\x12\x05spawn"
+    recovery_handle = b"\x0a\x04\x08\x01\x10\x01"
     source_bytes = (
         b"PBDEMS2\x00"
         + b"\x00" * 8
-        + _frame(1, 0, b"header")
+        + _frame(1, (1 << 32) - 1, b"header")
+        + _frame(18, (1 << 32) - 1, recovery_message)
+        + _frame(18, (1 << 32) - 1, recovery_handle)
+        + _frame(7, 42, b"")
         + _frame(7, 43, b"partial", declared_size=12)
     )
     source.write_bytes(source_bytes)
-    original_stat = source.stat()
     monkeypatch.setattr(service, "_cache_path", lambda: tmp_path / "cache.json")
 
     first = service.ensure_demo_compatible(
@@ -122,9 +126,8 @@ def test_tolerated_terminal_tail_is_cached_without_changing_uploaded_bytes(
     second = service.ensure_demo_compatible(source)
 
     assert first.cached is False
-    assert first.report.outcome == "tolerated"
-    assert first.report.tolerated_truncated_packet_tail is True
+    assert first.report.outcome == "repaired"
+    assert first.report.recovered_unfinalized_demo is True
     assert second.cached is True
     assert second.report == first.report
-    assert source.read_bytes() == source_bytes
-    assert source.stat().st_mtime_ns == original_stat.st_mtime_ns
+    assert source.read_bytes() != source_bytes

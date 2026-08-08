@@ -178,6 +178,44 @@ def test_reads_real_outer_frame_end_tick_without_decoding_payloads(tmp_path: Pat
     assert compat._stat_fingerprint(source.stat()) == original_stat
 
 
+def _recovery_frames(messages: list[bytes]) -> bytes:
+    frames: list[bytes] = []
+    for handle, message in enumerate(messages, start=1):
+        message_record = b"\x12" + compat._encode_varint(len(message)) + message
+        handle_payload = b"\x08" + compat._encode_varint(handle) + b"\x10\x01"
+        handle_record = (
+            b"\x0a"
+            + compat._encode_varint(len(handle_payload))
+            + handle_payload
+        )
+        frames.append(_frame(18, compat._U32_MAX, message_record))
+        frames.append(_frame(18, compat._U32_MAX, handle_record))
+    return b"".join(frames)
+
+
+def _unfinalized_demo(
+    complete_frames: list[bytes],
+    *,
+    terminal_tick: int,
+    missing_tail_bytes: int = 3,
+    recovery_messages: list[bytes] | None = None,
+) -> bytes:
+    terminal = _frame(
+        7,
+        terminal_tick,
+        _packet_proto(_packet_data([(76, b"partial-tail")])),
+    )
+    assert 0 < missing_tail_bytes < len(terminal)
+    return (
+        b"PBDEMS2\x00"
+        + b"\x00" * 8
+        + _frame(1, compat._U32_MAX, b"file-header")
+        + _recovery_frames(recovery_messages or [b"spawn-group-one"])
+        + b"".join(complete_frames)
+        + terminal[:-missing_tail_bytes]
+    )
+
+
 def test_read_end_tick_tolerates_terminal_packet_without_modifying_file(
     tmp_path: Path,
 ):
@@ -285,24 +323,49 @@ def test_persistent_repair_does_not_implicitly_discard_truncated_tail(tmp_path: 
     assert source.read_bytes() == source_bytes
 
 
-def test_analysis_tolerance_keeps_truncated_terminal_packet_byte_identical(
+def test_unfinalized_demo_recovery_rebuilds_terminal_metadata_atomically(
     tmp_path: Path,
 ):
-    first = _frame(1, 0, b"file-header")
-    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
-    source_bytes = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + terminal[:-3]
+    complete = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    source_bytes = _unfinalized_demo(
+        [complete],
+        terminal_tick=43,
+        recovery_messages=[b"spawn-one", b"spawn-two"],
+    )
     source = _write(tmp_path / "source.dem", source_bytes)
-    original_stat = compat._stat_fingerprint(source.stat())
 
     report = compat.repair_demo_in_place(
         source,
         allow_truncated_packet_tail=True,
     )
 
-    assert report.outcome == "tolerated"
-    assert report.tolerated_truncated_packet_tail is True
-    assert source.read_bytes() == source_bytes
-    assert compat._stat_fingerprint(source.stat()) == original_stat
+    assert report.outcome == "repaired"
+    assert report.recovered_unfinalized_demo is True
+    assert report.tolerated_truncated_packet_tail is False
+    assert report.discarded_truncated_packet_bytes > 0
+    assert source.read_bytes() != source_bytes
+    assert compat.read_demo_end_tick(source) == 42
+
+    recovered = source.read_bytes()
+    file_info_offset = int.from_bytes(recovered[8:12], "little")
+    spawn_groups_offset = int.from_bytes(recovered[12:16], "little")
+    assert _command_at(recovered, file_info_offset) == 2
+    assert _command_at(recovered, spawn_groups_offset) == 15
+
+    first_command, pos = _read_varint_at(recovered, 16)
+    first_tick, _pos = _read_varint_at(recovered, pos)
+    assert first_command == 1
+    assert first_tick == 0
+
+    recovered_stat = compat._stat_fingerprint(source.stat())
+    second_report = compat.repair_demo_in_place(
+        source,
+        allow_truncated_packet_tail=True,
+    )
+    assert second_report.outcome == "clean"
+    assert second_report.recovered_unfinalized_demo is False
+    assert source.read_bytes() == recovered
+    assert compat._stat_fingerprint(source.stat()) == recovered_stat
     assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
 
 
@@ -326,17 +389,25 @@ def test_analysis_tolerance_rejects_truncated_metadata_without_modifying_source(
     assert source.read_bytes() == source_bytes
 
 
-def test_analysis_tolerance_reports_but_does_not_rewrite_affected_prefix(
+def test_unfinalized_recovery_runs_138_and_win_panel_patches_before_finalization(
     tmp_path: Path,
 ):
     affected = _frame(
         7,
         42,
-        _packet_proto(_packet_data([(138, _remove_decals_payload(300_000))])),
+        _packet_proto(
+            _packet_data(
+                [
+                    (138, _remove_decals_payload(300_000)),
+                    (207, _win_panel_event_payload(42)),
+                    (76, b"retained"),
+                ]
+            )
+        ),
     )
-    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
-    source_bytes = (
-        b"PBDEMS2\x00" + (0).to_bytes(8, "little") + affected + terminal[:-3]
+    source_bytes = _unfinalized_demo(
+        [affected],
+        terminal_tick=43,
     )
     source = _write(tmp_path / "source.dem", source_bytes)
 
@@ -345,10 +416,35 @@ def test_analysis_tolerance_reports_but_does_not_rewrite_affected_prefix(
         allow_truncated_packet_tail=True,
     )
 
-    assert report.outcome == "tolerated"
-    assert report.tolerated_truncated_packet_tail is True
-    assert report.removed_messages == 0
-    assert report.remaining_selected_messages == 1
+    assert report.outcome == "repaired"
+    assert report.recovered_unfinalized_demo is True
+    assert report.removed_messages == 1
+    assert report.removed_win_panel_events == 1
+    assert report.remaining_selected_messages == 0
+    assert report.remaining_win_panel_events == 0
+    assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
+
+
+def test_tail_without_recovery_records_is_not_eligible_and_stays_unchanged(
+    tmp_path: Path,
+):
+    complete = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    source_bytes = (
+        b"PBDEMS2\x00"
+        + b"\x00" * 8
+        + _frame(1, compat._U32_MAX, b"file-header")
+        + complete
+        + terminal[:-3]
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="Recovery spawn-group records are missing",
+    ):
+        compat.repair_demo_in_place(source, allow_truncated_packet_tail=True)
+
     assert source.read_bytes() == source_bytes
     assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
 
@@ -744,7 +840,10 @@ def test_in_place_clean_demo_is_not_replaced(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(compat, "_rewrite_stream", unexpected_rewrite)
 
-    report = compat.repair_demo_in_place(source)
+    report = compat.repair_demo_in_place(
+        source,
+        allow_truncated_packet_tail=True,
+    )
 
     assert report.outcome == "clean"
     assert source.read_bytes() == original
