@@ -467,7 +467,43 @@ def build_batch_and_plan(
         "steamid": str(steamid),
         "items": plan_entries,
     }
-    return batch_items, plan_json
+    return _dedupe_zero_id_weapon_batch_items(batch_items), plan_json
+
+
+def _dedupe_zero_id_weapon_batch_items(
+    batch_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse duplicate vanilla gun rules that only differ by T/CT team.
+
+    Cosmetics UI can show the same zero-id weapon on both sides; skin-core binds
+    one provenance entity. Keep the first paint and drop ``team`` when multiple
+    sides were requested so resolve matches whichever entity exists. Knife/glove
+    zero-id rules stay team-scoped (defs >= 500).
+    """
+    seen_def_index: dict[int, int] = {}
+    out: list[dict[str, Any]] = []
+    for item in batch_items:
+        if str(item.get("item_id64") or "") != "0":
+            out.append(item)
+            continue
+        try:
+            def_index = int(item["definition_index"])
+        except (KeyError, TypeError, ValueError):
+            out.append(item)
+            continue
+        # Knives (500–599) and gloves (>=5000) keep per-side materialize rules.
+        if def_index >= 500:
+            out.append(item)
+            continue
+        prior_idx = seen_def_index.get(def_index)
+        if prior_idx is None:
+            seen_def_index[def_index] = len(out)
+            out.append(dict(item))
+            continue
+        prior = out[prior_idx]
+        if prior.get("team") != item.get("team"):
+            prior.pop("team", None)
+    return out
 
 
 def build_batch_from_plan_json(
@@ -641,7 +677,10 @@ def map_item_statuses(
         if unscoped is not None:
             return unscoped
         matches = [meta for (key, _), meta in mapping.items() if key == identity]
-        return matches[0] if len(matches) == 1 else {}
+        # Zero-id weapons may have both T and CT plan slots after UI dual-side
+        # display + batch dedupe. Prefer any named match over empty meta (which
+        # caused the save dialog to render bare item_id64 "0").
+        return matches[0] if matches else {}
 
     out: list[dict[str, Any]] = []
     for row in statuses or []:

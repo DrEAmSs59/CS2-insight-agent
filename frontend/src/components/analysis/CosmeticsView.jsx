@@ -229,10 +229,13 @@ function saveResultOriginalName(row, locale) {
 function saveResultReplacementName(row, locale) {
   const zh = String(row?.replacement_name_zh || row?.name_zh || "").trim();
   const en = String(row?.replacement_name_en || row?.name_en || "").trim();
+  const fallbackId = String(row?.item_id64 || "").trim();
+  // Never surface bare zero-id as a label (vanilla slots use item_id64 "0").
+  const idLabel = fallbackId && fallbackId !== "0" ? fallbackId : "";
   if (String(locale || "").toLowerCase().startsWith("zh")) {
-    return zh || en || String(row?.item_id64 || "");
+    return zh || en || idLabel;
   }
-  return en || zh || String(row?.item_id64 || "");
+  return en || zh || idLabel;
 }
 
 function saveFailureMessage(result, t) {
@@ -265,8 +268,18 @@ function enrichSaveResultRows(rows, inventoryRows, replacements) {
   return (Array.isArray(rows) ? rows : []).map((row) => {
     const slot = String(row?.slot_key || "").trim();
     const itemId = String(row?.item_id64 || "").trim();
-    const original = (slot && bySlot.get(slot)) || (itemId && byItemId.get(itemId)) || null;
-    const replacement = (slot && replacements?.[slot]) || null;
+    let original = (slot && bySlot.get(slot)) || (itemId && itemId !== "0" && byItemId.get(itemId)) || null;
+    if (!original && itemId === "0") {
+      const def = Number(row?.definition_index);
+      if (Number.isFinite(def) && def > 0) {
+        original = (inventoryRows || []).find((item) => Number(item?.def_index) === def) || null;
+      }
+    }
+    const replacement = (slot && replacements?.[slot])
+      || (original && replacements?.[teamSlotKey(original, "ct")])
+      || (original && replacements?.[teamSlotKey(original, "t")])
+      || (original && replacements?.[slotKey(original)])
+      || null;
     return {
       ...row,
       original_name_zh: row?.original_name_zh || original?.name_zh || "",
@@ -1046,13 +1059,18 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         setSavedReplacements(seeded);
         setSavedOriginals(originals);
         if (failed.length > 0) {
+          // Keep succeeded overlays from the saved plan; only retain failed slots as
+          // pending so the grid refreshes immediately (switching players used to be
+          // required because we dropped succeeded keys from localReplacements).
           const failedKeys = new Set(failed.map((row) => row?.slot_key).filter(Boolean));
-          setLocalReplacements((prev) =>
-            Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
-          );
-          setOriginalBySlot((prev) =>
-            Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
-          );
+          setLocalReplacements((prev) => ({
+            ...seeded,
+            ...Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+          }));
+          setOriginalBySlot((prev) => ({
+            ...originals,
+            ...Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+          }));
           setNotice({ tone: "info", text: t("analysis.cosmetics.savePartial") });
         } else {
           setLocalReplacements(seeded);

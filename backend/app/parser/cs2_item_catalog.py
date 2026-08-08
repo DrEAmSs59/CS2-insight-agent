@@ -68,6 +68,32 @@ def resolve_weapon_model(value: object) -> str:
     return ""
 
 
+@lru_cache(maxsize=1)
+def _weapon_model_to_def_index() -> dict[str, int]:
+    bases = load_cs2_item_catalog().get("bases") or {}
+    out: dict[str, int] = {}
+    for key, item in bases.items():
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "") != "weapon":
+            continue
+        model = str(item.get("model") or "").strip()
+        if not model:
+            continue
+        try:
+            out[model] = int(key)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def def_index_for_purchase_item_name(item_name: object) -> int | None:
+    """Map demoparser item_purchase.item_name (e.g. AWP) to a weapon def_index."""
+    model = resolve_weapon_model(item_name)
+    if not model:
+        return None
+    return _weapon_model_to_def_index().get(model)
+
 def cs2_weapon_translation_map() -> dict[str, str]:
     bases = load_cs2_item_catalog().get("bases") or {}
     return {
@@ -774,15 +800,50 @@ def _sample_player_context(
     }
 
 
+def _live_weapon_purchase_defs(
+    parser: object,
+    match_start_tick: int,
+) -> dict[str, set[int]]:
+    """Return steamid -> weapon def_index set bought at/after match start."""
+    parse_event = getattr(parser, "parse_event", None)
+    if not callable(parse_event) or int(match_start_tick or 0) <= 0:
+        return {}
+    try:
+        table = parse_event("item_purchase")
+    except Exception as exc:  # noqa: BLE001 - cosmetics never block analysis
+        logger.info("CS2 item_purchase unavailable for cosmetics gate: %s", exc)
+        return {}
+    rows = _records_from_columns(table)
+    out: dict[str, set[int]] = {}
+    start = int(match_start_tick)
+    for row in rows:
+        tick = _safe_int(row.get("tick"))
+        if tick is None or tick < start:
+            continue
+        steamid = _safe_text(row.get("steamid"))
+        if not steamid:
+            continue
+        def_index = def_index_for_purchase_item_name(row.get("item_name"))
+        if def_index is None:
+            continue
+        out.setdefault(steamid, set()).add(def_index)
+    return out
+
+
 def build_player_cosmetic_inventory(
     parser: object,
     *,
     sample_ticks: Sequence[int] | None = None,
+    match_start_tick: int = 0,
 ) -> dict[str, list[dict[str, Any]]]:
     """Build evidence-only owned cosmetics keyed by their owner SteamID.
 
     Ownership comes from SteamID-bearing demo economy entities. Weapon entities
     are attributed through their economy account ID, never OriginalOwnerXuid.
+
+    When ``match_start_tick > 0``, gun cosmetics additionally require a live-phase
+    ``item_purchase`` for that player+weapon def (warmup buys do not count).
+    Knives/gloves/agents are unchanged.
     """
     parse_skins = getattr(parser, "parse_skins", None)
     rows: list[dict[str, Any]] = []
@@ -792,9 +853,14 @@ def build_player_cosmetic_inventory(
         except Exception as exc:  # noqa: BLE001 - cosmetics never block analysis
             logger.info("CS2 owned cosmetic metadata unavailable: %s", exc)
 
+    live_sample_ticks = sample_ticks
+    start_tick = int(match_start_tick or 0)
+    if start_tick > 0 and sample_ticks is not None:
+        live_sample_ticks = [tick for tick in sample_ticks if int(tick) >= start_tick]
+
     context = _sample_player_context(
         parser,
-        sample_ticks,
+        live_sample_ticks,
         known_steamids=[_safe_text(row.get("steamid")) for row in rows],
     )
     item_teams = context["item_teams"]
@@ -806,6 +872,9 @@ def build_player_cosmetic_inventory(
     default_weapons = context["default_weapons"]
     pawn_gloves = context["pawn_gloves"]
     agents = context["agents"]
+    live_weapon_buys = (
+        _live_weapon_purchase_defs(parser, start_tick) if start_tick > 0 else None
+    )
     grouped: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
         entry = _skin_entry(row)
@@ -821,6 +890,10 @@ def build_player_cosmetic_inventory(
         # item can be shown under a player.
         if entry.get("type") == "melee" and item_accounts.get(item_id or 0) != steamid:
             continue
+        if entry.get("type") == "weapon" and live_weapon_buys is not None:
+            def_index = int(entry["def_index"])
+            if def_index not in live_weapon_buys.get(steamid, set()):
+                continue
         signature: tuple[Any, ...] = (
             ("item", item_id)
             if item_id is not None and item_id > 0
@@ -845,6 +918,16 @@ def build_player_cosmetic_inventory(
         grouped.setdefault(steamid, {}).setdefault(signature, entry)
 
     for (steamid, item_id), observed_entry in observed_items.items():
+        if (
+            live_weapon_buys is not None
+            and str(observed_entry.get("type") or "") == "weapon"
+        ):
+            try:
+                def_index = int(observed_entry.get("def_index"))
+            except (TypeError, ValueError):
+                continue
+            if def_index not in live_weapon_buys.get(steamid, set()):
+                continue
         owner_entries = grouped.setdefault(steamid, {})
         matching = next((
             entry
@@ -886,6 +969,10 @@ def build_player_cosmetic_inventory(
             owner_entries.setdefault(("item", item_id), observed_entry)
 
     for (steamid, def_index), default_entry in default_weapons.items():
+        if live_weapon_buys is not None and def_index not in live_weapon_buys.get(
+            steamid, set()
+        ):
+            continue
         owner_entries = grouped.setdefault(steamid, {})
         # Prefer a real economy-backed finish for the same definition when present.
         if any(

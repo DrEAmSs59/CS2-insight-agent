@@ -794,6 +794,12 @@ describe("CosmeticsView", () => {
     expect(within(result).getByText("刺刀 | 多普勒")).toBeTruthy();
     expect(within(result).getByText(/该饰品无法修改|could not be changed/i)).toBeTruthy();
     expect(within(result).queryByText(/need a donor knife/i)).toBeNull();
+    fireEvent.click(screen.getByTestId("cosmetics-save-result-close"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("cosmetics-save-result")).toBeNull();
+    });
+    // Succeeded overlays must stay visible without remounting / switching players.
+    expect(screen.getByText(/→\s*AK新皮|AK新皮/)).toBeTruthy();
   });
 
   test("save result dialog enriches original names from inventory when API omits them", async () => {

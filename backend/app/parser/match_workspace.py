@@ -1213,6 +1213,7 @@ def build_match_workspace(
         player_cosmetics = build_player_cosmetic_inventory(
             parser,
             sample_ticks=sorted(cosmetic_sample_ticks),
+            match_start_tick=int(match_start_tick or 0),
         ) if parser is not None else {}
     except Exception:  # noqa: BLE001 - optional catalog enrichment never blocks analysis
         logger.exception("build_player_cosmetic_inventory failed")
@@ -1261,8 +1262,9 @@ def build_match_workspace(
         "players": stats,
         "rounds": rounds_out,
         "cosmetics": {
-            "version": 6,
+            "version": 7,
             "ownership_source": "demo_economy_entities",
+            "weapon_ownership_gate": "live_item_purchase",
             "players": player_cosmetics,
         },
         "effect_tracks_version": 1,

@@ -795,7 +795,8 @@ def get_player_list(
             rec["team"] = team_val
 
     # Seed the full playing roster so a 0/0 player is not lost merely because
-    # they never appeared in player_death.
+    # they never appeared in player_death. Skip GOTV/bot/disconnect placeholders
+    # whose "steamid" is a tiny fake id (e.g. "11"), or they inflate 5v5 to 11.
     pi_team_col = _player_info_team_col(pi) if not pi.empty else None
     if not pi.empty and "name" in pi.columns:
         for _, row in pi.iterrows():
@@ -803,6 +804,8 @@ def get_player_list(
             sid = _steam_id_cell(row.get("steamid")) if "steamid" in pi.columns else None
             team = _cell_team(row.get(pi_team_col)) if pi_team_col else None
             if not name or team not in (2, 3):
+                continue
+            if "steamid" in pi.columns and not _is_real_steamid64(sid):
                 continue
             _, rec = _touch(name, sid, row.get("user_id"))
             _set_team_if_missing(rec, team)
@@ -888,6 +891,8 @@ def get_player_list(
     for rec in ordered:
         name = str(rec["name"])
         steam_id = str(rec.get("steam_id") or "") or None
+        if steam_id and not _is_real_steamid64(steam_id):
+            continue
         event_uid = _user_id_cell(rec.get("event_user_id"))
         rows.append(
             {

@@ -751,6 +751,119 @@ def test_default_buy_weapon_without_econ_id_attributes_to_holder_as_vanilla():
     assert weapons[0]["ownership_evidence"] == "default_weapon_no_econ_id"
 
 
+def test_weapons_require_live_match_purchase_when_match_start_provided():
+    """Warmup buys must not unlock cosmetics; live item_purchase is required."""
+    owner = "76561198000000001"
+    item_id = (12 << 32) | 1634679555
+
+    def make_parser(*, purchase_ticks: list[int]):
+        class FakeParser:
+            def parse_skins(self):
+                return {}
+
+            def parse_event(self, name):
+                if name != "item_purchase":
+                    raise AssertionError(name)
+                return {
+                    "tick": list(purchase_ticks),
+                    "steamid": [int(owner)] * len(purchase_ticks),
+                    "item_name": ["AWP"] * len(purchase_ticks),
+                    "skin": ["Asiimov"] * len(purchase_ticks),
+                    "skin_id": [279] * len(purchase_ticks),
+                }
+
+            def parse_ticks(self, _wanted, *, ticks):
+                # Entity still present live even when only bought in warmup.
+                return {
+                    "steamid": [owner, owner],
+                    "tick": [50, 1000],
+                    "item_id_high": [item_id >> 32, item_id >> 32],
+                    "item_id_low": [item_id & 0xFFFFFFFF, item_id & 0xFFFFFFFF],
+                    "Weapon.m_iAccountID": [account_id(owner), account_id(owner)],
+                    "weapon_stickers": [[], []],
+                    "item_def_idx": [9, 9],
+                    "weapon_skin_id": [279, 279],
+                    "weapon_paint_seed": [1, 1],
+                    "weapon_float": [0.2, 0.2],
+                    "team_num": [3, 3],
+                }
+
+        return FakeParser()
+
+    # Warmup-only buy; entity still sampled live → still no AWP cosmetics
+    cold = build_player_cosmetic_inventory(
+        make_parser(purchase_ticks=[100]),
+        sample_ticks=[50, 1000],
+        match_start_tick=500,
+    )
+    assert not any(row.get("def_index") == 9 for row in (cold.get(owner) or []))
+
+    # Live buy after match_start → AWP allowed
+    live = build_player_cosmetic_inventory(
+        make_parser(purchase_ticks=[100, 900]),
+        sample_ticks=[50, 1000],
+        match_start_tick=800,
+    )
+    weapons = [row for row in live[owner] if row.get("type") == "weapon"]
+    assert len(weapons) == 1
+    assert weapons[0]["def_index"] == 9
+    assert weapons[0]["ownership_evidence"] == "weapon_account_id"
+
+
+def test_live_purchase_gate_does_not_drop_knives_or_gloves():
+    owner = "76561198000000001"
+    knife_id = 53009600926
+    glove_id = 46871901218
+
+    class FakeParser:
+        def parse_skins(self):
+            return {
+                "steamid": [owner],
+                "def_index": [508],
+                "paint_index": [415],
+                "paint_seed": [80],
+                "paint_wear": [0.01],
+                "item_id": [knife_id],
+                "custom_name": [""],
+            }
+
+        def parse_event(self, name):
+            if name != "item_purchase":
+                return {"tick": []}
+            return {"tick": [], "steamid": [], "item_name": []}
+
+        def parse_ticks(self, wanted, *, ticks):
+            assert "glove_paint_id" in wanted
+            return {
+                "steamid": [owner],
+                "tick": [1000],
+                "item_id_high": [knife_id >> 32],
+                "item_id_low": [knife_id & 0xFFFFFFFF],
+                "Weapon.m_iAccountID": [account_id(owner)],
+                "weapon_stickers": [[]],
+                "item_def_idx": [508],
+                "weapon_skin_id": [415],
+                "weapon_paint_seed": [80],
+                "weapon_float": [0.01],
+                "team_num": [2],
+                "CCSPlayerPawn.m_iItemDefinitionIndex": [5034],
+                "CCSPlayerPawn.m_iItemIDHigh": [glove_id >> 32],
+                "CCSPlayerPawn.m_iItemIDLow": [glove_id & 0xFFFFFFFF],
+                "CCSPlayerPawn.m_szCustomName": [""],
+                "glove_paint_id": [10063],
+                "glove_paint_seed": [893],
+                "glove_paint_float": [0.14],
+            }
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[1000], match_start_tick=100
+    )
+    types = {row.get("type") for row in inventory.get(owner) or []}
+    assert "melee" in types
+    assert "glove" in types
+    assert not any(row.get("type") == "weapon" for row in inventory.get(owner) or [])
+
+
 def test_default_buy_path_skips_c4_even_though_catalog_marks_it_weapon():
     holder = "76561198000000001"
 

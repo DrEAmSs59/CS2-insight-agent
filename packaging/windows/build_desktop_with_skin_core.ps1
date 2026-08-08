@@ -342,13 +342,14 @@ try {
     $sigPath = "$setup.sig"
     if (Test-Path -LiteralPath $updaterKey) {
         Write-Host "Refreshing updater signature with $updaterKey"
+        # node argv[0]=node argv[1]=script; real args start at argv[2]
         $signJs = @"
 const { spawnSync } = require('child_process');
 const { readFileSync } = require('fs');
 const { join } = require('path');
-const frontend = process.argv[1];
-const setup = process.argv[2];
-const keyPath = process.argv[3];
+const frontend = process.argv[2];
+const setup = process.argv[3];
+const keyPath = process.argv[4];
 const key = readFileSync(keyPath, 'utf8').trim();
 const tauri = join(frontend, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: key, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' };

@@ -470,6 +470,121 @@ def test_build_batch_emits_zero_item_id64_for_vanilla_inventory():
     assert plan["items"][0]["slot_key"] == key
 
 
+def test_build_batch_dedupes_zero_id_weapon_across_t_ct_sides():
+    """UI may show the same vanilla gun on T and CT; skin-core only binds one entity."""
+    inv = [
+        inventory_row(
+            item_id=None,
+            type="weapon",
+            def_index=9,
+            paint_index=0,
+            paint_seed=0,
+            paint_wear=0,
+            model="awp",
+            name_zh="AWP",
+            observed_teams=["t", "ct"],
+        )
+    ]
+    base = slot_key(inv[0])
+    ct_repl = replacement(
+        type="weapon",
+        def_index=9,
+        paint_index=279,
+        paint_seed=1,
+        paint_wear=0.2,
+        name_zh="AWP | 二西莫夫",
+    )
+    t_repl = replacement(
+        type="weapon",
+        def_index=9,
+        paint_index=395,
+        paint_seed=1,
+        paint_wear=0.2,
+        name_zh="AWP | 巨龙大灾",
+    )
+    batch, plan = build_batch_and_plan(
+        STEAM_ID,
+        inv,
+        {f"ct:{base}": ct_repl, f"t:{base}": t_repl},
+    )
+    zero_awp = [row for row in batch if row.get("item_id64") == "0" and row.get("definition_index") == 9]
+    assert len(zero_awp) == 1
+    assert "team" not in zero_awp[0]
+    assert {entry["slot_key"] for entry in plan["items"]} == {f"ct:{base}", f"t:{base}"}
+
+
+def test_map_item_statuses_names_zero_id_weapon_when_t_and_ct_plan_slots_exist():
+    """Deduped zero-id success must still resolve display names (not bare item_id 0)."""
+    inv = [
+        inventory_row(
+            item_id=None,
+            type="weapon",
+            def_index=9,
+            paint_index=0,
+            paint_seed=0,
+            paint_wear=0,
+            model="awp",
+            name_zh="AWP",
+            name_en="AWP",
+            observed_teams=["t", "ct"],
+        )
+    ]
+    base = slot_key(inv[0])
+    repl = replacement(
+        type="weapon",
+        def_index=9,
+        paint_index=279,
+        paint_seed=1,
+        paint_wear=0.2,
+        name_zh="AWP | 二西莫夫",
+        name_en="AWP | Asiimov",
+    )
+    _batch, plan = build_batch_and_plan(
+        STEAM_ID,
+        inv,
+        {f"ct:{base}": repl, f"t:{base}": repl},
+    )
+    mapped = map_item_statuses(
+        plan,
+        [{"item_id64": "0", "definition_index": 9, "team": None}],
+    )
+    assert len(mapped) == 1
+    assert mapped[0]["original_name_zh"] == "AWP"
+    assert mapped[0]["replacement_name_zh"] == "AWP | 二西莫夫"
+    assert mapped[0]["name_zh"] == "AWP | 二西莫夫"
+
+
+def test_build_batch_keeps_both_zero_id_glove_teams_after_weapon_dedupe():
+    """Glove T/CT materialize must not be collapsed by the weapon dedupe path."""
+    inv = [
+        inventory_row(
+            item_id=0,
+            type="glove",
+            def_index=5027,
+            paint_index=0,
+            observed_teams=["t"],
+        ),
+        inventory_row(
+            item_id=0,
+            type="glove",
+            def_index=5031,
+            paint_index=0,
+            observed_teams=["ct"],
+        ),
+    ]
+    replacements = {
+        f"t:{slot_key(inv[0])}": replacement(
+            catalog_id=1722, type="glove", def_index=5030, paint_index=10048, paint_wear=0.07
+        ),
+        f"ct:{slot_key(inv[1])}": replacement(
+            catalog_id=1718, type="glove", def_index=5030, paint_index=10038, paint_wear=0.07
+        ),
+    }
+    glove_batch, _ = build_batch_and_plan(STEAM_ID, inv, replacements)
+    assert len(glove_batch) == 2
+    assert {row.get("team") for row in glove_batch} == {"T", "CT"}
+
+
 def test_build_batch_accepts_placeholder_melee_without_inventory_row():
     repl = replacement(
         catalog_id=1345,
