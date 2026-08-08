@@ -77,6 +77,11 @@ def test_voice_payload_compacts_intervals_and_location_changes():
 
 
 def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
+    # The shared roster fallback intentionally rejects tiny GOTV/disconnect
+    # placeholder IDs, so exercise it with real SteamID64-shaped values.
+    steam_a = 76561198000000001
+    steam_b = 76561198000000002
+
     class _TickFallbackParser:
         def __init__(self, _path: str):
             pass
@@ -84,8 +89,8 @@ def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
         @staticmethod
         def parse_voice():
             return [
-                {"tick": 10, "steamid": 111, "bytes": b"one"},
-                {"tick": 12, "steamid": 222, "bytes": b"two"},
+                {"tick": 10, "steamid": steam_a, "bytes": b"one"},
+                {"tick": 12, "steamid": steam_b, "bytes": b"two"},
             ]
 
         @staticmethod
@@ -100,11 +105,11 @@ def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
                 return {
                     "tick": [10, 20],
                     "attacker_name": ["one", "two"],
-                    "attacker_steamid": [111, 222],
+                    "attacker_steamid": [steam_a, steam_b],
                     "attacker_user_id": [0, 1],
                     "attackerteam": [2, 3],
                     "user_name": ["two", "one"],
-                    "user_steamid": [222, 111],
+                    "user_steamid": [steam_b, steam_a],
                     "user_user_id": [1, 0],
                     "userteam": [3, 2],
                 }
@@ -115,14 +120,14 @@ def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
             if fields == ["last_place_name"] and ticks is None:
                 return {
                     "tick": [1, 1],
-                    "steamid": [111, 222],
+                    "steamid": [steam_a, steam_b],
                     "last_place_name": ["CTSpawn", "TSpawn"],
                 }
             tick = ticks[0]
             return {
                 "tick": [tick, tick],
                 "name": ["one", "two"],
-                "steamid": [111, 222],
+                "steamid": [steam_a, steam_b],
                 "user_id": [0, 1],
                 "team_num": [2, 3],
                 "CCSPlayerController.m_iTeamNum": [2, 3],
@@ -137,9 +142,12 @@ def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
 
     assert stats["voice_packets"] == 2
     assert stats["speakers"] == 2
-    assert {(row[0], row[2]) for row in roster} == {("111", 2), ("222", 3)}
+    assert {(row[0], row[2]) for row in roster} == {
+        (str(steam_a), 2),
+        (str(steam_b), 3),
+    }
     assert {row[1] for row in roster} == {0, 1}
-    assert {row[1] for row in speakers} == {"111", "222"}
+    assert {row[1] for row in speakers} == {str(steam_a), str(steam_b)}
 
 
 def test_demo_voice_probe_requires_a_non_empty_audio_packet():
