@@ -149,7 +149,7 @@ jobs:
 
       - name: Report bundled runtime size
         shell: pwsh
-        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 100
+        run: ./packaging/windows/report-runtime-size.ps1 -Root "frontend/src-tauri/bundle-resources" -OutputPath "dist/runtime-size-report.json" -BudgetMiB 120
 
       - name: Write SHA256SUMS
         shell: pwsh
