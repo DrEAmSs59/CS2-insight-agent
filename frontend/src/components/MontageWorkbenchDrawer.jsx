@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import API, { API_BASE_URL, withDesktopSessionToken } from "../api/api";
+import API, { API_BASE_URL } from "../api/api";
 import { useMontageStore } from "../stores/montageStore";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import FfmpegRequiredDialog from "./FfmpegRequiredDialog";

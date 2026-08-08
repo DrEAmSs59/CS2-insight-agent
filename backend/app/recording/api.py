@@ -27,7 +27,6 @@ from ..demo_compat_service import ensure_demo_compatible
 from ..demo_paths import resolve_working_demo_path
 from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
-from ..session_auth import overlay_session_fragment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])

@@ -472,13 +472,7 @@ app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay
 
 @app.websocket("/ws/kb-overlay")
 async def kb_overlay_ws(ws: WebSocket) -> None:
-    authorized, accepted_protocol = authorize_websocket_protocols(
-        ws.headers.get("sec-websocket-protocol"),
-    )
-    if not authorized:
-        await ws.close(code=1008, reason="desktop session required")
-        return
-    await ws.accept(subprotocol=accepted_protocol)
+    await ws.accept()
     await _kb_overlay_bus.register(ws)
     try:
         while True:

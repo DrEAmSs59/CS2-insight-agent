@@ -5,20 +5,6 @@ import { useLocaleStore } from "../i18n/localeStore.js";
 const IS_DESKTOP_APP = Boolean(window.__TAURI_INTERNALS__);
 
 export const API_BASE_URL = IS_DESKTOP_APP ? "http://127.0.0.1:19871" : "";
-export const DESKTOP_SESSION_QUERY_PARAM = "_session";
-
-let desktopSessionToken = "";
-
-export function setDesktopSessionToken(token) {
-  desktopSessionToken = IS_DESKTOP_APP ? String(token || "").trim() : "";
-}
-
-export function withDesktopSessionToken(url) {
-  const value = String(url || "");
-  if (!desktopSessionToken) return value;
-  const separator = value.includes("?") ? "&" : "?";
-  return `${value}${separator}${DESKTOP_SESSION_QUERY_PARAM}=${encodeURIComponent(desktopSessionToken)}`;
-}
 
 /** 启动屏展示的连接目标（浏览器 dev 走 Vite 代理，桌面壳直连 19871）。 */
 export const BACKEND_CONNECT_LABEL = IS_DESKTOP_APP
@@ -27,17 +13,15 @@ export const BACKEND_CONNECT_LABEL = IS_DESKTOP_APP
 
 /** 桌面壳须用绝对 URL；浏览器 dev 用相对路径走 Vite 代理。 */
 export function getDemosStreamUrl() {
-  const url = API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";
-  return withDesktopSessionToken(url);
+  return API_BASE_URL ? `${API_BASE_URL}/api/demos/stream` : "/api/demos/stream";
 }
 
 /** Recorded clip HTTP Range stream for LiteCut / montage <video> preview */
 export function getRecordedClipStreamUrl(clipId) {
   const id = encodeURIComponent(String(clipId));
-  const url = API_BASE_URL
+  return API_BASE_URL
     ? `${API_BASE_URL}/api/recorded-clips/${id}/stream`
     : `/api/recorded-clips/${id}/stream`;
-  return withDesktopSessionToken(url);
 }
 
 /** LiteCut uploaded overlay asset stream (WebM/PNG/GIF). */
@@ -46,30 +30,28 @@ export function getLiteCutAssetStreamUrl(assetId, previewVersion = "") {
   const base = API_BASE_URL
     ? `${API_BASE_URL}/api/lite-cut/assets/${id}/stream`
     : `/api/lite-cut/assets/${id}/stream`;
-  const url = previewVersion ? `${base}?preview=${encodeURIComponent(String(previewVersion))}` : base;
-  return withDesktopSessionToken(url);
+  return previewVersion ? `${base}?preview=${encodeURIComponent(String(previewVersion))}` : base;
 }
 
 export function getLiteCutBuiltinFontUrl(fontName) {
   const name = encodeURIComponent(String(fontName));
-  const url = API_BASE_URL
+  return API_BASE_URL
     ? `${API_BASE_URL}/api/lite-cut/fonts/${name}`
     : `/api/lite-cut/fonts/${name}`;
-  return withDesktopSessionToken(url);
 }
 
 /** Bundled radar map image served by the local desktop backend. */
 export function getDemoRadarMapUrl(mapName, layer = "") {
   const name = encodeURIComponent(String(mapName || ""));
   const query = layer ? `?layer=${encodeURIComponent(String(layer))}` : "";
-  return withDesktopSessionToken(`${API_BASE_URL}/api/demo/radar-map/${name}${query}`);
+  return `${API_BASE_URL}/api/demo/radar-map/${name}${query}`;
 }
 
 /** Radar-derived utility clip mask (white = drawable). 404 → skip clip client-side. */
 export function getDemoUtilityMaskUrl(mapName, layer = "") {
   const name = encodeURIComponent(String(mapName || ""));
   const query = layer ? `?layer=${encodeURIComponent(String(layer))}` : "";
-  return withDesktopSessionToken(`${API_BASE_URL}/api/demo/utility-mask/${name}${query}`);
+  return `${API_BASE_URL}/api/demo/utility-mask/${name}${query}`;
 }
 
 console.log(`[API Init] Protocol: ${window.location.protocol}, IsDesktop: ${IS_DESKTOP_APP}, BaseURL: ${API_BASE_URL}`);
@@ -82,9 +64,6 @@ API.interceptors.request.use((config) => {
   const locale = useLocaleStore.getState().locale || "zh";
   config.headers = config.headers ?? {};
   config.headers["X-CS2-Insight-Locale"] = locale;
-  if (desktopSessionToken) {
-    config.headers["X-CS2-Insight-Token"] = desktopSessionToken;
-  }
   return config;
 });
 

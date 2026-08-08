@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { Upload, Loader2 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
-import API, { API_BASE_URL, withDesktopSessionToken } from "../../api/api";
+import API, { API_BASE_URL } from "../../api/api";
 import { derivePlayerAssetsFromClips } from "../../utils/montageUtils";
 import { useT } from "../../i18n/useT.js";
 

@@ -15,13 +15,4 @@ describe("waveformUrlForMediaStream", () => {
     expect(waveformUrlForMediaStream("http://127.0.0.1:19871/api/recorded-clips/9/stream", { bars: 48 }))
       .toBe("http://127.0.0.1:19871/api/recorded-clips/9/waveform?buckets=48&start_sec=0");
   });
-
-  it("preserves the desktop session credential for the derived waveform request", () => {
-    expect(waveformUrlForMediaStream(
-      "http://127.0.0.1:19871/api/recorded-clips/9/stream?_session=session-123",
-      { bars: 48 },
-    )).toBe(
-      "http://127.0.0.1:19871/api/recorded-clips/9/waveform?buckets=48&start_sec=0&_session=session-123",
-    );
-  });
 });
