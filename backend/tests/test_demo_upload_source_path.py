@@ -92,7 +92,7 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     assert item["uploaded_path"] == str(upload_dir / "match.dem")
     assert Path(item["uploaded_path"]).read_bytes() == original.read_bytes()
     assert registered == [original.resolve()]
-    assert ensure_options == [False]
+    assert ensure_options == [True]
 
 
 def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path: Path):

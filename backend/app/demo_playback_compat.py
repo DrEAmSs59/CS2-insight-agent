@@ -26,7 +26,7 @@ from typing import BinaryIO, Callable, Literal, Optional
 
 
 PATCH_ID = "drop-legacy-remove-all-decals-138"
-PATCH_REVISION = 2
+PATCH_REVISION = 3
 WIN_PANEL_PATCH_ID = "drop-cs-win-panel-match-gameevent-207"
 PERSISTENT_PATCH_ID = f"{PATCH_ID}+{WIN_PANEL_PATCH_ID}"
 
@@ -66,7 +66,7 @@ class DemoCompatibilityScan:
 @dataclass(frozen=True)
 class PlaybackDemoReport:
     schema_version: int
-    outcome: Literal["clean", "repaired"]
+    outcome: Literal["clean", "repaired", "tolerated"]
     patch_id: str
     patch_revision: int
     removed_messages: int
@@ -77,6 +77,7 @@ class PlaybackDemoReport:
     remaining_selected_messages: int
     removed_win_panel_events: int = 0
     remaining_win_panel_events: int = 0
+    tolerated_truncated_packet_tail: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -84,7 +85,7 @@ class PlaybackDemoReport:
 
 @dataclass(frozen=True)
 class TruncatedPacketTailRepair:
-    """One incomplete terminal packet discarded from an uploaded demo copy."""
+    """Narrow classification of one incomplete terminal packet."""
 
     frame_offset: int
     tick: int
@@ -895,6 +896,7 @@ def _scan_stream(
     drop_legacy_type138: bool = True,
     drop_win_panel_match: bool = False,
     win_panel_match_tick: Optional[int] = None,
+    logical_end_offset: Optional[int] = None,
 ) -> tuple[_PatchStats, tuple[int, int]]:
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
@@ -906,6 +908,12 @@ def _scan_stream(
     stats = _PatchStats()
 
     while True:
+        if logical_end_offset is not None:
+            current_offset = reader.tell()
+            if current_offset == logical_end_offset:
+                break
+            if current_offset > logical_end_offset:
+                raise _fail("compatibility scan crossed its validated logical EOF")
         command_result = _read_stream_varint(
             reader, context="outer command", allow_clean_eof=True
         )
@@ -920,6 +928,8 @@ def _scan_stream(
         if size > _MAX_OUTER_FRAME_SIZE:
             raise _fail(f"outer frame exceeds size limit: {size}")
         payload = _read_exact(reader, size, context="outer frame payload")
+        if logical_end_offset is not None and reader.tell() > logical_end_offset:
+            raise _fail("outer frame crosses the validated logical EOF")
 
         command = raw_command & ~_COMPRESSED_COMMAND_FLAG
         if old_pos in (old_offset_a, old_offset_b):
@@ -1508,19 +1518,39 @@ def prepare_cs2_playback_demo(
                 pass
 
 
-def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoReport:
+def repair_demo_in_place(
+    source_path: os.PathLike[str] | str,
+    *,
+    allow_truncated_packet_tail: bool = False,
+) -> PlaybackDemoReport:
     """Persistently remove legacy 138 and the terminal win-panel GameEvent.
 
     The candidate is created in the source directory so ``os.replace`` remains
     same-volume and atomic.  A clean demo is left untouched.  If parsing,
     rewriting, verification, metadata copying, or replacement fails, the
     original path still refers to the original file.
+
+    ``allow_truncated_packet_tail`` is an analysis-only compatibility escape
+    hatch.  It accepts exactly the narrow terminal packet shape classified by
+    :func:`_find_truncated_packet_tail`, scans the complete prefix as a logical
+    file, and never removes the incomplete bytes.  Compatibility messages in
+    the retained prefix are reported but not rewritten, because CS2 may still
+    recover only the unfinalized demo's original byte stream.
     """
 
     source = Path(source_path)
     if not source.is_file():
         raise FileNotFoundError(f"Demo file not found: {source}")
     source_before = _stat_fingerprint(source.stat())
+    truncated_tail: Optional[TruncatedPacketTailRepair] = None
+
+    if allow_truncated_packet_tail:
+        with source.open("rb") as reader:
+            if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+                raise _fail("source demo changed before terminal-tail scan started")
+            truncated_tail = _find_truncated_packet_tail(reader)
+        if _stat_fingerprint(source.stat()) != source_before:
+            raise _fail("source demo changed while terminal-tail scan was running")
 
     # A clean demo needs only one read pass and no full-size temporary copy.
     # Legacy demos normally expose the first selected message near the start.
@@ -1534,9 +1564,28 @@ def repair_demo_in_place(source_path: os.PathLike[str] | str) -> PlaybackDemoRep
             stop_after_first_selected=True,
             drop_legacy_type138=True,
             drop_win_panel_match=True,
+            logical_end_offset=(
+                truncated_tail.frame_offset if truncated_tail is not None else None
+            ),
         )
     if _stat_fingerprint(source.stat()) != source_before:
         raise _fail("source demo changed while compatibility scan was running")
+    if truncated_tail is not None:
+        return PlaybackDemoReport(
+            schema_version=1,
+            outcome="tolerated",
+            patch_id=PERSISTENT_PATCH_ID,
+            patch_revision=PATCH_REVISION,
+            removed_messages=0,
+            changed_frames=0,
+            first_tick=None,
+            last_tick=None,
+            max_per_frame=0,
+            remaining_selected_messages=initial_stats.removed_messages,
+            removed_win_panel_events=0,
+            remaining_win_panel_events=initial_stats.removed_win_panel_events,
+            tolerated_truncated_packet_tail=True,
+        )
     if (
         initial_stats.removed_messages == 0
         and initial_stats.removed_win_panel_events == 0

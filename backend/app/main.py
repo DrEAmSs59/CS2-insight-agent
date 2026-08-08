@@ -690,7 +690,10 @@ def _verified_upload_source_path(
     """Use an Electron local path only when it is the exact uploaded demo."""
 
     if not raw_source_path:
-        logger.info("Browser demo upload has no local source path; repairing uploaded copy: %s", uploaded_path)
+        logger.info(
+            "Browser demo upload has no local source path; using uploaded copy: %s",
+            uploaded_path,
+        )
         return uploaded_path
     try:
         source = Path(raw_source_path).resolve(strict=True)
@@ -959,9 +962,7 @@ async def upload_demo(
     compat = await asyncio.to_thread(
         ensure_demo_compatible,
         persistent_path,
-        allow_truncated_packet_tail=(
-            _upload_source_scope(persistent_path, dest) == "uploaded_copy"
-        ),
+        allow_truncated_packet_tail=True,
     )
 
     players, match_meta, inspection_error = await _safe_upload_demo_meta(persistent_path)
@@ -1006,9 +1007,7 @@ async def upload_demos(
             compat = await asyncio.to_thread(
                 ensure_demo_compatible,
                 persistent_path,
-                allow_truncated_packet_tail=(
-                    _upload_source_scope(persistent_path, dest) == "uploaded_copy"
-                ),
+                allow_truncated_packet_tail=True,
             )
             saved.append((filename, dest, persistent_path, compat))
         except Exception as exc:  # noqa: BLE001

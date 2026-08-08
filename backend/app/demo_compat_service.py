@@ -16,7 +16,6 @@ from .demo_playback_compat import (
     PATCH_REVISION,
     PlaybackDemoReport,
     repair_demo_in_place,
-    repair_truncated_packet_tail_in_place,
 )
 from .env_utils import get_data_dir
 
@@ -116,12 +115,13 @@ def _cached_result(
 def ensure_demo_compatible(
     source_path: os.PathLike[str] | str,
     *,
-    allow_truncated_packet_tail: bool = False,
+    allow_truncated_packet_tail: bool = True,
 ) -> DemoCompatibilityEnsureResult:
-    """Repair a demo once, then use a persistent O(1)-I/O fingerprint cache.
+    """Classify/repair a demo once, then cache its content fingerprint.
 
-    ``allow_truncated_packet_tail`` is reserved for application-owned uploaded
-    copies. It remains off for local originals and every other caller.
+    By default, a narrowly validated incomplete terminal packet is treated as
+    a logical EOF for analysis, but its bytes are never removed or replaced.
+    Strict callers can explicitly disable that tolerance.
     """
 
     source = Path(source_path).resolve(strict=True)
@@ -146,21 +146,20 @@ def ensure_demo_compatible(
             if hit is not None:
                 return hit
 
-        if allow_truncated_packet_tail:
-            tail_repair = repair_truncated_packet_tail_in_place(source)
-            if tail_repair is not None:
-                logger.warning(
-                    "Discarded incomplete terminal packet from uploaded demo copy: "
-                    "path=%s tick=%d offset=%d declared=%d available=%d missing=%d",
-                    source,
-                    tail_repair.tick,
-                    tail_repair.frame_offset,
-                    tail_repair.declared_payload_size,
-                    tail_repair.available_payload_size,
-                    tail_repair.missing_payload_bytes,
-                )
-
-        report = repair_demo_in_place(source)
+        repair_options = (
+            {"allow_truncated_packet_tail": True}
+            if allow_truncated_packet_tail
+            else {}
+        )
+        report = repair_demo_in_place(source, **repair_options)
+        if report.tolerated_truncated_packet_tail:
+            logger.warning(
+                "Accepted incomplete terminal packet for analysis without modifying demo: "
+                "path=%s remaining_type138=%d remaining_win_panel=%d",
+                source,
+                report.remaining_selected_messages,
+                report.remaining_win_panel_events,
+            )
         repaired_fingerprint = _fingerprint(source)
         with _cache_lock:
             cache = _load_cache(cache_path)

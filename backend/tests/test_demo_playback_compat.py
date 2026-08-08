@@ -238,6 +238,74 @@ def test_persistent_repair_does_not_implicitly_discard_truncated_tail(tmp_path: 
     assert source.read_bytes() == source_bytes
 
 
+def test_analysis_tolerance_keeps_truncated_terminal_packet_byte_identical(
+    tmp_path: Path,
+):
+    first = _frame(1, 0, b"file-header")
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    source_bytes = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + terminal[:-3]
+    source = _write(tmp_path / "source.dem", source_bytes)
+    original_stat = compat._stat_fingerprint(source.stat())
+
+    report = compat.repair_demo_in_place(
+        source,
+        allow_truncated_packet_tail=True,
+    )
+
+    assert report.outcome == "tolerated"
+    assert report.tolerated_truncated_packet_tail is True
+    assert source.read_bytes() == source_bytes
+    assert compat._stat_fingerprint(source.stat()) == original_stat
+    assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
+
+
+def test_analysis_tolerance_rejects_truncated_metadata_without_modifying_source(
+    tmp_path: Path,
+):
+    first = _frame(1, 0, b"file-header")
+    terminal = _frame(2, 43, b"partial-file-info")
+    source_bytes = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + terminal[:-3]
+    source = _write(tmp_path / "source.dem", source_bytes)
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="not a packet",
+    ):
+        compat.repair_demo_in_place(
+            source,
+            allow_truncated_packet_tail=True,
+        )
+
+    assert source.read_bytes() == source_bytes
+
+
+def test_analysis_tolerance_reports_but_does_not_rewrite_affected_prefix(
+    tmp_path: Path,
+):
+    affected = _frame(
+        7,
+        42,
+        _packet_proto(_packet_data([(138, _remove_decals_payload(300_000))])),
+    )
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    source_bytes = (
+        b"PBDEMS2\x00" + (0).to_bytes(8, "little") + affected + terminal[:-3]
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+
+    report = compat.repair_demo_in_place(
+        source,
+        allow_truncated_packet_tail=True,
+    )
+
+    assert report.outcome == "tolerated"
+    assert report.tolerated_truncated_packet_tail is True
+    assert report.removed_messages == 0
+    assert report.remaining_selected_messages == 1
+    assert source.read_bytes() == source_bytes
+    assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))
+
+
 @pytest.mark.parametrize("compressed", [False, True])
 def test_repairs_unaligned_207_138_76_and_remaps_header(tmp_path: Path, compressed: bool):
     old = _packet_data(
