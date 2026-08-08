@@ -312,6 +312,54 @@ def test_post_ok_false_logs_error_without_exposing_response_details(api_env, mon
     assert asyncio.run(api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)) is None
 
 
+@pytest.mark.parametrize(
+    "native_message",
+    [
+        "DEM_FileInfo header offset 0 is outside the demo",
+        "DEM_SpawnGroups frame was not found",
+    ],
+)
+def test_post_missing_demo_rewrite_metadata_returns_specific_public_code(
+    api_env,
+    monkeypatch,
+    caplog,
+    native_message,
+):
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    cached: Path = api_env["cached"]
+    prior = b"PREVIOUSLY-REWRITTEN"
+    cached.write_bytes(prior)
+
+    def incomplete_demo(
+        *, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0
+    ):
+        return {
+            "schema_version": 1,
+            "ok": False,
+            "error_code": "io",
+            "error_message": native_message,
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", incomplete_demo)
+
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE"
+    }
+    assert native_message not in response.text
+    assert native_message in caplog.text
+    assert cached.read_bytes() == prior
+    assert asyncio.run(
+        api_env["db"].get_custom_skin_plan(str(api_env["original"]), STEAM_ID)
+    ) is None
+
+
 def test_get_custom_plan_returns_persisted_plan(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]

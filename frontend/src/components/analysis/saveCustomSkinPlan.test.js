@@ -73,6 +73,28 @@ describe("saveCustomSkinPlan", () => {
     expect(JSON.stringify(result)).not.toContain("entity handle");
   });
 
+  test("preserves the public incomplete-demo error without exposing native details", async () => {
+    API.post.mockRejectedValue({
+      response: {
+        data: {
+          detail: {
+            code: "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE",
+            message: "DEM_FileInfo header offset 0 is outside the demo",
+          },
+        },
+      },
+    });
+
+    const result = await saveCustomSkinPlan({
+      demoId: 42,
+      steamid: "1",
+      replacements: { "id:10": { paint_index: 340 } },
+    });
+
+    expect(result.error_code).toBe("COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE");
+    expect(JSON.stringify(result)).not.toContain("DEM_FileInfo");
+  });
+
   test("GETs custom-plan for demoId and steamid", async () => {
     API.get.mockResolvedValue({ data: { ok: true, plan: null } });
 

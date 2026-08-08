@@ -708,6 +708,53 @@ describe("CosmeticsView", () => {
     expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
   });
 
+  test("explains when an incomplete demo cannot be safely rewritten", async () => {
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({
+      ok: false,
+      partial: false,
+      plan: null,
+      succeeded: [],
+      failed: [],
+      error_code: "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE",
+    });
+
+    render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  item_id: 10,
+                  type: "weapon",
+                  model: "ak47",
+                  def_index: 7,
+                  observed_teams: ["t"],
+                  name_zh: "AK-47",
+                  name_en: "AK-47",
+                }),
+              ],
+            },
+          },
+        }}
+        onlineAssetsEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("cosmetics-customize"));
+    fireEvent.click(screen.getByRole("button", { name: /AK-47/ }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/这个 Demo 文件结尾不完整|This demo is incomplete at the end/i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/DEM_FileInfo/i)).toBeNull();
+  });
+
   test("shows save result dialog listing succeeded and failed items", async () => {
     vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({
       ok: true,

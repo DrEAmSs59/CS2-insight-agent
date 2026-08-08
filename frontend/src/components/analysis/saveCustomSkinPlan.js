@@ -1,12 +1,17 @@
 import API from "../../api/api.js";
 
 const GENERIC_SKIN_SAVE_ERROR = "COSMETICS_SKIN_REWRITE_FAILED";
+const PUBLIC_SKIN_SAVE_ERRORS = new Set([
+  "COSMETICS_SKIN_CORE_UNAVAILABLE",
+  "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE",
+  GENERIC_SKIN_SAVE_ERROR,
+]);
 
 function publicErrorCodeFromAxios(error) {
   const detail = error?.response?.data?.detail;
   if (detail && typeof detail === "object" && !Array.isArray(detail)) {
     const code = String(detail.code || "").trim();
-    if (code === "COSMETICS_SKIN_CORE_UNAVAILABLE" || code === GENERIC_SKIN_SAVE_ERROR) {
+    if (PUBLIC_SKIN_SAVE_ERRORS.has(code)) {
       return code;
     }
   }

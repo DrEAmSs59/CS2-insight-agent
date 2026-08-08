@@ -57,6 +57,7 @@ export default {
   "analysis.cosmetics.saveFailed": "Failed to save custom skin plan",
   "analysis.cosmetics.saveFailedLogged": "The cosmetic rewrite failed. Try again or use another demo. Technical details were written to the log.",
   "analysis.cosmetics.saveCoreUnavailable": "The built-in cosmetic rewrite component is unavailable. Repair or reinstall the app. Technical details were written to the log.",
+  "analysis.cosmetics.saveDemoIncomplete": "This demo is incomplete at the end and is missing the index data required for skin changes. It may still analyze or play, but cannot be modified safely. Download a complete copy or use another demo.",
   "analysis.cosmetics.saveItemFailed": "This cosmetic could not be changed. Try another cosmetic or demo.",
   "analysis.cosmetics.saveResultTitle": "Save result",
   "analysis.cosmetics.saveResultSucceeded": "Succeeded ({count})",

@@ -956,7 +956,13 @@ async def upload_demo(
         dest,
         uploaded_md5,
     )
-    compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
+    compat = await asyncio.to_thread(
+        ensure_demo_compatible,
+        persistent_path,
+        allow_truncated_packet_tail=(
+            _upload_source_scope(persistent_path, dest) == "uploaded_copy"
+        ),
+    )
 
     players, match_meta, inspection_error = await _safe_upload_demo_meta(persistent_path)
     demo_id = await _ensure_analysis_demo_row(persistent_path)
@@ -997,7 +1003,13 @@ async def upload_demos(
                 dest,
                 uploaded_md5,
             )
-            compat = await asyncio.to_thread(ensure_demo_compatible, persistent_path)
+            compat = await asyncio.to_thread(
+                ensure_demo_compatible,
+                persistent_path,
+                allow_truncated_packet_tail=(
+                    _upload_source_scope(persistent_path, dest) == "uploaded_copy"
+                ),
+            )
             saved.append((filename, dest, persistent_path, compat))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Demo preparation failed for %s", filename)

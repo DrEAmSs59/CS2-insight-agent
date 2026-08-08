@@ -37,6 +37,14 @@ logger = logging.getLogger(__name__)
 _ERR_SKIN_CORE_UNAVAILABLE = "COSMETICS_SKIN_CORE_UNAVAILABLE"
 _ERR_SKIN_REWRITE_FAILED = "COSMETICS_SKIN_REWRITE_FAILED"
 _ERR_SKIN_ITEM_FAILED = "COSMETICS_SKIN_ITEM_FAILED"
+_ERR_DEMO_INCOMPLETE_FOR_SKIN_REWRITE = "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE"
+
+_MISSING_REWRITE_METADATA_ERRORS = (
+    "DEM_FileInfo header offset 0 is outside the demo",
+    "DEM_SpawnGroups header offset 0 is outside the demo",
+    "DEM_FileInfo frame was not found",
+    "DEM_SpawnGroups frame was not found",
+)
 
 
 class CustomSkinPlanBody(BaseModel):
@@ -127,6 +135,19 @@ def _log_skin_core_result_failure(
         phase,
         result,
     )
+
+
+def _public_skin_result_error_code(result: Any) -> str:
+    """Map one known incomplete-demo signature to a safe public error code."""
+    if not isinstance(result, dict):
+        return _ERR_SKIN_REWRITE_FAILED
+    native_code = str(result.get("error_code") or "").strip().lower()
+    native_message = str(result.get("error_message") or "")
+    if native_code == "io" and any(
+        marker in native_message for marker in _MISSING_REWRITE_METADATA_ERRORS
+    ):
+        return _ERR_DEMO_INCOMPLETE_FOR_SKIN_REWRITE
+    return _ERR_SKIN_REWRITE_FAILED
 
 
 def _sanitize_failed_item_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -284,7 +305,10 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     steamid=other_steamid,
                     phase="reapply",
                 )
-                raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
+                raise HTTPException(
+                    502,
+                    error_detail(_public_skin_result_error_code(prior_result)),
+                )
             if not prior_out.is_file():
                 logger.error(
                     "skin-core produced no reapply output: demo_id=%s steamid=%s path=%s",
@@ -369,6 +393,7 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                 steamid=steamid,
                 phase="rewrite",
             )
+            public_error_code = _public_skin_result_error_code(skin_result)
             if failed_mapped or succeeded_mapped:
                 return {
                     "ok": False,
@@ -377,9 +402,9 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
                     "plan": None,
                     "succeeded": succeeded_mapped,
                     "failed": failed_public,
-                    "error_code": _ERR_SKIN_REWRITE_FAILED,
+                    "error_code": public_error_code,
                 }
-            raise HTTPException(502, error_detail(_ERR_SKIN_REWRITE_FAILED))
+            raise HTTPException(502, error_detail(public_error_code))
 
         if not temp_out.is_file():
             logger.error(

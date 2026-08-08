@@ -12,7 +12,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .demo_playback_compat import PATCH_REVISION, PlaybackDemoReport, repair_demo_in_place
+from .demo_playback_compat import (
+    PATCH_REVISION,
+    PlaybackDemoReport,
+    repair_demo_in_place,
+    repair_truncated_packet_tail_in_place,
+)
 from .env_utils import get_data_dir
 
 logger = logging.getLogger(__name__)
@@ -108,8 +113,16 @@ def _cached_result(
     return DemoCompatibilityEnsureResult(report=report, cached=True)
 
 
-def ensure_demo_compatible(source_path: os.PathLike[str] | str) -> DemoCompatibilityEnsureResult:
-    """Repair a demo once, then use a persistent O(1)-I/O fingerprint cache."""
+def ensure_demo_compatible(
+    source_path: os.PathLike[str] | str,
+    *,
+    allow_truncated_packet_tail: bool = False,
+) -> DemoCompatibilityEnsureResult:
+    """Repair a demo once, then use a persistent O(1)-I/O fingerprint cache.
+
+    ``allow_truncated_packet_tail`` is reserved for application-owned uploaded
+    copies. It remains off for local originals and every other caller.
+    """
 
     source = Path(source_path).resolve(strict=True)
     if not source.is_file() or source.suffix.lower() != ".dem":
@@ -132,6 +145,20 @@ def ensure_demo_compatible(source_path: os.PathLike[str] | str) -> DemoCompatibi
             hit = _cached_result(cache, key, fingerprint)
             if hit is not None:
                 return hit
+
+        if allow_truncated_packet_tail:
+            tail_repair = repair_truncated_packet_tail_in_place(source)
+            if tail_repair is not None:
+                logger.warning(
+                    "Discarded incomplete terminal packet from uploaded demo copy: "
+                    "path=%s tick=%d offset=%d declared=%d available=%d missing=%d",
+                    source,
+                    tail_repair.tick,
+                    tail_repair.frame_offset,
+                    tail_repair.declared_payload_size,
+                    tail_repair.available_payload_size,
+                    tail_repair.missing_payload_bytes,
+                )
 
         report = repair_demo_in_place(source)
         repaired_fingerprint = _fingerprint(source)

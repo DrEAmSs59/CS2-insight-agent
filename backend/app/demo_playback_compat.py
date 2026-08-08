@@ -40,6 +40,7 @@ _WIN_PANEL_MATCH_EVENT_NAME = b"cs_win_panel_match"
 
 # Defensive limits.  Real packet frames are far below these ceilings.
 _MAX_OUTER_FRAME_SIZE = 256 * 1024 * 1024
+_MAX_TRUNCATED_PACKET_TAIL_MISSING_BYTES = 64 * 1024
 _MAX_SNAPPY_DECOMPRESSED_SIZE = 128 * 1024 * 1024
 _MAX_PROTOBUF_FIELD_SIZE = 128 * 1024 * 1024
 _MAX_NETMESSAGE_PAYLOAD_SIZE = 64 * 1024 * 1024
@@ -79,6 +80,18 @@ class PlaybackDemoReport:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class TruncatedPacketTailRepair:
+    """One incomplete terminal packet discarded from an uploaded demo copy."""
+
+    frame_offset: int
+    tick: int
+    declared_payload_size: int
+    available_payload_size: int
+    missing_payload_bytes: int
+    discarded_bytes: int
 
 
 @dataclass
@@ -1253,6 +1266,164 @@ def _stat_fingerprint(stat_result: os.stat_result) -> tuple[int, int, int, int]:
         int(stat_result.st_size),
         int(stat_result.st_mtime_ns),
     )
+
+
+def _find_truncated_packet_tail(
+    reader: BinaryIO,
+) -> Optional[TruncatedPacketTailRepair]:
+    """Return a narrowly classified incomplete final packet, otherwise fail/no-op.
+
+    Only a payload that runs past physical EOF is repairable. Truncated
+    varints, metadata frames, backward ticks, empty payload fragments, and
+    large gaps remain hard failures so this cannot become a generic corruption
+    recovery path.
+    """
+
+    file_size = int(os.fstat(reader.fileno()).st_size)
+    header = _read_exact(reader, 16, context="PBDEMS2 short header")
+    if header[:8] != _MAGIC:
+        raise _fail("expected PBDEMS2 short header")
+    old_offset_a = int.from_bytes(header[8:12], "little")
+    old_offset_b = int.from_bytes(header[12:16], "little")
+    offset_commands: dict[int, int] = {}
+    complete_frames = 0
+    max_tick = 0
+
+    while True:
+        frame_offset = reader.tell()
+        command_result = _read_stream_varint(
+            reader,
+            context="outer command",
+            allow_clean_eof=True,
+        )
+        if command_result is None:
+            _validate_header_offsets(old_offset_a, old_offset_b, offset_commands)
+            return None
+        raw_command, _raw_command_bytes = command_result
+        tick_result = _read_stream_varint(reader, context="outer tick")
+        size_result = _read_stream_varint(reader, context="outer payload size")
+        assert tick_result is not None and size_result is not None
+        tick, _raw_tick_bytes = tick_result
+        size, _raw_size_bytes = size_result
+        if size > _MAX_OUTER_FRAME_SIZE:
+            raise _fail(f"outer frame exceeds size limit: {size}")
+
+        command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+        payload_offset = reader.tell()
+        available = file_size - payload_offset
+        if size > available:
+            missing = size - available
+            _validate_header_offsets(old_offset_a, old_offset_b, offset_commands)
+            if complete_frames <= 0:
+                raise _fail("refusing to discard the first outer frame")
+            if command not in _PACKET_COMMANDS:
+                raise _fail(
+                    f"truncated terminal frame is command {command}, not a packet"
+                )
+            if int(tick) == _U32_MAX or int(tick) < max_tick:
+                raise _fail("truncated terminal packet has an invalid or backward tick")
+            if available <= 0:
+                raise _fail("truncated terminal packet has no payload bytes")
+            if missing > _MAX_TRUNCATED_PACKET_TAIL_MISSING_BYTES:
+                raise _fail(
+                    "truncated terminal packet exceeds the safe missing-byte limit: "
+                    f"{missing}"
+                )
+            return TruncatedPacketTailRepair(
+                frame_offset=int(frame_offset),
+                tick=int(tick),
+                declared_payload_size=int(size),
+                available_payload_size=int(available),
+                missing_payload_bytes=int(missing),
+                discarded_bytes=int(file_size - frame_offset),
+            )
+
+        if frame_offset in (old_offset_a, old_offset_b):
+            offset_commands[int(frame_offset)] = int(command)
+        reader.seek(size, os.SEEK_CUR)
+        complete_frames += 1
+        if int(tick) != _U32_MAX:
+            max_tick = max(max_tick, int(tick))
+
+
+def repair_truncated_packet_tail_in_place(
+    source_path: os.PathLike[str] | str,
+) -> Optional[TruncatedPacketTailRepair]:
+    """Atomically discard one incomplete terminal packet from a disposable copy.
+
+    Callers must opt in and must ensure ``source_path`` is an application-owned
+    uploaded copy. Clean demos are byte-identical no-ops. The original path is
+    replaced only after the retained prefix passes a complete structural scan.
+    """
+
+    source = Path(source_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Demo file not found: {source}")
+    source_before = _stat_fingerprint(source.stat())
+    with source.open("rb") as reader:
+        if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+            raise _fail("source demo changed before tail scan started")
+        repair = _find_truncated_packet_tail(reader)
+    if repair is None:
+        return None
+    if _stat_fingerprint(source.stat()) != source_before:
+        raise _fail("source demo changed while tail scan was running")
+
+    temp_file = tempfile.NamedTemporaryFile(
+        mode="w+b",
+        prefix=f".{source.name}.tail-",
+        suffix=".tmp",
+        dir=source.parent,
+        delete=False,
+    )
+    temp_path = Path(temp_file.name)
+    replaced = False
+    try:
+        with temp_file as writer, source.open("rb") as reader:
+            if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+                raise _fail("source demo changed before tail repair started")
+            remaining = repair.frame_offset
+            while remaining > 0:
+                chunk = reader.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise _fail("source demo ended while copying retained prefix")
+                writer.write(chunk)
+                remaining -= len(chunk)
+            writer.flush()
+            os.fsync(writer.fileno())
+
+        with temp_path.open("rb") as candidate:
+            _scan_stream(
+                candidate,
+                drop_legacy_type138=False,
+                drop_win_panel_match=False,
+            )
+        if _stat_fingerprint(source.stat()) != source_before:
+            raise _fail("source demo changed while tail repair was being validated")
+
+        shutil.copymode(source, temp_path)
+        source_stat = source.stat()
+        repaired_mtime_ns = max(time.time_ns(), source_stat.st_mtime_ns + 1_000_000_000)
+        os.utime(temp_path, ns=(source_stat.st_atime_ns, repaired_mtime_ns))
+        if _stat_fingerprint(source.stat()) != source_before:
+            raise _fail("source demo changed before atomic tail replacement")
+        os.replace(temp_path, source)
+        replaced = True
+        return repair
+    except DemoPlaybackCompatibilityError:
+        raise
+    except OSError as exc:
+        raise _fail(f"could not atomically repair truncated demo tail: {exc}") from exc
+    finally:
+        if not replaced:
+            try:
+                temp_file.close()
+            except Exception:
+                pass
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def prepare_cs2_playback_demo(

@@ -63,3 +63,28 @@ def test_ensure_demo_compatible_invalidates_when_file_changes(monkeypatch, tmp_p
 
     assert result.cached is False
     assert calls == 2
+
+
+def test_tail_repair_requires_explicit_opt_in(monkeypatch, tmp_path: Path):
+    source = tmp_path / "match.dem"
+    source.write_bytes(b"demo-bytes")
+    tail_calls: list[Path] = []
+
+    def fake_tail_repair(path):
+        tail_calls.append(Path(path))
+        return None
+
+    monkeypatch.setattr(service, "_cache_path", lambda: tmp_path / "cache.json")
+    monkeypatch.setattr(
+        service,
+        "repair_truncated_packet_tail_in_place",
+        fake_tail_repair,
+    )
+    monkeypatch.setattr(service, "repair_demo_in_place", lambda _path: _clean_report())
+
+    service.ensure_demo_compatible(source)
+    assert tail_calls == []
+
+    source.write_bytes(b"changed-demo-bytes")
+    service.ensure_demo_compatible(source, allow_truncated_packet_tail=True)
+    assert tail_calls == [source.resolve()]

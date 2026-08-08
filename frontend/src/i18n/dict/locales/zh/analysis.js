@@ -57,6 +57,7 @@ export default {
   "analysis.cosmetics.saveFailed": "保存自定义方案失败",
   "analysis.cosmetics.saveFailedLogged": "饰品修改失败，请重试或更换 Demo。技术详情已写入日志。",
   "analysis.cosmetics.saveCoreUnavailable": "内置饰品修改组件不可用，请重新安装或修复应用。技术详情已写入日志。",
+  "analysis.cosmetics.saveDemoIncomplete": "这个 Demo 文件结尾不完整，缺少换肤所需的索引数据。它仍可用于分析或播放，但无法安全换肤，请重新下载完整 Demo 或更换其他 Demo。",
   "analysis.cosmetics.saveItemFailed": "该饰品无法修改，请尝试其他饰品或 Demo。",
   "analysis.cosmetics.saveResultTitle": "保存结果",
   "analysis.cosmetics.saveResultSucceeded": "成功（{count}）",

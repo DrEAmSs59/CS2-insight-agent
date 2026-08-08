@@ -171,6 +171,73 @@ def test_reads_real_outer_frame_end_tick_without_decoding_payloads(tmp_path: Pat
     assert compat.read_demo_end_tick(source) == 9_999
 
 
+def test_opt_in_tail_repair_discards_only_incomplete_final_packet(tmp_path: Path):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    retained = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first
+    source = _write(tmp_path / "source.dem", retained + terminal[:-3])
+
+    repair = compat.repair_truncated_packet_tail_in_place(source)
+
+    assert repair is not None
+    assert repair.frame_offset == len(retained)
+    assert repair.tick == 43
+    assert repair.missing_payload_bytes == 3
+    assert repair.discarded_bytes == len(terminal) - 3
+    assert source.read_bytes() == retained
+    assert compat.read_demo_end_tick(source) == 42
+    assert not list(tmp_path.glob(".source.dem.tail-*.tmp"))
+
+
+def test_opt_in_tail_repair_keeps_clean_demo_byte_identical(tmp_path: Path):
+    source = _write(
+        tmp_path / "source.dem",
+        _demo(_packet_proto(_packet_data([(76, b"complete")]))),
+    )
+    original = source.read_bytes()
+    original_stat = compat._stat_fingerprint(source.stat())
+
+    assert compat.repair_truncated_packet_tail_in_place(source) is None
+    assert source.read_bytes() == original
+    assert compat._stat_fingerprint(source.stat()) == original_stat
+
+
+def test_opt_in_tail_repair_rejects_incomplete_metadata_frame(tmp_path: Path):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal_metadata = _frame(2, 43, b"partial-file-info")
+    source_bytes = (
+        b"PBDEMS2\x00"
+        + (0).to_bytes(8, "little")
+        + first
+        + terminal_metadata[:-3]
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="not a packet",
+    ):
+        compat.repair_truncated_packet_tail_in_place(source)
+
+    assert source.read_bytes() == source_bytes
+    assert not list(tmp_path.glob(".source.dem.tail-*.tmp"))
+
+
+def test_persistent_repair_does_not_implicitly_discard_truncated_tail(tmp_path: Path):
+    first = _frame(7, 42, _packet_proto(_packet_data([(76, b"complete")])))
+    terminal = _frame(7, 43, _packet_proto(_packet_data([(76, b"partial-tail")])))
+    source_bytes = b"PBDEMS2\x00" + (0).to_bytes(8, "little") + first + terminal[:-3]
+    source = _write(tmp_path / "source.dem", source_bytes)
+
+    with pytest.raises(
+        compat.DemoPlaybackCompatibilityError,
+        match="truncated outer frame payload",
+    ):
+        compat.repair_demo_in_place(source)
+
+    assert source.read_bytes() == source_bytes
+
+
 @pytest.mark.parametrize("compressed", [False, True])
 def test_repairs_unaligned_207_138_76_and_remaps_header(tmp_path: Path, compressed: bool):
     old = _packet_data(

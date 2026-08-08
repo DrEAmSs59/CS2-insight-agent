@@ -242,6 +242,9 @@ function saveFailureMessage(result, t) {
   if (result?.error_code === "COSMETICS_SKIN_CORE_UNAVAILABLE") {
     return t("analysis.cosmetics.saveCoreUnavailable");
   }
+  if (result?.error_code === "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE") {
+    return t("analysis.cosmetics.saveDemoIncomplete");
+  }
   return t("analysis.cosmetics.saveFailedLogged");
 }
 

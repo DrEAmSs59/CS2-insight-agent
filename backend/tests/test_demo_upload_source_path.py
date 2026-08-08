@@ -70,13 +70,18 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     original = original_dir / "match.dem"
     original.write_bytes(b"same-demo-content")
     upload = main.UploadFile(filename="match.dem", file=io.BytesIO(original.read_bytes()))
+    ensure_options: list[bool] = []
 
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {"map_name": "de_mirage"}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", upload_dir)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
-    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+    def fake_ensure(_path, *, allow_truncated_packet_tail=False):
+        ensure_options.append(allow_truncated_packet_tail)
+        return _compat_result()
+
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     registered = _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([upload], json.dumps([str(original)])))
@@ -87,17 +92,23 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     assert item["uploaded_path"] == str(upload_dir / "match.dem")
     assert Path(item["uploaded_path"]).read_bytes() == original.read_bytes()
     assert registered == [original.resolve()]
+    assert ensure_options == [False]
 
 
 def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path: Path):
     upload = main.UploadFile(filename="browser.dem", file=io.BytesIO(b"browser-demo"))
+    ensure_options: list[bool] = []
 
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
-    monkeypatch.setattr(main, "ensure_demo_compatible", lambda _path: _compat_result())
+    def fake_ensure(_path, *, allow_truncated_packet_tail=False):
+        ensure_options.append(allow_truncated_packet_tail)
+        return _compat_result()
+
+    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([upload], json.dumps([""])))
@@ -106,6 +117,7 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
     assert item["id"] == 73
     assert item["path"] == str(tmp_path / "browser.dem")
     assert item["uploaded_path"] == item["path"]
+    assert ensure_options == [True]
 
 
 def test_single_upload_rejects_non_dem_with_specific_error_code():
@@ -124,7 +136,7 @@ def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_pat
     bad = main.UploadFile(filename="broken.dem", file=io.BytesIO(b"broken"))
     good = main.UploadFile(filename="good.dem", file=io.BytesIO(b"good"))
 
-    def fake_ensure(path):
+    def fake_ensure(path, **_kwargs):
         if Path(path).name == "broken.dem":
             raise RuntimeError("parser implementation detail")
         return _compat_result()
@@ -172,7 +184,7 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {}, None
 
-    def fake_ensure(_path: Path):
+    def fake_ensure(_path: Path, **_kwargs):
         ensure_threads.append(threading.get_ident())
         return _compat_result()
 
