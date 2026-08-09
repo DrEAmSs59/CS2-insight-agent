@@ -12,15 +12,11 @@ import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
-import { getPlayerClipScope } from "./utils/playerClipScope";
 import {
   isFreezeToDeathCompilation,
-  sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
 import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
-import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
 import {
-  queueItemClientUid,
   buildRecordingQueueRequestsFromQueue,
   applySessionObsTransitionToRequests,
   applySessionKbOverlayToRequests,
@@ -31,6 +27,7 @@ import { progressToastShowsBusy } from "./utils/progressToast";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
+import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
 import {
   recordingAbortToastKind,
   recordingQueueHadUnexpectedCs2Exit,
@@ -343,21 +340,44 @@ export default function App() {
   );
 
   const currentDemoFilename = currentParsed?.demo_filename ?? currentUpload?.filename ?? "";
-  const queuedClientClipUidsForCurrentDemo = useMemo(() => {
-    if (!currentDemoFilename) return new Set();
-    const uids = new Set();
-    for (const q of queue) {
-      if (q.demoFilename !== currentDemoFilename) continue;
-      uids.add(queueItemClientUid(q));
-      if (q.sourceClientClipUid) uids.add(q.sourceClientClipUid);
-    }
-    return uids;
-  }, [queue, currentDemoFilename]);
-
-  const queuedClientClipUidsGlobal = useMemo(
-    () => new Set(queue.map((q) => queueItemClientUid(q))),
-    [queue]
-  );
+  const {
+    queuedClientClipUidsForCurrentDemo,
+    regularSelectableTotal,
+    selectedRegularCount,
+    canAddCurrentPlayerHighlights,
+    handleToggleClip,
+    handleSelectAll,
+    handleDeselectAll,
+    handleAddSelectedToQueue,
+    handleAddCurrentPlayerHighlights,
+    handleAddTimelineEventToQueue,
+    handleAddTimelineRoundToQueue,
+    handleAddTimelineEventsBatchToQueue,
+    handleAddWeaponKillsToQueue,
+    handleDequeueClip,
+    handleRemoveTimelineEventFromQueue,
+    handleRemoveTimelineRoundFromQueue,
+  } = useClipQueueActions({
+    t,
+    locale,
+    setProgressText,
+    queue,
+    addToQueue,
+    removeByClientClipUid,
+    uploadedDemos,
+    parsedMatches,
+    currentMatchIndex,
+    currentParsed,
+    currentActivePlayer,
+    matchMeta,
+    activePlayerTabs,
+    selectedPlayers,
+    clips,
+    freezeToDeathDraft,
+    selectedClientClipUids,
+    setSelectedClientClipUids,
+    currentDemoFilename,
+  });
 
   // ── 确保 client_clip_uid 已注入 ──
   useEffect(() => {
@@ -384,20 +404,6 @@ export default function App() {
       return next;
     });
   }, [parsedMatches, currentMatchIndex, uploadedDemos]);
-
-  useEffect(() => {
-    setSelectedClientClipUids((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      for (const uid of queuedClientClipUidsForCurrentDemo) {
-        if (next.has(uid)) {
-          next.delete(uid);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [queuedClientClipUidsForCurrentDemo]);
 
   // 切换玩家 Tab 时清空选中状态
   useEffect(() => {
@@ -582,447 +588,6 @@ export default function App() {
   }, [refreshConfigBackupStatus]);
 
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
-
-  const roundMontageCanEnqueue = useMemo(() => {
-    const p = freezeToDeathDraft?.picked ?? [];
-    return p.length > 0;
-  }, [freezeToDeathDraft]);
-
-  const regularSelectableTotal = useMemo(
-    () =>
-      clips.filter((c) => {
-        if (c.category === "meme_death" || !c.client_clip_uid) return false;
-        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-        return true;
-      }).length,
-    [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]
-  );
-  const selectedRegularCount = useMemo(
-    () =>
-      clips.filter((c) => {
-        if (c.category === "meme_death" || !c.client_clip_uid) return false;
-        if (!selectedClientClipUids.has(c.client_clip_uid)) return false;
-        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-        return true;
-      }).length,
-    [
-      clips,
-      selectedClientClipUids,
-      queuedClientClipUidsForCurrentDemo,
-      roundMontageCanEnqueue,
-    ]
-  );
-
-  const currentPlayerClipScope = useMemo(
-    () =>
-      getPlayerClipScope(
-        currentParsed?.players,
-        currentActivePlayer,
-        queuedClientClipUidsForCurrentDemo,
-      ),
-    [currentParsed, currentActivePlayer, queuedClientClipUidsForCurrentDemo],
-  );
-  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
-
-  const handleToggleClip = useCallback(
-    (clientClipUid) => {
-      if (!clientClipUid || queuedClientClipUidsForCurrentDemo.has(clientClipUid)) return;
-      const clip = clips.find((c) => c.client_clip_uid === clientClipUid);
-      if (clip && isFreezeToDeathCompilation(clip)) {
-        const p = freezeToDeathDraft?.picked ?? [];
-        if (!p.length) return;
-      }
-      setSelectedClientClipUids((prev) => {
-        const next = new Set(prev);
-        if (next.has(clientClipUid)) next.delete(clientClipUid);
-        else next.add(clientClipUid);
-        return next;
-      });
-    },
-    [queuedClientClipUidsForCurrentDemo, clips, freezeToDeathDraft]
-  );
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedClientClipUids((prev) => {
-      const next = new Set(prev);
-      clips
-        .filter((c) => {
-          if (c.category === "meme_death" || !c.client_clip_uid) return false;
-          if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-          if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-          return true;
-        })
-        .forEach((c) => next.add(c.client_clip_uid));
-      return next;
-    });
-  }, [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]);
-
-  const handleDeselectAll = useCallback(() => {
-    setSelectedClientClipUids(new Set());
-  }, []);
-
-  const queueItemMetaForPlayer = useCallback(
-    (index, playerName) => {
-      const um = uploadedDemos?.[index];
-      const pm = parsedMatches?.[index];
-      const playerData = pm?.players?.[playerName];
-      const meta = playerData?.match_meta ?? um?.match_meta ?? null;
-      const demoFilename = pm?.demo_filename ?? um?.filename ?? "";
-      const demoPath = pm?.demo_path ?? um?.path ?? "";
-      const steam =
-        meta?.target_steam_id != null && meta?.target_steam_id !== ""
-          ? String(meta.target_steam_id)
-          : null;
-      return {
-        demoFilename,
-        demoPath,
-        targetPlayer: meta?.target_player || playerName || null,
-        targetPlayerUserId: meta?.target_player_user_id ?? null,
-        targetSteamId: steam,
-      };
-    },
-    [uploadedDemos, parsedMatches]
-  );
-
-  // 兼容旧版接口（单玩家，用当前活跃玩家）
-  const queueItemMetaForIndex = useCallback(
-    (index) => {
-      const activePlayer =
-        activePlayerTabs[index] ??
-        Object.keys(parsedMatches?.[index]?.players ?? {})[0] ??
-        selectedPlayers[index]?.[0] ??
-        "";
-      return queueItemMetaForPlayer(index, activePlayer);
-    },
-    [activePlayerTabs, parsedMatches, selectedPlayers, queueItemMetaForPlayer]
-  );
-
-  const handleAddSelectedToQueue = useCallback(() => {
-    if (!currentParsed || selectedClientClipUids.size === 0) return;
-    const meta = queueItemMetaForIndex(currentMatchIndex);
-    const ftdPicksSorted = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
-    const candidates = clips.filter(
-      (c) => c.client_clip_uid && selectedClientClipUids.has(c.client_clip_uid)
-    );
-    const toAdd = [];
-    for (const c of candidates) {
-      const row = {
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: c.clip_id,
-        clientClipUid: c.client_clip_uid,
-        clipData: { ...c },
-      };
-      if (isFreezeToDeathCompilation(c)) {
-        const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
-        if (!sliced.ok) {
-          setProgressText(t(sliced.errorKey));
-          return;
-        }
-        toAdd.push({
-          ...row,
-          clientClipUid: sliced.clip.client_clip_uid,
-          sourceClientClipUid: c.client_clip_uid,
-          clipData: sliced.clip,
-          freezeToDeathQueueRounds: [...ftdPicksSorted],
-        });
-      } else {
-        toAdd.push(row);
-      }
-    }
-    if (!toAdd.length) {
-      return;
-    }
-    addToQueue(toAdd);
-    setSelectedClientClipUids(new Set());
-    const skipped = candidates.length - toAdd.length;
-    const skipHint =
-      skipped > 0 ? t("app.enqueueSkippedHint", { n: skipped }) : "";
-    setProgressText(t("app.enqueueAdded", { n: toAdd.length }) + skipHint, {
-      autoDismissMs: 2000,
-      queueLink: true,
-    });
-  }, [
-    currentParsed,
-    clips,
-    selectedClientClipUids,
-    addToQueue,
-    currentMatchIndex,
-    queueItemMetaForIndex,
-    freezeToDeathDraft,
-    t,
-  ]);
-
-  const handleAddCurrentPlayerHighlights = useCallback(() => {
-    if (!currentParsed || !currentActivePlayer) return;
-    const toAdd = [];
-    const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
-    for (const c of currentPlayerClipScope.queueableHighlights) {
-      toAdd.push({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: c.clip_id,
-        clientClipUid: c.client_clip_uid,
-        clipData: c,
-      });
-    }
-    if (!toAdd.length) {
-      setProgressText(t("app.enqueuePlayerHighlightsEmpty", { player: currentActivePlayer }));
-      return;
-    }
-    addToQueue(toAdd);
-    setProgressText(t("app.enqueuePlayerHighlightsDone", {
-      player: currentActivePlayer,
-      n: toAdd.length,
-    }), {
-      autoDismissMs: 2000,
-      queueLink: true,
-    });
-  }, [
-    currentParsed,
-    currentActivePlayer,
-    currentPlayerClipScope,
-    currentMatchIndex,
-    addToQueue,
-    queueItemMetaForPlayer,
-    t,
-  ]);
-
-  const handleAddTimelineEventToQueue = useCallback(
-    (event, roundRow) => {
-      const hasWindow =
-        (event?.suggested_clip && typeof event.suggested_clip === "object") ||
-        (event?.start_tick != null && event?.end_tick != null);
-      if (!currentParsed || !hasWindow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineEventClipData({
-        event,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        round: roundRow?.round ?? event?.round,
-        t,
-        locale,
-      });
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueTimelineDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-      locale,
-    ],
-  );
-
-  const handleAddTimelineRoundToQueue = useCallback(
-    (roundRow) => {
-      if (!currentParsed || !roundRow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename, t });
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueRoundAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueRoundDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-    ],
-  );
-
-  const handleAddTimelineEventsBatchToQueue = useCallback(
-    (eventList) => {
-      if (!currentParsed || !Array.isArray(eventList) || !eventList.length) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const toAdd = [];
-      for (const ev of eventList) {
-        if (!ev?.suggested_clip && (ev?.start_tick == null || ev?.end_tick == null)) continue;
-        const clipData = buildTimelineEventClipData({
-          event: ev,
-          mapName,
-          targetPlayer: meta.targetPlayer,
-          round: ev.round,
-          t,
-          locale,
-        });
-        const uid = clipData.client_clip_uid;
-        const qk = queueItemClientUid({
-          clientClipUid: uid,
-          clipData,
-          demoFilename: meta.demoFilename,
-          clipId: clipData.clip_id,
-        });
-        if (queuedClientClipUidsGlobal.has(qk)) continue;
-        toAdd.push({
-          demoPath: meta.demoPath,
-          demoFilename: meta.demoFilename,
-          targetPlayer: meta.targetPlayer,
-          targetPlayerUserId: meta.targetPlayerUserId,
-          targetSteamId: meta.targetSteamId,
-          clipId: clipData.clip_id,
-          clientClipUid: uid,
-          clipData,
-        });
-      }
-      if (!toAdd.length) {
-        setProgressText(t("app.enqueueTimelineBatchAllIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue(toAdd);
-      setProgressText(t("app.enqueueTimelineBatchDone", { n: toAdd.length }), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-      locale,
-    ],
-  );
-
-  const handleAddWeaponKillsToQueue = useCallback(
-    (clipData) => {
-      if (!currentParsed || !clipData?.client_clip_uid || !clipData?.kill_ticks?.length) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueWeaponKillsDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      queuedClientClipUidsGlobal,
-      addToQueue,
-      setProgressText,
-      t,
-    ],
-  );
-
-  const handleDequeueClip = useCallback(
-    (clientClipUid) => {
-      removeByClientClipUid(clientClipUid);
-    },
-    [removeByClientClipUid],
-  );
-
-  const handleRemoveTimelineEventFromQueue = useCallback(
-    (event, roundRow) => {
-      if (!currentParsed) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineEventClipData({
-        event,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        round: roundRow?.round ?? event?.round,
-        t,
-        locale,
-      });
-      removeByClientClipUid(clipData.client_clip_uid);
-    },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid, t, locale],
-  );
-
-  const handleRemoveTimelineRoundFromQueue = useCallback(
-    (roundRow) => {
-      if (!currentParsed || !roundRow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({
-        roundRow,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        demoFilename: meta.demoFilename,
-        t,
-      });
-      removeByClientClipUid(clipData.client_clip_uid);
-    },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid],
-  );
 
   const persistCs2RecordExtras = useCallback(async (payload) => {
     try {
