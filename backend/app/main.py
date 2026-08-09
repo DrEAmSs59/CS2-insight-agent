@@ -75,7 +75,7 @@ from .api.cosmetics_skin import router as cosmetics_skin_router
 from .api.config_backup import router as config_backup_router
 from .api.gsi import router as gsi_router
 from .recording.api import router as recording_router
-from .lite_cut.api import router as lite_cut_router
+from .features.lite_cut.api import router as lite_cut_router
 from .api_errors import error_detail
 from .pov_hud_manager import PovHudError
 import httpx
@@ -277,7 +277,7 @@ async def lifespan(_: FastAPI):
     await lite_cut_db.init_tables()
     stale_lite_cut_outputs = await lite_cut_db.recover_interrupted_exports()
     if stale_lite_cut_outputs:
-        from .lite_cut.export_preflight import cleanup_stale_export_artifacts
+        from .features.lite_cut.export_preflight import cleanup_stale_export_artifacts
 
         await asyncio.to_thread(cleanup_stale_export_artifacts, stale_lite_cut_outputs)
     cfg = load_config()
@@ -304,7 +304,7 @@ async def lifespan(_: FastAPI):
             abort_event = get_queue_abort_event()
             if abort_event is not None:
                 abort_event.set()
-            from .lite_cut.api import shutdown_lite_cut_jobs
+            from .features.lite_cut.api import shutdown_lite_cut_jobs
 
             await shutdown_lite_cut_jobs(timeout_sec=5.0)
             if application_state.demo_watcher is not None:
@@ -381,7 +381,7 @@ async def app_runtime_state():
 @app.post("/api/app/shutdown")
 async def app_shutdown():
     """Abort owned jobs, flush cleanup and then ask uvicorn to exit normally."""
-    from .lite_cut.api import shutdown_lite_cut_jobs
+    from .features.lite_cut.api import shutdown_lite_cut_jobs
     from .recording.api import get_queue_abort_event
     from .shutdown_state import request_server_shutdown
 

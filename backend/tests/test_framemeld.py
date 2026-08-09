@@ -19,7 +19,7 @@ from app.framemeld import (
     framemeld_working_fps,
     probe_framemeld,
 )
-from app.lite_cut.runtime import normalize_project_body
+from app.features.lite_cut.runtime import normalize_project_body
 
 
 class TestFrameMeld(unittest.TestCase):

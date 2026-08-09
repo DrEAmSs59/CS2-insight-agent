@@ -17,8 +17,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ..api_errors import error_detail
-from ..env_utils import get_data_dir
+from ...api_errors import error_detail
+from ...env_utils import get_data_dir
 from .assets import asset_kind_for_path
 from .projects_api import _delete_project_asset_files
 from .runtime import (

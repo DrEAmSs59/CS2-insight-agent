@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from app.lite_cut.assets import (
+from app.features.lite_cut.assets import (
     _unlink_with_retry,
     _run_proxy_process,
     alpha_preview_proxy_command,
@@ -30,11 +30,11 @@ from app.lite_cut.assets import (
     stable_project_asset_directory,
     validate_stored_asset_path,
 )
-from app.lite_cut.models import empty_project
+from app.features.lite_cut.models import empty_project
 
 
 def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monkeypatch):
-    from app.lite_cut import assets_api as api_mod
+    from app.features.lite_cut import assets_api as api_mod
     from app import video_composer
     from app import env_utils
 
@@ -56,7 +56,7 @@ def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monk
             }
 
     monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
-    monkeypatch.setattr("app.lite_cut.assets.validate_stored_asset_path", lambda _path: source)
+    monkeypatch.setattr("app.features.lite_cut.assets.validate_stored_asset_path", lambda _path: source)
     monkeypatch.setattr(env_utils, "load_config", lambda: SimpleNamespace(ffmpeg_path=None))
     monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
     monkeypatch.setattr(video_composer, "resolve_ffprobe_binary", lambda _path: tmp_path / "ffprobe.exe")
@@ -80,7 +80,7 @@ def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monk
 
 
 def test_save_uploaded_png(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -95,7 +95,7 @@ def test_save_uploaded_png(tmp_path, monkeypatch):
 
 
 def test_save_uploaded_mp3(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -110,7 +110,7 @@ def test_save_uploaded_mp3(tmp_path, monkeypatch):
 
 
 def test_project_upload_is_saved_inside_project_named_directory(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -130,7 +130,7 @@ def test_project_directory_name_replaces_windows_invalid_characters():
 
 
 def test_stable_project_directory_keeps_the_original_folder_after_rename(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
     original = stable_project_asset_directory(24, "First name")
@@ -145,7 +145,7 @@ def test_stable_project_directory_keeps_the_original_folder_after_rename(tmp_pat
 
 
 def test_save_uploaded_gif_is_seekable_video_media(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -161,7 +161,7 @@ def test_save_uploaded_gif_is_seekable_video_media(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("filename", ["match.mkv", "capture.m4v", "legacy.avi"])
 def test_save_uploaded_container_video(tmp_path, monkeypatch, filename):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -176,7 +176,7 @@ def test_save_uploaded_container_video(tmp_path, monkeypatch, filename):
 
 
 def test_save_uploaded_audio_webm_is_audio_asset(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -194,7 +194,7 @@ def test_save_uploaded_audio_webm_is_audio_asset(tmp_path, monkeypatch):
 
 
 def test_reject_unsupported_ext(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
 
@@ -207,7 +207,7 @@ def test_reject_unsupported_ext(tmp_path, monkeypatch):
 
 
 def test_rejects_oversized_upload_without_leaving_a_partial_file(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
     monkeypatch.setattr(assets_mod, "_ASSET_MAX_BYTES", 4)
@@ -223,7 +223,7 @@ def test_rejects_oversized_upload_without_leaving_a_partial_file(tmp_path, monke
 
 
 def test_validate_stored_asset_path_rejects_sibling_prefix(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     root = tmp_path / "lite_cut_assets"
     root.mkdir()
@@ -251,7 +251,7 @@ def test_browser_proxy_replaces_only_stream_source(tmp_path):
 
 
 def test_relocate_and_delete_asset_bundle_includes_preview_proxies(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
     source = tmp_path / "clip.mov"
@@ -286,7 +286,7 @@ def test_unlink_retries_temporary_windows_file_lock(monkeypatch):
                 raise PermissionError("file is in use")
 
     locked_path = TemporarilyLockedPath()
-    monkeypatch.setattr("app.lite_cut.assets.time.sleep", lambda _delay: None)
+    monkeypatch.setattr("app.features.lite_cut.assets.time.sleep", lambda _delay: None)
 
     _unlink_with_retry(locked_path, attempts=3)
 
@@ -304,8 +304,8 @@ def test_proxy_process_can_be_cancelled_before_ffmpeg_starts():
 
 
 def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, monkeypatch):
-    from app.lite_cut import proxy_api as api_mod
-    from app.lite_cut.runtime import preview_proxy_jobs
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import preview_proxy_jobs
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
@@ -333,8 +333,8 @@ def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, m
 
 @pytest.mark.anyio
 async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
-    from app.lite_cut import assets_api as api_mod
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets_api as api_mod
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
@@ -417,7 +417,7 @@ def test_ready_high_fps_proxy_survives_requests_without_probe_metadata(tmp_path)
     # the FPS that triggered generation was intentionally not persisted.
     assert asset_stream_path(source, duration_sec=60) == proxy
 
-    from app.lite_cut.proxy_api import (
+    from app.features.lite_cut.proxy_api import (
         _decorate_asset_preview_state,
         _row_requires_or_has_preview_proxy,
     )
@@ -469,7 +469,7 @@ def test_h264_remux_command_copies_video_without_scale_or_video_encoder(tmp_path
 
 
 def test_successful_remux_does_not_resolve_a_transcode_encoder(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     source = tmp_path / "match.mkv"
     source.write_bytes(b"source")
@@ -491,7 +491,7 @@ def test_successful_remux_does_not_resolve_a_transcode_encoder(tmp_path, monkeyp
 
 
 def test_failed_remux_falls_back_to_transcode(tmp_path, monkeypatch):
-    from app.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets as assets_mod
 
     source = tmp_path / "match.mkv"
     source.write_bytes(b"source")
@@ -519,9 +519,9 @@ def test_failed_remux_falls_back_to_transcode(tmp_path, monkeypatch):
 
 def test_high_fps_h264_proxy_job_transcodes_instead_of_remuxing(tmp_path, monkeypatch):
     from app import env_utils, video_composer
-    from app.lite_cut import assets as assets_mod
-    from app.lite_cut import proxy_api as api_mod
-    from app.lite_cut.runtime import LiteCutPreviewProxyJob
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import LiteCutPreviewProxyJob
 
     source = tmp_path / "240fps.mp4"
     source.write_bytes(b"source")
@@ -603,7 +603,7 @@ def test_gif_preview_proxy_is_limited_to_one_animation_cycle(tmp_path):
 
 @pytest.mark.anyio
 async def test_asset_validation_lists_missing_uploaded_and_recorded_sources(monkeypatch, tmp_path):
-    from app.lite_cut import assets_api as api_mod
+    from app.features.lite_cut import assets_api as api_mod
 
     class FakeMontageDB:
         async def get_recorded_clips_by_ids(self, ids):

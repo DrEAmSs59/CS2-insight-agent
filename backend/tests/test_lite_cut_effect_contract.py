@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from app.lite_cut.composer import (
+from app.features.lite_cut.composer import (
     _FILTER_PRESET_VF,
     _MAIN_VIDEO_EXT,
     _build_color_vf,
     _clip_canvas_transform_graph,
 )
-from app.lite_cut.effect_contract import load_effect_contract, normalize_video_layer_transform
+from app.features.lite_cut.effect_contract import load_effect_contract, normalize_video_layer_transform
 
 
 def test_effect_contract_is_the_exporter_filter_source_of_truth():

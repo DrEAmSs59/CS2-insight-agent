@@ -9,7 +9,7 @@ from typing import Any
 
 
 def effect_contract_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "data" / "lite_cut_effect_contract.json"
+    return Path(__file__).resolve().parents[4] / "data" / "lite_cut_effect_contract.json"
 
 
 @lru_cache(maxsize=1)

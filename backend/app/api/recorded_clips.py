@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from ..databases import montage_db
 from ..env_utils import load_config
-from ..lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
+from ..features.lite_cut.stream import stream_file_with_range, validate_recorded_clip_path
 
 router = APIRouter(tags=["recorded-clips"])
 
@@ -107,7 +107,7 @@ async def get_recorded_clip_waveform(
         from ..api_errors import error_detail
 
         raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(clip_id)))
-    from ..lite_cut.waveform import load_or_create_waveform_cache, waveform_view
+    from ..features.lite_cut.waveform import load_or_create_waveform_cache, waveform_view
     from ..video_composer import resolve_ffmpeg_binary
 
     file_path = validate_recorded_clip_path(str(row.get("output_path") or ""))

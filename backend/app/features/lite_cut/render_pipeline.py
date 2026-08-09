@@ -60,7 +60,7 @@ from .timeline import (
     _timeline_gap_plan,
     _video_layer_audio_clips_for_export,
 )
-from ..video_composer import (
+from ...video_composer import (
     MontageComposerError,
     _concat_file_line,
     _is_hard_cut,
@@ -70,16 +70,16 @@ from ..video_composer import (
     resolve_ffprobe_binary,
     validate_output_path,
 )
-from ..montage_encoder import (
+from ...montage_encoder import (
     apply_encoder_device_args,
     available_h264_encoders,
     ffmpeg_encoder_identity,
     h264_encode_cli_args,
     raise_hardware_encoder_failure,
 )
-from ..montage_exceptions import HardwareEncoderFailure
-from ..ffmpeg_compatibility import add_ffmpeg_compatibility_hint
-from ..framemeld import (
+from ...montage_exceptions import HardwareEncoderFailure
+from ...ffmpeg_compatibility import add_ffmpeg_compatibility_hint
+from ...framemeld import (
     build_framemeld_command,
     framemeld_sources_are_compatible,
     framemeld_working_fps,
@@ -1184,7 +1184,7 @@ def compose_lite_cut_montage(
 ) -> Any:
     """Export LiteCut with the shared GPU plan and x264 safety fallback."""
 
-    from ..encoder_planner import (
+    from ...encoder_planner import (
         EncoderCandidate,
         EncoderTargetSpec,
         build_encoder_candidates,

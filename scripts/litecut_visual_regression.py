@@ -27,13 +27,13 @@ VITE_PORT = 4174
 
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.lite_cut.composer import (  # noqa: E402
+from app.features.lite_cut.composer import (  # noqa: E402
     _composite_overlays_on_base,
     _lite_cut_boundary_transition_to_ts,
     _lite_cut_clip_to_ts,
     _map_transition_type,
 )
-from app.lite_cut.assets import ensure_alpha_mov_preview_proxy  # noqa: E402
+from app.features.lite_cut.assets import ensure_alpha_mov_preview_proxy  # noqa: E402
 from app.video_composer import ffprobe_streams, probe_video_audio_summary, resolve_ffprobe_binary  # noqa: E402
 
 

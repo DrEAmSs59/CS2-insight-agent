@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
-from ..ffmpeg_process import process_error_tail, run_process_capture
-from ..video_composer import MontageComposerError, ffprobe_streams, resolve_ffprobe_binary, validate_output_path
+from ...ffmpeg_process import process_error_tail, run_process_capture
+from ...video_composer import MontageComposerError, ffprobe_streams, resolve_ffprobe_binary, validate_output_path
 
 
 def ensure_ffmpeg_runnable(ffmpeg_bin: Path) -> None:

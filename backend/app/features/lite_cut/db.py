@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import aiosqlite
 
-from ..demo_db import utc_now_iso
+from ...demo_db import utc_now_iso
 
 
 def _replace_storage_root(value: Any, old_root: Path, new_root: Path) -> Any:

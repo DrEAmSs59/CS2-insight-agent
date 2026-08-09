@@ -1,6 +1,6 @@
 """LiteCut preset apply pure functions."""
 
-from app.lite_cut.models import (
+from app.features.lite_cut.models import (
     BgmConfig,
     ColorGradePresetBody,
     OverlayRecipeLayer,
@@ -11,8 +11,8 @@ from app.lite_cut.models import (
     TransitionRhythmPresetBody,
     empty_project,
 )
-from app.lite_cut.api import _preset_asset_warnings
-from app.lite_cut.preset_apply import (
+from app.features.lite_cut.api import _preset_asset_warnings
+from app.features.lite_cut.preset_apply import (
     apply_color_grade,
     apply_overlay_recipe,
     apply_packaging_bundle,

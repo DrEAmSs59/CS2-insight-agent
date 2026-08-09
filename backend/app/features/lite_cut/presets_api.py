@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..api_errors import error_detail
+from ...api_errors import error_detail
 from .models import (
     LiteCutPresetCreate,
     LiteCutPresetPatch,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from ..video_composer import MontageComposerError, _is_hard_cut, _parse_transition_for_edge
+from ...video_composer import MontageComposerError, _is_hard_cut, _parse_transition_for_edge
 
 _TRANSITION_MAP = {
     "cut": "cut",

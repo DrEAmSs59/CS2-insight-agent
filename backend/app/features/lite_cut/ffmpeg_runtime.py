@@ -9,8 +9,8 @@ import threading
 import time
 from typing import Any, Callable
 
-from ..ffmpeg_process import command_for_log, decode_process_output
-from ..video_composer import MontageComposerError
+from ...ffmpeg_process import command_for_log, decode_process_output
+from ...video_composer import MontageComposerError
 
 logger = logging.getLogger(__name__)
 

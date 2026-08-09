@@ -5,8 +5,8 @@ import zipfile
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from app.lite_cut import api, portable_api
-from app.lite_cut.api import _resolve_lite_cut_encoder
+from app.features.lite_cut import api, portable_api
+from app.features.lite_cut.api import _resolve_lite_cut_encoder
 
 
 def test_lite_cut_export_uses_project_encoder():
@@ -106,7 +106,7 @@ async def test_portable_import_rolls_back_project_and_directory_on_invalid_asset
     monkeypatch.setattr(portable_api, "get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(portable_api, "_delete_project_asset_files", no_asset_records)
     monkeypatch.setattr(
-        "app.lite_cut.assets.stable_project_asset_directory",
+        "app.features.lite_cut.assets.stable_project_asset_directory",
         lambda *_args, **_kwargs: destination,
     )
 

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..env_utils import load_config, save_config
+from ...env_utils import load_config, save_config
 from .runtime import (
     LiteCutPreviewProxyJob,
     get_lite_cut_db,
@@ -34,9 +34,9 @@ def _preview_proxy_job_snapshot(job: LiteCutPreviewProxyJob) -> dict[str, Any]:
 
 
 def _create_preview_proxy_sync(job: LiteCutPreviewProxyJob, row: dict[str, Any]) -> tuple[Path | None, bool]:
-    from ..env_utils import load_config
-    from ..montage_encoder import h264_encode_cli_args
-    from ..video_composer import (
+    from ...env_utils import load_config
+    from ...montage_encoder import h264_encode_cli_args
+    from ...video_composer import (
         probe_video_audio_summary,
         resolve_ffmpeg_binary,
         resolve_ffprobe_binary,

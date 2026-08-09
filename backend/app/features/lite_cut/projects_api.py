@@ -9,8 +9,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ..api_errors import error_detail
-from ..file_quarantine import QuarantineBatch, quarantine_files
+from ...api_errors import error_detail
+from ...file_quarantine import QuarantineBatch, quarantine_files
 from .models import LiteCutProjectCreate, LiteCutProjectPatch
 from .proxy_api import _stop_preview_proxy_job
 from .runtime import get_lite_cut_db, normalize_project_body

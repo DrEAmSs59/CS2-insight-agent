@@ -1,7 +1,7 @@
 import pytest
 
-from app.lite_cut.db import LiteCutDB
-from app.lite_cut.models import empty_project
+from app.features.lite_cut.db import LiteCutDB
+from app.features.lite_cut.models import empty_project
 
 
 def test_track_custom_name_survives_project_body_round_trip():

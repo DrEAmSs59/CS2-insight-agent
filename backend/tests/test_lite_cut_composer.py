@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.lite_cut.composer import (
+from app.features.lite_cut.composer import (
     _audio_mix_filter_complex,
     _audio_track_clips_for_export,
     _video_layer_audio_clips_for_export,
@@ -78,8 +78,8 @@ from app.lite_cut.composer import (
 )
 from app.video_composer import MontageComposerError
 from app.video_composer import _xfade_transition_name
-from app.lite_cut.models import empty_project
-from app.lite_cut.render_pipeline import _concat_timeline_command
+from app.features.lite_cut.models import empty_project
+from app.features.lite_cut.render_pipeline import _concat_timeline_command
 
 
 def test_map_transition_types():

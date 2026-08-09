@@ -27,7 +27,7 @@ from .timeline import (
     _clip_volume_filter,
     _map_transition_type,
 )
-from ..video_composer import _xfade_transition_name
+from ...video_composer import _xfade_transition_name
 
 _FILTER_PRESET_VF = filter_preset_ffmpeg_map()
 
@@ -601,7 +601,7 @@ def _overlay_filter_complex(
 
 
 def _default_text_font_file() -> str:
-    font = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "NotoSansSC-Bold.ttf"
+    font = Path(__file__).resolve().parents[3] / "assets" / "fonts" / "NotoSansSC-Bold.ttf"
     return str(font) if font.is_file() else ""
 
 
@@ -625,7 +625,7 @@ def _builtin_text_font_file(font_family: str) -> str:
             return str(windows_font)
     if not filename:
         return _default_text_font_file()
-    path = Path(__file__).resolve().parents[2] / "assets" / "fonts" / filename
+    path = Path(__file__).resolve().parents[3] / "assets" / "fonts" / filename
     return str(path) if path.is_file() else _default_text_font_file()
 
 

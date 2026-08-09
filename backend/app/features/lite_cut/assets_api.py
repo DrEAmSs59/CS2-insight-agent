@@ -11,9 +11,9 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..api_errors import error_detail
-from ..env_utils import load_config
-from ..file_quarantine import quarantine_files
+from ...api_errors import error_detail
+from ...env_utils import load_config
+from ...file_quarantine import quarantine_files
 from .proxy_api import (
     _decorate_asset_preview_state,
     _preview_proxy_job_snapshot,
@@ -36,7 +36,7 @@ async def _attach_video_fps(items: list[dict[str, Any]]) -> list[dict[str, Any]]
     if not video_items:
         return items
     try:
-        from ..video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
+        from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
 
         ffprobe = resolve_ffprobe_binary(resolve_ffmpeg_binary(load_config().ffmpeg_path))
     except Exception:
@@ -171,8 +171,8 @@ async def upload_lite_cut_asset(
             media_info["width"], media_info["height"] = dimensions
     if kind in {"video", "webm", "audio", "image"} or dest.suffix.lower() == ".gif":
         try:
-            from ..env_utils import load_config
-            from ..video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
+            from ...env_utils import load_config
+            from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
 
             cfg = load_config()
             ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
@@ -245,8 +245,8 @@ async def get_lite_cut_asset_metadata(asset_id: int):
         return result
 
     try:
-        from ..env_utils import load_config
-        from ..video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
+        from ...env_utils import load_config
+        from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
 
         ffmpeg_bin = resolve_ffmpeg_binary(load_config().ffmpeg_path)
         info = await asyncio.to_thread(probe_video_audio_summary, path, resolve_ffprobe_binary(ffmpeg_bin))
@@ -273,7 +273,7 @@ async def get_lite_cut_asset_waveform(
     row = await get_lite_cut_db().get_asset(int(asset_id))
     if not row:
         raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
-    from ..video_composer import resolve_ffmpeg_binary
+    from ...video_composer import resolve_ffmpeg_binary
     from .assets import validate_stored_asset_path
     from .waveform import load_or_create_waveform_cache, waveform_view
 
@@ -302,7 +302,7 @@ async def stream_lite_cut_builtin_font(font_name: str):
     safe_name = allowed.get(font_name)
     if not safe_name:
         raise HTTPException(404, "font not found")
-    path = Path(__file__).resolve().parents[2] / "assets" / "fonts" / safe_name
+    path = Path(__file__).resolve().parents[3] / "assets" / "fonts" / safe_name
     return FileResponse(path, media_type="font/ttf", filename=safe_name)
 
 

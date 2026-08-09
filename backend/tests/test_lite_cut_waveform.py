@@ -1,6 +1,6 @@
 from array import array
 
-from app.lite_cut.waveform import _bucket_peaks, waveform_command, waveform_view
+from app.features.lite_cut.waveform import _bucket_peaks, waveform_command, waveform_view
 
 
 def test_waveform_command_decodes_only_compact_mono_pcm(tmp_path):

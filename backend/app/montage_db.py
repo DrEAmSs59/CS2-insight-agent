@@ -192,7 +192,7 @@ class MontageDB:
             except OSError as e:
                 raise ValueError(f"无法删除本地文件: {e}") from e
         try:
-            from .lite_cut.waveform import waveform_cache_path
+            from .features.lite_cut.waveform import waveform_cache_path
 
             waveform_cache_path(out).unlink(missing_ok=True)
         except OSError:

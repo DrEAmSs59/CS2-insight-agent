@@ -13,7 +13,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app import encoder_planner, video_composer  # noqa: E402
 from app.encoder_planner import EncoderCandidate, GpuAdapter  # noqa: E402
-from app.lite_cut import export_preflight, render_pipeline  # noqa: E402
+from app.features.lite_cut import export_preflight, render_pipeline  # noqa: E402
 from app.montage_exceptions import HardwareEncoderFailure, MontageComposerError  # noqa: E402
 
 

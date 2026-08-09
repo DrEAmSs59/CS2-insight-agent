@@ -17,8 +17,8 @@ from typing import Callable
 
 from fastapi import HTTPException, UploadFile
 
-from ..env_utils import get_data_dir, load_config
-from ..ffmpeg_process import decode_process_output
+from ...env_utils import get_data_dir, load_config
+from ...ffmpeg_process import decode_process_output
 
 _ASSET_MAX_BYTES = 20 * 1024 * 1024 * 1024
 _ASSET_UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -675,7 +675,7 @@ def ensure_alpha_mov_preview_proxy(
     if has_alpha is False:
         return None
     try:
-        from ..video_composer import probe_video_audio_summary, resolve_ffprobe_binary
+        from ...video_composer import probe_video_audio_summary, resolve_ffprobe_binary
 
         info: dict = {}
         if has_alpha is None:
