@@ -11,7 +11,7 @@ import logging
 import math
 from typing import Any
 
-from .parser.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
+from .features.demo_analysis.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
 
 logger = logging.getLogger(__name__)
 

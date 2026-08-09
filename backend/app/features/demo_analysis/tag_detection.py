@@ -4,7 +4,7 @@ import math
 from bisect import bisect_left, bisect_right
 from typing import Optional
 
-from .. import native_table as pd
+from ... import native_table as pd
 
 from .parse_utils import _int, _bool
 from .tag_constants import (

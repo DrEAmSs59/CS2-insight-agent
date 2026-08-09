@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 
 from app import main
-from app.parser import replay_effects_cache, replay_frames_cache, replay_match_cache
-from app.parser import replay_cache_storage
+from app.features.demo_analysis import replay_effects_cache, replay_frames_cache, replay_match_cache
+from app.features.demo_analysis import replay_cache_storage
 
 
 def _write_match_entry(root: Path, cache_key: str, demo_path: Path) -> None:

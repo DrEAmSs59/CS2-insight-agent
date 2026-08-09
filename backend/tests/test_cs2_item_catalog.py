@@ -4,9 +4,9 @@ import gzip
 import json
 import struct
 
-from app.parser import cs2_item_catalog as catalog_module
+from app.features.demo_analysis import cs2_item_catalog as catalog_module
 
-from app.parser.cs2_item_catalog import (
+from app.features.demo_analysis.cs2_item_catalog import (
     build_player_cosmetic_inventory,
     build_player_skin_loadouts,
     resolve_cs2_item,

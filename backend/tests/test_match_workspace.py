@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from app import native_table as pd
 
-from app.parser.match_workspace import (
+from app.features.demo_analysis.match_workspace import (
     _build_round_windows,
     _enrich_grenade_events,
     _extract_grenade_trajectories,

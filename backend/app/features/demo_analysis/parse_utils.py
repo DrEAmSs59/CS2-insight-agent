@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from .. import native_table as pd
+from ... import native_table as pd
 from demoparser2 import DemoParser
 
 from .tag_constants import TICK_RATE

@@ -10,7 +10,7 @@ from typing import Any
 
 from demoparser2 import DemoParser
 
-from .. import native_table as pd
+from ... import native_table as pd
 
 from .smoke_voxel_decode import (
     SMOKE_FORMATION_SECONDS,

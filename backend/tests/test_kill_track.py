@@ -1,6 +1,6 @@
 from app import native_table as pd
 
-from app.parser import kill_track
+from app.features.demo_analysis import kill_track
 
 
 def _event_tables() -> dict[str, pd.DataFrame]:

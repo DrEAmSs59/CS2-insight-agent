@@ -8,10 +8,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
-from .. import native_table as pd
+from ... import native_table as pd
 from demoparser2 import DemoParser
 
-from ..demo_playback_compat import read_demo_end_tick
+from ...demo_playback_compat import read_demo_end_tick
 from .models import MatchMeta, Clip, ParseResult, meme_series_badges_for_kd
 from .weapons import (
     SNIPER_WEAPONS, _normalize_item, _translate_weapon, _highlight_weapon_used_label,
@@ -2008,7 +2008,7 @@ class DemoAnalyzer:
         timeline: Optional[dict] = None
         round_timeline: Optional[list] = None
         try:
-            from ..round_timeline import build_round_timeline, build_round_timeline_error_fallback
+            from ...round_timeline import build_round_timeline, build_round_timeline_error_fallback
 
             re_df_tl = re_df_cached
             tteam: Optional[int] = None
@@ -2058,7 +2058,7 @@ class DemoAnalyzer:
             if isinstance(e, _DEMOPARSER_RE_RAISE):
                 raise
             logger.exception("build_round_timeline failed for %s", self.dem_path)
-            from ..round_timeline import build_round_timeline_error_fallback
+            from ...round_timeline import build_round_timeline_error_fallback
             fb = build_round_timeline_error_fallback(
                 demo_path=str(self.dem_path), map_name=map_name, target_player=target_player,
                 target_steam_id=target_steam_id, target_player_user_id=target_player_user_id,

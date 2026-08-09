@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .. import native_table as pd
+from ... import native_table as pd
 from .cs2_item_catalog import cs2_weapon_translation_map, resolve_weapon_model
 
 WEAPON_TRANSLATION_MAP: dict[str, str] = cs2_weapon_translation_map()

@@ -1,5 +1,5 @@
-from app.parser.smoke_voxel_decode import SmokeVoxel
-from app.parser.smoke_voxel_diagnostics import (
+from app.features.demo_analysis.smoke_voxel_decode import SmokeVoxel
+from app.features.demo_analysis.smoke_voxel_diagnostics import (
     compare_centers,
     raw_grid_entries,
     state_byte_histograms,
@@ -22,13 +22,13 @@ def test_compare_centers_reports_both_anchors():
 
 
 def test_iter_axis_candidates_has_forty_eight():
-    from app.parser.smoke_voxel_diagnostics import iter_axis_candidates
+    from app.features.demo_analysis.smoke_voxel_diagnostics import iter_axis_candidates
 
     assert len(iter_axis_candidates()) == 48
 
 
 def test_rank_tie_break_prefers_protocol_mapping():
-    from app.parser.smoke_voxel_diagnostics import rank_axis_candidates
+    from app.features.demo_analysis.smoke_voxel_diagnostics import rank_axis_candidates
 
     # Four XYZ-packed seeds have an XY centroid at the true 15.5 cell centre.
     payload = bytes([
@@ -61,7 +61,7 @@ def test_state_histograms_count_bytes():
 
 
 def test_demo_fingerprint_fields(tmp_path):
-    from app.parser.smoke_voxel_diagnostics import demo_fingerprint
+    from app.features.demo_analysis.smoke_voxel_diagnostics import demo_fingerprint
 
     p = tmp_path / "x.dem"
     p.write_bytes(b"abc")

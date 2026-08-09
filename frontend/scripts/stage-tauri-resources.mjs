@@ -49,7 +49,14 @@ copyFiltered("backend", (rel) => {
   if (/\.db(?:-wal|-shm)?$/i.test(path) || path.endsWith(".exe")) return false;
   return !/^debug_.*\.py$/i.test(path);
 });
-const catalogJson = join(destination, "backend", "app", "parser", "cs2_item_catalog.generated.json");
+const catalogJson = join(
+  destination,
+  "backend",
+  "app",
+  "features",
+  "demo_analysis",
+  "cs2_item_catalog.generated.json",
+);
 if (!existsSync(catalogJson)) throw new Error(`Missing generated CS2 catalog: ${catalogJson}`);
 const catalogGzip = `${catalogJson}.gz`;
 writeFileSync(catalogGzip, gzipSync(readFileSync(catalogJson), { level: 9 }));

@@ -5,7 +5,7 @@ from typing import Any, Iterable, Optional
 
 import math
 
-from .. import native_table as pd
+from ... import native_table as pd
 
 from .parse_utils import _bool, _int, _round_end_winner_team_num, _to_pandas_df
 
@@ -1187,7 +1187,7 @@ def build_match_workspace(
         })
 
     try:
-        from ..radar.radar_map_assets import lookup_map_data
+        from ...radar.radar_map_assets import lookup_map_data
         map_transform = lookup_map_data(map_name)
     except (KeyError, OSError):
         map_transform = None

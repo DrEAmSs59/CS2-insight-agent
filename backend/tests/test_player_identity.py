@@ -7,8 +7,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import native_table as pd
-from app.parser.player_identity import PlayerIdentityRegistry
-from app.parser.player_roster import get_player_list
+from app.features.demo_analysis.player_identity import PlayerIdentityRegistry
+from app.features.demo_analysis.player_roster import get_player_list
 
 
 SID_A = "76561198000000001"

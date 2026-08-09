@@ -1,7 +1,7 @@
-"""向后兼容 shim — 实现已迁移到 app/parser/ 包。请勿在新代码中从此文件导入新符号。"""
+"""向后兼容 shim — 实现位于 app/features/demo_analysis/。请勿在新代码中导入此模块。"""
 # ruff: noqa: F401, F403
-from .parser import *
-from .parser import (
+from .features.demo_analysis import *
+from .features.demo_analysis import (
     # round_timeline.py 使用 `import demo_parser as dp` 后访问的属性
     _dedup_context_tags,
     _normalize_item,

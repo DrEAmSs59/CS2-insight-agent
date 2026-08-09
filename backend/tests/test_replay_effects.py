@@ -5,14 +5,14 @@ import os
 
 from app import native_table as pd
 
-from app.parser.replay_effects import (
+from app.features.demo_analysis.replay_effects import (
     _parse_effect_rows,
     build_inferno_tracks_from_rows,
     build_smoke_tracks_from_rows,
     extract_dynamic_effect_tracks,
     extract_inferno_cells_from_row,
 )
-from app.parser.smoke_voxel_decode import decode_smoke_cells
+from app.features.demo_analysis.smoke_voxel_decode import decode_smoke_cells
 
 
 def _make_journal(records: list[tuple[int, list[int]]]) -> bytes:

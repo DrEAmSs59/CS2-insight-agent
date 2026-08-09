@@ -160,7 +160,14 @@ const backendPayload = {
   stickers: ordered(stickerKits),
 };
 
-const backendPath = join(repoRoot, "backend", "app", "parser", "cs2_item_catalog.generated.json");
+const backendPath = join(
+  repoRoot,
+  "backend",
+  "app",
+  "features",
+  "demo_analysis",
+  "cs2_item_catalog.generated.json",
+);
 mkdirSync(dirname(backendPath), { recursive: true });
 writeFileSync(backendPath, `${JSON.stringify(backendPayload, null, 2)}\n`, "utf8");
 

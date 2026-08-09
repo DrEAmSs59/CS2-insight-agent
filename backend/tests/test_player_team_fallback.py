@@ -8,24 +8,24 @@ from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.parser.parse_utils import (
+from app.features.demo_analysis.parse_utils import (
     PLAYER_CONTROLLER_TEAM_PROP,
     PLAYER_TEAM_PARSE_FIELDS,
     coalesce_player_team_num,
 )
-from app.parser.player_roster import (
+from app.features.demo_analysis.player_roster import (
     _build_all_players_roster,
     _build_tick_team_lookup,
     build_player_name_to_spec_player_slot_dict,
 )
-from app.parser.round_economy import (
+from app.features.demo_analysis.round_economy import (
     build_group_side_by_round,
     build_round_economy_shared,
     extract_player_team_maps,
     extract_target_team_map,
 )
-from app.parser.spatial_analysis import parse_spatial_snapshots
-from app.parser.spatial_analysis import (
+from app.features.demo_analysis.spatial_analysis import parse_spatial_snapshots
+from app.features.demo_analysis.spatial_analysis import (
     _alive_mates_and_enemies,
     _victim_facing_attacker,
     enrich_kill_action_tags_spatial,

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from .. import native_table as pd
+from ... import native_table as pd
 from demoparser2 import DemoParser
 
 from .parse_utils import (

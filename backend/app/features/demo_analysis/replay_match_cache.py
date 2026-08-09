@@ -12,8 +12,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .. import native_table as pd
-from ..demoparser_runtime import REQUIRED_DEMOPARSER_VERSION
+from ... import native_table as pd
+from ...demoparser_runtime import REQUIRED_DEMOPARSER_VERSION
 from .replay_cache_storage import (
     replay_cache_namespace_root,
     replay_cache_namespace_roots,
@@ -551,7 +551,7 @@ def materialize_match_replay_parquet_impl(
     """Parse all replay ticks once and atomically write Rust-native Parquet."""
     from demoparser2 import DemoParser
 
-    from app.parser.replay_effects import extract_dynamic_effect_tracks
+    from app.features.demo_analysis.replay_effects import extract_dynamic_effect_tracks
     from app.radar.radar_map_assets import lookup_map_data
 
     started = time.perf_counter()

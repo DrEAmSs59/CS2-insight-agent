@@ -1358,7 +1358,7 @@ def _build_team_roster_from_tick_fallback(
 ) -> tuple[list[list[Any]], dict[int, tuple[int, int]]]:
     """Reuse the analyzer's event/tick roster when player metadata is unavailable."""
     try:
-        from .parser.player_roster import get_player_list
+        from .features.demo_analysis.player_roster import get_player_list
 
         players = get_player_list(demo_path, parser=parser)
     except Exception as exc:  # noqa: BLE001 - native parser errors are contextualized

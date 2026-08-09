@@ -2310,7 +2310,7 @@ async def delete_demo(demo_id: int):
     demo = await demo_db.get_demo_by_id(demo_id)
     if not demo:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    from .parser.replay_cache_storage import remove_demo_row_caches
+    from .features.demo_analysis.replay_cache_storage import remove_demo_row_caches
 
     # Reclaim parse/replay caches for original + working paths before the
     # demo-cache file is unlinked with the library row.
@@ -2428,7 +2428,7 @@ async def delete_demo_file(demo_id: int):
     targets = [Path(disk_path), Path(disk_path).with_suffix(".zip")]
     if cached_path:
         targets.append(Path(cached_path))
-    from .parser.replay_cache_storage import remove_demo_row_caches
+    from .features.demo_analysis.replay_cache_storage import remove_demo_row_caches
 
     # Generated replay assets are disposable. Reclaim them while the source
     # Demo still exists so legacy fingerprint-only entries remain attributable.

@@ -398,7 +398,7 @@ def extract_radar_timeline_impl(
         probe_lo, probe_hi = start_i, end_i
 
     parser = DemoParser(demo_path)
-    from app.parser.cs2_item_catalog import (
+    from app.features.demo_analysis.cs2_item_catalog import (
         build_player_skin_loadouts,
         resolve_weapon_model,
         skin_for_player_weapon,
@@ -703,7 +703,7 @@ def extract_radar_timeline_impl(
         "parse_ms": 0.0,
     }
     try:
-        from app.parser.replay_effects import extract_dynamic_effect_tracks
+        from app.features.demo_analysis.replay_effects import extract_dynamic_effect_tracks
 
         effect_payload = extract_dynamic_effect_tracks(
             parser,
@@ -776,7 +776,7 @@ def extract_replay_effects_impl(
     """Runs inside parse_worker: only dynamic utility effect tracks."""
     from demoparser2 import DemoParser
 
-    from app.parser.replay_effects import extract_dynamic_effect_tracks
+    from app.features.demo_analysis.replay_effects import extract_dynamic_effect_tracks
 
     parser = DemoParser(demo_path)
     payload = extract_dynamic_effect_tracks(

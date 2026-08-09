@@ -34,7 +34,7 @@ def _run(payload: dict) -> object:
         workspace = payload.get("workspace")
         if not isinstance(workspace, dict):
             raise ValueError("workspace must be an object")
-        from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+        from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
 
         return materialize_match_replay_parquet_impl(
             demo_path=dem_path,
@@ -79,7 +79,7 @@ def _run(payload: dict) -> object:
         if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
             analysis_workspace = dict(analysis_workspace)
             try:
-                from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+                from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
 
                 analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
                     demo_path=dem_path,

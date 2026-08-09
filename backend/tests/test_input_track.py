@@ -3,8 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import native_table as pd
-from app.parser import input_track as input_track_module
-from app.parser.input_track import (
+from app.features.demo_analysis import input_track as input_track_module
+from app.features.demo_analysis.input_track import (
     KEYS,
     _build_ephemeral_map,
     _classify_grenade_throw_row,
@@ -18,7 +18,7 @@ from app.parser.input_track import (
     _infer_movement_from_motion,
     _scope_press_at,
 )
-from app.parser.parse_utils import _to_pandas_df as _to_df
+from app.features.demo_analysis.parse_utils import _to_pandas_df as _to_df
 
 
 def test_resolve_col_exact():

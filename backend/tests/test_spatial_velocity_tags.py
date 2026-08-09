@@ -4,7 +4,7 @@ demoparser2 0.41.2 不暴露 vel_x/vel_y（静默丢列），速度必须用 X/Y
 这些测试用合成的 spatial_cache（dict[tick][name] -> row dict）验证位置差路径。
 """
 
-from app.parser.spatial_analysis import enrich_kill_action_tags_spatial
+from app.features.demo_analysis.spatial_analysis import enrich_kill_action_tags_spatial
 
 
 def _row(x: float, y: float, yaw: float = 0.0) -> dict:

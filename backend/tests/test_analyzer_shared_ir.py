@@ -6,21 +6,21 @@ from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.parser import analyzer as analyzer_module
-from app.parser import player_roster as player_roster_module
-from app.parser import round_economy as round_economy_module
-from app.parser.analyzer import DemoAnalyzer, _build_shared_player_indexes
-from app.parser.parse_utils import _max_demo_tick
-from app.parser.player_roster import (
+from app.features.demo_analysis import analyzer as analyzer_module
+from app.features.demo_analysis import player_roster as player_roster_module
+from app.features.demo_analysis import round_economy as round_economy_module
+from app.features.demo_analysis.analyzer import DemoAnalyzer, _build_shared_player_indexes
+from app.features.demo_analysis.parse_utils import _max_demo_tick
+from app.features.demo_analysis.player_roster import (
     build_player_name_to_steam_id,
     build_player_name_to_user_id,
 )
-from app.parser.round_economy import (
+from app.features.demo_analysis.round_economy import (
     build_round_scores,
     build_round_winner_side_map,
     compute_team_identity_scoreline,
 )
-from app.parser.spatial_analysis import (
+from app.features.demo_analysis.spatial_analysis import (
     build_equip_timeline,
     build_fire_index,
     build_hurt_index,

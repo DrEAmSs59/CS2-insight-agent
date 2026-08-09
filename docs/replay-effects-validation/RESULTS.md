@@ -2,7 +2,7 @@
 
 > 探针输出：`probe-output/run-002/` + S-A `smoke-sa-001/`  
 > 结论摘要：**烟雾 = REAL_VOXEL_READY；燃烧弹 = INFERNO_CELLS_READY。**  
-> 解码器：`backend/app/parser/smoke_voxel_decode.py`（journal + 32³ occupancy；`world = sign*(grid-16)*20 + detonationPos`）。  
+> 解码器：`backend/app/features/demo_analysis/smoke_voxel_decode.py`（journal + 32³ occupancy；`world = sign*(grid-16)*20 + detonationPos`）。
 > 产品路径：`/api/demo/replay` sidecar `effect_tracks` + 前端 `ReplayAreaEffectsCanvas`。
 
 ## Environment

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.parser.smoke_voxel_decode import (
+from app.features.demo_analysis.smoke_voxel_decode import (
     VOXEL_CELL_SIZE_WORLD,
     decode_smoke_cells,
     decode_smoke_occupancy_sequence,
@@ -198,7 +198,7 @@ class TestDecodeSmokeCells:
 
 class TestFormationFromSeeds:
     def test_bfs_formation_grows_without_circular_clip(self):
-        from app.parser.smoke_voxel_decode import SmokeVoxel, synthesize_formation_from_seeds
+        from app.features.demo_analysis.smoke_voxel_decode import SmokeVoxel, synthesize_formation_from_seeds
 
         # Diagonal seed chain — formation must follow adjacency, not a filled disc.
         voxels = [

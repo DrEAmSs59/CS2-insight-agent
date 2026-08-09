@@ -4,7 +4,7 @@ import json
 
 from app import native_table as pd
 
-from app.parser import replay_match_cache
+from app.features.demo_analysis import replay_match_cache
 
 
 def _workspace() -> dict:
@@ -67,7 +67,7 @@ def test_cache_key_changes_with_parser_runtime(monkeypatch, tmp_path):
 
 def test_materializes_and_reads_parquet_through_rust_extension(monkeypatch, tmp_path):
     import demoparser2
-    from app.parser import replay_effects
+    from app.features.demo_analysis import replay_effects
 
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")

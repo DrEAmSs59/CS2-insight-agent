@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app import demo_parse_isolation, main
 from app.api import demo_replay as demo_replay_api
-from app.parser import replay_match_cache
+from app.features.demo_analysis import replay_match_cache
 
 
 @pytest.fixture(autouse=True)

@@ -3727,11 +3727,11 @@ class OBSDirector:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
             if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
-                from .parser.input_track import (
+                from .features.demo_analysis.input_track import (
                     extract_input_track as _pre_extract_kb,
                     prepare_input_track_batch as _prepare_kb_batch,
                 )
-                from .parser.kill_track import extract_kill_track as _pre_extract_fx
+                from .features.demo_analysis.kill_track import extract_kill_track as _pre_extract_fx
                 _kb_prepared_by_demo: dict = {}
 
                 async def _extract_seg_pre(_seg, _demo_path):

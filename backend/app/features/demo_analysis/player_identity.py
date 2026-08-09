@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-from .. import native_table as pd
+from ... import native_table as pd
 
 
 def _text(value: object) -> str:
