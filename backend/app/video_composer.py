@@ -15,6 +15,7 @@ from typing import Any, Optional, Sequence
 
 from .ffmpeg_process import (
     command_for_log,
+    decode_process_output,
     process_error_tail,
     remove_partial_file,
     run_process_capture,
@@ -31,10 +32,15 @@ from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
 from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint, ffmpeg_tool_version_identity
 from .framemeld import (
     build_framemeld_command,
+    framemeld_execution_policy,
+    framemeld_failure_from_result,
+    log_framemeld_diagnostic_events,
     framemeld_sources_are_compatible,
     framemeld_working_fps,
+    parse_framemeld_status_events,
     probe_framemeld,
 )
+from .video_export_log import export_event, export_gpu_inventory
 from .env_utils import (
     resolve_name_card_font,
     resolve_name_card_font_bold,
@@ -94,11 +100,26 @@ def _run_ffmpeg_capture(
     stage: str,
     output_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run FFmpeg with actionable logs and one conservative AMF retry."""
+    """Run FFmpeg with actionable logs and isolated precise GPU policies."""
     is_amf = "h264_amf" in cmd
-    attempts = 2 if is_amf else 1
+    precise_policy = framemeld_execution_policy(cmd)
+    precise_framemeld = precise_policy is not None
+    attempts = 1 if precise_framemeld else (2 if is_amf else 1)
     result = None
     for attempt in range(1, attempts + 1):
+        attempt_started = time.monotonic()
+        export_event(
+            "stage_started",
+            stage=stage,
+            attempt=attempt,
+            attempts=attempts,
+            encoder=(
+                precise_policy.encoder
+                if precise_policy is not None
+                else ("h264_amf" if is_amf else "")
+            ),
+            branch=precise_policy.branch if precise_policy is not None else None,
+        )
         logger.debug(
             "FFmpeg stage=%s attempt=%d/%d command=%s",
             stage,
@@ -107,20 +128,61 @@ def _run_ffmpeg_capture(
             command_for_log(cmd),
         )
         try:
-            result = run_process_capture(cmd, timeout=timeout)
+            if precise_policy is not None:
+                result = run_process_capture(
+                    cmd,
+                    timeout=precise_policy.hard_timeout_seconds,
+                    stall_timeout=precise_policy.stall_timeout_seconds,
+                )
+            else:
+                result = run_process_capture(cmd, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             remove_partial_file(output_path)
             timeout_result = subprocess.CompletedProcess(
                 cmd,
                 124,
-                "",
-                f"FFmpeg timed out after {timeout:g} seconds",
+                decode_process_output(exc.stdout),
+                "\n".join(
+                    part
+                    for part in (
+                        decode_process_output(exc.stderr),
+                        f"FFmpeg timed out after {float(exc.timeout):g} seconds",
+                    )
+                    if part
+                ),
             )
             logger.error(
                 "FFmpeg timed out stage=%s command=%s",
                 stage,
                 command_for_log(cmd),
             )
+            export_event(
+                "stage_failed",
+                level=logging.ERROR,
+                stage=stage,
+                attempt=attempt,
+                returncode=124,
+                timeout_seconds=exc.timeout,
+                elapsed_ms=round((time.monotonic() - attempt_started) * 1000),
+                detail=process_error_tail(timeout_result, 2400),
+            )
+            if precise_policy is not None:
+                logger.error(
+                    "FrameMeld precise timeout branch=%s encoder=%s stage=%s timeout_seconds=%s last_output=%s",
+                    precise_policy.branch,
+                    precise_policy.encoder,
+                    stage,
+                    exc.timeout,
+                    process_error_tail(timeout_result, 2400),
+                )
+                raise MontageComposerError(
+                    "MONTAGE_FRAMEMELD_TIMEOUT",
+                    branch=precise_policy.branch,
+                    encoder=precise_policy.encoder,
+                    stage=stage,
+                    timeout_seconds=exc.timeout,
+                    detail=process_error_tail(timeout_result, 2400),
+                ) from exc
             try:
                 raise_hardware_encoder_failure(
                     cmd,
@@ -133,9 +195,26 @@ def _run_ffmpeg_capture(
                 raise hardware_exc from exc
             raise MontageComposerError("MONTAGE_EXPORT_FAILED") from exc
         if result.returncode == 0:
+            export_event(
+                "stage_completed",
+                stage=stage,
+                attempt=attempt,
+                returncode=0,
+                elapsed_ms=round((time.monotonic() - attempt_started) * 1000),
+            )
             if attempt > 1:
                 logger.info("FFmpeg AMF retry succeeded stage=%s attempt=%d", stage, attempt)
             return result
+        export_event(
+            "stage_failed",
+            level=logging.ERROR,
+            stage=stage,
+            attempt=attempt,
+            returncode=result.returncode,
+            elapsed_ms=round((time.monotonic() - attempt_started) * 1000),
+            detail=process_error_tail(result, 2400),
+            will_retry=attempt < attempts,
+        )
         if attempt < attempts:
             logger.warning(
                 "FFmpeg AMF attempt failed; retrying stage=%s returncode=%d command=%s stderr=%s",
@@ -1447,6 +1526,7 @@ def _compose_montage_once(
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
     encoder_device_args: Sequence[str] | None = None,
+    encoder_adapter: object | None = None,
 ) -> None:
     if not clip_paths:
         raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
@@ -1874,21 +1954,82 @@ def _compose_montage_once(
                 source_path=framemeld_base,
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
+                encoder_adapter=encoder_adapter,
                 capability=capability,
             )
+            framemeld_policy = framemeld_execution_policy(cmd_framemeld)
             r4 = _run_ffmpeg_capture(
                 cmd_framemeld,
                 timeout=3600,
                 stage="montage_framemeld",
                 output_path=output_path,
             )
+            precise_events = parse_framemeld_status_events(r4.stdout, r4.stderr)
+            if precise_events:
+                log_framemeld_diagnostic_events(
+                    precise_events,
+                    branch=framemeld_policy.branch if framemeld_policy is not None else "legacy",
+                )
+                final_event = precise_events[-1]
+                export_event(
+                    "framemeld_result",
+                    branch=framemeld_policy.branch if framemeld_policy is not None else "legacy",
+                    status=final_event.get("status"),
+                    failure_domain=final_event.get("failure_domain"),
+                    encoder=final_event.get("encoder"),
+                    devices=final_event.get("devices"),
+                    elapsed_ms=final_event.get("elapsed_ms"),
+                    processed_frames=final_event.get("processed_frames"),
+                    total_frames=final_event.get("total_frames"),
+                    ffmpeg_returncode=final_event.get("ffmpeg_returncode"),
+                    vspipe_returncode=final_event.get("vspipe_returncode"),
+                )
+                logger.info(
+                    "montage FrameMeld precise branch=%s status=%s domain=%s encoder=%s devices=%s elapsed_ms=%s processed_frames=%s total_frames=%s ffmpeg_returncode=%s vspipe_returncode=%s",
+                    framemeld_policy.branch if framemeld_policy is not None else "legacy",
+                    final_event.get("status"),
+                    final_event.get("failure_domain") or "",
+                    final_event.get("encoder") or "",
+                    final_event.get("devices") or {},
+                    final_event.get("elapsed_ms"),
+                    final_event.get("processed_frames"),
+                    final_event.get("total_frames"),
+                    final_event.get("ffmpeg_returncode"),
+                    final_event.get("vspipe_returncode"),
+                )
             if r4.returncode != 0:
+                precise_failure = framemeld_failure_from_result(r4)
+                export_event(
+                    "framemeld_failed",
+                    level=logging.ERROR,
+                    branch=framemeld_policy.branch if framemeld_policy is not None else "legacy",
+                    returncode=r4.returncode,
+                    failure_domain=(
+                        precise_failure.domain if precise_failure is not None else "legacy-unclassified"
+                    ),
+                    encoder=precise_failure.encoder if precise_failure is not None else "",
+                    devices=precise_failure.devices if precise_failure is not None else {},
+                    detail=(precise_failure.detail if precise_failure is not None else process_error_tail(r4)),
+                )
                 logger.error(
-                    "montage FrameMeld failed returncode=%d command=%s stderr=%s",
+                    "montage FrameMeld failed branch=%s returncode=%d domain=%s encoder=%s devices=%s command=%s stderr=%s",
+                    framemeld_policy.branch if framemeld_policy is not None else "legacy",
                     r4.returncode,
+                    precise_failure.domain if precise_failure is not None else "legacy-unclassified",
+                    precise_failure.encoder if precise_failure is not None else "",
+                    precise_failure.devices if precise_failure is not None else {},
                     command_for_log(cmd_framemeld),
                     process_error_tail(r4),
                 )
+                if precise_failure is not None and precise_failure.domain != "encoder":
+                    raise MontageComposerError(
+                        "MONTAGE_FRAMEMELD_FAILED",
+                        branch=framemeld_policy.branch if framemeld_policy is not None else "legacy",
+                        failure_domain=precise_failure.domain,
+                        encoder=precise_failure.encoder,
+                        devices=precise_failure.devices,
+                        detail=precise_failure.detail[-1200:],
+                    )
                 raise_hardware_encoder_failure(
                     cmd_framemeld,
                     r4,
@@ -1987,6 +2128,7 @@ def compose_montage(
     adapters = enumerate_windows_gpus()
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
+    export_gpu_inventory(adapters)
     candidates = build_encoder_candidates(
         montage_encoder,
         adapters,
@@ -1994,6 +2136,29 @@ def compose_montage(
     )
     if not candidates:
         raise MontageComposerError("MONTAGE_ENCODER_ALL_FAILED", last_encoder="none")
+    ffmpeg_identity = ffmpeg_encoder_identity(ffmpeg_bin)
+    export_event(
+        "encoder_plan",
+        ffmpeg_identity=ffmpeg_identity,
+        requested_encoder=montage_encoder,
+        width=width,
+        height=height,
+        fps=fps,
+        framemeld_enabled=framemeld_enabled,
+        candidates=[
+            {
+                "codec": candidate.codec,
+                "adapter": getattr(candidate.adapter, "name", None),
+                "vendor": getattr(candidate.adapter, "vendor", None),
+                "stable_id": getattr(candidate.adapter, "stable_id", None),
+                "luid": getattr(candidate.adapter, "luid", None),
+                "device_id": getattr(candidate.adapter, "device_id", None),
+                "driver_version": getattr(candidate.adapter, "driver_version", None),
+                "encoder_device_index": getattr(candidate.adapter, "encoder_device_index", None),
+            }
+            for candidate in candidates
+        ],
+    )
     spec = EncoderTargetSpec(
         width=width,
         height=height,
@@ -2058,6 +2223,7 @@ def compose_montage(
                 name_cards=name_cards,
                 framemeld_enabled=framemeld_enabled,
                 encoder_device_args=candidate.ffmpeg_device_args,
+                encoder_adapter=candidate.adapter,
             )
             final_info = ffprobe_streams(
                 attempt_output,
@@ -2091,6 +2257,11 @@ def compose_montage(
             "Montage output encoder candidate=%s actual=%s",
             candidate.codec,
             output_encoder,
+        )
+        export_event(
+            "output_encoder_verified",
+            candidate=candidate.codec,
+            actual_encoder=output_encoder,
         )
         decode_command = [
             str(ffmpeg_bin),
@@ -2138,6 +2309,14 @@ def compose_montage(
             raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID") from exc
 
     def _on_attempt(attempt: Any) -> None:
+        export_event(
+            "encoder_attempt",
+            candidate=attempt.candidate.codec,
+            adapter=getattr(attempt.candidate.adapter, "name", None),
+            status=attempt.status,
+            stage=attempt.stage,
+            detail=attempt.detail[-1200:],
+        )
         logger.info(
             "Montage encoder attempt candidate=%s status=%s stage=%s detail=%s",
             attempt.candidate.display_name,
@@ -2157,7 +2336,7 @@ def compose_montage(
                 target,
             ),
             _run_candidate,
-            ffmpeg_identity=ffmpeg_encoder_identity(ffmpeg_bin),
+            ffmpeg_identity=ffmpeg_identity,
             cleanup=_cleanup_attempt,
             on_attempt=_on_attempt,
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -19,8 +20,14 @@ from ..name_card_meta import (
     resolve_name_card_eyebrow,
 )
 from ..player_names import normalize_player_key
+from ..video_export_log import (
+    export_event,
+    set_video_export_database_id,
+    video_export_endpoint,
+)
 
 router = APIRouter(tags=["montage"])
+logger = logging.getLogger(__name__)
 
 
 # ─── Montage (V2) ─────────────────────────────────────────────
@@ -129,6 +136,7 @@ class MontageExportBody(BaseModel):
 
 
 @router.post("/api/montage/export")
+@video_export_endpoint("montage")
 async def montage_export(body: MontageExportBody):
     cfg = load_config()
     try:
@@ -324,6 +332,16 @@ async def montage_export(body: MontageExportBody):
         body=snap,
         status="running",
     )
+    set_video_export_database_id(export_id)
+    export_event(
+        "pipeline_started",
+        database_export_id=export_id,
+        project_id=body.project_id,
+        output_name=out.name,
+        clip_count=len(clip_paths),
+        requested_encoder=cfg.montage_encoder or "auto",
+        framemeld_enabled=framemeld_enabled_eff,
+    )
 
     try:
         from ..video_composer import MontageComposerError, compose_montage
@@ -353,9 +371,35 @@ async def montage_export(body: MontageExportBody):
         await montage_db.update_export(
             export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED"), output_path=None,
         )
+        error_code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=error_code,
+            failure_domain=detail.get("failure_domain"),
+            encoder=detail.get("encoder"),
+            branch=detail.get("branch"),
+        )
+        logger.error(
+            "video export summary feature=montage export_id=%s status=error code=%s",
+            export_id,
+            error_code,
+        )
         raise HTTPException(400, detail) from e
 
     await montage_db.update_export(export_id, status="done", error_msg="", output_path=str(out))
+    export_event(
+        "pipeline_completed",
+        status="done",
+        database_export_id=export_id,
+        output_name=out.name,
+    )
+    logger.info(
+        "video export summary feature=montage export_id=%s status=done output=%s",
+        export_id,
+        out.name,
+    )
     return {"export_id": export_id, "status": "done", "output_path": str(out)}
 
 

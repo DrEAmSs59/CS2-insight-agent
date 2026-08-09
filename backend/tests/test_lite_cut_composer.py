@@ -330,6 +330,41 @@ def test_ffmpeg_process_maps_vspipe_frame_progress():
     assert detail == {"stage_progress": 1.0, "processed_frames": 10, "total_frames": 10}
 
 
+def test_ffmpeg_process_stops_only_after_frame_progress_stalls():
+    result = _run_ffmpeg_process(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys,time; "
+                "sys.stderr.write('Frame: 1/10\\r'); sys.stderr.flush(); "
+                "time.sleep(5)"
+            ),
+        ],
+        timeout=10,
+        stall_timeout=0.25,
+    )
+    assert result.returncode == 124
+    assert "no frame progress" in result.stderr
+
+
+def test_ffmpeg_process_progress_refreshes_stall_budget_without_ui_callback():
+    result = _run_ffmpeg_process(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys,time; "
+                "[(sys.stderr.write(f'Frame: {i}/5\\r'), sys.stderr.flush(), time.sleep(0.2)) "
+                "for i in range(1, 6)]"
+            ),
+        ],
+        timeout=5,
+        stall_timeout=0.6,
+    )
+    assert result.returncode == 0
+
+
 def test_color_preset_vf():
     vf = _build_color_vf({"filter_preset": "esports"})
     assert "saturation=1.35" in vf

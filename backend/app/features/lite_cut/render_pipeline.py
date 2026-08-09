@@ -79,10 +79,15 @@ from ...montage_encoder import (
 )
 from ...montage_exceptions import HardwareEncoderFailure
 from ...ffmpeg_compatibility import add_ffmpeg_compatibility_hint
+from ...video_export_log import export_event, export_gpu_inventory
 from ...framemeld import (
     build_framemeld_command,
+    framemeld_execution_policy,
+    framemeld_failure_from_result,
+    log_framemeld_diagnostic_events,
     framemeld_sources_are_compatible,
     framemeld_working_fps,
+    parse_framemeld_status_events,
     probe_framemeld,
 )
 
@@ -854,6 +859,7 @@ def _compose_lite_cut_montage_once(
     progress_callback: ProgressCallback | None = None,
     cancel_event: Any | None = None,
     encoder_device_args: Sequence[str] | None = None,
+    encoder_adapter: object | None = None,
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
     output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
@@ -1142,20 +1148,108 @@ def _compose_lite_cut_montage_once(
                 source_path=framemeld_base,
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
+                encoder_adapter=encoder_adapter,
                 capability=capability,
             )
+            precise_policy = framemeld_execution_policy(cmd_framemeld)
             framemeld_result = _run_ffmpeg_process(
                 cmd_framemeld,
-                timeout=3600,
+                timeout=(
+                    precise_policy.hard_timeout_seconds
+                    if precise_policy is not None else 3600
+                ),
+                stall_timeout=(
+                    precise_policy.stall_timeout_seconds
+                    if precise_policy is not None else None
+                ),
                 cancel_event=cancel_event,
                 progress_callback=progress_callback,
                 progress_start=0.60,
                 progress_end=0.995,
                 progress_stage="framemeld",
             )
+            precise_events = parse_framemeld_status_events(
+                framemeld_result.stdout,
+                framemeld_result.stderr,
+            )
+            if precise_events:
+                log_framemeld_diagnostic_events(
+                    precise_events,
+                    branch=precise_policy.branch if precise_policy is not None else "legacy",
+                )
+                final_event = precise_events[-1]
+                export_event(
+                    "framemeld_result",
+                    branch=precise_policy.branch if precise_policy is not None else "legacy",
+                    status=final_event.get("status"),
+                    failure_domain=final_event.get("failure_domain"),
+                    encoder=final_event.get("encoder"),
+                    devices=final_event.get("devices"),
+                    elapsed_ms=final_event.get("elapsed_ms"),
+                    processed_frames=final_event.get("processed_frames"),
+                    total_frames=final_event.get("total_frames"),
+                    ffmpeg_returncode=final_event.get("ffmpeg_returncode"),
+                    vspipe_returncode=final_event.get("vspipe_returncode"),
+                )
+                logger.info(
+                    "lite_cut FrameMeld precise branch=%s status=%s domain=%s encoder=%s devices=%s elapsed_ms=%s processed_frames=%s total_frames=%s ffmpeg_returncode=%s vspipe_returncode=%s",
+                    precise_policy.branch if precise_policy is not None else "legacy",
+                    final_event.get("status"),
+                    final_event.get("failure_domain") or "",
+                    final_event.get("encoder") or "",
+                    final_event.get("devices") or {},
+                    final_event.get("elapsed_ms"),
+                    final_event.get("processed_frames"),
+                    final_event.get("total_frames"),
+                    final_event.get("ffmpeg_returncode"),
+                    final_event.get("vspipe_returncode"),
+                )
             if framemeld_result.returncode != 0:
                 tail = (framemeld_result.stderr or framemeld_result.stdout or "").strip()[-600:]
-                logger.error("lite_cut FrameMeld failed: %s", tail)
+                precise_failure = framemeld_failure_from_result(framemeld_result)
+                export_event(
+                    "framemeld_failed",
+                    level=logging.ERROR,
+                    branch=precise_policy.branch if precise_policy is not None else "legacy",
+                    returncode=framemeld_result.returncode,
+                    failure_domain=(
+                        precise_failure.domain if precise_failure is not None else "legacy-unclassified"
+                    ),
+                    encoder=precise_failure.encoder if precise_failure is not None else "",
+                    devices=precise_failure.devices if precise_failure is not None else {},
+                    detail=(precise_failure.detail if precise_failure is not None else tail),
+                )
+                logger.error(
+                    "lite_cut FrameMeld failed branch=%s returncode=%d domain=%s encoder=%s devices=%s detail=%s",
+                    precise_policy.branch if precise_policy is not None else "legacy",
+                    framemeld_result.returncode,
+                    precise_failure.domain if precise_failure is not None else "legacy-unclassified",
+                    precise_failure.encoder if precise_failure is not None else "",
+                    precise_failure.devices if precise_failure is not None else {},
+                    tail,
+                )
+                if framemeld_result.returncode == 124 and precise_policy is not None:
+                    raise MontageComposerError(
+                        "MONTAGE_FRAMEMELD_TIMEOUT",
+                        branch=precise_policy.branch,
+                        encoder=precise_policy.encoder,
+                        stage="lite_cut_framemeld",
+                        timeout_seconds=(
+                            precise_policy.stall_timeout_seconds
+                            if "no frame progress" in tail
+                            else precise_policy.hard_timeout_seconds
+                        ),
+                        detail=tail,
+                    )
+                if precise_failure is not None and precise_failure.domain != "encoder":
+                    raise MontageComposerError(
+                        "MONTAGE_FRAMEMELD_FAILED",
+                        branch=precise_policy.branch if precise_policy is not None else "legacy",
+                        failure_domain=precise_failure.domain,
+                        encoder=precise_failure.encoder,
+                        devices=precise_failure.devices,
+                        detail=precise_failure.detail[-1200:],
+                    )
                 raise_hardware_encoder_failure(
                     cmd_framemeld,
                     framemeld_result,
@@ -1238,6 +1332,7 @@ def compose_lite_cut_montage(
     adapters = enumerate_windows_gpus()
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
+    export_gpu_inventory(adapters)
     candidates = build_encoder_candidates(
         montage_encoder,
         adapters,
@@ -1245,6 +1340,35 @@ def compose_lite_cut_montage(
     )
     if not candidates:
         raise MontageComposerError("MONTAGE_ENCODER_ALL_FAILED", last_encoder="none")
+    ffmpeg_identity = ffmpeg_encoder_identity(ffmpeg_bin)
+    export_event(
+        "encoder_plan",
+        ffmpeg_identity=ffmpeg_identity,
+        requested_encoder=montage_encoder,
+        width=width,
+        height=height,
+        fps=fps,
+        framemeld_enabled=bool(
+            (
+                project_body.get("output")
+                if isinstance(project_body.get("output"), dict)
+                else {}
+            ).get("framemeld_enabled")
+        ),
+        candidates=[
+            {
+                "codec": candidate.codec,
+                "adapter": getattr(candidate.adapter, "name", None),
+                "vendor": getattr(candidate.adapter, "vendor", None),
+                "stable_id": getattr(candidate.adapter, "stable_id", None),
+                "luid": getattr(candidate.adapter, "luid", None),
+                "device_id": getattr(candidate.adapter, "device_id", None),
+                "driver_version": getattr(candidate.adapter, "driver_version", None),
+                "encoder_device_index": getattr(candidate.adapter, "encoder_device_index", None),
+            }
+            for candidate in candidates
+        ],
+    )
     tier = _project_encoder_tier(project_body)
     spec = EncoderTargetSpec(
         width=int(width),
@@ -1308,6 +1432,7 @@ def compose_lite_cut_montage(
                 progress_callback=progress_callback,
                 cancel_event=cancel_event,
                 encoder_device_args=candidate.ffmpeg_device_args,
+                encoder_adapter=candidate.adapter,
             )
             validate_export_output(ffmpeg_bin, attempt_output)
         except MontageComposerError as exc:
@@ -1320,6 +1445,14 @@ def compose_lite_cut_montage(
             raise MontageComposerError("MONTAGE_OUTPUT_PATH_INVALID") from exc
 
     def _on_attempt(attempt: Any) -> None:
+        export_event(
+            "encoder_attempt",
+            candidate=attempt.candidate.codec,
+            adapter=getattr(attempt.candidate.adapter, "name", None),
+            status=attempt.status,
+            stage=attempt.stage,
+            detail=attempt.detail[-1200:],
+        )
         logger.info(
             "LiteCut encoder attempt candidate=%s status=%s stage=%s detail=%s",
             attempt.candidate.display_name,
@@ -1345,7 +1478,7 @@ def compose_lite_cut_montage(
                 target,
             ),
             _run_candidate,
-            ffmpeg_identity=ffmpeg_encoder_identity(ffmpeg_bin),
+            ffmpeg_identity=ffmpeg_identity,
             cleanup=_cleanup_attempt,
             cancellation_check=lambda: _raise_if_cancelled(cancel_event),
             on_attempt=_on_attempt,

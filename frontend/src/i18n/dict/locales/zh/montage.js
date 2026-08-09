@@ -302,6 +302,8 @@ export default {
   "montage.err.ffmpegPathMissing": "未找到 FFmpeg，请在设置中填写路径或加入系统 PATH。",
   "montage.err.ffmpegNotRunnable": "FFmpeg 无法启动，请检查文件权限、杀毒软件拦截或重新配置路径。",
   "montage.err.framemeldRequired": "当前配置的 FFmpeg 不支持帧混合功能。请在设置中选择特定版本 FrameMeld_ffmpeg 运行目录中的 ffmpeg.exe。",
+  "montage.err.framemeldFailed": "帧混合处理失败（阶段：{{failure_domain}}）。系统已保留原始错误，且不会把非编码器故障误判为 AMD 编码失败。",
+  "montage.err.framemeldTimeout": "帧混合处理超过允许时间，导出已停止。系统不会再切换到 CPU 从头重复导出。",
   "montage.err.framemeldSourceFpsRequired": "无法读取素材「{name}」的帧率，FrameMeld 未启动。",
   "montage.err.framemeldMixedSourceFps": "当前工程包含不同帧率的视频。为保护源时间线，请统一帧率后再启用 FrameMeld。",
   "montage.err.ffprobeNotFound": "未找到 ffprobe（通常与 FFmpeg 一同安装）。",

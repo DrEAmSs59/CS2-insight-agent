@@ -31,6 +31,7 @@ from .gsi_ready import (
 from .update_info import resolve_local_version_info
 from .runtime_session import runtime_session_state
 from .app_state import application_state
+from .video_export_log import configure_video_export_logging
 from .api.config import (
     build_data_dir_info,
     open_directory,
@@ -84,6 +85,7 @@ try:
     _file_handler = logging.FileHandler(_backend_log, mode="w", encoding="utf-8")
     _file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_file_handler)
+    _video_export_log = configure_video_export_logging(_log_dir)
     
     # 将 Uvicorn 的访问日志 (API 请求) 也写入文件
     for _u_logger_name in ("uvicorn", "uvicorn.access"):
@@ -94,6 +96,7 @@ try:
     _FAULT_LOG_FILE = (_log_dir / "backend-fault.log").open("w", encoding="utf-8")
     faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
     logging.getLogger(__name__).info("Backend file logging enabled: %s", _backend_log)
+    logging.getLogger(__name__).info("Video export logging enabled: %s", _video_export_log)
 except Exception:
     logging.getLogger(__name__).exception("Backend file logging setup failed")
 

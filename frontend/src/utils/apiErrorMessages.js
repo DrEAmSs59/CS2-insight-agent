@@ -40,6 +40,8 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_FFMPEG_PATH_MISSING: "montage.err.ffmpegPathMissing",
   MONTAGE_FFMPEG_NOT_RUNNABLE: "montage.err.ffmpegNotRunnable",
   MONTAGE_FRAMEMELD_REQUIRED: "montage.err.framemeldRequired",
+  MONTAGE_FRAMEMELD_FAILED: "montage.err.framemeldFailed",
+  MONTAGE_FRAMEMELD_TIMEOUT: "montage.err.framemeldTimeout",
   MONTAGE_FRAMEMELD_SOURCE_FPS_REQUIRED: "montage.err.framemeldSourceFpsRequired",
   MONTAGE_FRAMEMELD_MIXED_SOURCE_FPS: "montage.err.framemeldMixedSourceFps",
   MONTAGE_FFPROBE_NOT_FOUND: "montage.err.ffprobeNotFound",

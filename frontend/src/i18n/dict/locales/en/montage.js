@@ -302,6 +302,8 @@ export default {
   "montage.err.ffmpegPathMissing": "FFmpeg not found — set the path in Settings or add it to your system PATH.",
   "montage.err.ffmpegNotRunnable": "FFmpeg could not start. Check file permissions, security software, or configure the path again.",
   "montage.err.framemeldRequired": "The configured FFmpeg does not support FrameMeld. Select ffmpeg.exe from a complete FrameMeld runtime directory in Settings.",
+  "montage.err.framemeldFailed": "FrameMeld failed (domain: {{failure_domain}}). The original diagnostic was preserved and non-encoder failures are not attributed to AMD encoding.",
+  "montage.err.framemeldTimeout": "FrameMeld exceeded the allowed time and the export was stopped. It will not restart the full export on the CPU.",
   "montage.err.framemeldSourceFpsRequired": "The frame rate for \"{name}\" could not be read, so FrameMeld was not started.",
   "montage.err.framemeldMixedSourceFps": "This project contains videos with different frame rates. Normalize them before enabling FrameMeld to preserve source timelines.",
   "montage.err.ffprobeNotFound": "ffprobe not found (usually installed with FFmpeg).",

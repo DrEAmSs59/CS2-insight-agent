@@ -7,9 +7,11 @@ import re
 import subprocess
 import threading
 import time
+from contextvars import copy_context
 from typing import Any, Callable
 
 from ...ffmpeg_process import command_for_log, decode_process_output
+from ...video_export_log import export_event, export_progress as log_video_export_progress
 from ...video_composer import MontageComposerError
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ def emit_progress(
     stage: str,
     detail: dict[str, Any] | None = None,
 ) -> None:
+    log_video_export_progress(progress, stage, detail)
     if not callback:
         return
     try:
@@ -61,6 +64,7 @@ def run_ffmpeg_process(
     cmd: list[str],
     *,
     timeout: float = 3600,
+    stall_timeout: float | None = None,
     cancel_event: Any | None = None,
     progress_callback: ProgressCallback | None = None,
     progress_start: float = 0.0,
@@ -76,10 +80,16 @@ def run_ffmpeg_process(
     """
 
     started = time.monotonic()
+    export_event(
+        "stage_started",
+        stage=progress_stage,
+        hard_timeout_seconds=timeout,
+        stall_timeout_seconds=stall_timeout,
+    )
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
     stdout_buffer = bytearray()
     stderr_buffer = bytearray()
-    progress_state = {"last_frame": -1, "rolling": b""}
+    progress_state = {"last_frame": -1, "last_progress_at": started, "rolling": b""}
 
     def drain(stream: Any, target: bytearray, *, parse_progress: bool = False) -> None:
         try:
@@ -92,7 +102,7 @@ def run_ffmpeg_process(
                 if not chunk:
                     return
                 _append_bounded(target, chunk)
-                if not parse_progress or not progress_callback:
+                if not parse_progress:
                     continue
                 rolling = (progress_state["rolling"] + chunk)[-8192:]
                 progress_state["rolling"] = rolling[-256:]
@@ -104,6 +114,7 @@ def run_ffmpeg_process(
                 if total <= 0 or current <= progress_state["last_frame"]:
                     continue
                 progress_state["last_frame"] = current
+                progress_state["last_progress_at"] = time.monotonic()
                 stage_progress = max(0.0, min(1.0, current / total))
                 mapped = progress_start + (progress_end - progress_start) * stage_progress
                 emit_progress(
@@ -120,11 +131,17 @@ def run_ffmpeg_process(
             logger.debug("LiteCut process output reader stopped", exc_info=True)
 
     assert process.stdout is not None and process.stderr is not None
+    stdout_context = copy_context()
+    stderr_context = copy_context()
     readers = [
-        threading.Thread(target=drain, args=(process.stdout, stdout_buffer), daemon=True),
         threading.Thread(
-            target=drain,
-            args=(process.stderr, stderr_buffer),
+            target=stdout_context.run,
+            args=(drain, process.stdout, stdout_buffer),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=stderr_context.run,
+            args=(drain, process.stderr, stderr_buffer),
             kwargs={"parse_progress": True},
             daemon=True,
         ),
@@ -148,9 +165,23 @@ def run_ffmpeg_process(
             process.wait(timeout=10)
             for reader in readers:
                 reader.join(timeout=2.0)
+            export_event(
+                "stage_cancelled",
+                level=logging.WARNING,
+                stage=progress_stage,
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+            )
             raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
         if process.poll() is not None:
             result = completed(int(process.returncode or 0))
+            export_event(
+                "stage_completed" if result.returncode == 0 else "stage_failed",
+                level=logging.INFO if result.returncode == 0 else logging.ERROR,
+                stage=progress_stage,
+                returncode=result.returncode,
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                detail=(result.stderr or result.stdout or "").strip()[-2400:] if result.returncode else "",
+            )
             if result.returncode != 0:
                 logger.error(
                     "LiteCut FFmpeg failed returncode=%d command=%s stderr=%s",
@@ -159,9 +190,32 @@ def run_ffmpeg_process(
                     (result.stderr or result.stdout or "").strip()[-1200:],
                 )
             return result
-        if time.monotonic() - started > timeout:
+        now = time.monotonic()
+        hard_expired = now - started > timeout
+        stalled = (
+            stall_timeout is not None
+            and now - float(progress_state["last_progress_at"]) > float(stall_timeout)
+        )
+        if hard_expired or stalled:
             process.kill()
             process.wait(timeout=10)
-            logger.error("LiteCut FFmpeg timed out command=%s", command_for_log(cmd))
+            reason = (
+                f"hard timeout after {timeout:g} seconds"
+                if hard_expired
+                else (
+                    f"no frame progress for {float(stall_timeout or 0):g} seconds "
+                    f"after frame {int(progress_state['last_frame'])}"
+                )
+            )
+            _append_bounded(stderr_buffer, ("\nFrameMeld " + reason).encode("utf-8"))
+            export_event(
+                "stage_failed",
+                level=logging.ERROR,
+                stage=progress_stage,
+                returncode=124,
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                detail=reason,
+            )
+            logger.error("LiteCut FFmpeg timed out reason=%s command=%s", reason, command_for_log(cmd))
             return completed(124)
         time.sleep(0.25)

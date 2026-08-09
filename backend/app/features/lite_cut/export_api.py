@@ -13,6 +13,14 @@ from pydantic import BaseModel
 
 from ...api_errors import error_detail
 from ...env_utils import load_config
+from ...video_export_log import (
+    current_video_export_context,
+    current_video_export_session_id,
+    export_event,
+    set_video_export_database_id,
+    video_export_endpoint,
+    video_export_session,
+)
 from .runtime import (
     LiteCutExportJob,
     export_job_snapshot,
@@ -117,6 +125,25 @@ async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
 
 
 async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, Any]) -> None:
+    session_id = str(prepared.get("video_export_session_id") or "") or None
+    with video_export_session(
+        "lite_cut",
+        session_id=session_id,
+        database_export_id=job.export_id,
+        phase="background",
+        metadata={"project_id": job.project_id},
+        started_monotonic=prepared.get("video_export_started_monotonic"),
+    ):
+        export_event(
+            "background_job_started",
+            status="running",
+            output_name=Path(job.output_path).name,
+            requested_encoder=prepared.get("montage_encoder"),
+        )
+        await _run_lite_cut_export_job_in_session(job, prepared)
+
+
+async def _run_lite_cut_export_job_in_session(job: LiteCutExportJob, prepared: dict[str, Any]) -> None:
     from ...montage_errors import montage_detail_from_exception
     from ...video_composer import MontageComposerError
     from .render_pipeline import export_lite_cut_project
@@ -172,6 +199,11 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
             job.stage = "cancelled"
             job.error = ""
             await db.update_export(job.export_id, status="cancelled", error_msg="", output_path=job.output_path)
+            export_event("pipeline_cancelled", status="cancelled", error_code=e.code)
+            logger.info(
+                "video export summary feature=lite_cut export_id=%s status=cancelled",
+                job.export_id,
+            )
             return
         detail = montage_detail_from_exception(e)
         code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
@@ -179,6 +211,20 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
         job.stage = "error"
         job.error = code
         await db.update_export(job.export_id, status="error", error_msg=code, output_path=job.output_path)
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=code,
+            failure_domain=detail.get("failure_domain"),
+            encoder=detail.get("encoder"),
+            branch=detail.get("branch"),
+        )
+        logger.error(
+            "video export summary feature=lite_cut export_id=%s status=error code=%s",
+            job.export_id,
+            code,
+        )
         return
     except Exception as e:
         await asyncio.to_thread(remove_partial_output, job.output_path)
@@ -188,6 +234,13 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
         job.stage = "error"
         job.error = code
         await db.update_export(job.export_id, status="error", error_msg=code, output_path=job.output_path)
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=code,
+            error_type=type(e).__name__,
+        )
         return
 
     job.status = "done"
@@ -196,9 +249,20 @@ async def _run_lite_cut_export_job(job: LiteCutExportJob, prepared: dict[str, An
     job.output_path = str(out)
     job.error = ""
     await db.update_export(job.export_id, status="done", error_msg="", output_path=str(out))
+    export_event(
+        "pipeline_completed",
+        status="done",
+        output_name=Path(str(out)).name,
+    )
+    logger.info(
+        "video export summary feature=lite_cut export_id=%s status=done output=%s",
+        job.export_id,
+        Path(str(out)).name,
+    )
 
 
 @router.post("/export")
+@video_export_endpoint("lite_cut")
 async def lite_cut_export(body: LiteCutExportBody):
     from ...montage_errors import montage_detail_from_exception
     from ...video_composer import MontageComposerError
@@ -218,6 +282,17 @@ async def lite_cut_export(body: LiteCutExportBody):
         status="running",
         output_path=prepared["output_path"],
     )
+    set_video_export_database_id(export_id)
+    export_event(
+        "pipeline_started",
+        database_export_id=export_id,
+        project_id=body.project_id,
+        output_name=Path(prepared["output_path"]).name,
+        requested_encoder=prepared["montage_encoder"],
+        framemeld_enabled=bool(
+            (prepared["project_body"].get("output") or {}).get("framemeld_enabled")
+        ),
+    )
 
     try:
         out = await asyncio.to_thread(
@@ -234,13 +309,39 @@ async def lite_cut_export(body: LiteCutExportBody):
         await get_lite_cut_db().update_export(
             export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
         )
+        error_code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=error_code,
+            failure_domain=detail.get("failure_domain"),
+            encoder=detail.get("encoder"),
+            branch=detail.get("branch"),
+        )
+        logger.error(
+            "video export summary feature=lite_cut export_id=%s status=error code=%s",
+            export_id,
+            error_code,
+        )
         raise HTTPException(400, detail) from e
 
     await get_lite_cut_db().update_export(export_id, status="done", error_msg="", output_path=str(out))
+    export_event(
+        "pipeline_completed",
+        status="done",
+        output_name=Path(str(out)).name,
+    )
+    logger.info(
+        "video export summary feature=lite_cut export_id=%s status=done output=%s",
+        export_id,
+        Path(str(out)).name,
+    )
     return {"export_id": export_id, "status": "done", "output_path": str(out)}
 
 
 @router.post("/export/start")
+@video_export_endpoint("lite_cut")
 async def start_lite_cut_export(body: LiteCutExportBody):
     prepared = await _prepare_lite_cut_export(body)
     if body.project_id is not None:
@@ -254,6 +355,19 @@ async def start_lite_cut_export(body: LiteCutExportBody):
         body=prepared["project_body"],
         status="queued",
         output_path=prepared["output_path"],
+    )
+    set_video_export_database_id(export_id)
+    prepared["video_export_session_id"] = current_video_export_session_id()
+    current_context = current_video_export_context()
+    if current_context is not None:
+        prepared["video_export_started_monotonic"] = current_context.started_monotonic
+    export_event(
+        "background_job_queued",
+        status="queued",
+        database_export_id=export_id,
+        project_id=body.project_id,
+        output_name=Path(prepared["output_path"]).name,
+        requested_encoder=prepared["montage_encoder"],
     )
     job = LiteCutExportJob(
         export_id=export_id,

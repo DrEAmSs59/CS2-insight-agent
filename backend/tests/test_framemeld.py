@@ -14,9 +14,13 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.framemeld import (
     FRAMEMELD_DELIVERY_FPS,
+    FRAMEMELD_STATUS_PREFIX,
     build_framemeld_command,
+    framemeld_execution_policy,
+    framemeld_failure_from_result,
     framemeld_sources_are_compatible,
     framemeld_working_fps,
+    log_framemeld_diagnostic_events,
     probe_framemeld,
 )
 from app.features.lite_cut.runtime import normalize_project_body
@@ -45,7 +49,10 @@ class TestFrameMeld(unittest.TestCase):
                     {
                         "protocol": "org.framemeld.cli",
                         "api_version": 1,
-                        "features": ["host-managed-encoder-fallback"],
+                        "features": [
+                            "host-managed-encoder-fallback",
+                            "structured-status-json-v1",
+                        ],
                     }
                 ),
                 stderr="",
@@ -55,6 +62,7 @@ class TestFrameMeld(unittest.TestCase):
             self.assertEqual(capability.route, "-framemeld")
             self.assertFalse(capability.legacy)
             self.assertIn("host-managed-encoder-fallback", capability.features)
+            self.assertIn("structured-status-json-v1", capability.features)
             self.assertEqual(run.call_args.args[0][1:], ["-framemeld", "--capabilities-json"])
 
     def test_current_framemeld_build_uses_legacy_cli_route(self):
@@ -127,6 +135,185 @@ class TestFrameMeld(unittest.TestCase):
         self.assertEqual(command[command.index("-gpu") + 1], "2")
         self.assertEqual(command[command.index("-cq") + 1], "21")
         self.assertNotIn("--host-managed-encoder-fallback", command)
+        self.assertNotIn("--status-json-lines", command)
+
+    def test_amd_command_opts_into_structured_status_without_changing_nvenc(self):
+        from app.framemeld import FrameMeldCapability
+
+        capability = FrameMeldCapability(
+            route="-framemeld",
+            api_version=1,
+            features=frozenset(
+                {
+                    "host-managed-encoder-fallback",
+                    "structured-status-json-v1",
+                }
+            ),
+        )
+        amf_command = build_framemeld_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            video_encode_args=["-c:v", "h264_amf", "-qp_i", "20"],
+            encoder_adapter=SimpleNamespace(
+                name="AMD Radeon RX Test",
+                vendor="amd",
+                stable_id="luid:test",
+                luid="test",
+                device_id="DEV_TEST",
+                driver_version="1.2.3",
+                kind="discrete",
+                enumeration_index=0,
+                encoder_device_index=None,
+            ),
+            capability=capability,
+        )
+        nvenc_command = build_framemeld_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            video_encode_args=["-c:v", "h264_nvenc", "-cq", "20"],
+            capability=capability,
+        )
+        self.assertIn("--status-json-lines", amf_command)
+        adapter_payload = json.loads(
+            amf_command[amf_command.index("--host-encoder-adapter-json") + 1]
+        )
+        self.assertEqual(adapter_payload["name"], "AMD Radeon RX Test")
+        self.assertEqual(adapter_payload["stable_id"], "luid:test")
+        self.assertEqual(adapter_payload["driver_version"], "1.2.3")
+        self.assertNotIn("--status-json-lines", nvenc_command)
+
+    def test_intel_qsv_command_uses_separate_precise_branch(self):
+        from app.framemeld import FrameMeldCapability
+
+        capability = FrameMeldCapability(
+            route="-framemeld",
+            api_version=1,
+            features=frozenset(
+                {
+                    "host-managed-encoder-fallback",
+                    "structured-status-json-v1",
+                }
+            ),
+        )
+        qsv_command = build_framemeld_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            video_encode_args=["-c:v", "h264_qsv", "-global_quality", "20"],
+            encoder_adapter=SimpleNamespace(
+                name="Intel Arc Test",
+                vendor="intel",
+                stable_id="luid:intel-test",
+                luid="intel-test",
+                device_id="DEV_INTEL_TEST",
+                driver_version="2.3.4",
+                kind="discrete",
+                enumeration_index=1,
+                encoder_device_index=None,
+            ),
+            capability=capability,
+        )
+
+        self.assertIn("--status-json-lines", qsv_command)
+        adapter_payload = json.loads(
+            qsv_command[qsv_command.index("--host-encoder-adapter-json") + 1]
+        )
+        self.assertEqual(adapter_payload["vendor"], "intel")
+        self.assertEqual(adapter_payload["stable_id"], "luid:intel-test")
+        policy = framemeld_execution_policy(qsv_command)
+        self.assertIsNotNone(policy)
+        self.assertEqual(policy.branch, "intel_qsv")
+        self.assertEqual(policy.encoder, "h264_qsv")
+
+    def test_precise_policy_requires_status_flag_and_supported_backend(self):
+        self.assertIsNone(
+            framemeld_execution_policy(["ffmpeg.exe", "-c:v", "h264_qsv", "output.mp4"])
+        )
+        self.assertIsNone(
+            framemeld_execution_policy(
+                [
+                    "ffmpeg.exe",
+                    "--status-json-lines",
+                    "-c:v",
+                    "h264_nvenc",
+                    "output.mp4",
+                ]
+            )
+        )
+
+    def test_structured_failure_parser_returns_domain_and_devices(self):
+        payload = {
+            "protocol": "org.framemeld.status",
+            "version": 1,
+            "event": "pipeline_finished",
+            "status": "failed",
+            "failure_domain": "frame_engine",
+            "encoder": "h264_amf",
+            "devices": {
+                "rife": {"index": 0, "selection": "default"},
+                "encoder": {"backend": "h264_amf", "selection": "system-default"},
+            },
+            "vspipe_stderr_tail": "RIFE: failed to load model",
+        }
+        result = SimpleNamespace(
+            stdout="",
+            stderr="noise\n" + FRAMEMELD_STATUS_PREFIX + json.dumps(payload),
+        )
+        failure = framemeld_failure_from_result(result)
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure.domain, "frame_engine")
+        self.assertEqual(failure.encoder, "h264_amf")
+        self.assertEqual(failure.devices["rife"]["index"], 0)
+        self.assertIn("failed to load model", failure.detail)
+
+    def test_diagnostic_events_are_forwarded_without_claiming_exact_binding(self):
+        events = [
+            {
+                "protocol": "org.framemeld.status",
+                "version": 1,
+                "event": "device_mapping",
+                "status": "candidate",
+                "confidence": "medium",
+                "exact_mapping_available": False,
+            },
+            {
+                "protocol": "org.framemeld.status",
+                "version": 1,
+                "event": "encoder_binding",
+                "status": "succeeded",
+                "binding_state": "system_default_unverified",
+                "binding_verified": False,
+            },
+            {
+                "protocol": "org.framemeld.status",
+                "version": 1,
+                "event": "performance_summary",
+                "status": "succeeded",
+                "first_frame_observed": True,
+                "first_frame_ms": 123,
+                "first_packet_observed": True,
+                "first_packet_ms": 456,
+            },
+        ]
+        with patch("app.framemeld.export_event") as emit:
+            log_framemeld_diagnostic_events(events, branch="amd_amf")
+
+        emitted_names = [call.args[0] for call in emit.call_args_list]
+        self.assertEqual(
+            emitted_names,
+            [
+                "device_mapping",
+                "encoder_binding",
+                "performance_summary",
+                "first_frame",
+                "first_packet",
+            ],
+        )
+        mapping_fields = emit.call_args_list[0].kwargs
+        self.assertFalse(mapping_fields["exact_mapping_available"])
+        self.assertEqual(mapping_fields["branch"], "amd_amf")
 
     def test_lite_cut_schema_keeps_only_new_framemeld_switch(self):
         body = normalize_project_body(
