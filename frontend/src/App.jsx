@@ -14,7 +14,6 @@ import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import { getPlayerClipScope } from "./utils/playerClipScope";
 import {
-  freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
   sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
@@ -22,7 +21,6 @@ import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
 import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
 import {
   queueItemClientUid,
-  runWithConcurrency,
   buildRecordingQueueRequestsFromQueue,
   applySessionObsTransitionToRequests,
   applySessionKbOverlayToRequests,
@@ -30,13 +28,8 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
-import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./features/demo-analysis/state/analysisCache";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
-import {
-  DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
-  demoBatchFailureMessage,
-  normalizeDemoBatchFailures,
-} from "./utils/demoBatchFailures";
+import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import {
   recordingAbortToastKind,
@@ -122,11 +115,7 @@ export default function App() {
    */
   const [parsedMatches, setParsedMatches] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-  const currentMatchIndexRef = useRef(0);
   const autoParseLoadedDemosRef = useRef(null);
-  useEffect(() => {
-    currentMatchIndexRef.current = currentMatchIndex;
-  }, [currentMatchIndex]);
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
   const [selectedPlayers, setSelectedPlayers] = useState({});
@@ -135,17 +124,10 @@ export default function App() {
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
   const [activePlayerTabs, setActivePlayerTabs] = useState({});
-  const [aiReviewingPlayers, setAiReviewingPlayers] = useState({});
-  const aiReviewInFlightRef = useRef(new Set());
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
 
-  const [parsing, setParsing] = useState(false);
-  /** 按场次索引的后台解析（与上传时的全局 parsing 区分，便于切换场次） */
-  const [parsingByIndex, setParsingByIndex] = useState({});
-  /** 解析分析页内嵌：当前场次解析读条 / 完成或上传成功提示（不占顶部栏） */
-  const [analysisInlineProgress, setAnalysisInlineProgress] = useState(null);
   const [progressText, setProgressTextInner] = useState("");
   /** 底部 ProgressBar 可选行为：自动消失、跳转队列按钮 */
   const [progressToastMeta, setProgressToastMeta] = useState(null);
@@ -159,9 +141,6 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    setAnalysisInlineProgress(null);
-  }, [currentMatchIndex]);
   const [batchRecording, setBatchRecording] = useState(false);
   const [recordingAbortRequested, setRecordingAbortRequested] = useState(false);
   const recordingAbortRequestedRef = useRef(false);
@@ -217,6 +196,7 @@ export default function App() {
     selectedLibraryDemoIds,
     setSelectedLibraryDemoIds,
     libraryDemoIdsByIndex,
+    setLibraryDemoIdsByIndex,
     libraryRename,
     setLibraryRename,
     libraryDeletePrompt,
@@ -263,6 +243,37 @@ export default function App() {
       setFreezeToDeathRoundsByMatch,
       setSelectedClientClipUids,
     },
+  });
+  const {
+    parsing,
+    parsingByIndex,
+    analysisInlineProgress,
+    aiReviewingPlayers,
+    handleUpload,
+    handleParse,
+    ensurePlayerAiReview,
+    resetAnalysisWorkflow,
+  } = useDemoAnalysisWorkflows({
+    t,
+    navigate,
+    setProgressText,
+    setBatchLoadError,
+    aiMode,
+    uploadedDemos,
+    setUploadedDemos,
+    parsedMatches,
+    setParsedMatches,
+    currentMatchIndex,
+    setCurrentMatchIndex,
+    selectedPlayers,
+    setSelectedPlayers,
+    freezeToDeathRoundsByMatch,
+    setFreezeToDeathRoundsByMatch,
+    setActivePlayerTabs,
+    setSelectedClientClipUids,
+    libraryDemoIdsByIndex,
+    setLibraryDemoIdsByIndex,
+    autoParseLoadedDemosRef,
   });
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
@@ -572,72 +583,6 @@ export default function App() {
 
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
-  const handleUpload = useCallback(async (files) => {
-    const list = Array.isArray(files) ? files : [files];
-    if (!list.length) return;
-
-    setProgressText(t("app.uploadingDemo"), { loading: true });
-    setParsing(true);
-
-    try {
-      const sourcePaths = list.map((f) => {
-        if (typeof f === "string") return f;
-        try {
-          return window.electron?.getPathForFile?.(f) || "";
-        } catch {
-          return "";
-        }
-      });
-      let data;
-      if (sourcePaths.every(Boolean)) {
-        ({ data } = await API.post("/demo/open-local", { paths: sourcePaths }));
-      } else {
-        const formData = new FormData();
-        list.forEach((f) => formData.append("files", f));
-        formData.append("source_paths_json", JSON.stringify(sourcePaths));
-        ({ data } = await API.post("/demo/upload-multiple", formData));
-      }
-      const uploads = data.uploads ?? [];
-      const preparationFailures = Array.isArray(data.failed) ? data.failed : [];
-      if (!uploads.length) {
-        const failed = normalizeDemoBatchFailures(preparationFailures, t, "upload");
-        setAnalysisInlineProgress({ active: false, text: t("app.autoParseNoUsable") });
-        setProgressText(t("app.autoParseNoUsable"), { isError: true });
-        if (failed.length) {
-          setBatchLoadError({ open: true, failed, mode: "analysis" });
-        }
-        return;
-      }
-      setUploadedDemos(uploads);
-      setParsedMatches(uploads.map(() => null));
-      setLibraryDemoIdsByIndex({});
-      setCurrentMatchIndex(0);
-      const selectedMap = {};
-      uploads.forEach((upload, index) => {
-        const names = (upload.players || [])
-          .map(playerIdentityKey)
-          .filter((name) => typeof name === "string" && name.trim());
-        selectedMap[index] = names;
-      });
-      setSelectedPlayers(selectedMap);
-      setActivePlayerTabs({});
-      setFreezeToDeathRoundsByMatch({});
-      setSelectedClientClipUids(new Set());
-      const uploadDoneMsg =
-        uploads.length > 1
-          ? t("app.uploadDoneMulti", { n: uploads.length })
-          : t("app.uploadDoneSingle");
-      setProgressText("");
-      setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
-      navigate("/analysis");
-      await autoParseLoadedDemosRef.current?.(uploads, {}, preparationFailures);
-    } catch (e) {
-      setProgressText(t("app.uploadFail", { msg: demoBatchFailureMessage(e, t) }), { isError: true });
-    } finally {
-      setParsing(false);
-    }
-  }, [navigate, t]);
-
   const roundMontageCanEnqueue = useMemo(() => {
     const p = freezeToDeathDraft?.picked ?? [];
     return p.length > 0;
@@ -680,292 +625,6 @@ export default function App() {
     [currentParsed, currentActivePlayer, queuedClientClipUidsForCurrentDemo],
   );
   const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
-
-  /**
-   * @param {number} idx
-   * @param {string[] | null} [playerListOverride] 非 null 时忽略 selectedPlayers
-   * @param {{ demos?: any[]; libraryDemoIdsByIndex?: Record<number, number>; suppressProgressText?: boolean } | null} [ctx] 库批量载入后立即解析时使用，避免尚未提交的 React 状态
-   */
-  const handleParseForIndex = useCallback(
-    async (idx, playerListOverride = null, ctx = null) => {
-      const demos = ctx?.demos ?? uploadedDemos;
-      const libIds = ctx?.libraryDemoIdsByIndex ?? libraryDemoIdsByIndex;
-      const quietProgress = Boolean(ctx?.suppressProgressText);
-      if (!demos?.length) return;
-      const names =
-        playerListOverride != null ? playerListOverride : (selectedPlayers[idx] ?? []);
-      if (!names.length) return;
-      const fn = demos[idx]?.filename;
-      if (!fn) return;
-
-      setParsingByIndex((prev) => ({ ...prev, [idx]: true }));
-      const viewingHere = currentMatchIndexRef.current === idx;
-      if (viewingHere && !quietProgress) {
-        setProgressText("");
-        setAnalysisInlineProgress({ active: true, text: t("app.parsingDemo", { fn }) });
-        setSelectedClientClipUids(new Set());
-      }
-
-      try {
-        const activeLibraryDemoId = libIds[idx] ?? demos[idx]?.id;
-        const body = { target_players: names, locale: useLocaleStore.getState().locale };
-        const ftdCfg = freezeToDeathRoundsByMatch[idx] ?? { picked: [] };
-        const ftdPicked = [...(ftdCfg.picked || [])].sort((a, b) => a - b);
-        // null = 后端按全部合规非赛后回合生成回合合集；[] 会显式跳过生成（见 demo_parser）
-        body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
-        const { data } = activeLibraryDemoId
-          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body, {
-              timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
-            })
-          : await API.post(
-              `/demo/parse-multi?filename=${encodeURIComponent(fn)}&path=${encodeURIComponent(demos[idx]?.path || fn)}`,
-              body,
-              { timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS },
-            );
-
-        const processedPlayers = {};
-        for (const [playerName, playerData] of Object.entries(data.players ?? {})) {
-          processedPlayers[playerName] = {
-            ...playerData,
-            clips: ensureClientClipUidsOnClips(playerData.clips ?? []),
-          };
-        }
-
-        setParsedMatches((prev) => {
-          const base =
-            prev && prev.length === demos.length ? [...prev] : demos.map(() => null);
-          const cur = base[idx];
-          const mergedPlayers = { ...(cur?.players || {}), ...processedPlayers };
-          base[idx] = {
-            players: mergedPlayers,
-            analysis_workspace: data.analysis_workspace ?? cur?.analysis_workspace ?? null,
-            demo_path: demos[idx].path,
-            demo_filename: fn,
-          };
-          return base;
-        });
-
-        const firstMeta = Object.values(processedPlayers)[0]?.match_meta;
-        const ftdMaxRounds = Math.max(
-          1,
-          Math.min(
-            64,
-            Number(firstMeta?.total_rounds) ||
-              Number(demos[idx]?.match_meta?.total_rounds) ||
-              24
-          )
-        );
-
-        const refPlayer = names[0];
-        const refClips = processedPlayers[refPlayer]?.clips ?? [];
-        const ftdClip = refClips.find(
-          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
-        );
-        setFreezeToDeathRoundsByMatch((prev) => ({
-          ...prev,
-          [idx]: ftdClip
-            ? freezeToDeathDraftFromClipFilter(
-                ftdClip.freeze_to_death_round_filter,
-                ftdMaxRounds
-              )
-            : { picked: [] },
-        }));
-
-        const rounds = firstMeta?.total_rounds ?? "?";
-        const totalRegular = Object.values(processedPlayers).reduce(
-          (s, pd) => s + (pd.clips ?? []).filter((c) => c.category !== "meme_death").length,
-          0
-        );
-        const totalMeme = Object.values(processedPlayers).reduce(
-          (s, pd) => s + (pd.clips ?? []).filter((c) => c.category === "meme_death").length,
-          0
-        );
-        const playerLabel =
-          names.length === 1 ? names[0] : t("app.parseDonePlayerCount", { n: names.length });
-        const doneMsg =
-          totalMeme > 0
-            ? t("app.parseDoneWithMeme", { fn, rounds, playerLabel, totalRegular, totalMeme })
-            : t("app.parseDone", { fn, rounds, playerLabel, totalRegular });
-        if (!quietProgress) {
-          if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
-          else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
-        }
-        return { ok: true };
-      } catch (e) {
-        const reason = demoBatchFailureMessage(e, t);
-        const err = t("app.parseFail", { fn, msg: reason });
-        if (!quietProgress) {
-          if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
-          else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
-        }
-        return { ok: false, reason };
-      } finally {
-        setParsingByIndex((prev) => {
-          const next = { ...prev };
-          delete next[idx];
-          return next;
-        });
-      }
-    },
-    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex, freezeToDeathRoundsByMatch, t]
-  );
-
-  const handleParse = useCallback(async () => {
-    await handleParseForIndex(currentMatchIndex, null, null);
-  }, [currentMatchIndex, handleParseForIndex]);
-
-  const LIBRARY_PARSE_CONCURRENCY = 2;
-
-  const autoParseLoadedDemos = useCallback(async (
-    loaded,
-    demoIdsByIndex = {},
-    initialFailures = [],
-  ) => {
-    const demos = Array.isArray(loaded) ? loaded : [];
-    const specs = buildPendingDemoAnalysisSpecs(demos);
-    const inferredFailures = demos
-      .map((demo, index) => ({ demo, index }))
-      .filter(({ demo }) => demoAnalysisRoster(demo).length === 0)
-      .map(({ demo, index }) => ({
-        id: demo?.id ?? `roster-${index}`,
-        filename: demo?.filename || `Demo ${index + 1}`,
-        code: demo?.inspection_error?.code || "DEMO_INSPECTION_FAILED",
-      }));
-    const failures = normalizeDemoBatchFailures(
-      [...(Array.isArray(initialFailures) ? initialFailures : []), ...inferredFailures],
-      t,
-      "analysis",
-    );
-    if (!specs.length) {
-      setAnalysisInlineProgress({
-        active: false,
-        text: failures.length ? t("app.autoParseNoUsable") : "",
-      });
-      if (failures.length) {
-        setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-      }
-      return;
-    }
-
-    let done = failures.length;
-    let succeeded = 0;
-    const activeNames = new Set();
-    const total = specs.length + failures.length;
-    const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
-    setAnalysisInlineProgress({
-      active: true,
-      text: t("app.autoParseStart", { demos: total, players: totalPlayers }),
-    });
-    const ctx = {
-      demos,
-      libraryDemoIdsByIndex: demoIdsByIndex,
-      suppressProgressText: true,
-    };
-
-    const showRunningProgress = () => {
-      setAnalysisInlineProgress({
-        active: done < total,
-        text: t("app.autoParseProgressDetail", {
-          done,
-          total,
-          failed: failures.length,
-          active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
-        }),
-      });
-    };
-
-    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
-      const filename = demos[spec.index]?.filename || `Demo ${spec.index + 1}`;
-      activeNames.add(filename);
-      showRunningProgress();
-      const result = await handleParseForIndex(spec.index, spec.players, ctx);
-      activeNames.delete(filename);
-      done += 1;
-      if (result?.ok) {
-        succeeded += 1;
-      } else {
-        failures.push({
-          id: demos[spec.index]?.id ?? `analysis-${spec.index}`,
-          filename,
-          reason: result?.reason || t("api.err.demoAnalysisFailed"),
-        });
-      }
-      setAnalysisInlineProgress({
-        active: done < total,
-        text: done < total
-          ? t("app.autoParseProgressDetail", {
-              done,
-              total,
-              failed: failures.length,
-              active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
-            })
-          : failures.length === 0
-            ? t("app.autoParseDone", { demos: specs.length, players: totalPlayers })
-            : t("app.autoParsePartial", {
-                succeeded,
-                failed: failures.length,
-              }),
-      });
-    });
-    if (failures.length) {
-      setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-    }
-  }, [handleParseForIndex, t]);
-  autoParseLoadedDemosRef.current = autoParseLoadedDemos;
-
-  const ensurePlayerAiReview = useCallback(async (playerName, matchIndex = currentMatchIndex) => {
-    const name = String(playerName || "").trim();
-    if (!aiMode || !name) return false;
-    const playerData = parsedMatches?.[matchIndex]?.players?.[name];
-    const clipsToReview = Array.isArray(playerData?.clips) ? playerData.clips : [];
-    if (!clipsToReview.length) return false;
-    const alreadyReviewed = Boolean(playerData?.ai_reviewed) || clipsToReview.some((clip) => (
-      clip?.ai_score != null
-      || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
-    ));
-    if (alreadyReviewed) return true;
-
-    const requestKey = `${matchIndex}:${name}`;
-    if (aiReviewInFlightRef.current.has(requestKey)) return false;
-    aiReviewInFlightRef.current.add(requestKey);
-    setAiReviewingPlayers((previous) => ({ ...previous, [requestKey]: true }));
-    try {
-      const { data } = await API.post("/demo/review-clips", {
-        clips: clipsToReview,
-        match_meta: playerData?.match_meta || {},
-        locale: useLocaleStore.getState().locale,
-      });
-      const reviewedClips = ensureClientClipUidsOnClips(data?.clips || clipsToReview);
-      setParsedMatches((previous) => {
-        if (!Array.isArray(previous) || !previous[matchIndex]?.players?.[name]) return previous;
-        const next = [...previous];
-        const current = next[matchIndex];
-        next[matchIndex] = {
-          ...current,
-          players: {
-            ...current.players,
-            [name]: {
-              ...current.players[name],
-              clips: reviewedClips,
-              ai_reviewed: true,
-            },
-          },
-        };
-        return next;
-      });
-      return true;
-    } catch (error) {
-      setProgressText(t("app.aiReviewFailed", { message: error.response?.data?.detail || error.message || t("common.requestFail") }), { isError: true });
-      return false;
-    } finally {
-      aiReviewInFlightRef.current.delete(requestKey);
-      setAiReviewingPlayers((previous) => {
-        const next = { ...previous };
-        delete next[requestKey];
-        return next;
-      });
-    }
-  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText, t]);
 
   const handleToggleClip = useCallback(
     (clientClipUid) => {
@@ -1889,13 +1548,11 @@ export default function App() {
     setCurrentMatchIndex(0);
     setSelectedPlayers({});
     setActivePlayerTabs({});
-    setAiReviewingPlayers({});
-    aiReviewInFlightRef.current.clear();
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
-    setAnalysisInlineProgress(null);
-  }, []);
+    resetAnalysisWorkflow();
+  }, [resetAnalysisWorkflow, setLibraryDemoIdsByIndex, setProgressText]);
 
   const handleDetectCs2 = useCallback(async () => {
     try {

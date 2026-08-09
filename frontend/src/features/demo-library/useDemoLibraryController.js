@@ -501,6 +501,7 @@ export function useDemoLibraryController({
     selectedLibraryDemoIds,
     setSelectedLibraryDemoIds,
     libraryDemoIdsByIndex,
+    setLibraryDemoIdsByIndex,
     libraryRename,
     setLibraryRename,
     libraryDeletePrompt,
