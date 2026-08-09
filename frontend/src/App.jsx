@@ -15,25 +15,12 @@ import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
 import {
   isFreezeToDeathCompilation,
 } from "./utils/freezeToDeathRoundFilter";
-import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
-import {
-  buildRecordingQueueRequestsFromQueue,
-  applySessionObsTransitionToRequests,
-  applySessionKbOverlayToRequests,
-} from "./utils/recordingBatch";
-import { messageFromApiCode } from "./utils/apiErrorMessages";
-import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
-import {
-  recordingAbortToastKind,
-  recordingQueueHadUnexpectedCs2Exit,
-  recordingQueueWasAborted,
-  unexpectedCs2ExitRecoveryMessageKey,
-} from "./utils/recordingAbort";
+import { useRecordingSessionController } from "./features/recording-queue/useRecordingSessionController";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
 import { desktopBridge } from "./desktop/desktopBridge.js";
@@ -138,22 +125,6 @@ export default function App() {
     }
   }, []);
 
-  const [batchRecording, setBatchRecording] = useState(false);
-  const [recordingAbortRequested, setRecordingAbortRequested] = useState(false);
-  const recordingAbortRequestedRef = useRef(false);
-  const [recordingResults, setRecordingResults] = useState(null);
-  const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
-  const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
-  const [recordingBlockedCode, setRecordingBlockedCode] = useState(null);
-  const [recordingRecoveryPrompt, setRecordingRecoveryPrompt] = useState({
-    configRecoveryNeeded: null,
-    povRecoveryNeeded: false,
-  });
-  const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
-  const [warmupIntent, setWarmupIntent] = useState(null);
-  /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
-  const [configBackupStatus, setConfigBackupStatus] = useState(null);
-  const [configBackupLoading, setConfigBackupLoading] = useState(false);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const savedRecordWarmupDefaultsRef = useRef(null);
@@ -282,6 +253,39 @@ export default function App() {
   const removeByClientClipUid  = useRecordingQueue((s) => s.removeByClientClipUid);
   const clearQueue             = useRecordingQueue((s) => s.clearQueue);
   const globalPacing    = useRecordingQueue((s) => s.globalPacing);
+
+  const {
+    batchRecording,
+    recordingAbortRequested,
+    recordingResults,
+    recordingResultModalOpen,
+    recordingBlockedMessage,
+    recordingBlockedCode,
+    recordingRecoveryPrompt,
+    recordWarmupOpen,
+    configBackupStatus,
+    configBackupLoading,
+    refreshConfigBackupStatus,
+    openBatchWarmup,
+    handleWarmupConfirm,
+    handleRestorePlayerConfig,
+    handleOpenConfigBackupDir,
+    handleAbortBatchRecording,
+    dismissWarmup,
+    closeRecordingResults,
+    clearRecordingResultsAndQueue,
+    clearRecordingBlock,
+  } = useRecordingSessionController({
+    t,
+    setProgressText,
+    setQueueDrawerOpen,
+    queue,
+    clearQueue,
+    obsConfig,
+    uploadedDemos,
+    parsedMatches,
+    demoLibraryItems,
+  });
 
   const currentUpload = uploadedDemos?.[currentMatchIndex] ?? null;
   const currentParsed = parsedMatches?.[currentMatchIndex] ?? null;
@@ -563,78 +567,9 @@ export default function App() {
     };
   }, [applyCommonParamsFromConfigData]);
 
-  const refreshConfigBackupStatus = useCallback(async () => {
-    setConfigBackupLoading(true);
-    try {
-      const { data } = await API.get("/config-backup/status");
-      const nextStatus = data && typeof data === "object" ? data : null;
-      setConfigBackupStatus(nextStatus);
-      return nextStatus;
-    } catch (e) {
-      const msg = formatRecordingApiError(e, t, t("app.backendConnectFail"));
-      const failedStatus = {
-        fetch_failed: true,
-        message: msg,
-      };
-      setConfigBackupStatus(failedStatus);
-      return failedStatus;
-    } finally {
-      setConfigBackupLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void refreshConfigBackupStatus();
-  }, [refreshConfigBackupStatus]);
-
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
-  const persistCs2RecordExtras = useCallback(async (payload) => {
-    try {
-      await API.put("config", payload);
-    } catch {
-      /* silent */
-    }
-  }, []);
-
   savedRecordWarmupDefaultsRef.current = savedRecordWarmupDefaults;
-
-  const persistWarmupDefaults = useCallback(async (obj) => {
-    const merged = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...obj };
-    setSavedRecordWarmupDefaults(merged);
-    try {
-      await API.put("config", { default_record_warmup: merged });
-    } catch {
-      /* silent */
-    }
-  }, []);
-
-  const persistObsTransition = useCallback(async (data) => {
-    const enabled = !!data.obs_transition_enabled;
-    const name = data.obs_transition_name ?? "Fade";
-    const ms = Number(data.obs_transition_duration_ms) || 100;
-    setObsTransitionEnabled(enabled);
-    setObsTransitionName(name);
-    setObsTransitionDurationMs(ms);
-    try {
-      await API.put("config", {
-        obs_transition_enabled: enabled,
-        obs_transition_name: name,
-        obs_transition_duration_ms: ms,
-      });
-    } catch {
-      /* silent */
-    }
-  }, []);
-
-  const persistExperimentalPov = useCallback(async (enabled) => {
-    try {
-      await API.put("config", { experimental: { pov_enabled: enabled } });
-      setExperimentalPovEnabled(!!enabled);
-    } catch {
-      /* silent */
-    }
-  }, []);
 
   /** 常用参数页：一次性写入配置文件（替代分项防抖保存） */
   const saveAllCommonParams = useCallback(async (payload) => {
@@ -679,295 +614,6 @@ export default function App() {
       return { ok: false, error: msg };
     }
   }, [setProgressText, refreshCommonParamsFromServer, t]);
-
-  const openBatchWarmup = useCallback(async () => {
-    if (!queue.length) return;
-    // 每次点击开始录制时现场拉取最新状态，避免程序刚启动时 state 尚未加载而漏检
-    setProgressText(t("app.checkingPlayerConfig"), { loading: true });
-    try {
-      const { data: cfgStatus } = await API.get("/config-backup/status");
-      setConfigBackupStatus(cfgStatus && typeof cfgStatus === "object" ? cfgStatus : null);
-      if (cfgStatus?.restore_required) {
-        setProgressText("");
-        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
-        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
-        return;
-      }
-    } catch {
-      // 获取失败时退回本地缓存，不阻断流程
-      if (configBackupStatus?.restore_required) {
-        setProgressText("");
-        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
-        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
-        return;
-      }
-    }
-    // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
-    setProgressText(t("app.checkingObsConnection"), { loading: true });
-    try {
-      const { data } = await API.post("/obs/config-check", obsConfig);
-      if (!data?.connected) {
-        setProgressText(t("app.obsConnectFail"), { isError: true });
-        return;
-      }
-    } catch (e) {
-      setProgressText(t("app.obsCheckFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      return;
-    }
-    setQueueDrawerOpen(false);
-    setWarmupIntent("batch");
-    setRecordWarmupOpen(true);
-    setProgressText("");
-  }, [queue.length, configBackupStatus, setConfigBackupStatus, setProgressText, obsConfig, t]);
-
-  const handleWarmupConfirm = useCallback(
-    async (warmupPayload) => {
-      const intent = warmupIntent;
-      const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
-      // 录制前参数为一次性配置：Overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
-      // 不写入配置文件。持久化仅由「录制参数配置」页的 saveAllCommonParams 负责。
-
-      setRecordWarmupOpen(false);
-      if (intent === "batch") {
-        setWarmupIntent(null);
-        if (!queue.length) return;
-        recordingAbortRequestedRef.current = false;
-        setRecordingAbortRequested(false);
-        setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
-        setBatchRecording(true);
-        setProgressText(t("app.preparingRecording"), { loading: true });
-
-        // 如果启用了任一事件轨道 Overlay，轮询预构建进度并更新提示文字。
-        const _overlayPrebuildOn = session.kb_overlay_enabled || session.kill_fx_enabled;
-        let _kbPollTimer = null;
-        if (_overlayPrebuildOn) {
-          _kbPollTimer = setInterval(async () => {
-            if (recordingAbortRequestedRef.current) return;
-            try {
-              const { data: kbst } = await API.get("recording/kb-prebuild-status");
-              if (recordingAbortRequestedRef.current) return;
-              if (kbst?.active) {
-                setProgressText(
-                  t("app.overlayPrebuildProgress", { done: kbst.done, total: kbst.total }),
-                  { loading: true }
-                );
-              } else if (kbst?.done > 0 && !kbst?.active) {
-                setProgressText(t("app.overlayPrebuildReady"), { loading: true });
-              }
-            } catch { /* ignore */ }
-          }, 1000);
-        }
-
-        try {
-          let requests = buildRecordingQueueRequestsFromQueue(
-            queue,
-            useRecordingQueue.getState().globalPacing,
-            uploadedDemos,
-            parsedMatches,
-            demoLibraryItems,
-          );
-          if (!requests.length) {
-            setProgressText(t("app.queueNoRecordableClips"));
-            return;
-          }
-          requests = applySessionObsTransitionToRequests(requests, session);
-          requests = applySessionKbOverlayToRequests(requests, session);
-          const povHud = session.experimental_pov_enabled
-            ? {
-                enabled: true,
-                radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
-                teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
-                voice_disabled: Boolean(warmupForApi?.pov_voice_disabled),
-              }
-            : undefined;
-          const body = {
-            requests,
-            warmup: warmupForApi,
-            obs: obsConfig,
-            cs2_extra_launch_args: session.cs2_extra_launch_args,
-            record_inject_console_lines: session.record_inject_console_lines,
-            ...(povHud ? { pov_hud: povHud } : {}),
-          };
-          if (!recordingAbortRequestedRef.current) {
-            setProgressText(t("app.batchRecording"), { loading: true });
-          }
-          const { data } = await API.post("recording/queue", body);
-          const results = Array.isArray(data) ? data : [];
-
-          // Build request_id → queue item mapping for friendly names in the result modal
-          const reqIdToQueueItem = {};
-          requests.forEach((req) => {
-            const qid = req.source_ref?.queue_item_id;
-            if (qid) {
-              const found = queue.find((q) => q.id === qid);
-              if (found) reqIdToQueueItem[req.request_id] = found;
-            }
-          });
-
-          const annotated = results.map((r, i) => ({
-            ...r,
-            _queueItem: reqIdToQueueItem[r?.request_id] ?? null,
-            _index: i,
-          }));
-          const allSucceeded = results.length > 0 && results.every((r) => r && r.success);
-          if (allSucceeded) clearQueue();
-          setRecordingResults(annotated);
-          setRecordingResultModalOpen(true);
-          const hadUnexpectedCs2Exit = recordingQueueHadUnexpectedCs2Exit(results);
-          const wasAborted = recordingQueueWasAborted(
-            results,
-            recordingAbortRequestedRef.current,
-          );
-          if (hadUnexpectedCs2Exit) {
-            const unexpectedExitResult = results.find(
-              (item) => item?.error_code === "RECORDING_CS2_EXITED" ||
-                String(item?.error || "").toLowerCase() === "cs2_exited_unexpectedly",
-            );
-            const reportedRecovery = unexpectedExitResult?.recovery;
-            const backupStatus = await refreshConfigBackupStatus();
-            let povStatus = null;
-            if (session.experimental_pov_enabled) {
-              try {
-                const { data: nextPovStatus } = await API.get("experimental/pov/status");
-                povStatus = nextPovStatus && typeof nextPovStatus === "object"
-                  ? nextPovStatus
-                  : { fetch_failed: true };
-              } catch {
-                povStatus = { fetch_failed: true };
-              }
-            }
-            const configRecoveryNeeded = reportedRecovery?.player_config_restore_verified
-              ? reportedRecovery.player_config_restored !== true
-              : Boolean(backupStatus?.restore_required || backupStatus?.fetch_failed);
-            const povRecoveryNeeded = !session.experimental_pov_enabled
-              ? false
-              : reportedRecovery?.pov_restore_verified
-                ? reportedRecovery.pov_restored !== true
-                : Boolean(povStatus?.needs_restore || povStatus?.fetch_failed);
-            setRecordingRecoveryPrompt({ configRecoveryNeeded, povRecoveryNeeded });
-            setRecordingBlockedMessage(t(unexpectedCs2ExitRecoveryMessageKey({
-              configRecoveryNeeded,
-              povEnabled: session.experimental_pov_enabled,
-              povRecoveryNeeded,
-              povRecoveryMode: reportedRecovery?.pov_restore?.verification_mode,
-            })));
-            setRecordingBlockedCode("RECORDING_CS2_EXITED");
-            setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });
-          } else if (wasAborted) {
-            const backupStatus = await refreshConfigBackupStatus();
-            const toastKind = recordingAbortToastKind(backupStatus, results);
-            if (toastKind === "restore_pending") {
-              setProgressText(t("app.abortRestorePending"), { isError: true });
-            } else if (toastKind === "unverified") {
-              setProgressText(t("app.abortRestoreUnverified"), { isError: true });
-            } else if (toastKind === "not_needed") {
-              setProgressText(t("app.abortConfigNotModified"), { autoDismissMs: 5000 });
-            } else {
-              setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
-            }
-          } else {
-            setProgressText("", { autoDismissMs: 100 });
-          }
-        } catch (e) {
-          const { text: detail, code: blockedCode } = parseRecordingApiError(
-            e,
-            t,
-            t("common.requestFail"),
-          );
-          if (e.response?.status === 409 || e.response?.status === 422) {
-            setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
-            setRecordingBlockedCode(blockedCode);
-          }
-          const toastKey = recordingAbortRequestedRef.current
-            ? "app.abortFail"
-            : "app.batchRecordFail";
-          setProgressText(t(toastKey, { msg: detail }), { isError: true });
-        } finally {
-          if (_kbPollTimer) clearInterval(_kbPollTimer);
-          recordingAbortRequestedRef.current = false;
-          setRecordingAbortRequested(false);
-          setBatchRecording(false);
-          void refreshConfigBackupStatus();
-        }
-        return;
-      }
-      setWarmupIntent(null);
-    },
-    [
-      warmupIntent,
-      queue,
-      clearQueue,
-      obsConfig,
-      refreshConfigBackupStatus,
-      uploadedDemos,
-      parsedMatches,
-      demoLibraryItems,
-      t,
-    ]
-  );
-
-  const handleRestorePlayerConfig = useCallback(async () => {
-    setProgressText(t("app.restoringPlayerConfig"), { loading: true });
-    try {
-      const { data } = await API.post("/config-backup/restore");
-      if (data?.ok) {
-        setProgressText(
-          messageFromApiCode(data?.code, t) || t("app.playerConfigRestored"),
-          { autoDismissMs: 3000 },
-        );
-      } else {
-        setProgressText(
-          messageFromApiCode(data?.code, t) || t("app.playerConfigRestorePartial"),
-          { autoDismissMs: 4000 },
-        );
-      }
-      await refreshConfigBackupStatus();
-    } catch (e) {
-      const st = e.response?.status;
-      const det = e.response?.data?.detail;
-      if (st === 409 && det?.code === "CS2_RUNNING") {
-        setRecordingBlockedMessage(t("app.restoreBlockedCs2Running"));
-        setRecordingBlockedCode("CS2_RUNNING");
-      } else {
-        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { autoDismissMs: 5000, isError: true });
-      }
-      await refreshConfigBackupStatus();
-    }
-  }, [refreshConfigBackupStatus, t]);
-
-  const handleOpenConfigBackupDir = useCallback(async () => {
-    try {
-      const { data } = await API.post("/config-backup/open-dir");
-      if (data && data.ok === false && data.backup_dir) {
-        setProgressText(
-          `${messageFromApiCode(data?.code, t) || t("app.openDirManual")} ${data.backup_dir}`,
-        );
-      }
-    } catch (e) {
-      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { isError: true });
-    }
-  }, [t]);
-
-  const handleAbortBatchRecording = useCallback(async () => {
-    if (recordingAbortRequestedRef.current) return;
-    try {
-      const { data } = await API.post("recording/abort");
-      if (data?.status === "idle") {
-        setProgressText(t("app.abortNoActive"), { autoDismissMs: 3000 });
-        return;
-      }
-      recordingAbortRequestedRef.current = true;
-      setRecordingAbortRequested(true);
-      setProgressText(t("app.abortingRecording"), { loading: true });
-    } catch (e) {
-      setProgressText(
-        t("app.abortFail", {
-          msg: formatRecordingApiError(e, t, t("common.requestFail")),
-        }),
-        { isError: true },
-      );
-    }
-  }, [t]);
 
   const handleSaveConfig = useCallback(async (config) => {
     try {
@@ -1859,10 +1505,7 @@ export default function App() {
 
         <RecordWarmupModal
           open={recordWarmupOpen}
-          onClose={() => {
-            setRecordWarmupOpen(false);
-            setWarmupIntent(null);
-          }}
+          onClose={dismissWarmup}
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
@@ -1887,11 +1530,8 @@ export default function App() {
 
         <RecordingResultModal
           open={recordingResultModalOpen}
-          onClose={() => setRecordingResultModalOpen(false)}
-          onClearQueue={() => {
-            clearQueue();
-            setRecordingResultModalOpen(false);
-          }}
+          onClose={closeRecordingResults}
+          onClearQueue={clearRecordingResultsAndQueue}
           results={recordingResults ?? []}
         />
 
@@ -1900,11 +1540,7 @@ export default function App() {
           errorCode={recordingBlockedCode}
           configRecoveryNeeded={recordingRecoveryPrompt.configRecoveryNeeded}
           povRecoveryNeeded={recordingRecoveryPrompt.povRecoveryNeeded}
-          onClose={() => {
-            setRecordingBlockedMessage("");
-            setRecordingBlockedCode(null);
-            setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
-          }}
+          onClose={clearRecordingBlock}
         />
 
         <UpdateCheckModal
