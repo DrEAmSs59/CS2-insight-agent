@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import API from "../api/api";
-import { useLocaleStore } from "../i18n/localeStore";
-import { useT } from "../i18n/useT.js";
+import API from "../../../api/api";
+import { useLocaleStore } from "../../../i18n/localeStore";
+import { useT } from "../../../i18n/useT.js";
 import {
   X,
   Loader2,
@@ -10,23 +10,23 @@ import {
 } from "lucide-react";
 import {
   ensureClientClipUidsOnClips,
-} from "../utils/clipClientUid";
-import { getPlayerClipScope } from "../utils/playerClipScope";
+} from "../../../utils/clipClientUid";
+import { getPlayerClipScope } from "../../../utils/playerClipScope";
 import {
   freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
   sliceFreezeToDeathClipForEnqueue,
-} from "../utils/freezeToDeathRoundFilter";
-import MatchScoreboard from "./MatchScoreboard";
-import PlayerSelect from "./PlayerSelect";
-import ClipList from "./ClipList";
-import ActionBar from "./ActionBar";
-import RoundTimelineView from "../features/demo-analysis/workspaces/timeline/RoundTimelineView";
-import WeaponKillsView from "../features/demo-analysis/workspaces/WeaponKillsView";
-import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../utils/timelineQueue";
-import { summarizeWeaponKills } from "../utils/weaponKillCompilations.js";
-import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
-import { playerDisplayName, playerIdentityKey } from "../utils/playerIdentity.js";
+} from "../../../utils/freezeToDeathRoundFilter";
+import MatchScoreboard from "../../../components/MatchScoreboard";
+import PlayerSelect from "../../../components/PlayerSelect";
+import ClipList from "../../../components/ClipList";
+import ActionBar from "../../../components/ActionBar";
+import RoundTimelineView from "../../demo-analysis/workspaces/timeline/RoundTimelineView";
+import WeaponKillsView from "../../demo-analysis/workspaces/WeaponKillsView";
+import { buildTimelineEventClipData, buildTimelineRoundClipData } from "../../../utils/timelineQueue";
+import { summarizeWeaponKills } from "../../../utils/weaponKillCompilations.js";
+import { useDemoPlaybackDialog } from "../../../hooks/useDemoPlaybackDialog.jsx";
+import { playerDisplayName, playerIdentityKey } from "../../../utils/playerIdentity.js";
 
 /**
  * @param {{

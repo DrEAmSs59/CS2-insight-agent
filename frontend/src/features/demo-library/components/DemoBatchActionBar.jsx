@@ -1,4 +1,4 @@
-import { useT } from "../../i18n/useT.js";
+import { useT } from "../../../i18n/useT.js";
 
 export default function DemoBatchActionBar({
   count,

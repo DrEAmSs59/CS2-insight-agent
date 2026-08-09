@@ -1,15 +1,15 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import API from "../api/api";
-import { useLocaleStore } from "../i18n/localeStore.js";
+import API from "../../../api/api";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 import DemoInfoModal from "./DemoInfoModal";
 
-vi.mock("../api/api", () => ({
+vi.mock("../../../api/api", () => ({
   default: { get: vi.fn() },
 }));
 
-vi.mock("../hooks/useDemoPlaybackDialog.jsx", () => ({
+vi.mock("../../../hooks/useDemoPlaybackDialog.jsx", () => ({
   useDemoPlaybackDialog: () => ({
     requestPlayDemo: vi.fn(),
     DemoPlaybackUi: () => null,

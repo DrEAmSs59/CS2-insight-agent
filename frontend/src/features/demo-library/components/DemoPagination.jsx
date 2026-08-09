@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useT } from "../../i18n/useT.js";
-import IconButton from "../ui/IconButton.jsx";
+import { useT } from "../../../i18n/useT.js";
+import IconButton from "../../../components/ui/IconButton.jsx";
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48, 96];
 

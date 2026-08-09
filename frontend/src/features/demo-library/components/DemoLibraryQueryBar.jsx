@@ -1,6 +1,6 @@
 import { Filter, X, Search, Calendar, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
-import { DEMO_LIBRARY_MAP_OPTIONS, DEMO_LIBRARY_STATUS_FILTER_OPTIONS } from "../../constants/demoLibraryFilters";
-import { useT } from "../../i18n/useT.js";
+import { DEMO_LIBRARY_MAP_OPTIONS, DEMO_LIBRARY_STATUS_FILTER_OPTIONS } from "../../../constants/demoLibraryFilters";
+import { useT } from "../../../i18n/useT.js";
 
 export default function DemoLibraryQueryBar({
   librarySearchInput,

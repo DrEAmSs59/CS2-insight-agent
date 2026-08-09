@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { classifyDemoStatus } from "../utils/demoLibraryDisplay";
+import { classifyDemoStatus } from "../../../utils/demoLibraryDisplay";
 import {
   Play,
   FolderSearch,
@@ -19,7 +19,7 @@ import {
   Info,
   Sparkles,
 } from "lucide-react";
-import { useT } from "../i18n/useT.js";
+import { useT } from "../../../i18n/useT.js";
 
 /**
  * 格式化分钟数为 xx min

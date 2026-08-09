@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import API from "../api/api";
-import { useLocaleStore } from "../i18n/localeStore.js";
+import API from "../../../api/api";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 import IngestModal from "./IngestModal.jsx";
 
-vi.mock("../api/api", () => ({
+vi.mock("../../../api/api", () => ({
   default: { get: vi.fn() },
 }));
 

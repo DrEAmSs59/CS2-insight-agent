@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import API from "../api/api";
-import { useT } from "../i18n/useT.js";
+import API from "../../../api/api";
+import { useT } from "../../../i18n/useT.js";
 import {
   X,
   Search,

@@ -1,28 +1,28 @@
 import { useCallback, useMemo, useState } from "react";
-import API from "../api/api";
+import API from "../../api/api";
 import { LayoutGrid, List } from "lucide-react";
-import PageContainer from "../components/PageContainer";
-import { useAppShell } from "../context/AppShellContext";
-import { useRecordingQueue } from "../stores/recordingQueueStore";
-import DemoAdvancedFilters from "../components/demoLibrary/DemoAdvancedFilters";
-import DemoBatchActionBar from "../components/demoLibrary/DemoBatchActionBar";
-import DemoLibraryQueryBar from "../components/demoLibrary/DemoLibraryQueryBar";
-import DemoLibraryToolbar from "../components/demoLibrary/DemoLibraryToolbar";
-import DemoWatchPathsModal from "../components/demoLibrary/DemoWatchPathsModal";
-import DemoPagination from "../components/demoLibrary/DemoPagination";
-import MatchCard, { MatchListRow } from "../components/MatchCard";
-import DemoInfoModal from "../components/DemoInfoModal";
-import IngestModal from "../components/IngestModal";
-import Modal from "../components/ui/Modal";
-import Button from "../components/ui/Button";
+import PageContainer from "../../components/PageContainer";
+import { useAppShell } from "../../context/AppShellContext";
+import { useRecordingQueue } from "../../stores/recordingQueueStore";
+import DemoAdvancedFilters from "./components/DemoAdvancedFilters";
+import DemoBatchActionBar from "./components/DemoBatchActionBar";
+import DemoLibraryQueryBar from "./components/DemoLibraryQueryBar";
+import DemoLibraryToolbar from "./components/DemoLibraryToolbar";
+import DemoWatchPathsModal from "./components/DemoWatchPathsModal";
+import DemoPagination from "./components/DemoPagination";
+import MatchCard, { MatchListRow } from "./components/MatchCard";
+import DemoInfoModal from "./components/DemoInfoModal";
+import IngestModal from "./components/IngestModal";
+import Modal from "../../components/ui/Modal";
+import Button from "../../components/ui/Button";
 import {
   applyClientSideDemoFilters,
   filterByPathAndTags,
   sortDemoRows,
-} from "../utils/demoLibraryDisplay";
-import { useDemoPlaybackDialog } from "../hooks/useDemoPlaybackDialog.jsx";
-import { useT } from "../i18n/useT.js";
-import { desktopBridge } from "../desktop/desktopBridge.js";
+} from "../../utils/demoLibraryDisplay";
+import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
+import { useT } from "../../i18n/useT.js";
+import { desktopBridge } from "../../desktop/desktopBridge.js";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",

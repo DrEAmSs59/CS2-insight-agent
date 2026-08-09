@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { useLocaleStore } from "../../i18n/localeStore.js";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 import DemoBatchActionBar from "./DemoBatchActionBar";
 
 describe("DemoBatchActionBar", () => {

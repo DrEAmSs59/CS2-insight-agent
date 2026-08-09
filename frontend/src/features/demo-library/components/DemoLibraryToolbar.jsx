@@ -1,5 +1,5 @@
 import { Database, FilePlus2, FolderOpen, LayoutGrid, List, Loader2, ScanSearch } from "lucide-react";
-import { useT } from "../../i18n/useT.js";
+import { useT } from "../../../i18n/useT.js";
 
 export default function DemoLibraryToolbar({
   onOpenWatchPaths,

@@ -1,4 +1,4 @@
-import { useT } from "../../i18n/useT.js";
+import { useT } from "../../../i18n/useT.js";
 
 export default function DemoAdvancedFilters({ libraryAdvFilters, setLibraryAdvFilters, idPrefix = "adv" }) {
   const t = useT();

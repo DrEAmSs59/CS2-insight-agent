@@ -37,7 +37,7 @@ import {
   demoBatchFailureMessage,
   normalizeDemoBatchFailures,
 } from "./utils/demoBatchFailures";
-import { resetDemoAnalysisDefaultView } from "./features/demo-analysis/state/analysisSession";
+import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import {
   recordingAbortToastKind,
   recordingQueueHadUnexpectedCs2Exit,
@@ -48,13 +48,13 @@ import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
 import { desktopBridge } from "./desktop/desktopBridge.js";
 import { Loader2 } from "lucide-react";
-import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
+import API, { BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 import SidebarNav from "./components/SidebarNav";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
-const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
+const DemoLibraryPage = lazy(() => import("./features/demo-library/DemoLibraryPage"));
 const DemoAnalysisPage = lazy(() => import("./features/demo-analysis/DemoAnalysisPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
@@ -204,47 +204,65 @@ export default function App() {
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [demoWatchScanDepth, setDemoWatchScanDepth] = useState(2);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
-  const [demoLibraryItems, setDemoLibraryItems] = useState([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  /** 仅「扫描本地 demo 库」进行中；不在顶部 ProgressBar 展示，由按钮内 spinner 表示 */
-  const [libraryScanning, setLibraryScanning] = useState(false);
-  const [libraryLoadingOverlay, setLibraryLoadingOverlay] = useState(false);
-  const [libraryLoadingText, setLibraryLoadingText] = useState("");
-  const [libraryPage, setLibraryPage] = useState(1);
-  const libraryPageRef = useRef(1);
-  const [libraryHasNextPage, setLibraryHasNextPage] = useState(false);
-  const [libraryTotal, setLibraryTotal] = useState(null);
-  const [selectedLibraryDemoIds, setSelectedLibraryDemoIds] = useState(new Set());
-  const [libraryDemoIdsByIndex, setLibraryDemoIdsByIndex] = useState({});
-  const [libraryRename, setLibraryRename] = useState(null);
-  /** @type {{ id: number, label: string } | null} */
-  const [libraryDeletePrompt, setLibraryDeletePrompt] = useState(null);
-  const [librarySearchInput, setLibrarySearchInput] = useState("");
-  const [librarySearchQ, setLibrarySearchQ] = useState("");
-  const [libraryAdvFilters, setLibraryAdvFilters] = useState({
-    mapName: "",
-    status: "all",
-    playerQuery: "",
-    steamQuery: "",
-    minKills: "",
-    maxDeaths: "",
-    minAssists: "",
-    minKd: "",
-    roundsMin: "",
-    roundsMax: "",
-    durationMin: "",
-    durationMax: "",
-    dateFrom: "",
-    dateTo: "",
-  });
-  const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
-  /** Demo 库列表每页条数（与 GET /demos limit 一致） */
-  const [libraryPageSize, setLibraryPageSize] = useState(12);
-  const libraryPageSizeEffectSkipRef = useRef(false);
-  const [batchLoadError, setBatchLoadError] = useState({
-    open: false,
-    failed: [],
-    mode: "load",
+  const {
+    demoLibraryItems,
+    libraryLoading,
+    libraryScanning,
+    libraryLoadingOverlay,
+    libraryLoadingText,
+    libraryPage,
+    setLibraryPage,
+    libraryHasNextPage,
+    libraryTotal,
+    selectedLibraryDemoIds,
+    setSelectedLibraryDemoIds,
+    libraryDemoIdsByIndex,
+    libraryRename,
+    setLibraryRename,
+    libraryDeletePrompt,
+    setLibraryDeletePrompt,
+    librarySearchInput,
+    setLibrarySearchInput,
+    librarySearchQ,
+    setLibrarySearchQ,
+    libraryAdvFilters,
+    setLibraryAdvFilters,
+    libraryJumpDraft,
+    setLibraryJumpDraft,
+    libraryPageSize,
+    setLibraryPageSize,
+    libraryTotalPages,
+    batchLoadError,
+    setBatchLoadError,
+    hasLibraryAdvancedFilters,
+    refreshDemoLibrary,
+    handleLibrarySearchSubmit,
+    handleLibraryPageJump,
+    handleScanDemos,
+    handleDeleteDemo,
+    handleDeleteDemoFile,
+    handleLibraryBatchDelete,
+    handleSaveLibraryRename,
+    handleLoadDemoFromLibrary,
+    handleLoadSelectedLibraryDemos,
+    selectLibraryPage,
+    selectAllLibraryDemos,
+    clearLibrarySelection,
+  } = useDemoLibraryController({
+    t,
+    navigate,
+    setProgressText,
+    startupInitDone,
+    analysis: {
+      autoParseLoadedDemosRef,
+      setUploadedDemos,
+      setParsedMatches,
+      setCurrentMatchIndex,
+      setSelectedPlayers,
+      setActivePlayerTabs,
+      setFreezeToDeathRoundsByMatch,
+      setSelectedClientClipUids,
+    },
   });
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
@@ -406,512 +424,6 @@ export default function App() {
     });
   }, [uploadedDemos, parsedMatches]);
 
-  const libraryTotalPages =
-    libraryTotal == null ? null : Math.max(1, Math.ceil(libraryTotal / libraryPageSize));
-
-  const libraryAdvFiltersKey = useMemo(() => JSON.stringify(libraryAdvFilters), [libraryAdvFilters]);
-
-  useEffect(() => {
-    setLibraryPage(1);
-  }, [libraryAdvFiltersKey]);
-
-  const appendDemoLibraryFilterParams = useCallback((params) => {
-    const f = libraryAdvFilters;
-    if (f.mapName.trim()) params.map_name = f.mapName.trim();
-    if (f.status && f.status !== "all") params.status = f.status;
-    const pq = f.playerQuery.trim();
-    if (pq) params.player_query = pq;
-    const sq = f.steamQuery.trim();
-    if (sq) params.steam_query = sq;
-    const num = (v) => {
-      const s = String(v ?? "").trim();
-      if (!s) return null;
-      const n = parseInt(s, 10);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
-    const fl = (v) => {
-      const s = String(v ?? "").trim();
-      if (!s) return null;
-      const n = parseFloat(s);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
-    const mk = num(f.minKills);
-    if (mk != null) params.min_kills = mk;
-    const xdth = num(f.maxDeaths);
-    if (xdth != null) params.max_deaths = xdth;
-    const ma = num(f.minAssists);
-    if (ma != null) params.min_assists = ma;
-    const mkd = fl(f.minKd);
-    if (mkd != null) params.min_kd = mkd;
-    const roundsMin = num(f.roundsMin);
-    if (roundsMin != null) params.rounds_min = roundsMin;
-    const roundsMax = num(f.roundsMax);
-    if (roundsMax != null) params.rounds_max = roundsMax;
-    const durationMin = fl(f.durationMin);
-    if (durationMin != null) params.duration_min = durationMin;
-    const durationMax = fl(f.durationMax);
-    if (durationMax != null) params.duration_max = durationMax;
-    const dateBoundary = (value, endOfDay) => {
-      const date = String(value ?? "").trim();
-      if (!date) return null;
-      const local = new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
-      return Number.isNaN(local.getTime()) ? null : local.toISOString();
-    };
-    const dateFrom = dateBoundary(f.dateFrom, false);
-    if (dateFrom) params.date_from = dateFrom;
-    const dateTo = dateBoundary(f.dateTo, true);
-    if (dateTo) params.date_to = dateTo;
-  }, [libraryAdvFilters]);
-
-  const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
-    const { manageLoading = true, searchQ: searchQOverride } = opts;
-    if (manageLoading) setLibraryLoading(true);
-    try {
-      const limit = libraryPageSize;
-      const offset = (page - 1) * limit;
-      const params = { limit, offset };
-      const qEff = searchQOverride !== undefined ? searchQOverride : librarySearchQ;
-      if (qEff) params.q = qEff;
-      appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos/compact", { params });
-      setDemoLibraryItems(data.items || []);
-      const total = typeof data.total === "number" ? data.total : null;
-      if (total != null) {
-        setLibraryTotal(total);
-        setLibraryHasNextPage(offset + (data.items || []).length < total);
-      } else {
-        setLibraryTotal(null);
-        setLibraryHasNextPage((data.items || []).length === limit);
-      }
-    } catch {
-      // ignore
-    } finally {
-      if (manageLoading) setLibraryLoading(false);
-    }
-  }, [libraryPage, librarySearchQ, libraryPageSize, appendDemoLibraryFilterParams]);
-
-  const refreshDemoLibraryRef = useRef(refreshDemoLibrary);
-  refreshDemoLibraryRef.current = refreshDemoLibrary;
-
-  const handleLibrarySearchSubmit = useCallback(() => {
-    const next = librarySearchInput.trim();
-    setLibrarySearchQ(next);
-    setLibraryPage(1);
-    void refreshDemoLibrary(1, { manageLoading: true, searchQ: next });
-  }, [librarySearchInput, refreshDemoLibrary]);
-
-  useEffect(() => {
-    if (!libraryPageSizeEffectSkipRef.current) {
-      libraryPageSizeEffectSkipRef.current = true;
-      return;
-    }
-    setLibraryPage(1);
-    void refreshDemoLibraryRef.current(1, { manageLoading: false });
-  }, [libraryPageSize]);
-
-  useEffect(() => {
-    libraryPageRef.current = libraryPage;
-  }, [libraryPage]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let es = null;
-    let debounce = null;
-    const scheduleRefresh = () => {
-      if (cancelled) return;
-      window.clearTimeout(debounce);
-      debounce = window.setTimeout(() => {
-        void refreshDemoLibrary(libraryPageRef.current, { manageLoading: false });
-      }, 600);
-    };
-    const connect = () => {
-      if (cancelled) return;
-      try {
-        es = new EventSource(getDemosStreamUrl());
-      } catch {
-        return;
-      }
-      es.addEventListener("library", scheduleRefresh);
-      es.onerror = () => {
-        if (cancelled) return;
-        try {
-          es?.close();
-        } catch {
-          /* ignore */
-        }
-        es = null;
-        if (!cancelled) window.setTimeout(connect, 4000);
-      };
-    };
-    connect();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(debounce);
-      try {
-        es?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [refreshDemoLibrary]);
-
-  const handleLibraryPageJump = useCallback(() => {
-    const raw = libraryJumpDraft.trim();
-    if (!raw) return;
-    const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 1) {
-      setProgressText(t("app.libraryPageJumpInvalid"));
-      return;
-    }
-    const maxPage = libraryTotalPages;
-    let target = n;
-    if (maxPage != null && n > maxPage) {
-      target = maxPage;
-      setProgressText(t("app.libraryPageJumpClamped", { maxPage }));
-    }
-    setLibraryJumpDraft("");
-    setLibraryPage(target);
-    void refreshDemoLibrary(target, { manageLoading: false });
-  }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary, t]);
-
-  const handleScanDemos = useCallback(async () => {
-    setLibraryScanning(true);
-    try {
-      const { data } = await API.post("/demos/scan");
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      const n = data?.discovered_count;
-      setProgressText(
-        typeof n === "number" && n > 0
-          ? t("app.scanDone", { n })
-          : t("app.scanDoneEmpty", { scanned: data?.scanned || 0 })
-      );
-      return data;
-    } catch (e) {
-      setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      return null;
-    } finally {
-      setLibraryScanning(false);
-    }
-  }, [refreshDemoLibrary, libraryPage, t]);
-
-  const handleDeleteDemo = useCallback(
-    async (id) => {
-      setLibraryDeletePrompt(null);
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.deletingDemo"));
-      try {
-        await API.delete(`/demos/${id}`);
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } catch (e) {
-        setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      } finally {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleDeleteDemoFile = useCallback(
-    async (id) => {
-      try {
-        await API.post(`/demos/${id}/delete-file`);
-        setLibraryDeletePrompt(null);
-        setProgressText(t("app.deleteFileDone"));
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } catch (e) {
-        setProgressText(t("app.deleteFileFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleLibraryBatchDelete = useCallback(
-    async (ids) => {
-      const list = [...ids];
-      if (!list.length) return;
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.batchDeleteProgress", { done: 0, total: list.length }));
-      let done = 0;
-      try {
-        for (const id of list) {
-          try {
-            await API.delete(`/demos/${id}`);
-            done += 1;
-            setLibraryLoadingText(t("app.batchDeleteProgress", { done, total: list.length }));
-          } catch (e) {
-            setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-            await refreshDemoLibrary(libraryPage, { manageLoading: false });
-            return;
-          }
-        }
-        setSelectedLibraryDemoIds(new Set());
-        setProgressText(t("app.batchDeleteDone", { n: list.length }));
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } finally {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleSaveLibraryRename = useCallback(async () => {
-    if (!libraryRename) return;
-    try {
-      await API.patch(`/demos/${libraryRename.id}`, { display_name: libraryRename.draft });
-      setLibraryRename(null);
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
-    } catch (e) {
-      setProgressText(t("app.renameFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-    }
-  }, [libraryRename, refreshDemoLibrary, libraryPage, t]);
-
-  const handleLoadDemoFromLibrary = useCallback(async (items, opts = {}) => {
-    const { resolvedByDemoId, skipLoadingOverlay = false } = opts;
-    if (!skipLoadingOverlay) {
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.libraryLoadingDemo"));
-    }
-    try {
-      const list = Array.isArray(items) ? items : [items];
-      const loaded = await Promise.all(
-        list.map(async (item) => {
-          const playersResult =
-            item.players != null
-              ? { players: item.players, match_meta: item.match_meta }
-              : (await API.get(`/demos/${item.id}/players`)).data;
-          const data = playersResult;
-          const cachedResult = item?.result || null;
-          const cachedMeta = cachedResult?.match_meta || null;
-          const ordered =
-            Array.isArray(cachedResult?.analyzed_target_players) && cachedResult.analyzed_target_players.length
-              ? cachedResult.analyzed_target_players.filter((n) => typeof n === "string" && n.trim())
-              : null;
-          const autoPlayer =
-            (ordered && ordered[0]) ||
-            cachedResult?.auto_target_player ||
-            cachedMeta?.target_player ||
-            playerIdentityKey(data.players?.[0]) ||
-            "";
-          const displayLabel =
-            (item.display_name && String(item.display_name).trim()) || item.filename;
-          return {
-            id: item.id,
-            filename: displayLabel,
-            path: item.path,
-            players: data.players || [],
-            // 优先使用实时 summary，确保地图名等基础信息总是可见
-            match_meta: data.match_meta || item?.result?.match_meta || null,
-            cached_result: cachedResult,
-            cached_auto_player: autoPlayer,
-          };
-        })
-      );
-      // A fresh selection from the Demo library is a new analysis entry. Keep
-      // in-page navigation restorable, but always enter this flow on Highlights.
-      resetDemoAnalysisDefaultView(loaded);
-      setUploadedDemos(loaded);
-      setParsedMatches(
-        loaded.map((d) => {
-          const r = d.cached_result;
-          if (!r) return null;
-          const pObj = r.players;
-          if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
-            const names = Object.keys(pObj).filter((n) => String(n).trim());
-            if (!names.length) return null;
-            const players = {};
-            for (const name of names) {
-              const pd = pObj[name];
-              if (!pd || typeof pd !== "object") continue;
-              players[name] = {
-                clips: ensureClientClipUidsOnClips(pd.clips || []),
-                match_meta: pd.match_meta || r.match_meta || d.match_meta || null,
-                timeline: pd.timeline ?? null,
-                round_timeline: pd.round_timeline ?? null,
-              };
-            }
-            if (!Object.keys(players).length) return null;
-            return {
-              players,
-              analysis_workspace: r.analysis_workspace ?? null,
-              demo_path: d.path,
-              demo_filename: d.filename,
-            };
-          }
-          const ap = d.cached_auto_player;
-          if (!ap || !Array.isArray(r.clips)) return null;
-          return {
-            players: {
-              [ap]: {
-                clips: ensureClientClipUidsOnClips(r.clips || []),
-                match_meta: r.match_meta || d.match_meta || null,
-                timeline: r.timeline ?? null,
-                round_timeline: r.round_timeline ?? null,
-              },
-            },
-            analysis_workspace: r.analysis_workspace ?? null,
-            demo_path: d.path,
-            demo_filename: d.filename,
-          };
-        }),
-      );
-      const idMap = {};
-      const selectedMap = {};
-      loaded.forEach((x, i) => {
-        idMap[i] = x.id;
-        if (resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id)) {
-          const r = resolvedByDemoId[x.id] ?? [];
-          selectedMap[i] = r;
-        } else if (x.cached_result) {
-          const r = x.cached_result;
-          let names = [];
-          if (Array.isArray(r.analyzed_target_players) && r.analyzed_target_players.length) {
-            names = r.analyzed_target_players.filter((n) => typeof n === "string" && n.trim());
-          } else if (r.players && typeof r.players === "object" && !Array.isArray(r.players)) {
-            names = Object.keys(r.players).filter((n) => String(n).trim());
-          }
-          if (names.length) {
-            selectedMap[i] = names;
-          } else if (x.cached_auto_player) {
-            selectedMap[i] = [x.cached_auto_player];
-          }
-        }
-        if (
-          !(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))
-          && !Object.prototype.hasOwnProperty.call(selectedMap, i)
-        ) {
-          const rosterNames = (x.players || [])
-            .map(playerIdentityKey)
-            .filter((name) => typeof name === "string" && name.trim());
-          selectedMap[i] = rosterNames;
-        }
-      });
-      setLibraryDemoIdsByIndex(idMap);
-      setCurrentMatchIndex(0);
-      setSelectedPlayers(selectedMap);
-      setActivePlayerTabs({});
-      const ftdByIndex = {};
-      loaded.forEach((x, i) => {
-        const r = x.cached_result;
-        if (!r) return;
-        let clips = null;
-        const pObj = r.players;
-        if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
-          const keys = Object.keys(pObj).filter((k) => String(k).trim());
-          const ref =
-            typeof r.auto_target_player === "string" &&
-            r.auto_target_player.trim() &&
-            pObj[r.auto_target_player]
-              ? r.auto_target_player
-              : keys[0];
-          clips = ref && pObj[ref] && Array.isArray(pObj[ref].clips) ? pObj[ref].clips : null;
-        } else {
-          clips = r.clips;
-        }
-        if (!Array.isArray(clips)) return;
-        const ftd = clips.find(
-          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
-        );
-        if (ftd) {
-          const tr =
-            x.cached_result?.match_meta?.total_rounds ??
-            x.match_meta?.total_rounds ??
-            24;
-          const maxR = Math.max(1, Math.min(64, Number(tr) || 24));
-          ftdByIndex[i] = freezeToDeathDraftFromClipFilter(ftd.freeze_to_death_round_filter, maxR);
-        }
-      });
-      setFreezeToDeathRoundsByMatch(ftdByIndex);
-      setSelectedClientClipUids(new Set());
-      setProgressText("");
-      navigate("/analysis");
-      return loaded;
-    } catch (e) {
-      setProgressText(t("app.libraryLoadFail", {
-        msg: demoBatchFailureMessage(e, t),
-      }), { isError: true });
-      return null;
-    } finally {
-      if (!skipLoadingOverlay) {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    }
-  }, [navigate, t]);
-
-  const handleLoadSelectedLibraryDemos = useCallback(async () => {
-    const ids = Array.from(selectedLibraryDemoIds);
-    if (!ids.length) return;
-    setLibraryLoadingOverlay(true);
-    setLibraryLoadingText(t("app.libraryLoadingDemo"));
-    try {
-      ids.sort((a, b) => Number(a) - Number(b));
-      const { data } = await API.post("/demos/batch-summary", { ids });
-      const failedItems = Array.isArray(data.failed) ? data.failed : [];
-      if (!data.items?.length) {
-        setBatchLoadError({
-          open: true,
-          failed: normalizeDemoBatchFailures(failedItems, t, "library"),
-          mode: "analysis",
-        });
-        return;
-      }
-      const loaded = await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
-      if (loaded?.length) {
-        const idMap = Object.fromEntries(loaded.map((demo, index) => [index, demo.id]));
-        setLibraryLoadingOverlay(false);
-        await autoParseLoadedDemosRef.current?.(loaded, idMap, failedItems);
-      }
-    } catch (e) {
-      const failed = e.response?.data?.detail?.failed;
-      if (Array.isArray(failed) && failed.length) {
-        setBatchLoadError({
-          open: true,
-          failed: normalizeDemoBatchFailures(failed, t, "library"),
-          mode: "load",
-        });
-      } else {
-        setProgressText(t("app.libraryLoadSelectedFail", {
-          msg: demoBatchFailureMessage(e, t),
-        }), { isError: true });
-      }
-    } finally {
-      setLibraryLoadingOverlay(false);
-    }
-  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText, t]);
-
-  const selectLibraryPage = useCallback(() => {
-    setSelectedLibraryDemoIds((prev) => {
-      const next = new Set(prev);
-      for (const it of demoLibraryItems) {
-        next.add(it.id);
-      }
-      return next;
-    });
-  }, [demoLibraryItems]);
-
-  const selectAllLibraryDemos = useCallback(async () => {
-    try {
-      const cap = 1000;
-      const want = libraryTotal != null ? Math.min(libraryTotal, cap) : cap;
-      const params = { limit: want, offset: 0 };
-      if (librarySearchQ) params.q = librarySearchQ;
-      appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos/ids", { params });
-      setSelectedLibraryDemoIds(new Set(data.ids || []));
-      if (libraryTotal != null && libraryTotal > cap) {
-        setProgressText(t("app.librarySelectAllCapped", { cap }));
-      }
-    } catch (e) {
-      setProgressText(t("app.librarySelectAllFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-    }
-  }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams, t]);
-
-  const clearLibrarySelection = useCallback(() => {
-    setSelectedLibraryDemoIds(new Set());
-  }, []);
-
   const applyCommonParamsFromConfigData = useCallback((data) => {
     if (!data || typeof data !== "object") return;
     if (data.default_record_warmup && typeof data.default_record_warmup === "object") {
@@ -1059,45 +571,6 @@ export default function App() {
   }, [refreshConfigBackupStatus]);
 
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
-
-  useEffect(() => {
-    // 后端就绪后再拉库，避免启动阶段请求失败导致进 Demo 库需手动回车刷新
-    if (!startupInitDone) return;
-    void refreshDemoLibrary(libraryPage, { manageLoading: false });
-  }, [refreshDemoLibrary, libraryPage, startupInitDone]);
-
-  useEffect(() => {
-    if (!startupInitDone) return;
-    const timer = window.setTimeout(() => {
-      const next = librarySearchInput.trim();
-      if (next === librarySearchQ) return;
-      setLibrarySearchQ(next);
-      setLibraryPage(1);
-      void refreshDemoLibraryRef.current(1, { manageLoading: false, searchQ: next });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [librarySearchInput, librarySearchQ, startupInitDone]);
-
-  const hasLibraryAdvancedFilters = useMemo(() => {
-    const f = libraryAdvFilters;
-    const numOrStr = (v) => String(v ?? "").trim();
-    return !!(
-      f.mapName.trim() ||
-      (f.status && f.status !== "all") ||
-      f.playerQuery.trim() ||
-      f.steamQuery.trim() ||
-      numOrStr(f.minKills) ||
-      numOrStr(f.maxDeaths) ||
-      numOrStr(f.minAssists) ||
-      numOrStr(f.minKd) ||
-      numOrStr(f.roundsMin) ||
-      numOrStr(f.roundsMax) ||
-      numOrStr(f.durationMin) ||
-      numOrStr(f.durationMax) ||
-      numOrStr(f.dateFrom) ||
-      numOrStr(f.dateTo)
-    );
-  }, [libraryAdvFilters]);
 
   const handleUpload = useCallback(async (files) => {
     const list = Array.isArray(files) ? files : [files];

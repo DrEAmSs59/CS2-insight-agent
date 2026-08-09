@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, FolderPlus, Loader2, ScanSearch, X } from "lucide-react";
-import API from "../../api/api";
-import { desktopBridge } from "../../desktop/desktopBridge.js";
-import { useT } from "../../i18n/useT.js";
+import API from "../../../api/api";
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
+import { useT } from "../../../i18n/useT.js";
 
 function pathKey(value) {
   return String(value || "").trim().replace(/[\\/]+$/, "").toLocaleLowerCase();
