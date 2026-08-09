@@ -1,8 +1,11 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 
 export const isDesktopApp = Boolean(window.__TAURI_INTERNALS__);
 
@@ -26,6 +29,9 @@ export const desktopBridge = isDesktopApp
         };
       },
       getVersion,
+      checkForUpdate: () => check(),
+      relaunch: () => relaunch(),
+      readLegacyUiState: () => invoke("read_legacy_ui_state"),
       writeClipboardText: (text) => writeText(String(text ?? "")),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];

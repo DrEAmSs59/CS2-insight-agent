@@ -26,7 +26,6 @@ import {
   Loader2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { ConfigProvider } from "antd";
 import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
 import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
@@ -1865,7 +1864,6 @@ export default function LiteCutPropertyPanel({
     export: t("liteCut.inspector.exportDescription"),
   }[tab];
   return (
-    <ConfigProvider theme={{ token: { colorPrimary: "#ff8c00", colorPrimaryHover: "#ffa500", colorPrimaryActive: "#e67e00", colorBgContainer: "var(--cs2-bg-card)", colorBgElevated: "var(--cs2-bg-elevated)", colorBorder: "var(--cs2-border)", colorText: "var(--cs2-text-primary)", colorTextSecondary: "var(--cs2-text-secondary)", borderRadius: 8 }, components: { Collapse: { headerBg: "transparent", contentBg: "transparent" }, Slider: { railBg: "var(--cs2-bg-elevated)", railHoverBg: "var(--cs2-surface-3)", handleColor: "var(--cs2-accent)", handleActiveColor: "var(--cs2-accent-light)", dotActiveBorderColor: "var(--cs2-accent)", trackBg: "var(--cs2-accent)", trackHoverBg: "var(--cs2-accent-light)" }, InputNumber: { activeBorderColor: "var(--cs2-accent)", hoverBorderColor: "var(--cs2-accent-light)" } } }}>
     <aside data-litecut-property-panel className="litecut-property-panel flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-sidebar">
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-cs2-border/80">
@@ -2077,6 +2075,5 @@ export default function LiteCutPropertyPanel({
       </nav>
       </div>
     </aside>
-    </ConfigProvider>
   );
 }

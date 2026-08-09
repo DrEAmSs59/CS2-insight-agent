@@ -46,7 +46,7 @@ import {
 } from "./utils/recordingAbort";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
-import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
+import { desktopBridge } from "./desktop/desktopBridge.js";
 import { Loader2 } from "lucide-react";
 import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
 
@@ -2717,7 +2717,7 @@ export default function App() {
 
       let currentVersion = "";
       try {
-        currentVersion = String((await getDesktopAppVersion()) || "");
+        currentVersion = String((await desktopBridge?.getVersion()) || "");
       } catch {
         currentVersion = "";
       }

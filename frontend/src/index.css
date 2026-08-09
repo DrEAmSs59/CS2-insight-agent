@@ -133,59 +133,79 @@
   --cs2-radius-status: 4px;
 }
 
-.litecut-property-collapse > .ant-collapse-item > .ant-collapse-header {
+.litecut-property-collapse-header {
   align-items: center;
   min-height: 38px;
   padding: 8px 11px;
+  border: 0;
   background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 45%, var(--cs2-bg-card)), var(--cs2-bg-card));
+  color: inherit;
+  cursor: pointer;
   transition: background-color 160ms ease;
 }
 
-.litecut-property-collapse > .ant-collapse-item > .ant-collapse-header:hover {
+.litecut-property-collapse-header:hover {
   background: var(--cs2-bg-hover);
 }
 
-.litecut-property-collapse > .ant-collapse-item-active > .ant-collapse-header {
+.litecut-property-collapse-header[aria-expanded="true"] {
   background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 60%, var(--cs2-bg-card)), var(--cs2-bg-card));
   border-bottom: 1px solid color-mix(in srgb, var(--cs2-border) 75%, transparent);
 }
 
-.litecut-property-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+.litecut-property-collapse-content {
   padding: 10px 9px 11px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--cs2-bg-card) 88%, var(--cs2-bg-elevated)), var(--cs2-bg-sidebar));
 }
 
-.litecut-property-number.ant-input-number .ant-input-number-input {
+.litecut-property-number {
   height: 26px;
   padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--cs2-border) 78%, transparent);
+  border-radius: var(--cs2-radius-control);
+  outline: none;
   text-align: right;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-}
-
-.litecut-property-number.ant-input-number {
-  border-color: color-mix(in srgb, var(--cs2-border) 78%, transparent);
+  color: var(--cs2-text-primary);
   background: color-mix(in srgb, var(--cs2-bg-page) 70%, var(--cs2-bg-input));
   box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.16);
 }
 
-.litecut-property-number.ant-input-number:hover,
-.litecut-property-number.ant-input-number-focused {
+.litecut-property-number:hover,
+.litecut-property-number:focus {
   border-color: color-mix(in srgb, var(--cs2-accent) 55%, var(--cs2-border));
 }
 
-.litecut-property-slider .ant-slider-rail {
-  height: 3px;
+.litecut-property-number::-webkit-inner-spin-button,
+.litecut-property-number::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
 }
 
-.litecut-property-slider .ant-slider-track {
+.litecut-property-slider {
+  width: 100%;
   height: 3px;
+  margin: 0;
+  border-radius: 999px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  background: linear-gradient(to right, var(--cs2-accent) 0 var(--litecut-range-progress), var(--cs2-bg-elevated) var(--litecut-range-progress) 100%);
 }
 
-.litecut-property-slider .ant-slider-handle::after {
-  width: 8px;
-  height: 8px;
-  box-shadow: 0 0 0 2px var(--cs2-accent);
+.litecut-property-slider::-webkit-slider-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--cs2-accent);
+  border-radius: 50%;
+  appearance: none;
+  background: var(--cs2-bg-card);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-accent) 30%, transparent);
+}
+
+.litecut-property-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs2-accent) 28%, transparent);
 }
 
 .litecut-inspector-header {
@@ -220,7 +240,7 @@
     grid-column: 1 / -1;
   }
 
-  .litecut-property-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+  .litecut-property-collapse-content {
     padding-inline: 7px;
   }
 }

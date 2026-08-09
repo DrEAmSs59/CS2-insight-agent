@@ -1,6 +1,4 @@
-import { CS2_ITEMS } from "@ianlucas/cs2-lib";
-import { english } from "@ianlucas/cs2-lib/translations/english";
-import { schinese } from "@ianlucas/cs2-lib/translations/schinese";
+import { CS2_COSMETICS_ITEMS } from "../../generated/cs2CosmeticsCatalog.js";
 
 const IMAGE_BASE = "https://cdn.cstrike.app";
 const RARITY_RANK = {
@@ -14,10 +12,6 @@ const RARITY_RANK = {
   "#ded6cc": 0,
 };
 
-function translated(language, id, field = "name") {
-  return String(language?.[id]?.[field] || "").trim();
-}
-
 function toCandidate(raw) {
   const image = String(raw.image || "");
   const altName = String(raw.altName || "").trim();
@@ -27,8 +21,8 @@ function toCandidate(raw) {
     paint_index: Number(raw.index || 0),
     model: String(raw.model || ""),
     type: String(raw.type || ""),
-    name_en: translated(english, raw.id) || String(raw.model || ""),
-    name_zh: translated(schinese, raw.id) || translated(english, raw.id) || String(raw.model || ""),
+    name_en: String(raw.nameEn || raw.model || ""),
+    name_zh: String(raw.nameZh || raw.nameEn || raw.model || ""),
     alt_name: altName || undefined,
     image_url: image ? (image.startsWith("http") ? image : `${IMAGE_BASE}${image}`) : "",
     rarity: String(raw.rarity || "#ded6cc"),
@@ -40,7 +34,7 @@ function toCandidate(raw) {
 export function listSkinCandidates(sourceItem) {
   const type = String(sourceItem?.type || "");
   const def = Number(sourceItem?.def_index);
-  const rows = CS2_ITEMS.filter((item) => {
+  const rows = CS2_COSMETICS_ITEMS.filter((item) => {
     if (item.base) return false;
     if (type === "melee") return item.type === "melee";
     if (type === "glove") return item.type === "glove";
@@ -174,7 +168,7 @@ const LOADOUT_TYPES = new Set(["weapon", "melee", "glove"]);
 export function listDefaultLoadout(team) {
   const teamKey = String(team || "").toLowerCase() === "ct" ? "ct" : "t";
   const teamCode = teamKey === "ct" ? 1 : 0;
-  return CS2_ITEMS
+  return CS2_COSMETICS_ITEMS
     .filter((item) => {
       if (!item.free || !item.base) return false;
       if (!LOADOUT_TYPES.has(String(item.type || ""))) return false;

@@ -1,9 +1,8 @@
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { desktopBridge, isDesktopApp } from "../desktop/desktopBridge.js";
 
 /** Tauri 桌面壳注入 IPC 对象；浏览器 / Vite dev 页面无此对象。 */
 export function isTauriDesktop() {
-  return Boolean(window.__TAURI_INTERNALS__);
+  return isDesktopApp;
 }
 
 /** @param {unknown} value */
@@ -55,7 +54,7 @@ export function createDesktopUpdateCheck(onStatus) {
 
     let update = null;
     try {
-      update = await check();
+      update = await desktopBridge?.checkForUpdate();
     } catch (error) {
       emit({ status: "error", error: String(error?.message || error), update_mode: "normal" });
       return;
@@ -116,7 +115,7 @@ export function createDesktopUpdateCheck(onStatus) {
 
     emit({ status: "downloaded", ...base });
     try {
-      await relaunch();
+      await desktopBridge?.relaunch();
     } catch {
       // 安装器已接管进程时 relaunch 可能失败，忽略
     }

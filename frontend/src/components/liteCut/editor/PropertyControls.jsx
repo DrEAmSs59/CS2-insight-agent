@@ -1,7 +1,31 @@
 import { useState } from "react";
 import { ChevronDown, Link2, RotateCcw, Unlink2 } from "lucide-react";
-import { Collapse, InputNumber, Slider } from "antd";
 import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+
+function finiteValue(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function NumberInput({ value, min, max, step, onChange, onFocus, onBlur, className = "" }) {
+  return (
+    <input
+      type="number"
+      value={Number.isFinite(Number(value)) ? Number(value) : ""}
+      min={min}
+      max={max}
+      step={step}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onChange={(event) => {
+        if (event.target.value === "") return;
+        const next = Number(event.target.value);
+        if (Number.isFinite(next)) onChange?.(next);
+      }}
+      className={`litecut-property-number ${className}`.trim()}
+    />
+  );
+}
 
 export function snapRotation(value) {
   const points = [-180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180];
@@ -30,33 +54,50 @@ export function useTransformControls(transform, onChange, defaultSize = 1) {
 }
 
 export function PaneSection({ title, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <Collapse
-      ghost
-      defaultActiveKey={defaultOpen ? ["content"] : []}
-      expandIconPosition="end"
-      expandIcon={({ isActive }) => (
-        <ChevronDown className={`h-3.5 w-3.5 text-cs2-text-muted transition-transform ${isActive ? "rotate-180" : ""}`} />
-      )}
-      className="litecut-property-collapse overflow-hidden rounded-lg border border-cs2-border/55 bg-cs2-bg-card shadow-sm"
-      items={[{
-        key: "content",
-        label: <span className="flex min-w-0 items-center whitespace-normal break-words text-[11px] font-semibold leading-snug text-cs2-text-secondary">{title}</span>,
-        children: <div className="space-y-1">{children}</div>,
-      }]}
-    />
+    <section className="litecut-property-collapse overflow-hidden rounded-lg border border-cs2-border/55 bg-cs2-bg-card shadow-sm">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="litecut-property-collapse-header flex w-full items-center justify-between gap-2 text-left"
+      >
+        <span className="flex min-w-0 items-center whitespace-normal break-words text-[11px] font-semibold leading-snug text-cs2-text-secondary">{title}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-cs2-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      <div hidden={!open} className="litecut-property-collapse-content space-y-1">{children}</div>
+    </section>
   );
 }
 
 export function ProSlider({ label, value, onChange, min = -100, max = 100, resetValue = 0, step = 1 }) {
   const beginPropertyEdit = useLiteCutTimelineStore((state) => state.beginPropertyEdit);
   const endPropertyEdit = useLiteCutTimelineStore((state) => state.endPropertyEdit);
+  const numericValue = Math.max(min, Math.min(max, finiteValue(value, resetValue)));
+  const progress = max > min ? ((numericValue - min) / (max - min)) * 100 : 0;
   return (
     <div className="litecut-property-control-row group grid min-h-9 grid-cols-[minmax(64px,84px)_minmax(28px,1fr)_52px_24px] items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-cs2-bg-hover/35">
       <span className="min-w-0 whitespace-normal break-words text-[10px] font-medium leading-[1.35] text-cs2-text-muted">{label}</span>
-      <Slider min={min} max={max} step={step} value={value} onPointerDown={beginPropertyEdit} onPointerCancel={endPropertyEdit} onChange={(next) => onChange(Number(next))} onChangeComplete={endPropertyEdit} tooltip={{ open: false }} className="litecut-property-slider !m-0 min-w-0 flex-1" />
-      <InputNumber value={value} min={min} max={max} step={step} onFocus={beginPropertyEdit} onBlur={endPropertyEdit} onChange={(next) => next !== null && onChange(Number(next))} controls={false} className="litecut-property-number !w-full min-w-0" />
-      <button type="button" disabled={value === resetValue} onClick={() => { beginPropertyEdit(); onChange(resetValue); endPropertyEdit(); }} className="inline-flex h-7 w-6 items-center justify-center rounded-md text-cs2-text-muted transition-colors hover:bg-cs2-accent-soft hover:text-cs2-accent disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-cs2-text-muted" title="重置" aria-label={`${label}重置`}>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={numericValue}
+        aria-label={label}
+        style={{ "--litecut-range-progress": `${progress}%` }}
+        onBlur={endPropertyEdit}
+        onKeyDown={beginPropertyEdit}
+        onKeyUp={endPropertyEdit}
+        onPointerDown={beginPropertyEdit}
+        onPointerUp={endPropertyEdit}
+        onPointerCancel={endPropertyEdit}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="litecut-property-slider min-w-0 flex-1"
+      />
+      <NumberInput value={numericValue} min={min} max={max} step={step} onFocus={beginPropertyEdit} onBlur={endPropertyEdit} onChange={onChange} className="w-full min-w-0" />
+      <button type="button" disabled={numericValue === resetValue} onClick={() => { beginPropertyEdit(); onChange(resetValue); endPropertyEdit(); }} className="inline-flex h-7 w-6 items-center justify-center rounded-md text-cs2-text-muted transition-colors hover:bg-cs2-accent-soft hover:text-cs2-accent disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-cs2-text-muted" title="重置" aria-label={`${label}重置`}>
         <RotateCcw className="h-3.5 w-3.5" />
       </button>
     </div>
@@ -72,8 +113,8 @@ export function NumericPairCard({ title, firstLabel, firstValue, onFirstChange, 
     <div className="group flex min-h-9 items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-cs2-bg-hover/35">
       <p className="w-[44px] shrink-0 text-[10px] font-medium text-cs2-text-muted">{title}</p>
       <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{firstLabel}</span><InputNumber controls={false} min={min} max={max} value={firstValue} onChange={(value) => value !== null && onFirstChange?.(Number(value))} className="litecut-property-number min-w-0 flex-1" /></label>
-        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{secondLabel}</span><InputNumber controls={false} min={min} max={max} value={secondValue} onChange={(value) => value !== null && onSecondChange?.(Number(value))} className="litecut-property-number min-w-0 flex-1" /></label>
+        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{firstLabel}</span><NumberInput min={min} max={max} value={firstValue} onChange={onFirstChange} className="min-w-0 flex-1" /></label>
+        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{secondLabel}</span><NumberInput min={min} max={max} value={secondValue} onChange={onSecondChange} className="min-w-0 flex-1" /></label>
       </div>
       {onToggleLinked ? <button type="button" aria-label={linked ? "解锁宽高比例" : "锁定宽高比例"} title={linked ? "解锁宽高比例" : "锁定宽高比例"} onClick={onToggleLinked} className={`inline-flex h-7 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-cs2-accent-soft hover:text-cs2-accent ${linked ? "text-cs2-accent" : "text-cs2-text-muted"}`}>{linked ? <Link2 className="h-3.5 w-3.5" /> : <Unlink2 className="h-3.5 w-3.5" />}</button> : <span className="w-6 shrink-0" />}
     </div>
