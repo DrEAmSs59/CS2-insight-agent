@@ -17,12 +17,12 @@ import {
   ZoomOut,
 } from "lucide-react";
 
-import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
-import { useLiteCutHistoryStore } from "../../../stores/liteCut/historyStore.js";
-import { liteCutMediaDragSource } from "../../../stores/liteCut/mediaDragSource.js";
-import { overlayBlocks, trackBlocks } from "../../../stores/liteCut/playbackUtils.js";
-import { canPlaceOnTrack, clipTimelineEnd, timelineTotalSec } from "../../../stores/liteCut/timelineUtils.js";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutEditorStore } from "../state/editorStore.js";
+import { useLiteCutHistoryStore } from "../state/historyStore.js";
+import { liteCutMediaDragSource } from "../state/mediaDragSource.js";
+import { overlayBlocks, trackBlocks } from "../state/playbackUtils.js";
+import { canPlaceOnTrack, clipTimelineEnd, timelineTotalSec } from "../state/timelineUtils.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { snapPlayheadToBoundaries, timelineClipIntersectsRange, visibleTimelineRange } from "./timelineInteraction.js";
 import {
   assignKillAxisLevels,
@@ -31,13 +31,13 @@ import {
   KILL_AXIS_TONES,
   killMarkerLabel,
   readClipKillMarkers,
-} from "../../../stores/liteCut/killAxisUtils.js";
+} from "../state/killAxisUtils.js";
 import { useT } from "../../../i18n/useT.js";
 import {
   clampTimelineZoom,
   timelineZoomFromSliderPercent,
   timelineZoomToSliderPercent,
-} from "../../../stores/liteCut/timelineZoomUtils.js";
+} from "../state/timelineZoomUtils.js";
 import TimelineClip, { timelineClipClass, timelineClipTone } from "./TimelineClip.jsx";
 import TimelineTrackHeader from "./TimelineTrackHeader.jsx";
 

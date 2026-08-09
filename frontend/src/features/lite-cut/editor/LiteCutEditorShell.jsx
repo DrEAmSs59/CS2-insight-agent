@@ -10,26 +10,26 @@ import LiteCutResizableLayout from "./LiteCutResizableLayout.jsx";
 import LiteCutPresetsDrawer from "./LiteCutPresetsDrawer.jsx";
 import LiteCutProjectStartPage from "./LiteCutProjectStartPage.jsx";
 import LiteCutExportProgressDialog from "./LiteCutExportProgressDialog.jsx";
-import FfmpegRequiredDialog from "../../FfmpegRequiredDialog.jsx";
+import FfmpegRequiredDialog from "../../../components/FfmpegRequiredDialog.jsx";
 import { filterStyleFromColor, TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { LITECUT_PROJECT_TEMPLATES, projectBodyFromTemplate } from "./projectTemplates.js";
 import { inspectorTabForTimelineSelection } from "./inspectorSelectionUtils.js";
 import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
-import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
-import { collectUsedLiteCutAssetIds, mapAssetRow } from "../../../stores/liteCut/assetUtils.js";
+import { useLiteCutEditorStore } from "../state/editorStore.js";
+import { collectUsedLiteCutAssetIds, mapAssetRow } from "../state/assetUtils.js";
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import {
   LITE_CUT_AUTOSAVE_FLUSH_EVENTS,
   LITE_CUT_AUTOSAVE_DELAY_MS,
   shouldScheduleLiteCutAutosave,
   shouldFlushLiteCutAutosave,
-} from "../../../stores/liteCut/autosaveUtils.js";
-import { mapRecordedClipRow } from "../../../stores/liteCut/mediaUtils.js";
-import { overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "../../../stores/liteCut/overlayKeyframeUtils.js";
-import { audioKeyframeNearPlayhead, clipVolumeAt } from "../../../stores/liteCut/audioKeyframeUtils.js";
-import { relinkMissingAssetReferences } from "../../../stores/liteCut/relinkUtils.js";
+} from "../state/autosaveUtils.js";
+import { mapRecordedClipRow } from "../state/mediaUtils.js";
+import { overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "../state/overlayKeyframeUtils.js";
+import { audioKeyframeNearPlayhead, clipVolumeAt } from "../state/audioKeyframeUtils.js";
+import { relinkMissingAssetReferences } from "../state/relinkUtils.js";
 import {
   defaultLiteCutFilename,
   cancelLiteCutExport,
@@ -39,7 +39,7 @@ import {
   normalizeLiteCutExportRange,
   resolveLiteCutOutputDir,
   startLiteCutExport,
-} from "../../../stores/liteCut/exportUtils.js";
+} from "../state/exportUtils.js";
 import {
   nextTopVideoPlaybackAfter,
   hasSoloAudioTracks,
@@ -53,19 +53,19 @@ import {
   resolveTopVideoPlaybackAt,
   resolveVideoUnderlayPlaybackAt,
   resolveVideoUnderlayPlaybacksAt,
-} from "../../../stores/liteCut/playbackUtils.js";
-import { useLiteCutHistoryStore } from "../../../stores/liteCut/historyStore.js";
+} from "../state/playbackUtils.js";
+import { useLiteCutHistoryStore } from "../state/historyStore.js";
 import {
   isEditableShortcutTarget,
   resolveLiteCutShortcut,
-} from "../../../stores/liteCut/keyboardShortcuts.js";
+} from "../state/keyboardShortcuts.js";
 import {
   colorGradeFromBody,
   colorGradeFromClip,
   packagingBundleFromBody,
   transitionRhythmFromBody,
-} from "../../../stores/liteCut/presetUtils.js";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+} from "../state/presetUtils.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import {
   clipPlaybackSpeed,
   clipSpeedAtTimeline,
@@ -86,7 +86,7 @@ import {
   resolveAudioEditingTarget,
   selectedTimelineRange,
   timelineTotalSec,
-} from "../../../stores/liteCut/timelineUtils.js";
+} from "../state/timelineUtils.js";
 import { formatMontageApiError } from "../../../utils/formatMontageApiError.js";
 import { ffmpegGateSubtitle } from "../../../utils/ffmpegGateMessages.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";

@@ -1,5 +1,5 @@
-import API from "../../api/api.js";
-import { ensureMp4Filename } from "../../utils/montageUtils.js";
+import API from "../../../api/api.js";
+import { ensureMp4Filename } from "../../../utils/montageUtils.js";
 import { mainVideoClips } from "./timelineUtils.js";
 
 function dirnamePath(p) {

@@ -2,10 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import OpenCutTrackTimeline, { snapPlacementStart } from "./OpenCutTrackTimeline.jsx";
-import { useLiteCutEditorStore } from "../../../stores/liteCutEditorStore.js";
-import { useLiteCutHistoryStore } from "../../../stores/liteCut/historyStore.js";
-import { liteCutMediaDragSource } from "../../../stores/liteCut/mediaDragSource.js";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutEditorStore } from "../state/editorStore.js";
+import { useLiteCutHistoryStore } from "../state/historyStore.js";
+import { liteCutMediaDragSource } from "../state/mediaDragSource.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { useLocaleStore } from "../../../i18n/localeStore.js";
 
 const body = {

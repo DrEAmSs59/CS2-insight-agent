@@ -1,11 +1,11 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, FileSearch, FileVideo2, Film, ImageIcon, Layers, Loader2, Music, RefreshCw, Search, Trash2, Type, X } from "lucide-react";
 import { useRef } from "react";
 
 import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
-import { mapAssetRow } from "../../../stores/liteCut/assetUtils.js";
-import { mapRecordedClipRow, reconcileRecordedClipDuration } from "../../../stores/liteCut/mediaUtils.js";
-import { replacementAcceptForWarning, replacementMatchesWarning } from "../../../stores/liteCut/relinkUtils.js";
+import { mapAssetRow } from "../state/assetUtils.js";
+import { mapRecordedClipRow, reconcileRecordedClipDuration } from "../state/mediaUtils.js";
+import { replacementAcceptForWarning, replacementMatchesWarning } from "../state/relinkUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
 import DraggableMediaCard from "./DraggableMediaCard.jsx";

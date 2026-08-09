@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { hideNativeDragImage } from "./timelineInteraction.js";
-import { liteCutMediaDragSource } from "../../../stores/liteCut/mediaDragSource.js";
+import { liteCutMediaDragSource } from "../state/mediaDragSource.js";
 import { useT } from "../../../i18n/useT.js";
 
 /** 列表行素材：左侧封面 + 信息，支持拖拽与 + 加入时间轴 */

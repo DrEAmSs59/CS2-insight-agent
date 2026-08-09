@@ -6,7 +6,7 @@ const historyMocks = vi.hoisted(() => ({
   endPropertyEdit: vi.fn(),
 }));
 
-vi.mock("../../../stores/liteCut/timelineStore.js", () => ({
+vi.mock("../state/timelineStore.js", () => ({
   useLiteCutTimelineStore: (selector) => selector(historyMocks),
 }));
 

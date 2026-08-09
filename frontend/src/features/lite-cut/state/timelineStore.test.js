@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it } from "vitest";
-import { useLiteCutEditorStore } from "../liteCutEditorStore.js";
+import { useLiteCutEditorStore } from "./editorStore.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
 import { useLiteCutTimelineStore } from "./timelineStore.js";
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, Link2, RotateCcw, Unlink2 } from "lucide-react";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 
 function finiteValue(value, fallback = 0) {
   const number = Number(value);

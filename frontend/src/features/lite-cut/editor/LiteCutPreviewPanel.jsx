@@ -3,7 +3,7 @@ import { Maximize2, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, Zoom
 import { getLiteCutAssetStreamUrl, getLiteCutBuiltinFontUrl } from "../../../api/api.js";
 import { TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { startPendingDrag } from "./timelineInteraction.js";
-import { overlayTransformAt } from "../../../stores/liteCut/overlayKeyframeUtils.js";
+import { overlayTransformAt } from "../state/overlayKeyframeUtils.js";
 import { textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { handoffFrameAction, normalizePreviewLayerTransform, previewFrameTimes, previewMediaIdentity, promotedUnderlayForMain, shouldApplyPreviewSeek, shouldPublishPreviewClock, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { hideNativeDragImage } from "./timelineInteraction.js";
-import { liteCutMediaDragSource } from "../../../stores/liteCut/mediaDragSource.js";
+import { liteCutMediaDragSource } from "../state/mediaDragSource.js";
 
 /**
  * OpenCut DraggableItem：右下角 + 加入时间轴，同时支持拖到时间轴/预览区。

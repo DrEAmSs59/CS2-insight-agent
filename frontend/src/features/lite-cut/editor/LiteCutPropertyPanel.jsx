@@ -26,7 +26,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import API from "../../../api/api.js";

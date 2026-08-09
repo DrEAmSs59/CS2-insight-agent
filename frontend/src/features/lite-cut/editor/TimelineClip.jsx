@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import { timelineSpeedRampSegments } from "./speedRampUiUtils.js";

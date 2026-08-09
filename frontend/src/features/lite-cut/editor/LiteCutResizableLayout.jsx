@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { useLiteCutPanelStore } from "../../../stores/liteCut/panelStore.js";
+import { useLiteCutPanelStore } from "../state/panelStore.js";
 
 function ResizeHandle({ orientation, onPointerDrag }) {
   const active = useRef(false);

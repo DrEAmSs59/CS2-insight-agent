@@ -8,7 +8,7 @@ import {
   killMarkerTimelineSec,
   readClipKillMarkers,
 } from "./killAxisUtils.js";
-import { translate } from "../../i18n/translate.js";
+import { translate } from "../../../i18n/translate.js";
 
 function clip(overrides = {}) {
   return {

@@ -1,4 +1,4 @@
-import { useLiteCutTimelineStore } from "../../../stores/liteCut/timelineStore.js";
+import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { matchingSpeedRampPresetId, SPEED_RAMP_PRESETS, speedRampDisplaySegments, speedRampPointsForPreset } from "./speedRampUiUtils.js";
 import { PaneSection, ProSlider, Toggle } from "./PropertyControls.jsx";
 

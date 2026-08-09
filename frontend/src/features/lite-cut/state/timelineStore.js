@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { useLiteCutEditorStore } from "../liteCutEditorStore.js";
+import { useLiteCutEditorStore } from "./editorStore.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
 import { keyframeNearPlayhead, normalizedOverlayKeyframes, normalizedOverlayTransform, overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "./overlayKeyframeUtils.js";
 import { audioKeyframeNearPlayhead, clipVolumeAt, normalizedAudioKeyframes } from "./audioKeyframeUtils.js";

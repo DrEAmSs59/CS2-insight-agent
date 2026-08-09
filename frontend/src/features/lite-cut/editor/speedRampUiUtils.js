@@ -63,4 +63,4 @@ export function timelineSpeedRampSegments(clip) {
     };
   });
 }
-import { clipSpeedSegments, clipTimelineDuration, clipTrimmedSourceDuration } from "../../../stores/liteCut/timelineUtils.js";
+import { clipSpeedSegments, clipTimelineDuration, clipTrimmedSourceDuration } from "../state/timelineUtils.js";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { normalizeWaveformBuckets } from "../../../stores/liteCut/audioWaveformUtils.js";
+import { normalizeWaveformBuckets } from "../state/audioWaveformUtils.js";
 
 const waveformCache = new Map();
 

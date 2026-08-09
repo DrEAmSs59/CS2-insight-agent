@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import API from "../api/api.js";
-import { useLiteCutHistoryStore } from "./liteCut/historyStore.js";
+import API from "../../../api/api.js";
+import { useLiteCutHistoryStore } from "./historyStore.js";
 import {
   clearLiteCutRecoveryDraft,
   forgetRememberedLiteCutProject,
@@ -9,7 +9,7 @@ import {
   rememberedLiteCutProjectId,
   rememberLiteCutProject,
   writeLiteCutRecoveryDraft,
-} from "./liteCut/recoveryUtils.js";
+} from "./recoveryUtils.js";
 
 const SESSION_PROJECT_KEY = "liteCut:projectId";
 const activeSavePromises = new Map();

@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import API from "../api/api.js";
-import { projectBodyFromTemplate } from "../components/liteCut/editor/projectTemplates.js";
-import { normalizeLiteCutBody, useLiteCutEditorStore } from "./liteCutEditorStore.js";
+import API from "../../../api/api.js";
+import { projectBodyFromTemplate } from "../editor/projectTemplates.js";
+import { normalizeLiteCutBody, useLiteCutEditorStore } from "./editorStore.js";
 
 describe("normalizeLiteCutBody", () => {
   beforeEach(() => {
