@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import math
@@ -20,6 +21,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _CATALOG_PATH = Path(__file__).with_name("cs2_item_catalog.generated.json")
+_CATALOG_GZIP_PATH = Path(__file__).with_name("cs2_item_catalog.generated.json.gz")
 _ALIAS_SEPARATORS = re.compile(r"[\s-]+")
 _ALIAS_PUNCTUATION = re.compile(r"[^\w]+", flags=re.UNICODE)
 _STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
@@ -27,7 +29,14 @@ _STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
 
 @lru_cache(maxsize=1)
 def load_cs2_item_catalog() -> dict[str, Any]:
-    payload = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+    if _CATALOG_PATH.is_file():
+        encoded = _CATALOG_PATH.read_text(encoding="utf-8")
+    elif _CATALOG_GZIP_PATH.is_file():
+        with gzip.open(_CATALOG_GZIP_PATH, "rt", encoding="utf-8") as handle:
+            encoded = handle.read()
+    else:
+        raise RuntimeError("Generated CS2 item catalog is missing")
+    payload = json.loads(encoded)
     if not isinstance(payload, dict) or payload.get("schema_version") != 2:
         raise RuntimeError("Unsupported generated CS2 item catalog")
     return payload

@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -48,6 +49,12 @@ copyFiltered("backend", (rel) => {
   if (/\.db(?:-wal|-shm)?$/i.test(path) || path.endsWith(".exe")) return false;
   return !/^debug_.*\.py$/i.test(path);
 });
+const catalogJson = join(destination, "backend", "app", "parser", "cs2_item_catalog.generated.json");
+if (!existsSync(catalogJson)) throw new Error(`Missing generated CS2 catalog: ${catalogJson}`);
+const catalogGzip = `${catalogJson}.gz`;
+writeFileSync(catalogGzip, gzipSync(readFileSync(catalogJson), { level: 9 }));
+rmSync(catalogJson);
+console.log(`[desktop] compressed generated catalog: ${normalizedRelative(destination, catalogGzip)}`);
 writeFileSync(join(destination, "backend", "app", "release_version.txt"), `${appVersion}\n`);
 copyFiltered("pov", () => true);
 const bundledDataFiles = new Set([
@@ -63,19 +70,15 @@ function maybeStageSkinCore() {
   const toolsDir = join(destination, "tools");
   const target = join(toolsDir, "skin-core.exe");
   const envPath = process.env.CS2_SKIN_CORE_EXE?.trim();
-  const candidates = [];
-  if (envPath) candidates.push(envPath);
-  candidates.push(join(repoRoot, "..", "CS2-demo-anyskin", "dist", "skin-core.exe"));
-  candidates.push(join(repoRoot, "..", "dist", "skin-core.exe"));
-
-  for (const source of candidates) {
-    if (!source || !existsSync(source)) continue;
-    mkdirSync(toolsDir, { recursive: true });
-    cpSync(source, target);
-    console.log(`[desktop] staged skin-core.exe from ${source}`);
+  if (!envPath) {
+    console.log("[desktop] CS2_SKIN_CORE_EXE not provided; skipping proprietary sidecar");
     return;
   }
-  console.log("[desktop] skin-core.exe not provided; skipping proprietary sidecar");
+  const source = resolve(repoRoot, envPath);
+  if (!existsSync(source)) throw new Error(`Configured skin-core.exe does not exist: ${source}`);
+  mkdirSync(toolsDir, { recursive: true });
+  cpSync(source, target);
+  console.log(`[desktop] staged explicitly configured skin-core.exe from ${source}`);
 }
 
 maybeStageSkinCore();

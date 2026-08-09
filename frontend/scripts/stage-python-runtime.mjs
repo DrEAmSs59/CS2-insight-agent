@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { runtimeManifestStatus } from "./runtime-fingerprint.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pythonDir = join(repoRoot, "python");
@@ -43,6 +44,14 @@ if (!existsSync(portablePs1)) {
 }
 
 if (existsSync(pythonExe) && process.env.CS2_INSIGHT_REFRESH_PYTHON !== "1") {
+  const manifest = runtimeManifestStatus(repoRoot, pythonDir);
+  if (!manifest.valid) {
+    console.error(
+      `[desktop] existing Python runtime is stale (${manifest.reason}); rebuild with ` +
+      "CS2_INSIGHT_REFRESH_PYTHON=1 and CS2_INSIGHT_DEMOPARSER_WHEEL.",
+    );
+    process.exit(1);
+  }
   const backendDir = join(repoRoot, "backend");
   // demoparser gate + skin-core IPC deps (cryptography). Stale python/ after
   // pyproject bumps otherwise ships and crashes at backend import.
@@ -106,5 +115,11 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 
 if (!existsSync(pythonExe)) {
   console.error("[desktop] Python staging completed without python/python.exe");
+  process.exit(1);
+}
+
+const stagedManifest = runtimeManifestStatus(repoRoot, pythonDir);
+if (!stagedManifest.valid) {
+  console.error(`[desktop] Python staging completed with a stale runtime manifest (${stagedManifest.reason})`);
   process.exit(1);
 }

@@ -182,6 +182,9 @@ function Install-BackendRequirements {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     & $PythonExe -c "from PIL import Image; import cryptography, demoparser2, fastapi, openai, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
     if ($LASTEXITCODE -ne 0) { throw "final trimmed runtime import verification failed (exit $LASTEXITCODE)" }
+    $runtimeFingerprintScript = Join-Path $Root "frontend\scripts\runtime-fingerprint.mjs"
+    & node $runtimeFingerprintScript write $pythonRoot
+    if ($LASTEXITCODE -ne 0) { throw "runtime fingerprint manifest failed (exit $LASTEXITCODE)" }
     } finally {
         if ($null -eq $previousNoUserSite) {
             Remove-Item Env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue

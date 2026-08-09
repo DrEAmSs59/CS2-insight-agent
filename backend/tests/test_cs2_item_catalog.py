@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import gzip
+import json
 import struct
+
+from app.parser import cs2_item_catalog as catalog_module
 
 from app.parser.cs2_item_catalog import (
     build_player_cosmetic_inventory,
@@ -12,6 +16,21 @@ from app.parser.cs2_item_catalog import (
 )
 
 STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
+
+
+def test_catalog_loader_accepts_packaged_gzip(tmp_path, monkeypatch):
+    payload = {"schema_version": 2, "aliases": {}, "bases": {}, "items": {}, "stickers": {}}
+    json_path = tmp_path / "catalog.json"
+    gzip_path = tmp_path / "catalog.json.gz"
+    with gzip.open(gzip_path, "wt", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+    monkeypatch.setattr(catalog_module, "_CATALOG_PATH", json_path)
+    monkeypatch.setattr(catalog_module, "_CATALOG_GZIP_PATH", gzip_path)
+    catalog_module.load_cs2_item_catalog.cache_clear()
+    try:
+        assert catalog_module.load_cs2_item_catalog() == payload
+    finally:
+        catalog_module.load_cs2_item_catalog.cache_clear()
 
 
 def account_id(steamid: str) -> int:

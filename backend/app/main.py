@@ -49,9 +49,7 @@ from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
 from .file_hash import file_md5_hex
 from .gsi_ready import (
     cleanup_stale_gsi_configs,
-    gsi_status,
     install_gsi_access_log_filter,
-    notify_gsi_payload,
 )
 from .update_info import resolve_local_version_info
 from .runtime_session import runtime_session_dependency, runtime_session_state
@@ -74,15 +72,10 @@ from .api.demo_replay import (
     router as demo_replay_router,
 )
 from .api.cosmetics_skin import router as cosmetics_skin_router
+from .api.config_backup import router as config_backup_router
+from .api.gsi import router as gsi_router
 from .recording.api import router as recording_router
 from .lite_cut.api import router as lite_cut_router
-from .cs2_config_backup import (
-    build_config_backup_status_payload,
-    is_cs2_running,
-    is_restore_required,
-    open_backup_directory,
-    restore_latest_user_config_backup,
-)
 from .api_errors import error_detail
 from .pov_hud_manager import PovHudError
 import httpx
@@ -335,6 +328,8 @@ app.include_router(recorded_clips_router)
 app.include_router(desktop_router)
 app.include_router(demo_replay_router)
 app.include_router(cosmetics_skin_router)
+app.include_router(config_backup_router)
+app.include_router(gsi_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2555,50 +2550,6 @@ async def patch_demo_remark(demo_id: int, body: DemoRemarkPatch):
     await demo_library_hub.notify("remark")
     return {"status": "ok", "demo_id": demo_id}
 
-
-
-@app.get("/api/config-backup/status")
-def config_backup_status():
-    return build_config_backup_status_payload()
-
-
-@app.post("/api/config-backup/restore")
-def config_backup_restore():
-    if not is_restore_required():
-        return {"ok": True, "code": "CONFIG_RESTORE_NOT_NEEDED", "restored": 0}
-    if is_cs2_running():
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "CS2_RUNNING"},
-        )
-    res = restore_latest_user_config_backup()
-    if res.get("code") == "CS2_RUNNING":
-        raise HTTPException(status_code=409, detail={"code": "CS2_RUNNING"})
-    if res.get("ok"):
-        return {"ok": True, "code": "CONFIG_RESTORE_OK", "restored": res.get("restored", 0)}
-    return {
-        "ok": False,
-        "code": "CONFIG_RESTORE_PARTIAL",
-        "failed": res.get("failed") or [],
-    }
-
-
-@app.post("/api/config-backup/open-dir")
-def config_backup_open_dir():
-    return open_backup_directory()
-
-
-@app.post("/api/gsi/cs2")
-async def cs2_gsi(payload: Optional[dict] = Body(default=None)):
-    """CS2 Game State Integration sink used as a recording startup ready gate."""
-    _payload = payload or {}
-    ready = notify_gsi_payload(_payload)
-    return {"ok": True, "ready": ready}
-
-
-@app.get("/api/gsi/status")
-def cs2_gsi_status():
-    return gsi_status()
 
 
 # Montage and recorded-clip routes live in app.api.montage.
