@@ -6,8 +6,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import demo_parse_isolation, main
+from app import demo_parse_isolation
 from app.env_utils import AppConfig, LLMConfig
+from app.features.demo_analysis import api as demo_analysis_api
 from app.features.demo_analysis import inspection
 
 
@@ -18,20 +19,20 @@ def bypass_demo_library_lookup(monkeypatch):
     async def not_in_library(_path):
         return None
 
-    monkeypatch.setattr(main.demo_db, "get_demo_by_path", not_in_library)
-    monkeypatch.setattr(main.demo_db, "get_demo_by_cached_path", not_in_library)
+    monkeypatch.setattr(demo_analysis_api.demo_db, "get_demo_by_path", not_in_library)
+    monkeypatch.setattr(demo_analysis_api.demo_db, "get_demo_by_cached_path", not_in_library)
 
 
 def _run_parse_multi(*, players: list[str], filename: str = "match.dem", locale: str = "zh") -> dict:
-    request = main.ParseMultiRequest(target_players=players, locale=locale)
-    return asyncio.run(main.parse_demo_multi(request, filename))
+    request = demo_analysis_api.ParseMultiRequest(target_players=players, locale=locale)
+    return asyncio.run(demo_analysis_api.parse_demo_multi(request, filename))
 
 
 def test_parse_demo_multi_uses_one_shared_worker(monkeypatch, tmp_path):
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
     monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "load_config", AppConfig)
+    monkeypatch.setattr(demo_analysis_api, "load_config", AppConfig)
 
     calls: list[tuple[str, list[str], list[int] | None]] = []
     expected = {
@@ -58,7 +59,7 @@ def test_parse_demo_multi_defers_ai_review_until_player_is_selected(monkeypatch,
     demo_path.write_bytes(b"demo")
     monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(
-        main,
+        demo_analysis_api,
         "load_config",
         lambda: AppConfig(ai_mode=True, llm=LLMConfig(api_key="test-key")),
     )
@@ -83,12 +84,12 @@ def test_parse_demo_multi_defers_ai_review_until_player_is_selected(monkeypatch,
     assert response["players"]["alpha"]["clips"] == [{"id": "a"}]
     assert response["players"]["bravo"]["clips"] == [{"id": "b"}]
 
-    request = main.PlayerClipReviewRequest(
+    request = demo_analysis_api.PlayerClipReviewRequest(
         clips=response["players"]["alpha"]["clips"],
         match_meta=response["players"]["alpha"]["match_meta"],
         locale="en",
     )
-    reviewed = asyncio.run(main.review_demo_player_clips(request))
+    reviewed = asyncio.run(demo_analysis_api.review_demo_player_clips(request))
 
     assert reviewed_players == [("alpha", "en")]
     assert reviewed == {"clips": [{"id": "a", "reviewed": True}], "reviewed": True}
@@ -98,7 +99,7 @@ def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_pa
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
     monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "load_config", AppConfig)
+    monkeypatch.setattr(demo_analysis_api, "load_config", AppConfig)
     workspace = {"version": 1, "map_name": "de_mirage", "players": [], "rounds": []}
     parsed = {
         "__analysis_workspace__": workspace,
@@ -124,7 +125,7 @@ def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):
 
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
 
-    with pytest.raises(main.HTTPException) as exc_info:
+    with pytest.raises(demo_analysis_api.HTTPException) as exc_info:
         _run_parse_multi(players=["alpha"])
 
     assert exc_info.value.status_code == 500
@@ -134,7 +135,7 @@ def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):
 def test_parse_demo_multi_returns_stable_missing_file_code(monkeypatch, tmp_path):
     monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
 
-    with pytest.raises(main.HTTPException) as exc_info:
+    with pytest.raises(demo_analysis_api.HTTPException) as exc_info:
         _run_parse_multi(players=["alpha"], filename="missing.dem")
 
     assert exc_info.value.status_code == 404
@@ -147,7 +148,7 @@ def test_parse_demo_multi_rejects_empty_success(monkeypatch, tmp_path):
     monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", lambda *_args: {})
 
-    with pytest.raises(main.HTTPException) as exc_info:
+    with pytest.raises(demo_analysis_api.HTTPException) as exc_info:
         _run_parse_multi(players=["alpha"])
 
     assert exc_info.value.status_code == 500

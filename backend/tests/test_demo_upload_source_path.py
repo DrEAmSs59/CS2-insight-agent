@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import main
 from app.demo_playback_compat import PATCH_ID, PATCH_REVISION, PlaybackDemoReport
+from app.features.demo_analysis import api as demo_analysis_api
 from app.features.demo_analysis import uploads
 
 
@@ -39,7 +39,7 @@ def _stub_analysis_registration(monkeypatch, demo_id: int = 73):
         registered.append(Path(path))
         return demo_id
 
-    monkeypatch.setattr(main, "_ensure_analysis_demo_row", fake_register)
+    monkeypatch.setattr(demo_analysis_api, "_ensure_analysis_demo_row", fake_register)
     return registered
 
 
@@ -70,22 +70,22 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     original_dir.mkdir()
     original = original_dir / "match.dem"
     original.write_bytes(b"same-demo-content")
-    upload = main.UploadFile(filename="match.dem", file=io.BytesIO(original.read_bytes()))
+    upload = demo_analysis_api.UploadFile(filename="match.dem", file=io.BytesIO(original.read_bytes()))
     ensure_options: list[bool] = []
 
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {"map_name": "de_mirage"}, None
 
-    monkeypatch.setattr(main, "UPLOAD_DIR", upload_dir)
-    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(demo_analysis_api, "UPLOAD_DIR", upload_dir)
+    monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", fake_meta)
     def fake_ensure(_path, *, allow_truncated_packet_tail=False):
         ensure_options.append(allow_truncated_packet_tail)
         return _compat_result()
 
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", fake_ensure)
     registered = _stub_analysis_registration(monkeypatch)
 
-    response = asyncio.run(main.upload_demos([upload], json.dumps([str(original)])))
+    response = asyncio.run(demo_analysis_api.upload_demos([upload], json.dumps([str(original)])))
 
     item = response["uploads"][0]
     assert item["id"] == 73
@@ -97,22 +97,22 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
 
 
 def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path: Path):
-    upload = main.UploadFile(filename="browser.dem", file=io.BytesIO(b"browser-demo"))
+    upload = demo_analysis_api.UploadFile(filename="browser.dem", file=io.BytesIO(b"browser-demo"))
     ensure_options: list[bool] = []
 
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {}, None
 
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(demo_analysis_api, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", fake_meta)
     def fake_ensure(_path, *, allow_truncated_packet_tail=False):
         ensure_options.append(allow_truncated_packet_tail)
         return _compat_result()
 
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", fake_ensure)
     _stub_analysis_registration(monkeypatch)
 
-    response = asyncio.run(main.upload_demos([upload], json.dumps([""])))
+    response = asyncio.run(demo_analysis_api.upload_demos([upload], json.dumps([""])))
 
     item = response["uploads"][0]
     assert item["id"] == 73
@@ -122,11 +122,11 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
 
 
 def test_single_upload_rejects_non_dem_with_specific_error_code():
-    upload = main.UploadFile(filename="notes.txt", file=io.BytesIO(b"not-a-demo"))
+    upload = demo_analysis_api.UploadFile(filename="notes.txt", file=io.BytesIO(b"not-a-demo"))
 
     try:
-        asyncio.run(main.upload_demo(upload))
-    except main.HTTPException as exc:
+        asyncio.run(demo_analysis_api.upload_demo(upload))
+    except demo_analysis_api.HTTPException as exc:
         assert exc.status_code == 400
         assert exc.detail == {"code": "DEMO_INVALID_EXTENSION"}
     else:
@@ -134,8 +134,8 @@ def test_single_upload_rejects_non_dem_with_specific_error_code():
 
 
 def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_path: Path):
-    bad = main.UploadFile(filename="broken.dem", file=io.BytesIO(b"broken"))
-    good = main.UploadFile(filename="good.dem", file=io.BytesIO(b"good"))
+    bad = demo_analysis_api.UploadFile(filename="broken.dem", file=io.BytesIO(b"broken"))
+    good = demo_analysis_api.UploadFile(filename="good.dem", file=io.BytesIO(b"good"))
 
     def fake_ensure(path, **_kwargs):
         if Path(path).name == "broken.dem":
@@ -145,12 +145,12 @@ def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_pat
     async def fake_meta(_path: Path):
         return [{"name": "player"}], {"map_name": "de_nuke"}, None
 
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
-    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(demo_analysis_api, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", fake_meta)
     _stub_analysis_registration(monkeypatch)
 
-    response = asyncio.run(main.upload_demos([bad, good], json.dumps(["", ""])))
+    response = asyncio.run(demo_analysis_api.upload_demos([bad, good], json.dumps(["", ""])))
 
     assert [item["filename"] for item in response["uploads"]] == ["good.dem"]
     assert response["failed"] == [{
@@ -162,7 +162,7 @@ def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_pat
 def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
     dest = tmp_path / "existing.dem"
     dest.write_bytes(b"old-content-that-must-be-replaced")
-    upload = main.UploadFile(filename="existing.dem", file=io.BytesIO(b"new-demo-bytes"))
+    upload = demo_analysis_api.UploadFile(filename="existing.dem", file=io.BytesIO(b"new-demo-bytes"))
 
     digest = uploads.save_uploaded_demo(upload, dest)
 
@@ -172,7 +172,7 @@ def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
 
 
 def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path: Path):
-    upload = main.UploadFile(filename="threaded.dem", file=io.BytesIO(b"demo"))
+    upload = demo_analysis_api.UploadFile(filename="threaded.dem", file=io.BytesIO(b"demo"))
     caller_thread = threading.get_ident()
     save_threads: list[int] = []
     ensure_threads: list[int] = []
@@ -189,13 +189,13 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
         ensure_threads.append(threading.get_ident())
         return _compat_result()
 
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "save_uploaded_demo", fake_save)
-    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_analysis_api, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(demo_analysis_api, "save_uploaded_demo", fake_save)
+    monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", fake_ensure)
     _stub_analysis_registration(monkeypatch)
 
-    response = asyncio.run(main.upload_demo(upload))
+    response = asyncio.run(demo_analysis_api.upload_demo(upload))
 
     assert response["id"] == 73
     assert response["path"] == str(tmp_path / "threaded.dem")
@@ -217,11 +217,11 @@ def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: P
         inspected.append(path)
         return [{"name": "player"}], {"map_name": "de_nuke"}, None
 
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
-    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", fake_meta)
     registered = _stub_analysis_registration(monkeypatch)
 
-    response = asyncio.run(main.open_local_demos(main.OpenLocalDemosBody(paths=[str(original)])))
+    response = asyncio.run(demo_analysis_api.open_local_demos(demo_analysis_api.OpenLocalDemosBody(paths=[str(original)])))
 
     item = response["uploads"][0]
     assert item["id"] == 73
@@ -237,7 +237,7 @@ def test_open_local_reports_non_dem_as_invalid_extension(tmp_path: Path):
     invalid = tmp_path / "manual.zip"
     invalid.write_bytes(b"not-a-demo")
 
-    response = asyncio.run(main.open_local_demos(main.OpenLocalDemosBody(paths=[str(invalid)])))
+    response = asyncio.run(demo_analysis_api.open_local_demos(demo_analysis_api.OpenLocalDemosBody(paths=[str(invalid)])))
 
     assert response["uploads"] == []
     assert response["failed"] == [{
@@ -269,11 +269,11 @@ def test_analysis_demo_registration_creates_and_reuses_stable_id(monkeypatch, tm
     async def fake_notify(event):
         notifications.append(event)
 
-    monkeypatch.setattr(main, "demo_db", fake_db)
-    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=fake_notify))
+    monkeypatch.setattr(demo_analysis_api, "demo_db", fake_db)
+    monkeypatch.setattr(demo_analysis_api, "demo_library_hub", SimpleNamespace(notify=fake_notify))
 
-    first = asyncio.run(main._ensure_analysis_demo_row(demo))
-    second = asyncio.run(main._ensure_analysis_demo_row(demo))
+    first = asyncio.run(demo_analysis_api._ensure_analysis_demo_row(demo))
+    second = asyncio.run(demo_analysis_api._ensure_analysis_demo_row(demo))
 
     assert first == second == 91
     assert len(fake_db.add_calls) == 1

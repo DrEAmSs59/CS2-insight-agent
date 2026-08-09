@@ -13,6 +13,7 @@ from app.env_utils import AppConfig
 from app.features.demo_analysis import inspection
 from app.features.demo_analysis import workflows
 from app.features.demo_library import roster
+from app.features.demo_library import api as demo_library_api
 
 
 def _cache_metadata(
@@ -146,14 +147,14 @@ def test_batch_demo_summary_uses_roster_cache(monkeypatch):
             "error": None,
         },
     )
-    monkeypatch.setattr(main, "get_or_index_demo_roster", lookup_mock)
+    monkeypatch.setattr(demo_library_api, "get_or_index_demo_roster", lookup_mock)
     monkeypatch.setattr(
-        main,
+        demo_library_api,
         "library_working_demo_path",
         AsyncMock(return_value=Path("match.dem")),
     )
 
-    response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[21])))
+    response = asyncio.run(demo_library_api.batch_demo_summary(demo_library_api.BatchSummaryBody(ids=[21])))
 
     assert response["items"][0]["players"] == roster
     lookup_mock.assert_awaited_once()
@@ -199,10 +200,10 @@ def test_batch_demo_summary_materializes_working_cache_for_legacy_rows(monkeypat
             "error": None,
         }
 
-    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
-    monkeypatch.setattr(main, "get_or_index_demo_roster", fake_roster)
+    monkeypatch.setattr(demo_library_api, "library_working_demo_path", fake_working)
+    monkeypatch.setattr(demo_library_api, "get_or_index_demo_roster", fake_roster)
 
-    response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[99])))
+    response = asyncio.run(demo_library_api.batch_demo_summary(demo_library_api.BatchSummaryBody(ids=[99])))
 
     assert len(ensure_calls) == 1
     assert response["failed"] == []
@@ -231,10 +232,10 @@ def test_batch_demo_summary_reports_missing_original_as_item_failure(monkeypatch
     async def fake_working(_row):
         raise FileNotFoundError("Demo original missing: C:/missing/gone.dem")
 
-    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
-    monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock())
+    monkeypatch.setattr(demo_library_api, "library_working_demo_path", fake_working)
+    monkeypatch.setattr(demo_library_api, "get_or_index_demo_roster", AsyncMock())
 
-    response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[44])))
+    response = asyncio.run(demo_library_api.batch_demo_summary(demo_library_api.BatchSummaryBody(ids=[44])))
 
     assert response["items"] == []
     assert response["failed"] == [{
@@ -242,7 +243,7 @@ def test_batch_demo_summary_reports_missing_original_as_item_failure(monkeypatch
         "filename": "gone.dem",
         "code": "DEMO_FILE_NOT_FOUND",
     }]
-    main.get_or_index_demo_roster.assert_not_awaited()
+    demo_library_api.get_or_index_demo_roster.assert_not_awaited()
 
 
 def test_batch_resolve_players_reports_roster_failure_without_raw_error(monkeypatch):
@@ -256,12 +257,12 @@ def test_batch_resolve_players_reports_roster_failure_without_raw_error(monkeypa
         }),
     )
     monkeypatch.setattr(
-        main,
+        demo_library_api,
         "get_or_index_demo_roster",
         AsyncMock(side_effect=RuntimeError("native parser implementation detail")),
     )
 
-    response = asyncio.run(main.batch_resolve_players(main.BatchResolvePlayersBody(
+    response = asyncio.run(demo_library_api.batch_resolve_players(demo_library_api.BatchResolvePlayersBody(
         demo_ids=[21],
         mode="manual",
         manual_lines=["alpha"],
@@ -484,9 +485,9 @@ def test_reparse_invalidates_roster_cache(monkeypatch):
     monkeypatch.setattr(main.demo_db, "invalidate_demo_roster_cache", invalidate_mock)
     monkeypatch.setattr(main.demo_db, "clear_result", AsyncMock())
     monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
-    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
+    monkeypatch.setattr(demo_library_api, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
 
-    response = asyncio.run(main.reparse_demo(93))
+    response = asyncio.run(demo_library_api.reparse_demo(93))
 
     assert response == {"status": "loaded", "demo_id": 93}
     invalidate_mock.assert_awaited_once_with(93, clear_rows=True)
@@ -769,20 +770,20 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
         active -= 1
         return ([{"name": dem_path.stem}], {"map_name": "de_test"})
 
-    monkeypatch.setattr(main, "demo_inspect_concurrency", lambda: 2)
-    monkeypatch.setattr(main, "inspect_demo_meta", fake_inspect)
+    monkeypatch.setattr(demo_library_api, "demo_inspect_concurrency", lambda: 2)
+    monkeypatch.setattr(demo_library_api, "inspect_demo_meta", fake_inspect)
 
     async def fake_working(row):
         return Path(str(row["path"]))
 
-    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
+    monkeypatch.setattr(demo_library_api, "library_working_demo_path", fake_working)
     compat_calls: list[tuple[str, bool]] = []
 
     def fake_ensure(path, *, allow_truncated_packet_tail=False):
         compat_calls.append((str(path), allow_truncated_packet_tail))
         return SimpleNamespace()
 
-    monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
+    monkeypatch.setattr(demo_library_api, "ensure_demo_compatible", fake_ensure)
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_list_items",
@@ -791,12 +792,12 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
     monkeypatch.setattr(main.demo_db, "update_lightweight_meta", AsyncMock())
     monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
     index_stats = AsyncMock(return_value={"indexed": True, "error": None})
-    monkeypatch.setattr(main, "index_demo_player_stats", index_stats)
+    monkeypatch.setattr(demo_library_api, "index_demo_player_stats", index_stats)
     notify = AsyncMock()
-    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=notify))
+    monkeypatch.setattr(demo_library_api, "demo_library_hub", SimpleNamespace(notify=notify))
 
     response = asyncio.run(
-        main.batch_ingest_demos(main.BatchIngestBody(demo_ids=[1, 2, 3]))
+        demo_library_api.batch_ingest_demos(demo_library_api.BatchIngestBody(demo_ids=[1, 2, 3]))
     )
 
     assert response == {"ingested": 3, "failed": []}

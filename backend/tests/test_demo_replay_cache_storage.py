@@ -7,6 +7,7 @@ from pathlib import Path
 from app import main
 from app.features.demo_analysis import replay_effects_cache, replay_frames_cache, replay_match_cache
 from app.features.demo_analysis import replay_cache_storage
+from app.features.demo_library import api as demo_library_api
 
 
 def _write_match_entry(root: Path, cache_key: str, demo_path: Path) -> None:
@@ -128,10 +129,10 @@ def test_library_delete_reclaims_replay_cache(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main.demo_db, "get_demo_by_id", fake_get_demo_by_id)
     monkeypatch.setattr(main.demo_db, "delete_demo", fake_delete_demo)
-    monkeypatch.setattr(type(main.demo_library_hub), "notify", fake_notify)
+    monkeypatch.setattr(type(demo_library_api.demo_library_hub), "notify", fake_notify)
     monkeypatch.setattr(replay_cache_storage, "remove_demo_row_caches", fake_remove_row)
 
-    result = asyncio.run(main.delete_demo(17))
+    result = asyncio.run(demo_library_api.delete_demo(17))
 
     assert result["replay_cache"] == {
         "removed_files": 3,

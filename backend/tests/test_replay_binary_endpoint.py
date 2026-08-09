@@ -6,7 +6,7 @@ import threading
 import pytest
 from fastapi import HTTPException
 
-from app import demo_parse_isolation, main
+from app import demo_parse_isolation
 from app.api import demo_replay as demo_replay_api
 from app.features.demo_analysis import replay_match_cache
 
@@ -18,12 +18,12 @@ def bypass_demo_library_lookup(monkeypatch):
     async def not_in_library(_path):
         return None
 
-    monkeypatch.setattr(main.demo_db, "get_demo_by_path", not_in_library)
-    monkeypatch.setattr(main.demo_db, "get_demo_by_cached_path", not_in_library)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_demo_by_path", not_in_library)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_demo_by_cached_path", not_in_library)
 
 
-def _request(path: str) -> main.DemoReplayRequest:
-    return main.DemoReplayRequest(
+def _request(path: str) -> demo_replay_api.DemoReplayRequest:
+    return demo_replay_api.DemoReplayRequest(
         path=path,
         map_name="de_mirage",
         start_tick=100,
@@ -56,14 +56,14 @@ def test_binary_endpoint_repairs_cold_parquet_from_persisted_workspace(
         return {"status": "materialized"}
 
     monkeypatch.setattr(replay_match_cache, "load_match_replay_round_binary", fake_load)
-    monkeypatch.setattr(main.demo_db, "get_result", fake_get_result)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_result", fake_get_result)
     monkeypatch.setattr(
         demo_parse_isolation,
         "materialize_match_replay_parquet_isolated",
         fake_materialize,
     )
 
-    response = asyncio.run(main.get_demo_replay_binary(_request(str(demo_path))))
+    response = asyncio.run(demo_replay_api.get_demo_replay_binary(_request(str(demo_path))))
 
     assert response.status_code == 200
     assert response.body == b"CS2RPL01-repaired"
@@ -92,7 +92,7 @@ def test_binary_endpoint_uses_original_library_path_when_working_copy_is_cached(
 
     async def fake_resolve(path, *, demo_db):
         assert path == str(original_path)
-        assert demo_db is main.demo_db
+        assert demo_db is demo_replay_api.demo_db
         return cached_path.resolve()
 
     def fake_load(path, **_kwargs):
@@ -115,14 +115,14 @@ def test_binary_endpoint_uses_original_library_path_when_working_copy_is_cached(
 
     monkeypatch.setattr(demo_replay_api, "resolve_working_demo_path", fake_resolve)
     monkeypatch.setattr(replay_match_cache, "load_match_replay_round_binary", fake_load)
-    monkeypatch.setattr(main.demo_db, "get_result", fake_get_result)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_result", fake_get_result)
     monkeypatch.setattr(
         demo_parse_isolation,
         "materialize_match_replay_parquet_isolated",
         fake_materialize,
     )
 
-    response = asyncio.run(main.get_demo_replay_binary(_request(str(original_path))))
+    response = asyncio.run(demo_replay_api.get_demo_replay_binary(_request(str(original_path))))
 
     assert response.status_code == 200
     assert response.body == b"CS2RPL01-cached-repaired"
@@ -145,10 +145,10 @@ def test_binary_endpoint_reports_reanalysis_when_workspace_is_unavailable(
     async def fake_get_result(_path):
         return None
 
-    monkeypatch.setattr(main.demo_db, "get_result", fake_get_result)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_result", fake_get_result)
 
     with pytest.raises(HTTPException) as error:
-        asyncio.run(main.get_demo_replay_binary(_request(str(demo_path))))
+        asyncio.run(demo_replay_api.get_demo_replay_binary(_request(str(demo_path))))
 
     assert error.value.status_code == 409
     assert "analyze the demo again" in str(error.value.detail)
@@ -184,7 +184,7 @@ def test_concurrent_binary_cold_misses_share_one_materialization(
         return {"status": "materialized"}
 
     monkeypatch.setattr(replay_match_cache, "load_match_replay_round_binary", fake_load)
-    monkeypatch.setattr(main.demo_db, "get_result", fake_get_result)
+    monkeypatch.setattr(demo_replay_api.demo_db, "get_result", fake_get_result)
     monkeypatch.setattr(
         demo_parse_isolation,
         "materialize_match_replay_parquet_isolated",
@@ -193,8 +193,8 @@ def test_concurrent_binary_cold_misses_share_one_materialization(
 
     async def run_both():
         return await asyncio.gather(
-            main.get_demo_replay_binary(_request(str(demo_path))),
-            main.get_demo_replay_binary(_request(str(demo_path))),
+            demo_replay_api.get_demo_replay_binary(_request(str(demo_path))),
+            demo_replay_api.get_demo_replay_binary(_request(str(demo_path))),
         )
 
     responses = asyncio.run(run_both())
